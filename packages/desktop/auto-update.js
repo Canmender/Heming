@@ -44,6 +44,16 @@ const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_FEED_URL = process.env.HEMING_UPDATE_FEED || "http://47.92.39.184/updates";
 
 /**
+ * 下载进度转发给界面订阅者的最小间隔。
+ *
+ * electron-updater 的 `download-progress` 每收一小段数据就发一次（250MB 的包
+ * 会有上千次），原样转发等于让渲染进程每秒重绘上百次，进度条反而更抖。
+ * 120ms 约 8fps：看起来是连续的，主进程到渲染进程的 IPC 数量降一个数量级。
+ * 首帧和 100% 不受节流——前者要让界面立刻知道「开始了」，后者决定按钮状态。
+ */
+const PROGRESS_EMIT_INTERVAL_MS = 120;
+
+/**
  * 当前是否运行在安装版。
  *
  * `app.isPackaged` 是唯一可靠判据：`electron .` 开发态为false，
@@ -131,6 +141,21 @@ function selectUpdate(currentVersion, info) {
 }
 
 /**
+ * 从 electron-updater 的下载结果里挑出安装包。
+ *
+ * `downloadUpdate()` 返回的是「这次落盘的所有文件路径」数组（安装包、blockmap
+ * 之类混在一起），安装助手只认 .exe。挑不到时返回 null，调用方回退到
+ * electron-updater 自己的安装流程，而不是猜一个文件去执行。
+ */
+function pickInstallerFile(files) {
+  if (!Array.isArray(files)) return null;
+  const exe = files.find((item) => typeof item === "string" && /\.exe$/i.test(item));
+  if (exe) return exe;
+  const first = files.find((item) => typeof item === "string" && item.trim());
+  return first || null;
+}
+
+/**
  * 创建更新控制器。
  *
  * 依赖全部可注入，便于单测时传入假对象——自动更新牵涉网络与进程重启，
@@ -161,6 +186,17 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
    */
   let progress = null;
 
+  /**
+   * 上次把进度转发出去的毫秒时刻；0 表示这一轮还没发过（首帧不受节流）。
+   */
+  let progressEmitAt = 0;
+
+  /**
+   * 已下载安装包的落盘路径（由 `downloadUpdate()` 的返回值得到）。
+   * 更新助手要拿它去静默安装；拿不到路径时主进程会回退到 electron-updater 自己的安装流程。
+   */
+  let downloadedInstaller = null;
+
   const listeners = new Set();
 
   const emit = () => {
@@ -188,6 +224,11 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
       total: Number(payload.total) || 0,
       bytesPerSecond: Number(payload.bytesPerSecond) || 0,
     };
+    // 100% 与首帧必须立刻发：前者让「下载完成」按钮及时出现，后者让界面知道动起来了。
+    const complete = progress.percent >= 100;
+    const nowMs = Date.now();
+    if (!complete && progressEmitAt !== 0 && nowMs - progressEmitAt < PROGRESS_EMIT_INTERVAL_MS) return;
+    progressEmitAt = nowMs;
     emit();
   }
 
@@ -223,6 +264,7 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
   async function check({ silent = false } = {}) {
     if (status === "checking") return getState();
     progress = null;
+    progressEmitAt = 0;
     setStatus("checking");
     lastError = null;
 
@@ -267,9 +309,11 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     if (!available) return getState();
 
     progress = null;
+    progressEmitAt = 0;
     setStatus("downloading");
     try {
-      await autoUpdater.downloadUpdate();
+      const files = await autoUpdater.downloadUpdate();
+      downloadedInstaller = pickInstallerFile(files);
       setStatus("downloaded");
       return getState();
     } catch (err) {
@@ -316,6 +360,11 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     scheduleCheck,
     dispose,
     getState,
+    /**
+     * 已下载安装包的路径；没有则 null。
+     * 主进程用它决定「交给自绘更新助手」还是「走 electron-updater 自带安装」。
+     */
+    getDownloadedInstaller: () => downloadedInstaller,
     /** 订阅状态变化；返回取消订阅函数。渲染进程用它刷新更新提示条。 */
     subscribe(listener) {
       listeners.add(listener);
@@ -338,6 +387,7 @@ module.exports = {
   createUpdater,
   fromSemver,
   isInstalledOnly,
+  pickInstallerFile,
   selectUpdate,
   toSemver,
 };

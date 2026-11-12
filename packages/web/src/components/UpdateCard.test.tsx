@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { act } from "react";
 import { UpdateCard } from "./UpdateCard";
+import { MOTION_WAVE_DOTS } from "./UpdateMotion";
 
 /**
  * 更新卡的三个关键行为：
@@ -189,7 +190,56 @@ describe("UpdateCard", () => {
         screen.getByRole("button", { name: "重启并安装", hidden: false }) as HTMLButtonElement,
       );
     });
-    expect(h.calls.install).toBe(1);
+    // 先用一小段落章给「点了、在动」的反馈，再真正调 install（进程一退就来不及说话）
+    expect(h.calls.install).toBe(0);
+    expect(await screen.findByText("更新已就绪，正在重启…")).toBeTruthy();
+    expect(screen.getByLabelText("检查更新").textContent).toContain("正在重启并安装");
+    await waitFor(() => expect(h.calls.install).toBe(1), { timeout: 2500 });
+  });
+
+  it("检查中：三点脉冲表明后台真的在动", async () => {
+    const h = makeBridge(baseState({ status: "checking" }));
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+
+    expect(await screen.findByTestId("update-motion-checking")).toBeTruthy();
+    const button = screen.getByLabelText("检查更新") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("下载中：墨点波浪 + 大号真实百分比，与进度条同源", async () => {
+    const h = makeBridge(
+      baseState({
+        status: "downloading",
+        progress: {
+          percent: 42.4,
+          transferred: 106 * 1024 * 1024,
+          total: 250 * 1024 * 1024,
+          bytesPerSecond: 0,
+        },
+      }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+
+    const motion = await screen.findByTestId("update-motion-downloading");
+    expect(motion.querySelectorAll(".um-wave i").length).toBe(MOTION_WAVE_DOTS);
+    // 数字只做展示，比例仍以真实字节为准（42.4 → 42）
+    expect(screen.getByText("42")).toBeTruthy();
+    expect(
+      screen.getByRole("progressbar", { name: "更新下载进度" }).getAttribute("aria-valuenow"),
+    ).toBe("42");
+  });
+
+  it("下载完成：落一颗朱砂「和」印章，而不是只换了行字", async () => {
+    const h = makeBridge(
+      baseState({ status: "downloaded", available: { version: "d.15.0.0.0" } }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+
+    const seal = await screen.findByTestId("update-motion-downloaded");
+    expect(seal.textContent).toContain("和");
   });
 
   it("检查失败：显示原因，而不是笼统的「没更新」", async () => {

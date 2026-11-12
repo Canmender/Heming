@@ -17,6 +17,8 @@ const path = require("node:path");
 
 const SPLASH_PATH = path.join(__dirname, "splash.html");
 const GLYPHS_PATH = path.join(__dirname, "..", "web", "src", "components", "wordmarkGlyphs.ts");
+/** 自绘安装器窗口里的第三份副本（本地页面，不能 import 打包后的 web 资源）。 */
+const SETUP_WORDMARK_PATH = path.join(__dirname, "..", "setup", "renderer", "wordmark.js");
 
 /** 从 splash.html 的 wordmark SVG 里按文档顺序取出全部 d 属性。 */
 function splashPaths() {
@@ -65,4 +67,27 @@ test("字形数据非空：六个字母、十个笔画都在", () => {
     fromSource.every((d) => d.startsWith("M ")),
     "每条 path 都应以绝对 M 开头"
   );
+});
+
+test("安装器窗口的 wordmark.js 与 wordmarkGlyphs.ts 逐字节一致（顺序也一致）", () => {
+  const setup = fs.readFileSync(SETUP_WORDMARK_PATH, "utf8");
+  const fromSetup = [...setup.matchAll(/\bd:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const fromSource = sourcePaths();
+
+  assert.ok(fromSetup.length > 0, "未能从 setup/renderer/wordmark.js 解析出 path（结构变了？）");
+  assert.equal(
+    fromSetup.length,
+    fromSource.length,
+    `笔画数不一致：setup ${fromSetup.length} 条，wordmarkGlyphs.ts ${fromSource.length} 条`
+  );
+
+  for (let i = 0; i < fromSource.length; i++) {
+    assert.equal(
+      fromSetup[i],
+      fromSource[i],
+      `第 ${i + 1} 条 path 不一致：\n  setup            : ${fromSetup[i]}\n  wordmarkGlyphs.ts: ${fromSource[i]}`
+    );
+  }
+
+  assert.match(setup, /viewBox:\s*"0 0 400 150"/, "viewBox 变了，画布尺寸对不上");
 });

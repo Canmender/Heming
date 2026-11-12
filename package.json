@@ -7,6 +7,7 @@
     "test": "pnpm -r build && pnpm -r test",
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "dist:desktop": "pnpm --filter @heming/desktop dist",
+    "dist:setup": "node scripts/build-setup.mjs",
     "plugin:new": "node scripts/new-plugin.mjs",
     "plugin:lint": "node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release,pet-widget && node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid",
     "plugin:schema": "node scripts/plugin-schema.mjs",

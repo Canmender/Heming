@@ -1,0 +1,474 @@
+/* 和鸣安装器 —— 纸面、墨线、一枚朱砂印。
+ *
+ * 设计约束（参考 unslop 的反套路清单，刻意避开）：
+ * - 没有渐变、光斑、辉光、磨砂玻璃、圆角卡片网格、投影悬浮；
+ * - 没有「居中大标题 + 两个按钮」的通用 hero 构图，改成左侧正文 + 右侧页边注的版式；
+ * - 只有一处彩色：完成时的朱砂印章，其余全是纸白 / 墨黑 / 发丝线；
+ * - 动效只做两件事：写出手写字、印章落下；其余状态切换控制在 300ms 内。
+ *
+ * 所有尺寸按 900×620 窗（= body 内容区）算过，主列内容不会出现滚动条。
+ */
+
+:root {
+  --paper: #f5f2ea;
+  --paper-raised: #fbf9f3;
+  --ink: #161616;
+  --ink-soft: #2a2822;
+  --muted: #6e695e;
+  --faint: #8a8578;
+  --line: #e3ded1;
+  --line-strong: #d9d3c4;
+  --seal: #a63d2e;
+
+  --font-display: "Songti SC", "SimSun", "Source Han Serif SC", "Noto Serif SC", serif;
+  --font-body: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+}
+
+[hidden] { display: none !important; }
+
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* 一层内嵌发丝线，像一张纸的印边 */
+.sheet::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(22, 22, 22, 0.07);
+  pointer-events: none;
+}
+
+/* ---------- 标题栏 ---------- */
+
+.titlebar {
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 0 26px;
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; }
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.brand-name { font-size: 15px; font-weight: 600; letter-spacing: 0.08em; }
+
+.brand-sep { width: 1px; height: 12px; background: var(--line-strong); }
+
+.brand-kind { font-size: 10.5px; letter-spacing: 0.3em; color: var(--faint); }
+
+.window-controls { display: flex; gap: 2px; -webkit-app-region: no-drag; }
+
+.win-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.win-button:hover { background: rgba(22, 22, 22, 0.06); color: var(--ink); }
+.win-button-close:hover { background: var(--seal); color: var(--paper); }
+.win-button:focus-visible { outline: 1px solid var(--ink); outline-offset: -1px; }
+
+/* ---------- 主体：正文 + 页边注 ---------- */
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 232px;
+  gap: 38px;
+  padding: 28px 34px 18px 46px;
+}
+
+.column-main { min-width: 0; display: flex; flex-direction: column; }
+
+.wordmark {
+  flex: 0 0 auto;
+  width: 200px;
+  height: auto;
+  display: block;
+  margin-bottom: 14px;
+  overflow: visible;
+}
+
+.wordmark path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wordmark-dot { fill: var(--seal); opacity: 0; transition: opacity 260ms ease; }
+
+.step-label {
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--faint);
+}
+
+.screen { display: none; }
+.screen.is-current { display: block; animation: screen-in 320ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+
+.headline {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: 0.01em;
+}
+
+.lede {
+  margin: 0 0 18px;
+  max-width: 44ch;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+/* 安装位置：一行发丝框，左侧一根墨条当书签 */
+.path-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 50px;
+  margin-bottom: 8px;
+  padding: 0 8px 0 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--ink);
+}
+
+.path-value {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint { margin: 0 0 22px; font-size: 11.5px; line-height: 1.6; color: var(--faint); }
+.hint.is-warning { color: var(--seal); }
+
+/* 预取那一行：文字 + 一根 96px 的发丝进度线，安静地待在安装位置下面 */
+.prefetch-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.prefetch-track {
+  width: 96px;
+  height: 1px;
+  overflow: hidden;
+  background: var(--line);
+}
+.prefetch-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ink);
+  transition: width 240ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.prefetch-line.is-ready .prefetch-track { background: var(--line-strong); }
+.prefetch-line.is-ready .prefetch-fill { background: var(--seal); }
+
+/* ---------- 按钮 ---------- */
+
+.text-button {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.text-button:hover { color: var(--ink); text-decoration-color: var(--ink); }
+.text-button:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+
+.primary-button {
+  appearance: none;
+  height: 46px;
+  min-width: 158px;
+  padding: 0 24px;
+  border: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition: background 150ms ease, transform 80ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.primary-button::after { content: "\2192"; margin-left: 14px; letter-spacing: 0; }
+.primary-button:hover { background: #2b2a26; }
+.primary-button:active { transform: translateY(1px); }
+.primary-button:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+.primary-button[disabled] { background: var(--line-strong); color: var(--paper); cursor: default; }
+
+.actions { display: flex; align-items: center; gap: 22px; margin-top: 22px; }
+
+.check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.check input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.check-box {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--ink);
+  position: relative;
+  transition: background 120ms ease;
+}
+
+/* 勾选用「墨块 + 白勾」，比一个小黑方块更像被选中的动作；黑白对调也正好是品牌的两色。 */
+.check-box::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 8px;
+  border-right: 1.5px solid var(--paper);
+  border-bottom: 1.5px solid var(--paper);
+  transform: rotate(42deg) scale(0);
+  transition: transform 120ms ease;
+}
+
+.check input:checked + .check-box { background: var(--ink); }
+.check input:checked + .check-box::after { transform: rotate(42deg) scale(1); }
+.check input:focus-visible + .check-box { outline: 1px solid var(--ink); outline-offset: 2px; }
+
+/* ---------- 安装中：大号真实数字 + 墨点波浪 + 2px 进度 ---------- */
+
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value { font-size: 72px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; }
+.metric-unit { font-size: 18px; letter-spacing: 0.04em; color: var(--faint); }
+.metric-sub { margin: 6px 0 0; min-height: 17px; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.wave { display: flex; align-items: center; gap: 7px; height: 26px; margin: 20px 0 22px; }
+
+.wave .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.28;
+  animation: dot-drift 1.5s ease-in-out infinite;
+}
+
+@keyframes dot-drift {
+  0%, 100% { transform: translateY(0); opacity: 0.24; }
+  35% { transform: translateY(-6px); opacity: 0.9; }
+  70% { transform: translateY(1px); opacity: 0.4; }
+}
+
+.progress { position: relative; height: 2px; background: var(--line); overflow: hidden; }
+
+.progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ink);
+  transition: width 240ms linear;
+}
+
+/* 总量未知时才用这种来回走的小段，不用假的百分比 */
+.progress.indeterminate .progress-fill {
+  width: 26%;
+  background: var(--faint);
+  animation: bar-travel 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes bar-travel {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(420%); }
+}
+
+.status { margin: 12px 0 0; min-height: 18px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 秒表：安装期没有可信百分比，但「还在走」本身是有效信息。 */
+.status-elapsed { margin: 4px 0 0; min-height: 16px; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+/* ---------- 完成：一枚朱砂印 ---------- */
+
+.seal {
+  width: 62px;
+  height: 62px;
+  margin: 24px 0 18px;
+  display: grid;
+  place-items: center;
+  background: var(--seal);
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-size: 33px;
+  border-radius: 2px;
+  transform: rotate(-6deg);
+  box-shadow: 0 0 0 1px rgba(166, 61, 46, 0.15);
+}
+
+.seal.stamped { animation: seal-stamp 300ms cubic-bezier(0.2, 0.8, 0.3, 1.2) both; }
+
+@keyframes seal-stamp {
+  from { opacity: 0; transform: rotate(-12deg) scale(1.35); }
+  to { opacity: 1; transform: rotate(-6deg) scale(1); }
+}
+
+.done-line { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--muted); word-break: break-all; }
+
+.done-time { margin: 6px 0 0; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+/* ---------- 失败：等宽详情 ---------- */
+
+.detail {
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  max-height: 76px;
+  overflow: hidden;
+  background: var(--paper-raised);
+  border-left: 2px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ---------- 页边注 ---------- */
+
+.column-note {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.facts { margin: 2px 0 0; }
+.fact { margin-bottom: 16px; }
+
+.fact dt { margin-bottom: 4px; font-size: 10px; letter-spacing: 0.26em; color: var(--faint); }
+.fact dd { margin: 0; font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; word-break: break-all; }
+
+.note { margin: 14px 0 0; padding-top: 16px; border-top: 1px solid var(--line); font-size: 11px; line-height: 1.9; }
+
+.note-sig { margin: auto 0 0; padding-top: 18px; font-size: 10px; letter-spacing: 0.26em; color: #a39c8b; }
+
+/* ---------- 版心脚注 ---------- */
+
+.footline {
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 34px 0 46px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: #a39c8b;
+}
+
+.foot-mark { letter-spacing: 0.34em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen.is-current,
+  .seal.stamped,
+  .wave .dot,
+  .progress.indeterminate .progress-fill {
+    animation: none !important;
+  }
+
+  .progress-fill,
+  .check-box::after,
+  .wordmark-dot {
+    transition: none;
+  }
+}

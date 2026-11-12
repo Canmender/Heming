@@ -46,6 +46,7 @@ const SYNCED_PACKAGES = [
   { path: join(root, "packages", "web", "package.json"), label: "packages/web" },
   { path: join(root, "packages", "server", "package.json"), label: "packages/server" },
   { path: join(root, "packages", "shared", "package.json"), label: "packages/shared" },
+  { path: join(root, "packages", "setup", "package.json"), label: "packages/setup" },
 ];
 
 /** 读 5 段版本；读不到或格式不对时返回 null（首次发布场景）。 */

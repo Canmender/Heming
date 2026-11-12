@@ -68,6 +68,8 @@
 | [specs/2026-10-18-boot-animation-design.md](superpowers/specs/2026-10-18-boot-animation-design.md) | 4.5s 四段式启动动画 |
 | [specs/2026-10-18-wordmark-login-design.md](superpowers/specs/2026-10-18-wordmark-login-design.md) | 手写「Heming」字样与登录分栏 |
 | [specs/2026-10-18-embed-web-in-client-design.md](superpowers/specs/2026-10-18-embed-web-in-client-design.md) | `app://heming` 嵌入产物与安全上下文 |
+| [specs/2026-11-12-setup-installer.md](superpowers/specs/2026-11-12-setup-installer.md) | **自绘安装器（`packages/setup`）**：为什么不用 NSIS 向导、portable 外壳 + 自绘 Electron 窗口 + 静默 NSIS 的架构、`/D=`/退出码/sha512/进度与取消语义、unslop 设计口径（纸白墨黑朱砂、手写 wordmark 逐笔描画）、构建与验证、已知限制 |
+| [specs/2026-11-12-install-speed-and-update-motion.md](superpowers/specs/2026-11-12-install-speed-and-update-motion.md) | **安装提速与应用内更新动画**：安装器预取（窗口打开即后台下载、任务单飞、失败不打扰）、断点续传（`.part` + Range + 服务器回 200 时整包重写）、缓存命中（大小 + sha512 + `.meta.json` 免重哈希）、安装期轮询 600→2500ms（`statTree` 两段式并发 + 线程池 16）、进度事件 120ms 合并、工作屏秒表与完成屏分段用时；`UpdateMotion` 四相动效（检查三点/下载墨点波浪 + 真实百分比/完成落章/重启前 800ms 落章），保留原 `role="progressbar"` 契约 |
 
 ### 安全与新能力
 

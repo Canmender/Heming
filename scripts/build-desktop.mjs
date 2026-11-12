@@ -12,12 +12,14 @@
  * 5. 内置运行时存在时，先跑 `prepare-runtime.mjs --check` 确认 .pyc 已预编译。
  *    缺了它包照样能启动，只是 MCP 首次连接慢一倍（16.2s vs 7.8s），
  *    装到用户机器上才发现就太晚了——所以在打包这一步拦住。
+ * 6. 把 packages/setup 打出来的自绘安装器暂存成更新助手（resources/updater/setup.exe），
+ *    应用内「重启并安装」时由它接管，见 stageUpdateHelper()。
  *
  * 用法：node scripts/build-desktop.mjs [--win nsis] [--config.xxx=yyy]
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { join, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isOutsideRepo, resolveReleaseDir } from "./release-dir.mjs";
 
@@ -85,6 +87,52 @@ function detectElectronDist() {
     .filter((dist) => existsSync(dist));
   return candidates[0] ?? null;
 }
+
+// —— 更新助手暂存 ——
+//
+// 应用内「重启并安装」要显示与首次安装同一套自绘窗口（见
+// docs/superpowers/specs/2026-11-12-setup-installer.md 的「更新助手」一节）。
+// 那个窗口必须在应用退出后仍然活着（Windows 会锁住正在运行的程序文件），
+// 所以是独立进程：packages/setup 打出来的单 exe，由 extraResources 原样搬进
+// resources/updater/。这里在打包前把它放进暂存目录，避免 desktop 包直接依赖
+// 另一个包的 release 目录——那个路径只在构建机上有意义。
+//
+// 找不到 setup 产物时**不中止打包**：老版本升级上来的用户仍可走静默安装回退
+// （packages/desktop/main.js 的 installUpdate 有 fallback），先让包能出。
+function stageUpdateHelper() {
+  const helperDir = join(desktopDir, "update-helper");
+  const target = join(helperDir, "setup.exe");
+  const setupReleaseDir = join(root, "packages", "setup", "release");
+  const skip = (reason) => {
+    if (existsSync(target)) rmSync(target, { force: true });
+    console.warn(`[build-desktop] 更新助手未内置（${reason}），应用内更新将回退到静默安装`);
+  };
+  if (!existsSync(setupReleaseDir)) {
+    skip("没有 packages/setup/release，先跑 pnpm dist:setup");
+    return;
+  }
+  const candidates = readdirSync(setupReleaseDir)
+    .filter((name) => name.startsWith("和鸣安装程序 ") && name.endsWith(".exe"))
+    .map((name) => join(setupReleaseDir, name))
+    .filter((file) => {
+      try {
+        return statSync(file).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (candidates.length === 0) {
+    skip("packages/setup/release 里没有「和鸣安装程序 *.exe」");
+    return;
+  }
+  mkdirSync(helperDir, { recursive: true });
+  copyFileSync(candidates[0], target);
+  const megabytes = Math.round(statSync(target).size / 1048576);
+  console.log(`[build-desktop] 更新助手已暂存：${relative(root, candidates[0])}（${megabytes} MB）`);
+}
+
+stageUpdateHelper();
 
 // 输出目录：调用方显式指定则尊重，否则用统一解析（D 盘优先）
 const releaseDir = resolveReleaseDir({ create: true });

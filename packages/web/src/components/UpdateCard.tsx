@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { UpdateMotion, installLeadMs } from "./UpdateMotion.js";
 
 /**
  * 自动更新卡（桌面安装版专属）。
@@ -81,6 +82,8 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
   const [state, setState] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmInstall, setConfirmInstall] = useState(false);
+  /** 确认「重启并安装」之后的落章阶段：界面先给出反馈，再真正调 install。 */
+  const [installing, setInstalling] = useState(false);
 
   // 订阅主进程推送的状态；组件卸载时务必退订，否则会向已销毁的组件 setState。
   useEffect(() => {
@@ -88,9 +91,18 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
     return bridge.subscribe(setState);
   }, [bridge]);
 
+  // 确认框一关就到落章：没有这段过渡，用户会以为点击没生效而再点一次。
+  useEffect(() => {
+    if (!installing || !bridge) return;
+    const timer = window.setTimeout(() => {
+      void bridge.install();
+    }, installLeadMs());
+    return () => window.clearTimeout(timer);
+  }, [installing, bridge]);
+
   const canAct = useMemo(
-    () => Boolean(bridge) && state?.status !== "downloading",
-    [bridge, state?.status],
+    () => Boolean(bridge) && !installing && state?.status !== "downloading",
+    [bridge, installing, state?.status],
   );
 
   // 开发态没有这个桥——整张卡不渲染，而不是显示一个点不动的按钮。
@@ -129,25 +141,22 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
 
       <div className="mt-1 ui-caption">{describe(state)}</div>
 
-      {/* 下载进度条：250MB 量级的包，只给「下载中…」三个字用户不知道是在动还是卡死 */}
-      {state?.status === "downloading" && state.progress && (
-        <div className="mt-2">
-          <div
-            role="progressbar"
-            aria-label="更新下载进度"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(state.progress.percent)}
-            className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-4)]"
-          >
-            <div
-              className="h-full rounded-full bg-ink transition-[width] duration-200"
-              style={{ width: `${state.progress.percent}%` }}
-            />
-          </div>
-          <div className="mt-1 ui-micro tabular-nums">{describeProgress(state.progress)}</div>
-        </div>
-      )}
+      {/* 动效层：检查中三点脉冲、下载中墨点波浪 + 真实百分比、下载完成朱砂印章。
+          进度条的 role/aria 与文案都还在 UpdateMotion 里，读屏行为不变。 */}
+      {installing ? (
+        <UpdateMotion phase="installing" />
+      ) : state?.status === "checking" ? (
+        <UpdateMotion phase="checking" />
+      ) : state?.status === "downloading" ? (
+        // 刚进入下载时主进程可能还没推第一帧进度：照样先出波浪，别让卡面看起来没反应。
+        <UpdateMotion
+          phase="downloading"
+          percent={state.progress?.percent ?? 0}
+          note={state.progress ? describeProgress(state.progress) : undefined}
+        />
+      ) : state?.status === "downloaded" ? (
+        <UpdateMotion phase="downloaded" />
+      ) : null}
 
       {hasUpdate && state?.available && (
         <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[12px]">
@@ -168,7 +177,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
         onClick={() => void onAction()}
         className="mt-2.5 ui-btn ui-btn-sm ui-btn-ghost"
       >
-        {buttonLabel(state, busy)}
+        {installing ? "正在重启并安装…" : buttonLabel(state, busy)}
       </button>
       {confirmInstall && (
         <ConfirmDialog
@@ -187,7 +196,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
                 type="button"
                 onClick={() => {
                   setConfirmInstall(false);
-                  void bridge.install();
+                  setInstalling(true);
                 }}
                 className="ui-btn ui-btn-sm ui-btn-primary"
               >
