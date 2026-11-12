@@ -17,6 +17,7 @@
  *
  * 用法：
  *   node scripts/build-setup.mjs                      # 在线版：运行时从更新服务器下载安装包
+ *   node scripts/build-setup.mjs --generic            # 在线版·通用外壳：产物名不带版本，跨版本复用
  *   node scripts/build-setup.mjs --embed-inner        # 离线版：自动找最近的「和鸣 Setup」并嵌进去
  *   node scripts/build-setup.mjs --embed-inner=<path> # 离线版：指定内层安装包
  *
@@ -25,7 +26,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +53,11 @@ if (setupPkg.hemingVersion !== version) {
 
 const args = process.argv.slice(2);
 const embedArg = args.find((arg) => arg === "--embed-inner" || arg.startsWith("--embed-inner="));
+/**
+ * 通用外壳：产物名不带版本（`和鸣安装程序.exe`），运行时按 latest.yml 决定装哪一版，
+ * 因此同一个文件可以一直对外分发。离线版不吃这个开关——内层包被嵌死，无法通用。
+ */
+const generic = args.includes("--generic");
 const embedPath = embedArg && embedArg.includes("=") ? embedArg.slice("--embed-inner=".length) : null;
 
 function readJson(filePath) {
@@ -135,6 +141,10 @@ if (embedArg && embedPath) {
   }
 }
 
+if (generic && innerPath) {
+  fail("--generic 只适用于在线版：离线版内嵌了某一版内层包 + sha512，无法跨版本复用");
+}
+
 mkdirSync(payloadDir, { recursive: true });
 mkdirSync(join(setupDir, "config"), { recursive: true });
 
@@ -167,7 +177,9 @@ if (installedBytes <= 0) {
 
 // —— 3. 复制内嵌安装包 + 写构建期配置 ——
 const generated = {
+  // 通用外壳里这个版本只是「探测不到服务器时的回落值」，真正装哪版看运行时 latest.yml
   hemingVersion: version,
+  generic,
   semverVersion: setupPkg.version,
   payload: payloadMode,
   installedBytes,
@@ -233,12 +245,20 @@ child.on("exit", (code) => {
   if (code !== 0) {
     fail(`electron-builder 退出码 ${code}`);
   }
-  const artifact = readdirSync(releaseDir)
+  let artifact = readdirSync(releaseDir)
     .filter((name) => /^和鸣安装程序\s+.+\.exe$/i.test(name))
     .map((name) => join(releaseDir, name))
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
   if (!artifact) {
     fail(`打包结束但没在 ${releaseDir} 找到「和鸣安装程序 *.exe」`);
+  }
+  if (generic) {
+    // 产物名去掉版本：通用外壳的文件名不该暗示它只装某一版（也方便对外给固定下载地址）。
+    const flat = join(releaseDir, "和鸣安装程序.exe");
+    if (existsSync(flat)) rmSync(flat, { force: true });
+    renameSync(artifact, flat);
+    artifact = flat;
+    console.log("[build-setup] 通用外壳：产物已改名为「和鸣安装程序.exe」（不带版本号）");
   }
   console.log(`[build-setup] 完成：${artifact}（${(statSync(artifact).size / 1024 / 1024).toFixed(1)} MB）`);
   console.log(`[build-setup] sha512: ${sha512Base64(artifact)}`);

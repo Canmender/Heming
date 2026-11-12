@@ -175,17 +175,19 @@ cd packages/setup && node --test                  # 纯函数与编排测试
 
 2026-11-12 冒烟：把计划里的 `installerPath` 指向一个假安装包，用真实 `main.js` 跑更新模式——窗口标题「更新 和鸣」、标题栏「更新程序」、直接进 work 屏，右栏三条事实变成「版本 / 现在是什么版本 / 已在后台下载」，失败后错误屏为「更新没能完成。」+ `install-failed`，说明「读计划 → 自动开跑 → 按磁盘结果判定」整条链路是通的（计划缺失时错误屏为「更新包已经不在原处了」，「重试」改为关窗回应用）。
 
+**通用外壳（2026-11-12，在线版跨版本复用）**：`latest.yml` 是运行时真源——`pipeline.probeLatest()` 只读它拿 `{version,size,url}`，`main.js` 在窗口创建后探测一次（`HEMING_SETUP_*` 之外的 8 秒超时、失败只写日志），`setup:init` 的 `version` 取 `latestVersion || generated.hemingVersion`，另给 `installerVersion`/`latestKnown`/`latestSize`；渲染层收到 `{type:"latest"}` 后刷新「版本」行。因此同一个在线外壳可以一直对外分发，服务器换版即装新版；探测失败（断网/内网）时界面回落到构建版本，安装主线仍会自己读 `latest.yml` 并给出真正的错误。构建 `node scripts/build-setup.mjs --generic` 会把产物名改成不带版本的 `和鸣安装程序.exe`（`generated.json` 记 `generic:true`），`build-desktop.mjs` 的 `stageUpdateHelper()` 两种命名都认。不通用的是 `--embed-inner` 离线版（内层包 + sha512 嵌死）。进度条分母 `installedBytes` 仍是构建时统计，跨版本有几个百分点偏差。
+
 ## 9. 与既有资产的关系
 
 - 内层 NSIS 完全保留：`2026-11-07-installer-branding.md` 的文案、侧栏、页头、图标继续生效；用户若直接运行 `和鸣 Setup <版本>.exe`（例如自动更新下载的包），看到的是原来的 MUI 向导，功能不受影响；
-- `publish-update.mjs` 仍上传内层安装包与 latest.yml，发布流程不变；外层 `和鸣安装程序 <版本>.exe` 另行分发，不参与自动更新；
+- `publish-update.mjs` 仍上传内层安装包与 latest.yml，发布流程不变；外层 `和鸣安装程序 <版本>.exe` 另行分发，不参与自动更新；在线版建议用 `--generic` 打出的 `和鸣安装程序.exe`（通用外壳，跨版本复用）；
 - 新增 `packages/setup` 已加入 `scripts/bump-version.mjs` 的 `SYNCED_PACKAGES`，5 段版本与派生 semver 随主版本同步；
 - 字形仍只有一份真源，`packages/desktop/wordmark-drift.test.js` 同时断言 `splash.html` 与 `packages/setup/renderer/wordmark.js` 与 `wordmarkGlyphs.ts` 一致。
 
 ## 10. 后续（未做，按需）
 
 1. 给安装器加签名（同时解决内层的「未知发布者」）；
-2. 外层安装器的自更新（或直接让官网/更新源永远给最新 setup）；
+2. ~~外层安装器的自更新~~（已用通用外壳解决：在线版外壳只读 `latest.yml`，换版无需重出外壳）；
 3. 安装阶段接内层日志（若 electron-builder 开放进度文件可换真进度）；
 4. 多语言与暗色（暗色要另画一套 token，不做系统色反转）；
 5. 安装完成页「首次启动引导」复用同一套动效语言。

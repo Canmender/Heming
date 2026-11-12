@@ -651,9 +651,38 @@ function createPipeline(input) {
     busy = false;
   }
 
+  /**
+   * 只读探测：更新服务器上现在发布的是哪一版（不下载、不装）。
+   *
+   * 为什么需要它：外壳是**通用**的——真正装哪个版本由启动时的 `latest.yml` 决定，
+   * 所以界面上「版本」这一行不能再用打包时烘进去的 `config.hemingVersion`，
+   * 否则外壳装新版却显示旧号。预取（`prefetch`）也会读同一份 `latest.yml`，
+   * 但它是下载主线、失败会弹错；这里允许静默失败，界面回落到烘进去的版本。
+   *
+   * @param {{ signal?: AbortSignal }} [options]
+   * @returns {Promise<{ version: string|null, size: number|null, url: string }>}
+   */
+  async function probeLatest(options = {}) {
+    if (config.payloadMode !== "network") {
+      // 内嵌/同目录安装包与服务器无关：显示的版本就是包里那一版。
+      return { version: config.hemingVersion, size: null, url: "" };
+    }
+    const feedUrl = `${config.feedUrl}/latest.yml`;
+    const text = await services.fetchText(feedUrl, { signal: options.signal });
+    const feed = parseLatestYml(text);
+    const file = pickWindowsInstaller(feed);
+    if (!file) throw new SetupError(CODES.FEED_INVALID, "更新信息里没有 Windows 安装包", feedUrl);
+    return {
+      version: versionFromInstallerName(decodeFileName(file.url)) || null,
+      size: typeof file.size === "number" ? file.size : null,
+      url: resolveDownloadUrl(config.feedUrl, file.url),
+    };
+  }
+
   return {
     start,
     prefetch,
+    probeLatest,
     cancel,
     dispose,
     isBusy: () => busy,

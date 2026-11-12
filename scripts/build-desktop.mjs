@@ -112,7 +112,12 @@ function stageUpdateHelper() {
     return;
   }
   const candidates = readdirSync(setupReleaseDir)
-    .filter((name) => name.startsWith("和鸣安装程序 ") && name.endsWith(".exe"))
+    // 两种命名都要认：带版本的（每版重出）与通用外壳的 `和鸣安装程序.exe`（跨版本复用）。
+    .filter(
+      (name) =>
+        name.endsWith(".exe") &&
+        (name === "和鸣安装程序.exe" || name.startsWith("和鸣安装程序 ")),
+    )
     .map((name) => join(setupReleaseDir, name))
     .filter((file) => {
       try {

@@ -55,6 +55,16 @@ const planFile = updateRequest ? resolvePlanPath(process.env, pathTools.workDir(
 let updatePlan = null;
 /** 计划读不出来时的错误文案（初始化时交给界面）。 */
 let planError = null;
+/**
+ * 更新服务器上当前发布的最新版本（通用外壳）。
+ *
+ * 外壳不再绑定某一版：界面上的「版本」读这里；探测还没回来时回落到
+ * 打包时烘进 `config/generated.json` 的版本（离线/断网/内嵌形态都走回落）。
+ * @type {string|null}
+ */
+let latestVersion = null;
+/** 最新安装包的字节数（界面上「安装包大小」用；未知时为 null）。 */
+let latestSize = null;
 
 const captureDir = readCaptureTarget(process.argv);
 
@@ -134,6 +144,31 @@ function sendEventFromPipeline(event) {
   // 更新完成就把计划删掉：留着它，下次用户手动双击安装器（没带环境变量）不受影响，
   // 但若桌面端又用同一路径写新计划，旧内容也不会被误用。
   if (event && event.type === "done" && planFile) removePlan(planFile);
+}
+
+/**
+ * 通用外壳的第一步：问一下更新服务器「现在最新是哪一版」。
+ *
+ * 只读 `latest.yml`，不下包、不校验签名——预取/安装主线会自己再读一次并给出
+ * 真正的错误。这里失败就静默回落到烘进包的版本，不让「联网慢」挡住安装界面。
+ * 更新模式不问：装哪一版由桌面端写好的计划文件指定，问了反而会显示错的版本。
+ */
+async function probeLatestVersion() {
+  if (!pipeline || updateRequest) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const latest = await pipeline.probeLatest({ signal: controller.signal });
+    if (!latest || !latest.version) return;
+    latestVersion = latest.version;
+    latestSize = latest.size;
+    log.info(`更新服务器最新版 ${latest.version}${latest.size ? `（${latest.size} 字节）` : ""}`);
+    emitToWindow({ type: "latest", version: latest.version, size: latest.size });
+  } catch (error) {
+    log.warn(`探测最新版失败，界面沿用 ${config.hemingVersion}：${error && error.message ? error.message : error}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function createWindow() {
@@ -222,7 +257,13 @@ async function requestClose() {
 
 function registerIpc() {
   ipcMain.handle("setup:init", () => ({
-    version: config.hemingVersion,
+    // 通用外壳：界面上显示的版本优先用「服务器上现在最新的一版」；
+    // 探测还没回来/失败时回落到打包时烘进去的版本（离线形态同理）。
+    version: latestVersion || config.hemingVersion,
+    /** 外壳自身的构建版本（排查用；正常安装流程不用它）。 */
+    installerVersion: config.hemingVersion,
+    latestKnown: Boolean(latestVersion),
+    latestSize,
     semver: config.semverVersion,
     defaultDir: pathTools.defaultInstallDir(),
     existingDir: detectExistingInstall(),
@@ -377,6 +418,7 @@ function bootstrap() {
       registerIpc();
       createWindow();
       traceStep("window-created");
+      void probeLatestVersion();
 
       app.on("window-all-closed", () => app.quit());
     })

@@ -1540,9 +1540,12 @@ app.whenReady().then(() => {
       afterInstallChange();
       return { ok: true, record: result.record };
     });
-    secureIpc.handle("widgets:uninstall", (_event, payload) => {
+    secureIpc.handle("widgets:uninstall", async (_event, payload) => {
       const id = payload && payload.id;
       if (typeof id !== "string" || !id) return { ok: false, error: "缺少插件 id" };
+      // 顺序要紧：插件引擎的工作目录就是这个插件的安装目录，进程还在跑时 Windows
+      // 拒绝删除（EPERM），卸载会稳定失败。先停引擎/页面视图/后台页，再删文件。
+      if (widgetHost) await widgetHost.stopForUninstall(id);
       const result = widgetStore.uninstall(id, { removeData: payload.removeData !== false });
       afterInstallChange();
       return result;

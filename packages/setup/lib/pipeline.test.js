@@ -428,3 +428,30 @@ test("还停在安装位置时取消，取消的是后台预取", async () => {
   assert.equal(prefetched.ok, false);
   assert.equal(prefetched.code, "cancelled");
 });
+
+// —— 通用外壳：启动时只读探测「服务器现在最新是哪一版」 ——
+
+test("probeLatest：在线形态读 latest.yml，返回最新版本/大小/下载地址", async () => {
+  const h = harness({ config: { payloadMode: "network" }, feedText: FEED_TEXT });
+  const latest = await h.pipeline.probeLatest();
+  assert.equal(h.calls.fetchText, "http://host/updates/latest.yml");
+  assert.equal(latest.version, "d.140.0.1.0");
+  assert.equal(latest.size, 1000);
+  assert.equal(latest.url, "http://host/updates/%E5%92%8C%E9%B8%A3%20Setup%20d.140.0.1.0.exe");
+  assert.equal(h.calls.downloadCount, 0, "探测不下载");
+});
+
+test("probeLatest：内嵌/本地形态不联网，直接用包内版本", async () => {
+  const h = harness({});
+  const latest = await h.pipeline.probeLatest();
+  assert.equal(latest.version, "d.135.3.54.7");
+  assert.equal(h.calls.fetchText, null);
+});
+
+test("probeLatest：latest.yml 里没有 Windows 安装包时报 feed-invalid", async () => {
+  const h = harness({ config: { payloadMode: "network" }, feedText: "version: 1.0.0\nfiles: []\n" });
+  await assert.rejects(
+    () => h.pipeline.probeLatest(),
+    (error) => error.code === "feed-invalid",
+  );
+});

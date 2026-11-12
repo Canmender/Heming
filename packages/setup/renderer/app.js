@@ -408,6 +408,18 @@
     if (percent !== null) fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
   }
 
+  /**
+   * 通用外壳：主进程问过更新服务器后推来「现在最新是哪一版」，把「版本」这一行
+   * 换成真正会装上的版本。探测失败不会有这个事件——界面保持 init 里回落的版本。
+   */
+  function onLatest(event) {
+    if (!state.init || !event.version) return;
+    state.init.version = event.version;
+    state.init.latestKnown = true;
+    if (typeof event.size === "number") state.init.latestSize = event.size;
+    renderFacts();
+  }
+
   function onProgress(event) {
     if (state.phase !== "download") return;
     state.download.received = event.received || 0;
@@ -502,6 +514,9 @@
         break;
       case "prefetch":
         onPrefetch(event);
+        break;
+      case "latest":
+        onLatest(event);
         break;
       case "files":
         onFiles(event);

@@ -38,6 +38,7 @@ import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
 import { installBundleFromMarket } from "../lib/widgets/marketInstall.js";
+import { BundlePluginCard } from "./plugins/BundlePluginCard.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
 import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
@@ -660,6 +661,24 @@ export function PluginsPage({
               renderUnit={(status) => {
                 const unit = status.unit;
                 if (unit.source === "system") return <SystemPluginCard system={system} />;
+                // d.141：界面插件（bundle）的管理动作在 d.135 合并 UI 时丢了（WidgetsView 被删），
+                // 这里补回启停/卸载；数据仍由主进程持有，卡片只调 store。
+                if (unit.source === "bundle") {
+                  const record = widgetsRecords.find((item) => item.id === unit.id);
+                  if (!record) return null;
+                  const pageEntry = pageEntryOf(record.id);
+                  return (
+                    <BundlePluginCard
+                      status={status}
+                      record={record}
+                      onOpenPage={
+                        pageEntry?.available ? () => setPage(pageEntry.pageId) : undefined
+                      }
+                      onNotify={(kind, text) => setMsg({ kind, text })}
+                      onChanged={bump}
+                    />
+                  );
+                }
                 if (unit.source !== "package") return null;
                 const plugin = plugins.get(unit.id);
                 if (!plugin) return null;

@@ -352,7 +352,7 @@ HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 node scripts/publish-u
 
 三处实际改动：
 
-1. **更新助手改在线版**：`node scripts/build-setup.mjs`（**不带** `--embed-inner`）→ `packages/setup/release/和鸣安装程序 <ver>.exe`（409MB → 97.8MB），`packages/setup/config/generated.json` 变 `payload: "network"`。打包顺序必须是**先助手、后桌面**：`build-desktop.mjs` 的 `stageUpdateHelper()` 按 mtime 取 `packages/setup/release` 里最新的那个复制成 `packages/desktop/update-helper/setup.exe`。应用内更新不受影响（计划文件的 `installerPath` 优先于内嵌包）；只有把这个 portable 当**首次安装器**单独跑时，才需要联网从 `/updates/latest.yml` 下载内层包——要做离线安装盘就还得用 `--embed-inner`，那会多回 357MB。
+1. **更新助手改在线版**：`node scripts/build-setup.mjs`（**不带** `--embed-inner`）→ `packages/setup/release/和鸣安装程序 <ver>.exe`（409MB → 97.8MB），`packages/setup/config/generated.json` 变 `payload: "network"`。打包顺序必须是**先助手、后桌面**：`build-desktop.mjs` 的 `stageUpdateHelper()` 按 mtime 取 `packages/setup/release` 里最新的那个复制成 `packages/desktop/update-helper/setup.exe`。应用内更新不受影响（计划文件的 `installerPath` 优先于内嵌包）；只有把这个 portable 当**首次安装器**单独跑时，才需要联网从 `/updates/latest.yml` 下载内层包——要做离线安装盘就还得用 `--embed-inner`，那会多回 357MB。对外分发建议加 `--generic` 打成 `和鸣安装程序.exe`（通用外壳：运行时读 `/updates/latest.yml` 决定装哪版，换版不用重出外壳，离线版不适用）。
 2. **压缩与语言**：`packages/desktop/package.json` 与 `packages/setup/package.json` 的 `build` 各加 `"compression": "maximum"`、`"electronLanguages": ["zh-CN","en-US"]`。
 3. **运行时过滤**：desktop `extraResources` 里 runtime 那条 filter 补 `!**/__pycache__/**`、`!**/tests/**`、`!**/test/**`、`!**/*.chm`（`tests` 16MB、`__pycache__` 6MB、`PyWin32.chm` 3MB）。
 

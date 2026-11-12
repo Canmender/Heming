@@ -1957,6 +1957,25 @@ function createWidgetHost(deps = {}) {
   }
 
   /**
+   * 卸载前置：先把「会占住插件目录」的运行面停干净，再由调用方删文件。
+   *
+   * Windows 不允许删除「正被某个进程当作当前工作目录」的目录（`fs.rmSync` 报
+   * `EPERM: Permission denied`）。插件引擎 spawn 时工作目录就是插件安装目录
+   * （plugin-engine.js 的 `cwd: target.dir`），所以必须**等引擎进程真正退出**再删，
+   * 否则卸载会稳定失败并提示「卸载未完成…（可重试卸载）」。
+   *
+   * 页面视图与后台常驻页一并销毁：它们的渲染进程正从插件目录里读资源。
+   * widget 窗口不在这里销毁——注册表记录删掉后由 `reconcile()` 走生命周期
+   * （`uninstalled` 事件）再销毁，保留既有语义。
+   */
+  async function stopForUninstall(pluginId) {
+    const id = String(pluginId);
+    if (pageInfo && pageInfo.id === id) destroyPageView();
+    destroyBackground(id);
+    await engineHost.stop(id);
+  }
+
+  /**
    * 按注册表对账：只给「已启用 + 清单有 widget + 文件没坏」的插件建窗；
    * 版本变化就重建；停用/卸载就销毁（保留文件与设置由 store 负责）。
    *
@@ -2196,6 +2215,8 @@ function createWidgetHost(deps = {}) {
     start,
     reconcile,
     destroyAll,
+    // 卸载前置：停引擎/页面视图/后台页，避免删目录时 EPERM（Windows 的 cwd 占用）
+    stopForUninstall,
     publish,
     action,
     stateOf,
