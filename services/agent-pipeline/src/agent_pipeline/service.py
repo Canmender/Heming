@@ -11,7 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -36,12 +36,16 @@ class KnowledgeDoc(BaseModel):
 
 class RunRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
-    cwd: str = "."
-    constraints: list[str] = Field(default_factory=list)
+    # cwd 会进日志和工具调用；不封顶的话一个超长字符串就能把日志行撑大。
+    cwd: str = Field(default=".", max_length=1000)
+    # 约束条数与单条长度都要有上限：它会被拼进提示词，条数不封顶等于让调用方决定 token 花多少。
+    constraints: list[Annotated[str, Field(max_length=2000)]] = Field(default_factory=list, max_length=20)
     mode: str = "react"
-    coverage_target: float | None = None
-    tools_allowed: list[str] = Field(default_factory=list)
-    run_id: str | None = None
+    # 覆盖率是 0-1 的比值；不夹住的话 `coverage_target=5` 会让对抗环永远不达标。
+    coverage_target: float | None = Field(default=None, ge=0.0, le=1.0)
+    tools_allowed: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=64)
+    # run_id 由调用方给（幂等重试用），但它是字典键、日志字段、线程名的一部分。
+    run_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class TuneRequest(BaseModel):
