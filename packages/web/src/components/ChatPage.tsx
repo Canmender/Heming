@@ -86,7 +86,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
@@ -3037,26 +3037,26 @@ export function ChatPage({
             aria-label="上一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(-1)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
+            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
           >
-            ↑
+            <ChevronIcon width={13} height={13} className="-rotate-90" aria-hidden="true" />
           </button>
           <button
             type="button"
             aria-label="下一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(1)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
+            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
           >
-            ↓
+            <ChevronIcon width={13} height={13} className="rotate-90" aria-hidden="true" />
           </button>
           <button
             type="button"
             aria-label="关闭搜索"
             onClick={closeSearch}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[var(--subtle-3)]"
+            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)]"
           >
-            ×
+            <XIcon width={13} height={13} aria-hidden="true" />
           </button>
         </div>
       )}
@@ -3329,10 +3329,11 @@ export function ChatPage({
         <button
           type="button"
           aria-label="滚动到最新消息"
-          className="absolute bottom-32 right-8 z-30 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
+          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
           onClick={() => scrollToLatest()}
         >
-          ↓ 新消息
+          <ChevronIcon width={13} height={13} className="rotate-90" aria-hidden="true" />
+          新消息
         </button>
       ) : null}
       <form onSubmit={send} className="relative border-t border-line-soft">

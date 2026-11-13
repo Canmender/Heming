@@ -5,6 +5,7 @@ import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { humanizeProviderError } from "../lib/llmFailure.js";
 import { toolNameLabel } from "../lib/toolName.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
+import { CheckIcon, ChevronIcon } from "./icons.js";
 
 /**
  * 流式生成气泡（M3 Task 8）：消息列表尾部的打字机行。
@@ -113,9 +114,14 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
         onClick={() => setOpen((v) => !v)}
         className={`flex w-full items-center gap-1 text-left text-[11px] text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
       >
-        <span className="text-[9px]" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
+        <ChevronIcon
+          width={12}
+          height={12}
+          aria-hidden="true"
+          className={`shrink-0 transition-transform duration-150 motion-reduce:transition-none ${
+            open ? "rotate-90" : ""
+          }`}
+        />
         <span>思考过程</span>
         <span className="text-[10px] text-muted">{text.length} 字</span>
         {streaming && <span className="text-[10px] text-muted">· 进行中</span>}
@@ -147,9 +153,14 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
         onClick={() => setOpen((v) => !v)}
         className={`flex w-full items-center gap-1.5 text-left text-[11px] text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
       >
-        <span className="text-[9px]" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
+        <ChevronIcon
+          width={12}
+          height={12}
+          aria-hidden="true"
+          className={`shrink-0 transition-transform duration-150 motion-reduce:transition-none ${
+            open ? "rotate-90" : ""
+          }`}
+        />
         <span>工具调用 · {tools.length} 次</span>
         {summary && <span className="text-[10px] text-muted">{summary}</span>}
       </button>
@@ -242,7 +253,11 @@ function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
           }`}
         >
           {a.profileLabel}
-          {a.ok ? " ✓" : ` · ${a.kind ?? "失败"}`}
+          {a.ok ? (
+            <CheckIcon width={11} height={11} className="inline-block align-[-1px] text-[var(--success)]" aria-hidden="true" />
+          ) : (
+            ` · ${a.kind ?? "失败"}`
+          )}
           {a.usage ? ` ${formatTokens(a.usage.totalTokens ?? 0)}` : ""}
         </span>
       ))}

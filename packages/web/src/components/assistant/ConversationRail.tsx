@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { EmptyState } from "../ui/EmptyState.js";
-import { PlusIcon, SearchIcon } from "../icons.js";
+import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
@@ -18,7 +18,7 @@ import { conversationTitle } from "./conversationTitle.js";
  * - 可折叠成头像窄栏，把横向空间让给对话；整个列表保持 Tab 可达。
  *
  * 会话名优先用服务端 `title`（d.128）；没有标题时由 `conversationTitle` 从已加载消息推导，
- * 未加载消息的会话回落为最后活跃时间。悬停行尾「⋯」可改名/删除（删除由调用方二次确认）。
+ * 未加载消息的会话回落为最后活跃时间。悬停行尾「更多」可改名/删除（删除由调用方二次确认）。
  */
 
 export interface ConversationRailProps {
@@ -179,7 +179,7 @@ export function ConversationRail({
     }
   };
 
-  /** 会话行：一级信息 = 会话名，右侧时间；悬停/聚焦出「⋯」操作（改名/删除）。 */
+  /** 会话行：一级信息 = 会话名，右侧时间；悬停/聚焦出「更多」操作（改名/删除）。 */
   const renderRow = (conv: Conversation) => {
     const active = conv.id === activeConversationId;
     const title = titleOf(conv);
@@ -264,7 +264,7 @@ export function ConversationRail({
             menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >
-          ⋯
+          <MoreIcon width={14} height={14} aria-hidden="true" />
         </button>
         {menuFor === conv.id ? (
           <div
@@ -341,7 +341,7 @@ export function ConversationRail({
             onClick={() => setCollapsed(false)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
           >
-            ›
+            <ChevronIcon width={14} height={14} aria-hidden="true" />
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -391,9 +391,9 @@ export function ConversationRail({
           aria-label="收起对话列表"
           title="收起对话列表"
           onClick={() => setCollapsed(true)}
-          className="ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-[13px] text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
+          className="ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
         >
-          ‹
+          <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
         </button>
       </header>
 

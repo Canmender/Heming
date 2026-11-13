@@ -148,6 +148,14 @@ export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
 );
 
 /** 关闭：两条细线交叉。替代文本字形「× / ✕」（字号与线条随 currentColor 一致）。 */
+/** 更多操作：三个实心点。用图形而不是「⋯」字符——字符在不同字体里基线高低不一。 */
+export const MoreIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+  </svg>
+);
 export const XIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M6 6l12 12M18 6L6 18" />

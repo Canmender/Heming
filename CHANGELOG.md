@@ -2,6 +2,29 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.69.11（2026-11-13）— 字形图标归位：9 处字符图标换成 SVG
+
+审计 S2「图标双轨」的收尾。此前 `icons.tsx`（49 个 1.5px 描边图标）与文本字形 `‹ › ⋯ ▾ ▸ ↑ ↓ × ✓` 并存，
+后者的问题不是好不好看，而是**不可控**：字形的宽度、基线、字重来自系统字体，125%/150% 缩放下
+同一行里字形与 SVG 混排会错位，字重也随字体回退跳动（PingFang / 雅黑 / Noto 各不相同）。
+
+- `icons.tsx`：新增 `MoreIcon`（三颗 1.4r 实心点，`stroke="none" fill="currentColor"`），
+  补齐此前只能用「⋯」字符表达的「更多操作」。
+- 换掉的 9 处（全部保留原 `aria-label`，读屏名不变）：
+  - `AgentStreamBubble.tsx`：思考过程 / 工具调用的折叠箭头 `▾ ▸` → `ChevronIcon` 12px + `rotate-90`，
+    位移带 150ms `transition-transform`（`motion-reduce:transition-none`）；候选链成功标记 `✓` → `CheckIcon` 11px 装饰绿。
+  - `knowledge/FileTree.tsx`：行尾「更多」`⋯` → `MoreIcon` 14px。
+  - `assistant/ConversationRail.tsx`：会话行「更多」`⋯` → `MoreIcon` 14px；收起/展开 `‹ ›` → `ChevronIcon` 14px（左向 `rotate-180`）。
+  - `assistant/AgentEditorView.tsx`：`‹ 返回名册` → `ChevronIcon` + 文字（`.ui-btn` 自带 `gap-1.5`）。
+  - `ChatPage.tsx`：会话内搜索条 `↑ ↓` → `ChevronIcon` ±90°、`×` → `XIcon`；
+    上滑期间的「↓ 新消息」浮标 → `ChevronIcon` + 文字（按钮改 `flex items-center gap-1`）。
+  - `NotificationCenter.tsx`：两处 `×` → `XIcon`（14 / 13px），按钮命中区从 `px-1.5 py-0.5` 收到 `p-1`。
+- 留下的字形是有意的：`<kbd>↑↓</kbd>`（键盘提示，本来就是文字）、`注释与测试名里的 ⋯`（描述用）、
+  `×1` 这类数学倍率（`MemoryPage` 的个性化加权说明）。
+- 测试：`AgentStreamBubble.test.tsx` 里「备用 Key ✓ 1.2k」的断言随标记改图标而调整
+  （改查 `备用 Key 1.2k` 并断言该 chip 内含 `svg`），其余用例只按 `aria-label` 查询，未受影响。
+- 门禁：web typecheck 过；web **298 文件 / 4372 例**全过；`pnpm -r typecheck`、`pnpm -r build` 过。
+
 ## d.140.3.68.11（2026-11-13）— NSIS 安装器补取消确认
 
 - `packages/desktop/build/installer.nsh`：新增 `!define MUI_ABORTWARNING` 与 `MUI_ABORTWARNING_TEXT`。

@@ -7,6 +7,7 @@ import {
 import { useUiStore } from "../store/ui.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
+import { XIcon } from "./icons.js";
 
 /**
  * 通知中心入口：铃铛 + 右侧浮层。
@@ -215,9 +216,9 @@ export function NotificationCenter() {
                 type="button"
                 aria-label="关闭通知中心"
                 onClick={() => setOpen(false)}
-                className="rounded-sm px-1.5 py-0.5 text-[13px] leading-none text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
               >
-                ×
+                <XIcon width={14} height={14} aria-hidden="true" />
               </button>
             </span>
           </div>
@@ -301,9 +302,9 @@ export function NotificationCenter() {
                           type="button"
                           aria-label={`删除通知：${item.title}`}
                           onClick={() => remove(item.id)}
-                          className="rounded-sm px-1 py-0.5 text-[12px] leading-none text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                          className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                         >
-                          ×
+                          <XIcon width={13} height={13} aria-hidden="true" />
                         </button>
                       </span>
                     </div>

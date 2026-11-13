@@ -175,7 +175,10 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
     );
     expect(screen.getByText("候选链")).toBeInTheDocument();
     expect(screen.getByText(/废 Key\s*·\s*rate/)).toBeInTheDocument();
-    expect(screen.getByText(/备用 Key\s*✓\s*1\.2k/)).toBeInTheDocument();
+    // 成功候选的标记从「✓」字符换成了 CheckIcon（字形在不同字体里基线不稳），
+    // 所以这里查文字要放宽、并显式断言图标存在。
+    const okChip = screen.getByText(/备用 Key\s*1\.2k/);
+    expect(okChip.querySelector("svg")).not.toBeNull();
   });
 
   it("第一次就问对（没有失败候选）→ 候选链这一行不占位", () => {

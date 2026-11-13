@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { VaultEntry } from "../../lib/vault/types.js";
-import { ChevronIcon, FileIcon, FolderIcon, ImageIcon, PlusIcon } from "../icons.js";
+import { ChevronIcon, FileIcon, FolderIcon, ImageIcon, MoreIcon, PlusIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PromptDialog } from "./PromptDialog.js";
 import { ancestorsOf, baseName, ensureMdExt, findEntry, isDir, joinRel, parentOf } from "./model.js";
@@ -242,7 +242,7 @@ export function FileTree({
             }}
             className="ml-0.5 hidden h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-subtle-3 hover:text-ink group-hover:flex focus:flex"
           >
-            <span aria-hidden="true">⋯</span>
+            <MoreIcon width={14} height={14} aria-hidden="true" />
           </button>
         </div>,
       ];
