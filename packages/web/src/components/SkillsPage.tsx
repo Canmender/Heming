@@ -17,6 +17,7 @@ import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plug
 import { useUiStore } from "../store/ui.js";
 import { useSessionTab } from "../lib/sessionState.js";
 import { SkillHubPanel } from "./skills/SkillHubPanel.js";
+import { Dialog } from "./ui/Dialog.js";
 import { Switch } from "./ui/Switch.js";
 
 /**
@@ -163,14 +164,12 @@ function SkillCreateDialog({
   onClose: () => void;
   onCreated: (skill: SkillDefinition, assigned: boolean) => void;
 }) {
-  const panelRef = useRef<HTMLFormElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [applied, setApplied] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ name?: string; instructions?: string }>({});
-  useModalA11y(panelRef, onClose, { active: open, initialFocusRef: nameRef });
 
   useEffect(() => {
     if (!open) return;
@@ -216,29 +215,29 @@ function SkillCreateDialog({
 
   const activeTemplate = SKILL_TEMPLATES.find((item) => item.key === applied);
 
+  // R17：改走 ui/Dialog——底栏在 <form> 之外，提交按钮用 form= 指回表单。
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-      <form
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="新建技能"
-        onSubmit={submit}
-        className="max-h-[90vh] w-[440px] max-w-full overflow-y-auto ui-card p-4"
-      >
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-[13px] font-bold">新建技能</h2>
-          <span className={hintCls}>只需名称和内容，其余可空</span>
-          <button
-            type="button"
-            aria-label="关闭新建技能"
-            onClick={onClose}
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={14} height={14} aria-hidden="true" />
+    <Dialog
+      ariaLabel="新建技能"
+      title="新建技能"
+      description="只需名称和内容，其余可空"
+      size="sm"
+      maxHeightVh={90}
+      onClose={onClose}
+      closeLabel="关闭新建技能"
+      initialFocusRef={nameRef}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={btnGhostSm}>
+            取消
           </button>
-        </div>
-
+          <button type="submit" form="skill-create-form" className={btnPrimarySm}>
+            创建技能
+          </button>
+        </>
+      }
+    >
+      <form id="skill-create-form" onSubmit={submit}>
         <div className="mb-3 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2.5">
           <div className={hintCls}>从模板开始（可选）</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="技能模板">
@@ -327,16 +326,8 @@ function SkillCreateDialog({
             : "还没有选择智能体：先建在技能池，选中智能体后再分配即可用于对话。"}
         </p>
 
-        <div className="mt-3 flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} className={btnGhostSm}>
-            取消
-          </button>
-          <button type="submit" className={btnPrimarySm}>
-            创建技能
-          </button>
-        </div>
       </form>
-    </div>
+    </Dialog>
   );
 }
 
@@ -448,7 +439,7 @@ function SkillDetailDrawer({
         type="button"
         aria-label="关闭技能详情"
         onClick={onClose}
-        className="absolute inset-0 bg-black/10"
+        className="absolute inset-0 bg-[var(--scrim)]"
       />
       <aside
         ref={panelRef}
@@ -613,9 +604,7 @@ export function SkillsView({
   const [agentId, setAgentId] = useState<string>("");
   /** 「＋ 添加技能」浮层：当前要往哪个分类里加（null = 关闭）。 */
   const [addFor, setAddFor] = useState<SkillCategory | null>(null);
-  const addPanelRef = useRef<HTMLDivElement>(null);
   const closeAddPanel = () => setAddFor(null);
-  useModalA11y(addPanelRef, closeAddPanel, { active: !!addFor });
 
   useEffect(() => {
     let cancelled = false;
@@ -1229,36 +1218,20 @@ export function SkillsView({
       </div>
 
       {addFor && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-          onClick={() => setAddFor(null)}
+        <Dialog
+          ariaLabel="添加技能"
+          title={`为「${agentName}」添加${GROUPS.find((g) => g.key === addFor)?.title ?? ""}`}
+          size="sm"
+          maxHeightVh={70}
+          onClose={closeAddPanel}
+          closeLabel="关闭添加面板"
+          bodyClassName="px-4 pb-4"
         >
-          <div
-            ref={addPanelRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="添加技能"
-            className="w-[440px] max-w-full ui-card p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold">
-                为「{agentName}」添加{GROUPS.find((g) => g.key === addFor)?.title}
-              </span>
-              <button
-                type="button"
-                aria-label="关闭添加面板"
-                onClick={() => setAddFor(null)}
-                className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-              >
-                <XIcon width={14} height={14} aria-hidden="true" />
-              </button>
-            </div>
-            <div className="mt-2 max-h-[320px] overflow-y-auto">
+            <div>
               {addableIn(addFor).length === 0 ? (
                 <p className={hintCls}>该分类下没有可添加的技能；可先去技能池导入或沉淀。</p>
               ) : (
-                <ul className="divide-y divide-[#f1f1f1]">
+                <ul className="divide-y divide-line-soft">
                   {addableIn(addFor).map((skill) => (
                     <li key={skill.id}>
                       <button
@@ -1285,8 +1258,7 @@ export function SkillsView({
                 </ul>
               )}
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* 写作能力（去 AI 味）不再单独占卡片：规则已并入内置「写作润色」技能的默认流程，

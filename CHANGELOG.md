@@ -2,6 +2,25 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.71.11（2026-11-13）— 技能页两个表单浮层并入 `ui/Dialog`
+
+第 8 轮统一弹窗时把「面板本身是 `<form>`」的项目留着没动，理由是提交按钮在表单内、
+搬到底栏需要跨节点关联。本轮用 `form` 属性解决了这件事，累计 12 个弹窗同一套外壳。
+
+- `SkillsPage.tsx`「新建技能」（440 → Dialog `sm` 480）：
+  - 原来 `div` 遮罩 + `form[role=dialog]` 自拼壳；现在 `<Dialog title="新建技能" description="只需名称和内容，其余可空" initialFocusRef={nameRef}>`，
+    表单变成 `id="skill-create-form"` 的 `<form>` 包住字段。
+  - 底栏按钮移进 `footer`，「创建技能」用 `type="submit" form="skill-create-form"` 指回表单——
+    点按钮与输入框内回车照旧提交。
+  - 头部（标题 + 提示 + 关闭按钮）由 Dialog 统一渲染，`closeLabel="关闭新建技能"` 保持读屏名不变。
+- `SkillsPage.tsx`「添加技能」（440 → Dialog `sm` 480，`maxHeightVh={70}`）：
+  - 列表原来的 `max-h-[320px] overflow-y-auto` 去掉，改由 Dialog body 滚动；标题走 Dialog 的 `title`。
+- 顺手收口两处字面量：技能详情抽屉遮罩 `bg-black/10` → `bg-[var(--scrim)]`（原先在白底页面上几乎看不出压暗，
+  也和其它浮层不一致）；添加上下文里的 `divide-[#f1f1f1]` → `divide-line-soft`（暗色下原本靠桥接规则兜底）。
+- `useModalA11y` 不再在这两处直接调用（Dialog 内部统一），`SkillsPage.tsx` 仍保留 import —— 技能详情抽屉与
+  文件里其它浮层还用它。
+- 门禁：web typecheck 过；`SkillsPage.test.tsx` 21 例过；web **298 文件 / 4372 例**全过。
+
 ## d.140.3.70.11（2026-11-13）— 字重与字号刻度：去掉 800，md 按钮对齐输入框
 
 审计 A 的「六维度无刻度」里最后一块：字重。仓里字重同时存在 400 / 500 / 600 / 700 / **800**，
