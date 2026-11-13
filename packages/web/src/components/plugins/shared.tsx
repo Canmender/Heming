@@ -110,7 +110,7 @@ export function DiffLine({
   const total = diff.added.length + diff.changed.length + diff.removed.length + diff.unchanged.length;
   return (
     <div>
-      <div className="text-[11px] text-[#555]">
+      <div className="text-[11px] text-body">
         <span className="font-bold">{label}</span>
         {total === 0 ? (
           <span className="ml-1">无</span>

@@ -60,7 +60,7 @@ export function LoginPage() {
       <div className="flex flex-1 items-center justify-center p-6">
         <form
           onSubmit={submit}
-          className="w-[340px] rounded-xl border border-line bg-white p-7 shadow-card"
+          className="w-[340px] rounded-xl border border-line bg-surface p-7 shadow-card"
         >
           {/* d.63：页面标题/副标题走全站排版档（18/600 + 12/muted），表单与按钮走控件基元 */}
           <h1 className="ui-page-title mb-1">和鸣</h1>
@@ -107,7 +107,7 @@ export function LoginPage() {
             <div
               id="login-capslock"
               role="status"
-              className={capsLock ? "ui-caption text-[#8a5a00]" : "sr-only"}
+              className={capsLock ? "ui-caption text-[var(--warn)]" : "sr-only"}
             >
               {capsLock ? "大写锁定已开启" : ""}
             </div>

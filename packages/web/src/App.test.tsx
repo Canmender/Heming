@@ -271,7 +271,7 @@ describe("App 右栏云端共享（仅智能体页显示）", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("上传失败（413 非 JSON 体）时 alert 走 http 413 兜底且不刷新列表", async () => {
+  it("上传失败（413 非 JSON 体）时面板内联提示走 http 413 兜底且不刷新列表", async () => {
     setToken("t1");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
@@ -312,9 +312,10 @@ describe("App 右栏云端共享（仅智能体页显示）", () => {
       render(<App />);
       const btn = await screen.findByRole("button", { name: "上传" });
       btn.click();
-      await waitFor(() =>
-        expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("http 413")),
-      );
+      // d.140 R4：失败提示从阻塞式 window.alert 改成面板内联 role="alert"。
+      const inlineAlert = await screen.findByRole("alert");
+      expect(inlineAlert).toHaveTextContent(/http 413/);
+      expect(alertSpy).not.toHaveBeenCalled();
       expect(errSpy).toHaveBeenCalledWith("上传失败", expect.any(Error));
       // 失败后不触发 refreshFiles 的 GET（仅 restore 的 /api/me 与初始 GET /api/files）
       const getCalls = fetchMock.mock.calls.filter(
@@ -626,12 +627,14 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
     expect(screen.getByRole("button", { name: "上传" })).toBeInTheDocument();
   });
 
-  it("没有打开会话时点绑定给出提示（不静默失败）", async () => {
+  it("没有打开会话时点绑定给出内联提示（不静默失败）", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     render(<App />);
     await screen.findByRole("button", { name: "主页" });
     fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
-    expect(alertSpy).toHaveBeenCalledWith("先打开一个会话，再绑定文件");
+    const inlineAlert = await screen.findByRole("alert");
+    expect(inlineAlert).toHaveTextContent("先打开一个会话，再绑定文件");
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 
   it("拖动手柄可改变目录栏宽度并落盘", async () => {

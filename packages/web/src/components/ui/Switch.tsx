@@ -12,6 +12,10 @@
  *
  * 可访问名走 `aria-label`——调用方给的是「和小鸣 短期记忆」这类完整句子，
  * 所以这里不渲染可见文字标签；需要可见标签时由调用方在外部排版。
+ *
+ * d.140 R4：视觉尺寸仍是 18×32，但用 `after:` 伪元素把**可点击区**撑到 32×48 ——
+ * 原先按钮本体只有 18px 高，远低于 32px 触摸目标标尺（审计 C-S2-18）。
+ * 伪元素属于按钮盒子，点击/触摸会命中按钮本身，不改变布局也不用额外包裹层。
  */
 export interface SwitchProps {
   /** 可访问名（读屏播报的就是这句）。 */
@@ -34,7 +38,7 @@ export function Switch({ label, checked, onChange, disabled = false, className =
       aria-disabled={disabled || undefined}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
+      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 after:absolute after:-inset-x-2 after:-inset-y-[7px] after:content-[''] ${
         checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
       }${disabled ? " cursor-not-allowed opacity-50" : ""}${className ? ` ${className}` : ""}`}
     >

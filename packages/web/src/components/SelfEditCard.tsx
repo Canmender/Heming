@@ -162,7 +162,7 @@ export function SelfEditCard({
         {notice && (
           <div
             role="status"
-            className={`mt-1 text-[11px] ${notice.ok ? "text-[#15803d]" : "text-[var(--warn)]"}`}
+            className={`mt-1 text-[11px] ${notice.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}
           >
             {notice.text}
           </div>

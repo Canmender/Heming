@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.57.11",
+    "date": "2026-11-13",
+    "title": "UI/UX 第 2–4 轮并回主干：令牌收敛、语义前景色、破坏性操作确认",
+    "bullets": [
+      "**合流**：第 1 轮（布局：页头/宽度档/字号档/375 溢出）已随 `d.140.3.56.x` 出包；本次把留在 `wip/uiux-2026-11-13` 的第 2–4 轮并回主干，并补齐当时缺的三道门禁。",
+      "**第 2 轮 · 样式**：新增 `--danger-on/--warn-on/--success-on/--info-on`（暗色下亮底白字只有 1.7–2.3:1，S1）与 `--shadow-overlay`（浮层阴影由变量承担，删掉同名暗色选择器）；`.ui-card` 去掉阴影只留描边；`.ui-alert` 合并原先同名两份（后者覆盖前者的死代码）；`.ui-btn/.ui-segment/.ui-filter-chip` 补 `cursor-pointer`，base 层统一 `:focus-visible` 焦点环，不再只靠 JS 注入；`--chart-2` 去紫（#7c6bd6 → #0f9d8a）、`--chart-label` 提到 5.7:1；`.ui-chip` 改胶囊。",
+      "**第 3 轮 · 字面量收口**：`bg-white`→`bg-surface`（16 处）、`bg-black/20·30`→`bg-[var(--scrim)]`（14 处）、`text-[#555/#444/#999]`、`bg-[#f3f3f3/#f1f1f1/#fffbeb]`、`accent-[#1a1a1a]`、`focus:border-[#bbb]`、`divide-[#f4f4f4]` 等批量换成语义类（`text-[#b42318]` 因测试钉死字面量而保留）。",
+      "**第 4 轮 · 设计优化**：删候选链接 `ConfirmDialog`（`RouteGroupsCard.tsx`），删分组/删密钥改成原地两步确认（`ModelPage.tsx`）；`SharedFilesPanel` 三处 `window.alert` 改为面板内联 `role=\"alert\"`；`ui/Switch` 用 `after:` 伪元素把 18px 高的可点区撑到 34px，新增 `.ui-hit` 命中区基元。",
+      "**门禁**：`pnpm -r typecheck` 通过、`pnpm --filter @heming/web test` **297 文件 / 4366 例全通过**、`pnpm -r build` 通过。合并时修掉两处遗留：`App.tsx` 的 `asideNotice` 状态错放在 `App`（应在 `AppShell`，原报 10 处 `Cannot find name`）；`navPrefs.test.ts` 里浮层阴影的字面量断言随 `--shadow-overlay` 变量化同步更新。",
+      "**文档**：新增 `docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57）与三份分报告、`docs/UIUX-REFACTOR-2026-11-13.md`（逐文件清单/遗留项/门禁结果/回滚）。用户指定的 `mshumer/unslop` 与 `alchaincyf/huashu-skills` 本机无外网拉不到，实际以本机 `anthropic-frontend-design`（anti-slop）与 `ui-design-pro` 为标尺。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.56.11",
     "date": "2026-11-13",
     "title": "修出包：更新助手只收通用在线外壳",

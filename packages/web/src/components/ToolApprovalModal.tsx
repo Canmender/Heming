@@ -201,7 +201,7 @@ export function ToolApprovalModal({
                     <span
                       className={`rounded-sm px-1 text-[10px] ${
                         call.risk === "danger"
-                          ? "bg-[var(--danger)] text-white"
+                          ? "bg-[var(--danger)] text-[var(--danger-on)]"
                           : call.risk === "write"
                             ? "bg-[var(--warn-soft)] text-[var(--warn)]"
                             : "bg-[var(--subtle-3)] text-muted"

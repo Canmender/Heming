@@ -401,7 +401,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] pt-[12vh]"
       onMouseDown={onClose}
       role="presentation"
     >

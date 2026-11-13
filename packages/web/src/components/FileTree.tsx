@@ -26,7 +26,7 @@ function Row({ label, depth, onClick, ariaLabel, expandable, expanded }: {
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-[3px] text-left text-[12px] text-[#444] hover:bg-[#f3f3f3]"
+      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-[3px] text-left text-[12px] text-body hover:bg-subtle-3"
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       {expandable ? (

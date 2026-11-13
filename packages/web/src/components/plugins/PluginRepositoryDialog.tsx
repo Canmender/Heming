@@ -108,7 +108,7 @@ export function PluginRepositoryDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
       <div
         ref={dialogRef}
         role="dialog"

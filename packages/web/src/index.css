@@ -42,6 +42,24 @@
   ::file-selector-button {
     border-color: var(--line, #e5e7eb);
   }
+
+  /* 可点击元素统一手型（d.140 R2）：全仓此前只有 29 处手写 cursor-pointer，
+     大量 <button> 在 Windows 上是默认箭头，看着像不可点。按标签兜底，
+     个别需要默认光标的（拖拽手柄/禁用态）由 utilities 覆盖。 */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
+  /* 焦点环静态基线（d.140 R2）：GlobalFocusRing 只在 JS 注入 <style> 时生效，
+     禁脚本/首帧会整站没有焦点提示。这里补一份与注入版同参数的基线；
+     带 outline-hidden 的控件仍由注入版压过（那一层不进 @layer）。 */
+  :where(a, button, summary, input, select, textarea):focus-visible {
+    outline: 2px solid var(--heming-accent, #1a1a1a);
+    outline-offset: 2px;
+  }
 }
 
 /*
@@ -108,9 +126,12 @@
    * 亮色十六进制，暗色下要么白块要么看不清。统一收成 token，组件只引用变量。
    */
   --chart-1: #2f6feb;
-  --chart-2: #7c6bd6;
+  /* d.140 R2：#7c6bd6 是「AI 紫」，与全站墨色/蓝色语义都不同支；换成蓝绿后
+     与 chart-1 蓝色仍可分（色相大约差 130°），也不再落进紫粉套路。 */
+  --chart-2: #0f9d8a;
   --chart-grid: #e4e7ec;
-  --chart-label: #98a2b3;
+  /* 图表轴标签：#98a2b3 在白底上只有 2.4:1，读不出具体刻度；压到 #5c6673 ≈ 5.7:1。 */
+  --chart-label: #5c6673;
   --avatar-1: #7c6bd6;
   --avatar-2: #2f6feb;
   --avatar-3: #0f9d8a;
@@ -120,6 +141,15 @@
   --info: #2f6feb;
   --info-soft: #e8f1ff;
   --info-line: #cfe0ff;
+  /* 语义色上的前景（d.140 R2）：暗色下 --danger 是亮红 #ff8a80，配白字只有 1.7–2.3:1，
+     远低于 4.5:1。每个语义底都配一个 on 色，按钮/徽标只引用它，不再各自决定黑白。 */
+  --danger-on: #ffffff;
+  --warn-on: #ffffff;
+  --success-on: #ffffff;
+  --info-on: #ffffff;
+  /* 浮层投影只留一级（d.140 R2）：此前 card / overlay / float / xl / plugin 五套并存，
+     页面里叠起来深浅不一。规则改为「卡片靠描边、浮层靠这一层」。 */
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.14);
   --warn-soft: #fffaf2;
   --warn-line: #fde6c8;
   --success-soft: #f4fbf6;
@@ -172,7 +202,7 @@
   --switch-knob: #e8eaed;
   /* 模型页视觉层（d.124）：暗色下图表/头像/语义软底单独一套，保证对比度与层次。 */
   --chart-1: #7aa2ff;
-  --chart-2: #a997ff;
+  --chart-2: #4fd8c0;
   --chart-grid: #303339;
   --chart-label: #9aa0a8;
   --avatar-1: #9a8cf0;
@@ -182,6 +212,13 @@
   --avatar-5: #ee7ab0;
   --avatar-6: #8b929c;
   --info: #8db4ff;
+  /* 暗色语义底是「亮色」的（#ff8a80 / #6bd08a / #f0b24a），白字在上面全是 1.7–2.3:1。
+     底色越亮，前景越深——四个 on 色都取同色系的深色，保留语义可分。 */
+  --danger-on: #2a0f0f;
+  --warn-on: #241a08;
+  --success-on: #0b2413;
+  --info-on: #0b1626;
+  --shadow-overlay: 0 10px 30px rgb(0 0 0 / 0.55);
   --info-soft: #16233a;
   --info-line: #2a3f63;
   --warn-soft: #2a2418;
@@ -227,7 +264,7 @@
     background-color: var(--subtle-3);
   }
   .ui-segment {
-    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] leading-5 text-muted transition-colors;
+    @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[12px] leading-5 text-muted transition-colors;
   }
   .ui-segment:hover {
     color: var(--ink);
@@ -236,7 +273,9 @@
   .ui-segment[aria-pressed="true"] {
     background-color: var(--surface);
     color: var(--ink);
-    font-weight: 700;
+    /* d.140 R2：全局字重只到 600（正文 400 / 标题 600），选中态此前是 700，
+       与页头同重但字号更小，反而显得脏。 */
+    font-weight: 600;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
   [data-theme="dark"] .ui-segment[aria-selected="true"],
@@ -249,7 +288,7 @@
 
   /* 过滤胶囊：全部/进行中/成功… 默认浅底可点，选中态用主题色填充（与分段控件区分语义） */
   .ui-filter-chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[12px] leading-5 text-muted transition-colors;
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[12px] leading-5 text-muted transition-colors;
     background-color: var(--subtle-2);
   }
   .ui-filter-chip:hover {
@@ -264,7 +303,7 @@
 
   /* 折叠区：去掉原生三角，统一 Chevron（图标来自 icons.tsx，与全站同一套描边） */
   .ui-disclosure > summary {
-    @apply flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-bold;
+    @apply flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-semibold;
   }
   .ui-disclosure > summary::-webkit-details-marker {
     display: none;
@@ -305,6 +344,12 @@
     border-color: var(--success-line);
     background-color: var(--success-soft);
     color: var(--success);
+  }
+  /* 中性提示条（知识库/标准检查在用）：既不是警告也不是成功，只是「说明一下」。 */
+  .ui-alert-muted {
+    border-color: var(--line-soft);
+    background-color: var(--panel);
+    color: var(--body);
   }
 
   /* 图标砖：空态/分区标题的 40px 圆角底（8% 主题色，暗色自动混合） */
@@ -481,7 +526,9 @@ samp {
   .ui-card {
     @apply rounded-xl border border-line-soft;
     background-color: var(--surface);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+    /* d.140 R2：卡片去掉投影，只靠 1px 描边分层。依据：一页里同时出现 4–6 张卡时，
+       每张都带 0 4px 14px 会让整个页面发灰；而描边 + 留白已经足够分级。
+       真正需要「浮起来」的只有弹层，走 --shadow-overlay。 */
   }
   /*
    * 浮层阴影（d.68 导航 auto 浮层）：侧滑出来的面板需要一层柔和竖向投影把层次压出来。
@@ -489,7 +536,7 @@ samp {
    * 像贴在内容上而不是浮在上面。亮色值写在这里，暗色在文件末尾的兼容层里加深。
    */
   .ui-overlay-shadow {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    box-shadow: var(--shadow-overlay);
   }
 }
 
@@ -527,7 +574,7 @@ samp {
 
   /* ── 按钮：尺寸 sm 28 / md 32，三种变体 ── */
   .ui-btn {
-    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border text-[12px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border text-[12px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
   .ui-btn-sm {
     @apply h-7 px-2.5;
@@ -555,7 +602,10 @@ samp {
      和 --danger-soft 的红不是同一支，按钮比提示条更亮、也更像「营销红」）。
      hover 用 brightness 而不是第二个写死色值，主题换色时不用再改这里。 */
   .ui-btn-danger {
-    @apply border-transparent text-white;
+    @apply border-transparent;
+    /* d.140 R2：前景走 --danger-on。此前写死 text-white，暗色下 --danger 是亮红
+       #ff8a80，白字对比 1.7–2.3:1（S1）。 */
+    color: var(--danger-on);
     background-color: var(--danger);
   }
   .ui-btn-danger:hover:not(:disabled) {
@@ -574,25 +624,15 @@ samp {
   }
 
   /* 提示条（R21）：错误/提醒/普通提示统一骨架。
-     改造前同一类错误条有 #b42318/#912018 两套红、亮色写死，暗色只能靠兼容层兜；
-     这里改成 token，颜色随主题走。 */
-  .ui-alert {
-    @apply flex items-start gap-3 rounded-lg border px-3 py-2 text-[12px] leading-5;
-  }
-  .ui-alert-danger {
-    background-color: var(--danger-soft);
-    border-color: var(--danger-line);
-    color: var(--danger);
-  }
-  .ui-alert-muted {
-    background-color: var(--panel);
-    border-color: var(--line-soft);
-    color: var(--body);
-  }
+     d.140 R2：此处曾第二遍定义 .ui-alert(gap-3)/.ui-alert-danger/.ui-alert-muted，
+     与模型页视觉层那份同名但间距不同，后定义胜出 → 同一类提示条两种间距。
+     已合并到上面唯一一份（gap-2 + 五色），这里不再重复定义。 */
 
   /* ── 胶囊/徽标（展示件，不承载点击） ── */
   .ui-chip {
-    @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[11px] leading-4 text-muted;
+    /* d.140 R2：徽标统一胶囊形（rounded-full）——此前 rounded-sm 的 4px 是圆角体系里
+       的第四档（6/8/12/4），密集表格里显得“方得莫名”。 */
+    @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-line px-2 text-[11px] leading-4 text-muted;
     background-color: var(--subtle);
   }
 
@@ -968,15 +1008,11 @@ samp {
 [data-theme="dark"] .shadow-float {
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
 }
-/* 导航 auto 浮层：暗色下同样加深（亮色 0.14 → 暗色 0.55），但边缘不发光 */
-[data-theme="dark"] .ui-overlay-shadow {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-}
-/* 卡片基元（.ui-card）自绘背景与阴影：不经过 .bg-white / .shadow-card 类名，
-   所以上面两条按类名覆盖的暗色规则匹配不到，必须单独覆盖（背景用 --surface 变量）。 */
+/* 导航 auto 浮层：阴影已走 --shadow-overlay（亮/暗各一套变量），此处不再单独覆盖。 */
+/* 卡片基元（.ui-card）自绘背景：不经过 .bg-white 类名，所以上面的按类名覆盖匹配不到。
+   d.140 R2 起卡片无投影（只留描边），暗色也不再补阴影。 */
 [data-theme="dark"] .ui-card {
   background-color: var(--surface);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
 }
 
 /* 图片/视频不因暗色反色；确保表单控件在暗色下也跟随（Chromium 默认控件色） */
@@ -1157,6 +1193,17 @@ samp {
 .rta-enter {
   animation: rta-enter 0.3s ease-out both;
 }
+/* d.140 R4 · 命中区基元：视觉尺寸不动，只把可点区撑到 ≥32px（审计 C-S2-18）。
+   用法：给 24–28px 的小图标按钮加 `.ui-hit`；行本身可点的地方不要加，避免互相吃掉点击。 */
+.ui-hit {
+  position: relative;
+}
+.ui-hit::after {
+  content: "";
+  position: absolute;
+  inset: -7px -6px;
+}
+
 /* 说明（d.124）：原来的 `.rta-hit`（列表行 hover 抬升 + 裸阴影）与 `.rta-segment`
  * 已删除——行不必抬升，卡片抬升走 `.ui-card-interactive`，分段控件走 `.ui-segment`，
  * 阴影统一由 token 提供（暗色也有对应值）。保留上面三条纯动效类。 */

@@ -216,7 +216,7 @@ function SkillCreateDialog({
   const activeTemplate = SKILL_TEMPLATES.find((item) => item.key === applied);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
       <form
         ref={panelRef}
         role="dialog"
@@ -1229,7 +1229,7 @@ export function SkillsView({
 
       {addFor && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
           onClick={() => setAddFor(null)}
         >
           <div

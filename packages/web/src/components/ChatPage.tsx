@@ -3257,7 +3257,7 @@ export function ChatPage({
                       aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
                       checked={selectedIds.includes(m.id)}
                       onChange={() => toggleSelected(m.id)}
-                      className="h-3.5 w-3.5 cursor-pointer accent-[#1a1a1a]"
+                      className="h-3.5 w-3.5 cursor-pointer accent-[var(--ink)]"
                     />
                   </label>
                 )}

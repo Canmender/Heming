@@ -234,7 +234,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
       </div>
 
       {ephemeral && (
-        <div role="status" className="mb-2 rounded-lg bg-[#fffbeb] px-2.5 py-1.5 text-[11px] text-[#92400e]">
+        <div role="status" className="mb-2 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-[11px] text-[var(--warn)]">
           浏览器临时模式：知识库只存在于当前页面，关掉就没了。桌面端会落成真实 markdown
           文件，可直接用 Obsidian 打开。
         </div>
@@ -339,7 +339,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                   )}
                 </div>
                 <div className="ui-caption">
-                  正文中写 <code className="rounded-sm bg-[#f3f3f3] px-1">[[页面名]]</code> 建立双向链接，
+                  正文中写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双向链接，
                   保存后可在图谱里看到连接。
                 </div>
                 <textarea
