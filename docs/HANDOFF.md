@@ -142,6 +142,13 @@
 
 已知边界（下一轮可继续）：stdio 请求超时只发取消通知、单次不硬杀（连续 3 次才回收子进程，见 `RECYCLE_AFTER_TIMEOUTS`）；记忆有容量上限（超限先删低重要性、同重要性比新旧），时间过期要显式开 `AGENT_MAX_EPISODE_AGE_DAYS`（默认 0）；仍没有「按检索命中率反向淘汰」；工具审批的等待只在本进程内有效（`AGENT_APPROVAL_MODE=write` 时 run 线程阻塞等裁决，重启后待审批随线程消失，跨重启续跑要 LangGraph `interrupt` + checkpointer）；pipeline 与桌面端的实际对接（目前是独立服务 + 设计文档，未接进 ChatPage 的生成链路）；本机无 docker，容器文件未构建验证。知识库检索以词面为主（BM25+哈希向量），同义改写召回不如真正的 embedding 服务，中文短查询容易放大无关片段。
 
+### 0.3 全量自检（2026-11-13，只读，未改代码）
+
+- 报告全文：**[AUDIT-2026-11-13.md](AUDIT-2026-11-13.md)**。基线 HEAD `1563bb03`，工作区干净。
+- 门禁实测：shared 118 / server 268 / web **297 文件 4366 例** / desktop 831 / setup 19 / pipeline **288 passed、覆盖率 95.95%**；`build`、`typecheck`、`plugin:check` 全 exit 0。
+- 五个 P0：① **99 个提交未 push**（`origin/main` 停在 `f7150561`）② 卸载执行 `RMDir /r $INSTDIR`，会删掉数据根 `<安装目录>/data`，与安装向导「数据会保留」文案矛盾 ③ **通用外壳 `和鸣安装程序.exe` 在 `/updates/` 是 404**（用户最初要的自定义安装界面就差上传）④ 已发布 `d.140.3.54.10` 与线上部署落后 tag 后 **104 个提交**（web 51 文件 / desktop 7 / setup 5 / pipeline 整包未进包）⑤ `pnpm -r test` 因 server 的 vitest worker 在 Windows 上崩（0xC0000409）**约 27% 假红**，缓解方案 `--no-file-parallelism` 实测 10/10 过。
+- 待拍板：push+发版、卸载数据策略（保留 vs 改文案）、pipeline 容器真构建、pipeline 是否接桌面端、真模型浸泡。详见报告 §6。
+
 ---
 
 ## 1. 项目是什么
