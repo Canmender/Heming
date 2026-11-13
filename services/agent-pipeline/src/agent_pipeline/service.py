@@ -18,7 +18,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .approval import ApprovalGate
 from .config import Settings
@@ -35,9 +35,23 @@ class KnowledgeDoc(BaseModel):
     # docId）时会以为写进去了、其实整份内容被忽略，排查时只剩「怎么没生效」。
     model_config = ConfigDict(extra="forbid")
 
-    doc_id: str = Field(min_length=1, max_length=200)
-    text: str = Field(min_length=1, max_length=200_000)
+    doc_id: str = Field(max_length=200)
+    text: str = Field(max_length=200_000)
     title: str = Field(default="", max_length=300)
+
+    @field_validator("doc_id", "text", "title", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("doc_id", "text")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        # 只含空白的文档切不出任何 chunk：写进去之后 documents 计数 +1、chunks 不变，
+        # 检索永远命中不到——「入库成功但搜不到」是最难查的一种。直接 422 说清楚。
+        if not value.strip():
+            raise ValueError("不能为空或只有空白字符（切不出任何切片，写进去也检索不到）")
+        return value
 
 
 class RunRequest(BaseModel):

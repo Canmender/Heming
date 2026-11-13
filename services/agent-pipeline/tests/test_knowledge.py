@@ -117,3 +117,31 @@ def test_http_knowledge_endpoints(runtime_factory) -> None:
     assert deleted.status_code == 200
     assert deleted.json()["stats"]["documents"] == 0
     assert client.delete("/v1/knowledge/d1").status_code == 404
+
+
+def test_knowledge_rejects_blank_documents_instead_of_storing_unsearchable_rows(runtime_factory) -> None:
+    """只有空白的文档以前会「入库成功但检索不到」。
+
+    `add_document` 切不出 chunk 也照样写 documents 行：`/v1/knowledge` 的 documents 计数 +1、
+    chunks 不变，`knowledge_search` 永远命中不到——事后只能靠翻库才发现。
+    现在直接 422，并说清楚原因。
+    """
+    settings = Settings(log_path=":memory:", db_path=":memory:")
+    runtime = build_runtime(settings, llm=FakeLLM([]))
+    client = TestClient(create_app(settings=settings, runtime=runtime))
+
+    blank_text = client.post("/v1/knowledge", json={"doc_id": "d1", "text": "   \n\t  "})
+    assert blank_text.status_code == 422
+    assert "空白" in blank_text.text or "切片" in blank_text.text
+
+    blank_id = client.post("/v1/knowledge", json={"doc_id": "  ", "text": "有内容的正文"})
+    assert blank_id.status_code == 422
+
+    # 一个都没写进去，计数保持为空
+    assert client.get("/v1/knowledge").json()["documents"] == 0
+
+    # 首尾空白会被去掉，正文照样能检索
+    ok = client.post("/v1/knowledge", json={"doc_id": "  d2  ", "text": "  安装器通用外壳  "})
+    assert ok.status_code == 200
+    assert ok.json()["doc_id"] == "d2"
+    assert ok.json()["chunks"] >= 1

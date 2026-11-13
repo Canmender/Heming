@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent_pipeline.memory import MemoryStore, tokenize
 from agent_pipeline.protocol import Citation, MemoryRecord
 
@@ -193,4 +195,23 @@ def test_prune_keeps_everything_when_age_disabled():
         store._conn.commit()  # noqa: SLF001
     assert store.prune()["episodes"] == 0
     assert store.count()["episodes"] == 1
+    store.close()
+
+
+def test_blank_document_does_not_wipe_an_existing_one() -> None:
+    """用一份空文档覆盖已有文档，不能把旧内容清空。
+
+    以前 add_document 先写 documents 行、再 DELETE chunks：内容为空白时新 chunk 列表为空，
+    旧内容就被「合法地」删掉了——检索突然什么都搜不到，而且没有任何报错。
+    """
+    store = MemoryStore(":memory:")
+    store.add_document("doc1", "安装器通用外壳支持离线包。")
+    before = store.count()
+    assert store.search("通用外壳", limit=3), "先确认旧内容可检索"
+
+    with pytest.raises(ValueError):
+        store.add_document("doc1", "   \n\t ")
+
+    assert store.count() == before, "空文档不应该改变计数"
+    assert store.search("通用外壳", limit=3), "旧内容必须还在"
     store.close()

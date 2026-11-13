@@ -150,8 +150,14 @@ class MemoryStore:
         self.prune()
 
     def add_document(self, doc_id: str, text: str, *, title: str = "", chunk_chars: int = 600) -> list[Chunk]:
-        """切块入索引。切块按段落聚合到 ``chunk_chars`` 左右，保留上下文。"""
+        """切块入索引。切块按段落聚合到 ``chunk_chars`` 左右，保留上下文。
+
+        内容为空（或只有空白）时直接报错、**不动库**：以前会先写 documents 行再删旧 chunk，
+        于是「用一份空文档覆盖已有文档」会把原来能检索到的内容清空，看起来像 RAG 突然坏了。
+        """
         chunks = _split_chunks(text, chunk_chars)
+        if not chunks:
+            raise ValueError(f"文档 {doc_id!r} 的内容为空（去掉空白后没有任何可索引的文本），未写入")
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO documents (doc_id, title) VALUES (?,?)",

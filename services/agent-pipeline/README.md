@@ -278,6 +278,12 @@ curl -s http://localhost:8000/v1/knowledge \
   -d '{"doc_id":"installer","title":"安装器手册","text":"通用外壳只适用于在线版……"}'
 ```
 
+**空白文档直接 422，且不会覆盖已有内容**：只有空白的 `text` 切不出任何 chunk，写进去只会让
+`documents` 计数 +1、`chunks` 不变（检索永远命中不到）；而「用空文档覆盖同 id 的旧文档」
+以前会先把旧的 chunk 删掉，等于静默清空知识库的一角。现在 API 层 422（`doc_id` / `text`
+都去掉首尾空白后必须非空——**注意这会真的删掉内容**，`test_memory.py` 钉住这条），
+`MemoryStore.add_document` 在内容为空时直接抛错、**不动库**。
+
 ## 工具允许清单（`tools_allowed`）
 
 `POST /v1/runs` 的 `tools_allowed` 是**硬约束**，不是提示：允许清单非空时，
@@ -520,7 +526,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **280 passed / 覆盖率 95.6%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **282 passed / 覆盖率 95.6%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 
