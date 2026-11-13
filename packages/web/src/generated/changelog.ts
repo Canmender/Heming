@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.78.11",
+    "date": "2026-11-13",
+    "title": "知识库空态快捷键提示补空格",
+    "bullets": [
+      "`packages/web/src/components/knowledge/KnowledgePage.tsx:1074-1075`：`<kbd>Ctrl+O</kbd>` 与后文「可以快速切换笔记」之间隔着 JSX 换行，行首空白被裁掉后渲染成「Ctrl+O可以…」。改为同一行并显式保留空格。",
+      "门禁：`KnowledgePage.test.tsx` 35 例通过。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.77.11",
     "date": "2026-11-13",
     "title": "第 22 轮收尾：设置搜索提示与折行空白",

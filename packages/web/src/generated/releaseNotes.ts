@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.140.3.78.11",
+    "date": "2026-11-13",
+    "title": "小修：知识库空态少了个空格",
+    "bullets": [
+      "知识库空页面里「Ctrl+O 可以快速切换笔记」不再粘成一句。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.77.11",
     "date": "2026-11-13",
     "title": "小修：设置页搜索不再多说一句",

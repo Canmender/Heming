@@ -2,6 +2,11 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.78.11（2026-11-13）— 知识库空态快捷键提示补空格
+
+- `packages/web/src/components/knowledge/KnowledgePage.tsx:1074-1075`：`<kbd>Ctrl+O</kbd>` 与后文「可以快速切换笔记」之间隔着 JSX 换行，行首空白被裁掉后渲染成「Ctrl+O可以…」。改为同一行并显式保留空格。
+- 门禁：`KnowledgePage.test.tsx` 35 例通过。
+
 ## d.140.3.77.11（2026-11-13）— 第 22 轮收尾：设置搜索提示与折行空白
 
 - `packages/web/src/components/SettingsPage.tsx`：删掉搜索框下方与 `placeholder` 重复的常驻提示「按标题、关键词或分区名搜索」；匹配状态（`N 项匹配 · Enter 打开第一项 · Esc 关闭`）改为只在搜索时显示。

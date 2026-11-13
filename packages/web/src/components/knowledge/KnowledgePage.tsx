@@ -1071,8 +1071,7 @@ function KnowledgePageShell({
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
                 写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
-                <kbd className="ml-1 rounded-sm border border-line px-1 text-ui-xs">Ctrl+O</kbd>
-                可以快速切换笔记。
+                <kbd className="ml-1 rounded-sm border border-line px-1 text-ui-xs">Ctrl+O</kbd> 可以快速切换笔记。
               </p>
               <div className="mt-1 flex items-center gap-2">
                 <Button
