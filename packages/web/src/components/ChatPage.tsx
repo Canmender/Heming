@@ -1856,6 +1856,8 @@ export function ChatPage({
       // 回合事件日志（G6）：本机逐条记「开始/工具调用/结果/答案/终态」，
       // 崩溃或刷新后还能回看过程。只落本机、有上限、失败静默（记录器内部保证）。
       onRollout: recordRollout,
+      // 心跳：等工具/等审批时定期刷新 lastAt，别让 60 秒看门狗把「在跑」写成「可能已中断」。
+      onHeartbeat: (streamId) => useChatStore.getState().touchStream(streamId),
       // 分叉（d.56）：来源始终带上（任务卡/日志能看出这是一次分叉）；
       // 只有前缀重建成功才额外传 forkPrefix，降级时由上面的提示行说明原因。
       ...(forkRun.forkedFrom ? { forkedFrom: forkRun.forkedFrom } : {}),

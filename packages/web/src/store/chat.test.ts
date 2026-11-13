@@ -308,6 +308,53 @@ describe("chat store", () => {
     expect(st.done.status).toBe("done"); // 非 streaming 状态一律不动
   });
 
+  // —— 心跳：工具长时间执行/等审批期间刷新 lastAt，别把「在跑」写成「可能已中断」——
+
+  it("touchStream：心跳刷新后看门狗不再把这条流判成卡死", () => {
+    const now = 1_000_000;
+    useChatStore.setState({
+      streaming: {
+        live: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now - 61_000 },
+      } as never,
+      streamOwner: {},
+    });
+    // 没心跳：61 秒没动静，看门狗判卡死。
+    useChatStore.getState().sweepStaleStreams(now);
+    expect(useChatStore.getState().streaming.live.status).toBe("error");
+
+    // 有心跳：工具还在跑，lastAt 被推到当下，看门狗不动它。
+    useChatStore.setState({
+      streaming: {
+        live: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now - 61_000 },
+      } as never,
+    });
+    useChatStore.getState().touchStream("live", now);
+    expect(useChatStore.getState().streaming.live.lastAt).toBe(now);
+    useChatStore.getState().sweepStaleStreams(now);
+    expect(useChatStore.getState().streaming.live.status).toBe("streaming");
+  });
+
+  it("touchStream：未知 id、已收口的流、时间不往前都不写（不复活已结束的气泡）", () => {
+    const now = 1_000_000;
+    useChatStore.setState({
+      streaming: {
+        done: { conversationId: "c1", agentId: "a1", text: "z", status: "done", lastAt: now - 9_000 },
+      } as never,
+    });
+    const before = useChatStore.getState().streaming;
+    useChatStore.getState().touchStream("missing", now); // 不炸
+    useChatStore.getState().touchStream("done", now); // 已收口：不复活
+    expect(useChatStore.getState().streaming).toBe(before);
+
+    useChatStore.setState({
+      streaming: {
+        live: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now },
+      } as never,
+    });
+    const fresh = useChatStore.getState().streaming;
+    useChatStore.getState().touchStream("live", now - 1_000); // 时间不往前：不写
+    expect(useChatStore.getState().streaming).toBe(fresh);
+  });
   it("sweepStaleStreams：无过期流时不动引用（不触发多余的重渲染）", () => {
     useChatStore.setState({
       streaming: {

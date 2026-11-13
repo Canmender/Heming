@@ -444,6 +444,13 @@ interface ChatState {
    * STREAM_STALE_MS 未刷新者置 error（长时间无响应，生成可能已中断）。由 ChatPage 定时器调用。
    */
   sweepStaleStreams: (now: number) => void;
+  /**
+   * 心跳：把该流的 lastAt 推到 `now`（缺省 Date.now()），让看门狗别再把它当卡死。
+   *
+   * 只对「存在且仍在 streaming」的流生效：已经收口的流不该被心跳复活；
+   * 不存在的 id 直接忽略（回声可能比心跳先到）。
+   */
+  touchStream: (streamId: string, now?: number) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
@@ -950,6 +957,14 @@ export const useChatStore = create<ChatState>((set, get) => {
       applyError(e.message); // 明文 legacy（服务端自产 forbidden / 旧端）
       return;
     }
+  },
+  touchStream(streamId, now) {
+    const current = get().streaming[streamId];
+    if (!current || current.status !== "streaming") return;
+    const at = now ?? Date.now();
+    // 只在真的往后走时才写：心跳很密，无事发生就不该触发重渲染。
+    if (at <= (current.lastAt ?? 0)) return;
+    set({ streaming: { ...get().streaming, [streamId]: { ...current, lastAt: at } } });
   },
   sweepStaleStreams(now) {
     const entries = get().streaming;

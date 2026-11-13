@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  HEARTBEAT_MS,
   MAX_TOOL_ROUNDS,
   MAX_VISIBLE_TOOLS,
   TOOL_SEARCH_NAME,
@@ -32,6 +33,8 @@ function makeDeps(rounds: Round[], opts: {
   toolNames?: string[];
   /** 覆盖档案（解码图片需要 vision 能力的模型）。 */
   profile?: LlmProfile;
+  /** 心跳钩子（等工具/等审批期间定期回调）。 */
+  onHeartbeat?: (streamId: string) => void;
 }) {
   let index = 0;
   const requests: ChatMessage[][] = [];
@@ -75,6 +78,7 @@ function makeDeps(rounds: Round[], opts: {
       send,
       onLocalDelta: vi.fn(),
       onRollout: opts.rollout,
+      onHeartbeat: opts.onHeartbeat,
       getTools: () => ({
         tools: (opts.toolNames ?? ["srv__x"]).map((name) => ({
           type: "function",
@@ -734,5 +738,58 @@ describe("历史压缩缓存（P2-6）", () => {
     for (const messages of h.requests) {
       expect(messages.some((m) => m.content === "（压缩过的历史摘要）")).toBe(true);
     }
+  });
+});
+
+describe("心跳：长工具调用不被界面看成卡死", () => {
+  it("工具执行挂起期间每 15 秒心跳一次，收口后自动停", async () => {
+    vi.useFakeTimers();
+    const beat = vi.fn();
+    let release!: () => void;
+    const toolDone = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "1", name: "srv__x" }] },
+      { text: "好了", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async () => {
+        await toolDone;
+        return { text: "结果", ok: true };
+      },
+      onHeartbeat: beat,
+    });
+    const run = runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 工具卡了 46 秒：这期间界面早该判卡死了，心跳必须已经在跳。
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 3 + 100);
+    expect(beat.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(typeof beat.mock.calls[0][0]).toBe("string");
+
+    release();
+    await run;
+
+    // 收口之后不能再有心跳（否则界面会一直以为还在跑）。
+    const settled = beat.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
+    expect(beat.mock.calls.length).toBe(settled);
+  });
+
+  it("没接心跳钩子时行为完全不变（不会因为心跳改造引入计时器）", async () => {
+    vi.useFakeTimers();
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "1", name: "srv__x" }] },
+      { text: "好了", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async () => ({ text: "结果", ok: true }),
+    });
+    const run = runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
+    await run;
+    expect(finishText(deps.send)).toContain("好了");
   });
 });

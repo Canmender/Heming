@@ -100,6 +100,33 @@ export interface ToolSource {
   kind?: "wiki" | "archive";
 }
 
+/**
+ * 等工具/等审批期间的心跳间隔（毫秒）。
+ *
+ * 界面按 60 秒无刷新判断「卡死」（`packages/web/src/store/chat.ts` 的 `STREAM_STALE_MS`）。
+ * 一次工具调用可以合法地跑几分钟（MCP 单次超时上限 600 秒），所以要在中途定期刷新，
+ * 否则工具还在跑、界面已经写「长时间无响应，生成可能已中断」。取 15 秒 —— 留足四次余量。
+ */
+export const HEARTBEAT_MS = 15_000;
+
+/**
+ * 给一段「可能很久没有新内容」的等待挂上心跳。
+ *
+ * 只包工具执行与人工审批：模型流本身如果长时间不出字，那是上游卡住，应当让看门狗报警，
+ * 不能用心跳掩盖。回调抛错、没有接心跳钩子都不影响被包装的 Promise。
+ */
+function withHeartbeat<T>(deps: TriggerDeps, streamId: string, job: Promise<T>): Promise<T> {
+  const beat = deps.onHeartbeat;
+  if (!beat) return job;
+  const timer = setInterval(() => {
+    try {
+      beat(streamId);
+    } catch {
+      /* 心跳失败不影响生成 */
+    }
+  }, HEARTBEAT_MS);
+  return job.finally(() => clearInterval(timer));
+}
 /** 答案末尾来源脚注最多列几条（再多用户也不会看）。 */
 export const MAX_SOURCES = 8;
 
@@ -258,6 +285,15 @@ export interface TriggerDeps {
    * 回调异常一律吞掉，绝不影响三事件上行。
    */
   onRunSettled?: (streamId: string, result: RunSettled) => void;
+  /**
+   * 心跳：等工具执行、等用户审批这类**长时间没有新内容**的阶段定期回调一次。
+   *
+   * 界面侧会按「多久没刷新」判断流是不是卡死（`sweepStaleStreams`，60 秒）。
+   * 一次合法的工具调用可能比这更久（MCP 单次超时可配到 600 秒、审批更久），
+   * 不发心跳就会在工具还在跑的时候显示「长时间无响应，生成可能已中断」。
+   * 回调异常一律吞掉（心跳失败不能影响生成）。
+   */
+  onHeartbeat?: (streamId: string) => void;
   /**
    * 逐候选留痕（d.48 路由组）：候选链每问一个候选回调一次，**只在本机展示**，绝不上行。
    * 单连接（链长 1）时路由层直接透传，从不回调——与没有本钩子时逐字等价。
@@ -1067,10 +1103,15 @@ export function runAgentMentions(
                 .map((call, index) => ({ call, index }))
                 // 重试时已执行过的调用不再打扰用户：结果直接复用（见 executed）。
                 .filter(({ call, index }) => !searchIndexes.has(index) && !executed.has(call.id));
-              const decided = await confirmToolCalls(
+              // 等用户点「允许」可能远超 60 秒：期间定期心跳，避免界面先判「无响应」。
+              const decided = await withHeartbeat(
                 deps,
-                targets.map((t) => t.call),
-                { agentId: m.agentId, agentName: m.name, streamId, conversationId },
+                streamId,
+                confirmToolCalls(
+                  deps,
+                  targets.map((t) => t.call),
+                  { agentId: m.agentId, agentName: m.name, streamId, conversationId },
+                ),
               );
               if (decided) {
                 const aligned: (GateOutcome | undefined)[] = new Array(calls.length);
@@ -1148,21 +1189,26 @@ export function runAgentMentions(
              * 轮数上限为止。这里只做提醒（结果仍真的执行），让模型自己判断要不要换路。
              */
             let writeChain: Promise<void> = Promise.resolve();
-            await Promise.all(
-              calls.map((call, i) => {
-                const job = async () => {
-                  settled[i] = await runOne(call, i);
-                };
-                // 检索是纯内存操作，与只读工具一样并行，不占用写队列
-                if (searchIndexes.has(i) || riskOf(call.function.name) === "read") return job();
-                const chained = writeChain.then(job, job);
-                // 链上任何一环失败都不能断链：失败已落在 settled 里，后续照常排队。
-                writeChain = chained.then(
-                  () => undefined,
-                  () => undefined,
-                );
-                return chained;
-              }),
+            // 工具执行可能很久（MCP/命令/浏览器），长等待期间发心跳，别让界面把「在跑」看成「卡死」。
+            await withHeartbeat(
+              deps,
+              streamId,
+              Promise.all(
+                calls.map((call, i) => {
+                  const job = async () => {
+                    settled[i] = await runOne(call, i);
+                  };
+                  // 检索是纯内存操作，与只读工具一样并行，不占用写队列
+                  if (searchIndexes.has(i) || riskOf(call.function.name) === "read") return job();
+                  const chained = writeChain.then(job, job);
+                  // 链上任何一环失败都不能断链：失败已落在 settled 里，后续照常排队。
+                  writeChain = chained.then(
+                    () => undefined,
+                    () => undefined,
+                  );
+                  return chained;
+                }),
+              ),
             );
             /**
              * 兜底文案（MCP 审计 D8）：job 抛异常时 settled[i] 还是空的，
