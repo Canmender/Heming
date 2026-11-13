@@ -29,6 +29,7 @@
 - **MCP 工具桥其它收口**：`sanitizeSchema()` 清洗服务端 schema（顶层 object/properties、required 幽灵键、非法 additionalProperties）；连接状态改 `idle/connecting/ready/stale/error`（`stale` = 有快照但最近一次连接失败，界面显示「已断开（清单过期）」）；`mcpNeedsConnect()` 会因 status 重连并 60s 冷却；`mergeToolBridges` 透传 `AbortSignal`（中断后不再有工具继续跑）；执行层异常不再回空 tool 消息（改成可重试的人话）。
 - **首轮可见工具按用户原话排序**（`lib/agentStream.ts`）：发现模式（目录 > 20）以前固定取目录前 20 个，目录顺序即提供者注册顺序（MCP 在前），知识库/白板这类工具常年排在第 21 位之后——用户说「查一下我的笔记」，模型第一轮只能看见截图/点击工具，必须先「猜到要调 tool_search」。现在一半名额给按当前用户原话的相关度检索、其余按目录顺序补齐（同一句输入结果确定），命中不了就退回原行为（有测试钉住）。
 - **中文工具检索**（`lib/mcp/discovery.ts`）：CJK 单字 + 相邻双字 + 31 组同义词（截图/点击/网页/文件…），并支持「截个图」这类字间插话。
+- **内容策略拦下不再是一个空白气泡**（`lib/agentStream.ts`）：供应商判定拒答时回 `finish_reason=content_filter`（OpenAI）或 `refusal`，正文通常为空。以前只有 `finish_reason=length` 被当回事，这种轮次会发出一个空 finish，用户只看到空白气泡、以为模型坏了。现在有工具、无工具两条路径都会补一句「这一轮被服务端的内容策略拦下了，没有生成正文。可以换个说法，或把要求拆小一点再试。」
 - **tool_search 解锁的工具总数有上限**（`lib/agentStream.ts`）：以前每轮检索都能再往 `visible` 里塞 8 个，12 轮下来请求里可能挂着 100+ 份 schema——正好毁掉「按需发现」想省的那点预算，还可能顶到供应商的 tools 数量上限。现在总数封顶 `MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT`（28），按用户原话排过序的初始 20 个尽量保留，超出的从**最早解锁**的开始挤掉（挤掉≠禁用：真要再用会重新检索到）。`agentStream.tools.test.ts` 钉住 9 轮检索后的工具数上限。
 - **超时不再是写死的 20s/30s**（`lib/mcp/{types,httpClient,stdioClient}.ts`、`packages/desktop/mcp-stdio.js`）：`McpServerConfig.timeoutMs` 可按服务配置（夹在 [2s, 600s]），界面在添加服务时填「单次超时（秒）」，空＝缺省；`store` 的 `coerceServer` 白名单必须显式带过该字段，否则重开应用就丢。
 - **stdio 超时会按协议发 `notifications/cancelled`**（`mcp-stdio.js`）：以前超时只是本地 reject，子进程里工具照跑、副作用照发生。现在先通知服务端取消，文案明说「若它不理会，子进程里可能仍在执行」——不假装已经停了。
@@ -73,7 +74,7 @@
 - **关停顺序修正**：宽限期用完仍有 run 线程活着时，以前照样 `_close_runtime()` 去关 SQLite/线程池——那个线程下次读写就会抛「Cannot operate on a closed database」，日志里冒出一堆像故障的错误。现在 `_drain_runs()` 返回还活着的 run id，只有为空才释放资源，否则只在 stderr 说明「跳过资源释放，由进程退出回收」（进程退出本来就会回收）。`tests/test_shutdown.py` 从 3 例扩到 5 例 → pytest **280 passed / 95.56%**。
 - **空白文档不再「入库成功但搜不到」、也不会把旧内容清空**：`POST /v1/knowledge` 的 `text` 只有空白时切不出 chunk，以前照样写下 `documents` 行（计数 +1、`chunks` 不变，检索永远命中不到）；更糟的是同 `doc_id` 覆盖时它先删旧 chunk 再写——等于静默清空一小块知识库。现在 API 层 422（`doc_id`/`text` 去空白后必须非空），`MemoryStore.add_document` 内容为空时直接抛错且**不动库**。`test_knowledge.py` / `test_memory.py` 各钉 1 例 → pytest **282 passed / 95.62%**。
 - **手滑的数值收成安全值**：`Settings.__post_init__` 补了 `tool_timeout_s<=0 → 1`（否则每次工具调用瞬间超时，看着像工具全坏了）、`max_observation_chars<200 → 200`（观测被截成空串会让模型像「看不到结果」）、`critic_threshold`/`coverage_target` 夹到 0..1（本意 90% 写成 `90` 会永远判不过）、`tune_interval_s>=1`、`idempotency_ttl_s>=0`、`Budget` 的 `max_steps/max_llm_calls/max_tokens/step_tool_budget>=1` 与 `max_wall_clock_s>=0`。`AGENT_APPROVAL_MODE` 仍然拼错就抛错（静默当 off 等于关了审批闸）→ pytest **284 passed / 95.65%**。
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4361 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4363 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

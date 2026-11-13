@@ -656,6 +656,16 @@ describe("输出被长度上限截断（P3-10 finish_reason）", () => {
     expect(text).toContain("\n\n（回复被输出长度上限截断");
     expect(text).not.toContain("\\n");
   });
+
+  it("finish_reason=content_filter 时说明「被内容策略拦下」而不是给空白气泡", async () => {
+    const { deps, send } = makeDeps([{ text: "", calls: [], finish: "content_filter" }], {
+      execute: async () => ({ text: "", ok: true }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "写点不该写的", deps as never);
+    const text = finishText(send);
+    expect(text).toContain("内容策略拦下了");
+    expect(text).toContain("换个说法");
+  });
 });
 
 describe("图片回灌（MCP 审计 D1）", () => {

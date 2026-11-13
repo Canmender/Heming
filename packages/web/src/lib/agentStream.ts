@@ -1044,6 +1044,8 @@ export function runAgentMentions(
             let calls: ToolCall[] = [];
             /** 本轮是否被输出长度上限截断（finish_reason=length）：要明确告诉用户，别让它像「模型变傻了」。 */
             let truncated = false;
+            /** 服务端内容策略拦下（finish_reason=content_filter / refusal）：通常正文是空的，必须说明。 */
+            let refused = false;
             await deps.streamChat(profile, await messagesFor(aggressive, extra), {
               signal: controller.signal,
               ...(useTools ? { tools: toolsForRequest() } : {}),
@@ -1052,6 +1054,7 @@ export function runAgentMentions(
               },
               onFinish: (reason) => {
                 if (reason === "length") truncated = true;
+                if (reason === "content_filter" || reason === "refusal") refused = true;
               },
               onAttempt: (a) => {
                 attempts.push(a);
@@ -1091,6 +1094,14 @@ export function runAgentMentions(
               },
             });
 
+            // 内容策略拦下时（无工具路径没有下面那段「工具轮收口」的提示）：
+            // 不说一句的话，用户只会看到一个空白气泡。
+            if (refused && !useTools) {
+              emitDelta(
+                "\n\n（这一轮被服务端的内容策略拦下了，没有生成正文。可以换个说法，或把要求拆小一点再试。）",
+                aggressive,
+              );
+            }
             if (!useTools) return;
             // 没有工具调用 = 这一轮就是答案，逐片补发文本后结束。
             // 逐片而非整段：保住打字机效果，与无工具路径表现一致。
@@ -1099,6 +1110,13 @@ export function runAgentMentions(
               // 否则他会以为模型坏了（这跟「工具参数不完整被丢弃」是同一件事的两面）。
               if (truncated) {
                 emitDelta("\n\n（回复被输出长度上限截断，回复「继续」可以接着写。）", aggressive);
+              }
+              // 内容策略拦下时正文通常是空的：不说一句的话，用户只会看到一个空白气泡。
+              if (refused) {
+                emitDelta(
+                  "\n\n（这一轮被服务端的内容策略拦下了，没有生成正文。可以换个说法，或把要求拆小一点再试。）",
+                  aggressive,
+                );
               }
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
               emitFooter();

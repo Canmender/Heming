@@ -71,6 +71,25 @@ describe("runAgentMentions", () => {
     });
   });
 
+  it("服务端内容策略拦下：说明原因，而不是给一个空白气泡", async () => {
+    const { send, deps } = makeDeps({
+      streamChat: vi.fn(async (_p: unknown, _msgs: unknown, o: { onFinish?: (reason: string) => void }) => {
+        o.onFinish?.("refusal");
+        return "";
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "写一段不该写的", deps);
+
+    const frames = send.mock.calls.map((c: unknown[]) => c[0] as { type: string; text?: string });
+    const chunks = frames.filter((f) => f.type === "agent_chunk").map((f) => String(f.text ?? "")).join("");
+    expect(chunks).toContain("内容策略拦下了");
+    expect(frames.find((f) => f.type === "agent_finish")).toMatchObject({
+      text: expect.stringContaining("内容策略拦下了"),
+    });
+    expect(frames.filter((f) => f.type === "agent_error")).toHaveLength(0);
+  });
+
   it("多条 system 合并成一条（历史摘要不再作为第二个 system 发出去）", async () => {
     const { deps } = makeDeps({
       prepareHistory: async () => [
