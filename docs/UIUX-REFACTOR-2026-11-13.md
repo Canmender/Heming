@@ -571,3 +571,50 @@ Tailwind 对自定义调色板生成的是 `--tw-ring-color: color-mix(...)`，�
 `text-[Npx]` 字面量仍有 650 处。这一项不适合机械替换：真正要决定的是「每个字号对应哪一档语义」，
 属于设计决策。在没有视觉校验手段的前提下，我选择不动——把 650 处换成 6 个 token 里挑错的几个，
 看起来像清理，实际是把问题藏起来。
+
+## 21 · 第 20 轮：卸载时让用户选「data 保留还是删除」（d.140.3.74.11）
+
+### 21.1 为什么要动
+
+打包版的用户数据根是 `<安装目录>/data`（`packages/desktop/data-root.js`）。
+electron-builder 的默认卸载逻辑是一行 `RMDir /r $INSTDIR` —— 程序连同登录态、插件、知识库、记忆一起删，
+不提示、不可恢复。第 14 轮修的是「装到一半取消要确认」，这一轮修的是「卸的时候数据怎么办」。
+
+### 21.2 做法
+
+| 位置 | 做法 |
+| --- | --- |
+| 页面 | `customUnWelcomePage` 里在欢迎页之后插一页「数据怎么处理」：三行说明 + `$INSTDIR\data` 路径 + 复选框「同时删除这个文件夹」 |
+| 默认 | 不勾选 = 保留。删数据不可恢复，默认取可逆的那一侧 |
+| 删文件 | 用 `customRemoveFiles` 替换默认的 `RMDir /r $INSTDIR`：先把 `data` 挪到同卷的 `<父目录>\heming-keep-data`，删完再按选择放回或丢弃 |
+| 静默 | `customUnInit` 默认保留；带 `--delete-app-data` 才删（与 electron-builder 的既有约定同名） |
+| 文案 | 卸载欢迎页/完成页按 `BUILD_UNINSTALLER` 另写一套；完成页只说两种结果各自落在哪里，不假装知道用户勾没勾 |
+
+### 21.3 两个坑（都值得记住）
+
+1. **跨卷 `Rename` 会静默失败**：首版把 data 暂存到 `$PLUGINSDIR`（即 %TEMP%，通常另一块盘），
+   `Rename` 失败后紧跟着的 `RMDir /r` 把 data 删了——比不改更糟。改成暂存在安装目录的父目录里。
+2. **`${isUpdated}` 会清掉 `$R9`**：它由 `nsisScriptGenerator.flags()` 生成，展开成 `StdUtils.TestParameter $R9 "updated"`。
+   我原先用 `$R9` 存暂存路径，走到 `${If} ${isUpdated}` 时路径被清空，data 搬到 `heming-keep-data` 后没有搬回来
+   （安装目录被清空、数据躺在同级目录里）。改用全局 `Var hemingKeepPath` / `Var hemingDataMoved`。
+   这条属于「模板宏有副作用」——用寄存器存跨宏的值之前，要读一眼宏的实现。
+
+### 21.4 真包验证
+
+`node scripts/build-desktop.mjs --win nsis` → `packages/desktop/release/和鸣 Setup d.140.3.74.11.exe`，
+静默装到 `D:\heming-nsis-test` 后逐场景实跑：
+
+| 场景 | 观察到什么 |
+| --- | --- |
+| GUI 卸载、不勾选 | 程序文件全部清空，`data` 及其中的 `test-keep.txt`、`plugins/state.json` 原样留下；无 `heming-keep-data` 残留 |
+| GUI 卸载、勾选 | 整个安装目录消失 |
+| 静默 `/S` | data 保留 |
+| 静默 `/S --delete-app-data` | 整个安装目录消失 |
+| 欢迎页 | 「卸载 和鸣」+ 卸载语境文案（不再复用安装文案） |
+| 完成页 | 「卸载完成」+ 「没勾选的话数据还在 data 文件夹里」 |
+
+### 21.5 有意没做
+
+- 卸载器文件名 `Uninstall Heming.exe` 是 electron-builder 生成的英文名，与中文品牌不一致；改名要动 `UNINSTALL_FILENAME`，
+  且会让已安装用户桌面上的旧快捷方式指向失效，收益不抵风险。
+- 安装器页头那行 semver、安装模式页的内置文案，仍然是模板写死的（第 14 轮已记录）。

@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.74.11",
+    "date": "2026-11-13",
+    "title": "卸载时让用户选「data 保留还是删除」",
+    "bullets": [
+      "卸载向导在欢迎页之后插入自定义页「数据怎么处理」：三行说明 + 路径 + 复选框「同时删除这个文件夹」，默认**不勾选**（保留）。勾选时记录 `$hemingDeleteData = 1`。",
+      "`customRemoveFiles` 替换默认的 `RMDir /r $INSTDIR`：先把 `data` 挪到**同卷**的 `<安装目录父目录>\\heming-keep-data`，删完程序文件后按选择放回 `<安装目录>\\data` 或丢弃；更新场景沿用原 `un.atomicRMDir` / `un.restoreFiles`。",
+      "静默卸载（/S）不弹窗，`customUnInit` 默认保留；带 `--delete-app-data` 时才删（与 electron-builder 自己的约定一致）。",
+      "卸载器欢迎页/完成页文案：MUI 的 `MUI_WELCOMEPAGE_*`、`MUI_FINISHPAGE_*` 是安装器/卸载器**共享**的 define 名，之前的 `MUI_UNWELCOMEPAGE_*` 完全无效（实测卸载器欢迎页显示「安装 和鸣」）。改为按 `BUILD_UNINSTALLER` 分两套定义。",
+      "**跨卷 Rename**：首版把 `data` 暂存到 `$PLUGINSDIR`（= %TEMP%，常在另一块盘），`Rename` 直接失败，随后 `RMDir /r` 把 data 删了——比不改还糟。改为暂存在安装目录的父目录里（必然同卷）。",
+      "**`${isUpdated}` 会清掉 `$R9`**：它由 `nsisScriptGenerator.flags()` 生成，实现是 `StdUtils.TestParameter $R9 \"updated\"`。用 `$R9` 存暂存路径时，执行到 `${If} ${isUpdated}` 路径就被清空，data 搬到 `heming-keep-data` 后没搬回来。",
+      "`packages/desktop/build/installer.nsh`：文案按安装/卸载分支定义、`Var hemingDeleteData/hemingKeepDataCheckbox/hemingKeepPath/hemingDataMoved`、`customUnInit`（解析 `--delete-app-data`）、`customUnWelcomePage`（插入自定义页 + 两个 `un.hemingKeep*` 函数）、`customRemoveFiles`。"
+    ],
+    "paragraphs": [
+      "打包版的用户数据根就是「<安装目录>/data」（`packages/desktop/data-root.js` 的 `resolveDataRoot()`，`HEMING_DATA_ROOT` 可覆盖），登录态、插件、知识库、记忆都在里面。卸载器默认 `RMDir /r $INSTDIR`把它们一起删掉且不可恢复——用户装过一次、用过一阵，卸载时没有任何交代。",
+      "行为",
+      "两个踩到的坑改用全局 `Var hemingKeepPath` / `Var hemingDataMoved`。",
+      "真包验证（`packages/desktop/release/和鸣 Setup d.140.3.74.11.exe`）",
+      "| 场景 | 结果 || --- | --- || GUI 卸载、不勾选 | 程序文件清空，`<安装目录>\\data` 与其中的 `test-keep.txt`、`plugins/state.json` 全在；无 `heming-keep-data` 残留 || GUI 卸载、勾选「同时删除」 | 整个安装目录消失 || 静默 `Uninstall.exe /S` | data 保留 || 静默 `/S --delete-app-data` | 整个安装目录消失 || 卸载欢迎页 | 「卸载 和鸣」+ 新说明（不再复用安装文案） |",
+      "文件"
+    ]
+  },
+  {
     "version": "d.140.3.73.11",
     "date": "2026-11-13",
     "title": "手拼 ui-btn 字符串清零：362 处按钮改用 ui/Button",
