@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginCatalogEntry } from "@heming/shared";
 import {
   fetchPluginCatalog,
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
-import { useModalA11y } from "../useModalA11y.js";
-import { PackageIcon, SearchIcon, XIcon } from "../icons.js";
+import { Dialog } from "../ui/Dialog.js";
+import { PackageIcon, SearchIcon } from "../icons.js";
 import { BTN_GHOST, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "./shared.js";
 import { EmptyState } from "../ui/EmptyState.js";
 
@@ -42,8 +42,6 @@ export function PluginRepositoryDialog({
   onError?: (message: string) => void;
   catalog?: CatalogClientDeps;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y(dialogRef, onClose, { active: true });
   const [plugins, setPlugins] = useState<PluginCatalogEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,31 +106,16 @@ export function PluginRepositoryDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="插件仓库"
-        className="plugin-dialog-pop flex max-h-[86vh] w-full max-w-[860px] flex-col rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
-      >
-        <div className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="ui-section-title">插件仓库</h2>
-            <p className="ui-caption">
-              和鸣只有一份云端插件仓库；下面都是插件，安装时按类型自动走对应的验签/安装流程。
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="关闭"
-            className="ml-auto rounded-md p-1 text-muted hover:bg-[var(--subtle-2)]"
-            onClick={onClose}
-          >
-            <XIcon width={14} height={14} />
-          </button>
-        </div>
-
+    <Dialog
+      ariaLabel="插件仓库"
+      title="插件仓库"
+      description="和鸣只有一份云端插件仓库；下面都是插件，安装时按类型自动走对应的验签/安装流程。"
+      size="xl"
+      maxHeightVh={86}
+      onClose={onClose}
+      closeLabel="关闭"
+      bodyClassName="p-0"
+    >
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
           <div className="relative w-[280px] max-w-full">
             <span
@@ -162,7 +145,7 @@ export function PluginRepositoryDialog({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="px-4 pb-3 pt-3">
           {error ? (
             <div className={`mb-3 ${ERROR_TEXT}`}>
               <p role="alert">{error}</p>
@@ -211,7 +194,6 @@ export function PluginRepositoryDialog({
             </ul>
           )}
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

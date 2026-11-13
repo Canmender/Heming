@@ -1,7 +1,5 @@
-import { useRef } from "react";
 import { PALETTE_PAGES } from "../lib/palette/pages.js";
-import { useModalA11y } from "./useModalA11y.js";
-import { XIcon } from "./icons.js";
+import { Dialog } from "./ui/Dialog.js";
 
 /**
  * 快捷键帮助面板（d.61 · UX 第二轮 F 轨）。
@@ -88,43 +86,23 @@ function Group({ title, rows }: { title: string; rows: ShortcutRow[] }) {
  * 所以这个面板开着时按 Esc 只关自己，不会误关下层别的弹窗（与全仓弹窗口径一致）。
  */
 export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, onClose);
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="快捷键"
-        onClick={(e) => e.stopPropagation()}
-        // d.138：壳与 ConfirmDialog 对齐——遮罩/面板/hover 全走 token，暗色下不再是白面板。
-        className="flex max-h-[80vh] w-[min(480px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] ui-overlay-shadow"
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
-          <span className="ui-section-title">快捷键</span>
-          <button
-            type="button"
-            aria-label="关闭快捷键"
-            onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
-          >
-            <XIcon width={16} height={16} aria-hidden="true" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <Group title="导航" rows={navRows()} />
-          <Group title="全局" rows={GLOBAL_ROWS} />
-          <Group title="编辑" rows={EDIT_ROWS} />
-        </div>
-        <p className="border-t border-line-soft px-4 py-2 text-[11px] text-muted">
+    <Dialog
+      ariaLabel="快捷键"
+      title="快捷键"
+      size="sm"
+      onClose={onClose}
+      closeLabel="关闭快捷键"
+      bodyClassName="px-4 py-3"
+      footer={
+        <p className="mr-auto text-[11px] text-muted">
           输入框内不会触发「?」；随时可按 <kbd className="rounded-sm border border-line px-1">?</kbd> 再次打开。
         </p>
-      </div>
-    </div>
+      }
+    >
+      <Group title="导航" rows={navRows()} />
+      <Group title="全局" rows={GLOBAL_ROWS} />
+      <Group title="编辑" rows={EDIT_ROWS} />
+    </Dialog>
   );
 }

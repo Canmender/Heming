@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.60.11）
+# UI/UX 重构交付记录（d.140.3.61.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11` → 第 8 轮 `d.140.3.61.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -151,3 +151,48 @@
 **判断标准**（写给下一个改界面的人）：元素下面有内容、会盖住内容 → 浮层，用 `ui-overlay-shadow`；元素与内容同层、只是分组 → 卡片，用 `ui-card`；元素是内容本身的一部分（按钮、提示条、`kbd`、色点）→ 不加投影，靠边框和底色区分。
 
 **门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**；`pnpm -r typecheck`、`pnpm -r build` 通过。
+
+## 9. 第 8 轮（`d.140.3.61.11`）· `ui/Dialog`：内容弹窗统一外壳
+
+审计 A/C 记了「11 个弹窗各自拼壳：4 种宽度 / 2 种圆角 / 有的有 border 有的没有」。逐个数下来，它们其实混了三类不同的东西，只有第一类该共用一个壳：
+
+1. **内容弹窗**（有标题、有关闭、有底栏按钮）——本轮统一；
+2. **全屏灯箱**（看大图，`z-[60] bg-black/75`，内容就是图本身）——不统一，套壳只会让图变小；
+3. **顶对齐搜索面板**（命令面板 / 代码速开，自带搜索框、没有标题栏）——不统一，它们的第一个元素就是输入框，硬加头部会把键盘焦点顶歪。
+
+### 9.1 新增 `components/ui/Dialog.tsx`
+
+| 维度 | 取值 |
+| --- | --- |
+| 宽度 | `size: sm | md | lg | xl` → `w-[min(480px,92vw)]` / 560 / 660 / 860（`94vw`） |
+| 头部 | 图标砖 `.ui-icon-tile h-8 w-8`（`aria-hidden`）+ 标题 `.ui-section-title` + 说明 `.ui-caption` + 关闭按钮（`aria-label` 可覆盖） |
+| 身体 | `min-h-0 flex-1 overflow-y-auto`，内边距默认 `p-4`，可传 `bodyClassName` |
+| 底栏 | 传了 `footer` 才渲染，默认 `justify-end gap-2 border-t px-4 py-2.5` |
+| 行为 | `useModalA11y`（焦点陷阱 / Esc / 归还焦点）、点遮罩关闭、`maxHeightVh` 默认 80 |
+| 无头模式 | 不传 `title` 就不渲染头部（给「自带搜索框」的浮层留口） |
+
+### 9.2 迁移清单
+
+| 文件 | 原形态 | 现形态 |
+| --- | --- | --- |
+| `ConfirmDialog.tsx` | 82 行自拼壳，`shadow-card` + `rounded-xl` | 20 行包装：`<Dialog ariaLabel={title} title={title} closeLabel="关闭并拒绝">`，默认聚焦拒绝按钮不变 |
+| `ShortcutsHelp.tsx` | 自拼壳 + 手写头部 | `size="sm"`、`closeLabel="关闭快捷键"`、底栏放「Esc 关闭」提示 |
+| `FilePreviewModal.tsx` | 自拼壳，标题是 13px 手写 | `size="md"`、标题走 `truncate` 的 13px 语义、`closeLabel="关闭预览"` |
+| `plugins/InstallDialog.tsx` | 自拼壳 + 浅色底 footer | `size="lg"` `maxHeightVh={88}`，`footerClassName` 保留浅色底 |
+| `plugins/PluginDetailDialog.tsx` | 自拼壳 + 内部再套一层滚动 | `size="lg"`，`PackageDetailBody` 去掉 `min-h-0 flex-1 overflow-y-auto`（滚动交给 Dialog） |
+| `plugins/PluginRepositoryDialog.tsx` | 自拼壳 + 内部滚动 | `size="xl"` `maxHeightVh={86}`，列表容器同样去掉滚动层 |
+
+**可访问名逐字保留**（测试钉死的）：`快捷键`、`关闭快捷键`、`命令面板`、`关闭预览`、`关闭并拒绝`、`查看大图`、`查看图片`。
+
+### 9.3 暂不合并的（连同理由写在这里，避免下一轮又「顺手统一」）
+
+| 位置 | 为什么保留 |
+| --- | --- |
+| `MarkdownMessage.tsx:160`、`ChatPage.tsx:402` | 全屏灯箱：`z-[60] bg-black/75`，交互是「点任意处关闭」，内容就是图本身 |
+| `SkillsPage.tsx:454` | 右侧抽屉：`border-l` + 全高，和居中弹窗的空间模型不同 |
+| `CommandPalette.tsx:421`、`knowledge/QuickOpen.tsx:106` | 顶对齐面板：第一个元素是搜索框，没有头部 |
+| `assistant/AgentFormPanel.tsx` | 同一个 `<form>` 兼作内联卡片与弹窗（`role` 条件切换），拆壳会把两种形态一起改坏 |
+| `MemoryPage.tsx:335`、`SkillsPage.tsx:222` / `:1237` | 窄表单弹窗（460 / 440 / 440），下一轮并入 `size="sm"` 并补可见 label 时一起做 |
+
+**门禁**：`pnpm -r typecheck` 通过；`pnpm --filter @heming/web test` **298 文件 / 4372 例全通过**（新增 `ui/Dialog.test.tsx` 5 例）；`pnpm -r build` 通过。
+

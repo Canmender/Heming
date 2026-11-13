@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useModalA11y } from "./useModalA11y.js";
-import { XIcon } from "./icons.js";
+import { useEffect, useState, type ReactNode } from "react";
+import { Dialog } from "./ui/Dialog.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { fetchFileBlobText, fetchFileBlobUrl } from "../lib/api.js";
 
@@ -112,8 +111,6 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const panelRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,32 +187,14 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Dialog
+      ariaLabel={`预览 ${file.name}`}
+      title={<span className="block truncate text-[13px] font-semibold">{file.name}</span>}
+      size="md"
+      onClose={onClose}
+      closeLabel="关闭预览"
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`预览 ${file.name}`}
-        className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] ui-overlay-shadow"
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
-          <span className="truncate text-[13px] font-bold">{file.name}</span>
-          <button
-            type="button"
-            aria-label="关闭预览"
-            onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={16} height={16} aria-hidden="true" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{body}</div>
-      </div>
-    </div>
+      {body}
+    </Dialog>
   );
 }

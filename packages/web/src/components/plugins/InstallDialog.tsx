@@ -9,8 +9,8 @@ import {
   type PublisherTrustStore,
   type SignatureCheck,
 } from "../../lib/plugins/index.js";
-import { useModalA11y } from "../useModalA11y.js";
-import { PackageIcon, ShieldIcon, XIcon } from "../icons.js";
+import { Dialog } from "../ui/Dialog.js";
+import { PackageIcon, ShieldIcon } from "../icons.js";
 import type { PluginCatalogEntry } from "@heming/shared";
 import { PluginPermissionList } from "./PluginPermissionList.js";
 import { OnlineCatalogPanel } from "./OnlineCatalogPanel.js";
@@ -78,8 +78,6 @@ export function InstallDialog({
   /** 公钥指纹实现（测试注入；默认 SHA-256） */
   fingerprintOf?: (publicKey: string) => Promise<string>;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y(dialogRef, onClose, { active: true });
   /**
    * 打开即把焦点放到清单一栏（d.77）：这个弹窗的主操作是粘贴 JSON / 选文件，
    * 落到关闭按钮上要再 Tab 两三次；不影响键盘可达性，只是少几步。
@@ -252,37 +250,47 @@ export function InstallDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="安装插件"
-        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-2.5 border-b border-line-soft px-4 py-3">
-          <span className="plugin-icon-tile h-9 w-9" aria-hidden="true">
-            <PackageIcon width={17} height={17} />
+    <Dialog
+      ariaLabel="安装插件"
+      title="安装 / 更新插件"
+      icon={<PackageIcon width={17} height={17} />}
+      description="粘贴、拖入或从云端载入清单；先校验，再安装。"
+      size="lg"
+      maxHeightVh={88}
+      onClose={onClose}
+      closeLabel="关闭安装面板"
+      bodyClassName="px-4 py-3"
+      footerClassName="flex flex-wrap items-center gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5"
+      footer={
+        <>
+          <span className="mr-auto ui-caption">
+            {preview
+              ? `${updating ? "更新" : "安装"}「${preview.manifest.name}」v${preview.manifest.version}`
+              : "粘贴清单、拖入文件或从云端载入"}
+            {preview && blocked ? " · 需先完成上方确认" : ""}
           </span>
-          <div className="min-w-0 flex-1">
-            <span className="ui-section-title">安装 / 更新插件</span>
-            <p className="mt-0.5 ui-caption">粘贴、拖入或从云端载入清单；先校验，再安装。</p>
-          </div>
+          <button type="button" onClick={onClose} className={BTN_GHOST}>
+            取消
+          </button>
           <button
             type="button"
-            aria-label="关闭安装面板"
-            onClick={onClose}
-            className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+            onClick={submitInstall}
+            disabled={!preview || blocked}
+            aria-describedby={
+              [
+                needsTrustConfirm ? `${trustConfirmId}-hint` : "",
+                needsPublisherTrust || needsKeyAck ? requirementsId : "",
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
+            className={BTN_PRIMARY}
           >
-            <XIcon width={14} height={14} aria-hidden="true" />
+            {updating ? "确认更新" : "确认安装"}
           </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        </>
+      }
+    >
           <div
             onDragOver={(event) => {
               event.preventDefault();
@@ -571,36 +579,6 @@ export function InstallDialog({
               </div>
             </div>
           )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5">
-          <span className="mr-auto ui-caption">
-            {preview
-              ? `${updating ? "更新" : "安装"}「${preview.manifest.name}」v${preview.manifest.version}`
-              : "粘贴清单、拖入文件或从云端载入"}
-            {preview && blocked ? " · 需先完成上方确认" : ""}
-          </span>
-          <button type="button" onClick={onClose} className={BTN_GHOST}>
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={submitInstall}
-            disabled={!preview || blocked}
-            aria-describedby={
-              [
-                needsTrustConfirm ? `${trustConfirmId}-hint` : "",
-                needsPublisherTrust || needsKeyAck ? requirementsId : "",
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
-            className={BTN_PRIMARY}
-          >
-            {updating ? "确认更新" : "确认安装"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

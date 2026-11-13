@@ -6,8 +6,8 @@ import type {
   PluginSkillInfo,
 } from "../../lib/plugins/index.js";
 import type { ToolPackGroup } from "./viewModel.js";
-import { useModalA11y } from "../useModalA11y.js";
-import { PackageIcon, XIcon } from "../icons.js";
+import { Dialog } from "../ui/Dialog.js";
+import { PackageIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PluginPermissionList } from "./PluginPermissionList.js";
 import { WidgetSettingsCard } from "../settings/WidgetSettingsCard.js";
@@ -87,40 +87,21 @@ export type PluginDetailDialogProps = PackageDetailProps;
  * 用户口径只有一个——插件详情。内部「模块」词汇不进入界面文案。
  */
 export function PluginDetailDialog(props: PluginDetailDialogProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y(dialogRef, props.onClose, { active: true });
   const title = props.plugin.manifest.name;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
-      onClick={props.onClose}
+    <Dialog
+      ariaLabel={`插件详情 ${title}`}
+      title="插件详情"
+      icon={<PackageIcon width={15} height={15} />}
+      size="lg"
+      maxHeightVh={88}
+      onClose={props.onClose}
+      closeLabel="关闭插件详情"
+      bodyClassName="p-0"
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`插件详情 ${title}`}
-        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
-          <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
-            <PackageIcon width={15} height={15} />
-          </span>
-          <span className="ui-section-title">插件详情</span>
-          <button
-            type="button"
-            aria-label="关闭插件详情"
-            onClick={props.onClose}
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={14} height={14} aria-hidden="true" />
-          </button>
-        </div>
-        <PackageDetailBody {...props} />
-      </div>
-    </div>
+      <PackageDetailBody {...props} />
+    </Dialog>
   );
 }
 
@@ -163,7 +144,7 @@ function PackageDetailBody({
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[14px] font-extrabold">{plugin.manifest.name}</span>
             <span className={CHIP}>v{plugin.manifest.version}</span>

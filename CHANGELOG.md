@@ -2,6 +2,17 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.61.11（2026-11-13）— 新增 `ui/Dialog`：6 个内容弹窗统一外壳
+
+- 审计 A/C 的「11 个弹窗各自拼壳（4 宽度 / 2 圆角 / 有无 border）」收敛第一步。新增 `packages/web/src/components/ui/Dialog.tsx`：
+  - 四档宽度 `size: sm|md|lg|xl`（480/560/660/860，配 `w-[min(Npx,9xvw)]`），调用方不能再传任意宽度；
+  - 统一头部（`.ui-icon-tile` 图标槽 + `.ui-section-title` 标题 + `.ui-caption` 说明 + 关闭按钮）、可滚动 body、可选 footer；
+  - `role="dialog" aria-modal="true" aria-label` 必填、`useModalA11y` 焦点陷阱 / Esc / 归还焦点、遮罩用 `var(--scrim)`、投影用 `ui-overlay-shadow`、圆角统一 `rounded-xl`。
+- 迁移 6 个内容弹窗（行为与可访问名逐字保留，762 行 → 约 520 行）：`ConfirmDialog.tsx`（默认聚焦拒绝按钮，`closeLabel="关闭并拒绝"`）、`ShortcutsHelp.tsx`、`FilePreviewModal.tsx`、`plugins/InstallDialog.tsx`、`plugins/PluginDetailDialog.tsx`、`plugins/PluginRepositoryDialog.tsx`。
+- 新增 `components/ui/Dialog.test.tsx`（5 例）：可访问名/标题/说明/图标 aria-hidden/底栏、点遮罩关闭且点面板内部不关闭、Esc 与关闭按钮、四档宽度、无 title 不渲染头部。
+- 判断标准（写进 REFACTOR 文档 §9）：**内容弹窗**用 `Dialog`；**全屏灯箱**（`MarkdownMessage` / `ChatPage` 看大图）、**右侧抽屉**（`SkillsPage` 详情）、**顶部对齐搜索面板**（`CommandPalette` / `QuickOpen`，自带搜索框无头部）保持各自形态——它们不是同一类东西，硬套外壳只会削掉交互。
+- 门禁：`pnpm -r typecheck` 过、web **298 文件 / 4372 例**全过、`pnpm -r build` 过。
+
 ## d.140.3.60.11（2026-11-13）— 浮层阴影统一：真浮层用 `.ui-overlay-shadow`，内联元素去投影
 
 - 第 6 轮遗留的 `shadow-card` 收尾（审计 A「六套阴影并存」）。按「是否真的浮在内容上」分三类处理，共 28 处：
