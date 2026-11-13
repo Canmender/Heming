@@ -86,3 +86,39 @@ def test_misconfigured_env_is_normalized_or_rejected(monkeypatch):
 
 def test_approval_mode_defaults_to_off() -> None:
     assert Settings().approval_mode == "off"
+
+def test_nonsense_numbers_are_clamped_instead_of_poisoning_every_run() -> None:
+    """手滑的环境变量不该让每条 run 都莫名其妙地失败。
+
+    - `AGENT_TOOL_TIMEOUT_S=0` → 每次工具调用瞬间超时（看着像工具全坏了）
+    - `AGENT_MAX_OBSERVATION_CHARS=50` → 观测被截成近乎空串，模型像「看不到结果」
+    - `AGENT_CRITIC_THRESHOLD=90` / `AGENT_COVERAGE_TARGET=90`（本意 90%）→ 永远判不过
+    """
+    settings = Settings(
+        tool_timeout_s=0.0,
+        max_observation_chars=10,
+        critic_threshold=90.0,
+        coverage_target=90.0,
+        tune_interval_s=0.2,
+        idempotency_ttl_s=-5.0,
+        budget=Budget(max_steps=0, max_llm_calls=0, max_tokens=0, max_wall_clock_s=-1, step_tool_budget=0),
+    )
+    assert settings.tool_timeout_s == 1.0
+    assert settings.max_observation_chars == 200
+    assert settings.critic_threshold == 1.0
+    assert settings.coverage_target == 1.0
+    assert settings.tune_interval_s == 1.0
+    assert settings.idempotency_ttl_s == 0.0
+    assert settings.budget.max_steps == 1
+    assert settings.budget.max_llm_calls == 1
+    assert settings.budget.max_tokens == 1
+    assert settings.budget.max_wall_clock_s == 0.0
+    assert settings.budget.step_tool_budget == 1
+
+
+def test_sane_values_are_left_untouched() -> None:
+    settings = Settings(tool_timeout_s=20.0, critic_threshold=0.6, coverage_target=0.9, budget=Budget())
+    assert settings.tool_timeout_s == 20.0
+    assert settings.critic_threshold == 0.6
+    assert settings.coverage_target == 0.9
+    assert settings.budget == Budget()

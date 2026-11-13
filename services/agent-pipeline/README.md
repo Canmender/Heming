@@ -140,6 +140,8 @@ curl -s http://localhost:8000/v1/runs \
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
 
+**手滑的数值会被收成安全值**（`Settings.__post_init__`）：`AGENT_TOOL_TIMEOUT_S<=0` → `1`（否则每次工具调用瞬间超时，看着像工具全坏了）；`AGENT_MAX_OBSERVATION_CHARS<200` → `200`（否则观测被截成空串，模型像「看不到结果」）；`AGENT_CRITIC_THRESHOLD` / `AGENT_COVERAGE_TARGET` 超出 `0..1`（例如本意 90% 写成 `90`）会被夹回去（否则每条 run 永远判不过）；`AGENT_TUNE_INTERVAL_S<1`、`AGENT_IDEMPOTENCY_TTL_S<0`、`Budget` 里 `max_steps/max_llm_calls/max_tokens/step_tool_budget<1` 与 `max_wall_clock_s<0` 同理。唯一**不**静默收口的是 `AGENT_APPROVAL_MODE`：拼错直接抛错，因为静默当 off 等于把审批闸关了却没人知道。
+
 ## 取消一个 run
 
 长任务不能只能靠杀进程停。`POST /v1/runs/{id}/cancel` 只置一个标记：正在执行的那次模型调用不会被打断（HTTP 请求没法安全打断），但**下一个节点边界**会看到标记，直接以 `status="aborted"` / `stop_reason="cancelled"` 收口，`summarize` 仍会跑完并回「取消前已完成的内容」——不用等 10 分钟墙钟超时。
@@ -526,7 +528,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **282 passed / 覆盖率 95.6%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **284 passed / 覆盖率 95.7%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

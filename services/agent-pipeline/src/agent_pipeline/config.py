@@ -174,6 +174,9 @@ class Settings:
         - `AGENT_CANARY_RATIO=2` 等于永久全量灰度，`-1` 等于灰度永不生效，都不该静默通过；
         - `AGENT_SHUTDOWN_GRACE_S` 为负数没有意义（`_drain_runs` 里已经 max(0)，这里统一收口）；
         - `AGENT_APPROVAL_MODE` 拼错（如 `wrtie`）时**必须报错**：静默当成 off 等于把审批闸关了却没人知道。
+        - `AGENT_TOOL_TIMEOUT_S=0` 会让每次工具调用瞬间超时（看起来像「所有工具都坏了」）；
+          `AGENT_MAX_OBSERVATION_CHARS=0` 会让模型什么观测都看不到（看起来像它不听话）；
+          `AGENT_CRITIC_THRESHOLD=90` / `AGENT_COVERAGE_TARGET=90`（本意 90%）会让每条 run 永远被判不过。
         """
         if self.max_concurrent_runs < 1:
             object.__setattr__(self, "max_concurrent_runs", 1)
@@ -185,6 +188,41 @@ class Settings:
             object.__setattr__(self, "canary_ratio", min(1.0, max(0.0, self.canary_ratio)))
         if self.approval_mode not in {"off", "write"}:
             raise ValueError(f"AGENT_APPROVAL_MODE 只能是 off 或 write，实际是 {self.approval_mode!r}")
+        # 工具超时 0/负数 = 每次调用立刻失败：看着像工具全坏了，实际是配置。
+        if self.tool_timeout_s <= 0:
+            object.__setattr__(self, "tool_timeout_s", 1.0)
+        # 观测渲染上限太小会把工具结果截成空字符串：模型据「什么都没返回」继续推理。
+        if self.max_observation_chars < 200:
+            object.__setattr__(self, "max_observation_chars", 200)
+        if not 0.0 <= self.critic_threshold <= 1.0:
+            object.__setattr__(self, "critic_threshold", min(1.0, max(0.0, self.critic_threshold)))
+        if not 0.0 <= self.coverage_target <= 1.0:
+            object.__setattr__(self, "coverage_target", min(1.0, max(0.0, self.coverage_target)))
+        if self.tune_interval_s < 1.0:
+            object.__setattr__(self, "tune_interval_s", 1.0)
+        if self.idempotency_ttl_s < 0:
+            object.__setattr__(self, "idempotency_ttl_s", 0.0)
+        if self.budget.max_steps < 1 or self.budget.max_llm_calls < 1 or self.budget.max_tokens < 1:
+            object.__setattr__(
+                self,
+                "budget",
+                replace(
+                    self.budget,
+                    max_steps=max(1, self.budget.max_steps),
+                    max_llm_calls=max(1, self.budget.max_llm_calls),
+                    max_tokens=max(1, self.budget.max_tokens),
+                ),
+            )
+        if self.budget.max_wall_clock_s < 0 or self.budget.step_tool_budget < 1:
+            object.__setattr__(
+                self,
+                "budget",
+                replace(
+                    self.budget,
+                    max_wall_clock_s=max(0.0, self.budget.max_wall_clock_s),
+                    step_tool_budget=max(1, self.budget.step_tool_budget),
+                ),
+            )
 
     @classmethod
     def from_env(cls) -> "Settings":
