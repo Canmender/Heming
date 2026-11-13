@@ -108,3 +108,45 @@ def test_threads_are_cleaned_up_after_run_finishes(runtime_factory, tmp_path) ->
 
     # 关停时也不能因为残留线程而卡住
     assert all(not thread.is_alive() for thread in app.state.threads.values())
+
+
+def test_resources_are_not_closed_while_a_run_thread_is_still_alive(runtime_factory, tmp_path) -> None:
+    """宽限期用完线程还没退，就别关 SQLite/线程池。
+
+    否则那个线程下一次读写会抛「Cannot operate on a closed database」之类的错误，
+    日志里出现一堆像是故障的东西——实际是关停顺序问题，进程退出本来就会回收这些资源。
+    """
+    settings = _settings(tmp_path, shutdown_grace_s=0.0)
+    runtime = runtime_factory([_slow_reply] * 32, settings=settings)
+    closed: list[str] = []
+    runtime.tools.close = lambda: closed.append("tools")  # type: ignore[method-assign]
+    runtime.memory.close = lambda: closed.append("memory")  # type: ignore[method-assign]
+    runtime.config_store.close = lambda: closed.append("config_store")  # type: ignore[method-assign]
+
+    app = create_app(runtime=runtime)
+    with TestClient(app) as client:
+        run_id = client.post("/v1/runs", json={"goal": "慢慢跑"}).json()["run_id"]
+        deadline = time.time() + 5
+        while time.time() < deadline and not len(runtime.llm.calls):
+            time.sleep(0.01)
+        assert len(runtime.llm.calls) > 0, "run 应该已经开跑"
+
+    # 宽限期 0：线程一定还在跑，所以不该释放共享资源
+    assert closed == [], f"还有活线程时不应该关资源，实际关了：{closed}"
+    assert "服务关停" in str(app.state.runs[run_id].get("error") or ""), "兜底仍要把状态与原因落下"
+
+
+def test_resources_are_closed_when_nothing_is_running(runtime_factory, tmp_path, capsys) -> None:
+    settings = _settings(tmp_path, shutdown_grace_s=5.0)
+    runtime = runtime_factory([_slow_reply] * 8, settings=settings)
+    closed: list[str] = []
+    runtime.tools.close = lambda: closed.append("tools")  # type: ignore[method-assign]
+    runtime.memory.close = lambda: closed.append("memory")  # type: ignore[method-assign]
+    runtime.config_store.close = lambda: closed.append("config_store")  # type: ignore[method-assign]
+
+    app = create_app(runtime=runtime)
+    with TestClient(app) as client:
+        assert client.get("/health").json()["ok"] is True
+
+    assert closed == ["tools", "memory", "config_store"], f"没有在跑的 run 时应当释放资源：{closed}"
+    assert "跳过资源释放" not in capsys.readouterr().err

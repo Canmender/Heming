@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hmac
+import sys
 import threading
 import time
 import uuid
@@ -172,12 +173,15 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     # run_id → 执行线程。关停时要能把它们 join 掉，否则容器 SIGTERM 会直接从中间砍断。
     threads: dict[str, threading.Thread] = {}
 
-    def _drain_runs() -> None:
+    def _drain_runs() -> list[str]:
         """关停前先让正在跑的 run 自己收口：置取消标记，再等最多 ``shutdown_grace_s``。
 
         不这么做，容器滚动更新时 SIGTERM 会直接杀掉进程：客户端看到的是「连不上」，
         而且这些 run 既没落 ``aborted`` 也没落 ``error``，日志里只剩半截——事后查不出发生过什么。
         节点边界看到取消标记会走正常收口（answer 里说明是取消前完成的），和用户点「取消」同一条路。
+
+        返回宽限期过后仍在跑的 run id：调用方据此决定能不能释放共享资源
+        （线程还活着就关 SQLite/线程池，会让它接着报「closed database」这类干扰性错误）。
         """
         with lock:
             pending = [rid for rid, entry in runs.items() if entry.get("status") in {"running", "cancelling"}]
@@ -186,13 +190,14 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         for event in events:
             event.set()
         if not joining:
-            return
+            return []
         deadline = time.monotonic() + max(0.0, settings.shutdown_grace_s)
         for thread in joining:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
+        still_alive = [rid for rid in pending if (threads.get(rid) is not None and threads[rid].is_alive())]
         with lock:
             still_running = [rid for rid in pending if runs.get(rid, {}).get("status") in {"running", "cancelling"}]
         if still_running:
@@ -206,6 +211,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                         finished_at=time.time(),
                     )
                     runs[rid] = entry
+        return still_alive
 
     def _close_runtime() -> None:
         """释放进程外资源：工具线程池、SQLite 连接。
@@ -230,8 +236,17 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             yield
         finally:
             tuner.stop()
-            _drain_runs()
-            _close_runtime()
+            still_alive = _drain_runs()
+            if still_alive:
+                # 线程还活着就关 SQLite / 线程池，它会在下一次读写时抛「closed database」
+                # 之类的错误混进日志，把「关停」写成「故障」。进程退出会回收这些资源。
+                print(
+                    f"[agent-pipeline] 关停：{len(still_alive)} 个 run 线程在宽限期内没退出"
+                    f"（{', '.join(sorted(still_alive))}），跳过资源释放，由进程退出回收。",
+                    file=sys.stderr,
+                )
+            else:
+                _close_runtime()
 
     app = FastAPI(title="agent-pipeline", version="0.1.0", lifespan=lifespan)
 

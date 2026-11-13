@@ -449,7 +449,7 @@ docker compose up --build               # 服务 :8000 + Prometheus :9090
 ## 长跑不飘（进程内状态有上限）
 
 - **run 历史有上限**：`AGENT_RUN_HISTORY_LIMIT`（默认 500）控制服务内存里保留多少个已结束 run；超出按完成顺序丢最旧，正在跑的 run 不动。`/health` 的 `runs_retained` 可以看当前占用。没有这一步时，每个请求都会把完整结果（含整份日志行）留在进程里，跑久了就是稳定泄漏。
-- **关停不硬砍在跑的 run**：`AGENT_SHUTDOWN_GRACE_S`（默认 5 秒）——lifespan 退出时先给所有在跑的 run 置取消标记（与用户点「取消」同一条协作式路径），最多等这么久让它们收口；宽限期用完还没结束的落成 `error` 并写明「服务关停：宽限期内没跑完，已中止」，客户端不会永远等到超时。同时释放工具线程池与 SQLite 连接，容器滚动更新时进程能干脆退出。`tests/test_shutdown.py` 3 例覆盖（在跑时关停 / 没有在跑时秒退 / 线程表随 run 结束清理）。
+- **关停不硬砍在跑的 run**：`AGENT_SHUTDOWN_GRACE_S`（默认 5 秒）——lifespan 退出时先给所有在跑的 run 置取消标记（与用户点「取消」同一条协作式路径），最多等这么久让它们收口；宽限期用完还没结束的落成 `error` 并写明「服务关停：宽限期内没跑完，已中止」，客户端不会永远等到超时。没有任何线程还活着时才释放工具线程池与 SQLite 连接；**线程还在跑就不关**（否则它下一次读写会抛「Cannot operate on a closed database」，日志里多出一堆像故障的东西，而进程退出本来就会回收这些资源），只在 stderr 说明跳过了释放。`tests/test_shutdown.py` 5 例覆盖（在跑时关停 / 没有在跑时秒退 / 线程表随 run 结束清理 / 宽限期 0 时线程还活着 → 不关资源 / 空载关停 → 资源确实释放）。
 - **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
 - **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
 
@@ -520,7 +520,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **278 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **280 passed / 覆盖率 95.6%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 
