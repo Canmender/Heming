@@ -21,7 +21,7 @@ export function SystemPluginCard({ system }: { system: SystemPlugin }) {
         <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
           <ShieldIcon width={15} height={15} />
         </span>
-        <span className="text-[13px] font-extrabold">{system.name}</span>
+        <span className="text-[13px] font-semibold">{system.name}</span>
         <span className={CHIP}>内置</span>
         <span className={CHIP}>v{system.version}</span>
         {/* 只留「内置 + 版本」两枚：原来还有「置顶」「随应用内置」，四个胶囊里两个在说同一件事，

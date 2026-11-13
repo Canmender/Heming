@@ -2,6 +2,22 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.70.11（2026-11-13）— 字重与字号刻度：去掉 800，md 按钮对齐输入框
+
+审计 A 的「六维度无刻度」里最后一块：字重。仓里字重同时存在 400 / 500 / 600 / 700 / **800**，
+`font-extrabold`（800）出现在卡片标题与两个统计数字上——它们和 `.ui-page-title`（600）、
+`.ui-section-title`（600）差了两级，等于用「更粗」替代了层级设计。
+
+- `font-extrabold` → `font-semibold`（11 处）：`HomePage`、`MemoryPage` ×2、`SkillsPage`、
+  `ux/OnboardingCard`、`skills/SkillHubPanel`、`plugins/{BundlePluginCard,PluginCard,PluginDetailDialog,SystemPluginCard,UnitListView}`。
+- 两个统计数字（`HomePage` 任务数、`MemoryPage` 全局语义/情景条数）顺带补 `ui-numeric`：
+  数值变化时不再因字形宽度抖动而左右位移。
+- `.ui-btn` 与 `.ui-input` 同为 32px 高，但按钮 12px、输入框 13px——同一行并排时
+  「框里的字比按钮上的字大一号」。改为 `.ui-btn` 基础 13px、`.ui-btn-sm` 显式 12px
+  （28px 高配 13px 偏挤，小按钮保持原样）。
+- 字重刻度现在只有 400 / 500 / 600 三档（700 仅用于 `<strong>` 类正文强调）。
+- 门禁：web typecheck 过；web **298 文件 / 4372 例**全过；`pnpm -r typecheck`、`pnpm -r build` 过。
+
 ## d.140.3.69.11（2026-11-13）— 字形图标归位：9 处字符图标换成 SVG
 
 审计 S2「图标双轨」的收尾。此前 `icons.tsx`（49 个 1.5px 描边图标）与文本字形 `‹ › ⋯ ▾ ▸ ↑ ↓ × ✓` 并存，

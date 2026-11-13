@@ -572,12 +572,14 @@ samp {
     background-color: var(--subtle);
   }
 
-  /* ── 按钮：尺寸 sm 28 / md 32，三种变体 ── */
+  /* ── 按钮：尺寸 sm 28 / md 32，三种变体 ──
+     R16：md 与同高的 .ui-input 对齐到 13px（此前两者并排时文字大小不一致，
+     输入框里的字比按钮上的字大一号）；sm 保持 12px，28px 高配 13px 会显得挤。 */
   .ui-btn {
-    @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border text-[12px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border text-[13px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
   .ui-btn-sm {
-    @apply h-7 px-2.5;
+    @apply h-7 px-2.5 text-[12px];
   }
   .ui-btn-md {
     @apply h-8 px-3;

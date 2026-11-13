@@ -386,7 +386,7 @@ export function HomePage() {
           {tab === "me" ? (
             <div className="mt-2 flex items-center gap-5">
               <div>
-                <div className="text-[18px] font-extrabold">
+                <div className="ui-numeric text-[18px] font-semibold">
                   {(monthSummary.total / 1000).toFixed(1)}
                   <small className="ml-1 text-[10px] text-muted">
                     / {(quota / 1_000_000).toFixed(1)}M

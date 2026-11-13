@@ -459,7 +459,7 @@ function SkillDetailDrawer({
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
-            <h2 className="truncate text-[14px] font-extrabold">{skill.name}</h2>
+            <h2 className="truncate text-[14px] font-semibold">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
               {skill.source === "builtin" ? (
                 <SystemSourceChip systemName={systemName} />

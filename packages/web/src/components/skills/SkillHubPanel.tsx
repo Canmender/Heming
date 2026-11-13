@@ -361,7 +361,7 @@ function HubDetailDialog({
         <div className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[15px] font-extrabold">{skill.name}</span>
+              <span className="text-[15px] font-semibold">{skill.name}</span>
               <span className={CHIP}>v{skill.version || "—"}</span>
               {skill.status === "official" && <span className={CHIP}>官方</span>}
               {skill.status === "trial" && <span className={CHIP}>试用</span>}

@@ -76,7 +76,7 @@ export function PluginCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-[13px] font-extrabold">{manifest.name}</span>
+            <span className="truncate text-[13px] font-semibold">{manifest.name}</span>
             <span className={CHIP}>v{manifest.version}</span>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
               <span

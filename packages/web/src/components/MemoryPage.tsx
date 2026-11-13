@@ -1373,11 +1373,11 @@ export function MemoryPage({
           <div className="flex flex-wrap items-start gap-5">
             <div>
               <div className="text-[11px] text-muted">公用语义记忆</div>
-              <div className="text-[18px] font-extrabold">{layers.globalSemantic.length}</div>
+              <div className="ui-numeric text-[18px] font-semibold">{layers.globalSemantic.length}</div>
             </div>
             <div>
               <div className="text-[11px] text-muted">情景记忆</div>
-              <div className="text-[18px] font-extrabold">{layers.episodic.length}</div>
+              <div className="ui-numeric text-[18px] font-semibold">{layers.episodic.length}</div>
             </div>
             <div>
               <div className="text-[11px] text-muted">总量</div>

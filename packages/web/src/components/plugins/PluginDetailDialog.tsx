@@ -146,7 +146,7 @@ function PackageDetailBody({
     <>
       <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[14px] font-extrabold">{plugin.manifest.name}</span>
+            <span className="text-[14px] font-semibold">{plugin.manifest.name}</span>
             <span className={CHIP}>v{plugin.manifest.version}</span>
             <span className={CHIP}>{plugin.enabled ? "已启用" : "已停用"}</span>
             <span className={CHIP}>schemaVersion {plugin.manifest.schemaVersion}</span>

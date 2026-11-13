@@ -190,7 +190,7 @@ function UnitRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={CHIP}>{UNIT_SOURCE_LABELS[unit.source]}</span>
-            <span className="truncate text-[13px] font-extrabold">{unit.name}</span>
+            <span className="truncate text-[13px] font-semibold">{unit.name}</span>
             <span className={CHIP}>v{unit.version}</span>
             <span
               className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}

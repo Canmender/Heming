@@ -26,7 +26,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-[14px] font-extrabold">开始使用</h2>
+          <h2 className="text-[14px] font-semibold">开始使用</h2>
           <p className="mt-0.5 text-[12px] leading-5 text-muted">
             三步跑通第一次任务（{doneCount}/{steps.length} 已完成）。
           </p>
