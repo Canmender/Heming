@@ -140,6 +140,11 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     # 工具审批闸：只有显式打开 AGENT_APPROVAL_MODE=write 才拦非只读工具。
     gate = ApprovalGate(settings.approval_timeout_s) if settings.approval_mode != "off" else None
     runtime.approval = gate
+    # 覆盖率命令按 run 的任务目录现跑：服务进程会同时接不同仓库的任务，不能把
+    # 一个 runner 固定挂在共享 Runtime 上（那样所有 run 都在启动目录里跑测试）。
+    if settings.coverage_command.strip() and runtime.coverage_runner is None:
+        command = settings.coverage_command.strip()
+        runtime.coverage_factory = lambda cwd, _command=command: make_coverage_runner(_command, cwd=cwd)
     # 没有评测器时 tune 只会出报告、永不注册灰度；打开 AGENT_TUNE_EVAL=1 才用
     # 「回放 A/B」真评一次（2 × tune_eval_budget 次流水线，成本可控但非零）。
     evaluator = None
@@ -303,6 +308,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "approval_mode": settings.approval_mode,
             # 入站鉴权是否开启：空 token 时不校验，但必须让人一眼看见，而不是以为已经保护了。
             "auth": "on" if settings.service_token.strip() else "off",
+            # 没接覆盖率命令时 mode=adversarial 会被 422 拒掉，这里给出可见信号。
+            "coverage_command": "configured" if (runtime.coverage_runner or runtime.coverage_factory) else "off",
             "pending_approvals": len(gate.pending()) if gate is not None else 0,
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
             "runs_retained": len(runs),
@@ -342,6 +349,10 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                     status_code=422,
                     detail=f"tools_allowed 里有不存在的工具：{'、'.join(unknown)}（可用：{'、'.join(sorted(known_tools)) or '无'}）",
                 )
+        # 对抗模式靠真实覆盖率命令判定「有没有做到」，没接测试时只能空耗模型轮数、
+        # 最后拿一个假的「未达标」收场。放在幂等冲突检查之后：同一个 run_id 换了任务
+        # 仍然先报 409（那是 id 的问题），新建的对抗 run 才在提交阶段拒掉。
+        needs_coverage = body.mode == "adversarial" and runtime.coverage_runner is None and runtime.coverage_factory is None
         run_id = body.run_id or uuid.uuid4().hex
         fingerprint: dict[str, Any] = {
             "goal": body.goal,
@@ -368,6 +379,15 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                         ),
                     )
                 return JSONResponse(status_code=202, content={"run_id": run_id, "status": existing["status"]})
+            if needs_coverage:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "对抗模式需要覆盖率命令：启动服务时设 AGENT_COVERAGE_COMMAND"
+                        "（例如 `pytest --cov=src --cov-report=term-missing`），"
+                        "它会在这个 run 的 cwd 里执行；否则「覆盖率达标」无法验证。"
+                    ),
+                )
             requests[run_id] = fingerprint
             if not semaphore.acquire(blocking=False):
                 raise HTTPException(status_code=429, detail="并发已满，请稍后重试", headers={"Retry-After": "5"})

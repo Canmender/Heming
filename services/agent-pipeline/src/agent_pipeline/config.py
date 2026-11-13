@@ -129,6 +129,10 @@ class Settings:
     # 允许 http_get 访问内网/本机地址（默认关）：模型给的 URL 不可信，
     # 放开就等于给它一个能读内部接口和云元数据的通道（SSRF）。
     allow_private_hosts: bool = False
+    # 对抗模式的覆盖率命令：HTTP 服务里按每次请求的 cwd 现跑（同一个服务会接不同仓库的任务）。
+    # 空 = 没接测试，此时 mode=adversarial 会被直接 422 拒掉——不装测试的「验证覆盖率」
+    # 只能空耗模型轮数，最后拿一个假的「未达标」收场。
+    coverage_command: str = ""
     # 服务本身的入站鉴权（与上游模型的 AGENT_PIPELINE_API_KEY 是两件事）：
     # 空 = 不校验（仅适合只监听 127.0.0.1 的本机调试）。
     service_token: str = ""
@@ -206,6 +210,7 @@ class Settings:
             idempotency_max_entries=_env_int("AGENT_IDEMPOTENCY_MAX_ENTRIES", cls.idempotency_max_entries),
             approval_mode=os.environ.get("AGENT_APPROVAL_MODE", cls.approval_mode),
             allow_private_hosts=_env_bool("AGENT_ALLOW_PRIVATE_HOSTS", cls.allow_private_hosts),
+            coverage_command=os.environ.get("AGENT_COVERAGE_COMMAND", cls.coverage_command),
             service_token=os.environ.get("AGENT_SERVICE_TOKEN", cls.service_token),
             approval_timeout_s=_env_float("AGENT_APPROVAL_TIMEOUT_S", cls.approval_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),

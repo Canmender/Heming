@@ -126,6 +126,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_APPROVAL_MODE` | `off` | `write` = 非只读工具执行前挂起等审批；`off` = 不拦 |
 | `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
 | `AGENT_ALLOW_PRIVATE_HOSTS` | `0` | 放开 `http_get` 访问内网/本机地址（默认拒；见「网络出口」） |
+| `AGENT_COVERAGE_COMMAND` | 空 | 对抗模式的覆盖率命令（在这个 run 的 `cwd` 里执行）；空时 `mode=adversarial` 直接 422 |
 | `AGENT_SERVICE_TOKEN` | 空 | 服务自己的入站令牌：设了则 `/v1/**` 要 `Authorization: Bearer <token>`（空 = 本机调试，`/health` 报 `auth: off`） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
@@ -425,6 +426,7 @@ docker compose up --build               # 服务 :8000 + Prometheus :9090
 - **覆盖率命令坏掉不硬撑**：`coverage_runner` 抛异常或拿不到数字时，`coverage=None`；连续两轮都拿不到就写 `stop_reason="coverage_command_failed"` 并转 summarize，不再空转到 `max_adversarial_rounds`（配置调大也不会白烧钱）。
 - **轮数用尽如实收口**：最后一轮仍未达标时 `stop_reason="coverage_gap"`，`adversarial_passed=False`，不会把 0.4 的覆盖率说成通过。
 - **「评审不过 → 重规划」在节点里生效**：`critic_node` 重置计划并累加 `replans`（用尽后写 `stop_reason="critic_blocked"`）。以前这些改动写在 LangGraph 的条件边里，边对 state 的修改不保证进图状态，等于每次都拿同一份计划重跑。
+- **覆盖率命令按 run 的任务目录现跑**：HTTP 服务里由 `AGENT_COVERAGE_COMMAND` 配一条命令（如 `pytest --cov=src --cov-report=term-missing`），每次请求用它 + `cwd` 现建 runner，同一目录复用一份。以前服务进程调用 `build_runtime()` 时没传 `coverage_runner`，`Runtime` 又只有那一个固定字段，所有 run 都只能拿到 `None`——对抗模式在线上一律退化成「连续两轮拿不到覆盖率就收口」。现在没配这条命令时 `mode=adversarial` 在提交阶段直接 **422**（附上怎么配），不再让调用方白等两轮模型。`tests/test_adversarial_coverage.py` 4 例。
 
 ## 记忆淘汰口径
 
@@ -507,7 +509,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **269 passed / 覆盖率 95.1%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **273 passed / 覆盖率 95.1%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

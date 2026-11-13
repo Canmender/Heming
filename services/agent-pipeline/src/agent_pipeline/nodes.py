@@ -47,6 +47,9 @@ class Runtime:
     config_store: ConfigStore | None = None
     # 返回 {"coverage": float|None, "output": str, "ok": bool}；None 表示没接测试
     coverage_runner: Callable[[], dict[str, Any]] | None = None
+    # 按任务目录现建覆盖率命令（HTTP 服务用：命令要跑在请求给的 cwd 里，
+    # 而一个服务进程会同时接多个仓库的任务，不能把 runner 固定挂在共享 Runtime 上）。
+    coverage_factory: Callable[[str | None], Callable[[], dict[str, Any]]] | None = None
     log_sink: Callable[[dict[str, Any]], None] | None = None
     clock: Callable[[], float] = time.monotonic
     # 工具审批闸：None = 不拦（默认）。开了以后 execute 在跑非只读工具前会阻塞等待裁决。
@@ -58,9 +61,29 @@ class Runtime:
     # 会拿着一份空文件出报告，看起来一切正常。
     log_failures: int = 0
     log_last_error: str | None = None
+    # cwd → 已建好的覆盖率命令。同一个任务目录的对抗轮复用同一个 runner。
+    _coverage_cache: dict[str, Callable[[], dict[str, Any]]] = field(default_factory=dict, repr=False)
 
     def prompt(self, key: str) -> str:
         return self.prompts.get(key) or DEFAULT_PROMPTS.get(key, "")
+
+    def coverage_for(self, cwd: str | None) -> Callable[[], dict[str, Any]] | None:
+        """返回这次 run 该用的覆盖率命令。
+
+        优先用显式注入的 ``coverage_runner``（CLI 的 ``--coverage-command`` 就是这种）；
+        HTTP 服务没有固定的任务目录，改用 ``coverage_factory`` 按请求的 cwd 现建，
+        同一个目录缓存一份，避免每轮对抗都重新起一个子进程。
+        """
+        if self.coverage_runner is not None:
+            return self.coverage_runner
+        if self.coverage_factory is None:
+            return None
+        key = cwd or ""
+        runner = self._coverage_cache.get(key)
+        if runner is None:
+            runner = self.coverage_factory(cwd or None)
+            self._coverage_cache[key] = runner
+        return runner
 
 
 # 与 config.py 的默认提示词解耦：这里只是兜底，避免 Runtime 造出来却少了某条提示词。
@@ -668,9 +691,10 @@ def adversarial_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
 
     # 覆盖率必须来自真实命令输出；没有接测试命令就如实记 None。
     report: dict[str, Any] = {"coverage": None, "output": "", "ok": False}
-    if runtime.coverage_runner is not None:
+    coverage_runner = runtime.coverage_for(str(_task(state).get("cwd") or "") or None)
+    if coverage_runner is not None:
         try:
-            report = runtime.coverage_runner()
+            report = coverage_runner()
         except Exception as exc:  # noqa: BLE001 - 测试命令失败不该让 run 崩掉
             report = {"coverage": None, "output": f"覆盖率命令执行失败：{exc}", "ok": False}
     coverage = report.get("coverage")
