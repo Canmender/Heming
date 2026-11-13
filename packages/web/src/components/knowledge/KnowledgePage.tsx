@@ -12,6 +12,7 @@ import {
 } from "../../lib/vault/standard.js";
 import { useUiStore } from "../../store/ui.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { PageShell } from "../layout/PageShell.js";
 import { hasOpenModal } from "../useModalA11y.js";
 import { BacklinkPane } from "./BacklinkPane.js";
 import { CanvasPane, emptyCanvas, serializeCanvas } from "./canvas/index.js";
@@ -592,8 +593,13 @@ function KnowledgePageShell({
   /* ── 空库态：整页只留一个明确的开始动作与隐私说明 ── */
   if (showLibraryEmpty) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <h1 className="ui-page-title">知识库</h1>
+      /* 统一壳：页头与其它 16 个页面同源（宽度、标题字号、内边距都由 PageShell 决定）。 */
+      <PageShell
+        title="知识库"
+        width="readable"
+        scroll={false}
+        bodyClassName="items-center justify-center gap-3 px-6 text-center"
+      >
         <p className="ui-body max-w-[440px] text-muted">
           打开一个本地目录作为知识库：笔记就是普通的 .md 文件，双链、标签、反链、搜索与图谱都在本机计算。
           <span className="mt-1 block font-medium text-ink">文件留在你的设备上，不会上传。</span>
@@ -624,146 +630,169 @@ function KnowledgePageShell({
             {store.error}
           </p>
         ) : null}
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* 顶栏：库切换 + 索引状态 + 全局入口 */}
-      <header className="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-1.5">
-        <span className="ui-section-title">知识库</span>
-        <select
-          aria-label="切换知识库"
-          className="ui-input h-7 w-[168px] text-[12px]"
-          value={store.activeVaultId ?? ""}
-          onChange={(e) => void store.setActiveVault(e.target.value)}
-        >
-          {store.vaults.map((vault) => (
-            <option key={vault.id} value={vault.id}>
-              {vault.name}
-            </option>
-          ))}
-        </select>
-        <Button
-          type="button"
-          size="sm" variant="ghost"
-          onClick={() => void store.pickVault()}
-        >
-          <FolderIcon width={14} height={14} />
-          打开其它库
-        </Button>
-        {activeMeta ? (
-          <button
-            type="button"
-            className="ui-link"
-            aria-label={`移除知识库 ${activeMeta.name}（不删除文件）`}
-            onClick={() => setRemoveConfirm(true)}
+    <PageShell
+      title="知识库"
+      subtitle="本地 Markdown 库：双链、标签、反链、搜索与图谱都在本机计算，文件不会上传。"
+      /* 三栏工作台（目录 / 编辑器 / 反链）保留通栏：960 会把编辑区压成一条缝，
+         而空库态仍用 readable（一句话居中时太宽反而难读）。 */
+      width="full"
+      scroll={false}
+      actions={
+        <>
+          <select
+            aria-label="切换知识库"
+            className="ui-input h-7 w-[168px] text-ui-sm"
+            value={store.activeVaultId ?? ""}
+            onChange={(e) => void store.setActiveVault(e.target.value)}
           >
-            <TrashIcon width={13} height={13} />
-            移除
-          </button>
-        ) : null}
+            {store.vaults.map((vault) => (
+              <option key={vault.id} value={vault.id}>
+                {vault.name}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            size="sm" variant="ghost"
+            onClick={() => void store.pickVault()}
+          >
+            <FolderIcon width={14} height={14} />
+            打开其它库
+          </Button>
+          {activeMeta ? (
+            <button
+              type="button"
+              className="ui-link"
+              aria-label={`移除知识库 ${activeMeta.name}（不删除文件）`}
+              onClick={() => setRemoveConfirm(true)}
+            >
+              <TrashIcon width={14} height={14} />
+              移除
+            </button>
+          ) : null}
 
-        {store.indexStatus === "indexing" ? (
-          <span className="ui-caption" aria-live="polite">
-            正在建索引 {Math.round(store.indexProgress * 100)}%
+          {store.indexStatus === "indexing" ? (
+            <span className="ui-caption" aria-live="polite">
+              正在建索引 {Math.round(store.indexProgress * 100)}%
+            </span>
+          ) : store.indexStatus === "ready" ? (
+            <span className="ui-caption">{store.index ? store.index.pages.size : 0} 篇笔记</span>
+          ) : null}
+
+          <span className="flex items-center gap-1">
+            {/* 第二轮入口：今天 / 新建 / 快速切换 / 设置（键盘路径 Ctrl+O 见下方监听） */}
+            <Button
+              type="button"
+              aria-label="打开今天的日记"
+              size="sm" variant="ghost"
+              onClick={() => void openToday()}
+            >
+              <BookIcon width={14} height={14} />
+              今天
+            </Button>
+            <Button
+              type="button"
+              size="sm" variant="primary"
+              onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
+            >
+              <PlusIcon width={14} height={14} />
+              新建笔记
+            </Button>
+            <Button
+              type="button"
+              title="快速切换笔记（Ctrl+O）"
+              onClick={() => setQuickOpenOpen(true)}
+              size="sm" variant="ghost"
+            >
+              <SearchIcon width={14} height={14} />
+              快速切换
+            </Button>
+            <Button
+              type="button"
+              title="按卡帕西 LLM Wiki 标准检查目录、根文件与页面 frontmatter"
+              onClick={openStandardCheck}
+              size="sm" variant="ghost"
+            >
+              <CheckIcon width={14} height={14} />
+              标准检查
+            </Button>
+            <Button
+              type="button"
+              aria-label="知识库设置"
+              size="sm" variant="ghost"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <GearIcon width={14} height={14} />
+              设置
+            </Button>
+            <Button
+              type="button"
+              aria-pressed={graphOpen}
+              size="sm" variant={graphOpen ? "primary" : "ghost"}
+              onClick={() => setGraphOpen((prev) => !prev)}
+            >
+              <RouteIcon width={14} height={14} />
+              图谱
+            </Button>
+            <Button
+              type="button"
+              aria-pressed={rightOpen}
+              size="sm" variant="ghost"
+              aria-label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
+              title={rightOpen ? "收起右栏" : "展开右栏"}
+              onClick={() => setRightOpen((prev) => !prev)}
+            >
+              <ChevronIcon width={14} height={14} className={rightOpen ? "rotate-180" : ""} />
+            </Button>
           </span>
-        ) : store.indexStatus === "ready" ? (
-          <span className="ui-caption">{store.index ? store.index.pages.size : 0} 篇笔记</span>
+        </>
+      }
+    >
+
+      {/* 顶部提示条（临时模式/库根回落/索引失败/操作反馈）：固定在内容区顶端，页头之下 */}
+      <div className="flex shrink-0 flex-col gap-1.5 px-3 pt-2 empty:hidden">
+        {store.ephemeral ? (
+          <p className="ui-alert ui-alert-muted" role="status">
+            浏览器临时模式：没有桌面文件桥，笔记只存在当前页面，刷新即丢；要保存请用桌面版打开本地库。
+          </p>
         ) : null}
 
-        <span className="ml-auto flex items-center gap-1">
-          {/* 第二轮入口：今天 / 新建 / 快速切换 / 设置（键盘路径 Ctrl+O 见下方监听） */}
-          <Button
-            type="button"
-            aria-label="打开今天的日记"
-            size="sm" variant="ghost"
-            onClick={() => void openToday()}
-          >
-            <BookIcon width={14} height={14} />
-            今天
-          </Button>
-          <Button
-            type="button"
-            size="sm" variant="primary"
-            onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
-          >
-            <PlusIcon width={14} height={14} />
-            新建笔记
-          </Button>
-          <Button
-            type="button"
-            title="快速切换笔记（Ctrl+O）"
-            onClick={() => setQuickOpenOpen(true)}
-            size="sm" variant="ghost"
-          >
-            <SearchIcon width={14} height={14} />
-            快速切换
-          </Button>
-          <Button
-            type="button"
-            title="按卡帕西 LLM Wiki 标准检查目录、根文件与页面 frontmatter"
-            onClick={openStandardCheck}
-            size="sm" variant="ghost"
-          >
-            <CheckIcon width={14} height={14} />
-            标准检查
-          </Button>
-          <Button
-            type="button"
-            aria-label="知识库设置"
-            size="sm" variant="ghost"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <GearIcon width={14} height={14} />
-            设置
-          </Button>
-          <Button
-            type="button"
-            aria-pressed={graphOpen}
-            size="sm" variant={graphOpen ? "primary" : "ghost"}
-            onClick={() => setGraphOpen((prev) => !prev)}
-          >
-            <RouteIcon width={14} height={14} />
-            图谱
-          </Button>
-          <Button
-            type="button"
-            aria-pressed={rightOpen}
-            size="sm" variant="ghost"
-            aria-label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
-            title={rightOpen ? "收起右栏" : "展开右栏"}
-            onClick={() => setRightOpen((prev) => !prev)}
-          >
-            <ChevronIcon width={14} height={14} className={rightOpen ? "rotate-180" : ""} />
-          </Button>
-        </span>
-      </header>
+        {/* 默认库根说明：安装目录不可写回落/两处都不可写时由主进程给出中文原因，原样展示不静默 */}
+        {activeMeta?.rootNote ? (
+          <p className="ui-alert ui-alert-muted" role="status">
+            {activeMeta.rootNote}
+          </p>
+        ) : null}
 
-      {store.ephemeral ? (
-        <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
-          浏览器临时模式：没有桌面文件桥，笔记只存在当前页面，刷新即丢；要保存请用桌面版打开本地库。
-        </p>
-      ) : null}
-
-      {/* 默认库根说明：安装目录不可写回落/两处都不可写时由主进程给出中文原因，原样展示不静默 */}
-      {activeMeta?.rootNote ? (
-        <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
-          {activeMeta.rootNote}
-        </p>
-      ) : null}
-
-      {store.error ? (
-        <p className="ui-alert ui-alert-danger mx-3 mt-2" role="alert">
-          {store.error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
-          {notice}
-        </p>
-      ) : null}
+        {store.error ? (
+          <div className="flex items-center gap-2">
+            <p role="alert" className="ui-alert ui-alert-danger min-w-0 flex-1">
+              {store.error}
+            </p>
+            {/* 索引失败是「失败」不是「空库」：给原地重试，别让用户只能刷新整个页面。 */}
+            {store.indexStatus === "error" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => void store.buildIndexNow()}
+              >
+                重试
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {notice ? (
+          <p className="ui-alert ui-alert-muted" role="status">
+            {notice}
+          </p>
+        ) : null}
+      </div>
 
       <div className="flex min-h-0 flex-1">
         {/* ── 左栏 ── */}
@@ -778,7 +807,7 @@ function KnowledgePageShell({
                 type="button"
                 aria-pressed={leftTab === tab}
                 onClick={() => setLeftTab(tab)}
-                className={`flex-1 rounded-sm px-1.5 py-1 text-[11px] transition-colors ${
+                className={`flex-1 rounded-sm px-1.5 py-1 text-ui-xs transition-colors ${
                   leftTab === tab
                     ? "bg-subtle-3 font-medium text-ink"
                     : "text-muted hover:bg-subtle-2 hover:text-ink"
@@ -805,7 +834,7 @@ function KnowledgePageShell({
                   </p>
                   <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
                     {tagFilteredRels.length === 0 ? (
-                      <p className="px-2 py-3 text-[12px] text-muted">这个标签下还没有笔记。</p>
+                      <p className="px-2 py-3 text-ui-sm text-muted">这个标签下还没有笔记。</p>
                     ) : (
                       tagFilteredRels.map((rel) => (
                         <button
@@ -813,7 +842,7 @@ function KnowledgePageShell({
                           type="button"
                           aria-current={rel === activeRel ? "page" : undefined}
                           onClick={() => requestOpen(rel)}
-                          className={`block w-full truncate rounded-sm px-2 py-[3px] text-left text-[12px] ${
+                          className={`block w-full truncate rounded-sm px-2 py-[3px] text-left text-ui-sm ${
                             rel === activeRel
                               ? "bg-subtle-2 font-medium text-ink"
                               : "text-body hover:bg-subtle-3 hover:text-ink"
@@ -899,7 +928,7 @@ function KnowledgePageShell({
                       aria-selected={active}
                       onClick={() => requestOpen(rel)}
                       title={rel}
-                      className={`max-w-[180px] truncate px-2 py-1 text-[12px] ${
+                      className={`max-w-[180px] truncate px-2 py-1 text-ui-sm ${
                         active ? "font-medium text-ink" : "text-muted"
                       }`}
                     >
@@ -932,13 +961,13 @@ function KnowledgePageShell({
             <>
               {/* 面包屑 + 三态切换（raw/ 只读时换成只读徽标与原因） */}
               <div className="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-1.5">
-                <span className="min-w-0 flex-1 truncate text-[11px] text-muted" title={activeRel}>
+                <span className="min-w-0 flex-1 truncate text-ui-xs text-muted" title={activeRel}>
                   {parentOf(activeRel) ? `${parentOf(activeRel)} / ` : ""}
                   <span className="text-ink">{baseName(activeRel)}</span>
                 </span>
                 {rawReadOnly ? (
                   <span className="ui-caption flex items-center gap-1 text-muted">
-                    <span className="rounded-sm bg-subtle-3 px-1.5 py-0.5 text-[10px] text-ink">只读来源</span>
+                    <span className="rounded-sm bg-subtle-3 px-1.5 py-0.5 text-ui-xs text-ink">只读来源</span>
                     raw/ 是事实基准，编辑与保存已关闭
                   </span>
                 ) : (
@@ -1045,7 +1074,7 @@ function KnowledgePageShell({
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
                 写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
-                <kbd className="ml-1 rounded-sm border border-line px-1 text-[10px]">Ctrl+O</kbd>
+                <kbd className="ml-1 rounded-sm border border-line px-1 text-ui-xs">Ctrl+O</kbd>
                 可以快速切换笔记。
               </p>
               <div className="mt-1 flex items-center gap-2">
@@ -1089,7 +1118,7 @@ function KnowledgePageShell({
                 }
               />
             ) : (
-              <div className="p-3 text-[12px] leading-5 text-muted">
+              <div className="p-3 text-ui-sm leading-5 text-muted">
                 打开一篇笔记后，这里会显示它的反链、出链、未解析链接、大纲与属性。
               </div>
             )}
@@ -1098,8 +1127,18 @@ function KnowledgePageShell({
       </div>
 
       {/* 状态栏：脏文件计数 + 快捷键提示 + 当前库根（默认库就是安装目录/数据根下的 wiki） */}
-      <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-[10px] text-muted">
-        <span>{dirtyCount > 0 ? `${dirtyCount} 个文件未保存` : "全部已保存"}</span>
+      <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-ui-xs text-muted">
+        {/* d.141（F-05）：浏览器临时模式没有文件桥，笔记只在内存里——此时页脚再说
+            「全部已保存」与上方「刷新即丢」横幅自相矛盾，用户会信前者而关页丢笔记。 */}
+        <span>
+          {store.ephemeral
+            ? dirtyCount > 0
+              ? `${dirtyCount} 个文件未保存（临时保存，刷新即丢）`
+              : "临时保存（仅本页，刷新即丢）"
+            : dirtyCount > 0
+              ? `${dirtyCount} 个文件未保存`
+              : "全部已保存"}
+        </span>
         <span>Ctrl+S 保存 · Ctrl+F 编辑器内搜索 · Ctrl+O 快速切换</span>
         <span className="ml-auto flex min-w-0 items-center gap-2">
           <span className="truncate" title={activeMeta?.root ?? ""}>
@@ -1234,6 +1273,6 @@ function KnowledgePageShell({
           onClose={() => setStandardOpen(false)}
         />
       ) : null}
-    </div>
+    </PageShell>
   );
 }

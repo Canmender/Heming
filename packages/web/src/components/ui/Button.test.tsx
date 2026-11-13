@@ -61,4 +61,19 @@ describe("Button 基元", () => {
     screen.getByRole("button", { name: "去" }).click();
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it("焦点可见：所有按钮都带统一焦点环，且 reduced-motion 下不跑过渡", () => {
+    render(<Button variant="ghost">刷新</Button>);
+    const btn = screen.getByRole("button", { name: "刷新" });
+    expect(btn.className).toContain("focus-visible:outline-2");
+    expect(btn.className).toContain("focus-visible:outline-offset-2");
+    expect(btn.className).toContain("motion-reduce:transition-none");
+  });
+
+  it("调用方 className 已带焦点环时不重复追加（withFocusRing 去重）", () => {
+    render(<Button className="focus-visible:outline focus-visible:outline-info">保存</Button>);
+    const btn = screen.getByRole("button", { name: "保存" });
+    expect(btn.className.match(/focus-visible:outline-2/g) ?? []).toHaveLength(0);
+    expect(btn.className).toContain("focus-visible:outline-info");
+  });
 });

@@ -55,6 +55,9 @@ export function AssistantPage() {
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
+  /** 首帧是否已拉到工作区 / 首帧失败原因（store 只在首帧写，后台刷新失败不推翻已就绪）。 */
+  const workspaceReady = useChatStore((s) => s.workspaceReady);
+  const workspaceError = useChatStore((s) => s.workspaceError);
   const openAgent = useChatStore((s) => s.openAgent);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
@@ -77,6 +80,8 @@ export function AssistantPage() {
   const [editor, setEditor] = useState<AgentEditorState | null>(null);
   /** 待确认删除的会话（d.128）：rail 只发请求，二次确认在页面上统一做。 */
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  /** 名册首载失败（store 没有这个字段，失败原因就近存本页，切走即清）。 */
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   /**
    * 默认落在「对话」。key 沿用 v1 以保留会话记忆；旧值 `work` / `chat` / `tasks`
@@ -125,12 +130,24 @@ export function AssistantPage() {
   }, [pageView, setTab]);
 
   // 对话与名册都从服务端取：智能体页是独立入口，不依赖用户先去别的页。
+  // d.141（F-01）：此前两处 `.catch(() => {})` 把首载失败吞掉，用户断网几秒回来
+  // 看到的是「空列表」而不是「加载失败」，会以为对话/智能体丢了。现在：会话失败由
+  // store 记录（workspaceError，仅首帧写）并上屏 + 给「重试」；名册没有 store 字段，
+  // 失败原因就近存本页，同样上屏 + 重试。
   useEffect(() => {
     void loadWorkspace().catch(() => {
-      /* 离线时保留已有的本机会话态 */
+      /* 错误已由 store 记录，这里不重复处理 */
     });
-    void loadAgentsRoster().catch(() => {
-      /* 名册失败只影响列表；错误在下方提示一次 */
+    void loadAgentsRoster().catch((err: unknown) => {
+      setRosterError(err instanceof Error ? err.message : String(err));
+    });
+  }, [loadWorkspace, loadAgentsRoster]);
+
+  const retryLoad = useCallback(() => {
+    setRosterError(null);
+    void loadWorkspace().catch(() => {});
+    void loadAgentsRoster().catch((err: unknown) => {
+      setRosterError(err instanceof Error ? err.message : String(err));
     });
   }, [loadWorkspace, loadAgentsRoster]);
 
@@ -283,14 +300,14 @@ export function AssistantPage() {
                       agentsRoster.find((a) => a.id === activeConv.agent.id) ?? activeConv.agent;
                     openAgentEditor(agent);
                   }}
-                  className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                  className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                 >
                   编辑智能体
                 </button>
                 <button
                   type="button"
                   onClick={backToPicker}
-                  className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                  className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                 >
                   切换智能体
                 </button>
@@ -337,6 +354,19 @@ export function AssistantPage() {
       />
     );
 
+  /**
+   * 首载失败的提示文案：对话看 workspaceError（只在还没成功过时），其余视图看名册。
+   * 已加载成功过一次的后台刷新失败不提示——旧数据仍可用，弹一次「失败」反而更吓人。
+   */
+  const loadFailure =
+    tab === "chat"
+      ? !workspaceReady && workspaceError
+        ? `对话列表加载失败：${workspaceError}`
+        : null
+      : rosterError
+        ? `智能体列表加载失败：${rosterError}`
+        : null;
+
   return (
     <PageShell
       title="智能体"
@@ -373,6 +403,17 @@ export function AssistantPage() {
         aria-labelledby={`assistant-tab-${tab}`}
         className="flex min-h-0 flex-1 flex-col"
       >
+        {loadFailure ? (
+          <div
+            role="alert"
+            className="ui-alert ui-alert-danger mx-3 mt-3 flex flex-wrap items-center gap-2"
+          >
+            <span className="min-w-0 flex-1">{loadFailure}</span>
+            <Button type="button" size="sm" variant="ghost" onClick={retryLoad}>
+              重试
+            </Button>
+          </div>
+        ) : null}
         {tab === "chat" ? (
           renderChatTab()
         ) : tab === "collab" ? (
@@ -403,7 +444,7 @@ export function AssistantPage() {
               </>
             }
           >
-            <p className="text-[12px] leading-6">
+            <p className="text-ui-sm leading-6">
               删除「{deleteTarget.title ?? "这段对话"}」？这段对话的消息会一起删除，**不可恢复**；
               智能体本身与其他对话不受影响。
             </p>

@@ -78,7 +78,7 @@ export function SelfEditCard({
     <section aria-label="自我优化" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-[12px] font-bold text-muted">自我优化</div>
+          <div className="text-ui-sm font-bold text-muted">自我优化</div>
           <div className="mt-1 ui-caption">
             允许智能体按需修改自己的记忆、技能与 MCP 配置。改动即时生效，并记录在下方。
           </div>
@@ -87,7 +87,7 @@ export function SelfEditCard({
           </div>
         </div>
         {agentId && (
-          <label className="flex items-center gap-2 text-[12px]">
+          <label className="flex items-center gap-2 text-ui-sm">
             <input
               type="checkbox"
               aria-label="允许自我优化"
@@ -105,16 +105,16 @@ export function SelfEditCard({
       </div>
 
       {!agentId && (
-        <div className="mt-2 text-[11px] text-[var(--warn)]">先在上方选择一个智能体，才能配置它的自我优化。</div>
+        <div className="mt-2 text-ui-xs text-[var(--warn)]">先在上方选择一个智能体，才能配置它的自我优化。</div>
       )}
       {agentId && !enabled && (
-        <div className="mt-2 text-[11px] text-[var(--warn)]">
+        <div className="mt-2 text-ui-xs text-[var(--warn)]">
           该智能体当前拿不到 self.* 工具，无法自行改动配置。
         </div>
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[12px] font-medium text-muted">
+        <div className="text-ui-sm font-medium text-muted">
           变更记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
@@ -129,7 +129,7 @@ export function SelfEditCard({
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[12px] font-medium text-muted">
+        <div className="text-ui-sm font-medium text-muted">
           可回滚的修改{snaps.length ? `（${snaps.length} 条）` : ""}
         </div>
         <div className="mt-0.5 ui-caption">
@@ -144,7 +144,7 @@ export function SelfEditCard({
             {snaps.map((snap) => (
               <li
                 key={snap.id}
-                className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
+                className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
               >
                 <span className="text-muted">{snap.at.slice(0, 16).replace("T", " ")}</span>
                 <span className="min-w-0 flex-1 truncate text-[var(--body)]">{snap.label}</span>
@@ -163,7 +163,7 @@ export function SelfEditCard({
         {notice && (
           <div
             role="status"
-            className={`mt-1 text-[11px] ${notice.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}
+            className={`mt-1 text-ui-xs ${notice.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}
           >
             {notice.text}
           </div>
@@ -192,7 +192,7 @@ export function SelfEditCard({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             把「{rollbackTarget.label}」还原为改动前的内容？如果这条之后又被改过（人工或智能体），
             那些改动会被这次回滚覆盖，且不会留下可再回滚的快照。
           </p>
@@ -227,7 +227,7 @@ const ACTION_LABEL: Record<string, string> = {
 function AuditRow({ entry }: { entry: AuditEntry }) {
   const time = entry.at.slice(0, 16).replace("T", " ");
   return (
-    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
+    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs">
       <span className="text-muted">{time}</span>
       <span className="rounded-sm bg-[var(--subtle-3)] px-1 text-muted">
         {SCOPE_LABEL[entry.scope]}·{ACTION_LABEL[entry.action] ?? entry.action}

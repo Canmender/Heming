@@ -10,6 +10,7 @@ import { MAX_FILE_BYTES, MAX_FILES_PER_PATCH, MAX_PATCH_BYTES } from "../lib/fil
 import { isFileEditTool } from "../lib/fileEdit/ruleTargets.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { Button } from "../components/ui/Button.js";
+import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 文件编辑卡。
@@ -92,9 +93,25 @@ export function FileEditCard({
   // 已记住的文件编辑规则（由确认卡「记住本次选择」按目录前缀写入）
   const rules = policy.rules().filter((rule) => isFileEditTool(rule.tool));
 
+  /** 标题旁摘要：一眼看出「到底能不能改文件、改哪、越界怎么办」。 */
+  const summaryItems: (string | false)[] = [];
+  if (!fileBridge) {
+    summaryItems.push("仅桌面端");
+  } else if (config.roots.length === 0) {
+    summaryItems.push("未配置可写根");
+  } else {
+    summaryItems.push(
+      `${config.roots.length}/${MAX_FILE_ROOTS} 个可写根`,
+      `越界${config.outOfRoot === "reject" ? "直接拒绝" : "先问我"}`,
+    );
+  }
+
   return (
     <section aria-label="文件编辑" className="ui-card mt-3 p-4">
-      <div className="text-[12px] font-bold text-muted">文件编辑</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="text-ui-sm font-bold text-muted">文件编辑</div>
+        <CardSummary items={summaryItems} />
+      </div>
       <div className="mt-1 ui-caption">
         允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，
         添加之后 `file_patch` / `file_read` 才会出现在智能体的工具里：任意一条根（含只读）会让 `file_read` 可见，至少一条可写根才会让 `file_patch` 可见。
@@ -108,11 +125,11 @@ export function FileEditCard({
         <>
           <div className="mt-3">
             <div className="flex items-center justify-between">
-              <div className="text-[12px] font-bold text-muted">
+              <div className="text-ui-sm font-bold text-muted">
                 可写根{config.roots.length ? `（${config.roots.length}/${MAX_FILE_ROOTS}）` : ""}
               </div>
               {config.roots.length > 0 && (
-                <span className="text-[10px] text-muted">路径只存在本机，不上传</span>
+                <span className="text-ui-xs text-muted">路径只存在本机，不上传</span>
               )}
             </div>
             {config.roots.length === 0 ? (
@@ -127,7 +144,7 @@ export function FileEditCard({
                     key={root.path}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
                   >
-                    <span className="text-[12px] font-bold">{root.name}</span>
+                    <span className="text-ui-sm font-bold">{root.name}</span>
                     <span className="min-w-0 flex-1 truncate font-mono ui-caption" title={root.path}>
                       {root.path}
                     </span>
@@ -135,7 +152,7 @@ export function FileEditCard({
                       aria-label={`${root.name} 读写模式`}
                       value={root.mode}
                       onChange={(e) => changeMode(root.path, e.target.value as "read" | "write")}
-                      className="rounded-lg border border-line-strong px-2 py-0.5 text-[11px] outline-hidden focus:border-ink"
+                      className="rounded-lg border border-line-strong px-2 py-0.5 text-ui-xs outline-hidden focus:border-ink"
                     >
                       <option value="write">可写</option>
                       <option value="read">只读</option>
@@ -144,7 +161,7 @@ export function FileEditCard({
                       type="button"
                       aria-label={`删除根 ${root.name}`}
                       onClick={() => removeRoot(root.path)}
-                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-[var(--danger)] hover:bg-[var(--subtle-2)]"
+                      className="rounded-lg border border-line px-2 py-0.5 text-ui-xs text-[var(--danger)] hover:bg-[var(--subtle-2)]"
                     >
                       删除
                     </button>
@@ -203,7 +220,7 @@ export function FileEditCard({
             </div>
           )}
 
-          <label className="mt-3 block text-[12px]">
+          <label className="mt-3 block text-ui-sm">
             目标不在可写根内时
             <select
               aria-label="越界处理方式"
@@ -214,13 +231,13 @@ export function FileEditCard({
               <option value="ask">先问我（默认）</option>
               <option value="reject">直接拒绝</option>
             </select>
-            <span className="mt-1 block text-[10px] text-muted">
+            <span className="mt-1 block text-ui-xs text-muted">
               写盘层无论如何都只写可写根内；这里只是决定「先问一次再失败」还是「直接失败」。
             </span>
           </label>
 
           <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="text-[11px] font-bold text-muted">
+            <div className="text-ui-xs font-bold text-muted">
               已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
             </div>
             {rules.length === 0 ? (
@@ -233,7 +250,7 @@ export function FileEditCard({
                 {rules.map((rule) => (
                   <li
                     key={`${rule.tool}-${rule.resource}-${rule.at}`}
-                    className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
+                    className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
                   >
                     <span
                       className={`rounded-sm px-1 ${
@@ -252,7 +269,7 @@ export function FileEditCard({
                 ))}
               </ul>
             )}
-            <div className="mt-1 text-[10px] text-muted">
+            <div className="mt-1 text-ui-xs text-muted">
               拒绝优先于允许；文件编辑只能按目录前缀授权，不能放行整个工具。
               规则可在「工具调用确认」卡里一键清空。
             </div>

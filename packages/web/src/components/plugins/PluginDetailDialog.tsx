@@ -90,7 +90,7 @@ export function PluginDetailDialog(props: PluginDetailDialogProps) {
     <Dialog
       ariaLabel={`插件详情 ${title}`}
       title="插件详情"
-      icon={<PackageIcon width={15} height={15} />}
+      icon={<PackageIcon width={16} height={16} />}
       size="lg"
       maxHeightVh={88}
       onClose={props.onClose}
@@ -143,7 +143,7 @@ function PackageDetailBody({
     <>
       <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[14px] font-semibold">{plugin.manifest.name}</span>
+            <span className="text-ui-base font-semibold">{plugin.manifest.name}</span>
             <span className={CHIP}>v{plugin.manifest.version}</span>
             <span className={CHIP}>{plugin.enabled ? "已启用" : "已停用"}</span>
             <span className={CHIP}>schemaVersion {plugin.manifest.schemaVersion}</span>
@@ -400,7 +400,7 @@ function PackageDetailBody({
                       <span className={CHIP}>{server.enabled ? "已启用" : "已停用"}</span>
                       <span className={CHIP}>{hostOf(server.url)}</span>
                     </div>
-                    <code className="mt-0.5 block break-all text-[10px] text-muted">{server.url}</code>
+                    <code className="mt-0.5 block break-all text-ui-xs text-muted">{server.url}</code>
                   </li>
                 ))}
               </ul>
@@ -459,7 +459,7 @@ function PackageDetailBody({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             风险：{pending.risk === "read" ? "只读（read）" : "写入（write）"}。
             {pending.next ? "启用" : "停用"}只代表模型是否能看到该工具，
             {pending.next

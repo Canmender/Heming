@@ -518,6 +518,31 @@ describe("PluginsPage 导航合并", () => {
     expect(useUiStore.getState().pageView).toBeNull();
   });
 
+  it("页签键盘可达：整组一个 Tab 停靠点，←/→/Home/End 切换能力分区", () => {
+    renderPage();
+    const list = screen.getByRole("tablist", { name: "能力分区" });
+    const pluginsTab = within(list).getByRole("tab", { name: "插件" });
+    const skillsTab = within(list).getByRole("tab", { name: "技能" });
+    const mcpTab = within(list).getByRole("tab", { name: "MCP" });
+
+    expect(pluginsTab).toHaveAttribute("tabindex", "0");
+    expect(skillsTab).toHaveAttribute("tabindex", "-1");
+    expect(mcpTab).toHaveAttribute("tabindex", "-1");
+
+    pluginsTab.focus();
+    fireEvent.keyDown(pluginsTab, { key: "ArrowRight" });
+    expect(skillsTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(skillsTab);
+    expect(document.getElementById("plugins-skills-panel")).not.toBeNull();
+
+    fireEvent.keyDown(skillsTab, { key: "End" });
+    expect(mcpTab).toHaveAttribute("aria-selected", "true");
+    // 末项 → 循环回首项
+    fireEvent.keyDown(mcpTab, { key: "ArrowRight" });
+    expect(pluginsTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(pluginsTab);
+  });
+
   it("消费一次性视图意图：旧 setPage(\"interfaces\") 落到 MCP Tab", () => {
     useUiStore.getState().setPage("interfaces");
     renderPage();

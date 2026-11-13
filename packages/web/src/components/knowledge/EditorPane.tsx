@@ -181,12 +181,12 @@ export function EditorPane({
               title={`编辑 ${rel}`}
             />
             {!ready && !loadError ? (
-              <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-muted">
+              <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-ui-sm text-muted">
                 编辑器加载中…
               </p>
             ) : null}
             {loadError ? (
-              <p role="alert" className="p-4 text-[12px] text-danger">
+              <p role="alert" className="p-4 text-ui-sm text-danger">
                 编辑器加载失败：{loadError}。可以切到「阅读」查看内容。
               </p>
             ) : null}
@@ -203,18 +203,18 @@ export function EditorPane({
             {renderPreview ? (
               renderPreview()
             ) : (
-              <p className="text-[12px] text-muted">预览暂不可用。</p>
+              <p className="text-ui-sm text-muted">预览暂不可用。</p>
             )}
           </div>
         ) : null}
       </div>
 
       {/* 状态条：脏标记 + 保存入口；接的是 store 的真实 dirty/saving 状态 */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-line-soft px-3 py-1.5 text-[11px] text-muted">
+      <div className="flex shrink-0 items-center gap-2 border-t border-line-soft px-3 py-1.5 text-ui-xs text-muted">
         <span aria-live="polite">
           {saving ? "保存中…" : dirty ? "有未保存的修改" : "已保存"}
         </span>
-        <span className="text-[10px]">Ctrl+S 保存{" · "}Ctrl+F 搜索</span>
+        <span className="text-ui-xs">Ctrl+S 保存{" · "}Ctrl+F 搜索</span>
         <Button
           type="button"
           onClick={() => onSaveRef.current?.()}

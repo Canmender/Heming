@@ -38,13 +38,13 @@ export function Switch({ label, checked, onChange, disabled = false, className =
       aria-disabled={disabled || undefined}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 after:absolute after:-inset-x-2 after:-inset-y-[7px] after:content-[''] ${
+      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-fast after:absolute after:-inset-x-2 after:-inset-y-[7px] after:content-[''] ${
         checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
       }${disabled ? " cursor-not-allowed opacity-50" : ""}${className ? ` ${className}` : ""}`}
     >
       <span
         style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
+        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-fast ${
           checked ? "left-[16px]" : "left-[2px]"
         }`}
       />

@@ -46,7 +46,7 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
           <button
             type="button"
             onClick={() => onSelectTag(null)}
-            className="ui-link h-5 text-[10px]"
+            className="ui-link h-5 text-ui-xs"
             aria-label={`清除标签过滤：${activeTag}`}
           >
             清除过滤
@@ -55,7 +55,7 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
       </div>
       <div className="px-2 pb-1.5">
         <input
-          className="ui-input h-7 text-[12px]"
+          className="ui-input h-7 text-ui-sm"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="筛选标签"
@@ -71,11 +71,11 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2" aria-label="标签列表">
         {all.length === 0 ? (
-          <p className="px-2 py-3 text-[12px] leading-5 text-muted">
+          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">
             还没有标签。正文里写 #标签，或在 frontmatter 的 tags 里加一项。
           </p>
         ) : visible.length === 0 ? (
-          <p className="px-2 py-3 text-[12px] leading-5 text-muted">没有匹配「{filter.trim()}」的标签。</p>
+          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">没有匹配「{filter.trim()}」的标签。</p>
         ) : (
           visible.map((item) => {
             const active = activeTag?.toLowerCase() === item.tag.toLowerCase();
@@ -86,14 +86,14 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
                 aria-pressed={active}
                 aria-label={`按标签 ${item.tag} 过滤（${item.count} 篇）`}
                 onClick={() => onSelectTag(active ? null : item.tag)}
-                className={`flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-[12px] leading-5 transition-colors ${
+                className={`flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-ui-sm leading-5 transition-colors ${
                   active
                     ? "bg-subtle-3 font-medium text-ink"
                     : "text-body hover:bg-subtle-3 hover:text-ink"
                 }`}
               >
                 <span className="truncate">#{item.tag}</span>
-                <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted">{item.count}</span>
+                <span className="ml-auto shrink-0 text-ui-xs tabular-nums text-muted">{item.count}</span>
               </button>
             );
           })

@@ -34,7 +34,7 @@ export function Stat({ label, value, hint, onOpen, actionLabel, className = "" }
   const body = (
     <>
       <div className="ui-caption text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-[26px] font-bold leading-none">{value}</div>
+      <div className="ui-numeric mt-1.5 text-num-lg font-bold leading-none">{value}</div>
       {hint ? <div className="mt-1.5 ui-caption">{hint}</div> : null}
     </>
   );

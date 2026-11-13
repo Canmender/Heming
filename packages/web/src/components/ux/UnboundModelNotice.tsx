@@ -23,11 +23,11 @@ export function unboundNoticeText(agentName?: string): string {
 export interface UnboundModelNoticeProps {
   /** 指定具体智能体名；不传 = 通用场景。 */
   agentName?: string;
-  /** 「去设置」的动作（跳设置页 / 打开设置弹窗）；不传则不渲染按钮。 */
+  /** 「去模型页添加来源」的动作（跳模型页）；不传则不渲染按钮。 */
   onGoSettings?: () => void;
   /**
    * 本机已有的模型连接。传了且非空时，提示条里直接给一个选择器——
-   * 「本机明明有连接、只是这个智能体没绑」不该让用户再跳去设置找一遍（d.82）。
+   * 「本机明明有连接、只是这个智能体没绑」不该让用户再跳去别处找一遍（d.82）。
    */
   connections?: { id: string; label: string }[];
   /** 选中连接后的动作（写本机绑定）；不传则不渲染选择器。 */
@@ -44,6 +44,14 @@ export interface UnboundModelNoticeProps {
 
 export const UNBOUND_NOTICE_ID = "unbound-model-notice";
 
+/**
+ * 没有可绑定连接时的主按钮文案（d.138）。
+ *
+ * 原来写「去设置」，但 d.89 起模型接入整体搬到「模型 → 来源」：
+ * 设置页已经没有添加 Key 的入口，按钮却还把人送去设置，等于指错路。
+ */
+export const UNBOUND_ADD_SOURCE_LABEL = "去模型页添加来源";
+
 export function UnboundModelNotice({
   agentName,
   onGoSettings,
@@ -56,8 +64,8 @@ export function UnboundModelNotice({
   const canQuickBind = Boolean(onBind) && (connections?.length ?? 0) > 0;
   const base =
     variant === "card"
-      ? "rounded-lg border border-[var(--warn-line)] bg-[var(--warn-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warn)]"
-      : "border-l-2 border-[var(--warn)] bg-[var(--warn-soft)] px-2 py-1.5 text-[12px] leading-5 text-[var(--warn)]";
+      ? "rounded-lg border border-[var(--warn-line)] bg-[var(--warn-soft)] px-3 py-2 text-ui-sm leading-5 text-[var(--warn)]"
+      : "border-l-2 border-[var(--warn)] bg-[var(--warn-soft)] px-2 py-1.5 text-ui-sm leading-5 text-[var(--warn)]";
   return (
     <div
       id={id}
@@ -68,7 +76,7 @@ export function UnboundModelNotice({
     >
       <span className="min-w-0 flex-1">{text}</span>
       {canQuickBind && (
-        <label className="flex shrink-0 items-center gap-1 text-[11px]">
+        <label className="flex shrink-0 items-center gap-1 text-ui-xs">
           <span className="whitespace-nowrap">用本机连接</span>
           <select
             aria-label="选择要绑定的模型连接"
@@ -94,9 +102,9 @@ export function UnboundModelNotice({
         <button
           type="button"
           onClick={onGoSettings}
-          className={`shrink-0 rounded-sm border border-[var(--warn-line)] px-2 py-0.5 text-[11px] text-[var(--warn)] hover:bg-[var(--warn-soft)] ${FOCUS_RING_TIGHT}`}
+          className={`shrink-0 rounded-sm border border-[var(--warn-line)] px-2 py-0.5 text-ui-xs text-[var(--warn)] hover:bg-[var(--warn-soft)] ${FOCUS_RING_TIGHT}`}
         >
-          {canQuickBind ? "管理连接" : "去设置"}
+          {canQuickBind ? "管理连接" : UNBOUND_ADD_SOURCE_LABEL}
         </button>
       )}
     </div>

@@ -33,6 +33,11 @@ import {
 } from "../lib/magpieCli.js";
 import { isModelId, parseAgents, type LocalAgent } from "../lib/magpieAgents.js";
 import {
+  checkApiKey,
+  normalizeProviderUrl,
+  providerTestVerdict,
+} from "../lib/settings/providerForm.js";
+import {
   MAGPIE_PRESETS,
   defaultPlanOption,
   detectPlanFromShow,
@@ -162,7 +167,7 @@ function Avatar({ name }: { name: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ui-sm font-bold text-white"
       style={{ backgroundColor: avatarColor(name) }}
     >
       {name.slice(0, 1).toUpperCase()}
@@ -197,6 +202,8 @@ export function ModelPage() {
   /** 选中的厂商与地址类型（plan 是 planOptions 里的 id，普通地址默认）。 */
   const [presetKey, setPresetKey] = useState<{ id: string; plan: string; key: string } | null>(null);
   const [custom, setCustom] = useState({ open: false, id: "", url: "", key: "", models: "" });
+  /** 自定义来源的保存前校验错误（就地显示，不弹窗、不清空已填内容）。 */
+  const [customError, setCustomError] = useState<string | null>(null);
   /** 展开高级时按需读 `provider show` 的结果：chat 地址 + 普通/套餐。 */
   const [showCache, setShowCache] = useState<Record<string, { chat: string; plan: PlanKind }>>({});
   const [showLoading, setShowLoading] = useState<string | null>(null);
@@ -275,11 +282,20 @@ export function ModelPage() {
     setAgents(parseAgents(result.stdout || ""));
   }, [cli]);
 
-  const run = useCallback(
-    async (title: string, args: string[], opts: { refresh?: boolean } = {}) => {
+  /**
+   * 执行一条内核命令并保留文本结果（可达性结论要用它说人话）。
+   * 与 run 共用同一条 setBusy / output 通道，避免两套「正在运行」状态。
+   */
+  const runDetailed = useCallback(
+    async (
+      title: string,
+      args: string[],
+      opts: { refresh?: boolean } = {},
+    ): Promise<{ ok: boolean; text: string }> => {
       if (!cli) {
-        setOutput({ title, text: "这个操作只在和鸣桌面端可用。", ok: false });
-        return false;
+        const text = "这个操作只在和鸣桌面端可用。";
+        setOutput({ title, text, ok: false });
+        return { ok: false, text };
       }
       setBusy(title);
       try {
@@ -295,15 +311,22 @@ export function ModelPage() {
           await loadProviders();
           await loadAccounts();
         }
-        return result.ok;
+        return { ok: result.ok, text };
       } catch (err) {
-        setOutput({ title, text: err instanceof Error ? err.message : String(err), ok: false });
-        return false;
+        const text = err instanceof Error ? err.message : String(err);
+        setOutput({ title, text, ok: false });
+        return { ok: false, text };
       } finally {
         setBusy(null);
       }
     },
     [cli, refreshCatalog, loadProviders, loadAccounts],
+  );
+
+  const run = useCallback(
+    async (title: string, args: string[], opts: { refresh?: boolean } = {}) =>
+      (await runDetailed(title, args, opts)).ok,
+    [runDetailed],
   );
 
   const runTerminal = async (title: string, args: string[]) => {
@@ -340,31 +363,54 @@ export function ModelPage() {
 
   const addPreset = async () => {
     if (!presetKey || !presetKey.key.trim()) return;
+    // 保存前先做格式校验：把「地址当 Key」「带 Bearer 前缀」这类错挡在发请求之前。
+    if (checkApiKey(presetKey.key).error) return;
     const preset = findPreset(presetKey.id);
     const option = planOptionOf(preset, presetKey.plan);
-    const ok = await run("添加来源", presetAddArgs(presetKey.id, presetKey.plan, presetKey.key), {
-      refresh: true,
-    });
-    if (ok) {
-      setPresetKey(null);
-      setNotice(
-        `已添加 ${preset?.name ?? presetKey.id}${option && option.kind === "coding" ? `（${option.label}）` : ""}。可以接着添加其他来源，或去「模型」看新出现的模型。`,
-      );
-    }
+    const added = await runDetailed(
+      "添加来源",
+      presetAddArgs(presetKey.id, presetKey.plan, presetKey.key),
+      { refresh: true },
+    );
+    if (!added.ok) return;
+    const id = presetKey.id;
+    setPresetKey(null);
+    const base = `已添加 ${preset?.name ?? id}${option && option.kind === "coding" ? `（${option.label}）` : ""}。`;
+    // 保存成功不等于能用：紧接着测一次连通性，把结论写在同一句提示里（d.138）。
+    setNotice(`${base}正在测试连通性…`);
+    const tested = await runDetailed("测试来源", ["provider", "test", id]);
+    setNotice(
+      `${base}${providerTestVerdict(tested.ok, tested.text)}可以接着添加其他来源，或去「模型」看新出现的模型。`,
+    );
   };
 
   const addCustom = async () => {
-    if (!custom.id.trim()) return;
-    const args = ["provider", "add", custom.id.trim()];
-    if (custom.url.trim()) args.push(`url=${custom.url.trim()}`);
+    const id = custom.id.trim();
+    if (!id) return;
+    // 地址自动补 scheme / 去尾斜杠；补不了才报错，且只报在表单里，不清空已填内容。
+    const urlCheck = normalizeProviderUrl(custom.url);
+    if (urlCheck.error) {
+      setCustomError(urlCheck.error);
+      return;
+    }
+    const keyCheck = custom.key.trim() ? checkApiKey(custom.key) : null;
+    if (keyCheck?.error) {
+      setCustomError(keyCheck.error);
+      return;
+    }
+    setCustomError(null);
+    const args = ["provider", "add", id, `url=${urlCheck.url}`];
     if (custom.key.trim()) args.push(`key=${custom.key.trim()}`);
     if (custom.models.trim()) args.push(`models=${custom.models.trim()}`);
-    const ok = await run("添加自定义来源", args, { refresh: true });
-    if (ok) {
-      const id = custom.id.trim();
-      setCustom({ open: false, id: "", url: "", key: "", models: "" });
-      setNotice(`已添加 ${id}。可以接着添加其他来源，或去「模型」看新出现的模型。`);
-    }
+    const added = await runDetailed("添加自定义来源", args, { refresh: true });
+    if (!added.ok) return;
+    setCustom({ open: false, id: "", url: "", key: "", models: "" });
+    const base = `已添加 ${id}。`;
+    setNotice(`${base}正在测试连通性…`);
+    const tested = await runDetailed("测试来源", ["provider", "test", id]);
+    setNotice(
+      `${base}${providerTestVerdict(tested.ok, tested.text)}可以接着添加其他来源，或去「模型」看新出现的模型。`,
+    );
   };
 
   /** 展开某个来源的高级设置：顺带读一次详细地址，判断它是普通还是套餐地址。 */
@@ -404,6 +450,11 @@ export function ModelPage() {
   /** 当前选中的厂商与地址类型（普通/套餐），添加前要问清楚。 */
   const activePreset = presetKey ? findPreset(presetKey.id) : undefined;
   const activePlan = presetKey ? planOptionOf(activePreset, presetKey.plan) : undefined;
+  /** 粘贴 Key 的即时校验结果：明确错用就地报错，可疑格式只提示。 */
+  const presetKeyCheck = presetKey ? checkApiKey(presetKey.key) : null;
+  /** 自定义地址的即时规范化结果：能补 scheme 就补，补不了就地报错。 */
+  const customUrlCheck = custom.url.trim() ? normalizeProviderUrl(custom.url) : null;
+  const customKeyCheck = custom.key.trim() ? checkApiKey(custom.key) : null;
 
   return (
     <PageShell
@@ -502,9 +553,9 @@ export function ModelPage() {
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="ui-section-title">可用模型</div>
-                  <input
-                    aria-label="搜索模型"
-                    className="ui-input w-56"
+                  <TextField
+                    label="搜索模型"
+                    className="w-56"
                     placeholder="搜索模型…"
                     value={modelQuery}
                     onChange={(event) => setModelQuery(event.target.value)}
@@ -518,12 +569,12 @@ export function ModelPage() {
                     >
                       <Avatar name={providerOf(profile.model)} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-bold" title={profile.model}>
+                        <span className="block truncate text-ui-md font-bold" title={profile.model}>
                           {profile.model}
                         </span>
                         <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-[11px] text-muted">
+                      <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
                         可用
                       </span>
                     </li>
@@ -537,7 +588,7 @@ export function ModelPage() {
             )}
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
               <p className="mt-1 ui-caption">改显示名、思考档或请求协议；留空的项不动。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <TextField
@@ -624,7 +675,7 @@ export function ModelPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <Avatar name={agent.name} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-bold">{agent.name}</span>
+                        <span className="block truncate text-ui-md font-bold">{agent.name}</span>
                         <span className="block truncate ui-caption">
                           当前：{agent.model}
                           {agent.detail ? ` · ${agent.detail}` : ""} · {agent.configPath}
@@ -632,9 +683,9 @@ export function ModelPage() {
                       </span>
                       {agent.id ? (
                         <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-                          <input
-                            aria-label={`${agent.name} 模型`}
-                            className="ui-input w-48 font-mono text-[12px]"
+                          <TextField
+                            label={`${agent.name} 模型`}
+                            className="w-48"
                             placeholder="provider/model"
                             value={agentModelOf(agent)}
                             onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
@@ -681,7 +732,7 @@ export function ModelPage() {
                   <div className="flex items-start gap-2">
                     <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-[12px] font-bold">
+                      <div className="text-ui-sm font-bold">
                         {agentConfirm.model === "default"
                           ? `恢复 ${agentConfirm.name} 原来的模型？`
                           : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
@@ -728,7 +779,7 @@ export function ModelPage() {
                 role="status"
                 className="ui-alert ui-alert-success rta-enter items-center justify-between"
               >
-                <span className="flex items-center gap-2 text-[12px]">
+                <span className="flex items-center gap-2 text-ui-sm">
                   <CheckIcon width={14} height={14} className="shrink-0" />
                   {notice}
                 </span>
@@ -748,9 +799,20 @@ export function ModelPage() {
                 <div className="ui-section-title">API Key 服务商</div>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
-              <p className="mt-0.5 ui-caption">
-                点一个服务商 → 选地址类型 → 只填一个 Key；保存后模型会自动读出来。
-              </p>
+              {cli ? (
+                <p className="mt-0.5 ui-caption">
+                  点一个服务商 → 选地址类型 → 只填一个 Key；保存后模型会自动读出来。
+                </p>
+              ) : (
+                // 无桌面桥时下面所有入口都点不动：先说明「为什么」，不摆一排灰按钮让人反复点（F-03）。
+                <div role="note" className="ui-alert ui-alert-muted mt-2">
+                  <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    浏览器预览下不能添加来源：保存 Key、登录订阅账号与维护自定义地址，都需要桌面版的文件/密钥桥。
+                  </span>
+                </div>
+              )}
+              {cli && (
               <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
                 {MAGPIE_PRESETS.map((preset) => (
                   <button
@@ -770,21 +832,22 @@ export function ModelPage() {
                     <span className="flex items-center gap-2">
                       <Avatar name={preset.name} />
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-bold">{preset.name}</span>
+                        <span className="block truncate text-ui-md font-bold">{preset.name}</span>
                         <span className="block truncate ui-caption">{preset.desc}</span>
                       </span>
                     </span>
                   </button>
                 ))}
               </div>
+              )}
 
               {presetKey && activePreset && activePlan && (
                 <div className="rta-enter mt-3 rounded-lg border border-line bg-[var(--subtle)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2 text-[12px] font-bold">
+                    <div className="flex flex-wrap items-center gap-2 text-ui-sm font-bold">
                       添加 {activePreset.name}
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] ${PLAN_BADGE[activePlan.kind].className}`}
+                        className={`rounded-full px-2 py-0.5 text-ui-xs ${PLAN_BADGE[activePlan.kind].className}`}
                       >
                         {activePlan.label}
                       </span>
@@ -821,17 +884,23 @@ export function ModelPage() {
                     </div>
                   )}
 
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <input
-                      aria-label="API Key"
-                      className="ui-input flex-1"
+                  <div className="mt-2 flex flex-wrap items-start gap-2">
+                    <TextField
+                      label="API Key"
                       type="password"
+                      className="flex-1"
                       placeholder={
                         activePlan.kind === "coding"
                           ? `粘贴 ${activePlan.label} 的 Key`
                           : "粘贴 API Key"
                       }
                       value={presetKey.key}
+                      error={presetKeyCheck?.error ?? null}
+                      hint={
+                        !presetKeyCheck?.error && presetKeyCheck?.warning
+                          ? presetKeyCheck.warning
+                          : undefined
+                      }
                       onChange={(event) => {
                         const key = event.target.value;
                         setPresetKey((current) => (current ? { ...current, key } : current));
@@ -843,7 +912,8 @@ export function ModelPage() {
                     <Button
                       type="button"
                       size="md" variant="primary"
-                      disabled={!presetKey.key.trim()}
+                      className="mt-5"
+                      disabled={!presetKey.key.trim() || Boolean(presetKeyCheck?.error)}
                       onClick={() => void addPreset()}
                     >
                       保存
@@ -865,6 +935,7 @@ export function ModelPage() {
               )}
             </div>
 
+            {cli && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -884,12 +955,12 @@ export function ModelPage() {
                     >
                       <Avatar name={item.label} />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-[13px] font-bold">{item.label}</span>
+                        <span className="block text-ui-md font-bold">{item.label}</span>
                         <span className="block ui-caption">{item.desc}</span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted">
+                      <span className="flex shrink-0 items-center gap-0.5 text-ui-xs text-muted">
                         登录
-                        <ChevronIcon width={13} height={13} />
+                        <ChevronIcon width={14} height={14} />
                       </span>
                     </button>
                   ))}
@@ -899,7 +970,7 @@ export function ModelPage() {
                     <li key={`${row.agent}-${row.label}-${index}`} className="flex items-center gap-3 py-2">
                       <Avatar name={row.agent} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-bold">{row.label}</span>
+                        <span className="block truncate text-ui-md font-bold">{row.label}</span>
                         <span className="block ui-caption">{row.agent}</span>
                       </span>
                       <span className="shrink-0 ui-caption">{row.allowance ?? "额度未知"}</span>
@@ -924,53 +995,65 @@ export function ModelPage() {
                     onClick={() => setCustom({ ...custom, open: true })}
                   >
                     <span className="min-w-0">
-                      <span className="block text-[13px] font-bold">其他 OpenAI 兼容地址</span>
+                      <span className="block text-ui-md font-bold">其他 OpenAI 兼容地址</span>
                       <span className="block ui-caption">填名称与地址即可，模型可留空自动读取</span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-0.5 text-[12px] text-muted">
+                    <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-muted">
                       展开
-                      <ChevronIcon width={13} height={13} className="rotate-90" />
+                      <ChevronIcon width={14} height={14} className="rotate-90" />
                     </span>
                   </button>
                 ) : (
                   <div className="rta-enter mt-2 grid gap-2 sm:grid-cols-2">
-                    <label className="grid gap-1">
-                      <span className="ui-caption">来源名称</span>
-                      <input
-                        className="ui-input"
-                        placeholder="名称（如 relay）"
-                        value={custom.id}
-                        onChange={(event) => setCustom({ ...custom, id: event.target.value })}
-                      />
-                    </label>
-                    <label className="grid gap-1">
-                      <span className="ui-caption">接口地址</span>
-                      <input
-                        className="ui-input"
-                        placeholder="https://host/v1"
-                        value={custom.url}
-                        onChange={(event) => setCustom({ ...custom, url: event.target.value })}
-                      />
-                    </label>
-                    <label className="grid gap-1">
-                      <span className="ui-caption">自定义 Key</span>
-                      <input
-                        className="ui-input"
-                        type="password"
-                        placeholder="API Key"
-                        value={custom.key}
-                        onChange={(event) => setCustom({ ...custom, key: event.target.value })}
-                      />
-                    </label>
-                    <label className="grid gap-1 sm:col-span-2">
-                      <span className="ui-caption">模型列表</span>
-                      <input
-                        className="ui-input"
-                        placeholder="模型 id，逗号分隔（可留空自动读取）"
-                        value={custom.models}
-                        onChange={(event) => setCustom({ ...custom, models: event.target.value })}
-                      />
-                    </label>
+                    <TextField
+                      label="来源名称"
+                      placeholder="名称（如 relay）"
+                      value={custom.id}
+                      onChange={(event) => setCustom({ ...custom, id: event.target.value })}
+                    />
+                    <TextField
+                      label="接口地址"
+                      placeholder="https://host/v1"
+                      value={custom.url}
+                      error={customUrlCheck?.error ?? null}
+                      hint={
+                        customUrlCheck && !customUrlCheck.error
+                          ? customUrlCheck.hint ?? undefined
+                          : undefined
+                      }
+                      onChange={(event) => setCustom({ ...custom, url: event.target.value })}
+                      onBlur={() => {
+                        // 能识别的地址就地规范成最终会保存的样子（补 http(s)、去尾斜杠）。
+                        if (customUrlCheck && !customUrlCheck.error && customUrlCheck.url) {
+                          setCustom((current) => ({ ...current, url: customUrlCheck.url }));
+                        }
+                      }}
+                    />
+                    <TextField
+                      label="自定义 Key"
+                      type="password"
+                      placeholder="API Key（可留空：有些中转不校验 Key）"
+                      value={custom.key}
+                      error={customKeyCheck?.error ?? null}
+                      hint={
+                        !customKeyCheck?.error && customKeyCheck?.warning
+                          ? customKeyCheck.warning
+                          : undefined
+                      }
+                      onChange={(event) => setCustom({ ...custom, key: event.target.value })}
+                    />
+                    <TextField
+                      label="模型列表"
+                      className="sm:col-span-2"
+                      placeholder="模型 id，逗号分隔（可留空自动读取）"
+                      value={custom.models}
+                      onChange={(event) => setCustom({ ...custom, models: event.target.value })}
+                    />
+                    {customError && (
+                      <p role="alert" className="sm:col-span-2 ui-caption text-[var(--danger)]">
+                        {customError}
+                      </p>
+                    )}
                     <div className="flex gap-2 sm:col-span-2">
                       <Button
                         type="button"
@@ -992,9 +1075,13 @@ export function ModelPage() {
                 )}
               </div>
             </div>
+            )}
 
             <div className="ui-card p-4">
               <div className="ui-section-title">已添加的来源（{providers.length}）</div>
+              {!cli && (
+                <p className="mt-1 ui-caption">浏览器预览下只能查看：测试、换 Key 与删除来源请用桌面版。</p>
+              )}
               <ul className="mt-2 divide-y divide-line">
                 {providers.map((row) => {
                   const info = showCache[row.id];
@@ -1008,9 +1095,9 @@ export function ModelPage() {
                         <Avatar name={row.kind} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
-                            <span className="truncate text-[13px] font-bold">{row.id}</span>
+                            <span className="truncate text-ui-md font-bold">{row.id}</span>
                             <span
-                              className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${badge.className}`}
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${badge.className}`}
                             >
                               {badge.label}
                             </span>
@@ -1050,10 +1137,10 @@ export function ModelPage() {
                       {advancedProvider === row.id && (
                         <div className="rta-enter mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3">
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <div className="text-[12px] font-bold">{row.id} 的高级设置</div>
+                            <div className="text-ui-sm font-bold">{row.id} 的高级设置</div>
                             {showCache[row.id]?.chat && (
                               <span
-                                className="max-w-full truncate font-mono text-[11px] text-muted"
+                                className="max-w-full truncate font-mono text-ui-xs text-muted"
                                 title={showCache[row.id]?.chat}
                               >
                                 {showCache[row.id]?.chat}
@@ -1063,19 +1150,31 @@ export function ModelPage() {
 
                           <div className="mt-3">
                             <div className="ui-micro">连接</div>
-                            <div className="mt-1.5 flex flex-wrap gap-2">
-                              <input
-                                aria-label="更新 Key"
-                                className="ui-input flex-1"
+                            <div className="mt-1.5 flex flex-wrap items-start gap-2">
+                              <TextField
+                                label="更新 Key"
                                 type="password"
+                                className="flex-1"
                                 placeholder="换成新的 API Key（留空不改）"
                                 value={providerForm.key}
+                                error={
+                                  providerForm.key.trim() ? checkApiKey(providerForm.key).error : null
+                                }
+                                hint={
+                                  providerForm.key.trim() && !checkApiKey(providerForm.key).error
+                                    ? checkApiKey(providerForm.key).warning ?? undefined
+                                    : undefined
+                                }
                                 onChange={(event) => setProviderForm({ ...providerForm, key: event.target.value })}
                               />
                               <Button
                                 type="button"
-                                size="sm" variant="primary"
-                                disabled={!cli || !providerForm.key.trim()}
+                                size="sm" variant="primary" className="mt-5"
+                                disabled={
+                                  !cli ||
+                                  !providerForm.key.trim() ||
+                                  Boolean(providerForm.key.trim() && checkApiKey(providerForm.key).error)
+                                }
                                 onClick={() => void run("更新 Key", ["provider", "key", row.id, providerForm.key.trim()])}
                               >
                                 更新 Key
@@ -1212,7 +1311,11 @@ export function ModelPage() {
                 })}
                 {providers.length === 0 && (
                   // d.138：方位词（「从上面选」）在滚动后失效——直接说清下一步动作名。
-                  <li className="py-2 ui-caption">还没有来源。点页面顶部的「添加来源」，填服务地址和 Key。</li>
+                  <li className="py-2 ui-caption">
+                    {cli
+                      ? "还没有来源。点上方「API Key 服务商」里的一个服务商，或展开「其他地址」填服务地址和 Key。"
+                      : "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"}
+                  </li>
                 )}
               </ul>
             </div>
@@ -1226,7 +1329,7 @@ export function ModelPage() {
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
             <details className="ui-disclosure ui-card p-4 lg:col-span-2">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
               <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <TextField
@@ -1326,7 +1429,7 @@ export function ModelPage() {
               </div>
 
               <div className="mt-3 border-t border-line pt-3">
-                <div className="text-[12px] font-bold">规则（可选）：把某类请求先交给组里的指定模型</div>
+                <div className="text-ui-sm font-bold">规则（可选）：把某类请求先交给组里的指定模型</div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
                   <TextField
                     label="规则分组"
@@ -1402,7 +1505,7 @@ export function ModelPage() {
             <BackupPanel />
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <label className="grid gap-1">
                   <span className="ui-caption">同步类型</span>
@@ -1424,15 +1527,12 @@ export function ModelPage() {
                     ))}
                   </select>
                 </label>
-                <label className="grid gap-1">
-                  <span className="ui-caption">同步参数</span>
-                  <input
-                    className="ui-input"
-                    placeholder="写入配置时：key=value key2=value2"
-                    value={syncValues}
-                    onChange={(event) => setSyncValues(event.target.value)}
-                  />
-                </label>
+                <TextField
+                  label="同步参数"
+                  placeholder="写入配置时：key=value key2=value2"
+                  value={syncValues}
+                  onChange={(event) => setSyncValues(event.target.value)}
+                />
               </div>
               <Button
                 type="button"
@@ -1451,7 +1551,7 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
                   查看库
@@ -1464,16 +1564,14 @@ export function ModelPage() {
                 </Button>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                <input
-                  aria-label="搜索 API"
-                  className="ui-input"
+                <TextField
+                  label="搜索 API"
                   placeholder="搜索 API（如 tavily）"
                   value={searchForm.api}
                   onChange={(event) => setSearchForm({ ...searchForm, api: event.target.value })}
                 />
-                <input
-                  aria-label="搜索 Key"
-                  className="ui-input"
+                <TextField
+                  label="搜索 Key"
                   type="password"
                   placeholder="Key"
                   value={searchForm.key}
@@ -1505,7 +1603,7 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
               <p className="mt-1 ui-caption">
                 给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
               </p>
@@ -1600,7 +1698,7 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
               <p className="mt-1 ui-caption">
                 看各智能体最近的会话记录；启动器命令由模型服务提供（终端里 `claude-magpie` 之类），
                 只影响那一次会话，不改配置。
@@ -1626,11 +1724,11 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
-              <div className="mt-2 flex gap-2">
-                <input
-                  aria-label="命令"
-                  className="ui-input flex-1 font-mono text-[12px]"
+              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
+              <div className="mt-2 flex flex-wrap items-start gap-2">
+                <TextField
+                  label="命令"
+                  className="flex-1"
                   placeholder="providers"
                   value={termCommand}
                   onChange={(event) => setTermCommand(event.target.value)}
@@ -1640,7 +1738,7 @@ export function ModelPage() {
                 />
                 <Button
                   type="button"
-                  size="sm" variant="primary"
+                  size="sm" variant="primary" className="mt-5"
                   disabled={!cli || !termCommand.trim()}
                   onClick={() => void startTerminalRun()}
                 >
@@ -1658,12 +1756,12 @@ export function ModelPage() {
                   取消
                 </Button>
               </div>
-              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[var(--console-bg)] p-3 text-[12px] text-[var(--console-ink)]">
+              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[var(--console-bg)] p-3 text-ui-sm text-[var(--console-ink)]">
                 {live || "（输出会出现在这里）"}
               </pre>
-              <input
-                aria-label="命令输入"
-                className="ui-input mt-2 w-full font-mono text-[12px]"
+              <TextField
+                label="命令输入"
+                className="mt-2"
                 placeholder="回车把这一行发给正在运行的命令"
                 value={terminalInput}
                 onChange={(event) => setTerminalInput(event.target.value)}
@@ -1686,7 +1784,7 @@ export function ModelPage() {
           className={`rta-enter mt-4 block ${output.ok ? "ui-alert ui-alert-info" : "ui-alert ui-alert-danger"}`}
         >
           <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[12px] font-bold">
+            <div className="flex items-center gap-2 text-ui-sm font-bold">
               {output.ok ? (
                 <CheckIcon width={14} height={14} className="shrink-0" />
               ) : (
@@ -1698,7 +1796,7 @@ export function ModelPage() {
               关闭
             </Button>
           </div>
-          <pre className="mt-1 max-h-64 w-full overflow-auto whitespace-pre-wrap text-[12px]">{output.text}</pre>
+          <pre className="mt-1 max-h-64 w-full overflow-auto whitespace-pre-wrap text-ui-sm">{output.text}</pre>
         </div>
       )}
     </PageShell>

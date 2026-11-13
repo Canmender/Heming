@@ -229,7 +229,7 @@ export function WikiGraphView({
 
   if (graph.nodes.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-[12px] text-muted">
+      <div className="flex h-full items-center justify-center text-ui-sm text-muted">
         {emptyHint ?? "还没有页面。建一页就会出现在图谱里。"}
       </div>
     );
@@ -237,7 +237,7 @@ export function WikiGraphView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center gap-2 pb-2 text-[11px] text-muted">
+      <div className="flex flex-wrap items-center gap-2 pb-2 text-ui-xs text-muted">
         <span className="font-bold text-muted">图谱</span>
         <span>{graph.nodes.length} 页 · {graph.edges.length} 条链接</span>
         {orphans > 0 && (
@@ -354,14 +354,14 @@ export function WikiGraphView({
             type="button"
             aria-label="缩小图谱"
             onClick={() => zoomBy(-ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             −
           </button>
           <span
             aria-live="polite"
             data-testid="graph-zoom-percent"
-            className="min-w-[38px] text-center text-[10px] tabular-nums text-muted"
+            className="min-w-[38px] text-center text-ui-xs tabular-nums text-muted"
           >
             {percent}%
           </span>
@@ -369,7 +369,7 @@ export function WikiGraphView({
             type="button"
             aria-label="放大图谱"
             onClick={() => zoomBy(ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             ＋
           </button>
@@ -377,12 +377,12 @@ export function WikiGraphView({
             type="button"
             aria-label="重置视图"
             onClick={reset}
-            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-ui-xs text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             重置
           </button>
         </div>
-        <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-muted">
+        <div className="pointer-events-none absolute bottom-2 left-2 text-ui-xs text-muted">
           拖动平移 · 滚轮缩放（以光标为中心） · 双击复位 · 点节点打开页面
         </div>
       </div>

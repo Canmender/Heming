@@ -69,7 +69,7 @@ function WikiChip({
       aria-label={
         resolved ? `打开页面 ${label}${anchorMiss ? "（锚点未命中）" : ""}` : `创建页面 ${label}（当前未解析）`
       }
-      className={`mx-0.5 inline-flex max-w-full items-baseline gap-1 truncate rounded-sm border px-1 py-0 align-baseline text-[12px] leading-5 transition-colors ${
+      className={`mx-0.5 inline-flex max-w-full items-baseline gap-1 truncate rounded-sm border px-1 py-0 align-baseline text-ui-sm leading-5 transition-colors ${
         resolved
           ? anchorMiss
             ? "border-dashed border-warn text-[var(--warn)] hover:bg-subtle-3"
@@ -81,9 +81,9 @@ function WikiChip({
     >
       <span className="truncate">{label}</span>
       {!resolved ? (
-        <span className="shrink-0 text-[10px]">{ambiguous ? "有歧义" : "未创建"}</span>
+        <span className="shrink-0 text-ui-xs">{ambiguous ? "有歧义" : "未创建"}</span>
       ) : anchorMiss ? (
-        <span className="shrink-0 text-[10px]">锚点未命中</span>
+        <span className="shrink-0 text-ui-xs">锚点未命中</span>
       ) : null}
     </button>
   );
@@ -316,22 +316,22 @@ export function PreviewPane({
         <p className="my-2 first:mt-0 last:mb-0">{children}</p>
       ),
       h1: ({ children }: { children?: React.ReactNode }) => (
-        <h1 className="mb-2 mt-4 border-b border-line-soft pb-1 text-[18px] font-semibold leading-[26px] text-ink first:mt-0">
+        <h1 className="mb-2 mt-4 border-b border-line-soft pb-1 text-ui-lg font-semibold leading-[26px] text-ink first:mt-0">
           {children}
         </h1>
       ),
       h2: ({ children }: { children?: React.ReactNode }) => (
-        <h2 className="mb-1.5 mt-3.5 text-[16px] font-semibold leading-6 text-ink first:mt-0">
+        <h2 className="mb-1.5 mt-3.5 text-ui-base font-semibold leading-6 text-ink first:mt-0">
           {children}
         </h2>
       ),
       h3: ({ children }: { children?: React.ReactNode }) => (
-        <h3 className="mb-1 mt-3 text-[14px] font-semibold leading-5 text-ink first:mt-0">
+        <h3 className="mb-1 mt-3 text-ui-base font-semibold leading-5 text-ink first:mt-0">
           {children}
         </h3>
       ),
       h4: ({ children }: { children?: React.ReactNode }) => (
-        <h4 className="mb-1 mt-2.5 text-[13px] font-semibold leading-5 text-ink first:mt-0">
+        <h4 className="mb-1 mt-2.5 text-ui-md font-semibold leading-5 text-ink first:mt-0">
           {children}
         </h4>
       ),
@@ -348,7 +348,7 @@ export function PreviewPane({
       hr: () => <hr className="my-3 border-line-soft" />,
       table: ({ children }: { children?: React.ReactNode }) => (
         <div className="my-2 overflow-x-auto">
-          <table className="w-full border-collapse text-[12px]">{children}</table>
+          <table className="w-full border-collapse text-ui-sm">{children}</table>
         </div>
       ),
       th: ({ children }: { children?: React.ReactNode }) => (
@@ -372,7 +372,7 @@ export function PreviewPane({
           );
         }
         return (
-          <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-subtle p-2 font-mono text-[12px] leading-relaxed text-ink">
+          <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-subtle p-2 font-mono text-ui-sm leading-relaxed text-ink">
             <code>{raw.replace(/\n$/, "")}</code>
           </pre>
         );
@@ -394,14 +394,14 @@ export function PreviewPane({
 
   if (!text.trim()) {
     return (
-      <div className={`flex h-full items-center justify-center p-6 text-[12px] text-muted ${className}`}>
+      <div className={`flex h-full items-center justify-center p-6 text-ui-sm text-muted ${className}`}>
         这篇笔记还是空的，切到源码模式开始写。
       </div>
     );
   }
 
   return (
-    <div className={`markdown-body break-words text-[13px] leading-[1.75] text-ink ${className}`}>
+    <div className={`markdown-body break-words text-ui-md leading-[1.75] text-ink ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath, remarkWikiLinks]}
         rehypePlugins={[rehypeKatex]}

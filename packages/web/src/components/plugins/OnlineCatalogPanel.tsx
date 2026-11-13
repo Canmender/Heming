@@ -72,7 +72,7 @@ export function OnlineCatalogPanel({
     >
       <div className="flex items-center justify-between gap-2">
         <div>
-          <span className="text-[12px] font-bold text-muted">云端插件目录</span>
+          <span className="text-ui-sm font-bold text-muted">云端插件目录</span>
           <span className="ml-2 ui-caption">独立插件包：下载后仍走本机校验与安装预览</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -115,7 +115,7 @@ export function OnlineCatalogPanel({
                 className="rounded-lg border border-line bg-[var(--surface)] p-2.5"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[12px] font-bold">{entry.name}</span>
+                  <span className="text-ui-sm font-bold">{entry.name}</span>
                   <span className={CHIP}>v{entry.version}</span>
                   <span
                     className={

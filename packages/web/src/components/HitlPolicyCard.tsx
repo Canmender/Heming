@@ -4,6 +4,12 @@ import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Button } from "../components/ui/Button.js";
+import { CardSummary } from "./settings/CardSummary.js";
+
+/** 档位的中文短名（摘要行用；与下面 ModeRow 的 title 同源语义）。 */
+const MODE_SUMMARY: Record<HitlMode, string> = { strict: "严格", guarded: "受控", trusted: "信任" };
+/** 免问下限的短名：下拉里的长句在标题旁会挤成两行。 */
+const FLOOR_SUMMARY: Record<string, string> = { read: "只读", write: "写入" };
 
 /**
  * 免问下限的选项文案。
@@ -108,13 +114,23 @@ export function HitlPolicyCard({
 
   return (
     <section aria-label="工具调用确认" className="ui-card mt-3 p-4">
-      <div className="text-[12px] font-bold text-muted">工具调用确认</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="text-ui-sm font-bold text-muted">工具调用确认</div>
+        <CardSummary
+          items={[
+            MODE_SUMMARY[policy.mode] ?? "受控",
+            `免问下限 ${FLOOR_SUMMARY[policy.floor] ?? policy.floor}`,
+            policy.scope === "global" ? "所有智能体共用" : "按智能体分别",
+            rules.length > 0 ? `记住 ${rules.length} 条` : false,
+          ]}
+        />
+      </div>
       <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。
       </div>
 
       <fieldset className="mt-3">
-        <legend className="text-[12px] font-bold text-muted">确认档位</legend>
+        <legend className="text-ui-sm font-bold text-muted">确认档位</legend>
         <div className="mt-1.5 flex flex-col gap-1.5">
           <ModeRow
             mode="strict"
@@ -140,7 +156,7 @@ export function HitlPolicyCard({
         </div>
       </fieldset>
 
-      <label className="mt-3 block text-[12px]">
+      <label className="mt-3 block text-ui-sm">
         免问下限
         {/*
           ★ 这里**没有**「危险（全部不问）」选项。
@@ -176,7 +192,7 @@ export function HitlPolicyCard({
         </div>
       )}
 
-      <label className="mt-3 block text-[12px]">
+      <label className="mt-3 block text-ui-sm">
         授权作用域
         <select
           aria-label="授权作用域"
@@ -220,7 +236,7 @@ export function HitlPolicyCard({
       {sessionMsg && (
         <div
           role="status"
-          className={`mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-[11px] ${
+          className={`mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-ui-xs ${
             sessionMsg.kind === "ok" ? "text-[var(--success)]" : "text-muted"
           }`}
         >
@@ -229,7 +245,7 @@ export function HitlPolicyCard({
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-muted">
+        <div className="text-ui-xs font-bold text-muted">
           记住的规则{rules.length ? `（${rules.length} 条）` : ""}
         </div>
         {rules.length === 0 ? (
@@ -241,7 +257,7 @@ export function HitlPolicyCard({
             {rules.map((rule) => (
               <li
                 key={`${rule.tool}-${rule.resource}-${rule.at}`}
-                className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
+                className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
               >
                 <span
                   className={`rounded-sm px-1 ${
@@ -256,7 +272,7 @@ export function HitlPolicyCard({
                 <span className="min-w-0 flex-1 truncate text-muted" title={rule.resource}>
                   {rule.resource === "*" ? "所有调用" : rule.resource}
                 </span>
-                <span className="shrink-0 text-[10px] text-muted">
+                <span className="shrink-0 text-ui-xs text-muted">
                   {rule.agentName || rule.agentId ? rule.agentName || "指定智能体" : "全部智能体"}
                 </span>
               </li>
@@ -264,14 +280,14 @@ export function HitlPolicyCard({
           </ul>
         )}
         {rules.length > 0 && (
-          <div className="mt-1 text-[10px] text-muted">
+          <div className="mt-1 text-ui-xs text-muted">
             拒绝规则优先于允许规则；记住的允许对危险操作不生效。新规则只对当前智能体生效。
           </div>
         )}
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-muted">
+        <div className="text-ui-xs font-bold text-muted">
           确认记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
@@ -312,7 +328,7 @@ export function HitlPolicyCard({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             清空全部 {rules.length} 条记住的规则？之后同类工具会重新询问；拒绝规则与允许规则都会被移除，操作不可撤销。
           </p>
         </ConfirmDialog>
@@ -340,7 +356,7 @@ export function HitlPolicyCard({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             清空后，本会话里已授权的工具将重新逐一询问。授权本来就只存在内存里，退出应用也会失效；此操作不可撤销。
           </p>
         </ConfirmDialog>
@@ -377,7 +393,7 @@ function ModeRow({
         className="mt-0.5"
       />
       <span className="min-w-0">
-        <span className="block text-[12px] font-bold">{title}</span>
+        <span className="block text-ui-sm font-bold">{title}</span>
         <span className="block ui-caption">{desc}</span>
       </span>
       <span className="sr-only">{mode}</span>
@@ -390,7 +406,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   const time = entry.at.slice(0, 16).replace("T", " ");
   const approved = entry.action !== "deny" && entry.action !== "reject";
   return (
-    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
+    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs">
       <span className="text-muted">{time}</span>
       <span
         className={`rounded-sm px-1 text-muted ${approved ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`}

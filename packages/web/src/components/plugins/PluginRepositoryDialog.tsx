@@ -123,14 +123,14 @@ export function PluginRepositoryDialog({
               aria-hidden="true"
               className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
             >
-              <SearchIcon width={13} height={13} />
+              <SearchIcon width={14} height={14} />
             </span>
             <input
               aria-label="搜索插件仓库"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索插件名称 / id / 描述…"
-              className="ui-input h-8 pl-7 text-[12px]"
+              className="ui-input h-8 pl-7 text-ui-sm"
             />
           </div>
           <span className="ui-caption">
@@ -173,11 +173,11 @@ export function PluginRepositoryDialog({
               {filtered.map((item) => (
                 <li key={item.key} className="ui-card flex flex-col gap-2 p-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[13px] font-bold">{item.name}</span>
+                    <span className="text-ui-md font-bold">{item.name}</span>
                     <span className={CHIP}>v{item.version}</span>
                     {item.installed ? <span className={CHIP}>已安装</span> : null}
                   </div>
-                  <p className="line-clamp-2 text-[12px] leading-5 text-muted">{item.description}</p>
+                  <p className="line-clamp-2 text-ui-sm leading-5 text-muted">{item.description}</p>
                   <div className="mt-auto flex items-center justify-between gap-2">
                     <span className={HINT}>安装前会校验签名/指纹</span>
                     <Button

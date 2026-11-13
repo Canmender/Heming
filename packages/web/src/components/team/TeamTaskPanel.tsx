@@ -205,7 +205,7 @@ export function TeamTaskPanel({
               type="button"
               aria-pressed={filter === key}
               onClick={() => setFilter(key)}
-              className={`rounded-md px-2 py-0.5 text-[11px] ${
+              className={`rounded-md px-2 py-0.5 text-ui-xs ${
                 filter === key ? "bg-[var(--subtle-4)] text-ink" : "text-muted hover:bg-[var(--subtle-2)]"
               }`}
             >
@@ -246,7 +246,7 @@ export function TeamTaskPanel({
             className="ui-input w-full resize-y"
           />
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1 text-[11px] text-muted">
+            <label className="flex items-center gap-1 text-ui-xs text-muted">
               指给
               <select
                 aria-label="任务负责人"
@@ -262,7 +262,7 @@ export function TeamTaskPanel({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-1 text-[11px] text-muted">
+            <label className="flex items-center gap-1 text-ui-xs text-muted">
               归属方案
               <select
                 aria-label="归属方案"
@@ -278,7 +278,7 @@ export function TeamTaskPanel({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-1 text-[11px] text-muted">
+            <label className="flex items-center gap-1 text-ui-xs text-muted">
               截止
               <input
                 aria-label="任务截止时间"
@@ -288,7 +288,7 @@ export function TeamTaskPanel({
                 className="ui-input w-auto"
               />
             </label>
-            <label className="flex items-center gap-1 text-[11px] text-muted">
+            <label className="flex items-center gap-1 text-ui-xs text-muted">
               <input
                 ref={fileRef}
                 type="file"
@@ -330,18 +330,18 @@ export function TeamTaskPanel({
                   type="button"
                   onClick={() => void cycle(task)}
                   title="点击切换状态"
-                  className={`rounded-full border px-1.5 py-0.5 text-[10px] ${STATUS_STYLE[task.status]}`}
+                  className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[task.status]}`}
                 >
                   {STATUS_LABEL[task.status]}
                 </button>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{task.title}</span>
-                <label className="flex shrink-0 items-center gap-1 text-[11px] text-muted">
+                <span className="min-w-0 flex-1 truncate text-ui-md font-medium">{task.title}</span>
+                <label className="flex shrink-0 items-center gap-1 text-ui-xs text-muted">
                   负责
                   <select
                     aria-label={`任务负责人 ${task.title}`}
                     value={task.assigneeId ?? ""}
                     onChange={(e) => void assign(task, e.target.value)}
-                    className="ui-input w-auto py-0.5 text-[11px]"
+                    className="ui-input w-auto py-0.5 text-ui-xs"
                   >
                     <option value="">待认领</option>
                     {members.map((m) => (
@@ -354,7 +354,7 @@ export function TeamTaskPanel({
                 <button
                   type="button"
                   aria-label={`删除任务 ${task.title}`}
-                  className="shrink-0 text-[11px] text-muted hover:text-[var(--danger)]"
+                  className="shrink-0 text-ui-xs text-muted hover:text-[var(--danger)]"
                   onClick={() => setPendingDelete(task)}
                 >
                   删除
@@ -373,7 +373,7 @@ export function TeamTaskPanel({
                   <span>
                     截止 {fmtLocalDateTime(task.dueAt)}
                     {task.status !== "done" && isOverdue(task.dueAt) ? (
-                      <span className="ml-1 rounded-full border border-[var(--danger-line)] bg-[var(--danger-soft)] px-1.5 py-0.5 text-[10px] text-[var(--danger)]">
+                      <span className="ml-1 rounded-full border border-[var(--danger-line)] bg-[var(--danger-soft)] px-1.5 py-0.5 text-ui-xs text-[var(--danger)]">
                         已逾期
                       </span>
                     ) : null}
@@ -397,7 +397,7 @@ export function TeamTaskPanel({
                 </span>
               </div>
               {task.detail && (
-                <p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-muted">
+                <p className="mt-1 whitespace-pre-wrap text-ui-xs leading-5 text-muted">
                   {task.detail}
                 </p>
               )}
@@ -430,7 +430,7 @@ export function TeamTaskPanel({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除任务「{pendingDelete.title}」？删除后不可恢复，负责人与截止时间等信息会一起消失。
             交付物文件仍保留在共享文件库。
           </p>

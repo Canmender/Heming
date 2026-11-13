@@ -68,39 +68,49 @@ export function LoginPage() {
           <p className="ui-page-sub mb-5">登录你的账号</p>
           <div className="flex flex-col gap-3">
             {/*
-             * 字段名走 aria-label 而不是可见 <label>：登录页版式是裸输入框 + placeholder，
-             * 加可见标签会改变版式（本轮不动视觉）。placeholder 不能当可访问名的主要来源，
-             * 所以显式给 aria-label；错误时用 aria-invalid + aria-describedby 关联到错误行。
+             * d.141：可见 label。此前是裸输入框 + placeholder，placeholder 一敲字就消失，
+             * 密码框还叠加大写锁定提示，填错了根本看不出哪个框是用户名。可访问名仍由
+             * <label htmlFor> 提供（不再用 aria-label），错误时接 aria-invalid + aria-describedby。
              */}
-            <input
-              ref={userRef}
-              aria-label="用户名"
-              autoComplete="username"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "login-error" : undefined}
-              className={`ui-input ${FOCUS_RING}`}
-              placeholder="用户名"
-              value={username}
-              onChange={onEdit(setUsername)}
-              required
-            />
-            <input
-              aria-label="密码"
-              autoComplete="current-password"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={
-                error ? "login-error login-capslock" : "login-capslock"
-              }
-              className={`ui-input ${FOCUS_RING}`}
-              placeholder="密码"
-              type="password"
-              value={password}
-              onChange={onEdit(setPassword)}
-              onKeyDown={trackCapsLock}
-              onKeyUp={trackCapsLock}
-              onBlur={() => setCapsLock(false)}
-              required
-            />
+            <div>
+              <label htmlFor="login-username" className="ui-caption block">
+                用户名
+              </label>
+              <input
+                ref={userRef}
+                id="login-username"
+                autoComplete="username"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "login-error" : undefined}
+                className={`mt-1 block w-full ui-input ${FOCUS_RING}`}
+                placeholder="输入用户名"
+                value={username}
+                onChange={onEdit(setUsername)}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="login-password" className="ui-caption block">
+                密码
+              </label>
+              <input
+                id="login-password"
+                autoComplete="current-password"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={
+                  error ? "login-error login-capslock" : "login-capslock"
+                }
+                className={`mt-1 block w-full ui-input ${FOCUS_RING}`}
+                placeholder="输入密码"
+                type="password"
+                value={password}
+                onChange={onEdit(setPassword)}
+                onKeyDown={trackCapsLock}
+                onKeyUp={trackCapsLock}
+                onBlur={() => setCapsLock(false)}
+                required
+              />
+            </div>
             {/*
               大写锁定提示：live region 常驻（动态插入的 role=status 很多读屏不播报），
               关闭时 sr-only 不占位；同时通过 aria-describedby 挂在密码框上，聚焦即可听到。

@@ -63,7 +63,7 @@ export function PluginStats({ stats }: { stats: CapabilityStats }) {
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[14px] font-bold leading-5 text-ink">能力中枢</h2>
+              <h2 className="text-ui-base font-bold leading-5 text-ink">能力中枢</h2>
               <span className="ui-micro rounded-full border border-line-soft bg-[var(--subtle-2)] px-2 py-0.5">
                 本机管理
               </span>
@@ -91,7 +91,7 @@ export function PluginStats({ stats }: { stats: CapabilityStats }) {
                   <Icon width={14} height={14} />
                 </span>
                 <div className="min-w-0">
-                  <div className="text-[20px] font-semibold leading-6 ui-numeric">
+                  <div className="text-num-md font-semibold leading-6 ui-numeric">
                     {card.value(stats)}
                   </div>
                   <div className="ui-caption">{card.label}</div>

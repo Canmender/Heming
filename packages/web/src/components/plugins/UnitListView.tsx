@@ -103,7 +103,7 @@ export function HealthBadge({ health }: { health: PluginHealth }) {
     <span
       aria-label={`健康度 ${label}`}
       title={title}
-      className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${HEALTH_TONE[health.level]}`}
+      className={`rounded-sm border px-1.5 py-0.5 text-ui-xs ${HEALTH_TONE[health.level]}`}
     >
       {label}
     </span>
@@ -185,16 +185,16 @@ function UnitRow({
       className="ui-card plugin-card p-4"
     >
       <div className="flex items-start gap-3">
-        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-[13px] font-bold">
+        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-bold">
           {initial}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={CHIP}>{UNIT_SOURCE_LABELS[unit.source]}</span>
-            <span className="truncate text-[13px] font-semibold">{unit.name}</span>
+            <span className="truncate text-ui-md font-semibold">{unit.name}</span>
             <span className={CHIP}>v{unit.version}</span>
             <span
-              className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}
+              className={`rounded-sm border px-1.5 py-0.5 text-ui-xs ${STATUS_TONE[label] ?? ""}`}
               title={reason || label}
             >
               {label}
@@ -343,7 +343,7 @@ export function UnitListView({
             aria-hidden="true"
             className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
           >
-            <SearchIcon width={13} height={13} />
+            <SearchIcon width={14} height={14} />
           </span>
           <input
             aria-label="搜索插件"
@@ -444,7 +444,7 @@ export function UnitListView({
                     <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1">
                       <span className={CHIP}>{UNIT_SOURCE_LABELS[status.unit.source]}</span>
                       <span
-                        className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}
+                        className={`rounded-sm border px-1.5 py-0.5 text-ui-xs ${STATUS_TONE[label] ?? ""}`}
                         title={status.reason ? blockReasonText(status.reason) : label}
                       >
                         {label}

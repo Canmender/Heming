@@ -64,16 +64,16 @@ function Row({
       onClick={onClick}
       title={title}
       aria-label={ariaLabel}
-      className="flex w-full items-start gap-2 rounded-sm px-2 py-1 text-left text-[12px] leading-5 text-body transition-colors hover:bg-subtle-3 hover:text-ink"
+      className="flex w-full items-start gap-2 rounded-sm px-2 py-1 text-left text-ui-sm leading-5 text-body transition-colors hover:bg-subtle-3 hover:text-ink"
     >
       <span className="min-w-0 flex-1 break-words">{label}</span>
-      {meta ? <span className="shrink-0 text-[10px] text-muted">{meta}</span> : null}
+      {meta ? <span className="shrink-0 text-ui-xs text-muted">{meta}</span> : null}
     </button>
   );
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-2 py-3 text-[12px] leading-5 text-muted">{children}</p>;
+  return <p className="px-2 py-3 text-ui-sm leading-5 text-muted">{children}</p>;
 }
 
 export function BacklinkPane({
@@ -125,7 +125,7 @@ export function BacklinkPane({
               aria-controls={`vault-panel-${item.id}`}
               tabIndex={active ? 0 : -1}
               onClick={() => setTab(item.id)}
-              className={`flex items-center gap-1 rounded-sm px-1.5 py-1 text-[11px] transition-colors ${
+              className={`flex items-center gap-1 rounded-sm px-1.5 py-1 text-ui-xs transition-colors ${
                 active ? "bg-subtle-3 font-medium text-ink" : "text-muted hover:bg-subtle-2 hover:text-ink"
               }`}
             >
@@ -185,7 +185,7 @@ export function BacklinkPane({
                     <>
                       {link.resolved ? <span className="text-[var(--info)]">{label}</span> : <span>{label}</span>}
                       {link.heading ? <span className="ml-1 text-muted">#{link.heading}</span> : null}
-                      {link.embed ? <span className="ml-1 text-[10px] text-muted">嵌入</span> : null}
+                      {link.embed ? <span className="ml-1 text-ui-xs text-muted">嵌入</span> : null}
                     </>
                   }
                   meta={
@@ -250,7 +250,7 @@ export function BacklinkPane({
           Object.keys(frontmatter).length === 0 ? (
             <Empty>这篇笔记没有属性。在文件开头写 --- 包裹的 frontmatter 就会出现。</Empty>
           ) : (
-            <table className="w-full border-collapse text-[12px]">
+            <table className="w-full border-collapse text-ui-sm">
               <tbody>
                 {Object.entries(frontmatter).map(([key, value]) => (
                   <tr key={key} className="align-top">

@@ -70,6 +70,26 @@ function group(name: string): HTMLElement {
 }
 
 describe("SkillsPage 技能区", () => {
+  it("页签键盘可达：整组一个 Tab 停靠点，←/→ 切换视图并移动焦点", async () => {
+    await renderReady();
+    const list = screen.getByRole("tablist", { name: "技能视图" });
+    const groupsTab = within(list).getByRole("tab", { name: "按智能体" });
+    const poolTab = within(list).getByRole("tab", { name: "技能池" });
+
+    expect(groupsTab).toHaveAttribute("tabindex", "0");
+    expect(poolTab).toHaveAttribute("tabindex", "-1");
+
+    groupsTab.focus();
+    fireEvent.keyDown(groupsTab, { key: "ArrowRight" });
+    expect(poolTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(poolTab);
+    expect(document.getElementById("skill-pool-panel")).not.toBeNull();
+
+    fireEvent.keyDown(poolTab, { key: "ArrowLeft" });
+    expect(groupsTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(groupsTab);
+  });
+
   it("默认渲染技能 tab、四类分组与已分配技能（内置默认分配）", async () => {
     await renderReady();
 

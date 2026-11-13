@@ -100,14 +100,14 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
       <div className="flex flex-col gap-3">
         <div className="rounded-lg border border-line px-3 py-2">
           {preview.rows.map((row) => (
-            <div key={row.label} className="flex gap-2 py-0.5 text-[11px]">
+            <div key={row.label} className="flex gap-2 py-0.5 text-ui-xs">
               <span className="w-[52px] shrink-0 text-muted">{row.label}</span>
-              <span className="min-w-0 flex-1 break-all font-mono text-[11px]">{row.value}</span>
+              <span className="min-w-0 flex-1 break-all font-mono text-ui-xs">{row.value}</span>
             </div>
           ))}
         </div>
 
-        <div className={`rounded-lg border px-3 py-2 text-[11px] ${RISK_STYLE[preview.risk.level]}`}>
+        <div className={`rounded-lg border px-3 py-2 text-ui-xs ${RISK_STYLE[preview.risk.level]}`}>
           <div className="font-bold">
             {RISK_LABEL[preview.risk.level]} · {preview.risk.message}
           </div>
@@ -116,15 +116,15 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
           )}
         </div>
 
-        <p className="text-[11px] text-muted">
+        <p className="text-ui-xs text-muted">
           活跃标记只表示该条目未被下架，不代表已通过安全审核。
         </p>
 
         {hints.length > 0 && (
           <div className="rounded-lg border border-line px-3 py-2">
-            <div className="text-[11px] font-bold text-muted">该服务需要以下请求头</div>
+            <div className="text-ui-xs font-bold text-muted">该服务需要以下请求头</div>
             {hints.map((h) => (
-              <label key={h.name} className="mt-2 block text-[11px] text-muted">
+              <label key={h.name} className="mt-2 block text-ui-xs text-muted">
                 {h.name}
                 {h.isRequired ? "（必填）" : "（可选）"}
                 <input
@@ -137,21 +137,21 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
                     setError(null);
                   }}
                   placeholder={h.placeholder ?? (h.isSecret ? "敏感值，仅保存在本机" : "")}
-                  className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-ink"
+                  className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-ui-xs text-ink outline-hidden focus:border-ink"
                 />
-                {h.description && <span className="mt-0.5 block text-[10px] text-muted">{h.description}</span>}
+                {h.description && <span className="mt-0.5 block text-ui-xs text-muted">{h.description}</span>}
               </label>
             ))}
           </div>
         )}
 
         {error && (
-          <p role="alert" className="text-[11px] text-[var(--danger)]">
+          <p role="alert" className="text-ui-xs text-[var(--danger)]">
             {error}
           </p>
         )}
 
-        <p className="text-[11px] text-muted">
+        <p className="text-ui-xs text-muted">
           安装后服务会出现在插件区的「MCP 服务」Tab，<strong>工具默认全部关闭</strong>，需要你逐个授权。
         </p>
       </div>

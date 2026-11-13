@@ -348,12 +348,12 @@ export function TeamWorkspace() {
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
         {error && (
-          <p role="alert" className="mb-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">
+          <p role="alert" className="mb-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] px-3 py-2 text-ui-sm text-[var(--danger)]">
             {error}
           </p>
         )}
         {notice && !error && (
-          <p role="status" className="mb-3 rounded-lg border border-line-soft bg-[var(--subtle)] px-3 py-2 text-[12px]">
+          <p role="status" className="mb-3 rounded-lg border border-line-soft bg-[var(--subtle)] px-3 py-2 text-ui-sm">
             {notice}
           </p>
         )}
@@ -411,7 +411,7 @@ export function TeamWorkspace() {
               {/* 目标 */}
               <div className="mt-3">
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-[12px] font-bold text-muted">团队目标</span>
+                  <span className="text-ui-sm font-bold text-muted">团队目标</span>
                   {isOwner && !goalEditing && (
                     <button
                       type="button"
@@ -458,7 +458,7 @@ export function TeamWorkspace() {
                     </div>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap text-[13px] leading-6">
+                  <p className="whitespace-pre-wrap text-ui-md leading-6">
                     {snapshot.team.goal || "还没有写目标。写清楚「这个团队要达成什么」，方案与任务才有对齐的依据。"}
                   </p>
                 )}
@@ -467,7 +467,7 @@ export function TeamWorkspace() {
               {/* 成员 */}
               <div className="mt-4">
                 <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                  <span className="text-[12px] font-bold text-muted">成员</span>
+                  <span className="text-ui-sm font-bold text-muted">成员</span>
                   {snapshot.members.map((m) => (
                     <span key={m.user.id} className="ui-chip">
                       {m.user.displayName}
@@ -565,7 +565,7 @@ export function TeamWorkspace() {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除团队「{snapshot.team.name}」？团队下的方案与任务会一起删除，且不可恢复。
             任务交付物文件仍保留在共享文件库，需要时请到文件库单独清理。
           </p>
@@ -598,7 +598,7 @@ export function TeamWorkspace() {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             移除成员「{pendingRemoveMember.user.displayName}」？移除后他的任务会解绑为待认领，需要重新指派。
           </p>
         </ConfirmDialog>

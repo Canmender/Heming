@@ -51,8 +51,8 @@ function KeyCaps({ keys }: { keys: string[] }) {
     <span className="flex shrink-0 items-center gap-1">
       {keys.map((k, i) => (
         <span key={`${k}-${i}`} className="flex items-center gap-1">
-          {i > 0 && <span className="text-[10px] text-muted">+</span>}
-          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-medium text-body">
+          {i > 0 && <span className="text-ui-xs text-muted">+</span>}
+          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-ui-xs font-medium text-body">
             {k}
           </kbd>
         </span>
@@ -64,11 +64,11 @@ function KeyCaps({ keys }: { keys: string[] }) {
 function Group({ title, rows }: { title: string; rows: ShortcutRow[] }) {
   return (
     <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">{title}</h3>
+      <h3 className="mb-1.5 text-ui-xs font-bold uppercase tracking-wider text-muted">{title}</h3>
       <dl className="divide-y divide-line-soft">
         {rows.map((row) => (
           <div key={`${title}-${row.label}`} className="flex items-center justify-between gap-3 py-1.5">
-            <dt className="min-w-0 truncate text-[12px] text-ink">{row.label}</dt>
+            <dt className="min-w-0 truncate text-ui-sm text-ink">{row.label}</dt>
             <dd>
               <KeyCaps keys={row.keys} />
             </dd>
@@ -95,7 +95,7 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
       closeLabel="关闭快捷键"
       bodyClassName="px-4 py-3"
       footer={
-        <p className="mr-auto text-[11px] text-muted">
+        <p className="mr-auto text-ui-xs text-muted">
           输入框内不会触发「?」；随时可按 <kbd className="rounded-sm border border-line px-1">?</kbd> 再次打开。
         </p>
       }

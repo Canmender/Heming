@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import type { Message, User, WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
+import { UNBOUND_ADD_SOURCE_LABEL } from "./ux/UnboundModelNotice.js";
 import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
@@ -4559,7 +4560,7 @@ describe("UX-A 未绑定模型与对话空态", () => {
     mockMessagesFetch([]);
   });
 
-  it("未绑定模型：输入区上方出现统一提示、发送禁用、点「去设置」跳设置页", async () => {
+  it("未绑定模型：输入区上方出现统一提示、发送禁用、点「去模型页添加来源」跳模型页", async () => {
     render(<ChatPage />);
     await act(async () => {});
 
@@ -4573,7 +4574,7 @@ describe("UX-A 未绑定模型与对话空态", () => {
     expect(send).toBeDisabled();
     expect(send.getAttribute("title") ?? "").toContain("还没有绑定模型连接");
 
-    fireEvent.click(within(noticeBox).getByRole("button", { name: "去设置" }));
+    fireEvent.click(within(noticeBox).getByRole("button", { name: UNBOUND_ADD_SOURCE_LABEL }));
     expect(useUiStore.getState().page).toBe("model");
   });
 
@@ -4593,7 +4594,7 @@ describe("UX-A 未绑定模型与对话空态", () => {
       expect(screen.queryByText(/当前智能体还没有绑定模型连接/)).toBeNull(),
     );
     // 拿不准管理连接时仍可去设置：按钮改叫「管理连接」
-    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: UNBOUND_ADD_SOURCE_LABEL })).toBeNull();
   });
 
   it("通道状态只描述实时通道，不与「未绑定模型」互相矛盾（P1-3）", async () => {

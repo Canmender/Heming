@@ -270,7 +270,7 @@ export function AgentFormPanel({
           className="border border-line"
         />
         {modal ? (
-          <h3 className="text-[14px] font-bold">{title}</h3>
+          <h3 className="text-ui-base font-bold">{title}</h3>
         ) : (
           <h2 className="ui-section-title">{title}</h2>
         )}
@@ -431,7 +431,7 @@ export function AgentFormPanel({
                 variant="ghost"
                 className="mt-1"
               >
-                去设置页添加
+                去模型页添加
               </Button>
             ) : (
               <select
@@ -469,7 +469,7 @@ export function AgentFormPanel({
           type="button"
           onClick={onClose}
           disabled={pending}
-          size="md" variant="ghost" className="text-[13px] disabled:opacity-60"
+          size="md" variant="ghost" className="text-ui-md disabled:opacity-60"
         >
           取消
         </Button>
@@ -478,7 +478,7 @@ export function AgentFormPanel({
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={pending}
-            className="mr-auto rounded-lg border border-[var(--danger-line)] px-3 py-1.5 text-[13px] text-[var(--danger)] disabled:opacity-60"
+            className="mr-auto rounded-lg border border-[var(--danger-line)] px-3 py-1.5 text-ui-md text-[var(--danger)] disabled:opacity-60"
           >
             删除智能体
           </button>
@@ -515,7 +515,7 @@ export function AgentFormPanel({
           </>
         }
       >
-        <p className="text-[12px] leading-6">
+        <p className="text-ui-sm leading-6">
           删除智能体「{agent.name}」？此操作不可恢复；已发送的聊天记录不受影响。
         </p>
       </ConfirmDialog>

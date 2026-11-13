@@ -126,6 +126,54 @@ async function renderPage() {
   );
 }
 
+describe("团队视图页签（③-1 roving tabindex）", () => {
+  it("整组一个 Tab 停靠点，←/→ 切换视图并联动 tabpanel", async () => {
+    await renderPage();
+    const list = screen.getByRole("tablist", { name: "团队视图" });
+    const workspace = within(list).getByRole("tab", { name: "工作台" });
+    const feed = within(list).getByRole("tab", { name: "动向" });
+    const board = within(list).getByRole("tab", { name: "看板" });
+
+    expect(workspace).toHaveAttribute("tabindex", "-1");
+    expect(feed).toHaveAttribute("tabindex", "0");
+
+    feed.focus();
+    fireEvent.keyDown(feed, { key: "ArrowRight" });
+    expect(board).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(board);
+    const panel = screen.getByRole("tabpanel");
+    // id 用 useId 生成（同屏挂两份也不撞车），所以断言「关系」而不是字面量：
+    expect(board).toHaveAttribute("aria-controls", panel.getAttribute("id"));
+    expect(panel).toHaveAttribute("aria-labelledby", board.getAttribute("id"));
+
+    fireEvent.keyDown(board, { key: "Home" });
+    expect(workspace).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(workspace);
+  });
+
+  it("同屏挂两份也不产生重复 id（useId 前缀）", async () => {
+    render(<TeamPage />);
+    render(<TeamPage />);
+    await waitFor(() =>
+      expect(screen.getAllByText(/名成员/).length).toBeGreaterThan(0),
+    );
+    const panelIds = screen.getAllByRole("tabpanel").map((el) => el.id);
+    expect(new Set(panelIds).size).toBe(panelIds.length);
+    const tabIds = screen.getAllByRole("tab").map((el) => el.id);
+    expect(new Set(tabIds).size).toBe(tabIds.length);
+    // 面板按需挂载，所以只有当前选中页签带 aria-controls（指向真实存在的面板），
+    // 未选中页签不写悬空引用。两份实例各有一条有效引用。
+    const controlled = screen
+      .getAllByRole("tab")
+      .map((el) => el.getAttribute("aria-controls"))
+      .filter((id): id is string => id !== null);
+    expect(controlled).toHaveLength(2);
+    for (const id of controlled) {
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+  });
+});
+
 describe("团队用量：默认关闭只看本人", () => {
   it("默认关闭：不上传、不采集、不拉排行；用量区显示本机统计", async () => {
     await renderPage();

@@ -368,15 +368,15 @@ function AttachmentPreview({
     return (
       <div
         role="alert"
-        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] text-muted"
+        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-ui-sm text-muted"
       >
-        <FileIcon width={15} height={15} />
+        <FileIcon width={16} height={16} />
         <span className="min-w-0 truncate">{file.name}</span>
-        <span className="shrink-0 text-[10px] text-muted">加载失败</span>
+        <span className="shrink-0 text-ui-xs text-muted">加载失败</span>
         <button
           type="button"
           onClick={() => setReloadKey((k) => k + 1)}
-          className={`shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-[11px] text-[var(--body)] hover:bg-[var(--subtle-2)] ${FOCUS_RING_TIGHT}`}
+          className={`shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-ui-xs text-[var(--body)] hover:bg-[var(--subtle-2)] ${FOCUS_RING_TIGHT}`}
         >
           重试
         </button>
@@ -421,11 +421,11 @@ function AttachmentPreview({
     <a
       href={url}
       download={file.name}
-      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] hover:bg-[var(--subtle-2)]"
+      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-ui-sm hover:bg-[var(--subtle-2)]"
     >
-      <FileIcon width={15} height={15} />
+      <FileIcon width={16} height={16} />
       <span className="min-w-0 truncate">{file.name}</span>
-      <span className="shrink-0 text-[10px] text-muted">
+      <span className="shrink-0 text-ui-xs text-muted">
         {(file.size / 1024).toFixed(1)} KB
       </span>
     </a>
@@ -476,7 +476,7 @@ function AudioBubble({
     };
   }, [fileId, fileKey, mime]);
 
-  if (err) return <div role="alert" className="mt-1 text-[11px] text-[var(--danger)]">音频加载失败：{err}</div>;
+  if (err) return <div role="alert" className="mt-1 text-ui-xs text-[var(--danger)]">音频加载失败：{err}</div>;
   return url ? (
     <audio
       controls
@@ -2898,7 +2898,7 @@ export function ChatPage({
             className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)]"
             onClick={leave}
           >
-            <ChevronIcon width={15} height={15} className="rotate-180" />
+            <ChevronIcon width={16} height={16} className="rotate-180" />
           </button>
         )}
         {/* d.126-C：对话界面不再展示头像（智能体身份由标题承载），消息流是纯转录 */}
@@ -2919,7 +2919,7 @@ export function ChatPage({
           {connState === "open" ? "通道已连接" : connState === "closed" ? "通道断开" : "通道连接中…"}
         </span>
         {recovered && connState === "open" && (
-          <span role="status" className="text-[11px] text-[var(--success)]">
+          <span role="status" className="text-ui-xs text-[var(--success)]">
             通道已恢复
           </span>
         )}
@@ -2931,7 +2931,7 @@ export function ChatPage({
           className={`ml-auto rounded-lg p-1.5 hover:bg-[var(--subtle-3)]${searchOpen ? " bg-[var(--subtle-3)]" : ""}`}
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
         >
-          <SearchIcon width={17} height={17} />
+          <SearchIcon width={18} height={18} />
         </button>
         {/* 多选导出：进入勾选态后，消息行左侧出复选框，header 下方出工具条。 */}
         <button
@@ -2951,7 +2951,7 @@ export function ChatPage({
             }
           }}
         >
-          <SelectIcon width={17} height={17} />
+          <SelectIcon width={18} height={18} />
         </button>
         {/* 导出：只读本机已解密密文，生成 Markdown / JSON 下载（不经过服务端）。 */}
         <div ref={exportRef} className="relative">
@@ -2964,7 +2964,7 @@ export function ChatPage({
             className="rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)]"
             onClick={() => setExportOpen((v) => !v)}
           >
-            <DownloadIcon width={17} height={17} />
+            <DownloadIcon width={18} height={18} />
           </button>
           {exportOpen && (
             <div
@@ -2975,7 +2975,7 @@ export function ChatPage({
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
                 onClick={() => exportConversation("md")}
               >
                 导出 Markdown
@@ -2983,12 +2983,12 @@ export function ChatPage({
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
                 onClick={() => exportConversation("json")}
               >
                 导出 JSON
               </button>
-              <p className="px-2 pb-1 pt-0.5 text-[10px] leading-4 text-muted">
+              <p className="px-2 pb-1 pt-0.5 text-ui-xs leading-4 text-muted">
                 仅包含本机可解密的明文
               </p>
             </div>
@@ -2998,7 +2998,7 @@ export function ChatPage({
       {connState === "closed" && (
         <div
           role="status"
-          className="border-b border-[var(--warn-line)] bg-[var(--warn-soft)] px-[var(--chat-gutter)] py-1.5 text-[11px] text-[var(--warn)]"
+          className="border-b border-[var(--warn-line)] bg-[var(--warn-soft)] px-[var(--chat-gutter)] py-1.5 text-ui-xs text-[var(--warn)]"
         >
           连接已断开，正在自动重连…消息会排队，恢复后自动补发
         </div>
@@ -3024,9 +3024,9 @@ export function ChatPage({
               }
             }}
             placeholder="在本会话中搜索…"
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-hidden placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            className="min-w-0 flex-1 bg-transparent text-ui-sm outline-hidden placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
           />
-          <span className="shrink-0 text-[11px] text-muted">
+          <span className="shrink-0 text-ui-xs text-muted">
             {searchQuery.trim()
               ? searchHits.length
                 ? `${(searchIndex >= 0 ? searchIndex : 0) + 1}/${searchHits.length}`
@@ -3040,7 +3040,7 @@ export function ChatPage({
             onClick={() => goSearch(-1)}
             className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
           >
-            <ChevronIcon width={13} height={13} className="-rotate-90" aria-hidden="true" />
+            <ChevronIcon width={14} height={14} className="-rotate-90" aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -3049,7 +3049,7 @@ export function ChatPage({
             onClick={() => goSearch(1)}
             className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
           >
-            <ChevronIcon width={13} height={13} className="rotate-90" aria-hidden="true" />
+            <ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -3057,13 +3057,13 @@ export function ChatPage({
             onClick={closeSearch}
             className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)]"
           >
-            <XIcon width={13} height={13} aria-hidden="true" />
+            <XIcon width={14} height={14} aria-hidden="true" />
           </button>
         </div>
       )}
       {/* 多选导出工具条：与搜索条同层（header 下方一条），不常驻挤压消息区。 */}
       {selectMode && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-[var(--subtle-2)] px-[var(--chat-gutter)] py-2 text-[12px]">
+        <div className="flex items-center gap-2 border-b border-line-soft bg-[var(--subtle-2)] px-[var(--chat-gutter)] py-2 text-ui-sm">
           <span className="shrink-0 text-muted">已选 {selectedIds.length} 条</span>
           <button
             type="button"
@@ -3196,7 +3196,7 @@ export function ChatPage({
                 title="本机没有这条消息对应的解密密钥：可能来自其他设备、本机缓存被清理过，或这条消息在生成时被中断。"
               >
                 本机解不开这条消息
-                <span className="ml-1 text-[11px]">
+                <span className="ml-1 text-ui-xs">
                   （可能来自其他设备、本机缓存被清理，或消息在生成时被中断）
                 </span>
               </div>
@@ -3226,7 +3226,7 @@ export function ChatPage({
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
               {showSeparator ? (
                 <div className="mb-3 flex justify-center">
-                  <span className="rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-[10px] text-muted">
+                  <span className="rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
                     {formatDayClock(m.createdAt)}
                   </span>
                 </div>
@@ -3259,14 +3259,14 @@ export function ChatPage({
                 )}
                 <div
                   data-message-bubble=""
-                  className={`min-w-0 text-[13px] leading-relaxed ${
+                  className={`min-w-0 text-ui-md leading-relaxed ${
                     mine ? "max-w-[92%]" : "flex-1"
                   }`}
                 >
                   {mine ? (
                     // 用户输入：一块提示（浅底 + 细边框），不占头像列、不挤右侧气泡
                     <div className="rounded-lg border border-line bg-[var(--subtle-2)] px-3.5 py-2.5">
-                      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted">
+                      <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
                         <span>我</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
@@ -3277,7 +3277,7 @@ export function ChatPage({
                   ) : (
                     // 助手输出：署名一行 + 思考块 + 工具调用块 + 正文（无气泡底色/圆角）
                     <div className="px-0.5">
-                      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted">
+                      <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
                         <span>{senderName || "智能体"}</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
@@ -3298,7 +3298,7 @@ export function ChatPage({
                   <button
                     type="button"
                     aria-label="复制消息"
-                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-[var(--surface)] px-1.5 py-0.5 text-[10px] text-muted hover:text-ink group-hover:block group-focus-within:block"
+                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-[var(--surface)] px-1.5 py-0.5 text-ui-xs text-muted hover:text-ink group-hover:block group-focus-within:block"
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
@@ -3330,10 +3330,10 @@ export function ChatPage({
         <button
           type="button"
           aria-label="滚动到最新消息"
-          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
+          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-ui-sm text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
           onClick={() => scrollToLatest()}
         >
-          <ChevronIcon width={13} height={13} className="rotate-90" aria-hidden="true" />
+          <ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />
           新消息
         </button>
       ) : null}
@@ -3344,7 +3344,7 @@ export function ChatPage({
         {!subtleOk && (
           <p
             role="alert"
-            className="mx-6 mt-2 border-l-2 border-[var(--danger)] bg-[var(--danger-soft)] px-2 py-1.5 text-[12px] text-[var(--danger)]"
+            className="mx-6 mt-2 border-l-2 border-[var(--danger)] bg-[var(--danger-soft)] px-2 py-1.5 text-ui-sm text-[var(--danger)]"
           >
             {NO_E2E_NOTICE}
           </p>
@@ -3366,7 +3366,7 @@ export function ChatPage({
         )}
         {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
         {recording ? (
-          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-[12px]">
+          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm">
             <span role="status">录音中…（最长 60 秒）</span>
             <button
               type="button"
@@ -3387,7 +3387,7 @@ export function ChatPage({
           </div>
         ) : uploading ? (
           // A8：上传进行中占住提示位，四个入口已禁用
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-[12px] text-muted">
+          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-muted">
             上传中…（≤6MB）
           </p>
         ) : sendNotice ? (
@@ -3395,7 +3395,7 @@ export function ChatPage({
           sendNotice.kind === "error" ? (
             <div
               role="alert"
-              className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-[12px] text-[var(--danger)]"
+              className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--danger)]"
             >
               <span>{sendNotice.text}</span>
               {sendNotice.retry ? (
@@ -3409,26 +3409,26 @@ export function ChatPage({
               ) : null}
             </div>
           ) : (
-            <p role="status" className="px-[var(--chat-gutter)] pt-2 text-[12px] text-[var(--warn)]">
+            <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
               {sendNotice.text}
             </p>
           )
         ) : null}
         {/* 分叉降级（d.56）：来源日志重建不出前缀，本次按普通重跑执行——整轮运行期间都显示 */}
         {forkNotice && (
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-[12px] text-[var(--warn)]">
+          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
             {forkNotice}
           </p>
         )}
         {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
         {toolsNotice && (
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-[12px] text-[var(--warn)]">
+          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
             {toolsNotice}
           </p>
         )}
         {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
         {activeLocal.length > 0 && (
-          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-[12px] text-muted">
+          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm text-muted">
             <span>生成中：{activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}</span>
             <button
               type="button"
@@ -3514,7 +3514,7 @@ export function ChatPage({
             <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 ui-overlay-shadow">
               <button
                 type="button"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
                 onClick={() => {
                   setVoiceMenu(false);
                   toggleVoice();
@@ -3525,7 +3525,7 @@ export function ChatPage({
               <button
                 type="button"
                 disabled={!hasRecorder}
-                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[var(--subtle-2)] disabled:text-muted disabled:hover:bg-transparent"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)] disabled:text-muted disabled:hover:bg-transparent"
                 onClick={() => {
                   setVoiceMenu(false);
                   void startRecording();
@@ -3534,7 +3534,7 @@ export function ChatPage({
                 语音消息（录音）
               </button>
               {!hasRecorder && (
-                <p className="px-2 pb-1 pt-0.5 text-[10px] text-muted">当前环境不支持录音</p>
+                <p className="px-2 pb-1 pt-0.5 text-ui-xs text-muted">当前环境不支持录音</p>
               )}
             </div>
           )}
@@ -3570,7 +3570,7 @@ export function ChatPage({
         {/* 底部说明 + 快捷键提示（UX-A）：常驻但弱化，不占提示位 */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[var(--chat-gutter)] pb-2">
           {conv && (
-            <span className="text-[11px] text-muted">
+            <span className="text-ui-xs text-muted">
               与 <span className="font-medium text-[var(--body)]">{conv.agent.name}</span>{" "}
               的对话 · 发送后自动交给智能体
             </span>

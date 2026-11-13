@@ -66,7 +66,7 @@ export function HomeTeamUsage() {
   if (!usageOn) {
     return (
       <div className="mt-2">
-        <p className="text-[11px] leading-5 text-muted">
+        <p className="text-ui-xs leading-5 text-muted">
           「用量」共享未开启：不上传、不采集，也看不到全站排行。开启后只同步近 30
           天的 token 数、模型名与连接名。
         </p>
@@ -94,7 +94,7 @@ export function HomeTeamUsage() {
   if (error) {
     return (
       <div className="mt-2 flex items-center gap-2">
-        <span role="alert" className="min-w-0 flex-1 truncate text-[11px] text-muted">
+        <span role="alert" className="min-w-0 flex-1 truncate text-ui-xs text-muted">
           用量排行加载失败：{error}
         </span>
         <button
@@ -115,7 +115,7 @@ export function HomeTeamUsage() {
   return (
     <div className="mt-2">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] text-muted">近 30 天 · 全站排行（只含显示名与 token 数）</span>
+        <span className="text-ui-xs text-muted">近 30 天 · 全站排行（只含显示名与 token 数）</span>
         <button
           type="button"
           className="ui-link ml-auto shrink-0"
@@ -135,7 +135,7 @@ export function HomeTeamUsage() {
       ) : (
         <ol className="mt-1.5 space-y-1">
           {ranking.slice(0, TOP_N).map((row, i) => (
-            <li key={row.userId} className="flex items-baseline gap-2 text-[11px]">
+            <li key={row.userId} className="flex items-baseline gap-2 text-ui-xs">
               <span className="w-4 shrink-0 tabular-nums text-muted">{i + 1}</span>
               <span className="min-w-0 flex-1 truncate">
                 {row.displayName}
@@ -148,7 +148,7 @@ export function HomeTeamUsage() {
       )}
 
       {selfTotal > 0 ? (
-        <div className="mt-1.5 border-t border-line-soft pt-1.5 text-[11px] text-muted">
+        <div className="mt-1.5 border-t border-line-soft pt-1.5 text-ui-xs text-muted">
           我的用量 <b className="tabular-nums">{fmtTokens(selfTotal)}</b>
         </div>
       ) : null}

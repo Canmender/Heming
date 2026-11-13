@@ -51,8 +51,8 @@ export function AgentStreamBubble({
       <p className="sr-only" role="status" aria-live="polite">
         {streaming ? `${name} 正在生成回复` : errorMessage ? `${name} 生成失败` : `${name} 已生成回复`}
       </p>
-      <div className="max-w-[78%] rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-[13px]">
-        <div className="mb-0.5 flex items-center gap-2 text-[10px] text-muted">
+      <div className="max-w-[78%] rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-ui-md">
+        <div className="mb-0.5 flex items-center gap-2 text-ui-xs text-muted">
           <span>{name}</span>
           {streaming && <span className="text-muted">生成中…</span>}
         </div>
@@ -83,7 +83,7 @@ export function AgentStreamBubble({
             {onRetry ? (
               <button
                 type="button"
-                className={`mt-1 rounded-sm border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[var(--subtle-3)] ${FOCUS_RING_TIGHT}`}
+                className={`mt-1 rounded-sm border border-line px-2 py-0.5 text-ui-sm text-muted hover:bg-[var(--subtle-3)] ${FOCUS_RING_TIGHT}`}
                 onClick={onRetry}
               >
                 继续生成
@@ -112,22 +112,22 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
         aria-expanded={open}
         aria-label="思考过程"
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-1 text-left text-[11px] text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
+        className={`flex w-full items-center gap-1 text-left text-ui-xs text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
       >
         <ChevronIcon
           width={12}
           height={12}
           aria-hidden="true"
-          className={`shrink-0 transition-transform duration-150 motion-reduce:transition-none ${
+          className={`shrink-0 transition-transform duration-fast motion-reduce:transition-none ${
             open ? "rotate-90" : ""
           }`}
         />
         <span>思考过程</span>
-        <span className="text-[10px] text-muted">{text.length} 字</span>
-        {streaming && <span className="text-[10px] text-muted">· 进行中</span>}
+        <span className="text-ui-xs text-muted">{text.length} 字</span>
+        {streaming && <span className="text-ui-xs text-muted">· 进行中</span>}
       </button>
       {open && (
-        <div className="mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-[12px] italic leading-relaxed text-[var(--body)]">
+        <div className="mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-ui-sm italic leading-relaxed text-[var(--body)]">
           {text}
         </div>
       )}
@@ -151,18 +151,18 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
         aria-expanded={open}
         aria-label="工具调用"
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-1.5 text-left text-[11px] text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
+        className={`flex w-full items-center gap-1.5 text-left text-ui-xs text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
       >
         <ChevronIcon
           width={12}
           height={12}
           aria-hidden="true"
-          className={`shrink-0 transition-transform duration-150 motion-reduce:transition-none ${
+          className={`shrink-0 transition-transform duration-fast motion-reduce:transition-none ${
             open ? "rotate-90" : ""
           }`}
         />
         <span>工具调用 · {tools.length} 次</span>
-        {summary && <span className="text-[10px] text-muted">{summary}</span>}
+        {summary && <span className="text-ui-xs text-muted">{summary}</span>}
       </button>
       {open && (
         <div className="mt-1 border-t border-line-soft pt-1">
@@ -179,26 +179,26 @@ export function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
     <div className="mt-1 flex flex-col gap-1">
       {tools.map((t) => (
         <details key={t.id} className="rounded-md border border-line-soft bg-[var(--surface)] px-2 py-1">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11px]">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-ui-xs">
             <StatusDot status={t.status} />
-            <span className="font-mono text-[11px] text-ink" title={t.name}>
+            <span className="font-mono text-ui-xs text-ink" title={t.name}>
               {toolNameLabel(t.name)}
             </span>
-            <span className={`text-[10px] ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
+            <span className={`text-ui-xs ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
             {t.endedAt ? (
-              <span className="text-[10px] text-muted">{Math.max(0, t.endedAt - t.startedAt)}ms</span>
+              <span className="text-ui-xs text-muted">{Math.max(0, t.endedAt - t.startedAt)}ms</span>
             ) : null}
           </summary>
           <div className="mt-1 border-t border-line-soft pt-1">
-            <div className="text-[10px] text-muted">参数</div>
-            <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] px-1.5 py-1 font-mono text-[10px] text-[var(--body)]">
+            <div className="text-ui-xs text-muted">参数</div>
+            <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] px-1.5 py-1 font-mono text-ui-xs text-[var(--body)]">
               {t.args || "{}"}
             </pre>
             {t.status !== "running" && (
               <>
-                <div className="mt-1 text-[10px] text-muted">结果</div>
+                <div className="mt-1 text-ui-xs text-muted">结果</div>
                 <pre
-                  className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-[10px] ${
+                  className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${
                     t.status === "error" || t.status === "denied"
                       ? "bg-[var(--danger-soft)] text-[var(--danger)]"
                       : "bg-[var(--subtle-2)] text-[var(--body)]"
@@ -240,7 +240,7 @@ export function toolSummaryLabel(tools: ToolTrace[]): string {
 function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
   if (!attempts.some((a) => !a.ok)) return null;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+    <div className="mt-1 flex flex-wrap items-center gap-1 text-ui-xs">
       <span className="shrink-0 text-muted">候选链</span>
       {attempts.map((a, i) => (
         <span
@@ -254,7 +254,7 @@ function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
         >
           {a.profileLabel}
           {a.ok ? (
-            <CheckIcon width={11} height={11} className="inline-block align-[-1px] text-[var(--success)]" aria-hidden="true" />
+            <CheckIcon width={12} height={12} className="inline-block align-[-1px] text-[var(--success)]" aria-hidden="true" />
           ) : (
             ` · ${a.kind ?? "失败"}`
           )}

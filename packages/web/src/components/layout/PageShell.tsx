@@ -35,6 +35,11 @@ export const WIDTH_CLASS: Record<PageWidth, string> = {
   narrow: "max-w-[720px]",
 };
 
+/** 宽度档类的只读别名（d.141）：页面内的附属面板（重连/恢复登录等）此前各自写
+ *  max-w-[380px] / max-w-[420px] 这类魔法数，与页面内容宽度不同源。
+ *  需要「和内容列同宽」的面板从这里取值，别再新写 max-w-[…]。 */
+export const PAGE_WIDTH_CLASS = WIDTH_CLASS;
+
 export interface PageShellProps {
   /** 页面标题（必填；字符串或节点，便于带徽标/时间） */
   title: ReactNode;

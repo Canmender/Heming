@@ -47,7 +47,7 @@ afterEach(() => cleanup());
 describe("快捷键帮助的全局入口", () => {
   it("?（Shift+/）在页面上打开帮助面板，Esc 关闭", async () => {
     render(<App />);
-    await screen.findByPlaceholderText("用户名");
+    await screen.findByLabelText("用户名");
     expect(screen.queryByRole("dialog", { name: "快捷键" })).toBeNull();
 
     fireEvent.keyDown(document, { key: "?", shiftKey: true, code: "Slash" });
@@ -60,7 +60,7 @@ describe("快捷键帮助的全局入口", () => {
 
   it("输入框内按 ? 不触发（用户是在打问号，不是在求帮助）", async () => {
     render(<App />);
-    const input = await screen.findByPlaceholderText("用户名");
+    const input = await screen.findByLabelText("用户名");
     input.focus();
 
     fireEvent.keyDown(input, { key: "?", shiftKey: true, code: "Slash" });
@@ -69,14 +69,14 @@ describe("快捷键帮助的全局入口", () => {
 
   it("Ctrl+/ 也能打开（与 ? 同一个面板）", async () => {
     render(<App />);
-    await screen.findByPlaceholderText("用户名");
+    await screen.findByLabelText("用户名");
     fireEvent.keyDown(document, { key: "/", ctrlKey: true, code: "Slash" });
     expect(await screen.findByRole("dialog", { name: "快捷键" })).toBeInTheDocument();
   });
 
   it("导航轨的 ? 按钮再次打开帮助（入口常驻）", async () => {
     render(<App />);
-    await screen.findByPlaceholderText("用户名");
+    await screen.findByLabelText("用户名");
     // 未登录时导航轨不渲染；直接验证登录态：给一个用户后应用壳出现
     act(() => {
       useAuthStore.setState({

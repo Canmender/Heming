@@ -12,6 +12,42 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.75.11",
+    "date": "2026-11-13",
+    "title": "UI/UX 第 21 轮：刻度落地、暗色桥接层清零、主页与设置简化",
+    "bullets": [
+      "`packages/web/src/index.css` 的 `@theme` 新增字号 `--text-ui-xs/sm/md/base/lg/xl`（11/12/13/14/18/22px）、数字展示 `--text-num-sm/md/lg`（18/22/26px）、动效 `--transition-duration-fast/base/slow`（120/180/280ms）与",
+      "`.tmp/uiux2/codemod-scales.mjs` 全仓替换：`text-[Npx]` **641 → 0**（84 个源文件，不含测试）；`duration-150`21 处换 `duration-fast`；成对图标尺寸吸附到 2px 栅格 **12/14/16/18/20/24**（13→14 25 处、17→18 13 处、",
+      "新增守卫 `packages/web/src/lib/designScales.test.ts`：非测试非 generated 源码不得出现 `text-[Npx]`、`duration-(100|150|160|200|280|300|500)`，图标 width/height 必须成对同值且在栅格，并钉住 `@theme` 里的九个字号键、",
+      "codemod 会误改 `packages/web/src/generated/changelog.ts`（历史文本里的「12px」这类字样），已 `git checkout` 还原；脚本因此排除 `.test.*` 与 generated。",
+      "`index.css` 删除 219 行「用 `[data-theme=\"dark\"] .bg-\\[\\#…\\]` 按字面量类名覆盖」的桥接规则（92 条），文件从 1169 行降到 1002 行。复核前提：非测试源码里字面量颜色工具类已清零，桥接层已无事可做。",
+      "保留的是语义规则：`.ui-card`、`.ui-skeleton`、`.shadow-card`/`.shadow-float`、`input/select/textarea { color-scheme: dark }`、滚动条配色，以及 `[data-theme=\"dark\"] .bg-white`（插件与 Markdown 注入的 HTML 兜底，那里没有主题类可挂）。",
+      "`packages/web/src/lib/themePrimitives.test.ts` 增加「字面量颜色工具类不得回流（d.141）」：扫源码禁止`(text|bg|border|ring|divide|fill|stroke)-\\[#…\\]`，并禁止 index.css 再出现那四条桥接选择器前缀。踩了两个坑：",
+      "新增 `packages/web/src/lib/ui/tabs.ts`（`nextTabIndex` + `useRovingTabs`）：roving tabindex、←→ 循环、Home/End、`aria-selected`/`tabindex` 与 tabpanel 的 `aria-labelledby` 一致。记忆/插件/技能/团队四页的分区页签改用它，",
+      "新增 `packages/web/src/components/ui/AsyncBoundary.tsx`（loading/error/empty 四态 + `onRetry` + 空态 action 插槽）、`ui/IconButton.tsx`（32×32，`aria-label` 必填）、`ui/SectionCard.tsx`（卡片壳从各处上提）。",
+      "Team/TeamBoard/Registry 接 `AsyncBoundary`；Memory 页名册失败由黄字 `role=status` 改 `role=alert` + 重试；知识库索引失败补「重试」；知识库页头并入 `PageShell`（工作台宽度 `full`，空库态仍 `readable`）。",
+      "`packages/web/src/components/TokenHeatmap.tsx` 重写为键盘可达：容器 `role=\"group\"` + 一句概况 aria-label（合计/最高值/操作提示），30 格各自 `role=\"img\"` + 日期与用量，roving tabindex（默认停在今天），",
+      "`packages/web/src/components/ModelTraceView.tsx` 改宽度自适应：`ResizeObserver` 算 `zoom = clamp(0.72–1, (宽-32)/960)`作用在内层图上。不能只改 viewBox——节点是绝对定位的 HTML，会与连线错位；0.72 以下继续靠卡片横向滚动。",
+      "`packages/web/src/components/ModelUsageView.tsx`「最近请求」表改 `.ui-table`（数字列 `ui-numeric`、模型列手写体），不再每格手拼 padding。",
+      "**设置**：每个设置卡加「当前值摘要」（`components/settings/CardSummary.tsx`），不必点进去才知道开关状态；引导卡三步就地展开并显示进度；模型接入改为「选预设服务商 → 选地址类型 → 只填 Key」，带 Key 格式校验、",
+      "**主页**：首屏只留「现在要做什么」（`home-focus` / `home-secondary` 分区），统计与团队动向降为次屏；Token 卡与团队动向抽成 `components/home/UsageCard.tsx`、`home/TeamActivityCard.tsx`；最近对话空态时整块不渲染。",
+      "**壳层**：`App.tsx` 的登录/断连提示收进 `AuthStatusPanel`，容器宽度改用 `PAGE_WIDTH_CLASS`（`PageShell` 导出六档）；`NavRail` 的搜索/导航页/快捷键/固定开关四个控件统一 32×32 命中区（`RAIL_CTRL`），通知铃铛 30→32；",
+      "**功能修复**：F-01 首载失败不再静默（对话/智能体列表给 `role=\"alert\"` + 原因 + 重试）；F-02「设置 → 模型」死指引改指向左侧「模型」页（设置页只有 个人资料/高级/外观/导航/关于，模型是独立页）；F-04 备份模型卡指向不存在的入口；",
+      "登录页两个输入框加可见 `<label>`（placeholder 改为「输入用户名 / 输入密码」，可访问名由 label 提供，`aria-invalid`/`aria-describedby`/CapsLock 提示保留）。",
+      "`pnpm -r typecheck` exit 0（6 个 workspace 项目，含 desktop 的 49 个 `node --check`）；`pnpm -r build` exit 0（web vite 1.79s，仅既有的 chunk > 500kB 警告）。",
+      "`pnpm --filter @heming/web test`：**304 文件 / 4435 例全过**（77s）。server 15 文件 268 例全过；desktop 的 `node --test` 套件全过。",
+      "多人并发跑 bash 会撞 dsh-ops 0.5.1 的 `EXECUTOR_UNAVAILABLE: … link 'winuxcmd.exe'`。本轮用`.tmp/uiux2/q.sh`（mkdir 原子锁 + 排队）把命令串行化；完整 typecheck / 全量测试只由 Lead 跑一次，"
+    ],
+    "paragraphs": [
+      "这一轮同时收三个口子：把「字号/动效/图标」从各处字面量收进 token；把最后一层「按字面量类名覆盖暗色」的补丁删掉；再按上一轮审计的 P2 清单，把主页、设置、模型接入、失败态与可访问性的遗留逐条做完。四路并发施工（设置、壳层、交互/可访问性、功能勘察），Lead 负责 token 与最终门禁。",
+      "刻度（审计 D3 收口）`--ease-out-soft`；并把 `--default-transition-duration` / `--default-transition-timing-function` 指到上面两个值，让「没写时长」的 `transition-*` 也走同一刻度。**只声明 font-size、不声明 line-height**：既有 `leading-*` 不动，换类名不改观感；9px/10px 统一升到 11px（此前 9px 只有 1 处）。11→12 6 处、15→16 6 处、22→24 2 处、10→12 1 处）。栅格取 2px 阶梯而非审计建议的 14/16/20/24：17→16/18→16会全局缩水，风险大；当前 `icons.tsx` 的 base 18 不变。三个时长键与 `--ease-out-soft`。生成产物要按目录名（`ent.name === \"generated\"`）跳过——按拼好的路径正则匹配会漏（目录项自身结尾没有分隔符）。",
+      "暗色（审计 D2 收口）Windows 路径要按 `/generated[\\\\/]/` 匹配；注释里写字面模式会自我命中，改成文字描述。",
+      "交互与可访问性删掉各自手写的键盘处理；`MemoryPage.tsx:2499-2531` 那段（审计建议不动的）保持原样。`Button` 内置焦点环、`EmptyState` 补 `align`/`action`/`actions`、`ErrorState` 的按钮名统一为「重试」。←→/Home/End 移动并跟随焦点。以前 30 格的唯一信息载体是 `title`，键盘、触屏、读屏都拿不到。",
+      "简化与修复（勘察报告 16 条里修 8 条）URL 自动补全、保存后自动跑一次 `provider test` 并给可达性结论；`ModelPage` 的裸 input 换 `TextField`。Alt+数字快捷键、`navOrder` 顺序、aria 名与 `data-testid` 全部未变；共享文件表头改 `flex-wrap`，不再在 375 下溢出。F-05 知识库页脚「全部已保存」与「临时保存，刷新即丢」自相矛盾；F-06 命令面板归档检索失败静默；F-07 浏览器预览版不再渲染「新建智能体 / 去绑定模型」（没有桌面桥时这两个按钮只会把用户送进死循环）；F-11 Ctrl+K 无结果时给下一步（换短词 / 用左侧导航逐条翻 / 显示归档失败原因）；F-14 首页页脚服务探测可重试。",
+      "门禁与协作teammate 只跑定向用例。这个脚本留在 `.tmp/`（已被 gitignore），不进仓库。"
+    ]
+  },
+  {
     "version": "d.140.3.74.11",
     "date": "2026-11-13",
     "title": "卸载时让用户选「data 保留还是删除」",

@@ -245,7 +245,7 @@ describe("humanizeProviderError：供应商原文翻成人话（展示层用）"
 
   it("网络层失败（无状态码）与未绑定连接都有明确指引", () => {
     expect(humanizeProviderError("provider_error: fetch failed")).toContain("检查网络");
-    expect(humanizeProviderError("未绑定 LLM 连接")).toContain("设置 → 模型");
+    expect(humanizeProviderError("未绑定 LLM 连接")).toContain("「模型」页");
   });
 
   it("其它文案原样返回（不二次翻译，避免走样）", () => {

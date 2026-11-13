@@ -92,6 +92,27 @@ export function ModelTraceView() {
   const [filter, setFilter] = useState<EdgeState | "all">("all");
   const [reducedMotion, setReducedMotion] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * 链路图自适应宽度（d.141）：图按 960px 绝对坐标排版（节点是绝对定位的 HTML，
+   * 不是 SVG 内元素，所以单改 viewBox 会让节点与连线错位）。卡片变窄时整块等比缩小，
+   * 下限 0.72——再小字就不可读了，剩下的宽度靠卡片自身的横向滚动。
+   */
+  const fitRef = useRef<HTMLDivElement | null>(null);
+  const [fit, setFit] = useState(1);
+
+  useEffect(() => {
+    const el = fitRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const avail = el.clientWidth - 32; // .p-4 左右内边距
+      if (avail <= 0) return; // jsdom / 隐藏状态下没有布局，保持 1
+      setFit(Math.max(0.72, Math.min(1, avail / W)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -196,7 +217,7 @@ export function ModelTraceView() {
               paused ? "bg-[var(--line-strong)]" : "rta-live-dot bg-[var(--success)]"
             }`}
           />
-          <span className="text-[13px] font-bold">实时</span>
+          <span className="text-ui-md font-bold">实时</span>
           <span className="ui-caption">
             {paused ? "已暂停" : "模型服务正在做的决定"}
             {snapshot ? ` · 最后读取 ${shortTime(snapshot.now)}` : ""}
@@ -227,13 +248,13 @@ export function ModelTraceView() {
         </div>
       )}
 
-      <div className="ui-card overflow-x-auto p-4">
+      <div ref={fitRef} className="ui-card overflow-x-auto p-4">
         {visibleRows.length === 0 ? (
           <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center">
             <span className="ui-icon-tile mb-1">
               <WorkflowIcon width={20} height={20} />
             </span>
-            <div className="text-[13px] font-bold">
+            <div className="text-ui-md font-bold">
               {graph.rows.length === 0 ? "还没有请求经过" : "当前筛选下没有请求"}
             </div>
             <p className="max-w-[380px] ui-caption">
@@ -243,7 +264,7 @@ export function ModelTraceView() {
             </p>
           </div>
         ) : (
-          <div style={{ width: W, height }} className="relative mx-auto">
+          <div style={{ width: W, height, zoom: fit }} className="relative mx-auto">
             <svg
               role="img"
               aria-label="路由节点图"
@@ -310,13 +331,13 @@ export function ModelTraceView() {
               >
                 <span className="flex items-center gap-2">
                   <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
                     style={{ backgroundColor: avatarColor(node.label) }}
                   >
                     {node.label.slice(0, 1).toUpperCase()}
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-bold">{node.label}</span>
+                    <span className="block truncate text-ui-md font-bold">{node.label}</span>
                     <span className="block ui-caption">{agentCount(node.id)} 个请求</span>
                   </span>
                 </span>
@@ -335,10 +356,10 @@ export function ModelTraceView() {
                     stats.live > 0 ? "rta-live-dot border-[var(--info)]" : "border-line"
                   }`}
                 />
-                <span className="relative text-[13px] font-bold">鸣</span>
+                <span className="relative text-ui-md font-bold">鸣</span>
               </span>
-              <div className="mt-1 text-[14px] font-bold tracking-wide">和鸣</div>
-              <span className="mt-1 rounded-full bg-[var(--heming-accent)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--heming-on-accent)]">
+              <div className="mt-1 text-ui-base font-bold tracking-wide">和鸣</div>
+              <span className="mt-1 rounded-full bg-[var(--heming-accent)] px-2.5 py-0.5 text-ui-xs font-medium text-[var(--heming-on-accent)]">
                 {stats.live > 0 ? "回答中" : "待命"}
               </span>
             </div>
@@ -371,19 +392,19 @@ export function ModelTraceView() {
                 >
                   <span className="flex items-center gap-2">
                     <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
                       style={{ backgroundColor: avatarColor(label) }}
                     >
                       {label.slice(0, 1).toUpperCase()}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="truncate text-[13px] font-bold">{label}</span>
-                        {model && <span className="truncate font-mono text-[11px] text-muted">{model}</span>}
+                        <span className="truncate text-ui-md font-bold">{label}</span>
+                        {model && <span className="truncate font-mono text-ui-xs text-muted">{model}</span>}
                       </span>
                       <span className="block ui-caption">{accountCount(node.id)} 个请求</span>
                     </span>
-                    <span className={`shrink-0 text-[11px] ${active ? "text-[var(--info)]" : "text-muted"}`}>
+                    <span className={`shrink-0 text-ui-xs ${active ? "text-[var(--info)]" : "text-muted"}`}>
                       {active ? "回答中…" : visibleRows.some((row) => row.account === node.label) ? "已就绪" : "待命"}
                     </span>
                   </span>
@@ -396,7 +417,7 @@ export function ModelTraceView() {
 
       {graph.rows.length > 0 && (
         <div className="ui-card flex flex-wrap items-end justify-between gap-3 px-4 py-3">
-          <div className="text-[13px]">{summary}</div>
+          <div className="text-ui-md">{summary}</div>
           <div className="flex items-end gap-6">
             {[
               { label: "请求", value: stats.total },
@@ -407,7 +428,7 @@ export function ModelTraceView() {
               },
             ].map((item) => (
               <span key={item.label} className="text-right">
-                <span className="ui-numeric block text-[20px] font-bold leading-none">{item.value}</span>
+                <span className="ui-numeric block text-num-md font-bold leading-none">{item.value}</span>
                 <span className="block ui-caption">{item.label}</span>
               </span>
             ))}
@@ -418,7 +439,7 @@ export function ModelTraceView() {
       {candidates.length > 0 && (
         <div className="ui-card p-4">
           <div className="flex items-center justify-between">
-            <div className="text-[13px] font-bold">候选链</div>
+            <div className="text-ui-md font-bold">候选链</div>
           </div>
           <ul className="mt-2 divide-y divide-line">
             {candidates.map((route) => (
@@ -427,7 +448,7 @@ export function ModelTraceView() {
                   {route.members.slice(0, 3).map((member) => (
                     <span
                       key={member.id}
-                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--surface)] text-[10px] font-bold text-white"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--surface)] text-ui-xs font-bold text-white"
                       style={{ backgroundColor: avatarColor(member.provider) }}
                       title={member.model}
                     >
@@ -436,12 +457,12 @@ export function ModelTraceView() {
                   ))}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-bold">{route.label}</span>
+                  <span className="block truncate text-ui-md font-bold">{route.label}</span>
                   <span className="block truncate ui-caption">
                     {route.members.map((member) => member.model).join(" · ") || "还没有候选"}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-[11px] text-muted">
+                <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
                   {STRATEGY_LABELS[route.strategy ?? "order"] ?? route.strategy}
                 </span>
               </li>
@@ -452,7 +473,7 @@ export function ModelTraceView() {
 
       {graph.rows.length > 0 && (
         <div ref={listRef} className="ui-card p-4">
-          <div className="text-[13px] font-bold">最近请求是怎么走的</div>
+          <div className="text-ui-md font-bold">最近请求是怎么走的</div>
           <ul className="mt-2 space-y-2">
             {[...visibleRows]
               .reverse()
@@ -472,7 +493,7 @@ export function ModelTraceView() {
                       style={{ backgroundColor: COLORS[state] }}
                     />
                     <span className="min-w-0">
-                      <span className="block text-[12px]">
+                      <span className="block text-ui-sm">
                         {route.agent || "客户端"} 请求 <span className="font-mono">{route.model}</span>
                         {route.done ? `，由 ${account} 回答` : `，正在交给 ${account}`}
                       </span>
@@ -492,7 +513,7 @@ export function ModelTraceView() {
       )}
 
       {selected && (
-        <div className="rounded-lg border border-line-soft bg-[var(--subtle)] p-3 text-[12px]">
+        <div className="rounded-lg border border-line-soft bg-[var(--subtle)] p-3 text-ui-sm">
           <div className="flex items-center justify-between">
             <div className="font-bold">请求详情</div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(null)}>

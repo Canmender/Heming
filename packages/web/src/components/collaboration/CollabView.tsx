@@ -10,6 +10,7 @@ import { estimateTurnCount, runCollaboration } from "../../lib/collaboration/eng
 import { createCollaborationAsk } from "../../lib/collaboration/run.js";
 import { loadLastRun, saveLastRun } from "../../lib/collaboration/history.js";
 import { resolveBoundProfile } from "../../lib/llmRoute.js";
+import { getMagpieBridge } from "../../lib/magpieHost.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { useLlmStore } from "../../store/llm.js";
 import { useUiStore } from "../../store/ui.js";
@@ -345,6 +346,12 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
     if (picks.length >= 2) setSelected(picks);
   };
 
+  /**
+   * 是否在桌面壳里（有 magpie 桥才可能添加模型来源）。整个会话内不变，取一次即可。
+   * 见 lib/magpieHost.ts：浏览器里返回 null，页面据此隐藏「仅桌面端可用」的入口。
+   */
+  const bridgeReady = useMemo(() => getMagpieBridge() !== null, []);
+
   const usableCount = boundIds.size;
   const insufficient = usableCount < 2;
 
@@ -406,22 +413,44 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                     当前可用 {usableCount} 个。协作会让每个智能体用自己的模型与提示词发言，
                     未绑定模型的智能体不能参与（本机运行，不会借用别人的 Key）。
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm" variant="primary"
-                      onClick={() => onCreateAgent?.()}
-                    >
-                      新建智能体
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm" variant="ghost"
-                      onClick={() => useUiStore.getState().setPage("model")}
-                    >
-                      去绑定模型
-                    </Button>
-                  </div>
+                  {/*
+                   * d.141 F-07：浏览器版没有桌面桥 → 模型来源面板整块隐藏、无法绑定，
+                   * 原来的「新建智能体 / 去绑定模型」两个按钮把用户送进
+                   * 「要绑定 → 去模型页 → 加不了 → 回来还是 0」的死循环。
+                   * 无桥时说清原因，只留一个「去模型页看看」的查看入口，不再给做不到的 CTA。
+                   */}
+                  {bridgeReady ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm" variant="primary"
+                        onClick={() => onCreateAgent?.()}
+                      >
+                        新建智能体
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        onClick={() => useUiStore.getState().setPage("model")}
+                      >
+                        去绑定模型
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-3">
+                      <p className="ui-caption leading-5">
+                        当前是浏览器预览：这里不能添加模型来源，协作也跑不起来，需要桌面版连接本机模型。
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        className="mt-2"
+                        onClick={() => useUiStore.getState().setPage("model")}
+                      >
+                        去模型页查看
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -442,7 +471,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 disabled={running}
                 rows={4}
                 placeholder="例如：调研本季度退款率上升的原因，产出改进方案并完成评审。"
-                className="mt-1 min-h-[88px] w-full resize-y rounded-md border border-line-strong bg-[var(--surface)] px-2.5 py-2 text-[13px] leading-5 text-ink outline-hidden transition-colors placeholder:text-[var(--placeholder)] focus:border-ink disabled:cursor-not-allowed disabled:bg-[var(--subtle)]"
+                className="mt-1 min-h-[88px] w-full resize-y rounded-md border border-line-strong bg-[var(--surface)] px-2.5 py-2 text-ui-md leading-5 text-ink outline-hidden transition-colors placeholder:text-[var(--placeholder)] focus:border-ink disabled:cursor-not-allowed disabled:bg-[var(--subtle)]"
               />
 
               <div className="mt-3 grid gap-3 md:grid-cols-[1fr_112px]">

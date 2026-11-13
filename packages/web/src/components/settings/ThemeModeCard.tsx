@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useThemeStore } from "../../store/theme.js";
+import { CardSummary } from "./CardSummary.js";
 import {
   getThemeMode,
   setThemeMode,
@@ -57,9 +58,9 @@ export function ThemeModeCard() {
       aria-label="主题模式"
       className="ui-card max-w-full p-4"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="ui-section-title">主题模式</span>
-        <span className="ui-caption">即时生效，仅本机保存</span>
+        <CardSummary items={[MODES.find((m) => m.id === mode)?.label ?? "跟随系统", "即时生效"]} />
       </div>
       <div className="mt-1 ui-caption">
         深色只改配色，不改变任何功能与文案；与同一页的「主题色」可自由组合。

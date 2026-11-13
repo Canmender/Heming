@@ -10,7 +10,8 @@
  * 组件基元的底色/文字色必须走 CSS 变量，暗色对应规则必须存在。
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
 
 const css = readFileSync("src/index.css", "utf8");
 const heatmap = readFileSync("src/components/TokenHeatmap.tsx", "utf8");
@@ -49,13 +50,56 @@ describe("组件基元的底色必须走变量（暗色不白底）", () => {
   });
 });
 
-describe("暗色字面量兼容层覆盖常用 hover（自检发现的悬停闪白）", () => {
-  it.each(["#fafafa", "#f3f3f3", "#f0f0f0", "#f5f5f5", "#f7f7f7", "#fbfbfb"])(
-    "hover:bg-[%s] 有暗色映射",
-    (hex) => {
-      expect(css).toContain(`.hover\\:bg-\\[\\#${hex.slice(1)}\\]:hover`);
-    },
+/**
+ * d.141：字面量颜色工具类清零后，暗色兼容层（按类名覆盖 `bg-[#fafafa]` 的桥接规则）
+ * 整体删除。守卫改为两条更强的约束：
+ *   1. 源码里不许再出现字面量颜色工具类（出现时要么换 token，要么说明为什么例外）；
+ *   2. index.css 里不许再长出「按字面量类名覆盖暗色」的桥接规则。
+ * 这比原来「钉住 6 条 hover 映射」更难绕过：旧写法只保护 6 个类名，新写法保护整类问题。
+ */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...sourceFiles(p));
+    else if (/\.(tsx?|jsx?)$/.test(ent.name)) out.push(p);
+  }
+  return out;
+}
+
+describe("字面量颜色工具类不得回流（d.141）", () => {
+  // 只扫组件源码：测试自己会断言这些字面量，generated/changelog.ts 是历史文本。
+  const files = sourceFiles("src").filter(
+    (f) => !/\.test\.tsx?$/.test(f) && !/generated[\\/]/.test(f),
   );
+
+  it("源码里没有 text-/bg-/border-/ring-[#…] 这类字面量颜色类", () => {
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      const hit = src.match(/\b(?:text|bg|border|ring|divide|fill|stroke)-\\?\[#[0-9a-fA-F]{3,8}\]/g);
+      if (hit) offenders.push(`${file}: ${[...new Set(hit)].join(", ")}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("index.css 不再有按字面量类名覆盖暗色的桥接规则", () => {
+    expect(css).not.toContain('[data-theme="dark"] .bg-\\[\\#');
+    expect(css).not.toContain('[data-theme="dark"] .text-\\[\\#');
+    expect(css).not.toContain('[data-theme="dark"] .border-\\[\\#');
+    expect(css).not.toContain('[data-theme="dark"] .hover\\:bg-\\[\\#');
+  });
+
+  it("保留的暗色语义覆盖仍在（基元/骨架屏/原生控件）", () => {
+    for (const selector of [
+      '[data-theme="dark"] .ui-card',
+      '[data-theme="dark"] .ui-skeleton',
+      '[data-theme="dark"] .shadow-card',
+      '[data-theme="dark"] input',
+    ]) {
+      expect(css, selector).toContain(selector);
+    }
+  });
 });
 
 describe("用量热力图配色跟随主题", () => {

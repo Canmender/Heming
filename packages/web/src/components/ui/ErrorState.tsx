@@ -29,8 +29,15 @@ export interface ErrorStateProps {
   retryLabel?: string;
   /** 紧凑变体：用于卡片内部。 */
   compact?: boolean;
-  /** 额外容器类（高度约束等）。 */
+  /** 失败态容器类（高度约束等）。 */
   className?: string;
+  /**
+   * 可展示的错误码（服务端 code / HTTP 状态 / 请求 id）。
+   * 放在说明下方用等宽字呈现：用户报障时能直接念出来，读屏也会读到。
+   */
+  code?: string;
+  /** 文案对齐，默认 center；侧栏/卡片内用 `start`。 */
+  align?: "center" | "start";
 }
 
 export function ErrorState({
@@ -40,11 +47,13 @@ export function ErrorState({
   retryLabel = "重试",
   compact = false,
   className = "",
+  code,
+  align = "center",
 }: ErrorStateProps) {
   return (
     <div
       role="alert"
-      className={`ui-empty${compact ? " gap-1 py-5" : ""}${className ? ` ${className}` : ""}`}
+      className={`ui-empty${align === "start" ? " items-start text-left" : ""}${compact ? " gap-1 py-5" : ""}${className ? ` ${className}` : ""}`}
     >
       {/* 图标槽沿用空态的格子，但换成告警语义的符号；aria-hidden 是因为 role=alert 已经播报整块。 */}
       <div className="ui-icon-tile" aria-hidden="true">
@@ -56,6 +65,11 @@ export function ErrorState({
       </div>
       <p className="ui-empty-title">{title}</p>
       {desc ? <p className="ui-empty-desc">{desc}</p> : null}
+      {code ? (
+        <p className="ui-caption">
+          错误码：<span className="font-mono">{code}</span>
+        </p>
+      ) : null}
       {onRetry ? (
         <div className="ui-empty-actions">
           <Button variant="ghost" size="sm" onClick={onRetry}>

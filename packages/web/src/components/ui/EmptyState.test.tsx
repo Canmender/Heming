@@ -68,4 +68,29 @@ describe("EmptyState 统一空态", () => {
     expect(screen.getByText("团队动向", { selector: "strong" })).toBeInTheDocument();
     expect(screen.getByText("成员开启共享后会出现摘要。")).toBeInTheDocument();
   });
+
+  it("align=start：侧栏/卡片内左对齐（不再居中折断句子）", () => {
+    const { container } = render(<EmptyState title="还没有其他成员。" align="start" compact />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("items-start");
+    expect(root.className).toContain("text-left");
+    expect(root.className).toContain("py-5");
+  });
+
+  it("action 单数插槽：不包数组也渲染操作区，且 actions 优先", () => {
+    const { rerender } = render(
+      <EmptyState title="还没有日程" action={<button type="button">去连接</button>} />,
+    );
+    expect(screen.getByRole("button", { name: "去连接" })).toBeInTheDocument();
+
+    rerender(
+      <EmptyState
+        title="还没有日程"
+        action={<button type="button">单个</button>}
+        actions={<button type="button">多个</button>}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "多个" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "单个" })).toBeNull();
+  });
 });

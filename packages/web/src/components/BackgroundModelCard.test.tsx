@@ -16,10 +16,12 @@ describe("BackgroundModelCard 后台任务模型", () => {
     useLlmStore.setState({ models: [], backgroundModel: null });
   });
 
-  it("没有模型目录：说明先连网关，不渲染可选模型", () => {
+  it("没有模型目录：指向「模型」页的真实入口，不渲染可选模型", () => {
     render(<BackgroundModelCard />);
     expect(screen.getByText("后台任务模型")).toBeInTheDocument();
-    expect(screen.getByText(/还没有模型目录/)).toBeInTheDocument();
+    // 旧文案让人「去聊天页连网关」，但全仓没有这个入口（F-04）。
+    expect(screen.getByText(/还没有模型目录/)).toHaveTextContent("「模型」页");
+    expect(screen.queryByText(/聊天页/)).toBeNull();
     expect(screen.getByLabelText("后台任务模型")).toHaveValue("");
   });
 

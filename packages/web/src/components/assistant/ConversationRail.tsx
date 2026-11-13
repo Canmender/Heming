@@ -206,7 +206,7 @@ export function ConversationRail({
                 cancelRename();
               }
             }}
-            className="ui-input h-7 min-w-0 flex-1 text-[12px]"
+            className="ui-input h-7 min-w-0 flex-1 text-ui-sm"
           />
           <Button
             type="button"
@@ -271,7 +271,7 @@ export function ConversationRail({
           <div
             role="menu"
             data-conv-menu
-            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-[12px] ui-overlay-shadow"
+            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-ui-sm ui-overlay-shadow"
           >
             <button
               type="button"
@@ -442,7 +442,7 @@ export function ConversationRail({
               }
             }}
             placeholder="搜索对话…"
-            className="w-full rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-ink"
+            className="w-full rounded-lg border border-line px-2 py-1 text-ui-sm outline-hidden focus:border-ink"
           />
         </div>
       ) : null}
@@ -493,7 +493,7 @@ export function ConversationRail({
       </div>
 
       {error && (
-        <p role="alert" className="border-t border-line-soft px-3 py-2 text-[11px] text-[var(--danger)]">
+        <p role="alert" className="border-t border-line-soft px-3 py-2 text-ui-xs text-[var(--danger)]">
           {error}
         </p>
       )}

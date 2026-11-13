@@ -20,6 +20,11 @@ import { SkillHubPanel } from "./skills/SkillHubPanel.js";
 import { Dialog } from "./ui/Dialog.js";
 import { Switch } from "./ui/Switch.js";
 import { Button } from "../components/ui/Button.js";
+import { useRovingTabs } from "../lib/ui/tabs.js";
+
+/** 技能视图的三个页签（顺序即键盘 ←/→ 顺序）。 */
+type SkillTab = "groups" | "pool" | "hub";
+const SKILL_TAB_ORDER: readonly SkillTab[] = ["groups", "pool", "hub"];
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -447,7 +452,7 @@ function SkillDetailDrawer({
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
-            <h2 className="truncate text-[14px] font-semibold">{skill.name}</h2>
+            <h2 className="truncate text-ui-base font-semibold">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
               {skill.source === "builtin" ? (
                 <SystemSourceChip systemName={systemName} />
@@ -467,23 +472,23 @@ function SkillDetailDrawer({
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-[12px] font-bold text-muted">描述</div>
-          <p className="mt-1 break-words text-[12px] text-[var(--body)]">
+          <div className="text-ui-sm font-bold text-muted">描述</div>
+          <p className="mt-1 break-words text-ui-sm text-[var(--body)]">
             {skill.description || "暂无描述"}
           </p>
 
-          <div className="mt-3 text-[12px] font-bold text-muted">触发词</div>
+          <div className="mt-3 text-ui-sm font-bold text-muted">触发词</div>
           <div className="mt-1">
             <TagList items={skill.triggers} empty="暂无触发词" />
           </div>
 
-          <div className="mt-3 text-[12px] font-bold text-muted">标签</div>
+          <div className="mt-3 text-ui-sm font-bold text-muted">标签</div>
           <div className="mt-1">
             <TagList items={skill.tags} empty="暂无标签" />
           </div>
 
-          <div className="mt-3 text-[12px] font-bold text-muted">指令</div>
-          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[var(--subtle-2)] p-2 font-sans text-[11px] leading-5 text-[var(--body)]">
+          <div className="mt-3 text-ui-sm font-bold text-muted">指令</div>
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[var(--subtle-2)] p-2 font-sans text-ui-xs leading-5 text-[var(--body)]">
             {skill.instructions || "暂无指令"}
           </pre>
         </div>
@@ -556,6 +561,12 @@ export function SkillsView({
     "groups",
     ["groups", "pool", "hub"],
   );
+  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
+  const skillTabs = useRovingTabs({
+    count: SKILL_TAB_ORDER.length,
+    activeIndex: SKILL_TAB_ORDER.indexOf(tab),
+    onChange: (index) => setTab(SKILL_TAB_ORDER[index]),
+  });
   const [tick, setTick] = useState(0);
   const [query, setQuery] = useState("");
   /** 插件 id → 显示名（「插件：<名>」来源徽标用；插件店可注入便于单测）。 */
@@ -753,7 +764,7 @@ export function SkillsView({
         return (
           <section key={group.key} className={`${cardCls} mt-3`} role="region" aria-label={group.title}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-bold text-muted">{group.title}</span>
+              <span className="text-ui-sm font-bold text-muted">{group.title}</span>
               <span className={badgeCls}>{items.length}</span>
               <button
                 type="button"
@@ -816,11 +827,11 @@ export function SkillsView({
                     key={skill.id}
                     role="group"
                     aria-label={`技能卡 ${skill.name}`}
-                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-150 hover:bg-[var(--subtle-2)]`}
+                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-fast hover:bg-[var(--subtle-2)]`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-bold">{skill.name}</div>
+                        <div className="truncate text-ui-md font-bold">{skill.name}</div>
                         <div className={`mt-0.5 ${hintCls}`}>
                           {skill.source === "builtin" ? (
                             <SystemSourceChip systemName={systemName} />
@@ -845,7 +856,7 @@ export function SkillsView({
                       />
                     </div>
 
-                    <p className="mt-2 line-clamp-2 min-h-[32px] break-words text-[12px] text-muted">
+                    <p className="mt-2 line-clamp-2 min-h-[32px] break-words text-ui-sm text-muted">
                       {skill.description || "暂无描述"}
                     </p>
 
@@ -853,7 +864,7 @@ export function SkillsView({
                       <TagList items={skill.tags} empty="暂无标签" />
                     </div>
 
-                    <div className="mt-3 flex items-center gap-1.5 border-t border-line-soft pt-2 opacity-70 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
+                    <div className="mt-3 flex items-center gap-1.5 border-t border-line-soft pt-2 opacity-70 transition-opacity duration-fast hover:opacity-100 focus-within:opacity-100">
                       <Button
                         type="button"
                         aria-label={`详情 ${skill.name}`}
@@ -898,14 +909,14 @@ export function SkillsView({
   /** 导入面板（技能池动作区与空态共用；抽出来避免两份文案漂移）。 */
   const importPanel = importOpen ? (
     <div className="mt-3 border-t border-line-soft pt-3">
-      <label className="block text-[12px] text-muted">
+      <label className="block text-ui-sm text-muted">
         导入技能内容
         <textarea
           aria-label="导入技能内容"
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
           placeholder="粘贴 SKILL.md（以 --- 开头）或技能 JSON；同名/同 id 走更新"
-          className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] outline-hidden focus:border-ink"
+          className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-ui-xs outline-hidden focus:border-ink"
         />
       </label>
       <div className="mt-2 flex items-center gap-2">
@@ -992,7 +1003,7 @@ export function SkillsView({
 
           <section className={`${cardCls} mt-3`}>
             <div className="flex items-center gap-2">
-              <span className="text-[12px] font-bold text-muted">全部技能</span>
+              <span className="text-ui-sm font-bold text-muted">全部技能</span>
               <span className={badgeCls}>{filtered.length}</span>
             </div>
 
@@ -1133,12 +1144,19 @@ export function SkillsView({
             </>
           )}
           </div>
-        <div role="tablist" aria-label="技能视图" className="flex items-center gap-1">
+        <div
+          role="tablist"
+          aria-label="技能视图"
+          className="flex items-center gap-1"
+          onKeyDown={skillTabs.onKeyDown}
+        >
           <Button
             type="button"
             role="tab"
             id="skill-groups-tab"
-            aria-controls="skill-groups-panel"
+            ref={skillTabs.getTabRef(0)}
+            tabIndex={skillTabs.tabIndexFor(0)}
+            aria-controls={tab === "groups" ? "skill-groups-panel" : undefined}
             aria-selected={tab === "groups"}
             onClick={() => setTab("groups")}
             size="sm" variant={tab === "groups" ? "primary" : "ghost"} className={tab === "groups" ? undefined : "text-muted"}
@@ -1149,7 +1167,9 @@ export function SkillsView({
             type="button"
             role="tab"
             id="skill-pool-tab"
-            aria-controls="skill-pool-panel"
+            ref={skillTabs.getTabRef(1)}
+            tabIndex={skillTabs.tabIndexFor(1)}
+            aria-controls={tab === "pool" ? "skill-pool-panel" : undefined}
             aria-selected={tab === "pool"}
             onClick={() => setTab("pool")}
             size="sm" variant={tab === "pool" ? "primary" : "ghost"} className={tab === "pool" ? undefined : "text-muted"}
@@ -1160,7 +1180,9 @@ export function SkillsView({
             type="button"
             role="tab"
             id="skill-hub-tab"
-            aria-controls="skill-hub-panel"
+            ref={skillTabs.getTabRef(2)}
+            tabIndex={skillTabs.tabIndexFor(2)}
+            aria-controls={tab === "hub" ? "skill-hub-panel" : undefined}
             aria-selected={tab === "hub"}
             onClick={() => setTab("hub")}
             size="sm" variant={tab === "hub" ? "primary" : "ghost"} className={tab === "hub" ? undefined : "text-muted"}
@@ -1245,12 +1267,12 @@ export function SkillsView({
                         className="ui-list-row w-full text-left"
                       >
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12px] font-medium">{skill.name}</span>
+                          <span className="block truncate text-ui-sm font-medium">{skill.name}</span>
                           <span className={`block truncate ${hintCls}`}>
                             {skill.description || "暂无描述"}
                           </span>
                         </span>
-                        <span className="shrink-0 text-[11px] text-muted">
+                        <span className="shrink-0 text-ui-xs text-muted">
                           {SOURCE_LABEL[skill.source]}
                         </span>
                       </button>
@@ -1323,7 +1345,7 @@ export function SkillsView({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除技能「{removeTarget.name}」？技能定义、使用统计和所有智能体上的分配都会被移除，
             此操作不可恢复。
           </p>

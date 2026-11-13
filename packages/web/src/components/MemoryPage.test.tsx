@@ -180,6 +180,31 @@ describe("MemoryPage 三分区结构", () => {
     expect(screen.getByRole("option", { name: "全部智能体" })).toBeInTheDocument();
   });
 
+  it("页签键盘可达：整组一个 Tab 停靠点，←/→/Home/End 切换分区", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+
+    const agentsTab = screen.getByRole("tab", { name: "智能体" });
+    const databaseTab = screen.getByRole("tab", { name: "数据库" });
+    const wikiTab = screen.getByRole("tab", { name: "个人知识库" });
+    // 选中项 tabIndex=0，其余 -1：Tab 键只需穿过整组一次
+    expect(agentsTab).toHaveAttribute("tabindex", "0");
+    expect(databaseTab).toHaveAttribute("tabindex", "-1");
+    expect(wikiTab).toHaveAttribute("tabindex", "-1");
+
+    agentsTab.focus();
+    fireEvent.keyDown(agentsTab, { key: "ArrowRight" });
+    expect(databaseTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(databaseTab);
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "memory-database-panel");
+
+    fireEvent.keyDown(databaseTab, { key: "End" });
+    expect(wikiTab).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(wikiTab, { key: "Home" });
+    expect(agentsTab).toHaveAttribute("aria-selected", "true");
+  });
+
   it("名册加载失败：降级「全部智能体」并内联中文提示，页面照常可用", async () => {
     mockApi({ agents: "fail" });
     renderPage();
@@ -189,6 +214,21 @@ describe("MemoryPage 三分区结构", () => {
     expect(screen.queryByRole("option", { name: "阿和" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "短期记忆" })).toBeInTheDocument();
     expect(screen.getByText(/名册为空/)).toBeInTheDocument();
+  });
+
+  it("名册加载失败用 alert 播报且可重试，恢复后横幅消失（失败≠空态）", async () => {
+    const fetchSpy = mockApi({ agents: "fail" });
+    renderPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/名册加载失败/);
+    const retry = screen.getByRole("button", { name: "重试" });
+
+    // 重试时接口恢复：名册回到下拉框，失败横幅消失。
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonRes(AGENTS)));
+    fireEvent.click(retry);
+    expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   /** d.62-B 布局迁移守卫：页头统一走 PageShell。 */

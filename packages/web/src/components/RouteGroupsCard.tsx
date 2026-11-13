@@ -206,7 +206,7 @@ export function RouteGroupsCard() {
     <section className="ui-card mt-3 p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-bold text-muted">候选链</span>
+          <span className="text-ui-sm font-bold text-muted">候选链</span>
           <span className="ui-caption">第一个答不了才走下一个</span>
         </div>
         {!open && (
@@ -264,19 +264,19 @@ export function RouteGroupsCard() {
                 llmHealth.remainingMs(modelKey(m.profileId, m.model ?? p?.model ?? ""), now),
               );
               return (
-                <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-[12px]">
+                <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-ui-sm">
                   <span className="w-4 shrink-0 text-right text-muted">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate">
                     {p ? `${p.label} · ${m.model ?? p.model}` : "（连接已删除）"}
                   </span>
                   {p && lookupCapability(p.provider, m.model ?? p.model) === null && (
-                    <span className="shrink-0 text-[10px] text-muted">窗口未知</span>
+                    <span className="shrink-0 text-ui-xs text-muted">窗口未知</span>
                   )}
                   {g.strategy === "weight" && (
                     <span className="shrink-0 ui-caption">权重 {m.weight ?? 1}</span>
                   )}
                   {resting > 0 && (
-                    <span className="shrink-0 text-[10px] text-amber-700">
+                    <span className="shrink-0 text-ui-xs text-amber-700">
                       休息 {formatLeft(resting)}
                     </span>
                   )}
@@ -291,7 +291,7 @@ export function RouteGroupsCard() {
       {rests.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-panel p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-bold text-muted">休息中的候选</span>
+            <span className="text-ui-sm font-bold text-muted">休息中的候选</span>
             <Button
               type="button"
               aria-label="刷新休息名单"
@@ -303,7 +303,7 @@ export function RouteGroupsCard() {
           </div>
           <ul className="mt-1.5 space-y-1">
             {rests.map(({ key, rest }) => (
-              <li key={key} className="flex items-center gap-2 text-[12px]">
+              <li key={key} className="flex items-center gap-2 text-ui-sm">
                 <span className="min-w-0 flex-1 truncate">{describeRestKey(key, profiles)}</span>
                 <span className="shrink-0 ui-caption">
                   {rest.kind} · 还剩 {formatLeft(rest.until - now)}
@@ -328,17 +328,17 @@ export function RouteGroupsCard() {
       {/* 逐候选账（d.48）：换候选换的是「谁在花钱」，所以按连接×模型分档列，而不是只给一个总数。 */}
       {usage.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-panel p-3">
-          <div className="text-[12px] font-bold text-muted">本月逐候选用量</div>
+          <div className="text-ui-sm font-bold text-muted">本月逐候选用量</div>
           <ul className="mt-1.5 space-y-1">
             {usage.map((u) => {
               return (
-                <li key={`${u.profileId}-${u.model}`} className="flex items-center gap-2 text-[12px]">
+                <li key={`${u.profileId}-${u.model}`} className="flex items-center gap-2 text-ui-sm">
                   <span className="min-w-0 flex-1 truncate">
                     {u.profileLabel} · {u.model}
                   </span>
                   <span className="shrink-0 ui-caption">{u.total} tokens</span>
                   {u.unreported > 0 && (
-                    <span className="shrink-0 text-[10px] text-muted">
+                    <span className="shrink-0 text-ui-xs text-muted">
                       {u.unreported} 轮未上报
                     </span>
                   )}
@@ -364,7 +364,7 @@ export function RouteGroupsCard() {
 
           <fieldset className="mt-2">
             <legend className="ui-caption">选路方式</legend>
-            <div className="mt-1 space-y-1 text-[12px]">
+            <div className="mt-1 space-y-1 text-ui-sm">
               {STRATEGY_OPTIONS.map((o) => (
                 <label key={o.value} className="flex items-start gap-1.5">
                   <input
@@ -410,13 +410,13 @@ export function RouteGroupsCard() {
             {members.map((m, i) => {
               const p = profiles.find((x) => x.id === m.profileId);
               return (
-                <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-[12px]">
+                <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-ui-sm">
                   <span className="w-4 shrink-0 text-right text-muted">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate">
                     {p ? `${p.label} · ${m.model ?? p.model}` : "（连接已删除）"}
                   </span>
                   {strategy === "weight" && (
-                    <label className="flex shrink-0 items-center gap-1 text-[12px]">
+                    <label className="flex shrink-0 items-center gap-1 text-ui-sm">
                       权重
                       <input
                         type="number"
@@ -425,7 +425,7 @@ export function RouteGroupsCard() {
                         aria-label={`权重 ${p?.label ?? m.profileId}`}
                         value={m.weight ?? 1}
                         onChange={(e) => setMemberWeight(i, e.target.value)}
-                        className="w-14 rounded border border-line px-1 py-0.5 text-[12px]"
+                        className="w-14 rounded border border-line px-1 py-0.5 text-ui-sm"
                       />
                     </label>
                   )}

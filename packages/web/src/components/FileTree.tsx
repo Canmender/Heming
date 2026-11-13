@@ -26,13 +26,13 @@ function Row({ label, depth, onClick, ariaLabel, expandable, expanded }: {
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-[3px] text-left text-[12px] text-body hover:bg-subtle-3"
+      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-[3px] text-left text-ui-sm text-body hover:bg-subtle-3"
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       {expandable ? (
         <ChevronIcon
-          width={11}
-          height={11}
+          width={12}
+          height={12}
           className={`shrink-0 text-muted transition-transform ${expanded ? "rotate-90" : ""}`}
         />
       ) : (
@@ -106,7 +106,7 @@ function SectionRows({
                   onSendToConversation(item);
                 }}
               >
-                <ChatIcon width={13} height={13} />
+                <ChatIcon width={14} height={14} />
               </button>
             )}
             {onPreview && (
@@ -119,7 +119,7 @@ function SectionRows({
                   onPreview(item);
                 }}
               >
-                <EyeIcon width={13} height={13} />
+                <EyeIcon width={14} height={14} />
               </button>
             )}
           </span>
@@ -129,8 +129,8 @@ function SectionRows({
 
   return (
     <div className="mb-3">
-      <div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted">{title}</div>
-      {roots.length > 0 ? render(roots, 0) : <div className="px-2 text-[11px] text-muted">（空）</div>}
+      <div className="px-2 pb-1 text-ui-xs font-bold uppercase tracking-wider text-muted">{title}</div>
+      {roots.length > 0 ? render(roots, 0) : <div className="px-2 text-ui-xs text-muted">（空）</div>}
     </div>
   );
 }
@@ -142,7 +142,7 @@ export function FileTree({ items, localPaths, onSendToConversation, onPreview }:
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-panel px-4 py-6 text-center">
         <FolderIcon width={20} height={20} className="text-line-strong" />
-        <p className="text-[11px] leading-relaxed text-muted">还没有文件。点上方「上传」或「绑定」，把文件放进来。</p>
+        <p className="text-ui-xs leading-relaxed text-muted">还没有文件。点上方「上传」或「绑定」，把文件放进来。</p>
       </div>
     );
   }
@@ -156,11 +156,11 @@ export function FileTree({ items, localPaths, onSendToConversation, onPreview }:
         onPreview={onPreview}
       />
       <div className="mx-2 border-t border-line-soft" />
-      <div className="mb-1 mt-1 px-2 pb-0 text-[10px] font-bold uppercase tracking-wider text-muted">
+      <div className="mb-1 mt-1 px-2 pb-0 text-ui-xs font-bold uppercase tracking-wider text-muted">
         本地工作目录
       </div>
       {localPaths.length === 0 ? (
-        <div className="px-2 text-[11px] text-muted">未绑定本地目录</div>
+        <div className="px-2 text-ui-xs text-muted">未绑定本地目录</div>
       ) : (
         localPaths.map((p) => (
           <Row key={p} label={p.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? p} depth={0} />

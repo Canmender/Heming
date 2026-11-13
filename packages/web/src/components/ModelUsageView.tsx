@@ -56,7 +56,7 @@ function Avatar({ name }: { name: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
       style={{ backgroundColor: avatarColor(name) }}
     >
       {name.slice(0, 1).toUpperCase()}
@@ -116,7 +116,7 @@ export function ModelUsageView({
   return (
     <section aria-label="用量" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[13px] font-bold">用量</div>
+        <div className="text-ui-md font-bold">用量</div>
         <div className="flex flex-wrap items-center gap-1.5">
           <div role="group" aria-label="统计区间" className="ui-segment-group">
             {PERIODS.map((item) => (
@@ -162,7 +162,7 @@ export function ModelUsageView({
           <span className="ui-icon-tile mx-auto mb-3">
             <SparkIcon width={20} height={20} />
           </span>
-          <div className="text-[14px] font-bold">这个时间段还没有调用</div>
+          <div className="text-ui-base font-bold">这个时间段还没有调用</div>
           <p className="mx-auto mt-1 max-w-[420px] ui-caption">
             智能体通过模型服务发出的请求会自动记账；发一次对话再回来看。
           </p>
@@ -196,14 +196,14 @@ export function ModelUsageView({
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[13px] font-bold">{metric === "calls" ? "每天请求数" : "每天 Token"}</div>
+                <div className="text-ui-md font-bold">{metric === "calls" ? "每天请求数" : "每天 Token"}</div>
                 <div role="group" aria-label="图表指标" className="ui-segment-group p-0.5">
                   {(["calls", "tokens"] as const).map((key) => (
                     <button
                       key={key}
                       type="button"
                       aria-pressed={metric === key}
-                      className="ui-segment px-2.5 py-0.5 text-[11px]"
+                      className="ui-segment px-2.5 py-0.5 text-ui-xs"
                       onClick={() => setMetric(key)}
                     >
                       {key === "calls" ? "请求" : "Token"}
@@ -249,14 +249,14 @@ export function ModelUsageView({
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[13px] font-bold">用在哪</div>
+                <div className="text-ui-md font-bold">用在哪</div>
                 <div role="group" aria-label="拆分维度" className="ui-segment-group p-0.5">
                   {BREAKDOWNS.map((item) => (
                     <button
                       key={item.key}
                       type="button"
                       aria-pressed={breakdown === item.key}
-                      className="ui-segment px-2.5 py-0.5 text-[11px]"
+                      className="ui-segment px-2.5 py-0.5 text-ui-xs"
                       onClick={() => setBreakdown(item.key)}
                     >
                       {item.label}
@@ -270,7 +270,7 @@ export function ModelUsageView({
                     <Avatar name={bucketLabel(row, breakdown)} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-[12px] font-bold">{bucketLabel(row, breakdown)}</span>
+                        <span className="truncate text-ui-sm font-bold">{bucketLabel(row, breakdown)}</span>
                         <span className="shrink-0 ui-caption">
                           {row.calls} 次 · {formatTokens(row.input + row.output)} tokens
                           {row.cost > 0 ? ` · ${formatCost(row.cost, row.unpriced)}` : ""}
@@ -292,33 +292,35 @@ export function ModelUsageView({
             {requests && requests.rows.length > 0 && (
               <div className="overflow-x-auto ui-card p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-[13px] font-bold">最近请求</div>
+                  <div className="text-ui-md font-bold">最近请求</div>
                   <span className="ui-caption">共 {requests.total} 条</span>
                 </div>
-                <table className="mt-2 w-full text-left text-[12px]">
-                  <thead className="ui-caption">
+                {/* d.141 P2「表格规范」：改用 .ui-table（表头/行距/hover/last-border 只在
+                    index.css 定义一次），不再各页手拼 padding 与字号。 */}
+                <table className="ui-table mt-2">
+                  <thead>
                     <tr>
-                      <th className="py-1 pr-3">时间</th>
-                      <th className="py-1 pr-3">Agent</th>
-                      <th className="py-1 pr-3">模型</th>
-                      <th className="py-1 pr-3">tokens</th>
-                      <th className="py-1 pr-3">耗时</th>
-                      <th className="py-1 pr-3">状态</th>
+                      <th>时间</th>
+                      <th>Agent</th>
+                      <th>模型</th>
+                      <th>tokens</th>
+                      <th>耗时</th>
+                      <th>状态</th>
                     </tr>
                   </thead>
                   <tbody>
                     {requests.rows.map((row) => (
-                      <tr key={row.route_id} className="border-t border-line transition-colors hover:bg-[var(--subtle)]">
-                        <td className="ui-numeric py-1.5 pr-3 text-muted">
+                      <tr key={row.route_id}>
+                        <td className="ui-numeric text-muted">
                           {new Date(row.t).toLocaleTimeString("zh-CN", { hour12: false })}
                         </td>
-                        <td className="py-1.5 pr-3">{row.agentName || row.agent || "—"}</td>
-                        <td className="py-1.5 pr-3 font-mono text-[11px]">{row.req || row.model}</td>
-                        <td className="ui-numeric py-1.5 pr-3">
+                        <td>{row.agentName || row.agent || "—"}</td>
+                        <td className="font-mono ui-micro">{row.req || row.model}</td>
+                        <td className="ui-numeric">
                           {row.in}/{row.out}
                         </td>
-                        <td className="ui-numeric py-1.5 pr-3">{row.ms ? `${row.ms}ms` : "—"}</td>
-                        <td className="py-1.5 pr-3 text-muted">{row.status || "—"}</td>
+                        <td className="ui-numeric">{row.ms ? `${row.ms}ms` : "—"}</td>
+                        <td className="text-muted">{row.status || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -345,9 +347,9 @@ function SummaryCard({
 }) {
   return (
     <div className="ui-card p-4">
-      <div className="text-[12px] font-medium text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-[22px] font-bold leading-none">{value}</div>
-      <div className={`mt-1.5 ${tone === "warn" ? "text-[11px] text-[var(--warn)]" : "ui-caption"}`}>{hint}</div>
+      <div className="text-ui-sm font-medium text-muted">{label}</div>
+      <div className="ui-numeric mt-1.5 text-num-md font-bold leading-none">{value}</div>
+      <div className={`mt-1.5 ${tone === "warn" ? "text-ui-xs text-[var(--warn)]" : "ui-caption"}`}>{hint}</div>
     </div>
   );
 }

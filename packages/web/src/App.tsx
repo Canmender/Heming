@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
@@ -28,6 +28,7 @@ import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
 import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
 import { Button } from "./components/ui/Button.js";
+import { PAGE_WIDTH_CLASS } from "./components/layout/PageShell.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -211,43 +212,49 @@ function SharedFilesPanel({
 }: SharedFilesPanelProps) {
   return (
     <>
-      {/* d.68：表头左内边距与文件树行对齐（FileTree 行是 px-2），表头标题不再比内容缩进一档 */}
-      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-2 py-1.5">
+      {/* d.68：表头左内边距与文件树行对齐（FileTree 行是 px-2），表头标题不再比内容缩进一档。
+          d.141：表头改成可换行的两段式——标题 + 用量在左，动作按钮成组靠右。
+          改动前三颗按钮都是 shrink-0、标题 whitespace-nowrap，aside 拖到最小宽（180）时
+          一行放不下，按钮会被挤出面板右缘（被父级 overflow-hidden 裁掉、点不到）。
+          现在按组换行：窄了就整组落到第二行，不靠写死宽度硬顶。 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line-soft px-2 py-1.5">
         {/* d.62：表头用全站统一的 section 档（13/20/600） */}
         <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
         {usage && (
-          <span className="ui-micro min-w-0 flex-1 truncate">
+          <span className="ui-micro min-w-0 grow basis-24 truncate tabular-nums">
             {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
           </span>
         )}
         {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
-        <Button
-          type="button"
-          aria-label="绑定本地文件到会话"
-          title="绑定工作区文件到当前会话（需先打开一个会话）"
-          onClick={onBind}
-          size="sm" variant="ghost" className="shrink-0"
-        >
-          绑定
-        </Button>
-        <Button
-          type="button"
-          title="上传文件到共享文件"
-          onClick={onUpload}
-          size="sm" variant="ghost" className="shrink-0"
-        >
-          上传
-        </Button>
-        {onClose ? (
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button
             type="button"
-            aria-label="关闭共享文件面板"
-            onClick={onClose}
-            size="sm" variant="ghost" className="shrink-0"
+            aria-label="绑定本地文件到会话"
+            title="绑定工作区文件到当前会话（需先打开一个会话）"
+            onClick={onBind}
+            size="sm" variant="ghost"
           >
-            关闭
+            绑定
           </Button>
-        ) : null}
+          <Button
+            type="button"
+            title="上传文件到共享文件"
+            onClick={onUpload}
+            size="sm" variant="ghost"
+          >
+            上传
+          </Button>
+          {onClose ? (
+            <Button
+              type="button"
+              aria-label="关闭共享文件面板"
+              onClick={onClose}
+              size="sm" variant="ghost"
+            >
+              关闭
+            </Button>
+          ) : null}
+        </div>
       </div>
       {notice && (
         <div role="alert" className="ui-alert ui-alert-warn mx-2 mt-2 items-center">
@@ -413,6 +420,25 @@ export function App() {
 }
 
 /**
+ * 登录恢复期的居中状态外壳（d.141）。
+ *
+ * 改动前这里有两套写法：「正在恢复登录…」是一个裸 div（items-center justify-center），
+ * 重连面板自己又写了 `flex h-full w-full items-center justify-center px-6` + 内层
+ * `max-w-[380px]`。同一个位置、同一件事（凭证在、但还没连上服务端），垂直对齐和内边距
+ * 却是两套，状态切换时内容会横跳一下；380 这个宽度也不来自任何档位。
+ *
+ * 现在收成一个壳：内容居中、宽度取 PageShell 的内容档位（prose = 680，说明型短文 + 出口按钮，
+ * 与首页空态/说明块同档；不是表单，所以不用 form），窄窗靠 w-full + px-6 自适应，不写死像素宽。
+ */
+function AuthStatusPanel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center overflow-y-auto px-6 py-8">
+      <div className={`mx-auto w-full ${PAGE_WIDTH_CLASS.prose} text-center`}>{children}</div>
+    </div>
+  );
+}
+
+/**
  * 登录恢复失败面板：凭证还在，只是此刻连不上服务端。
  * 不把用户推回登录页，给出「立即重试 / 退出登录」两个明确出口。
  */
@@ -426,33 +452,31 @@ function ReconnectPanel({
   onLogout: () => void;
 }) {
   return (
-    <div className="flex h-full w-full items-center justify-center px-6">
-      <div className="w-full max-w-[380px] text-center">
-        <h1 className="ui-section-title">登录状态已保留</h1>
-        <p className="ui-body-sm mt-2 text-body">
-          {message ? `暂时连不上服务器：${message}` : "正在重新连接服务器…"}
-        </p>
-        <p className="ui-caption mt-1">
-          网络恢复后会自动重试，不需要重新登录。
-        </p>
-        <div className="mt-4 flex items-center justify-center gap-2">
-          <Button
-            type="button"
-            onClick={onRetry}
-            size="md" variant="primary"
-          >
-            立即重试
-          </Button>
-          <Button
-            type="button"
-            onClick={onLogout}
-            size="md" variant="ghost"
-          >
-            退出登录
-          </Button>
-        </div>
+    <AuthStatusPanel>
+      <h1 className="ui-section-title">登录状态已保留</h1>
+      <p className="ui-body-sm mt-2 text-body">
+        {message ? `暂时连不上服务器：${message}` : "正在重新连接服务器…"}
+      </p>
+      <p className="ui-caption mt-1">
+        网络恢复后会自动重试，不需要重新登录。
+      </p>
+      <div className="mt-4 flex items-center justify-center gap-2">
+        <Button
+          type="button"
+          onClick={onRetry}
+          size="md" variant="primary"
+        >
+          立即重试
+        </Button>
+        <Button
+          type="button"
+          onClick={onLogout}
+          size="md" variant="ghost"
+        >
+          退出登录
+        </Button>
       </div>
-    </div>
+    </AuthStatusPanel>
   );
 }
 
@@ -781,9 +805,11 @@ function AppShell({
         <div className="flex min-h-0 flex-1">
           {hasToken ? (
             authStatus === "pending" && !restoreError ? (
-              <div className="flex h-full w-full items-center justify-center text-muted">
-                正在恢复登录…
-              </div>
+              <AuthStatusPanel>
+                <p role="status" className="ui-body-sm text-muted">
+                  正在恢复登录…
+                </p>
+              </AuthStatusPanel>
             ) : (
               <ReconnectPanel
                 message={restoreError}
@@ -849,9 +875,15 @@ function AppShell({
         <NavRail onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。
-              宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。 */}
+              宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。
+              d.141：从「一个 justify-end 的裸 div」改成显式 toolbar——纵向内边距用刻度 8（py-2，
+              原来是 6 不属于任何档），并给读屏一个区域名，与页面内工具栏同一套结构。 */}
           {narrow && showFilesPanel && (
-            <div className="flex shrink-0 items-center justify-end border-b border-line-soft px-4 py-1.5">
+            <div
+              role="toolbar"
+              aria-label="页面工具栏"
+              className="flex shrink-0 items-center justify-end gap-2 border-b border-line-soft px-4 py-2"
+            >
               <Button
                 type="button"
                 aria-label="打开共享文件"
@@ -888,7 +920,7 @@ function AppShell({
               aria-valuemax={ASIDE_MAX}
               aria-valuenow={asideWidth}
               onPointerDown={onResizeStart}
-              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-150 hover:bg-[var(--line-soft)] motion-reduce:transition-none"
+              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-fast hover:bg-[var(--line-soft)] motion-reduce:transition-none"
             />
             <SharedFilesPanel
               files={files}

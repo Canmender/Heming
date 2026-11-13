@@ -94,6 +94,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [archiveHits, setArchiveHits] = useState<InfohubSearchHit[]>([]);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  /** 归档检索失败原因（d.141 F-06）：此前 catch 静默置空，与「真的没搜到」不可区分。 */
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentEntry[]>(() => loadRecent());
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -120,18 +122,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     if (!q || !infohubRunning) {
       setArchiveHits([]);
       setArchiveBusy(false);
+      setArchiveError(null);
       return;
     }
     let alive = true;
     setArchiveHits([]);
+    setArchiveError(null);
     const timer = window.setTimeout(() => {
       setArchiveBusy(true);
       callInfohub<InfohubSearchResult>("search", { query: q, limit: ARCHIVE_LIMIT }, readInfohubConfig())
         .then((data) => {
-          if (alive) setArchiveHits(Array.isArray(data.items) ? data.items : []);
+          if (!alive) return;
+          setArchiveHits(Array.isArray(data.items) ? data.items : []);
+          setArchiveError(null);
         })
-        .catch(() => {
-          if (alive) setArchiveHits([]);
+        .catch((err: unknown) => {
+          if (!alive) return;
+          setArchiveHits([]);
+          setArchiveError(err instanceof Error ? err.message : String(err));
         })
         .finally(() => {
           if (alive) setArchiveBusy(false);
@@ -440,7 +448,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
            * Windows 高对比模式下的可见性（2.4.7/1.4.11），这里保持一致。
            */
           style={{ outline: "2px solid transparent" }}
-          className="w-full border-b border-line-strong px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-muted"
+          className="w-full border-b border-line-strong px-3.5 py-2.5 text-ui-md outline-hidden placeholder:text-muted"
         />
 
         <div
@@ -452,7 +460,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         >
           {groups.map((group) => (
             <div key={group.id} role="group" aria-label={group.label}>
-              <div className="px-3.5 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">
+              <div className="px-3.5 pb-0.5 pt-1.5 text-ui-xs font-bold uppercase tracking-wider text-muted">
                 {group.label}
               </div>
               {group.items.map((item) => {
@@ -471,7 +479,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     tabIndex={-1}
                     onMouseEnter={() => setCursor(index)}
                     onClick={() => execute(item)}
-                    className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-[12px] ${
+                    className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-ui-sm ${
                       selected ? "bg-[var(--subtle-3)]" : ""
                     }`}
                   >
@@ -487,22 +495,22 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{item.name}</span>
-                      <span className="block truncate text-[10px] text-muted">{item.detail}</span>
+                      <span className="block truncate text-ui-xs text-muted">{item.detail}</span>
                     </span>
                     {item.kind === "page" && shortcutLabel(item.digit) ? (
-                      <kbd className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                      <kbd className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                         {shortcutLabel(item.digit)}
                       </kbd>
                     ) : item.kind === "member" ? (
-                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                      <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                         团队
                       </span>
                     ) : item.kind === "archive" ? (
-                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                      <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                         本机
                       </span>
                     ) : item.kind === "vault" ? (
-                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                      <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                         知识库
                       </span>
                     ) : null}
@@ -512,17 +520,37 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             </div>
           ))}
 
-          {/* 输入了却没有任何命中：给一句明确的话，不要留白 */}
+          {/* 输入了却没有任何命中：给一句明确的话 + 下一步（d.141 F-11：原来只有一行
+              「没有匹配」，用户不知道该换词还是该去别处找）。 */}
           {query.trim() !== "" && !hasResults ? (
-            <div className="px-3.5 py-3 text-[12px] text-muted">
-              {archiveBusy ? `正在检索本机归档「${query.trim()}」…` : `没有匹配「${query}」的结果。`}
+            <div className="px-3.5 py-3 text-ui-sm text-muted">
+              {archiveBusy ? (
+                `正在检索本机归档「${query.trim()}」…`
+              ) : (
+                <>
+                  <p>没有匹配「{query}」的结果。</p>
+                  <p className="mt-1 ui-caption">
+                    换成更短的关键词试试；按 Esc 清空后，也可以用左侧导航去「记忆」「知识库」里逐条翻。
+                  </p>
+                  {archiveError ? (
+                    <p className="mt-1 text-ui-xs text-[var(--danger)]">
+                      本机归档检索失败：{archiveError}
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
           {archiveBusy && hasResults ? (
-            <div className="px-3.5 py-1 text-[10px] text-muted">正在检索本机归档…</div>
+            <div className="px-3.5 py-1 text-ui-xs text-muted">正在检索本机归档…</div>
+          ) : null}
+          {archiveError && hasResults ? (
+            <div className="px-3.5 py-1 text-ui-xs text-[var(--danger)]" role="status">
+              本机归档检索失败：{archiveError}（其余结果仍可打开）
+            </div>
           ) : null}
           {hiddenCount > 0 ? (
-            <div className="border-t border-line-soft px-3.5 py-1.5 text-[11px] text-muted">
+            <div className="border-t border-line-soft px-3.5 py-1.5 text-ui-xs text-muted">
               还有 {hiddenCount} 条
             </div>
           ) : null}
@@ -531,7 +559,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         {/* d.138：三段快捷键提示原本是三个裸 <span>，读屏会把它们连成
             「↑↓ 选择Enter 打开Esc 关闭」；键名改用 <kbd>（与右侧 Alt+N 同一样式），
             段间补分隔点，视觉与朗读都断得开。 */}
-        <div className="flex items-center gap-2 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-muted">
+        <div className="flex items-center gap-2 border-t border-line-soft px-3.5 py-1.5 text-ui-xs text-muted">
           <span className="inline-flex items-center gap-1">
             <kbd className="rounded-sm border border-line px-1">↑↓</kbd> 选择
           </span>

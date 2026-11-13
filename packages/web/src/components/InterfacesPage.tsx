@@ -351,17 +351,17 @@ export function InterfacesView({
           }}
           size="md" variant="ghost"
         >
-          <PlusIcon width={13} height={13} />
+          <PlusIcon width={14} height={14} />
           添加 MCP 服务
         </Button>
-        <span className="ml-auto text-[11px] text-muted">
+        <span className="ml-auto text-ui-xs text-muted">
           MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
         </span>
       </div>
       {msg && (
         <div
           role="status"
-          className={`mb-4 rounded-lg border px-3 py-2 text-[12px] ${
+          className={`mb-4 rounded-lg border px-3 py-2 text-ui-sm ${
             msg.kind === "error"
               ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
               : "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
@@ -381,16 +381,16 @@ export function InterfacesView({
           <div className="flex flex-wrap items-center gap-2">
             <span className="ui-section-title">预置服务</span>
             <span className="ui-chip">未接入</span>
-            <span className="ml-auto text-[11px] text-muted">随应用内置，无需填地址</span>
+            <span className="ml-auto text-ui-xs text-muted">随应用内置，无需填地址</span>
           </div>
-          <p className="mt-1 text-[11px] text-muted">
+          <p className="mt-1 text-ui-xs text-muted">
             工具默认关闭；启用后每次调用仍需你确认。
           </p>
           <div className="mt-2 flex flex-col gap-2">
             {missingPresets.map((preset) => (
               <div key={preset.id} className="flex flex-wrap items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-bold">{preset.name}</div>
+                  <div className="text-ui-md font-bold">{preset.name}</div>
                   <div className="mt-0.5 ui-caption">{preset.hint}</div>
                 </div>
                 <Button
@@ -455,10 +455,10 @@ export function InterfacesView({
                     size="sm" variant="ghost"
                   >
                     {p.name}
-                    {p.verified && <span className="ml-1 text-[10px] text-[var(--success)]">已实测</span>}
+                    {p.verified && <span className="ml-1 text-ui-xs text-[var(--success)]">已实测</span>}
                   </Button>
                 ))}
-                {presetHint && <span className="text-[11px] text-muted">{presetHint}</span>}
+                {presetHint && <span className="text-ui-xs text-muted">{presetHint}</span>}
               </div>
             </div>
             {transport === "http" ? (
@@ -537,7 +537,7 @@ export function InterfacesView({
               取消
             </Button>
             {transport === "stdio" && (
-              <span className="text-[11px] text-[var(--warn)]">
+              <span className="text-ui-xs text-[var(--warn)]">
                 {stdioReady
                   ? "会在本机启动这条命令，请确认来源可信"
                   : "当前环境不支持 stdio（需桌面端）；配置可先保存"}
@@ -548,7 +548,7 @@ export function InterfacesView({
       )}
 
       {servers.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-[var(--surface)] p-8 text-center text-[13px] text-muted">
+        <div className="mt-6 rounded-xl border border-dashed border-line bg-[var(--surface)] p-8 text-center text-ui-md text-muted">
           还没有 MCP 服务。点右上角「添加 MCP 服务」，填入一个 Streamable HTTP 地址即可接工具。
         </div>
       ) : (
@@ -580,7 +580,7 @@ export function InterfacesView({
                 className="ui-card p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[13px] font-bold">{server.name}</span>
+                  <span className="text-ui-md font-bold">{server.name}</span>
                   {(server.origin === "preset" || registry.isPreset(server.id)) && (
                     <SystemSourceChip systemName={systemName} />
                   )}
@@ -615,7 +615,7 @@ export function InterfacesView({
                     );
                   })()}
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] ${
+                    className={`rounded-full px-2 py-0.5 text-ui-xs ${
                       state === "ready"
                         ? "bg-[var(--success-soft)] text-[var(--success)]"
                         : state === "error"
@@ -638,11 +638,11 @@ export function InterfacesView({
                             ? "连接中…"
                             : "未连接"}
                   </span>
-                  <span className="text-[11px] text-muted">
+                  <span className="text-ui-xs text-muted">
                     {tools.length ? `${tools.length} 个工具` : "未获取工具"}
                   </span>
                   <div className="ml-auto flex items-center gap-2">
-                    <label className="flex items-center gap-1 text-[11px] text-muted">
+                    <label className="flex items-center gap-1 text-ui-xs text-muted">
                       <input
                         type="checkbox"
                         aria-label={`启用服务 ${server.name}`}
@@ -679,23 +679,23 @@ export function InterfacesView({
                 </div>
 
                 {server.transport === "stdio" && !stdioReady && (
-                  <p className="mt-2 text-[11px] text-[var(--warn)]">
+                  <p className="mt-2 text-ui-xs text-[var(--warn)]">
                     stdio 服务只能在桌面端连接；当前是浏览器环境。
                   </p>
                 )}
 
                 {connError[server.id] && (
-                  <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">
+                  <p role="alert" className="mt-2 text-ui-xs text-[var(--danger)]">
                     {connError[server.id]}
                   </p>
                 )}
 
-                <p className="mt-1 truncate font-mono text-[10px] text-muted">
+                <p className="mt-1 truncate font-mono text-ui-xs text-muted">
                   {server.transport === "http" ? server.url : `${server.command} ${(server.args ?? []).join(" ")}`}
                 </p>
 
                 {tools.length === 0 ? (
-                  <p className="mt-3 text-[12px] text-muted">
+                  <p className="mt-3 text-ui-sm text-muted">
                     点「连接」拉取工具清单。连接成功后可逐个授权给模型调用。
                   </p>
                 ) : (
@@ -759,7 +759,7 @@ export function InterfacesView({
                           aria-label="测试参数"
                           value={testArgs}
                           onChange={(e) => setTestArgs(e.target.value)}
-                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-[var(--surface)] px-2 py-1.5 font-mono text-[11px] outline-hidden focus:border-ink"
+                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-[var(--surface)] px-2 py-1.5 font-mono text-ui-xs outline-hidden focus:border-ink"
                         />
                         <div className="mt-2 flex items-center gap-2">
                           <Button
@@ -770,12 +770,12 @@ export function InterfacesView({
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
                           </Button>
-                          <span className="text-[11px] text-muted">按每个工具的说明填写参数（JSON 对象）</span>
+                          <span className="text-ui-xs text-muted">按每个工具的说明填写参数（JSON 对象）</span>
                         </div>
                         {testResult && (
                           <pre
                             role="status"
-                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 text-[11px] ${
+                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 text-ui-xs ${
                               testResult.ok
                                 ? "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
                                 : "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
@@ -794,8 +794,8 @@ export function InterfacesView({
         </div>
       )}
 
-      {enabledCount > 0 && <p className="mt-4 text-[11px] text-muted">已授权 {enabledCount} 个工具给模型调用。</p>}
-      <p className="mt-2 text-[11px] text-muted">
+      {enabledCount > 0 && <p className="mt-4 text-ui-xs text-muted">已授权 {enabledCount} 个工具给模型调用。</p>}
+      <p className="mt-2 text-ui-xs text-muted">
         工具调用在本地执行：模型返回调用意图 → 本机调用 MCP 服务 → 结果回灌模型，全程不经过云端。
       </p>
 
@@ -822,7 +822,7 @@ export function InterfacesView({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除 MCP 服务「{removeTarget.name}」？这条配置、缓存的工具清单与逐个工具的授权开关都会被移除；
             {registry.isPreset(removeTarget.id)
               ? "这是随应用内置的预置服务，删除后可在「预置服务」里重新接入。"

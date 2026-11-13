@@ -123,7 +123,7 @@ function nodeAriaLabel(node: CanvasNode): string {
 
 /** 工具栏按钮共用样式：走 token，暗色自动可读；禁用态降透明度。 */
 const toolbarButton =
-  "rounded-sm border border-line px-2 py-1 text-[11px] leading-4 text-ink transition-colors hover:bg-subtle-3 disabled:cursor-not-allowed disabled:opacity-40";
+  "rounded-sm border border-line px-2 py-1 text-ui-xs leading-4 text-ink transition-colors hover:bg-subtle-3 disabled:cursor-not-allowed disabled:opacity-40";
 
 export function CanvasPane({
   text,
@@ -387,15 +387,15 @@ export function CanvasPane({
       <div className="flex h-full flex-col gap-2 overflow-hidden p-3" data-testid="canvas-pane">
         <div
           role="alert"
-          className="rounded-sm border border-danger-line bg-danger-soft px-2 py-1 text-[12px] leading-5 text-danger"
+          className="rounded-sm border border-danger-line bg-danger-soft px-2 py-1 text-ui-sm leading-5 text-danger"
         >
           {parsed.error}
         </div>
-        <p className="text-[11px] text-muted">
+        <p className="text-ui-xs text-muted">
           画布内容无法解析，已切换为原文只读预览；不会把这段内容写回文件。
         </p>
         <pre
-          className="min-h-0 flex-1 overflow-auto rounded-sm border border-line-soft bg-subtle-2 p-2 font-mono text-[11px] leading-5 text-body"
+          className="min-h-0 flex-1 overflow-auto rounded-sm border border-line-soft bg-subtle-2 p-2 font-mono text-ui-xs leading-5 text-body"
           aria-label="画布原文只读预览"
         >
           {text}
@@ -438,7 +438,7 @@ export function CanvasPane({
           </button>
         </div>
         <div className="pointer-events-auto flex items-center gap-1 rounded-sm border border-line bg-panel p-1">
-          <span className="px-1 text-[11px] leading-4 text-muted">
+          <span className="px-1 text-ui-xs leading-4 text-muted">
             {Math.round(view.scale * 100)}%
           </span>
           <button type="button" className={toolbarButton} onClick={() => handleZoom(-1)} title="缩小">
@@ -451,7 +451,7 @@ export function CanvasPane({
             复位
           </button>
           {readOnly ? (
-            <span className="rounded-sm border border-line px-2 py-1 text-[11px] leading-4 text-muted">
+            <span className="rounded-sm border border-line px-2 py-1 text-ui-xs leading-4 text-muted">
               只读
             </span>
           ) : null}
@@ -591,24 +591,24 @@ export function CanvasPane({
                       style={{ pointerEvents: "none" }}
                     >
                       {node.type === "text" ? (
-                        <span className="whitespace-pre-wrap break-words text-[12px] leading-5 text-ink">
+                        <span className="whitespace-pre-wrap break-words text-ui-sm leading-5 text-ink">
                           {node.text?.trim() ? node.text : "双击编辑文本"}
                         </span>
                       ) : null}
                       {node.type === "file" ? (
                         <>
-                          <span className="truncate text-[12px] leading-5 text-ink">
+                          <span className="truncate text-ui-sm leading-5 text-ink">
                             {fileNameOf(node.file)}
                           </span>
-                          <span className="text-[10px] leading-4 text-muted">点击打开笔记</span>
+                          <span className="text-ui-xs leading-4 text-muted">点击打开笔记</span>
                         </>
                       ) : null}
                       {node.type === "link" ? (
                         <>
-                          <span className="break-all text-[11px] leading-4 text-ink">
+                          <span className="break-all text-ui-xs leading-4 text-ink">
                             {node.url ?? "（无地址）"}
                           </span>
-                          <span className="text-[10px] leading-4 text-muted">
+                          <span className="text-ui-xs leading-4 text-muted">
                             {isHttpUrl(node.url) ? "双击在浏览器打开" : "只支持 http(s) 链接"}
                           </span>
                         </>
@@ -643,7 +643,7 @@ export function CanvasPane({
                           commitEditing();
                         }
                       }}
-                      className="h-full w-full resize-none rounded-sm border border-line bg-surface p-1 font-sans text-[12px] leading-5 text-ink"
+                      className="h-full w-full resize-none rounded-sm border border-line bg-surface p-1 font-sans text-ui-sm leading-5 text-ink"
                       style={{ outline: "2px solid transparent" }}
                     />
                   </div>
@@ -656,13 +656,13 @@ export function CanvasPane({
 
       {activeDoc.nodes.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <p className="rounded-sm border border-dashed border-line px-3 py-2 text-[12px] text-muted">
+          <p className="rounded-sm border border-dashed border-line px-3 py-2 text-ui-sm text-muted">
             画布为空{readOnly ? "。" : "，点击「新建文本节点」开始。"}
           </p>
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute bottom-2 left-2 rounded-sm border border-line bg-panel px-2 py-1 text-[11px] leading-4 text-muted">
+      <div className="pointer-events-none absolute bottom-2 left-2 rounded-sm border border-line bg-panel px-2 py-1 text-ui-xs leading-4 text-muted">
         {readOnly
           ? "只读模式：可平移与缩放，不能修改画布"
           : "拖动空白处平移 · 滚轮缩放 · 双击文本编辑 · Delete 删除选中"}

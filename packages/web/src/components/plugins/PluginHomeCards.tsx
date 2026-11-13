@@ -82,16 +82,16 @@ function PluginHomeCardTile({
         }`}
         aria-label={`打开 ${card.title}`}
       >
-        <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
+        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
           <PluginPageIcon icon={card.icon} size={14} />
           <span className="truncate">{card.title}</span>
           {card.badge ? (
-            <span className="ml-auto shrink-0 rounded-full bg-[var(--subtle)] px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="ml-auto shrink-0 rounded-full bg-[var(--subtle)] px-1.5 py-0.5 text-ui-xs font-semibold">
               {card.badge}
             </span>
           ) : null}
         </div>
-        {card.text ? <div className="text-[15px] font-semibold">{card.text}</div> : null}
+        {card.text ? <div className="text-ui-base font-semibold">{card.text}</div> : null}
         {card.summary ? <div className="ui-caption line-clamp-2">{card.summary}</div> : null}
         {card.items.length > 0 ? (
           // 纯展示文本：不省行、不做点击，最多 3 条（归一化时已截断）。

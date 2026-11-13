@@ -9,6 +9,7 @@ import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
+import { CardSummary } from "./settings/CardSummary.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
@@ -55,7 +56,7 @@ function InlineText({ text }: { text: string }) {
             {seg.text}
           </strong>
         ) : seg.kind === "code" ? (
-          <code key={i} className="rounded-sm bg-[var(--subtle-2)] px-1 font-mono text-[11px]">
+          <code key={i} className="rounded-sm bg-[var(--subtle-2)] px-1 font-mono text-ui-xs">
             {seg.text}
           </code>
         ) : (
@@ -372,7 +373,7 @@ export function SettingsPage() {
                   className={anchorClass(highlightId === "memory-vault")}
                 >
                   <section className="mt-3 ui-card p-4">
-                    <div className="text-[12px] font-bold text-muted">知识库与记忆</div>
+                    <div className="text-ui-sm font-bold text-muted">知识库与记忆</div>
                     <p className="mt-1 ui-caption">
                       知识库参与记忆的开关、已纳入篇数与同步状态都在记忆页；这里只做入口，
                       两处共用同一个设置值，不做第二套开关。
@@ -457,14 +458,19 @@ function ProfileSection() {
 
   return (
     <section className="max-w-full ui-card p-4">
-      <div className="ui-section-title">个人资料</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="ui-section-title">个人资料</div>
+        <CardSummary
+          items={[`昵称 ${displayName.trim() || "未填写"}`, avatar ? "自定义头像" : "默认头像"]}
+        />
+      </div>
 
       <div className="mt-3 flex items-center gap-4">
         <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-muted">
           {avatar ? (
             <img src={avatar} alt="当前头像" className="h-full w-full object-cover" />
           ) : (
-            <UserIcon width={22} height={22} />
+            <UserIcon width={24} height={24} />
           )}
         </span>
         <label className="inline-flex cursor-pointer items-center ui-btn ui-btn-sm ui-btn-ghost">
@@ -488,7 +494,7 @@ function ProfileSection() {
             setAvatar(undefined);
             setSaved(false);
           }}
-          className="mt-2 rounded-lg border border-line px-3 py-1 text-[12px] hover:bg-[var(--subtle-2)]"
+          className="mt-2 rounded-lg border border-line px-3 py-1 text-ui-sm hover:bg-[var(--subtle-2)]"
         >
           恢复默认头像
         </button>
@@ -652,7 +658,12 @@ function NavModeSection() {
   return (
     <section aria-label="导航栏" className="max-w-full ui-card p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="ui-section-title">导航栏</div>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <div className="ui-section-title">导航栏</div>
+          <CardSummary
+            items={[NAV_MODE_OPTIONS.find((m) => m.id === navMode)?.label ?? "固定常显"]}
+          />
+        </div>
         <Button
           type="button"
           aria-label="恢复默认导航栏模式"
@@ -831,7 +842,7 @@ function NavigationSection() {
             className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
           >
             <span className="w-[18px] ui-caption">{index + 1}</span>
-            <span className="flex-1 text-[12px]">{NAV_LABELS[page]}</span>
+            <span className="flex-1 text-ui-sm">{NAV_LABELS[page]}</span>
             {index >= DEFAULT_NAV_ORDER.length ? (
               <span className="ui-micro shrink-0 text-muted">已装插件 · 固定末位</span>
             ) : (
@@ -846,7 +857,7 @@ function NavigationSection() {
           >
             <span className="w-[18px] ui-caption">{DEFAULT_NAV_ORDER.length + index + 1}</span>
             <PluginPageIcon icon={entry.icon} size={14} />
-            <span className="flex-1 text-[12px]">{entry.title}</span>
+            <span className="flex-1 text-ui-sm">{entry.title}</span>
             <span className="ui-micro shrink-0 text-muted">插件页面 · 固定末位</span>
           </li>
         ))}
@@ -910,9 +921,9 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                 onClick={() => setLogState((prev) => toggleLog(prev, entry.version, isCurrent))}
                 className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--subtle)]"
               >
-                <span className="text-[12px] font-bold">{entry.version}</span>
+                <span className="text-ui-sm font-bold">{entry.version}</span>
                 {isCurrent && (
-                  <span className="rounded-full border border-line px-1.5 text-[10px] text-muted">
+                  <span className="rounded-full border border-line px-1.5 text-ui-xs text-muted">
                     当前
                   </span>
                 )}
@@ -926,12 +937,12 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                   <div className="ui-caption">{entry.date}</div>
                   {notes ? (
                     <>
-                      <div className="mt-0.5 text-[12px] font-medium">
+                      <div className="mt-0.5 text-ui-sm font-medium">
                         <InlineText text={notes.title} />
                       </div>
                       <ul className="mt-1.5 flex flex-col gap-1">
                         {(notes.bullets.length > 0 ? notes.bullets : notes.paragraphs).map((line, i) => (
-                          <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed">
+                          <li key={i} className="flex gap-1.5 text-ui-sm leading-relaxed">
                             <span className="text-muted">·</span>
                             <span className="min-w-0 flex-1">
                               <InlineText text={line} />
@@ -941,7 +952,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                       </ul>
                     </>
                   ) : (
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                    <p className="mt-1 text-ui-sm leading-relaxed text-muted">
                       这一版还没有用户版说明；工程记录见仓库 CHANGELOG.md。
                     </p>
                   )}

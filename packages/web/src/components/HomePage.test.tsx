@@ -88,12 +88,15 @@ function mockTeam(
 }
 
 /** 取统计卡：标题 → 卡片容器，避免与页面别处的同名区块（如「在线成员」列表）互串。
- *  d.68 起卡片外观收口到 `.ui-card`（圆角/描边/阴影改由 CSS 类给出，DOM 上不再逐字面量写）。 */
+ *  d.68 起卡片外观收口到 `.ui-card`（圆角/描边/阴影改由 CSS 类给出，DOM 上不再逐字面量写）。
+ *  d.141：统计区从首屏下移到第二屏、外面多了一层 section，定位改成 data-testid 的容器
+ *  再按标题找直接子元素——不再依赖 `.grid.grid-cols-4` 这串展示类（改版时它最容易变）。 */
 function statCard(title: string): HTMLElement {
-  const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(".grid.grid-cols-4 > div.ui-card, .grid.grid-cols-4 > button.ui-card"),
-  );
-  const card = cards.find((c) => c.firstElementChild?.textContent === title);
+  const grid = document.querySelector<HTMLElement>('[data-testid="home-stats"]');
+  if (!grid) throw new Error('找不到统计卡容器：[data-testid="home-stats"]');
+  const card = Array.from(grid.children).find(
+    (c) => c.firstElementChild?.textContent === title,
+  ) as HTMLElement | undefined;
   if (!card) throw new Error(`找不到统计卡：${title}`);
   return card;
 }
@@ -116,6 +119,9 @@ describe("HomePage", () => {
     useChatStore.setState({
       agentsRoster: AGENT_ROSTER,
       conversations: [],
+      // 首载成功的常态：失败条只在「没就绪 + 有错误」时出现，默认用例不该落到失败态
+      workspaceReady: true,
+      workspaceError: null,
       loadWorkspace: vi.fn(async () => undefined),
       loadAgentsRoster: vi.fn(async () => undefined),
     });
@@ -378,13 +384,22 @@ describe("HomePage", () => {
     expect(screen.queryByRole("region", { name: "插件首页卡" })).toBeNull();
   });
 
-  it("云端探测失败时页脚显示「失败」", async () => {
+  it("服务探测失败：页脚给出原因与「重试」，点重试重新探测后恢复", async () => {
     mockTeam();
     mockHealth(false);
     render(<HomePage />);
     await act(async () => {});
 
-    expect(await screen.findByText("服务：失败")).toBeInTheDocument();
+    // F-14：不再只给一个「失败」词——说清是连不上，并给就地重试
+    expect(await screen.findByText("服务：连接失败")).toBeInTheDocument();
+    expect(screen.getByText(/连不上本机服务/)).toBeInTheDocument();
+
+    // 服务恢复：点「重试」重探一次（不刷新整页），成功态文案回来、失败提示消失
+    mockHealth(true);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await act(async () => {});
+    expect(screen.getByText("服务：正常")).toBeInTheDocument();
+    expect(screen.queryByText(/连接失败/)).toBeNull();
   });
 
   it("个人视图显示当月汇总（读取时按月重算）", async () => {
@@ -449,7 +464,9 @@ describe("HomePage", () => {
     useTokenUsageStore.getState().record("claude-sonnet-5", 120, now.toISOString());
     render(<HomePage />);
     await act(async () => {});
-    expect(screen.getByRole("img", { name: "近 30 日 token 用量" })).toBeInTheDocument();
+    // 热力图本体有读屏概要（d.141 起是 group + 每格 img，容器 label 先给合计/峰值）
+    const heatmap = screen.getByTestId("token-heatmap");
+    expect(heatmap.getAttribute("aria-label")).toMatch(/近 30 日 token 用量/);
     // 热力图标题与用量卡同属一张卡片：单独一张卡时它只是一条 70px 的细带，宽屏上白占一行。
     const usageCard = screen.getByText(/Token 用量/).closest(".ui-card") as HTMLElement;
     expect(usageCard).not.toBeNull();
@@ -567,5 +584,101 @@ describe("HomePage", () => {
     render(<HomePage />);
     await act(async () => {});
     expect(screen.queryByRole("region", { name: "开始使用" })).toBeNull();
+  });
+
+  /* ——— d.141 首屏收敛：首屏只回答「现在要做什么」 ——— */
+
+  it("首屏只放动作块；统计 / 用量 / 团队动向都在第二屏", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "system-assistant", name: "和小鸣", avatar: null, owner_id: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: now.toISOString(),
+          title: "上次聊到哪",
+        },
+      ] as never,
+    });
+    mockTeam();
+    render(<HomePage />);
+    await act(async () => {});
+
+    const first = screen.getByTestId("home-focus");
+    // 首屏：继续上次
+    expect(within(first).getByRole("region", { name: "最近对话" })).toBeInTheDocument();
+    // 首屏不放「我做了多少」：数字卡 / 用量账本 / 团队动向都在第二屏
+    expect(within(first).queryByTestId("home-stats")).toBeNull();
+    expect(within(first).queryByRole("region", { name: "Token 用量" })).toBeNull();
+    expect(within(first).queryByRole("region", { name: "团队动向" })).toBeNull();
+
+    const second = screen.getByTestId("home-secondary");
+    expect(within(second).getByTestId("home-stats")).toBeInTheDocument();
+    expect(within(second).getByRole("region", { name: "Token 用量" })).toBeInTheDocument();
+    expect(within(second).getByRole("region", { name: "团队动向" })).toBeInTheDocument();
+    // 第二屏有可见的分区标题（读屏与视觉都能分清「首屏/其后」）
+    expect(within(second).getByRole("heading", { name: "状态与动向" })).toBeInTheDocument();
+  });
+
+  it("首跑引导在场时不再叠加「最近对话」空态（同一件事只说一次）", async () => {
+    mockTeam();
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByRole("region", { name: "开始使用" })).toBeInTheDocument();
+    // 引导卡已经在劝「配置模型 → 开始对话」，最近对话空态不再重复出现
+    expect(screen.queryByRole("region", { name: "最近对话" })).toBeNull();
+  });
+
+  it("引导卡不在场时，最近对话空态自己给下一步（去智能体页）", async () => {
+    useOnboardingStore.setState({ dismissedAt: Date.now() });
+    mockTeam();
+    render(<HomePage />);
+    await act(async () => {});
+
+    const recent = screen.getByRole("region", { name: "最近对话" });
+    expect(within(recent).getByText(/还没有对话/)).toBeInTheDocument();
+    fireEvent.click(within(recent).getByRole("button", { name: "去智能体页" }));
+    expect(useUiStore.getState().page).toBe("chat");
+  });
+
+  it("团队动向空态也给下一步：点「去团队页」进入团队页", async () => {
+    mockTeam(undefined, undefined, []);
+    render(<HomePage />);
+    await act(async () => {});
+
+    const card = screen.getByRole("region", { name: "团队动向" });
+    expect(within(card).getByText("还没有团队动向")).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole("button", { name: "去团队页" }));
+    expect(useUiStore.getState().page).toBe("team");
+  });
+
+  /* ——— task-4 勘察 P1：首载失败不再静默（空列表 ≠ 记录丢了） ——— */
+
+  it("首载失败：首屏给出失败原因与「重试」，重试重新拉工作区", async () => {
+    const loadWorkspace = vi.fn(async () => undefined);
+    useChatStore.setState({ workspaceReady: false, workspaceError: "网络中断", loadWorkspace });
+    mockTeam();
+    render(<HomePage />);
+    await act(async () => {});
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("部分数据加载失败：网络中断");
+    // 失败提示属于首屏：和「接着干什么」的动作块在一起，不用滚到第二屏才看见
+    expect(within(screen.getByTestId("home-focus")).getByRole("alert")).toBe(alert);
+
+    expect(loadWorkspace).toHaveBeenCalledTimes(1); // 挂载时的那次首载
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(loadWorkspace).toHaveBeenCalledTimes(2); // 重试只重拉工作区一次
+  });
+
+  it("已成功加载过（workspaceReady）后，残留的旧错误不再提示", async () => {
+    useChatStore.setState({ workspaceReady: true, workspaceError: "上次失败的原因" });
+    mockTeam();
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.queryByText(/部分数据加载失败/)).toBeNull();
   });
 });

@@ -50,13 +50,13 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
+      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-fast ${
         checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
       } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       <span
         style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
+        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-fast ${
           checked ? "left-[16px]" : "left-[2px]"
         }`}
       />
@@ -64,7 +64,7 @@ export function Switch({
   );
 }
 
-const diffChipCls = "rounded-sm border px-1.5 py-0.5 text-[10px]";
+const diffChipCls = "rounded-sm border px-1.5 py-0.5 text-ui-xs";
 const diffTone = {
   add: "border-emerald-200 bg-emerald-50 text-emerald-700",
   change: "border-amber-200 bg-amber-50 text-amber-700",
@@ -106,7 +106,7 @@ export function DiffLine({
   const total = diff.added.length + diff.changed.length + diff.removed.length + diff.unchanged.length;
   return (
     <div>
-      <div className="text-[11px] text-body">
+      <div className="text-ui-xs text-body">
         <span className="font-bold">{label}</span>
         {total === 0 ? (
           <span className="ml-1">无</span>

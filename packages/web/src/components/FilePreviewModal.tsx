@@ -60,7 +60,7 @@ export function MarkdownLite({ text }: { text: string }) {
       while (i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
       i += 1;
       out.push(
-        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded-sm bg-[var(--subtle-2)] p-2 text-[12px]">{buf.join("\n")}</pre>,
+        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded-sm bg-[var(--subtle-2)] p-2 text-ui-sm">{buf.join("\n")}</pre>,
       );
       continue;
     }
@@ -94,7 +94,7 @@ export function MarkdownLite({ text }: { text: string }) {
       ))}</p>,
     );
   }
-  return <div className="space-y-1 text-[13px] leading-relaxed">{out}</div>;
+  return <div className="space-y-1 text-ui-md leading-relaxed">{out}</div>;
 }
 
 type Status = "loading" | "error" | "done";
@@ -147,7 +147,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
 
   let body: ReactNode;
   if (status === "loading") {
-    body = <div className="py-8 text-center text-[13px] text-muted">加载中…</div>;
+    body = <div className="py-8 text-center text-ui-md text-muted">加载中…</div>;
   } else if (status === "error") {
     body = (
       <div className="py-6 text-center">
@@ -155,7 +155,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
         <button
           type="button"
           onClick={() => setAttempt((a) => a + 1)}
-          className="rounded-lg border border-line-soft px-3 py-1.5 text-[13px]"
+          className="rounded-lg border border-line-soft px-3 py-1.5 text-ui-md"
         >
           重试
         </button>
@@ -167,18 +167,18 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
     body = <MarkdownLite text={text} />;
   } else if (kind === "text") {
     body = (
-      <pre className="whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] p-3 text-[12px]">
+      <pre className="whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] p-3 text-ui-sm">
         {text}
       </pre>
     );
   } else {
     body = (
       <div className="py-6 text-center">
-        <div className="mb-3 text-[13px] text-muted">不支持内嵌预览（{file.mime}）</div>
+        <div className="mb-3 text-ui-md text-muted">不支持内嵌预览（{file.mime}）</div>
         <a
           href={url}
           download={file.name}
-          className="inline-block rounded-lg border border-line-soft px-3 py-1.5 text-[13px]"
+          className="inline-block rounded-lg border border-line-soft px-3 py-1.5 text-ui-md"
         >
           下载
         </a>
@@ -189,7 +189,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   return (
     <Dialog
       ariaLabel={`预览 ${file.name}`}
-      title={<span className="block truncate text-[13px] font-semibold">{file.name}</span>}
+      title={<span className="block truncate text-ui-md font-semibold">{file.name}</span>}
       size="md"
       onClose={onClose}
       closeLabel="关闭预览"

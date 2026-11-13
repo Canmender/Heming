@@ -3,7 +3,7 @@ import type { TeamActivity, TeamActivityKind, TeamMember } from "@heming/shared"
 import { Avatar } from "./Avatar.js";
 import { CalendarIcon, TaskIcon } from "./icons.js";
 import { EmptyState } from "./ui/EmptyState.js";
-import { ErrorState } from "./ui/ErrorState.js";
+import { AsyncBoundary } from "./ui/AsyncBoundary.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
 import { activitySummaryLabel } from "../lib/team/labels.js";
 
@@ -60,13 +60,13 @@ function BoardCard({
     >
       <span className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12px] font-medium text-ink">{activity.title}</span>
-          <span className="mt-0.5 block truncate text-[10px] text-muted">{actor}</span>
+          <span className="block truncate text-ui-sm font-medium text-ink">{activity.title}</span>
+          <span className="mt-0.5 block truncate text-ui-xs text-muted">{actor}</span>
         </span>
-        <span className="shrink-0 text-[10px] text-muted">{fmtTime(activity.occurredAt)}</span>
+        <span className="shrink-0 text-ui-xs text-muted">{fmtTime(activity.occurredAt)}</span>
       </span>
       {summary && (
-        <span className="mt-1 block truncate text-[11px] leading-5 text-[var(--body)]">{summary}</span>
+        <span className="mt-1 block truncate text-ui-xs leading-5 text-[var(--body)]">{summary}</span>
       )}
     </button>
   );
@@ -150,7 +150,7 @@ export function TeamBoardView({
             type="button"
             aria-pressed={selectedId === null}
             onClick={() => onSelectMember(null)}
-            className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] ${
+            className={`shrink-0 rounded-full border px-2.5 py-1 text-ui-xs ${
               selectedId === null
                 ? "border-ink bg-ink text-white"
                 : "border-line text-muted hover:bg-[var(--surface)]"
@@ -164,7 +164,7 @@ export function TeamBoardView({
               type="button"
               aria-pressed={m.user.id === selectedId}
               onClick={() => onSelectMember(m.user.id === selectedId ? null : m.user.id)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-[11px] ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-ui-xs ${
                 m.user.id === selectedId
                   ? "border-ink bg-ink text-white"
                   : "border-line text-[var(--body)] hover:bg-[var(--surface)]"
@@ -230,15 +230,21 @@ export function TeamBoardView({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-        {!ready ? (
-          <div className="grid gap-4 md:grid-cols-2" role="status" aria-label="正在加载">
-            {[0, 1].map((i) => (
-              <SkeletonCard key={i} lines={3} className="h-40" />
-            ))}
-          </div>
-        ) : error ? (
-          <ErrorState className="py-10" title={<>看板加载失败：{error}</>} onRetry={onRetry} />
-        ) : (
+        <AsyncBoundary
+          status={!ready ? "loading" : error ? "error" : "ready"}
+          loadingLabel="正在加载"
+          loadingClassName="grid gap-4 md:grid-cols-2"
+          loadingFallback={
+            <>
+              {[0, 1].map((i) => (
+                <SkeletonCard key={i} lines={3} className="h-40" />
+              ))}
+            </>
+          }
+          errorTitle={<>看板加载失败：{error}</>}
+          onRetry={onRetry}
+          errorClassName="py-10"
+        >
           <div className="grid gap-4 md:grid-cols-2">
             <section aria-label="任务" className={`flex flex-col rounded-xl bg-[var(--subtle-2)] p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
               <div className="mb-2 flex items-center gap-1.5 ui-section-title">
@@ -294,7 +300,7 @@ export function TeamBoardView({
               )}
             </section>
           </div>
-        )}
+        </AsyncBoundary>
       </div>
     </div>
   );

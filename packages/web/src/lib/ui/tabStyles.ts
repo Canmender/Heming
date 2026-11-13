@@ -12,7 +12,7 @@
 export const PAGE_TABLIST = "flex gap-1";
 
 /** 单个页面级 Tab 按钮（含选中/未选中两种状态）。 */
-export const PAGE_TAB = "-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors";
+export const PAGE_TAB = "-mb-px border-b-2 px-3.5 py-2 text-ui-md transition-colors";
 export const PAGE_TAB_ACTIVE = "border-b-ink font-semibold text-ink";
 export const PAGE_TAB_IDLE = "border-b-transparent text-muted hover:text-ink";
 

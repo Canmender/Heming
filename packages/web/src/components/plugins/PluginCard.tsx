@@ -69,15 +69,15 @@ export function PluginCard({
       <div className="flex items-start gap-3">
         <span
           aria-hidden="true"
-          className="plugin-icon-tile h-9 w-9 text-[13px] font-bold"
+          className="plugin-icon-tile h-9 w-9 text-ui-md font-bold"
         >
           {initial}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-[13px] font-semibold">{manifest.name}</span>
+            <span className="truncate text-ui-md font-semibold">{manifest.name}</span>
             <span className={CHIP}>v{manifest.version}</span>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
+            <span className="inline-flex items-center gap-1.5 text-ui-xs font-medium text-muted">
               <span
                 aria-hidden="true"
                 className="plugin-dot"

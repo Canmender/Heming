@@ -243,6 +243,18 @@
 
 **P2（页面积累项）**：知识库页头并入 `PageShell`、表格规范、`TokenHeatmap` 可读化、登录页可见 label、`ChatEmptyState` 去模板、`ModelTraceView` 改 `viewBox`。
 
+> **状态（d.140.3.75.11 已清零）**：六条全部完成——知识库页头并入 `PageShell`（工作台宽度 `full`）；表格统一 `.ui-table`；
+> `TokenHeatmap` 改 roving tabindex + 方向键 + 每格 `aria-label` + 概况句；登录页两个输入框加可见 `<label>`；
+> `ChatEmptyState` 改为 `<EmptyState align="start">`；`ModelTraceView` 没有改 `viewBox`（节点是绝对定位 HTML，
+> 只改 viewBox 会与连线错位），改为 `ResizeObserver` + `zoom` 0.72–1 自适应缩放。
+>
+> **P1 状态**：1/2/3/5 已完成（`SectionCard`、`AsyncBoundary`、`useRovingTabs`、Button 焦点环与 32px 命中区）；
+> 4 的 `--scrim`/`ui/Dialog` 在前几轮完成；6 完成（字号/动效/图标三把尺子 + `lib/designScales.test.ts` 门禁），
+> 圆角与阴影沿用既有三档与 `.ui-card` 描边，不再新增刻度。
+>
+> **P1 残留（有意留着）**：`ui-btn-sm` 仍是 28px——它是「卡片/表格内联小按钮」的既有尺寸，抬到 32 会改变密集列表的行高；
+> ≥32 的命中区由 `ui/IconButton` 与主按钮承担。若后续要统一，应在一次单独的外观评审里做，和行高一起调。
+
 **不建议动**：字体栈、`--placeholder` 取值、`useModalA11y`、`MemoryPage.tsx:2499-2531` 的 tablist、`GlobalFocusRing` 的 forced-colors 分支、插件区已删光晕的方向。
 
 ---

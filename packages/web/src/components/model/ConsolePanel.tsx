@@ -84,7 +84,7 @@ export function ConsolePanel({
   return (
     <div className="rta-enter mt-3 rounded-lg border border-line-soft bg-[var(--subtle)] p-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[12px] font-bold">
+        <div className="text-ui-sm font-bold">
           {title}
           <span className="ml-2 font-normal text-muted">
             {status === "running" ? "进行中…" : status === "done" ? "已完成" : "失败"}
@@ -106,17 +106,17 @@ export function ConsolePanel({
         </div>
       </div>
       {hint && <p className="mt-1 ui-caption">{hint}</p>}
-      {error && <p className="mt-1 text-[12px] text-[var(--danger)]">{error}</p>}
+      {error && <p className="mt-1 text-ui-sm text-[var(--danger)]">{error}</p>}
       <pre
         aria-label="命令输出"
-        className="mt-2 h-44 overflow-auto rounded-lg bg-[var(--console-bg)] p-3 text-[12px] text-[var(--console-ink)]"
+        className="mt-2 h-44 overflow-auto rounded-lg bg-[var(--console-bg)] p-3 text-ui-sm text-[var(--console-ink)]"
       >
         {output || "（输出会出现在这里）"}
       </pre>
       <div className="mt-2 flex gap-2">
         <input
           aria-label="命令输入"
-          className="ui-input flex-1 font-mono text-[12px]"
+          className="ui-input flex-1 font-mono text-ui-sm"
           type="password"
           placeholder="输入口令/回答，回车发送（只在本面板内存里）"
           value={input}

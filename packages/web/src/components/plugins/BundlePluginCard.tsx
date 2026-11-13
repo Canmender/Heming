@@ -83,15 +83,15 @@ export function BundlePluginCard({
       className="ui-card plugin-card p-4"
     >
       <div className="flex items-start gap-3">
-        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-[13px] font-bold">
+        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-bold">
           {initial}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={CHIP}>{UNIT_SOURCE_LABELS[unit.source]}</span>
-            <span className="truncate text-[13px] font-semibold">{record.name}</span>
+            <span className="truncate text-ui-md font-semibold">{record.name}</span>
             <span className={CHIP}>v{record.version}</span>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
+            <span className="inline-flex items-center gap-1.5 text-ui-xs font-medium text-muted">
               <span
                 aria-hidden="true"
                 className="plugin-dot"
@@ -163,7 +163,7 @@ export function BundlePluginCard({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             卸载插件「{record.name}」？它的插件文件、模型与插件设置都会一并删除，此操作不可恢复。
             只想临时收起，改用左侧开关停用即可——停用会保留文件与设置。
           </p>

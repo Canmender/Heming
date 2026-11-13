@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSessionTab } from "../lib/sessionState.js";
 import { EmptyState } from "./ui/EmptyState.js";
+import { AsyncBoundary } from "./ui/AsyncBoundary.js";
+import { SkeletonLine } from "./ui/Skeleton.js";
+import { useRovingTabs } from "../lib/ui/tabs.js";
 import type {
   TeamActivity,
   TeamActivityKind,
@@ -102,6 +105,14 @@ function fmtLastSeen(iso: string | null): string {
 const TEAM_TAB_KEY = "heming.tab.team.v1";
 const TEAM_TABS = ["workspace", "feed", "board", "agenda", "usage"] as const;
 type TeamTab = (typeof TEAM_TABS)[number];
+/** 页签文案（顺序与 TEAM_TABS 一致，tab 与 tabpanel 的 id 都由 key 生成）。 */
+const TEAM_TAB_LABELS: Record<TeamTab, string> = {
+  workspace: "工作台",
+  feed: "动向",
+  board: "看板",
+  agenda: "团队日程",
+  usage: "用量",
+};
 
 export function TeamPage() {
   const me = useAuthStore((s) => s.user);
@@ -144,6 +155,16 @@ export function TeamPage() {
    * 只把「页面外壳」换成这里的 Tab。
    */
   const [tab, setTab] = useSessionTab<TeamTab>(TEAM_TAB_KEY, "feed", TEAM_TABS);
+  // 页签 id 前缀用 useId：团队页若被同屏挂载两份（如嵌入视图），静态 id 会撞车。
+  const teamTabPrefix = useId();
+  const teamTabDomId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-tab`;
+  const teamPanelDomId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-panel`;
+  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
+  const teamTabs = useRovingTabs({
+    count: TEAM_TABS.length,
+    activeIndex: TEAM_TABS.indexOf(tab),
+    onChange: (index) => setTab(TEAM_TABS[index]),
+  });
   const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
   const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
   const [usageReady, setUsageReady] = useState(false);
@@ -647,7 +668,7 @@ export function TeamPage() {
                 aria-label="搜索团队成员"
                 className={`ui-input ${FOCUS_RING}`}
               />
-              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+              <div className="mt-1.5 flex items-center justify-between text-ui-xs">
                 <label className="flex items-center gap-1 text-muted">
                   <input
                     type="checkbox"
@@ -670,29 +691,27 @@ export function TeamPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-              {!rosterReady ? (
-                <div role="status" aria-busy="true" aria-label="正在加载团队成员" className="space-y-1.5 p-1.5">
-                  {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className="ui-skeleton h-9 rounded-lg" />
-                  ))}
-                </div>
-              ) : rosterError ? (
-                <div className="p-2 text-[12px]">
-                  <p role="alert" className="ui-alert ui-alert-danger text-left">名册加载失败：{rosterError}</p>
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost" className="mt-1"
-                    onClick={() => void loadRoster()}
-                  >
-                    重试
-                  </Button>
-                </div>
-              ) : filteredMembers.length === 0 ? (
-                <p className="p-2 ui-caption">
-                  {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
-                </p>
-              ) : (
-                filteredMembers.map((m) => {
+              <AsyncBoundary
+                status={!rosterReady ? "loading" : rosterError ? "error" : "ready"}
+                loadingLabel="正在加载团队成员"
+                loadingClassName="space-y-1.5"
+                loadingFallback={
+                  <>
+                    {[0, 1, 2, 3].map((i) => (
+                      <SkeletonLine key={i} className="h-9 rounded-lg" />
+                    ))}
+                  </>
+                }
+                errorTitle={`名册加载失败：${rosterError}`}
+                onRetry={() => void loadRoster()}
+                errorCompact
+              >
+                {filteredMembers.length === 0 ? (
+                  <p className="p-2 ui-caption">
+                    {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
+                  </p>
+                ) : (
+                  filteredMembers.map((m) => {
                   const selected = m.user.id === selectedId;
                   return (
                     <button
@@ -727,6 +746,7 @@ export function TeamPage() {
                   );
                 })
               )}
+              </AsyncBoundary>
             </div>
           </aside>
         )}
@@ -782,7 +802,7 @@ export function TeamPage() {
                             className="flex w-full items-baseline gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-[var(--subtle-2)]"
                           >
                             <span className="shrink-0 ui-chip">{KIND_LABEL[a.kind]}</span>
-                            <span className="min-w-0 flex-1 truncate text-[12px]">{a.title}</span>
+                            <span className="min-w-0 flex-1 truncate text-ui-sm">{a.title}</span>
                             <time dateTime={a.occurredAt} className="shrink-0 ui-caption">
                               {fmtTime(a.occurredAt)}
                             </time>
@@ -801,27 +821,34 @@ export function TeamPage() {
             className={`${PAGE_TABLIST} items-center border-b border-line-soft px-6`}
             role="tablist"
             aria-label="团队视图"
+            onKeyDown={teamTabs.onKeyDown}
           >
-            {[
-              { key: "workspace" as const, label: "工作台" },
-              { key: "feed" as const, label: "动向" },
-              { key: "board" as const, label: "看板" },
-              { key: "agenda" as const, label: "团队日程" },
-              { key: "usage" as const, label: "用量" },
-            ].map((t) => (
+            {TEAM_TABS.map((key, index) => (
               <button
-                key={t.key}
+                key={key}
                 type="button"
                 role="tab"
-                aria-selected={tab === t.key}
-                onClick={() => setTab(t.key)}
-                className={pageTabClass(tab === t.key)}
+                id={teamTabDomId(key)}
+                ref={teamTabs.getTabRef(index)}
+                tabIndex={teamTabs.tabIndexFor(index)}
+                aria-controls={tab === key ? teamPanelDomId(key) : undefined}
+                aria-selected={tab === key}
+                onClick={() => setTab(key)}
+                className={pageTabClass(tab === key)}
               >
-                {t.label}
+                {TEAM_TAB_LABELS[key]}
               </button>
             ))}
           </div>
 
+          {/* 一个 tabpanel 包住四个互斥视图：id/aria-labelledby 随当前 tab 走，
+              既补齐了此前缺失的 tab→panel 关联，也保持 <main> 的 flex 布局不变。 */}
+          <div
+            role="tabpanel"
+            id={teamPanelDomId(tab)}
+            aria-labelledby={teamTabDomId(tab)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
           {tab === "workspace" && <TeamWorkspace />}
 
           {/* 看板：d.67 从独立页并进来的视图；d.109 起改为受控视图——数据、名册、
@@ -864,39 +891,37 @@ export function TeamPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {linkNotice && (
-              <p role="status" className="mb-2 rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-1.5 text-[11px] leading-5 text-muted">
+              <p role="status" className="mb-2 rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-1.5 text-ui-xs leading-5 text-muted">
                 {linkNotice}
               </p>
             )}
-            {!feedReady ? (
-              <div role="status" aria-busy="true" aria-label="正在加载团队动向" className="space-y-2">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="ui-skeleton h-12 rounded-xl" />
-                ))}
-              </div>
-            ) : feedError ? (
-              <div className="py-6 text-center text-[12px]">
-                <p role="alert" className="ui-alert ui-alert-danger text-left">动向加载失败：{feedError}</p>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost" className="mt-2"
-                  onClick={() => void loadFeed(true)}
-                >
-                  重试
-                </Button>
-              </div>
-            ) : visibleActivities.length === 0 ? (
-              <EmptyState
-                compact
-                title="还没有可见的动向。"
-                desc={
-                  shareCount > 0
-                    ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
-                    : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"
-                }
-              />
-            ) : (
-              <ul className="space-y-1">
+            <AsyncBoundary
+              status={!feedReady ? "loading" : feedError ? "error" : "ready"}
+              loadingLabel="正在加载团队动向"
+              loadingClassName="space-y-2"
+              loadingFallback={
+                <>
+                  {[0, 1, 2].map((i) => (
+                    <SkeletonLine key={i} className="h-12 rounded-xl" />
+                  ))}
+                </>
+              }
+              errorTitle={`动向加载失败：${feedError}`}
+              onRetry={() => void loadFeed(true)}
+              errorCompact
+            >
+              {visibleActivities.length === 0 ? (
+                <EmptyState
+                  compact
+                  title="还没有可见的动向。"
+                  desc={
+                    shareCount > 0
+                      ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
+                      : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"
+                  }
+                />
+              ) : (
+                <ul className="space-y-1">
                 {visibleActivities.map((a) => (
                   <li
                     key={a.id}
@@ -939,6 +964,7 @@ export function TeamPage() {
                 ))}
               </ul>
             )}
+            </AsyncBoundary>
             {hasMore && visibleActivities.length > 0 && (
               <div className="mt-2 flex justify-center">
                 <Button
@@ -960,24 +986,26 @@ export function TeamPage() {
 
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-              <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-[11px] leading-5 text-muted">
+              <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-ui-xs leading-5 text-muted">
                 团队日程只显示成员共享的日程标题与到期档位；不含日程正文与来源信息。
               </p>
               {!feedReady ? (
-                <p role="status" className="mt-3 ui-caption">加载中…</p>
+                <AsyncBoundary
+                  status="loading"
+                  loadingLabel="正在加载团队日程"
+                  loadingClassName="mt-3"
+                  loadingFallback={null}
+                />
               ) : feedError ? (
-                <div className="py-10 text-center text-[12px]">
-                  <p role="alert" className="ui-alert ui-alert-danger text-left">日程加载失败：{feedError}</p>
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost" className="mt-2"
-                    onClick={() => void loadFeed(true)}
-                  >
-                    重试
-                  </Button>
-                </div>
+                <AsyncBoundary
+                  status="error"
+                  errorTitle={`日程加载失败：${feedError}`}
+                  onRetry={() => void loadFeed(true)}
+                  errorCompact
+                  errorClassName="mt-3"
+                />
               ) : agendaActivities.length === 0 ? (
-                <div className="py-10 text-center text-[12px] leading-6 text-muted">
+                <div className="py-10 text-center text-ui-sm leading-6 text-muted">
                   {!infohubRunning ? (
                     <>
                       <p className="font-medium text-ink">还没有共享的日程</p>
@@ -1068,7 +1096,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="rounded-sm border border-[var(--danger-line)] px-2 py-1 text-[11px] text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                      className="rounded-sm border border-[var(--danger-line)] px-2 py-1 text-ui-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                     >
                       清除我的用量
                     </button>
@@ -1079,18 +1107,18 @@ export function TeamPage() {
               {!share.usage ? (
                 <section className="mt-3" aria-label="本机用量">
                   <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
-                  <p className="mt-1 text-[11px] leading-5 text-muted">
+                  <p className="mt-1 text-ui-xs leading-5 text-muted">
                     「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
                     聚合摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
                   </p>
-                  <div className="mt-2 flex flex-wrap items-baseline gap-4 text-[12px]">
+                  <div className="mt-2 flex flex-wrap items-baseline gap-4 text-ui-sm">
                     <span>
                       近 {rangeDays} 天合计{" "}
                       <b className="tabular-nums">{fmtTokens(localUsage.total)}</b>
                     </span>
                     <span className="ui-caption">未上报 {localUsage.unreported} 轮</span>
                   </div>
-                  <ul className="mt-2 space-y-1 text-[11px] leading-5">
+                  <ul className="mt-2 space-y-1 text-ui-xs leading-5">
                     {localUsage.byModel.map((m) => (
                       <li key={m.model} className="flex items-baseline gap-2">
                         <span className="truncate font-medium">{m.model}</span>
@@ -1117,23 +1145,25 @@ export function TeamPage() {
                   </p>
                 </section>
               ) : !usageReady ? (
-                <p role="status" className="mt-3 ui-caption">加载中…</p>
+                <AsyncBoundary
+                  status="loading"
+                  loadingLabel="正在加载团队用量"
+                  loadingClassName="mt-3"
+                  loadingFallback={null}
+                />
               ) : usageError ? (
-                <div className="py-6 text-center text-[12px]">
-                  <p role="alert" className="ui-alert ui-alert-danger text-left">用量加载失败：{usageError}</p>
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost" className="mt-2"
-                    onClick={() => void syncUsage()}
-                  >
-                    重试
-                  </Button>
-                </div>
+                <AsyncBoundary
+                  status="error"
+                  errorTitle={`用量加载失败：${usageError}`}
+                  onRetry={() => void syncUsage()}
+                  errorCompact
+                  errorClassName="mt-3"
+                />
               ) : usage ? (
                 <>
                   <section className="mt-3" aria-label="我的用量">
                     <h2 className="ui-section-title">我的用量（近 {rangeDays} 天）</h2>
-                    <div className="mt-1 flex flex-wrap items-baseline gap-4 text-[12px]">
+                    <div className="mt-1 flex flex-wrap items-baseline gap-4 text-ui-sm">
                       <span>
                         合计 <b className="tabular-nums">{fmtTokens(usage.self.total)}</b>
                       </span>
@@ -1141,7 +1171,7 @@ export function TeamPage() {
                         未上报 {usage.self.unreported} 轮
                       </span>
                     </div>
-                    <ul className="mt-2 space-y-1 text-[11px] leading-5">
+                    <ul className="mt-2 space-y-1 text-ui-xs leading-5">
                       {usage.self.byModel.map((m) => (
                         <li key={m.model} className="flex items-baseline gap-2">
                           <span className="truncate font-medium">{m.model}</span>
@@ -1167,7 +1197,7 @@ export function TeamPage() {
                     {usage.ranking.length === 0 ? (
                       <p className="mt-1 ui-caption">还没有成员共享用量。</p>
                     ) : (
-                      <ol className="mt-1 space-y-1 text-[11px] leading-5">
+                      <ol className="mt-1 space-y-1 text-ui-xs leading-5">
                         {rankingRows.map((row, i) => (
                           <li key={row.userId} className="flex items-baseline gap-2">
                             <span className="w-5 shrink-0 tabular-nums text-muted">{i + 1}.</span>
@@ -1208,6 +1238,7 @@ export function TeamPage() {
               ) : null}
             </div>
           )}
+          </div>
         </main>
       </div>
 
@@ -1235,7 +1266,7 @@ export function TeamPage() {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             会删除你已上传到团队动向的全部摘要；共享开关保持不变，之后的新动向仍会继续同步。
             <br />
             用量记录不在这里清除——请到「用量」页点「清除我的用量」。
@@ -1267,7 +1298,7 @@ export function TeamPage() {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             会删除你已上传到团队的用量记录（自然日 / 模型 / 连接名 / token 数），删除后你不再出现在
             用量排行里；共享开关保持不变，之后新产生的用量仍会继续同步。
             <br />

@@ -1,4 +1,5 @@
 import { useLlmStore } from "../store/llm.js";
+import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 后台任务模型（d.125）：归档、摘要、议程提取这类后台任务用哪个模型。
@@ -20,7 +21,19 @@ export function BackgroundModelCard() {
 
   return (
     <section className="ui-card mt-3 p-4">
-      <div className="text-[12px] font-medium text-muted">后台任务模型</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="text-ui-sm font-medium text-muted">后台任务模型</div>
+        <CardSummary
+          items={
+            backgroundModel
+              ? [
+                  `已选 ${models.find((m) => m.id === backgroundModel)?.name ?? backgroundModel}`,
+                  stale ? "不在当前目录" : "不参与聊天",
+                ]
+              : ["未设置", "插件不自动调用模型"]
+          }
+        />
+      </div>
       <div className="mt-1 ui-caption">
         归档、摘要、议程提取等后台任务专用；不参与聊天，挑了便宜的就够
       </div>
@@ -47,7 +60,9 @@ export function BackgroundModelCard() {
       </label>
 
       {models.length === 0 ? (
-        <div className="mt-2 ui-caption">还没有模型目录：先在聊天页连上本机网关并刷新模型列表</div>
+        <div className="mt-2 ui-caption">
+          还没有模型目录：在「模型」页添加一个来源（订阅账号或填一个 Key），模型会自动出现在这里
+        </div>
       ) : null}
       {stale ? (
         <div className="mt-2 ui-caption text-[var(--warn)]">

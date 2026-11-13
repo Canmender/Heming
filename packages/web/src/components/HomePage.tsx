@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { TeamActivity, TeamMember } from "@heming/shared";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
@@ -6,61 +6,53 @@ import { useUiStore } from "../store/ui.js";
 import { useLlmStore } from "../store/llm.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import {
-  useTokenUsageStore,
-  monthKeyOf,
-  summarizeMonth,
-  dailyTotals,
-  dayKeyOf,
-} from "../store/tokenUsage.js";
-import {
   deriveOnboardingSteps,
   shouldShowOnboarding,
   useOnboardingStore,
   type OnboardingTarget,
 } from "../lib/onboarding.js";
 import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
-import { Avatar } from "./Avatar.js";
 import { Button } from "./ui/Button.js";
 import { PageShell } from "./layout/PageShell.js";
-import { EmptyState } from "./ui/EmptyState.js";
-import { SkeletonLine } from "./ui/Skeleton.js";
 import { Stat } from "./ui/Stat.js";
 import { PluginHomeCards } from "./plugins/PluginHomeCards.js";
-import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
-import { HomeTeamUsage } from "./HomeTeamUsage.js";
 import { NeedsAttention } from "./home/NeedsAttention.js";
 import { RecentConversations } from "./home/RecentConversations.js";
+import { UsageCard } from "./home/UsageCard.js";
+import { TeamActivityCard } from "./home/TeamActivityCard.js";
 import { unreadCount, useNotificationStore } from "../store/notifications.js";
 import { useHitlStore } from "../store/hitl.js";
-import { TeamIcon } from "./icons.js";
 import { fileRootsStore } from "../lib/fileEdit/roots.js";
+
+/**
+ * 首页的服务探活：只回答「本机服务此刻是否可达」。
+ * 失败文案不在这里定——页脚要把「连接失败 + 原因 + 重试」放在一起说清楚（F-14）。
+ */
+function probeHealth(): Promise<"正常" | "失败"> {
+  return fetch(resolveUrl("/api/health"))
+    .then((r): "正常" | "失败" => (r.ok ? "正常" : "失败"))
+    .catch((): "失败" => "失败");
+}
 
 /**
  * 统计卡已抽到 ui/Stat.tsx（d.138）：首页与模型页此前各写一份、尺寸不同
  * （首页 20px / p-3，模型页 26px / p-4），同一套「数字卡」两个页面不一样大。
+ *
+ * d.141 页面结构（首屏收敛）：
+ *   第一屏 = 现在要做什么：开始使用（仅首跑）/ 需要你处理 / 最近对话；
+ *   第二屏 = 状态与动向：四张统计卡 / Token 用量 / 插件卡 / 团队动向。
+ *   改动前四张统计卡 + 一整张 Token 卡在首屏最上方，1440×900 下「最近对话」被挤到折线以下，
+ *   用户在主页最先看到的是数字，而不是「接着干什么」。
  */
-
-function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return sameDay
-    ? hm
-    : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
-}
-
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
   const { loadWorkspace, agentsRoster, loadAgentsRoster } = useChatStore();
+  /** 首帧是否已拉到工作区 / 首载失败原因（store 只在首帧写，后台刷新失败不推翻已就绪）。 */
+  const workspaceReady = useChatStore((s) => s.workspaceReady);
+  const workspaceError = useChatStore((s) => s.workspaceError);
   const setPage = useUiStore((s) => s.setPage);
   const openSettings = useUiStore((s) => s.openSettings);
-  const { quota, records } = useTokenUsageStore();
   /** UX-A 首跑引导：三步状态全部从真实 store 派生（连接/会话/任务），关闭状态只存本机。 */
   const llmProfiles = useLlmStore((s) => s.profiles);
   const conversations = useChatStore((s) => s.conversations);
@@ -69,8 +61,6 @@ export function HomePage() {
   const hitlPending = useHitlStore((s) => s.pending);
   const onboardingDismissedAt = useOnboardingStore((s) => s.dismissedAt);
   const dismissOnboarding = useOnboardingStore((s) => s.dismiss);
-  const [tab, setTab] = useState<"me" | "team" | "date">("me");
-  const [openDay, setOpenDay] = useState<string | null>(null);
   const [cloud, setCloud] = useState<"检测中" | "正常" | "失败">("检测中");
   /** 已绑定的可写根数量：首页「系统状态」不再写死「未绑定」（用户其实可能在设置区配过）。 */
   const [writeRootCount, setWriteRootCount] = useState(() => fileRootsStore.writeRoots().length);
@@ -82,11 +72,24 @@ export function HomePage() {
   /** 上次成功拉团队数据的时间：首页不轮询，至少让用户知道数据有多旧、并能手动刷新。 */
   const [lastTeamLoadAt, setLastTeamLoadAt] = useState<number | null>(null);
 
-  // 真实数据优先：挂载时加载工作区数据、云端健康探测与智能体名册
+  // 真实数据优先：挂载时加载工作区数据、云端健康探测与智能体名册。
+  // 首载失败不由本页吞掉：store 记 workspaceError（仅首帧写），首屏据此提示 + 给「重试」。
   useEffect(() => {
-    void loadWorkspace().catch((err) => console.warn("工作区数据加载失败", err));
+    void loadWorkspace().catch(() => {
+      /* 错误已由 store 记录（workspaceError），首屏的失败条据此渲染 */
+    });
     void loadAgentsRoster().catch(() => {});
   }, [loadWorkspace, loadAgentsRoster]);
+
+  /**
+   * 首载失败的重试：只重拉工作区，失败原因仍由 store 写回 workspaceError。
+   * 不在这里再存一份错误，避免「store 说失败、本页说成功」两套口径。
+   */
+  const retryWorkspace = () => {
+    void loadWorkspace().catch(() => {
+      /* 错误已由 store 记录（workspaceError） */
+    });
+  };
 
   const loadTeam = () => {
     void Promise.all([fetchTeam(), fetchTeamActivities({ limit: 100 })])
@@ -113,43 +116,36 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 服务可用性只在挂载时探一次；失败不再是一次性的死状态——页脚给原因与「重试」（F-14）。
   useEffect(() => {
     let alive = true;
-    fetch(resolveUrl("/api/health"))
-      .then((r) => {
-        if (alive) setCloud(r.ok ? "正常" : "失败");
-      })
-      .catch(() => {
-        if (alive) setCloud("失败");
-      });
+    void probeHealth().then((status) => {
+      if (alive) setCloud(status);
+    });
     return () => {
       alive = false;
     };
   }, []);
 
-  const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
-  const monthSummary = useMemo(() => summarizeMonth(records, monthKey), [records, monthKey]);
+  /**
+   * 页脚「重试」：重探服务 + 重读可写根（文件目录绑定可能在设置区刚改过）。
+   * 探活走同一条 probeHealth，文案由页脚统一渲染，避免两处各说各话。
+   */
+  const retryService = () => {
+    setCloud("检测中");
+    setWriteRootCount(fileRootsStore.writeRoots().length);
+    void probeHealth().then(setCloud);
+  };
 
-  const { today, todayKey } = useMemo(() => {
+  const { today } = useMemo(() => {
     const d = new Date();
     const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
     return {
       today: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
         d.getDate(),
       ).padStart(2, "0")} ${week}`,
-      todayKey: dayKeyOf(d.toISOString()),
     };
   }, []);
-
-  /**
-   * 按日明细只列到「今天」：本月还没到的日期不是「0 调用」，
-   * 把它们铺成 0 会让账本看起来像出错（审计 P1-6）。
-   */
-  const dayRows = useMemo(
-    () => dailyTotals(records, monthKey).filter((row) => row.day <= todayKey),
-    [records, monthKey, todayKey],
-  );
-  const monthHasRecords = monthSummary.total > 0 || monthSummary.missing > 0;
 
   /* —— 首页第一屏的动作指标（d.84）：要处理 / 在跑 / 上次聊到哪 —— */
   const runningTasks = useMemo(
@@ -161,18 +157,6 @@ export function HomePage() {
     (hitlPending ? 1 : 0) +
     notifications.filter((n) => !n.read && n.kind !== "approval").length;
   const unreadNotifications = unreadCount(notifications);
-  const todayDoneTasks = useMemo(() => {
-    const d = new Date();
-    return taskRecords.filter((t) => {
-      if (t.status !== "done") return false;
-      const at = new Date(t.endedAt ?? t.updatedAt);
-      return (
-        at.getFullYear() === d.getFullYear() &&
-        at.getMonth() === d.getMonth() &&
-        at.getDate() === d.getDate()
-      );
-    }).length;
-  }, [taskRecords]);
 
   /** 点「待处理」时的落点：有实时审批去那个会话，否则去第一条未读通知的目标。 */
   const openPending = () => {
@@ -205,9 +189,6 @@ export function HomePage() {
     return "晚上好";
   })();
 
-  const pct = quota > 0 ? Math.min(100, Math.round((monthSummary.total / quota) * 100)) : 0;
-  const modelRows = Object.entries(monthSummary.byModel).sort((a, b) => b[1] - a[1]);
-
   /** 团队动向只收真实成员的任务与日程；智能体侧旧数据不在首页露出。 */
   const humanActivities = useMemo(
     () => activities.filter((a) => a.kind === "task" || a.kind === "agenda"),
@@ -226,7 +207,6 @@ export function HomePage() {
       );
     }).length;
   }, [humanActivities]);
-  const recentActivities = humanActivities.slice(0, 3);
 
   /** 首跑引导三步骤（真状态派生，不落盘）。 */
   const onboardingInputs = useMemo(
@@ -241,6 +221,12 @@ export function HomePage() {
     () => deriveOnboardingSteps(onboardingInputs),
     [onboardingInputs],
   );
+  /**
+   * 「开始使用」卡的出现条件（d.141 复核，口径未改）：
+   * 用户没关过 + 三步没全完成（onboardingAllDone）+ 一个模型连接都没有（shouldShowOnboarding 内部）。
+   * 也就是说它只在「相关且未完成」时出现——首跑完成或用户点了「不再显示」就自然消失，
+   * 不会变成常驻的装饰。
+   */
   const showOnboarding = shouldShowOnboarding(
     onboardingInputs,
     onboardingDismissedAt,
@@ -253,14 +239,6 @@ export function HomePage() {
   const goOnboarding = (target: OnboardingTarget) => {
     if (target === "settings") setPage("model");
     else setPage(target);
-  };
-
-  const KIND_LABEL: Record<TeamActivity["kind"], string> = {
-    task: "任务",
-    agent: "AI",
-    staff: "幕僚",
-    agenda: "日程",
-    join: "加入",
   };
 
   return (
@@ -292,329 +270,122 @@ export function HomePage() {
         </>
       }
     >
+      {/* ── 第一屏：现在要做什么（d.141） ──
+          首页对日活用户只有一个问题「接着干什么」，对首跑用户是「下一步做什么」。
+          所以第一屏只放可执行的三块：开始使用（仅首跑）/ 需要你处理 / 最近对话（继续上次）。
+          统计与动向回答的是「我做了多少」，下沉到第二屏。
 
-      {/* 1.5 首跑引导（UX-A · U1）：只在「一个模型连接都没有」且用户没关过时出现 */}
-      {showOnboarding && (
-        <OnboardingCard steps={onboardingSteps} onGo={goOnboarding} onDismiss={dismissOnboarding} />
-      )}
-
-      {/* 1.8 需要你处理：审批 / 运行中的任务 / 未读通知，全都能点（d.84） */}
-      <NeedsAttention />
-
-      {/* 2. 四张动作指标卡（不是看板数字）：宽窗 4 列，窄窗折成 2 列 */}
-      <div className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
-        <Stat
-          label="待处理"
-          value={pendingCount}
-          hint={
-            pendingCount === 0
-              ? "没有需要你处理的事"
-              : unreadNotifications > 0
-                ? `含 ${unreadNotifications} 条未读通知`
-                : "点开直接处理"
-          }
-          onOpen={pendingCount > 0 ? openPending : undefined}
-          actionLabel="打开待处理事项"
-        />
-        <Stat
-          label="运行中任务"
-          value={runningTasks.length}
-          hint={runningTasks.length === 0 ? "没有在跑的任务" : "点开查看进度"}
-          onOpen={runningTasks.length > 0 ? openRunningTasks : undefined}
-          actionLabel="查看运行中的任务"
-        />
-        <Stat
-          label="我的智能体"
-          value={agentsRoster.length}
-          hint="本机运行"
-          onOpen={() => setPage("chat")}
-          actionLabel="打开智能体页"
-        />
-        <Stat
-          label="今日动向"
-          value={teamError ? "—" : todayActivities}
-          hint={teamError ? "团队数据加载失败" : "成员共享的任务与日程"}
-          onOpen={teamError ? undefined : () => setPage("team")}
-          actionLabel="打开团队页"
-        />
-        <div className="col-span-4 ui-card p-3 max-[1199px]:col-span-2">
-          {!monthHasRecords ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</span>
-              {/* 分隔符写在文本节点里：两个 span 之间只有 gap，读屏会把「2026-11」和
-                  「本月还没有…」拼成「2026-11本月还没有…」。 */}
-              <span className="text-[11px] text-muted">
-                {" · "}本月还没有调用记录；接入模型并开始对话后自动统计。
-              </span>
-              <button
-                type="button"
-                className="ui-link ml-auto"
-                onClick={() => setPage("model")}
-              >
-                去配置模型
-              </button>
-            </div>
-          ) : (
-          <>
-          <div className="flex items-center">
-            <div className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</div>
-            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-line bg-[var(--subtle)]">
-              {(
-                [
-                  ["me", "个人"],
-                  ["team", "团队"],
-                  ["date", "按日期"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => {
-                    setTab(key);
-                    if (key !== "date") setOpenDay(null);
-                  }}
-                  className={`border-l border-line-soft px-2.5 py-1 text-[11px] font-semibold first:border-l-0 ${
-                    tab === key ? "bg-ink text-white" : "text-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          两块劝进只留一块：引导卡在场时，最近对话空态（同样劝「去智能体页」）不再出现。
+          顺序也有意为之——先给「马上要处理的」，再给「上次干到哪」，最后才是引导（新用户没有前置项）。 */}
+      <div data-testid="home-focus" className="flex flex-col gap-3">
+        {/* 0. 首载失败：断网几秒回来时列表是空的，不说清楚会被读成「记录/智能体丢了」。
+            只认 store 的首帧错误——已经成功拉到过一次之后，后台刷新失败不提示（旧数据仍可用）。 */}
+        {!workspaceReady && workspaceError && (
+          <div role="alert" className="ui-alert ui-alert-danger flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1">部分数据加载失败：{workspaceError}</span>
+            <Button type="button" size="sm" variant="ghost" onClick={retryWorkspace}>
+              重试
+            </Button>
           </div>
+        )}
 
-          {tab === "me" ? (
-            <div className="mt-2 flex items-center gap-5">
-              <div>
-                <div className="ui-numeric text-[18px] font-semibold">
-                  {(monthSummary.total / 1000).toFixed(1)}
-                  <small className="ml-1 text-[10px] text-muted">
-                    / {(quota / 1_000_000).toFixed(1)}M
-                  </small>
-                </div>
-                <div className="text-[10px] text-muted">本月已用 {pct}%</div>
-                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[var(--subtle-4)]">
-                  <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
-                </div>
-                {/* 未上报单独提示（灰字，不抢主数字）：null 不是 0，不能被总量悄悄吞掉 */}
-                {monthSummary.missing > 0 && (
-                  <div className="mt-1 text-[10px] text-muted">{monthSummary.missing} 轮未上报</div>
-                )}
-              </div>
-              <div className="flex-1 border-l border-line-soft pl-4">
-                {modelRows.length === 0 ? (
-                  <EmptyState
-                    compact
-                    className="px-0 py-2"
-                    title="还没有调用记录"
-                    desc="接入模型、开始对话后自动累计。"
-                  />
-                ) : (
-                  modelRows.map(([model, n]) => (
-                    <div key={model} className="flex justify-between py-0.5 text-[11px]">
-                      <span>{model}</span>
-                      <span>
-                        <b>{n}</b>{" "}
-                        <span className="text-muted">
-                          · {Math.round((n / monthSummary.total) * 100)}%
-                        </span>
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          ) : tab === "team" ? (
-            <HomeTeamUsage />
-          ) : !monthHasRecords ? (
-            <div className="mt-2">
-              <EmptyState
-                compact
-                className="px-0 py-2"
-                title="本月还没有调用记录"
-                desc="接入模型并开始对话后，这里按天列出用量（只列到今天）。"
-              />
-            </div>
-          ) : (
-            <div className="mt-2 max-h-[220px] overflow-y-auto">
-              <table className="w-full text-left text-[11px]">
-                <thead>
-                  <tr className="border-b border-line-soft text-muted">
-                    <th className="py-1 font-semibold">日期</th>
-                    <th className="py-1 font-semibold">个人</th>
-                    <th className="py-1 font-semibold">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayRows.map((row) => (
-                    <Fragment key={row.day}>
-                      <tr className="border-b border-line-soft">
-                        <td className="py-1">{row.day}</td>
-                        <td className="py-1">{row.total}</td>
-                        <td className="py-1">
-                          <button
-                            type="button"
-                            className="text-muted underline-offset-2 hover:underline"
-                            onClick={() => setOpenDay(openDay === row.day ? null : row.day)}
-                          >
-                            {openDay === row.day ? "收起" : "查看"}
-                          </button>
-                        </td>
-                      </tr>
-                      {openDay === row.day ? (
-                        <tr className="bg-[var(--subtle)]">
-                          <td colSpan={3} className="py-1.5 pl-4">
-                            {Object.keys(row.byModel).length === 0 ? (
-                              <span className="text-muted">当天无调用记录</span>
-                            ) : (
-                              Object.entries(row.byModel).map(([model, n]) => (
-                                <div key={model} className="flex justify-between py-0.5 pr-4">
-                                  <span>{model}</span>
-                                  <b>{n}</b>
-                                </div>
-                              ))
-                            )}
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        {/* 1.5 首跑引导（UX-A · U1）：只在「一个模型连接都没有」且用户没关过时出现 */}
+        {showOnboarding && (
+          <OnboardingCard steps={onboardingSteps} onGo={goOnboarding} onDismiss={dismissOnboarding} />
+        )}
 
-          {/* 2.5 近 30 日用量热力图：并进「Token 用量」卡。
-              单独一张卡时它只是一条细带（标题 + 30 个方块），在宽屏上占了一整行却几乎没有内容；
-              并进来后「本月汇总 / 按日明细 / 近 30 日」在同一张卡里读，也少一个卡片框。 */}
-          <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="mb-1.5 flex items-center">
-              <div className="text-[11px] font-bold text-muted">近 30 日用量</div>
-              <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
-                少
-                {["var(--heat-0)", "var(--heat-1)", "var(--heat-2)", "var(--heat-3)", "var(--heat-4)"].map((c) => (
-                  <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-sm" />
-                ))}
-                多
-              </div>
-            </div>
-            <TokenHeatmap />
-          </div>
-          </>
-          )}
-        </div>
+        {/* 1.8 需要你处理：审批 / 运行中的任务 / 未读通知，全都能点（d.84）；空则整块不渲染 */}
+        <NeedsAttention />
+
+        {/* 1.9 继续上次：最近 3 个会话，点一下直接进那个会话（d.83 的阅读位置恢复接着上次的位置） */}
+        <RecentConversations hideWhenEmpty={showOnboarding} />
       </div>
 
-      {/* 2.6 插件首页卡（d.125）：沙箱 bundle 插件声明的卡片（信息中枢 / 自动化等）。
-          数据只经 `window.__heming_plugins` 从宿主读，浏览器/旧版桌面端整块不渲染；
-          模块运行时下线后这里是首页唯一的内置能力入口来源。 */}
-      <PluginHomeCards />
+      {/* ── 第二屏：状态与动向（d.141） ── */}
+      <section
+        data-testid="home-secondary"
+        aria-labelledby="home-status-heading"
+        className="flex flex-col gap-3"
+      >
+        <h2 id="home-status-heading" className="ui-micro px-1 font-bold">
+          状态与动向
+        </h2>
 
-      {/* 3/4/5/6. 两栏：左团队动向；右最近对话。
-          窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。
-          d.138：去掉 items-start，两栏等高——此前右卡内容少时底边比左卡高一截。 */}
-      <div className="grid grid-cols-[1.5fr_1fr] gap-3 max-[1199px]:grid-cols-1">
-        <section className="ui-card p-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
-              <TeamIcon width={14} height={14} />
-              团队动向
-            </div>
-            <div className="flex items-center gap-2">
-              {lastTeamLoadAt ? (
-                <span className="ui-micro">{fmtTime(new Date(lastTeamLoadAt).toISOString())} 更新</span>
-              ) : null}
-              <button
-                type="button"
-                className="ui-link"
-                onClick={loadTeam}
-              >
-                刷新
-              </button>
-              <button
-                type="button"
-                className="ui-link"
-                onClick={() => setPage("team")}
-              >
-                进入团队
-              </button>
-            </div>
-          </div>
-          {humanActivities.length === 0 ? (
-            !teamReady ? (
-              <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
-                {[0, 1, 2].map((i) => (
-                  <SkeletonLine key={i} className="h-7 rounded-lg" />
-                ))}
-              </div>
-            ) : teamError ? (
-              <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
-                <div role="alert" className="ui-alert ui-alert-danger min-w-0 flex-1 items-center">
-                  <span className="min-w-0 truncate">加载失败：{teamError}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={loadTeam}
-                  className="ui-link border border-line"
-                >
-                  重试
-                </button>
-              </div>
-            ) : (
-              <EmptyState
-                compact
-                title="还没有团队动向"
-                desc="成员在「团队」页开启共享后，这里显示任务和日程摘要；对话正文不上传。"
-              />
-            )
-          ) : (
-            recentActivities.map((a) => {
-              const actor = members.find((m) => m.user.id === a.actorId);
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  // 点的是「谁的哪条动向」就落到那个人 + 高亮那一条（审计 P2-6 的完整一半）
-                  onClick={() => useUiStore.getState().focusTeamActivity(a.id, a.actorId)}
-                  className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--subtle-2)]"
-                >
-                  <Avatar
-                    user={{
-                      displayName: actor?.user.displayName ?? "成员",
-                      avatar: actor?.user.avatar,
-                    }}
-                    size={28}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-baseline gap-1.5">
-                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
-                        {KIND_LABEL[a.kind]}
-                      </span>
-                      <span className="truncate text-[13px] font-medium">{a.title}</span>
-                    </span>
-                    <span className="block truncate text-[11px] text-muted">
-                      {actor?.user.displayName ?? "成员"}
-                      {a.detail ? ` · ${a.detail}` : ""}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-muted">{fmtTime(a.occurredAt)}</span>
-                </button>
-              );
-            })
-          )}
-        </section>
-
-        <div className="flex flex-col gap-3">
-          {/* 4. 最近对话：日活用户打开主页的第一诉求是接着上次干（替代原来不可点的「智能体动态」） */}
-          <RecentConversations />
+        {/* 2. 四张动作指标卡（不是看板数字）：宽窗 4 列，窄窗折成 2 列。
+            data-testid 给测试一个稳定入口，不再靠 `.grid.grid-cols-4 > .ui-card` 猜结构。 */}
+        <div data-testid="home-stats" className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
+          <Stat
+            label="待处理"
+            value={pendingCount}
+            hint={
+              pendingCount === 0
+                ? "没有需要你处理的事"
+                : unreadNotifications > 0
+                  ? `含 ${unreadNotifications} 条未读通知`
+                  : "点开直接处理"
+            }
+            onOpen={pendingCount > 0 ? openPending : undefined}
+            actionLabel="打开待处理事项"
+          />
+          <Stat
+            label="运行中任务"
+            value={runningTasks.length}
+            hint={runningTasks.length === 0 ? "没有在跑的任务" : "点开查看进度"}
+            onOpen={runningTasks.length > 0 ? openRunningTasks : undefined}
+            actionLabel="查看运行中的任务"
+          />
+          <Stat
+            label="我的智能体"
+            value={agentsRoster.length}
+            hint="本机运行"
+            onOpen={() => setPage("chat")}
+            actionLabel="打开智能体页"
+          />
+          <Stat
+            label="今日动向"
+            value={teamError ? "—" : todayActivities}
+            hint={teamError ? "团队数据加载失败" : "成员共享的任务与日程"}
+            onOpen={teamError ? undefined : () => setPage("team")}
+            actionLabel="打开团队页"
+          />
         </div>
-      </div>
 
-      {/* 7. 底部：服务状态 + 更新日志入口（只留一行，异常时才变醒目）。
+        {/* 2.5 Token 用量：整宽一张卡（原来用 col-span-4 塞在统计网格里，窄窗折 2 列时
+            还要再写 col-span-2，会额外生成隐式列）。 */}
+        <UsageCard />
+
+        {/* 2.6 插件首页卡（d.125）：沙箱 bundle 插件声明的卡片（信息中枢 / 自动化等）。
+            数据只经 `window.__heming_plugins` 从宿主读，浏览器/旧版桌面端整块不渲染；
+            模块运行时下线后这里是首页唯一的内置能力入口来源。 */}
+        <PluginHomeCards />
+
+        {/* 3. 团队动向：成员共享的任务与日程摘要（对话正文不上传） */}
+        <TeamActivityCard
+          activities={humanActivities}
+          members={members}
+          teamReady={teamReady}
+          teamError={teamError}
+          lastTeamLoadAt={lastTeamLoadAt}
+          onRefresh={loadTeam}
+          onOpenTeam={() => setPage("team")}
+        />
+      </section>
+
+      {/* 7. 底部：服务状态 + 文件目录 + 更新日志入口（一行，异常时才变醒目）。
           d.138：三项之间补分隔点——此前只靠 gap 撑开，无障碍树把整行读成
-          「服务：正常文件目录：未绑定」。 */}
+          「服务：正常文件目录：未绑定」。
+          F-14：探活原本是一次性的，「失败」既是无信息量的一个词、也没有重试入口，
+          服务恢复后不刷新页面就一直停在失败。现在失败态 = 原因 + 就地重试。 */}
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 ui-micro">
-        <span>服务：{cloud}</span>
+        <span>服务：{cloud === "失败" ? "连接失败" : cloud}</span>
+        {cloud === "失败" && (
+          <>
+            <span className="text-muted">连不上本机服务，可能刚重启或网络中断</span>
+            <Button type="button" size="sm" variant="ghost" onClick={retryService}>
+              重试
+            </Button>
+          </>
+        )}
         <span> · </span>
         <span>
           文件目录：{writeRootCount > 0 ? `已绑定 ${writeRootCount} 个` : "未绑定"}

@@ -13,6 +13,7 @@ import {
 import { isMsgCacheAuxKey } from "../lib/e2e/cacheEnvelope.js";
 import type { StorageLike } from "../lib/memory/types.js";
 import { Button } from "../components/ui/Button.js";
+import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 本机存储水位卡（d.31 · P1-1 ①「水位可见」+ ②b「一键清理」）。
@@ -485,9 +486,19 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
 
   return (
     <section aria-label="本机存储" className="ui-card mt-3 p-4">
-      <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
-        <StorageIcon className="text-muted" />
-        本机存储
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
+          <StorageIcon className="text-muted" />
+          本机存储
+        </div>
+        <CardSummary
+          items={[
+            `已用 ${formatBytes(usage.totalBytes)}`,
+            `${Math.round(percent)}%`,
+            level === "danger" ? "快满了" : level === "warn" ? "已用八成" : "余量充足",
+            quota.estimated ? "配额估算" : "配额实测",
+          ]}
+        />
       </div>
       <div className="mt-1 ui-caption">
         本机存储（浏览器配额）是一条单源预算，写满后新数据会静默丢失。这条水位告诉你还剩多少、是谁占的。
@@ -520,7 +531,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
           />
         </div>
-        <div role="status" aria-label="存储水位" className={`mt-1 text-[11px] ${statusColor}`}>
+        <div role="status" aria-label="存储水位" className={`mt-1 text-ui-xs ${statusColor}`}>
           {statusText}
           <span className="text-muted">（{Math.round(percent)}%）</span>
         </div>
@@ -528,7 +539,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
 
       {/* 明细：按字节数降序 */}
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-muted">
+        <div className="text-ui-xs font-bold text-muted">
           按模块{usage.keyCount ? `（${usage.keyCount} 个键）` : ""}
         </div>
         {usage.modules.length === 0 ? (
@@ -538,15 +549,15 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             {usage.modules.map((m) => (
               <li
                 key={m.name}
-                className="flex items-baseline justify-between gap-2 border-b border-line-soft pb-1 text-[11px] last:border-b-0"
+                className="flex items-baseline justify-between gap-2 border-b border-line-soft pb-1 text-ui-xs last:border-b-0"
               >
                 <span className="min-w-0 truncate text-[var(--body)]">
                   {m.name}
-                  <span className="ml-1 text-[10px] text-muted">{m.keys} 键</span>
+                  <span className="ml-1 text-ui-xs text-muted">{m.keys} 键</span>
                 </span>
                 <span className="shrink-0 font-mono text-muted">
                   {formatBytes(m.bytes)}
-                  <span className="ml-1 text-[10px] text-muted">{formatExactBytes(m.bytes)} 字节</span>
+                  <span className="ml-1 text-ui-xs text-muted">{formatExactBytes(m.bytes)} 字节</span>
                 </span>
               </li>
             ))}
@@ -557,7 +568,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           <div
             role="status"
             aria-label="消息缓存加密状态"
-            className={`mt-2 text-[11px] ${encryptionLine.tone}`}
+            className={`mt-2 text-ui-xs ${encryptionLine.tone}`}
           >
             {encryptionLine.text}
           </div>
@@ -635,7 +646,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             </>
           }
         >
-          <p className="text-[12px] leading-6">{CLEAR_TARGETS[pending].explain}</p>
+          <p className="text-ui-sm leading-6">{CLEAR_TARGETS[pending].explain}</p>
         </ConfirmDialog>
       )}
     </section>

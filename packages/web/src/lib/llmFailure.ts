@@ -301,7 +301,7 @@ export function humanizeProviderError(raw: string): string {
   const text = (raw ?? "").trim();
   if (!text) return "生成失败，请重试。";
   if (text === "未绑定 LLM 连接") {
-    return "这个智能体还没有绑定模型连接，请先到「设置 → 模型」选一条连接。";
+    return "这个智能体还没有绑定模型连接，请先到左侧「模型」页选一条连接。";
   }
   /** 中文错误体里通常带着「哪一步不对」：能显示就显示，比套通用提示有用。 */
   const hasCjk = (s: string) => /[\u4e00-\u9fff]/.test(s);
@@ -317,7 +317,7 @@ export function humanizeProviderError(raw: string): string {
     // 状态码能直接定位的，先用状态码：语义比词表更确定
     const direct =
       status === 401 || status === 403
-        ? "模型服务鉴权失败：请到「设置 → 模型」检查 API Key 是否正确、是否有权限。"
+        ? "模型服务鉴权失败：请到左侧「模型」页检查 API Key 是否正确、是否有权限。"
         : status === 404
           ? "接口地址找不到：请检查 Base URL（通常以 /v1 结尾）。"
           : status === 408
@@ -333,7 +333,7 @@ export function humanizeProviderError(raw: string): string {
       credit: "模型服务余额不足：请先到服务商充值后再试。",
       quota: "模型服务的额度已用完：请稍后重试或检查套餐额度。",
       rate: "请求太频繁：稍等片刻再试。",
-      auth: "模型服务鉴权失败：请到「设置 → 模型」检查 API Key 与权限。",
+      auth: "模型服务鉴权失败：请到左侧「模型」页检查 API Key 与权限。",
       verify: "模型服务要求先验证账号：请到服务商完成验证。",
       restricted: "账号被服务商限制：需要到服务商申诉或更换账号。",
       modelGone: "这个模型在服务商处不可用：请换一个模型或连接。",

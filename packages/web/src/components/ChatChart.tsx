@@ -60,7 +60,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
 
   if ("error" in rendered) {
     return (
-      <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+      <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-ui-sm text-red-700">
         图表渲染失败：{rendered.error}
       </div>
     );
@@ -83,7 +83,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           type="button"
           disabled={busy}
           onClick={() => void onExport()}
-          className="rounded-md border border-line bg-surface px-2 py-0.5 text-[11px] transition-colors duration-150 hover:bg-[var(--subtle-2)] disabled:opacity-50"
+          className="rounded-md border border-line bg-surface px-2 py-0.5 text-ui-xs transition-colors duration-fast hover:bg-[var(--subtle-2)] disabled:opacity-50"
         >
           导出 HTML
         </button>
@@ -91,12 +91,12 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           type="button"
           disabled={busy}
           onClick={() => void onOpen()}
-          className="rounded-md border border-line bg-surface px-2 py-0.5 text-[11px] transition-colors duration-150 hover:bg-[var(--subtle-2)] disabled:opacity-50"
+          className="rounded-md border border-line bg-surface px-2 py-0.5 text-ui-xs transition-colors duration-fast hover:bg-[var(--subtle-2)] disabled:opacity-50"
         >
           打开
         </button>
         {status && (
-          <span role="status" className="min-w-0 flex-1 truncate text-[11px] text-muted">
+          <span role="status" className="min-w-0 flex-1 truncate text-ui-xs text-muted">
             {status}
           </span>
         )}

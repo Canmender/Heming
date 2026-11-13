@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
  *
  * 用法：
  *   <EmptyState
- *     icon={<AutomationIcon width={22} height={22} />}
+ *     icon={<AutomationIcon width={24} height={24} />}
  *     title="还没有自动化任务"
  *     desc="可以把信息中枢的同步设成每天定时执行。"
  *     actions={<button …>新建自动化</button>}
@@ -28,6 +28,13 @@ export interface EmptyStateProps {
   desc?: ReactNode;
   /** 操作区（主按钮/次按钮），可选。 */
   actions?: ReactNode;
+  /** 单个主操作（与 `actions` 二选一，`actions` 优先）：省掉调用方包一层。 */
+  action?: ReactNode;
+  /**
+   * 文案对齐，默认 center（整页空态）。
+   * 侧栏/卡片内空态用 `start`：窄容器里居中会读起来像「一段被折断的句子」。
+   */
+  align?: "center" | "start";
   /** 紧凑变体：用于卡片内部而非整页空态。 */
   compact?: boolean;
   /** 自带卡片描边：空态本身就是一块独立卡片时使用。 */
@@ -41,18 +48,22 @@ export function EmptyState({
   title,
   desc,
   actions,
+  action,
+  align = "center",
   compact = false,
   framed = false,
   className = "",
 }: EmptyStateProps) {
   const classes = [
     "ui-empty",
+    align === "start" ? "items-start text-left" : "",
     compact ? "gap-1 py-5" : "",
     framed ? "ui-card py-8" : "",
     className,
   ]
     .filter(Boolean)
     .join(" ");
+  const actionSlot = actions ?? action;
   return (
     <div className={classes}>
       {icon ? (
@@ -62,7 +73,7 @@ export function EmptyState({
       ) : null}
       <p className="ui-empty-title">{title}</p>
       {desc ? <p className="ui-empty-desc">{desc}</p> : null}
-      {actions ? <div className="ui-empty-actions">{actions}</div> : null}
+      {actionSlot ? <div className="ui-empty-actions">{actionSlot}</div> : null}
     </div>
   );
 }

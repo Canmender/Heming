@@ -12,11 +12,11 @@ describe("LoginPage", () => {
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
   });
 
-  it("渲染登录表单（标题与用户名/密码占位文案）", () => {
+  it("渲染登录表单（标题与用户名/密码可见标签）", () => {
     render(<LoginPage />);
     expect(screen.getByText("和鸣")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("用户名")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("密码")).toBeInTheDocument();
+    expect(screen.getByLabelText("用户名")).toBeInTheDocument();
+    expect(screen.getByLabelText("密码")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByText("登录你的账号")).toBeInTheDocument();
   });
@@ -37,8 +37,8 @@ describe("LoginPage", () => {
       ),
     );
     render(<LoginPage />);
-    fireEvent.change(screen.getByPlaceholderText("用户名"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByPlaceholderText("密码"), { target: { value: "secret123" } });
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "alice" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "secret123" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => expect(useAuthStore.getState().status).toBe("authed"));
@@ -59,8 +59,8 @@ describe("LoginPage", () => {
       }),
     );
     render(<LoginPage />);
-    fireEvent.change(screen.getByPlaceholderText("用户名"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByPlaceholderText("密码"), { target: { value: "wrongpass" } });
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "alice" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "wrongpass" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     expect(await screen.findByText("用户名或密码不正确")).toBeInTheDocument();

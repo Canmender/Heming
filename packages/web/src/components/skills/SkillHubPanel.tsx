@@ -199,7 +199,7 @@ function KeyDialog({
         className="w-[min(520px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-bold">社区 Key（{source.name}）</span>
+          <span className="text-ui-md font-bold">社区 Key（{source.name}）</span>
           <button
             type="button"
             aria-label="关闭社区 Key"
@@ -362,7 +362,7 @@ function HubDetailDialog({
         <div className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[15px] font-semibold">{skill.name}</span>
+              <span className="text-ui-base font-semibold">{skill.name}</span>
               <span className={CHIP}>v{skill.version || "—"}</span>
               {skill.status === "official" && <span className={CHIP}>官方</span>}
               {skill.status === "trial" && <span className={CHIP}>试用</span>}
@@ -508,7 +508,7 @@ function InstallPreviewDialog({
         className="w-[min(560px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-bold">安装社区技能</span>
+          <span className="text-ui-md font-bold">安装社区技能</span>
           <button
             type="button"
             aria-label="关闭安装预览"
@@ -612,7 +612,7 @@ function BulkUpdateDialog({
         className="flex max-h-[86vh] w-[min(620px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-xl"
       >
         <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-          <span className="text-[13px] font-bold">批量更新社区技能</span>
+          <span className="text-ui-md font-bold">批量更新社区技能</span>
           <button
             type="button"
             aria-label="关闭批量更新"
@@ -651,7 +651,7 @@ function BulkUpdateDialog({
               <ul className="mt-1 grid gap-1 ui-caption">
                 {results.map((item, index) => (
                   <li key={`${item.name}:${index}`} className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="rounded-sm border border-line px-1.5 py-0.5 text-[10px]">
+                    <span className="rounded-sm border border-line px-1.5 py-0.5 text-ui-xs">
                       {item.kind === "ok" ? "成功" : item.kind === "skipped" ? "跳过" : "失败"}
                     </span>
                     <span>{item.name}</span>
@@ -1193,7 +1193,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
             aria-label="社区排序"
             value={sort}
             onChange={(event) => setSort(event.target.value as SortKey)}
-            className="ui-input h-7 text-[12px]"
+            className="ui-input h-7 text-ui-sm"
           >
             <option value="downloads">下载量</option>
             <option value="stars">收藏</option>
@@ -1272,7 +1272,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
               return (
                 <li key={item.id} className="ui-card flex min-w-0 flex-col gap-2 p-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate text-[13px] font-bold">{item.name}</span>
+                    <span className="truncate text-ui-md font-bold">{item.name}</span>
                     <span className={CHIP}>v{item.version || "—"}</span>
                     {item.status === "official" && <span className={CHIP}>官方</span>}
                     {item.status === "trial" && <span className={CHIP}>试用</span>}
@@ -1283,7 +1283,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
                   <div className={`${HINT}`}>
                     {item.ownerName || "未知作者"} · 更新于 {formatDate(item.updatedAt)}
                   </div>
-                  <p className="line-clamp-2 text-[12px] leading-5 text-muted">
+                  <p className="line-clamp-2 text-ui-sm leading-5 text-muted">
                     {item.description || "暂无描述"}
                   </p>
                   <div className="flex flex-wrap items-center gap-1 ui-micro">

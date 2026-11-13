@@ -140,9 +140,29 @@ describe("知识库页 · 空库与降级", () => {
     renderPage({ error: "文件已被外部修改，请先对比再保存" });
     expect(screen.getByRole("alert")).toHaveTextContent("文件已被外部修改，请先对比再保存");
   });
+
+  it("索引失败：alert 播报且可原地重试（失败≠空库）", () => {
+    const { store } = renderPage({
+      error: "读取目录失败：权限不足",
+      indexStatus: "error",
+      index: null,
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("读取目录失败：权限不足");
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(store.buildIndexNow).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("知识库页 · 三栏装配", () => {
+  it("页头由 PageShell 提供：一级标题「知识库」唯一，自拼页头已删", () => {
+    renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "知识库" })).toBeInTheDocument();
+    // 只允许一个「知识库」一级标题（文档正文里的 h1 不算页头，按名字区分）
+    expect(screen.getAllByRole("heading", { level: 1, name: "知识库" })).toHaveLength(1);
+    // 副标题是 PageShell 的统一排版槽，自拼页头的<span class="ui-section-title">不应残留
+    expect(screen.getByText(/双链、标签、反链、搜索与图谱都在本机计算/)).toBeInTheDocument();
+  });
+
   it("左/中/右三栏都在，标签页显示已打开文件", async () => {
     renderPage();
     expect(screen.getByTestId("knowledge-left")).toBeInTheDocument();

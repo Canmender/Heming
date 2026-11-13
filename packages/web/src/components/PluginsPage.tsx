@@ -33,6 +33,8 @@ import {
 } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { useRovingTabs } from "../lib/ui/tabs.js";
+import { IconButton } from "./ui/IconButton.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
 import { EmptyState } from "./ui/EmptyState.js";
 
@@ -150,6 +152,12 @@ export function PluginsPage({
   const [tick, setTick] = useState(0);
   const setPage = useUiStore((s) => s.setPage);
   const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
+  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
+  const tabs = useRovingTabs({
+    count: TABS.length,
+    activeIndex: TABS.findIndex((item) => item.key === tab),
+    onChange: (index) => setTab(TABS[index].key),
+  });
   const [installOpen, setInstallOpen] = useState(false);
   /** 仓库面板正在下载的包（id@version）：只禁那一张卡的按钮。 */
   const [repoLoadingKey, setRepoLoadingKey] = useState<string | null>(null);
@@ -554,20 +562,23 @@ export function PluginsPage({
           <p className={`min-w-0 flex-1 ${msg.kind === "error" ? ERROR_TEXT : OK_TEXT}`}>
             {msg.text}
           </p>
-          <button
-            type="button"
-            aria-label="关闭提示"
+          <IconButton
+            label="关闭提示"
+            icon={<XIcon width={14} height={14} />}
             onClick={() => setMsg(null)}
-            className="shrink-0 rounded-sm p-0.5 text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={13} height={13} />
-          </button>
+            className="shrink-0"
+          />
         </div>
       )}
 
       {/* Tab 栏：复用技能区的角色与下划线样式 */}
-      <div className={`${PAGE_TABLIST} border-b border-line-soft`} role="tablist" aria-label="能力分区">
-        {TABS.map((item) => {
+      <div
+        className={`${PAGE_TABLIST} border-b border-line-soft`}
+        role="tablist"
+        aria-label="能力分区"
+        onKeyDown={tabs.onKeyDown}
+      >
+        {TABS.map((item, index) => {
           const active = tab === item.key;
           return (
             <button
@@ -575,7 +586,9 @@ export function PluginsPage({
               type="button"
               role="tab"
               id={`plugins-${item.key}-tab`}
-              aria-controls={`plugins-${item.key}-panel`}
+              ref={tabs.getTabRef(index)}
+              tabIndex={tabs.tabIndexFor(index)}
+              aria-controls={active ? `plugins-${item.key}-panel` : undefined}
               aria-selected={active}
               onClick={() => setTab(item.key)}
               className={pageTabClass(active)}
@@ -610,11 +623,11 @@ export function PluginsPage({
                 onClick={() => setRepoDialogOpen(true)}
                 size="sm" variant="primary"
               >
-                <DownloadIcon width={13} height={13} aria-hidden="true" />
+                <DownloadIcon width={14} height={14} aria-hidden="true" />
                 从插件仓库安装
               </Button>
               <Button type="button" onClick={openInstall} size="sm" variant="ghost">
-                <FileIcon width={13} height={13} aria-hidden="true" />
+                <FileIcon width={14} height={14} aria-hidden="true" />
                 手动粘贴清单
               </Button>
               <span className="ml-auto hidden ui-micro sm:inline">

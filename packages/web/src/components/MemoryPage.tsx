@@ -60,6 +60,7 @@ import { EmptyState } from "./ui/EmptyState.js";
 import { Switch } from "./ui/Switch.js";
 import { Dialog } from "./ui/Dialog.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { useRovingTabs } from "../lib/ui/tabs.js";
 import { Button } from "../components/ui/Button.js";
 
 /**
@@ -383,7 +384,7 @@ function AddMemoryModal({
             onChange={(e) => setValue(e.target.value)}
           />
         </label>
-        <div className="mt-1 text-[11px] text-muted">
+        <div className="mt-1 text-ui-xs text-muted">
           同一主题键再次保存会覆盖旧内容（记忆按智能体 + 主题去重）
         </div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
@@ -468,7 +469,7 @@ function KnowledgeModal({
             onChange={(e) => setTags(e.target.value)}
           />
         </label>
-        <div className="mt-1 text-[11px] text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
+        <div className="mt-1 text-ui-xs text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
           <Button type="button" onClick={onClose} size="md" variant="ghost">
@@ -574,13 +575,13 @@ function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
         {title}（{lines.length}）
       </div>
       {lines.length === 0 ? (
-        <div className="mt-0.5 text-[11px] text-muted">无命中</div>
+        <div className="mt-0.5 text-ui-xs text-muted">无命中</div>
       ) : (
         <ul className="mt-0.5 space-y-1">
           {lines.map((line, i) => (
-            <li key={i} className="break-words text-[11px] text-[var(--body)]">
+            <li key={i} className="break-words text-ui-xs text-[var(--body)]">
               {line.text}
-              <span className="ml-1 text-[10px] text-muted">
+              <span className="ml-1 text-ui-xs text-muted">
                 {line.score !== undefined && `· 打分 ${line.score.toFixed(3)} `}
                 {line.boost !== undefined && `· 加权 ×${line.boost} `}
                 {line.injected
@@ -604,8 +605,8 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
     <li className="rounded-lg border border-line px-3 py-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="break-words text-[12px] text-[var(--body)]">{clip(run.query, 60) || "（空提问）"}</div>
-          <div className="mt-0.5 text-[10px] text-muted">
+          <div className="break-words text-ui-sm text-[var(--body)]">{clip(run.query, 60) || "（空提问）"}</div>
+          <div className="mt-0.5 text-ui-xs text-muted">
             {run.at.slice(0, 10)} {run.at.slice(11, 16)} · 召回 语义{run.recalled.semantic}/情景{run.recalled.episodic}/短期
             {run.recalled.working} → 注入 {run.injected.length} 条
             {run.dropped.length > 0 && ` · 未注入 ${run.dropped.length} 条`}
@@ -619,7 +620,7 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
       {expanded && (
         <div className="mt-2 space-y-1 border-t border-line-soft pt-2">
           {run.injected.map((item) => (
-            <div key={`${item.layer}-${item.id}`} className="break-words text-[11px] text-[var(--body)]">
+            <div key={`${item.layer}-${item.id}`} className="break-words text-ui-xs text-[var(--body)]">
               <span className="text-muted">
                 {item.layer === "semantic" ? "语义" : item.layer === "episodic" ? "情景" : "短期"}
                 {item.score !== undefined && ` ${item.score.toFixed(3)}`}
@@ -630,10 +631,10 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
             </div>
           ))}
           {run.dropped.map((item) => (
-            <div key={`drop-${item.layer}-${item.id}`} className="flex items-baseline gap-1 break-words text-[11px] text-muted">
+            <div key={`drop-${item.layer}-${item.id}`} className="flex items-baseline gap-1 break-words text-ui-xs text-muted">
               <XIcon
-                width={10}
-                height={10}
+                width={12}
+                height={12}
                 aria-hidden="true"
                 className="shrink-0 translate-y-[1px] text-muted"
               />
@@ -681,6 +682,13 @@ export function MemoryPage({
   fetchSharedFiles = fetchFiles,
 }: MemoryPageProps = {}) {
   const [tab, setTab] = useSessionTab<TabKey>(MEMORY_TAB_KEY, "agents", MEMORY_TABS);
+  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
+  const tabOrder: TabKey[] = [...MEMORY_TABS];
+  const tabs = useRovingTabs({
+    count: tabOrder.length,
+    activeIndex: tabOrder.indexOf(tab),
+    onChange: (index) => setTab(tabOrder[index]),
+  });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [manualAgents, setManualAgents] = useState<Agent[]>([]);
   const [rosterError, setRosterError] = useState("");
@@ -716,25 +724,25 @@ export function MemoryPage({
     return () => window.clearTimeout(timer);
   }, [highlightMemoryId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    listAgents()
-      .then((list) => {
-        if (!cancelled) setAgents(list);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        // 名册失败只降级选择器与开关表，记忆页本身照常可用
-        setRosterError(
-          `智能体名册加载失败，已降级为「全部智能体」：${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
+  // 名册加载：既给首载用，也给失败横幅的「重试」用（失败不是空态，必须 alert + 可重试）。
+  const loadRoster = useCallback(async () => {
+    setRosterError("");
+    try {
+      const list = await listAgents();
+      setAgents(list);
+    } catch (err: unknown) {
+      // 名册失败只降级选择器与开关表，记忆页本身照常可用
+      setRosterError(
+        `智能体名册加载失败，已降级为「全部智能体」：${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }, []);
+
+  useEffect(() => {
+    void loadRoster();
+  }, [loadRoster]);
 
   const layers = useMemo(() => loadLayers(memory, agentId), [memory, agentId, tick]);
   const settings = memory.getSettings();
@@ -1138,21 +1146,21 @@ export function MemoryPage({
                   type="button"
                   aria-expanded={open}
                   onClick={() => toggleGroup(key)}
-                  className="flex min-w-0 items-center gap-1.5 text-left text-[12px] font-bold"
+                  className="flex min-w-0 items-center gap-1.5 text-left text-ui-sm font-bold"
                 >
                   <span aria-hidden="true" className="text-muted">
                     <ChevronIcon
-                      width={11}
-                      height={11}
-                      className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+                      width={12}
+                      height={12}
+                      className={`transition-transform duration-fast ${open ? "rotate-90" : ""}`}
                     />
                   </span>
                   <span className="truncate">会话 {clip(key, 24)}</span>
                 </button>
-                <span className="text-[11px] text-muted">
+                <span className="text-ui-xs text-muted">
                   {group.agentIds.map((id) => agentName(id)).join("、")} · {group.turns.length} 轮
                 </span>
-                <span className="ml-auto text-[11px] text-muted">
+                <span className="ml-auto text-ui-xs text-muted">
                   最近 {group.latestAt.slice(5, 16).replace("T", " ")}
                 </span>
                 <Button
@@ -1174,15 +1182,15 @@ export function MemoryPage({
                         highlightMemoryId === turn.id ? "ring-2 ring-ink/25" : ""
                       }`}
                     >
-                      <div className="text-[10px] text-muted">
+                      <div className="text-ui-xs text-muted">
                         {turn.at.slice(11, 16)}
                         {turn.partial && " · 中断"}
                         {!agentId && ` · ${agentName(turn.agentId)}`}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
                         用户：{turn.userText}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
                         助手：{turn.assistantText}
                       </div>
                     </div>
@@ -1264,12 +1272,12 @@ export function MemoryPage({
 
   const vaultStatusRows = (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="text-[12px]">
+      <span className="text-ui-sm">
         已纳入 <strong>{vaultEntries.length}</strong> 篇
       </span>
       <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
       {vaultSync?.truncated ? (
-        <span role="status" className="text-[12px] text-[var(--warn)]">
+        <span role="status" className="text-ui-sm text-[var(--warn)]">
           被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
         </span>
       ) : (
@@ -1318,8 +1326,8 @@ export function MemoryPage({
           {vaultEntries.slice(0, 5).map((entry) => (
             <li key={entry.id} className="flex items-start justify-between gap-2 py-2">
               <div className="min-w-0">
-                <div className="truncate text-[12px] font-bold">{entry.key}</div>
-                <div className="mt-0.5 break-words text-[11px] text-muted">{entry.value}</div>
+                <div className="truncate text-ui-sm font-bold">{entry.key}</div>
+                <div className="mt-0.5 break-words text-ui-xs text-muted">{entry.value}</div>
               </div>
               <Button
                 type="button"
@@ -1337,7 +1345,7 @@ export function MemoryPage({
         <div className={`mt-1 ${hintCls}`}>只列出最近 5 篇；完整清单见知识库页。</div>
       )}
       {vaultPreview && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2 text-[11px] leading-5 text-[var(--body)]">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2 text-ui-xs leading-5 text-[var(--body)]">
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-bold">{vaultPreview.rel}</span>
             <Button type="button" onClick={() => setVaultPreview(null)} size="sm" variant="ghost">
@@ -1368,16 +1376,16 @@ export function MemoryPage({
           </div>
           <div className="flex flex-wrap items-start gap-5">
             <div>
-              <div className="text-[11px] text-muted">公用语义记忆</div>
-              <div className="ui-numeric text-[18px] font-semibold">{layers.globalSemantic.length}</div>
+              <div className="text-ui-xs text-muted">公用语义记忆</div>
+              <div className="ui-numeric text-num-sm font-semibold">{layers.globalSemantic.length}</div>
             </div>
             <div>
-              <div className="text-[11px] text-muted">情景记忆</div>
-              <div className="ui-numeric text-[18px] font-semibold">{layers.episodic.length}</div>
+              <div className="text-ui-xs text-muted">情景记忆</div>
+              <div className="ui-numeric text-num-sm font-semibold">{layers.episodic.length}</div>
             </div>
             <div>
-              <div className="text-[11px] text-muted">总量</div>
-              <div className="mt-1 text-[12px] font-bold">
+              <div className="text-ui-xs text-muted">总量</div>
+              <div className="mt-1 text-ui-sm font-bold">
                 {totalEntries} 条 · {totalChars} 字符
               </div>
             </div>
@@ -1452,7 +1460,7 @@ export function MemoryPage({
             关闭后不再自动记录；手动添加不受影响
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <label className="flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-muted">
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-ui-sm text-muted">
               <input
                 type="checkbox"
                 checked={includeAux}
@@ -1493,7 +1501,7 @@ export function MemoryPage({
               disabled={!writeReady}
               size="md" variant="ghost" className="inline-flex items-center gap-1.5"
             >
-              <PlusIcon width={13} height={13} />
+              <PlusIcon width={14} height={14} />
               添加记忆
             </Button>
             <Button
@@ -1517,7 +1525,7 @@ export function MemoryPage({
             readOnly
             aria-label="手动复制记忆 JSON"
             value={manualCopy}
-            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-[11px]"
+            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-ui-xs"
           />
         )}
         {importOpen && (
@@ -1526,7 +1534,7 @@ export function MemoryPage({
               导入记忆 JSON
               <textarea
                 aria-label="导入记忆 JSON"
-                className={`${inputCls} min-h-[96px] resize-y font-mono text-[11px]`}
+                className={`${inputCls} min-h-[96px] resize-y font-mono text-ui-xs`}
                 value={importText}
                 placeholder="粘贴「导出」得到的 JSON；导入会整体替换本机记忆"
                 onChange={(e) => setImportText(e.target.value)}
@@ -1585,7 +1593,7 @@ export function MemoryPage({
               >
                 {editing?.id === entry.id ? (
                   <div>
-                    <label className="block text-[11px] text-muted">
+                    <label className="block text-ui-xs text-muted">
                       主题
                       <input
                         aria-label={`编辑主题 ${entry.key}`}
@@ -1595,7 +1603,7 @@ export function MemoryPage({
                         onChange={(e) => setEditing({ ...editing, key: e.target.value })}
                       />
                     </label>
-                    <label className="mt-2 block text-[11px] text-muted">
+                    <label className="mt-2 block text-ui-xs text-muted">
                       内容
                       <textarea
                         aria-label={`编辑内容 ${entry.key}`}
@@ -1633,16 +1641,16 @@ export function MemoryPage({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-[13px] font-bold">{entry.key}</span>
+                        <span className="truncate text-ui-md font-bold">{entry.key}</span>
                         {entry.pinned && <span className={badgeCls}>置顶</span>}
                         {!agentId && (
-                          <span className="text-[10px] text-muted">{agentName(entry.agentId)}</span>
+                          <span className="text-ui-xs text-muted">{agentName(entry.agentId)}</span>
                         )}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
                         {entry.value}
                       </div>
-                      <div className="mt-1 text-[10px] text-muted">
+                      <div className="mt-1 text-ui-xs text-muted">
                         {SOURCE_LABEL[entry.source]}
                         {/* 手动添加的条目没有「置信度」可言：置信度是自动提取时的可信度，
                             人工录入再显示 0.60 只会让人怀疑内容本身（d.77）。 */}
@@ -1650,7 +1658,7 @@ export function MemoryPage({
                         {touchNote(touches.get(entry.id))}
                       </div>
                       {personalNote(usage[entry.id]) && (
-                        <div className="mt-0.5 break-words text-[10px] text-muted">
+                        <div className="mt-0.5 break-words text-ui-xs text-muted">
                           {personalNote(usage[entry.id])}
                         </div>
                       )}
@@ -1688,7 +1696,7 @@ export function MemoryPage({
                         onClick={() => setPendingSemantic(entry)}
                         size="sm" variant="ghost" className="text-[var(--danger)]"
                       >
-                        <TrashIcon width={13} height={13} />
+                        <TrashIcon width={14} height={14} />
                       </Button>
                     </div>
                   </div>
@@ -1721,13 +1729,13 @@ export function MemoryPage({
                 }`}
               >
                 <div className="min-w-0">
-                  <div className="text-[10px] text-muted">
+                  <div className="text-ui-xs text-muted">
                     {entry.at.slice(0, 10)}
                     {!agentId && ` · ${agentName(entry.agentId)}`} · {entry.sourceTurns} 轮
                   </div>
-                  <div className="mt-0.5 break-words text-[12px] text-[var(--body)]">{entry.summary}</div>
+                  <div className="mt-0.5 break-words text-ui-sm text-[var(--body)]">{entry.summary}</div>
                   {personalNote(usage[entry.id]) && (
-                    <div className="mt-0.5 break-words text-[10px] text-muted">
+                    <div className="mt-0.5 break-words text-ui-xs text-muted">
                       {personalNote(usage[entry.id])}
                     </div>
                   )}
@@ -1738,7 +1746,7 @@ export function MemoryPage({
                   onClick={() => setPendingEpisodic(entry)}
                   size="sm" variant="ghost" className="text-[var(--danger)]"
                 >
-                  <TrashIcon width={13} height={13} />
+                  <TrashIcon width={14} height={14} />
                 </Button>
               </div>
             ))
@@ -1818,7 +1826,7 @@ export function MemoryPage({
                 readOnly
                 aria-label="将被注入的记忆段"
                 value={recall.text}
-                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-[11px]"
+                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-ui-xs"
               />
             ) : (
               <div className={`mt-3 ${hintCls}`}>三层皆无命中：不会注入任何记忆段</div>
@@ -1893,9 +1901,9 @@ export function MemoryPage({
                 className="ui-list-row items-start justify-between"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-[12px] font-bold">{row.title}</div>
-                  <div className="mt-0.5 break-words text-[12px] text-[var(--body)]">{row.body}</div>
-                  <div className="mt-0.5 text-[10px] text-muted">
+                  <div className="truncate text-ui-sm font-bold">{row.title}</div>
+                  <div className="mt-0.5 break-words text-ui-sm text-[var(--body)]">{row.body}</div>
+                  <div className="mt-0.5 text-ui-xs text-muted">
                     {row.layer}
                     {!agentId && ` · ${agentName(row.agentId)}`}
                     {` · ${personalNote(usage[row.id])}`}
@@ -1907,7 +1915,7 @@ export function MemoryPage({
                   onClick={row.pending}
                   size="sm" variant="ghost" className="text-[var(--danger)] shrink-0"
                 >
-                  <TrashIcon width={13} height={13} />
+                  <TrashIcon width={14} height={14} />
                 </Button>
               </li>
             ))}
@@ -1946,7 +1954,7 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             清除全部 {runs.length} 条召回记录？记忆本身不受影响，只是看不到历史注入与引用轨迹了。
             累计的注入/引用次数一并清零，个性化加权回到起点（下次召回从「谁都没被引用过」重新开始）。
           </p>
@@ -1984,10 +1992,10 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除记忆「{pendingSemantic.key}」？删除后智能体不会再召回这条，操作不可撤销。
           </p>
-          <p className="mt-1 break-words text-[12px] text-muted">{pendingSemantic.value}</p>
+          <p className="mt-1 break-words text-ui-sm text-muted">{pendingSemantic.value}</p>
         </ConfirmDialog>
       )}
 
@@ -2022,8 +2030,8 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-[12px] leading-6">删除这条情景记忆？删除后不会参与召回。</p>
-          <p className="mt-1 break-words text-[12px] text-muted">{pendingEpisodic.summary}</p>
+          <p className="text-ui-sm leading-6">删除这条情景记忆？删除后不会参与召回。</p>
+          <p className="mt-1 break-words text-ui-sm text-muted">{pendingEpisodic.summary}</p>
         </ConfirmDialog>
       )}
 
@@ -2050,7 +2058,7 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             导入会整体替换本机三层记忆与设置，当前记忆不会保留。建议先导出备份，操作不可撤销。
           </p>
         </ConfirmDialog>
@@ -2180,7 +2188,7 @@ export function MemoryPage({
             disabled={reviewSettings.frequency === "never"}
             value={reviewSettings.turnsThreshold}
             onChange={(e) => patchReview({ turnsThreshold: Number(e.target.value) })}
-            className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-[12px] disabled:opacity-50"
+            className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-ui-sm disabled:opacity-50"
           />
           轮最多复盘一次
         </label>
@@ -2188,7 +2196,7 @@ export function MemoryPage({
 
       {capacity && (
         <div className="mt-3">
-          <div className="flex items-center justify-between text-[11px] text-muted">
+          <div className="flex items-center justify-between text-ui-xs text-muted">
             <span>语义记忆容量（该智能体）</span>
             <span>
               {capacity.used} / {capacity.limit} 字符
@@ -2207,12 +2215,12 @@ export function MemoryPage({
       )}
 
       {reviewMsg && (
-        <div role="status" className="mt-2 text-[12px] text-muted">
+        <div role="status" className="mt-2 text-ui-sm text-muted">
           {reviewMsg}
         </div>
       )}
       {reviewReport && (
-        <div className="mt-2 text-[11px] text-muted">
+        <div className="mt-2 text-ui-xs text-muted">
           最近一次：{reviewReport.reason}
           {reviewReport.memoryWritten > 0 && ` · 写入 ${reviewReport.memoryWritten} 条记忆`}
           {reviewReport.skillWritten && ` · 沉淀技能「${reviewReport.skillWritten}」`}
@@ -2282,7 +2290,7 @@ export function MemoryPage({
                     <tr className="bg-[var(--subtle-2)]">
                       <td colSpan={4} className="px-2 py-2" >
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] text-[var(--warn)]">
+                          <span className="text-ui-xs text-[var(--warn)]">
                             关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
                           </span>
                           <Button
@@ -2403,13 +2411,13 @@ export function MemoryPage({
           {vaultMsgRow}
         </div>
         {vaultSync?.truncated ? (
-          <div className="mt-2 text-[12px] text-[var(--warn)]">
+          <div className="mt-2 text-ui-sm text-[var(--warn)]">
             被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
           </div>
         ) : null}
       </section>
       <details className={cardCls}>
-        <summary className="cursor-pointer select-none text-[13px] font-bold">
+        <summary className="cursor-pointer select-none text-ui-md font-bold">
           旧版知识库（Wiki 视图，保留可用）
         </summary>
         <div className="mt-3">
@@ -2431,7 +2439,6 @@ export function MemoryPage({
     // 数据库：全局语义记忆 + 情景记忆（这是所有智能体真正会读到的长期记忆）
     database: layers.globalSemantic.length + layers.episodic.length,
   };
-  const tabOrder: TabKey[] = ["agents", "database", "wiki"];
 
   return (
     <PageShell
@@ -2462,14 +2469,20 @@ export function MemoryPage({
               与设置区同一做法，标签与内容收进 1200px 居中列，宽屏阅读更稳。 */}
           <div className="mx-auto w-full max-w-[1200px]">
           {rosterError && (
-            <div role="status" className="mb-2 text-[12px] text-[var(--warn)]">
-              {rosterError}
+            <div className="mb-2 flex items-center gap-2 text-ui-sm text-[var(--warn)]">
+              {/* 加载失败是「失败」不是「空」：用 alert 断言式播报，并给可重试入口。 */}
+              <p role="alert" className="min-w-0 flex-1">
+                {rosterError}
+              </p>
+              <Button type="button" size="sm" variant="ghost" onClick={() => void loadRoster()}>
+                重试
+              </Button>
             </div>
           )}
 
           {/* 上侧横向标签页：选中项白底、下边框与内容区连成一体（与设置页同一视觉语言） */}
-          <div role="tablist" aria-label="记忆分区" className={PAGE_TABLIST}>
-            {tabOrder.map((key) => {
+          <div role="tablist" aria-label="记忆分区" className={PAGE_TABLIST} onKeyDown={tabs.onKeyDown}>
+            {tabOrder.map((key, index) => {
               const active = tab === key;
               return (
                 <button
@@ -2477,7 +2490,9 @@ export function MemoryPage({
                   type="button"
                   role="tab"
                   id={`memory-${key}-tab`}
-                  aria-controls={`memory-${key}-panel`}
+                  ref={tabs.getTabRef(index)}
+                  tabIndex={tabs.tabIndexFor(index)}
+                  aria-controls={active ? `memory-${key}-panel` : undefined}
                   aria-selected={active}
                   aria-label={TAB_LABELS[key]}
                   onClick={() => setTab(key)}
@@ -2537,7 +2552,7 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             清空会话「{clearTarget.label}」的短期记忆？长期记忆与已发送的聊天记录不受影响，但这段短期上下文清空后无法恢复。
           </p>
         </ConfirmDialog>

@@ -28,7 +28,18 @@ function fmtRelative(iso: string | null | undefined, now = Date.now()): string {
   return `${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-export function RecentConversations() {
+export function RecentConversations({
+  /**
+   * 首跑引导卡在场时隐藏空态占位（d.141）。
+   *
+   * 首页首屏上，「开始使用 0/3」和「还没有对话 → 去智能体页」是同一个下一步：
+   * 两块并排劝同一件事，用户只会觉得首页在重复说话。引导卡负责劝，这里整块不出现；
+   * 有会话时照常显示（列表本身就是「继续上次」，与引导不冲突）。
+   */
+  hideWhenEmpty = false,
+}: {
+  hideWhenEmpty?: boolean;
+} = {}) {
   const conversations = useChatStore((s) => s.conversations);
   const openConversation = useUiStore((s) => s.openConversation);
   const setPage = useUiStore((s) => s.setPage);
@@ -45,12 +56,15 @@ export function RecentConversations() {
     [conversations],
   );
 
+  // 引导卡在场 + 没有会话：让引导成为首屏唯一的「下一步」。
+  if (hideWhenEmpty && recent.length === 0) return null;
+
   return (
     // d.138：h-full 让这张卡与左栏「团队动向」底边齐平——首页两栏此前顶对齐、
     // 右卡内容少时底边差出一截，看起来像布局没做完。
     <section aria-label="最近对话" className="ui-card h-full p-3">
       <div className="mb-1.5 flex items-center justify-between">
-        <div className="text-[12px] font-bold text-muted">最近对话</div>
+        <div className="text-ui-sm font-bold text-muted">最近对话</div>
         <button type="button" className="ui-link" onClick={() => setPage("chat")}>
           全部智能体
         </button>
@@ -86,11 +100,11 @@ export function RecentConversations() {
                   size={22}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-medium">{title}</span>
+                  <span className="block truncate text-ui-sm font-medium">{title}</span>
                   <span className="block truncate ui-caption">{meta}</span>
                 </span>
                 {conv.unreadCount > 0 ? (
-                  <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-semibold text-[var(--danger-on)]">
+                  <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-ui-xs font-semibold text-[var(--danger-on)]">
                     {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
                   </span>
                 ) : null}

@@ -165,23 +165,23 @@ export function TeamPlanPanel({
               key={plan.id}
               className={`flex items-start gap-2 rounded-lg border border-line-soft px-2.5 py-2 ${FOCUS_RING}`}
             >
-              <span className="mt-0.5 w-4 shrink-0 text-[11px] tabular-nums text-muted">
+              <span className="mt-0.5 w-4 shrink-0 text-ui-xs tabular-nums text-muted">
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[13px] font-medium">{plan.title}</span>
+                  <span className="text-ui-md font-medium">{plan.title}</span>
                   <button
                     type="button"
                     onClick={() => void cycle(plan)}
                     title="点击切换状态"
-                    className={`rounded-full border px-1.5 py-0.5 text-[10px] ${STATUS_STYLE[plan.status]}`}
+                    className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[plan.status]}`}
                   >
                     {PLAN_STATUS_LABEL[plan.status]}
                   </button>
                 </div>
                 {plan.detail && (
-                  <p className="mt-0.5 whitespace-pre-wrap text-[11px] leading-5 text-muted">
+                  <p className="mt-0.5 whitespace-pre-wrap text-ui-xs leading-5 text-muted">
                     {plan.detail}
                   </p>
                 )}
@@ -189,7 +189,7 @@ export function TeamPlanPanel({
               <button
                 type="button"
                 aria-label={`删除方案 ${plan.title}`}
-                className="shrink-0 text-[11px] text-muted hover:text-[var(--danger)]"
+                className="shrink-0 text-ui-xs text-muted hover:text-[var(--danger)]"
                 onClick={() => setPendingDelete(plan)}
               >
                 删除
@@ -223,7 +223,7 @@ export function TeamPlanPanel({
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除方案「{pendingDelete.title}」？方案本身删除后不可恢复；挂在它下面的任务会保留，但会解绑为「不挂方案」。
           </p>
         </ConfirmDialog>

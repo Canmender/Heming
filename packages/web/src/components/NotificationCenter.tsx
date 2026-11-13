@@ -150,7 +150,7 @@ export function NotificationCenter() {
           // 打开即视为「已看到有通知」：列表项的未读点保留到逐条点击/全部已读，
           // 但角标不清——清了用户就没法知道哪几条还没细看。
         }}
-        className={`flex h-[30px] w-[30px] items-center justify-center rounded-lg transition-colors duration-150 ${
+        className={`flex h-[32px] w-[32px] items-center justify-center rounded-lg transition-colors duration-fast ${
           open ? "bg-ink text-white" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
         }`}
       >
@@ -171,7 +171,7 @@ export function NotificationCenter() {
         {unread > 0 && (
           <span
             aria-hidden="true"
-            className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white"
+            className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full border border-white bg-ink px-1 text-center text-ui-xs font-semibold leading-[14px] text-white"
           >
             {unread}
           </span>
@@ -195,7 +195,7 @@ export function NotificationCenter() {
           className="absolute bottom-0 left-full z-40 ml-2 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-80px)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] ui-overlay-shadow"
         >
           <div className="flex items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
-            <span className="text-[12px] font-bold">通知中心</span>
+            <span className="text-ui-sm font-bold">通知中心</span>
             <span className="flex items-center gap-1.5">
               <button
                 type="button"
@@ -238,7 +238,7 @@ export function NotificationCenter() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => setFilter(f.id)}
-                    className={`rounded-sm px-1.5 py-0.5 text-[11px] transition-colors duration-150 ${
+                    className={`rounded-sm px-1.5 py-0.5 text-ui-xs transition-colors duration-fast ${
                       active ? "bg-ink text-white" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                     }`}
                   >
@@ -251,13 +251,13 @@ export function NotificationCenter() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {items.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[12px] leading-5 text-muted">
+              <p className="px-3 py-6 text-center text-ui-sm leading-5 text-muted">
                 还没有通知。
                 <br />
                 任务完成、需要确认的工具调用和幕僚简报会出现在这里。
               </p>
             ) : visible.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[12px] text-muted">还没有这类通知</p>
+              <p className="px-3 py-6 text-center text-ui-sm text-muted">还没有这类通知</p>
             ) : (
               <ul className="divide-y divide-line-soft">
                 {visible.map((item) => (
@@ -270,21 +270,21 @@ export function NotificationCenter() {
                         className="min-w-0 flex-1 text-left"
                       >
                         <div className="flex items-baseline gap-1.5">
-                          <span className="shrink-0 rounded-sm border border-line-soft px-1 text-[10px] text-muted">
+                          <span className="shrink-0 rounded-sm border border-line-soft px-1 text-ui-xs text-muted">
                             {KIND_LABEL[item.kind]}
                           </span>
                           <span
-                            className={`truncate text-[12px] ${item.read ? "text-ink" : "font-bold text-ink"}`}
+                            className={`truncate text-ui-sm ${item.read ? "text-ink" : "font-bold text-ink"}`}
                           >
                             {item.title}
                           </span>
                         </div>
                         {item.body && (
-                          <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">
+                          <p className="mt-0.5 line-clamp-2 text-ui-xs leading-4 text-muted">
                             {item.body}
                           </p>
                         )}
-                        <span className="mt-0.5 block text-[10px] text-muted">
+                        <span className="mt-0.5 block text-ui-xs text-muted">
                           {formatRelativeTime(item.createdAt, now)}
                         </span>
                       </button>
@@ -294,7 +294,7 @@ export function NotificationCenter() {
                             type="button"
                             aria-label={`标记已读：${item.title}`}
                             onClick={() => markRead(item.id)}
-                            className="rounded-sm px-1 py-0.5 text-[10px] text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                            className="rounded-sm px-1 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                           >
                             已读
                           </button>
@@ -305,7 +305,7 @@ export function NotificationCenter() {
                           onClick={() => remove(item.id)}
                           className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                         >
-                          <XIcon width={13} height={13} aria-hidden="true" />
+                          <XIcon width={14} height={14} aria-hidden="true" />
                         </button>
                       </span>
                     </div>
@@ -341,7 +341,7 @@ export function NotificationCenter() {
                 </>
               }
             >
-              <p className="text-[12px] leading-6">
+              <p className="text-ui-sm leading-6">
                 清空全部 {items.length} 条通知？<strong className="font-bold">此操作不可恢复</strong>
                 ——未读的也会一起清掉。会话本身的消息与未读角标不受影响，通知只是提醒的副本。
               </p>

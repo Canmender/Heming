@@ -120,7 +120,7 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="输入笔记名…"
-          className="w-full border-b border-line px-3.5 py-2.5 text-[13px] text-ink outline-hidden placeholder:text-placeholder"
+          className="w-full border-b border-line px-3.5 py-2.5 text-ui-md text-ink outline-hidden placeholder:text-placeholder"
         />
         <div
           id={LISTBOX_ID}
@@ -129,7 +129,7 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
           className="max-h-[46vh] overflow-y-auto py-1"
         >
           {notes.length === 0 ? (
-            <p className="px-3.5 py-3 text-[12px] text-muted">
+            <p className="px-3.5 py-3 text-ui-sm text-muted">
               {index ? "没有匹配的笔记。" : "索引还没建好，稍等一下再试。"}
             </p>
           ) : (
@@ -143,12 +143,12 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
                 tabIndex={-1}
                 onMouseEnter={() => setCursor(i)}
                 onClick={() => execute(note)}
-                className={`flex cursor-pointer items-baseline gap-2 px-3 py-1.5 text-[12px] ${
+                className={`flex cursor-pointer items-baseline gap-2 px-3 py-1.5 text-ui-sm ${
                   i === cursor ? "bg-subtle-3" : ""
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{note.title}</span>
-                <span className="shrink-0 truncate text-[10px] text-muted">
+                <span className="shrink-0 truncate text-ui-xs text-muted">
                   {matchKindLabel(note.matchKind) ? `${matchKindLabel(note.matchKind)} · ` : ""}
                   {note.dir || "库根"}
                 </span>
@@ -156,7 +156,7 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
             ))
           )}
         </div>
-        <div className="flex items-center gap-3 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-muted">
+        <div className="flex items-center gap-3 border-t border-line-soft px-3.5 py-1.5 text-ui-xs text-muted">
           <span>↑↓ 选择</span>
           <span>Enter 打开</span>
           <span>Esc 关闭</span>

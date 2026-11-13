@@ -65,9 +65,9 @@ interface PromptState {
 
 /** 行内图标：目录 / 图片 / 其它文本。 */
 function EntryIcon({ entry }: { entry: VaultEntry }) {
-  if (isDir(entry)) return <FolderIcon width={13} height={13} className="shrink-0 text-muted" />;
-  if (entry.kind === "image") return <ImageIcon width={13} height={13} className="shrink-0 text-muted" />;
-  return <FileIcon width={13} height={13} className="shrink-0 text-muted" />;
+  if (isDir(entry)) return <FolderIcon width={14} height={14} className="shrink-0 text-muted" />;
+  if (entry.kind === "image") return <ImageIcon width={14} height={14} className="shrink-0 text-muted" />;
+  return <FileIcon width={14} height={14} className="shrink-0 text-muted" />;
 }
 
 export function FileTree({
@@ -208,15 +208,15 @@ export function FileTree({
               openMenu(entry, e.clientX, e.clientY);
             }}
             onKeyDown={(e) => onRowKeyDown(e, entry)}
-            className={`flex min-h-[26px] w-full items-center gap-1.5 rounded-sm py-[3px] pr-1 text-left text-[12px] transition-colors ${
+            className={`flex min-h-[26px] w-full items-center gap-1.5 rounded-sm py-[3px] pr-1 text-left text-ui-sm transition-colors ${
               active ? "bg-subtle-2 font-medium text-ink" : "text-body hover:bg-subtle-3 hover:text-ink"
             }`}
             style={{ paddingLeft: 6 + depth * 13 }}
           >
             {dir ? (
               <ChevronIcon
-                width={11}
-                height={11}
+                width={12}
+                height={12}
                 className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
               />
             ) : (
@@ -266,7 +266,7 @@ export function FileTree({
       disabled={!action}
       title={action ? undefined : disabledHint}
       onClick={action ?? undefined}
-      className={`flex w-full items-center rounded-sm px-2.5 py-1 text-left text-[12px] ${
+      className={`flex w-full items-center rounded-sm px-2.5 py-1 text-left text-ui-sm ${
         action
           ? "text-ink hover:bg-subtle-3"
           : "cursor-not-allowed text-muted disabled:opacity-100"
@@ -287,7 +287,7 @@ export function FileTree({
           onClick={() => setPrompt({ kind: "new-note", dir: "", initial: "" })}
           className="flex h-6 w-6 items-center justify-center rounded-sm text-muted hover:bg-subtle-3 hover:text-ink"
         >
-          <PlusIcon width={13} height={13} />
+          <PlusIcon width={14} height={14} />
         </button>
       </div>
 

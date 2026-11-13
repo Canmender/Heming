@@ -13,7 +13,8 @@ import { hasStdioBridge } from "../lib/mcp/index.js";
 import { useRegistryStore, type RegistryStore } from "../store/registry.js";
 import { PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
-import { EmptyState } from "./ui/EmptyState.js";
+import { AsyncBoundary } from "./ui/AsyncBoundary.js";
+import { SkeletonLine } from "./ui/Skeleton.js";
 import { Button } from "../components/ui/Button.js";
 
 /** 搜索防抖：输入过程中的每个字符都打一次 Registry 没有意义。 */
@@ -121,6 +122,17 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
     [entries, filter],
   );
 
+  /** Registry 区域四态（③-1）：首次加载 / 硬失败 / 空结果 / 有数据。
+   *  带缓存时的失败（stale）不走这里，仍用上方的行内警示条 + 缓存列表。 */
+  const registryStatus: "loading" | "error" | "empty" | "ready" =
+    loading && entries.length === 0
+      ? "loading"
+      : error && entries.length === 0
+        ? "error"
+        : visible.length === 0
+          ? "empty"
+          : "ready";
+
   const doInstall = async (entry: RegistryEntry, option: InstallOption) => {
     setMsg(null);
     const result = await install(entry, option);
@@ -201,7 +213,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
       {msg && (
         <div
           role="status"
-          className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
+          className={`mt-3 rounded-lg border px-3 py-2 text-ui-sm ${
             msg.kind === "error"
               ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
               : "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
@@ -211,10 +223,11 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
         </div>
       )}
 
-      {error && (
+      {/* 带缓存时的失败是「行内警示」而不是整区状态：列表还能用，所以保留缓存内容。 */}
+      {error && entries.length > 0 && (
         <div
           role="alert"
-          className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-[11px] ${
+          className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-ui-xs ${
             stale
               ? "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]"
               : "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
@@ -233,16 +246,26 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
         </div>
       )}
 
-      {loading && entries.length === 0 ? (
-        <EmptyState framed className="border-dashed" title="正在连接 Registry…" />
-      ) : visible.length === 0 ? (
-        <EmptyState
-          framed
-          className="border-dashed"
-          title={entries.length === 0 ? "没有拉到可展示的服务" : "没有匹配的服务"}
-          desc={entries.length === 0 ? "检查网络后重试，或稍后再来看。" : undefined}
-        />
-      ) : (
+      <AsyncBoundary
+        status={registryStatus}
+        loadingLabel="正在连接 Registry"
+        loadingClassName="mt-4 space-y-2"
+        loadingFallback={
+          <>
+            {[0, 1, 2].map((i) => (
+              <SkeletonLine key={i} className="h-12 rounded-lg" />
+            ))}
+          </>
+        }
+        errorTitle={stale ? "无法连接 Registry，正在显示上次缓存。" : "无法连接 Registry"}
+        errorDesc={error ?? undefined}
+        onRetry={() => void load(undefined, { force: true })}
+        errorClassName="mt-4"
+        emptyFramed
+        emptyClassName="border-dashed"
+        emptyTitle={entries.length === 0 ? "没有拉到可展示的服务" : "没有匹配的服务"}
+        emptyDesc={entries.length === 0 ? "检查网络后重试，或稍后再来看。" : undefined}
+      >
         <div className="mt-4 flex flex-col ui-card">
           {visible.map((entry) => (
             <RegistryRow
@@ -256,7 +279,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
             />
           ))}
         </div>
-      )}
+      </AsyncBoundary>
 
       {nextCursor && (
         <div className="mt-4 flex justify-center">
@@ -306,7 +329,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
           <span className="ui-section-title">{entry.title}</span>
           {risk && (
             <span
-              className={`rounded-sm px-1 text-[10px] ${
+              className={`rounded-sm px-1 text-ui-xs ${
                 risk.level === "high"
                   ? "bg-[var(--danger-soft)] text-[var(--danger)]"
                   : risk.level === "medium"
@@ -344,7 +367,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             href={entry.websiteUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-[11px] text-muted underline decoration-[#ddd] underline-offset-2 hover:text-ink"
+            className="text-ui-xs text-muted underline decoration-[#ddd] underline-offset-2 hover:text-ink"
           >
             官网
           </a>
@@ -354,7 +377,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             href={entry.repoUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-[11px] text-muted underline decoration-[#ddd] underline-offset-2 hover:text-ink"
+            className="text-ui-xs text-muted underline decoration-[#ddd] underline-offset-2 hover:text-ink"
           >
             仓库
           </a>
@@ -372,7 +395,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             : installed
               ? "已安装"
               : installable
-                ? <><PlusIcon width={11} height={11} />安装</>
+                ? <><PlusIcon width={12} height={12} />安装</>
                 : option
                   ? rowBlockLabel(option, runtime)
                   : "暂不支持"}
@@ -385,7 +408,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
 function EntryIcon({ entry }: { entry: RegistryEntry }) {
   const [broken, setBroken] = useState(false);
   return (
-    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)] text-[13px] font-bold text-muted">
+    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)] text-ui-md font-bold text-muted">
       {entry.title.slice(0, 1).toUpperCase()}
       {entry.iconUrl && !broken && (
         <img

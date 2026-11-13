@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
-import { OnboardingCard } from "./OnboardingCard.js";
-import { UnboundModelNotice, UNBOUND_NOTICE_ID, unboundNoticeText } from "./UnboundModelNotice.js";
+import { OnboardingCard, ONBOARDING_OPEN_KEY } from "./OnboardingCard.js";
+import { UnboundModelNotice, UNBOUND_ADD_SOURCE_LABEL, UNBOUND_NOTICE_ID, unboundNoticeText } from "./UnboundModelNotice.js";
 import { ChatEmptyState } from "./ChatEmptyState.js";
 import { ComposerHints } from "./ComposerHints.js";
 import { deriveOnboardingSteps } from "../../lib/onboarding.js";
@@ -43,6 +43,25 @@ describe("OnboardingCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "不再显示" }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
+
+  it("未完成步骤就地展开做法（展开态存本标签页），已完成步骤没有「怎么做」", () => {
+    sessionStorage.clear();
+    render(<OnboardingCard steps={steps} onGo={vi.fn()} onDismiss={vi.fn()} />);
+    const card = screen.getByRole("region", { name: "开始使用" });
+    // connections=0 / tasks=0 → 两步未完成；对话那步已完成，不再给「怎么做」
+    expect(within(card).getAllByRole("button", { name: "怎么做" })).toHaveLength(2);
+
+    fireEvent.click(within(card).getAllByRole("button", { name: "怎么做" })[0]);
+    const howTo = card.querySelector("#onboarding-how-model")!;
+    expect(howTo).not.toBeNull();
+    expect(howTo).toHaveTextContent("「模型 → 来源」");
+    expect(within(card).getByRole("button", { name: "收起做法" })).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem(ONBOARDING_OPEN_KEY) ?? "[]")).toEqual(["model"]);
+
+    fireEvent.click(within(card).getByRole("button", { name: "收起做法" }));
+    expect(card.querySelector("#onboarding-how-model")).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem(ONBOARDING_OPEN_KEY) ?? "[]")).toEqual([]);
+  });
 });
 
 describe("UnboundModelNotice（三处同源）", () => {
@@ -59,12 +78,13 @@ describe("UnboundModelNotice（三处同源）", () => {
     expect(screen.getByText("还没有智能体绑定 LLM 连接")).toBeInTheDocument();
   });
 
-  it("「去设置」可点、id 可覆盖（对话页 aria-describedby 指向它）", () => {
+  it("「去模型页添加来源」可点、id 可覆盖（对话页 aria-describedby 指向它）", () => {
     const go = vi.fn();
     render(<UnboundModelNotice id="chat-unbound" agentName="X" onGoSettings={go} />);
     const notice = document.getElementById("chat-unbound")!;
     expect(notice).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "去设置" }));
+    // d.138：设置页不再承接 Key 录入，按钮必须指向「模型 → 来源」
+    fireEvent.click(screen.getByRole("button", { name: UNBOUND_ADD_SOURCE_LABEL }));
     expect(go).toHaveBeenCalledTimes(1);
   });
 
@@ -97,7 +117,7 @@ describe("UnboundModelNotice（三处同源）", () => {
     expect(bind).toHaveBeenCalledWith("p2");
     // 有快捷绑定时主按钮是「管理连接」，不是把用户再送去设置页
     expect(screen.getByRole("button", { name: "管理连接" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: UNBOUND_ADD_SOURCE_LABEL })).toBeNull();
   });
 
   it("没有可用连接（或没传 onBind）：不渲染选择器，避免空下拉", () => {

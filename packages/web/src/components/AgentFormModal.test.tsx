@@ -14,11 +14,11 @@ describe("AgentFormModal", () => {
     vi.restoreAllMocks();
   });
 
-  it("无 LLM 连接时提示去设置页；有连接时可选并保存", async () => {
+  it("无 LLM 连接时提示去模型页；有连接时可选并保存", async () => {
     const { rerender } = render(<AgentFormModal open mode="create" onClose={() => {}} />);
     // 进阶区默认收起：先展开才看得到模型连接
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
-    expect(screen.getByText(/去设置页添加/)).toBeInTheDocument();
+    expect(screen.getByText(/去模型页添加/)).toBeInTheDocument();
 
     useLlmStore.setState({ profiles: [{ id: "mp:m", label: "主模型", provider: "openai", apiKey: "k", model: "m" }] });
     rerender(<AgentFormModal open mode="create" onClose={() => {}} />);
@@ -34,11 +34,11 @@ describe("AgentFormModal", () => {
     expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)["a1"]).toBe("你是架构师");
   });
 
-  it("「去设置页添加」点击后切到设置页「模型」并关闭弹窗", () => {
+  it("「去模型页添加」点击后切到「模型」页并关闭弹窗", () => {
     const onClose = vi.fn();
     render(<AgentFormModal open mode="create" onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
-    fireEvent.click(screen.getByText(/去设置页添加/));
+    fireEvent.click(screen.getByText(/去模型页添加/));
     expect(useUiStore.getState().page).toBe("model");
     expect(onClose).toHaveBeenCalled();
   });

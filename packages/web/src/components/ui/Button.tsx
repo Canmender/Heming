@@ -1,4 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { withFocusRing } from "../../lib/a11y/focus.js";
 
 /**
  * 按钮基元（d.138 · 阶段 2 的第一块）。
@@ -43,13 +44,18 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   },
   ref,
 ) {
+  // 焦点环与 reduced-motion：.ui-btn 只声明了 transition-colors，没有焦点环；
+  // 全站按钮都经过这里，补一次比每个调用点各写一遍可靠得多。
+  const classes = withFocusRing(
+    `ui-btn ui-btn-${size} ui-btn-${variant} motion-reduce:transition-none${className ? ` ${className}` : ""}`,
+  );
   return (
     <button
       ref={ref}
       type={type}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
-      className={`ui-btn ui-btn-${size} ui-btn-${variant}${className ? ` ${className}` : ""}`}
+      className={classes}
       {...rest}
     >
       {leadingIcon ? (

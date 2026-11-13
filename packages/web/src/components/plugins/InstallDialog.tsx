@@ -251,7 +251,7 @@ export function InstallDialog({
     <Dialog
       ariaLabel="安装插件"
       title="安装 / 更新插件"
-      icon={<PackageIcon width={17} height={17} />}
+      icon={<PackageIcon width={18} height={18} />}
       description="粘贴、拖入或从云端载入清单；先校验，再安装。"
       size="lg"
       maxHeightVh={88}
@@ -337,7 +337,7 @@ export function InstallDialog({
                 value={text}
                 onChange={(e) => onTextChange(e.target.value)}
                 placeholder={`{\n  "schemaVersion": 3,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "permissions": { "network": [], "tools": "read", "files": [] },\n  "contributions": {\n    "skills": [ ... ],\n    "mcpServers": [ ... ],\n    "commands": [ ... ]\n  }\n}`}
-                className="mt-1 block min-h-[150px] w-full resize-y rounded-lg border border-line-strong bg-[var(--surface)] px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-ink"
+                className="mt-1 block min-h-[150px] w-full resize-y rounded-lg border border-line-strong bg-[var(--surface)] px-3 py-2 font-mono text-ui-xs text-ink outline-hidden focus:border-ink"
               />
             </label>
             <p className="mt-1 ui-caption">只读取本地 JSON；不会上传，也不会执行其中的内容。</p>
@@ -366,7 +366,7 @@ export function InstallDialog({
             <div className="plugin-rise mt-3 overflow-hidden rounded-xl border border-line bg-[var(--surface)]">
               <div className="flex flex-wrap items-start gap-3 border-b border-line-soft bg-[var(--subtle-2)] px-3 py-3">
                 <span
-                  className="plugin-icon-tile h-9 w-9 text-[13px] font-bold"
+                  className="plugin-icon-tile h-9 w-9 text-ui-md font-bold"
                   aria-hidden="true"
                 >
                   {Array.from(preview.manifest.name)[0]?.toUpperCase() ?? "?"}
@@ -391,7 +391,7 @@ export function InstallDialog({
                 <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2">
                   <div className="flex items-start gap-2">
                     <span className="mt-0.5 shrink-0 text-muted" aria-hidden="true">
-                      <ShieldIcon width={13} height={13} />
+                      <ShieldIcon width={14} height={14} />
                     </span>
                     <div className="min-w-0 flex-1">
                       {/* 信任行（d.66）：内容指纹 + 首装/与上次相同/不同；不是签名，只发现悄悄改动 */}

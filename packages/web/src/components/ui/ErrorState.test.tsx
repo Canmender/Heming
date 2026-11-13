@@ -35,4 +35,19 @@ describe("ErrorState（失败态基元）", () => {
     expect(container.firstChild).toHaveProperty("className");
     expect(String((container.firstChild as HTMLElement).className)).toContain("py-5");
   });
+
+  it("code：错误码用等宽字单独一行，读屏与用户都能念出来", () => {
+    render(<ErrorState title="同步失败" code="E_SYNC_503" />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("错误码：");
+    expect(alert).toHaveTextContent("E_SYNC_503");
+    expect(alert.querySelector(".font-mono")?.textContent).toBe("E_SYNC_503");
+  });
+
+  it("align=start：侧栏内左对齐", () => {
+    render(<ErrorState title="名册加载失败" align="start" compact />);
+    const alert = screen.getByRole("alert");
+    expect(alert.className).toContain("items-start");
+    expect(alert.className).toContain("text-left");
+  });
 });

@@ -136,7 +136,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       className="ui-card max-w-[520px] p-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-muted">软件更新</div>
+        <div className="text-ui-sm font-bold text-muted">软件更新</div>
         <span className="ui-caption">当前 {currentVersion}</span>
       </div>
 
@@ -160,7 +160,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       ) : null}
 
       {hasUpdate && state?.available && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-subtle px-2.5 py-2 text-[12px]">
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle px-2.5 py-2 text-ui-sm">
           可更新至 <span className="font-bold">{state.available.version}</span>
         </div>
       )}
@@ -208,7 +208,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             安装会关闭并重启应用，正在输入的内容、运行中的智能体任务与通话会中断。请先保存工作，再继续。
           </p>
         </ConfirmDialog>

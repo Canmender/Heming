@@ -8,6 +8,24 @@ import { useLlmStore } from "../store/llm.js";
 import { useAuthStore } from "../store/auth.js";
 
 /**
+ * d.141 F-07：CollabView 用桌面桥是否存在来决定空态 CTA（浏览器里模型来源整块隐藏，
+ * 「新建智能体 / 去绑定模型」会走进死循环）。测试按需挂/撤一个最小桥。
+ */
+function stubDesktopBridge(on: boolean) {
+  const w = window as unknown as { __heming_magpie?: unknown };
+  if (on) {
+    w.__heming_magpie = {
+      status: async () => ({ available: true, running: true }),
+      start: async () => ({ status: { available: true, running: true } }),
+      stop: async () => ({ available: true, running: false }),
+      gateway: async () => ({}),
+    };
+  } else {
+    delete w.__heming_magpie;
+  }
+}
+
+/**
  * 智能体页（d.126 阶段 B）：
  * - 三个一级 Tab：对话 / 协作 / 智能体；
  * - 对话 Tab：Claude Code 风格左栏（新建/搜索、按智能体分组、会话名为一级信息、
@@ -542,7 +560,10 @@ describe("智能体 Tab · 名册与独立编辑页", () => {
 });
 
 describe("智能体页 · 协作 Tab 与意图跳转", () => {
+  beforeEach(() => stubDesktopBridge(false));
+
   it("协作 Tab 原样收进：可用智能体不足 2 个时给出绑定引导", () => {
+    stubDesktopBridge(true);
     render(<AssistantPage />);
     fireEvent.click(tab("协作"));
     expect(screen.getByText("至少需要 2 个已绑定模型的智能体")).toBeInTheDocument();
@@ -550,7 +571,17 @@ describe("智能体页 · 协作 Tab 与意图跳转", () => {
     expect(screen.getByText(/当前可用 1 个/)).toBeInTheDocument();
   });
 
+  it("浏览器无桌面桥：说明原因，且不给做不到的建人按钮", () => {
+    render(<AssistantPage />);
+    fireEvent.click(tab("协作"));
+    expect(screen.getByText("至少需要 2 个已绑定模型的智能体")).toBeInTheDocument();
+    expect(screen.getByText(/当前是浏览器预览/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建智能体" })).toBeNull();
+    expect(screen.getByRole("button", { name: "去模型页查看" })).toBeInTheDocument();
+  });
+
   it("协作里「新建智能体」也进智能体 Tab 的编辑页", () => {
+    stubDesktopBridge(true);
     render(<AssistantPage />);
     fireEvent.click(tab("协作"));
     fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
@@ -650,5 +681,38 @@ describe("会话列表分页（d.130）", () => {
     render(<AssistantPage />);
     fireEvent.click(screen.getByRole("button", { name: "加载更多对话" }));
     expect(useChatStore.getState().loadMoreConversations).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("首载失败不再静默（d.141 F-01）", () => {
+  it("会话首载失败：出 role=alert + 「重试」，重试会重新拉取", async () => {
+    const loadWorkspace = vi.fn(async () => undefined);
+    useChatStore.setState({
+      conversations: [] as never,
+      messages: {} as never,
+      workspaceReady: false,
+      workspaceError: "网络中断",
+      loadWorkspace,
+    });
+    render(<AssistantPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("对话列表加载失败：网络中断");
+
+    const before = loadWorkspace.mock.calls.length; // 挂载时已拉过一次
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(loadWorkspace.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("名册首载失败：切到「智能体」出提示与重试，点击后重新拉名册", async () => {
+    const loadAgentsRoster = vi.fn(async () => {
+      throw new Error("网关超时");
+    });
+    useChatStore.setState({ agentsRoster: [] as never, loadAgentsRoster });
+    render(<AssistantPage />);
+    fireEvent.click(tab("智能体"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("智能体列表加载失败：网关超时");
+
+    const before = loadAgentsRoster.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(loadAgentsRoster.mock.calls.length).toBeGreaterThan(before));
   });
 });

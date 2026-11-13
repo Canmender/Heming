@@ -77,7 +77,7 @@ describe("NavRail 图标轨（A 方案）", () => {
     const tip = name.parentElement as HTMLElement;
     expect(tip.className).toContain("opacity-0");
     expect(tip.className).toContain("group-hover:opacity-100");
-    expect(tip.className).toContain("duration-150");
+    expect(tip.className).toContain("duration-fast");
     expect(tip.className).toContain("translate-x-1");
   });
 

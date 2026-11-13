@@ -254,7 +254,7 @@ function StatsBlock({ block }: { block: Extract<PluginPageBlockV5, { type: "stat
           className="rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2"
         >
           <dt className="ui-micro text-muted">{item.label}</dt>
-          <dd className="ui-numeric mt-0.5 text-[15px] font-bold">{item.value}</dd>
+          <dd className="ui-numeric mt-0.5 text-ui-base font-bold">{item.value}</dd>
         </div>
       ))}
     </dl>
@@ -265,7 +265,7 @@ function TableBlock({ block }: { block: Extract<PluginPageBlockV5, { type: "tabl
   return (
     // 窄窗里表格会溢出：横向滚动兜住（与聊天 markdown 表格同一做法）
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[12px]">
+      <table className="w-full border-collapse text-ui-sm">
         <thead>
           <tr>
             {block.columns.map((column, index) => (

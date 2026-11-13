@@ -40,7 +40,7 @@ export function RemovePluginDialog({
         </>
       }
     >
-      <p className="text-[12px] leading-6">
+      <p className="text-ui-sm leading-6">
         卸载插件「{plugin.manifest.name}」？它的 {plugin.skillIds.length}{" "}
         个技能（含使用统计与智能体分配）与 {plugin.serverIds.length}{" "}
         台 MCP 服务（含工具清单与工具启用状态）都会一并删除，此操作不可恢复。

@@ -38,19 +38,19 @@ import { Button } from "../components/ui/Button.js";
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
-  { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
+  { page: "home", label: "主页", icon: <HomeIcon width={18} height={18} />, digit: "1" },
   // 团队：名册 + 动向；还承接原「团队看板」的看板视图
-  { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} />, digit: "2" },
+  { page: "team", label: "团队", icon: <TeamIcon width={18} height={18} />, digit: "2" },
   // 智能体（本机运行）：承接原「通用智能体」的任务视图
-  { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
+  { page: "chat", label: "智能体", icon: <AssistantIcon width={18} height={18} />, digit: "8" },
   // 插件（能力中枢）：插件包 + 技能 / 工具 / MCP / 组件
-  { page: "plugins", label: "插件", icon: <PackageIcon width={17} height={17} />, digit: "0" },
-  { page: "memory", label: "记忆", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
+  { page: "plugins", label: "插件", icon: <PackageIcon width={18} height={18} />, digit: "0" },
+  { page: "memory", label: "记忆", icon: <MemoryIcon width={18} height={18} />, digit: "5" },
   // 知识库：本地 vault（文件树/双链/标签/搜索/图谱），数据不出设备
-  { page: "vault", label: "知识库", icon: <BookIcon width={17} height={17} /> },
-  { page: "model", label: "模型", icon: <ModelIcon width={17} height={17} /> },
+  { page: "vault", label: "知识库", icon: <BookIcon width={18} height={18} /> },
+  { page: "model", label: "模型", icon: <ModelIcon width={18} height={18} /> },
   // digit 绑定页面不随显示顺序变：改老页的编号等于换掉用户肌肉记忆里的快捷键。
-  { page: "settings", label: "设置", icon: <GearIcon width={17} height={17} />, digit: "6" },
+  { page: "settings", label: "设置", icon: <GearIcon width={18} height={18} />, digit: "6" },
 ];
 
 /** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
@@ -59,11 +59,11 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 ui-overlay-shadow transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-ui-xs font-medium text-white opacity-0 ui-overlay-shadow transition-all duration-fast motion-reduce:transition-none group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
     >
       <span>{label}</span>
       {shortcut && (
-        <kbd className="rounded-sm border border-current px-1 text-[10px] font-normal opacity-70">
+        <kbd className="rounded-sm border border-current px-1 text-ui-xs font-normal opacity-70">
           {shortcut}
         </kbd>
       )}
@@ -73,6 +73,16 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
 
 /** 导航轨外形尺寸：与 d.67 的 A 方案一致（54px 常驻宽度）。 */
 const RAIL_WIDTH = "w-[54px]";
+
+/**
+ * 导航轨控件的统一命中区（d.141）：32×32、圆角 12。
+ *
+ * 为什么收口：改动前同一列里 34×34（搜索 / 导航页）、32×34（快捷键 / 固定）、
+ * 30×30（通知）、32×32（账户）四种尺寸混排——图标视觉重心左右各差 1px，
+ * 悬停时整列看着在轻微「抖」；34 也超出控件高刻度（28 / 32）。
+ * 命中区不到 32 的控件一律套 RAIL_CTRL，新增按钮别再写一次性 h-[…] w-[…]。
+ */
+const RAIL_CTRL = "flex h-[32px] w-[32px] items-center justify-center rounded-lg";
 
 /**
  * 元素当前是否是「键盘可见焦点」。
@@ -269,9 +279,9 @@ export function NavRail({
             type="button"
             aria-label="全局搜索 Ctrl K"
             onClick={() => onOpenSearch?.()}
-            className="flex h-[34px] w-[34px] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
+            className={`${RAIL_CTRL} text-muted transition-colors duration-fast hover:bg-[var(--subtle-3)] hover:text-ink`}
           >
-            <SearchIcon width={17} height={17} />
+            <SearchIcon width={18} height={18} />
           </button>
           <Tip label="搜索" shortcut="Ctrl K" />
         </div>
@@ -283,7 +293,7 @@ export function NavRail({
             aria-label="快捷键帮助"
             title="快捷键"
             onClick={() => onOpenShortcuts?.()}
-            className="flex h-[32px] w-[34px] items-center justify-center rounded-lg text-[13px] font-semibold text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
+            className={`${RAIL_CTRL} text-ui-md font-semibold text-muted transition-colors duration-fast hover:bg-[var(--subtle-3)] hover:text-ink`}
           >
             ?
           </button>
@@ -316,7 +326,7 @@ export function NavRail({
                     // 键盘激活（Enter）保留浮层，让焦点连续、可继续 Tab/Esc。
                     if (auto && !keyboardFocusRef.current) closeOverlay();
                   }}
-                  className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
+                  className={`relative ${RAIL_CTRL} transition-colors duration-fast ${
                     active ? "bg-ink text-white" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                   }`}
                 >
@@ -339,11 +349,11 @@ export function NavRail({
             aria-pressed={pinned}
             title={pinned ? "自动隐藏导航栏（Ctrl+B）" : "固定导航栏常显（Ctrl+B）"}
             onClick={() => setNavMode(otherNavMode(navMode))}
-            className={`flex h-[32px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
+            className={`${RAIL_CTRL} transition-colors duration-fast ${
               pinned ? "text-[var(--body)] hover:bg-[var(--subtle-3)] hover:text-ink" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
             }`}
           >
-            <PinIcon width={15} height={15} />
+            <PinIcon width={16} height={16} />
           </button>
           <Tip label={pinned ? "自动隐藏" : "固定常显"} shortcut="Ctrl B" />
         </div>
@@ -354,7 +364,7 @@ export function NavRail({
             aria-label={`账户：${who} · 退出登录`}
             title="退出登录"
             onClick={() => setConfirmLogout(true)}
-            className="flex h-[32px] w-[32px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-[12px] font-bold text-[var(--body)] transition-colors duration-150 hover:bg-[var(--subtle-4)]"
+            className="flex h-[32px] w-[32px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-ui-sm font-bold text-[var(--body)] transition-colors duration-fast hover:bg-[var(--subtle-4)]"
           >
             {avatar ? (
               <img src={avatar} alt="" className="h-full w-full rounded-full object-cover" />

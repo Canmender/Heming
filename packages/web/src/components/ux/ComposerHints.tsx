@@ -8,7 +8,7 @@ export function ComposerHints({ streaming = false }: { streaming?: boolean }) {
   return (
     <p
       aria-label="输入快捷键提示"
-      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-ui-xs leading-4 text-muted"
     >
       <span>
         <kbd className="rounded-sm border border-line px-1">Enter</kbd> 发送

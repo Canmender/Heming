@@ -108,7 +108,7 @@ export function UnitDiagnostics({
         <ul className="mt-2 grid gap-1 ui-body-sm">
           {rows.map((row) => (
             <li key={row.key} className="flex flex-wrap items-baseline gap-2">
-              <span className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-muted">
+              <span className="rounded-sm border border-line px-1.5 py-0.5 text-ui-xs text-muted">
                 {row.source}
               </span>
               <span className="font-medium">{row.name}</span>

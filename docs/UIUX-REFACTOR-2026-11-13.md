@@ -618,3 +618,64 @@ electron-builder 的默认卸载逻辑是一行 `RMDir /r $INSTDIR` —— 程�
 - 卸载器文件名 `Uninstall Heming.exe` 是 electron-builder 生成的英文名，与中文品牌不一致；改名要动 `UNINSTALL_FILENAME`，
   且会让已安装用户桌面上的旧快捷方式指向失效，收益不抵风险。
 - 安装器页头那行 semver、安装模式页的内置文案，仍然是模板写死的（第 14 轮已记录）。
+
+## 22 · 第 21 轮：刻度落地 + 桥接层清零 + 首次四路并行（`d.140.3.75.11`）
+
+第 20 轮结束时剩的都是「要设计决策」的活：651 处字号字面量、42 条暗色桥接、三态抽象、页签行为、图标/动效刻度。
+这一轮先把 Lead 侧的设计决策定死（刻度取值、栅格、桥接层删到什么程度），再把页面级施工按写入范围切成四份并行。
+
+### 22.1 决策先行（谁定什么）
+
+| 决策 | 结论 | 理由 |
+| --- | --- | --- |
+| 字号 | 11/12/13/14/18/22（`--text-ui-*`）+ 数字 18/22/26（`--text-num-*`），只写 font-size | 既有 `leading-*` 不动，换类名不改行高观感；9/10px 升到 11px |
+| 动效 | 120/180/280ms + `--ease-out-soft`，并设 `--default-transition-*` | 让「没写时长」的 `transition-*` 也入刻度，否则 5 个值继续繁殖 |
+| 图标 | 2px 栅格 12/14/16/18/20/24，16 为主，`icons.tsx` base 仍 18 | 审计建议的 14/16/20/24 会让 17/18 全局缩水；2px 已消掉 15/17 这类奇数 |
+| 暗色桥接 | 整层删除，只留语义规则 | 非测试源码里字面量颜色工具类已清零，桥接层无事可做 |
+| 知识库宽度 | 工作台 `full`，空库态 `readable` | 960 会把三栏的编辑区压窄；空态只有一张卡，宽反而不聚焦 |
+
+### 22.2 四路并行的写范围切分
+
+- `settings-ux`：`SettingsPage.tsx`、`components/settings/**`、`components/ux/**`、`lib/settings/**`、六个设置卡、`ModelPage.tsx`。
+- `page-structure`：`HomePage.tsx`、`components/home/**`、`App.tsx`、`NavRail.tsx`、`ConversationRail.tsx`、`lib/navGroups.ts`。
+- `interaction-a11y`：`components/ui/**`、`lib/ui/**`、`lib/a11y/**`、记忆/插件/技能/团队/团队看板/接口/注册表页、`components/knowledge/**`。
+- `function-audit`（只读）：只能写 `.tmp/uiux2/functionality-report.md`，出 16 条带证据的缺陷 + 10 条运行验证。
+- Lead 保留：`index.css`、`tailwind.config.js`、`icons.tsx`、全局刻度、版本/日志/文档、最终门禁与提交。
+
+不重叠是硬约束：四人同时在同一个 `pnpm -r typecheck` 上排队会把 dsh-ops 执行器打挂
+（`EXECUTOR_UNAVAILABLE … link 'winuxcmd.exe'`），所以完整门禁只由 Lead 跑，teammate 只跑定向用例，
+所有 bash 走 `.tmp/uiux2/q.sh`（mkdir 原子锁排队，锁超 5 分钟自动清）。
+
+### 22.3 施工结果（按主线）
+
+| 主线 | 落地 | 量化 |
+| --- | --- | --- |
+| 字号/动效/图标刻度 | `.tmp/uiux2/codemod-scales.mjs` 一次性替换 | `text-[Npx]` 641→0（84 文件）；`duration-150` 21→0；图标离格值全清 |
+| 门禁 | `lib/designScales.test.ts` + `lib/themePrimitives.test.ts` 加守卫 | 4+3 条规则，回归即红 |
+| 暗色 | `index.css` 删 219 行/92 条桥接规则 | 1169 → 1002 行 |
+| 三态与页签 | `ui/AsyncBoundary`、`lib/ui/tabs.ts`、`ui/IconButton`、`ui/SectionCard` | 四页页签共用一套 APG 行为；Team/TeamBoard/Registry 接边界组件 |
+| 设置 | 卡片当前值摘要、引导就地展开、模型「选服务商→贴 Key」+格式校验+自动探活 | 673 → 更少决策点；失败就地报 |
+| 主页与壳层 | 首屏只留「现在要做什么」；统计/团队动向次屏；壳层宽度用 `PAGE_WIDTH_CLASS` | Home 32 例、App+NavRail+Notification 77 例 |
+| 可访问性 | TokenHeatmap 键盘可达、登录页可见 label、ModelTraceView 自适应、`.ui-table` | 热力图 30 格每格可读；960 宽链路图在 1024 下不再横拖 |
+
+### 22.4 勘察修掉的 8 条（`docs/UIUX-AUDIT` 之外的功能面）
+
+F-01 首载失败静默、F-02「设置→模型」死指引、F-03 无桥时仍给来源点击指引、F-04 备份模型卡指错入口、
+F-05 知识库「全部已保存 / 刷新即丢」同屏矛盾、F-06 命令面板归档检索静默失败、F-07 浏览器版协作按钮死循环、
+F-11 Ctrl+K 无结果无引导；另 F-14 首页页脚服务探测补重试。F-08/09/10/12/13/15/16 判断为不改或留待后续
+（例如 F-09 的团队页三态本来就齐全，属「看着像问题」的误报）。
+
+### 22.5 门禁
+
+`pnpm -r typecheck` exit 0；`pnpm -r build` exit 0；web **304 文件 / 4435 例**；server 15 文件 268 例；
+desktop `node --test` 全过。全程无新增依赖、无联网。
+
+### 22.6 教训
+
+- **codemod 必须查生成产物**：首跑把 `src/generated/changelog.ts` 的历史文本也改了（那里有「12px」字样），
+  只能 `git checkout` 回滚；脚本随后排除 `.test.*` 与 `generated`。
+- **守卫测试自己也会踩字面量**：注释里写 `[data-theme="dark"] .bg-\[\#…\]` 会让扫描自我命中，注释要写文字描述。
+- **vitest 绿 ≠ tsc 干净**：`(x ? "a" : "b") as const` 在 vitest 下不报错，`tsc --noEmit` 报 TS1355；
+  所以每轮都跑 `pnpm -r typecheck`，不只看定向用例。
+- **窗口宽度与信任**：本轮所有视觉结论都来自无障碍树、`viewportBox` 几何、OCR 与测试断言；
+  当前会话的模型不支持读图，因此「像素级对比」由 teammate 显式标注为未做，没有把推断写成实测。

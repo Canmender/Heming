@@ -7,6 +7,7 @@ import {
 import { useLlmStore } from "../store/llm.js";
 import { lookupCapability } from "../lib/modelCaps.js";
 import { Switch } from "./ui/Switch.js";
+import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 上下文预算（设计 §5）：@ 触发链路的历史 token 预算与压缩开关。
@@ -67,13 +68,22 @@ export function ContextSettingsCard() {
 
   return (
     <section className="ui-card mt-3 p-4">
-      <div className="text-[12px] font-bold text-muted">上下文预算</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="text-ui-sm font-bold text-muted">上下文预算</div>
+        <CardSummary
+          items={
+            settings.enabled
+              ? ["已开启", `${shownBudget} token`, `保留最近 ${settings.keepRecentTurns} 轮`]
+              : ["未启用", "发送完整历史"]
+          }
+        />
+      </div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-3">
-        <span className="text-[12px]">启用上下文预算</span>
+        <span className="text-ui-sm">启用上下文预算</span>
         <Switch
           label="启用上下文预算"
           checked={settings.enabled}
@@ -144,7 +154,7 @@ export function ContextSettingsCard() {
       ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-3">
-        <span className="text-[12px]">用模型生成早期摘要</span>
+        <span className="text-ui-sm">用模型生成早期摘要</span>
         <Switch
           label="用模型生成早期摘要"
           checked={settings.llmSummary}

@@ -98,12 +98,12 @@ function CodeBlock({
   return (
     <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)]">
       <div className="flex items-center justify-between border-b border-line-soft px-2 py-1">
-        <span className="text-[10px] font-medium text-muted">{label}</span>
+        <span className="text-ui-xs font-medium text-muted">{label}</span>
         <button
           type="button"
           aria-label="复制代码"
           onClick={() => void copy()}
-          className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[var(--subtle-3)] hover:text-[var(--body)]"
+          className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-[var(--body)]"
         >
           {copied ? "已复制" : "复制"}
         </button>
@@ -111,11 +111,11 @@ function CodeBlock({
       {html ? (
         // shiki 输出的 HTML 由本库生成（代码内容已转义），不含用户可注入的标签
         <div
-          className="overflow-x-auto p-2 text-[12px] leading-relaxed [&_pre]:!bg-transparent [&_code]:!text-[12px]"
+          className="overflow-x-auto p-2 text-ui-sm leading-relaxed [&_pre]:!bg-transparent [&_code]:!text-ui-sm"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-2 font-mono text-[12px] leading-relaxed text-[var(--body)]">
+        <pre className="overflow-x-auto p-2 font-mono text-ui-sm leading-relaxed text-[var(--body)]">
           <code>{code}</code>
         </pre>
       )}
@@ -226,9 +226,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       ul: ({ children }: any) => <ul className="my-1 list-disc pl-5">{children}</ul>,
       ol: ({ children }: any) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
       li: ({ children }: any) => <li className="my-0.5">{children}</li>,
-      h1: ({ children }: any) => <h1 className="mb-1 mt-2 text-[15px] font-bold">{children}</h1>,
-      h2: ({ children }: any) => <h2 className="mb-1 mt-2 text-[14px] font-bold">{children}</h2>,
-      h3: ({ children }: any) => <h3 className="mb-1 mt-2 text-[13px] font-bold">{children}</h3>,
+      h1: ({ children }: any) => <h1 className="mb-1 mt-2 text-ui-base font-bold">{children}</h1>,
+      h2: ({ children }: any) => <h2 className="mb-1 mt-2 text-ui-base font-bold">{children}</h2>,
+      h3: ({ children }: any) => <h3 className="mb-1 mt-2 text-ui-md font-bold">{children}</h3>,
       blockquote: ({ children }: any) => (
         <blockquote className="my-1 border-l-2 border-line pl-2.5 text-muted">
           {children}
@@ -238,7 +238,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       // 表格：GFM 表格在窄气泡里会溢出，用横向滚动兜住（而不是压缩列宽）
       table: ({ children }: any) => (
         <div className="my-1.5 overflow-x-auto">
-          <table className="w-full border-collapse text-[12px]">{children}</table>
+          <table className="w-full border-collapse text-ui-sm">{children}</table>
         </div>
       ),
       th: ({ children }: any) => (

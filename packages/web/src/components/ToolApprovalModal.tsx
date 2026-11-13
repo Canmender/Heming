@@ -129,7 +129,7 @@ export function ToolApprovalModal({
         写操作默认不勾、允许只放行勾选项——这条规则不说出来，用户会以为「点了允许却被拒绝」。
       */}
       {calls.length > 0 && (
-        <p className="text-[11px] text-muted">先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。</p>
+        <p className="text-ui-xs text-muted">先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。</p>
       )}
       <div className="flex w-full flex-wrap items-center justify-end gap-2">
         {/* d.138 危险语义归位：此前「拒绝」是 md 红字（全页最显眼的按钮），
@@ -165,14 +165,14 @@ export function ToolApprovalModal({
               <button
                 type="button"
                 onClick={onOpenConversation}
-                className="rounded-sm border border-line bg-[var(--surface)] px-2 py-0.5 text-[10px] text-[var(--body)] hover:bg-[var(--subtle-2)]"
+                className="rounded-sm border border-line bg-[var(--surface)] px-2 py-0.5 text-ui-xs text-[var(--body)] hover:bg-[var(--subtle-2)]"
               >
                 回到该会话
               </button>
             )}
           </div>
         )}
-        {calls.length === 0 && <div className="text-[13px] text-muted">没有待确认的调用。</div>}
+        {calls.length === 0 && <div className="text-ui-md text-muted">没有待确认的调用。</div>}
         {calls.map((call) => {
           const isPatch = call.name === "file_patch";
           const preview = isPatch ? null : buildChangePreview(call.name, call.argsJson);
@@ -199,7 +199,7 @@ export function ToolApprovalModal({
                   >
                     <span className="ui-section-title">{call.displayName}</span>
                     <span
-                      className={`rounded-sm px-1 text-[10px] ${
+                      className={`rounded-sm px-1 text-ui-xs ${
                         call.risk === "danger"
                           ? "bg-[var(--danger)] text-[var(--danger-on)]"
                           : call.risk === "write"
@@ -209,7 +209,7 @@ export function ToolApprovalModal({
                     >
                       {RISK_LABEL[call.risk]}
                     </span>
-                    <span className="font-mono text-[10px] text-muted" title={call.name}>
+                    <span className="font-mono text-ui-xs text-muted" title={call.name}>
                       {/* MCP 工具名是 `服务__工具` 的内部命名：展示成「服务 · 工具」，
                           原文留在 title 供排障 */}
                       {toolNameLabel(call.name)}
@@ -223,13 +223,13 @@ export function ToolApprovalModal({
                   ) : preview ? (
                     <details className="mt-1 rounded-md border border-line-soft bg-[var(--surface)]">
                       <summary
-                        className="cursor-pointer px-2 py-1 text-[10px] text-muted"
+                        className="cursor-pointer px-2 py-1 text-ui-xs text-muted"
                         title={preview.path}
                       >
                         查看变更（{changeCountLabel(preview)}）
                         {preview.path ? ` · ${preview.path}` : ""}
                       </summary>
-                      <pre className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-[10px] leading-4">
+                      <pre className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-ui-xs leading-4">
                         {preview.lines.map((line, i) => (
                           <div
                             key={i}
@@ -250,7 +250,7 @@ export function ToolApprovalModal({
                         )}
                       </pre>
                       {preview.kind === "delete" && (
-                        <div className="border-t border-line-soft px-2 py-1 text-[10px] text-[var(--warn)]">
+                        <div className="border-t border-line-soft px-2 py-1 text-ui-xs text-[var(--warn)]">
                           删除不可撤销；这里只显示目标路径，不读取文件内容。
                         </div>
                       )}
@@ -296,18 +296,18 @@ export function ToolApprovalModal({
             <span>
               记住本次选择（按工具与资源）
               {rememberPrefixes.length > 0 && (
-                <span className="block font-mono text-[10px] text-muted">
+                <span className="block font-mono text-ui-xs text-muted">
                   将记住目录：{rememberPrefixes.join("、")}
                 </span>
               )}
-              <span className="block text-[10px] text-muted">
+              <span className="block text-ui-xs text-muted">
                 文件编辑只按目录前缀授权，不会放行整个工具；危险操作不受记住的允许影响，
                 仍会每次询问；可在设置区一键清空。
               </span>
             </span>
           </label>
         ) : (
-          <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5 text-[10px] text-muted">
+          <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5 text-ui-xs text-muted">
             这次改动无法按目录记住（目标不在可写根内），本次不会落任何授权规则。
             想让某个目录以后都免问，请先到设置区「文件编辑」把它加成可写根。
           </div>
@@ -352,12 +352,12 @@ function FilePatchPreviewPanel({
   }, [argsJson, previewer]);
 
   if (preview === undefined) {
-    return <div className="mt-1 text-[10px] text-muted">正在生成变更预览…</div>;
+    return <div className="mt-1 text-ui-xs text-muted">正在生成变更预览…</div>;
   }
   if (preview === null) return null;
   if (preview.error) {
     return (
-      <div className="mt-1 rounded-md border border-[var(--danger-line)] bg-[var(--danger-soft)] px-2 py-1 text-[10px] text-[var(--danger)]">
+      <div className="mt-1 rounded-md border border-[var(--danger-line)] bg-[var(--danger-soft)] px-2 py-1 text-ui-xs text-[var(--danger)]">
         {preview.error}
       </div>
     );
@@ -365,10 +365,10 @@ function FilePatchPreviewPanel({
 
   return (
     <details className="mt-1 rounded-md border border-line-soft bg-[var(--surface)]" open>
-      <summary className="cursor-pointer px-2 py-1 text-[10px] text-muted">
+      <summary className="cursor-pointer px-2 py-1 text-ui-xs text-muted">
         查看变更（{preview.summary}）
       </summary>
-      <div className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-[10px] leading-4">
+      <div className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-ui-xs leading-4">
         {preview.files.map((file) => (
           <div key={file.rel} className="mb-1 last:mb-0">
             <div className="text-[var(--body)]">

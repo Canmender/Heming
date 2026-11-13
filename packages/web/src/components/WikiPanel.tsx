@@ -204,7 +204,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               role="tab"
               aria-selected={view === v}
               onClick={() => setView(v)}
-              className={`${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-[12px] ${
+              className={`${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-ui-sm ${
                 view === v ? "bg-ink font-bold text-white" : "text-muted hover:bg-[var(--subtle-2)]"
               }`}
             >
@@ -227,7 +227,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               onClick={() => createPage(k)}
               className={`inline-flex items-center gap-1 ${btnGhost}`}
             >
-              <PlusIcon width={11} height={11} aria-hidden="true" />
+              <PlusIcon width={12} height={12} aria-hidden="true" />
               {KIND_LABEL[k]}
             </button>
           ))}
@@ -235,7 +235,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
       </div>
 
       {ephemeral && (
-        <div role="status" className="mb-2 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-[11px] text-[var(--warn)]">
+        <div role="status" className="mb-2 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-ui-xs text-[var(--warn)]">
           浏览器临时模式：知识库只存在于当前页面，关掉就没了。桌面端会落成真实 markdown
           文件，可直接用 Obsidian 打开。
         </div>
@@ -281,15 +281,15 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                         onClick={() => openPage(page.path)}
                         className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-subtle-2"
                       >
-                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
+                        <span className="min-w-0 flex-1 truncate text-ui-sm font-medium">
                           {page.title}
                         </span>
                         {page.tags.map((t) => (
-                          <span key={t} className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                          <span key={t} className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                             {t}
                           </span>
                         ))}
-                        <span className="shrink-0 text-[10px] text-muted">
+                        <span className="shrink-0 text-ui-xs text-muted">
                           {KIND_LABEL[page.kind]} · {degree} 链接
                         </span>
                       </button>
@@ -348,7 +348,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                   value={draft.body}
                   placeholder="在这里写内容。用 [[其他页面]] 交叉引用。"
                   onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                  className="min-h-0 flex-1 resize-none rounded-lg border border-line-strong px-2.5 py-2 font-mono text-[12px] leading-relaxed outline-hidden focus:border-ink"
+                  className="min-h-0 flex-1 resize-none rounded-lg border border-line-strong px-2.5 py-2 font-mono text-ui-sm leading-relaxed outline-hidden focus:border-ink"
                 />
               </>
             ) : (
@@ -383,7 +383,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
             </>
           }
         >
-          <p className="text-[12px] leading-6">
+          <p className="text-ui-sm leading-6">
             删除页面「{removeTarget}」？文件会从本机知识库移除，指向它的 [[双链]] 将变成悬空链接，操作不可撤销。
           </p>
         </ConfirmDialog>
