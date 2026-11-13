@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.61.11）
+# UI/UX 重构交付记录（d.140.3.62.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11` → 第 8 轮 `d.140.3.61.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11` → 第 8 轮 `d.140.3.61.11` → 第 9 轮 `d.140.3.62.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -196,3 +196,19 @@
 
 **门禁**：`pnpm -r typecheck` 通过；`pnpm --filter @heming/web test` **298 文件 / 4372 例全通过**（新增 `ui/Dialog.test.tsx` 5 例）；`pnpm -r build` 通过。
 
+## 10. 第 9 轮（`d.140.3.62.11`）· 模型页表单语义收口（审计 S1-9 收尾）
+
+第 5 轮把「来源」卡的 4 个字段和多机同步 3 个字段做成了可见 label，但模型页还有 21 个输入只剩占位符、4 个下拉靠 `aria-label` 顶着。占位符一旦输入就消失，用户填到一半就不知道自己在填什么——这是 S1 级问题。
+
+| 处理 | 处数 | 说明 |
+| --- | --- | --- |
+| → `ui/TextField` | 21 | `label` 可见、`htmlFor` 绑定、占位符降级为示例；`className` 只留布局（`sm:col-span-2` 等） |
+| → `<label class="grid gap-1"><span class="ui-caption">` 包裹 | 4 | 下拉不是 input，TextField 不覆盖：请求协议、来源分发策略、错误处理、分组选路策略 |
+| `text-[13px] font-bold` → `.ui-section-title` | 7 | 卡片标题回到全站一档（14px/600），模型页不再有自己的标题字号 |
+| `text-[11px] font-bold tracking-wide text-muted` → `.ui-micro` | 3 | 「连接」「模型」这类小标题 |
+
+**保留 `aria-label` 的输入**（连同理由）：模型搜索框、搜索 API / 搜索 Key、API Key 行内输入 + 「更新 Key」按钮、命令 / 命令输入。这些是工具栏与控制台里的即时输入，加标题会把行高撑开；它们的无障碍名已由 `aria-label` 提供。这一条写在这里，避免下一轮把它们也「补上标题」反而变差。
+
+**验证**：`ModelPage.test.tsx` 的 `getByLabelText` 覆盖 12 个字段名（属性模型 ID、模型显示名、来源分发策略、错误处理、规则分组 / 模型 / token 阈值、新密钥名称、更新 Key、API Key、命令…），改用 label 后全部照旧通过——测试没有为了改法而改断言。
+
+**门禁**：`pnpm -r typecheck` 通过；`pnpm --filter @heming/web test` **298 文件 / 4372 例全通过**；`pnpm -r build` 通过。

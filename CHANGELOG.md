@@ -2,6 +2,16 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.62.11（2026-11-13）— 模型页表单语义收口（S1-9 收尾）
+
+- 审计 C 的 S1-9「表单无可见 label / 枚举直接当界面」最后一块：
+  - **21 个输入框 → `ui/TextField`**（`label` 可见、`htmlFor` 绑定，占位符降级为示例）：模型属性 3（ID / 显示名 / 思考档）、来源 3（模型列表 / 目录地址 / 备用模型）、请求头 2、请求耐心、分组 3（名称 / 模型列表 / ID）、规则 6（分组 / 模型 / token 阈值 / 文件夹 / 时段 / 意图）、密钥 2（删除确认 / 新密钥名称）、密钥 ID。
+  - **4 个下拉 → `<label class="grid gap-1"><span class="ui-caption">…</span>`**（Text`Field 只管 input）：请求协议、来源分发策略、错误处理、分组选路策略。
+  - 7 处 `text-[13px] font-bold` 卡片标题 → `.ui-section-title`；3 处 `text-[11px] font-bold tracking-wide text-muted` 小标题 → `.ui-micro`。模型页不再有本地字号。
+  - 保留 `aria-label` 的仅限工具栏/控制台类输入（模型搜索、搜索 API/Key、API Key 行内输入、命令 / 命令输入）：这些是操作行里的即时输入，加标题会把行高撑开，无障碍名已由 `aria-label` 提供。
+- 可访问名逐字保留，`ModelPage.test.tsx` 18 例中 `getByLabelText` 的 12 个字段名全部照旧通过。
+- 门禁：`pnpm -r typecheck` 过、web **298 文件 / 4372 例**全过、`pnpm -r build` 过。
+
 ## d.140.3.61.11（2026-11-13）— 新增 `ui/Dialog`：6 个内容弹窗统一外壳
 
 - 审计 A/C 的「11 个弹窗各自拼壳（4 宽度 / 2 圆角 / 有无 border）」收敛第一步。新增 `packages/web/src/components/ui/Dialog.tsx`：

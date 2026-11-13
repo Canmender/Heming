@@ -14,6 +14,7 @@ import {
 import { ModelTraceView } from "./ModelTraceView.js";
 import { Button } from "./ui/Button.js";
 import { Stat } from "./ui/Stat.js";
+import { TextField } from "./ui/Field.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
 import { useLlmStore } from "../store/llm.js";
@@ -500,7 +501,7 @@ export function ModelPage() {
             ) : (
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-[13px] font-bold">可用模型</div>
+                  <div className="ui-section-title">可用模型</div>
                   <input
                     aria-label="搜索模型"
                     className="ui-input w-56"
@@ -539,39 +540,38 @@ export function ModelPage() {
               <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
               <p className="mt-1 ui-caption">改显示名、思考档或请求协议；留空的项不动。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <input
-                  aria-label="属性模型 ID"
-                  className="ui-input"
+                <TextField
+                  label="属性模型 ID"
                   placeholder="provider/model"
                   value={modelForm.model}
                   onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })}
                 />
-                <input
-                  aria-label="模型显示名"
-                  className="ui-input"
+                <TextField
+                  label="模型显示名"
                   placeholder="显示名"
                   value={modelForm.name}
                   onChange={(event) => setModelForm({ ...modelForm, name: event.target.value })}
                 />
-                <input
-                  aria-label="模型思考档"
-                  className="ui-input"
+                <TextField
+                  label="模型思考档"
                   placeholder="思考档，如 low,medium,high"
                   value={modelForm.efforts}
                   onChange={(event) => setModelForm({ ...modelForm, efforts: event.target.value })}
                 />
-                <select
-                  aria-label="模型请求协议"
-                  className="ui-input"
-                  value={modelForm.api}
-                  onChange={(event) => setModelForm({ ...modelForm, api: event.target.value })}
-                >
-                  {["auto", "chat", "responses", "anthropic", "gemini"].map((api) => (
-                    <option key={api} value={api}>
-                      {API_LABEL[api] ?? api}
-                    </option>
-                  ))}
-                </select>
+                <label className="grid gap-1">
+                  <span className="ui-caption">模型请求协议</span>
+                  <select
+                    className="ui-input"
+                    value={modelForm.api}
+                    onChange={(event) => setModelForm({ ...modelForm, api: event.target.value })}
+                  >
+                    {["auto", "chat", "responses", "anthropic", "gemini"].map((api) => (
+                      <option key={api} value={api}>
+                        {API_LABEL[api] ?? api}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <button
                 type="button"
@@ -597,7 +597,7 @@ export function ModelPage() {
               <div className="flex items-start gap-2">
                 <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                  <div className="text-[13px] font-bold">改模型会写入本机其他工具的配置</div>
+                  <div className="ui-section-title">改模型会写入本机其他工具的配置</div>
                   <p className="mt-1 ui-caption">
                     这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
                     已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
@@ -608,7 +608,7 @@ export function ModelPage() {
 
             <div className="ui-card p-4">
               <div className="flex items-center justify-between">
-                <div className="text-[13px] font-bold">本机智能体（{agents.length}）</div>
+                <div className="ui-section-title">本机智能体（{agents.length}）</div>
                 <button
                   type="button"
                   className="ui-btn ui-btn-sm ui-btn-ghost"
@@ -745,7 +745,7 @@ export function ModelPage() {
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <div className="text-[13px] font-bold">API Key 服务商</div>
+                <div className="ui-section-title">API Key 服务商</div>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
               <p className="mt-0.5 ui-caption">
@@ -868,7 +868,7 @@ export function ModelPage() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-[13px] font-bold">订阅账号</div>
+                  <div className="ui-section-title">订阅账号</div>
                   <span className="ui-caption">多个账号自动分担</span>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -913,7 +913,7 @@ export function ModelPage() {
 
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-[13px] font-bold">其他地址</div>
+                  <div className="ui-section-title">其他地址</div>
                   <span className="ui-caption">中转、局域网或自建接口</span>
                 </div>
                 {!custom.open ? (
@@ -994,7 +994,7 @@ export function ModelPage() {
             </div>
 
             <div className="ui-card p-4">
-              <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
+              <div className="ui-section-title">已添加的来源（{providers.length}）</div>
               <ul className="mt-2 divide-y divide-line">
                 {providers.map((row) => {
                   const info = showCache[row.id];
@@ -1062,7 +1062,7 @@ export function ModelPage() {
                           </div>
 
                           <div className="mt-3">
-                            <div className="text-[11px] font-bold tracking-wide text-muted">连接</div>
+                            <div className="ui-micro">连接</div>
                             <div className="mt-1.5 flex flex-wrap gap-2">
                               <input
                                 aria-label="更新 Key"
@@ -1081,41 +1081,41 @@ export function ModelPage() {
                                 更新 Key
                               </button>
                             </div>
-                            <select
-                              aria-label="来源分发策略"
-                              className="ui-input mt-2"
-                              value={providerForm.routing}
-                              onChange={(event) => setProviderForm({ ...providerForm, routing: event.target.value })}
-                            >
-                              <option value="">分发策略（保持默认）</option>
-                              {GROUP_ROUTING.map((routing) => (
-                                <option key={routing} value={routing}>
-                                  {ROUTING_LABEL[routing] ?? routing}
-                                </option>
-                              ))}
-                            </select>
+                            <label className="grid gap-1">
+                              <span className="ui-caption">来源分发策略</span>
+                              <select
+                                className="ui-input mt-2"
+                                value={providerForm.routing}
+                                onChange={(event) => setProviderForm({ ...providerForm, routing: event.target.value })}
+                              >
+                                <option value="">分发策略（保持默认）</option>
+                                {GROUP_ROUTING.map((routing) => (
+                                  <option key={routing} value={routing}>
+                                    {ROUTING_LABEL[routing] ?? routing}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
                           </div>
 
                           <div className="mt-3">
-                            <div className="text-[11px] font-bold tracking-wide text-muted">模型</div>
+                            <div className="ui-micro">模型</div>
                             <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
-                              <input
-                                aria-label="来源模型列表"
-                                className="ui-input"
+                              <TextField
+                                label="来源模型列表"
                                 placeholder="模型 id，逗号分隔（覆盖现有列表）"
                                 value={providerForm.models}
                                 onChange={(event) => setProviderForm({ ...providerForm, models: event.target.value })}
                               />
-                              <input
-                                aria-label="模型目录地址"
-                                className="ui-input"
+                              <TextField
+                                label="模型目录地址"
                                 placeholder="模型目录 URL（可选）"
                                 value={providerForm.modelsUrl}
                                 onChange={(event) => setProviderForm({ ...providerForm, modelsUrl: event.target.value })}
                               />
-                              <input
-                                aria-label="备用模型"
-                                className="ui-input sm:col-span-2"
+                              <TextField
+                                label="备用模型"
+                                className="sm:col-span-2"
                                 placeholder="额度用完/故障时改用：provider/model1,provider/model2"
                                 value={providerForm.fallback}
                                 onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
@@ -1142,44 +1142,43 @@ export function ModelPage() {
                           </div>
 
                           <details className="ui-disclosure mt-3 rounded-lg border border-line bg-[var(--subtle)] px-3 py-2">
-                            <summary className="cursor-pointer text-[11px] font-bold tracking-wide text-muted"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               请求（请求头 / 耐心 / 错误处理）
                             </summary>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <div className="flex gap-2">
-                                <input
-                                  aria-label="请求头名称"
-                                  className="ui-input"
+                                <TextField
+                                  label="请求头名称"
                                   placeholder="请求头名（如 X-Trace）"
                                   value={providerForm.headerName}
                                   onChange={(event) => setProviderForm({ ...providerForm, headerName: event.target.value })}
                                 />
-                                <input
-                                  aria-label="请求头值"
-                                  className="ui-input"
+                                <TextField
+                                  label="请求头值"
                                   placeholder="请求头值"
                                   value={providerForm.headerValue}
                                   onChange={(event) => setProviderForm({ ...providerForm, headerValue: event.target.value })}
                                 />
                               </div>
                               <div className="flex gap-2">
-                                <input
-                                  aria-label="请求耐心"
-                                  className="ui-input"
+                                <TextField
+                                  label="请求耐心"
                                   placeholder="耐心（如 2m / off）"
                                   value={providerForm.patience}
                                   onChange={(event) => setProviderForm({ ...providerForm, patience: event.target.value })}
                                 />
-                                <select
-                                  aria-label="错误处理"
-                                  className="ui-input"
-                                  value={providerForm.errors}
-                                  onChange={(event) => setProviderForm({ ...providerForm, errors: event.target.value })}
-                                >
-                                  <option value="">错误处理（默认）</option>
-                                  <option value="magpie">统一处理</option>
-                                  <option value="pass">原样透传</option>
-                                </select>
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">错误处理</span>
+                                  <select
+                                    className="ui-input"
+                                    value={providerForm.errors}
+                                    onChange={(event) => setProviderForm({ ...providerForm, errors: event.target.value })}
+                                  >
+                                    <option value="">错误处理（默认）</option>
+                                    <option value="magpie">统一处理</option>
+                                    <option value="pass">原样透传</option>
+                                  </select>
+                                </label>
                               </div>
                             </div>
                           </details>
@@ -1230,32 +1229,32 @@ export function ModelPage() {
               <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
               <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <input
-                  aria-label="分组名称"
-                  className="ui-input"
+                <TextField
+                  label="分组名称"
                   placeholder="分组名"
                   value={groupForm.name}
                   onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })}
                 />
-                <input
-                  aria-label="分组模型列表"
-                  className="ui-input"
+                <TextField
+                  label="分组模型列表"
                   placeholder="provider/model,provider/model2"
                   value={groupForm.models}
                   onChange={(event) => setGroupForm({ ...groupForm, models: event.target.value })}
                 />
-                <select
-                  aria-label="分组选路策略"
-                  className="ui-input"
-                  value={groupForm.routing}
-                  onChange={(event) => setGroupForm({ ...groupForm, routing: event.target.value })}
-                >
-                  {GROUP_ROUTING.map((routing) => (
-                    <option key={routing} value={routing}>
-                      {ROUTING_LABEL[routing] ?? routing}
-                    </option>
-                  ))}
-                </select>
+                <label className="grid gap-1">
+                  <span className="ui-caption">分组选路策略</span>
+                  <select
+                    className="ui-input"
+                    value={groupForm.routing}
+                    onChange={(event) => setGroupForm({ ...groupForm, routing: event.target.value })}
+                  >
+                    {GROUP_ROUTING.map((routing) => (
+                      <option key={routing} value={routing}>
+                        {ROUTING_LABEL[routing] ?? routing}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
@@ -1274,9 +1273,8 @@ export function ModelPage() {
                 >
                   保存分组
                 </button>
-                <input
-                  aria-label="分组 ID"
-                  className="ui-input"
+                <TextField
+                  label="分组 ID"
                   placeholder="分组名（查看/删除用）"
                   value={groupForm.target}
                   onChange={(event) => setGroupForm({ ...groupForm, target: event.target.value })}
@@ -1330,44 +1328,38 @@ export function ModelPage() {
               <div className="mt-3 border-t border-line pt-3">
                 <div className="text-[12px] font-bold">规则（可选）：把某类请求先交给组里的指定模型</div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  <input
-                    aria-label="规则分组"
-                    className="ui-input"
+                  <TextField
+                    label="规则分组"
                     placeholder="分组名"
                     value={ruleForm.group}
                     onChange={(event) => setRuleForm({ ...ruleForm, group: event.target.value })}
                   />
-                  <input
-                    aria-label="规则模型"
-                    className="ui-input"
+                  <TextField
+                    label="规则模型"
                     placeholder="先交给：provider/model"
                     value={ruleForm.use}
                     onChange={(event) => setRuleForm({ ...ruleForm, use: event.target.value })}
                   />
-                  <input
-                    aria-label="规则 token 阈值"
-                    className="ui-input"
+                  <TextField
+                    label="规则 token 阈值"
                     placeholder="够长才用：如 150k（可留空）"
                     value={ruleForm.tokens}
                     onChange={(event) => setRuleForm({ ...ruleForm, tokens: event.target.value })}
                   />
-                  <input
-                    aria-label="规则文件夹"
-                    className="ui-input"
+                  <TextField
+                    label="规则文件夹"
                     placeholder="项目文件夹（逗号分隔，可留空）"
                     value={ruleForm.folders}
                     onChange={(event) => setRuleForm({ ...ruleForm, folders: event.target.value })}
                   />
-                  <input
-                    aria-label="规则时段"
-                    className="ui-input"
+                  <TextField
+                    label="规则时段"
                     placeholder="时段（如 14:00-18:00，可留空）"
                     value={ruleForm.time}
                     onChange={(event) => setRuleForm({ ...ruleForm, time: event.target.value })}
                   />
-                  <input
-                    aria-label="规则意图"
-                    className="ui-input"
+                  <TextField
+                    label="规则意图"
                     placeholder="意图（如 一个简单问题，可留空）"
                     value={ruleForm.intent}
                     onChange={(event) => setRuleForm({ ...ruleForm, intent: event.target.value })}
@@ -1487,9 +1479,8 @@ export function ModelPage() {
                   value={searchForm.key}
                   onChange={(event) => setSearchForm({ ...searchForm, key: event.target.value })}
                 />
-                <input
-                  aria-label="删除搜索 API"
-                  className="ui-input"
+                <TextField
+                  label="删除搜索 API"
                   placeholder="要删除的 API 名称"
                   value={searchForm.target}
                   onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
@@ -1519,9 +1510,8 @@ export function ModelPage() {
                 给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <input
-                  aria-label="新密钥名称"
-                  className="ui-input"
+                <TextField
+                  label="新密钥名称"
                   placeholder="名称（如 我的笔记本）"
                   value={gatewayKeyForm.name}
                   onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, name: event.target.value })}
@@ -1556,9 +1546,8 @@ export function ModelPage() {
                 >
                   列出密钥
                 </button>
-                <input
-                  aria-label="密钥 ID"
-                  className="ui-input"
+                <TextField
+                  label="密钥 ID"
                   placeholder="密钥 ID（轮换/删除用）"
                   value={gatewayKeyForm.target}
                   onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, target: event.target.value })}
