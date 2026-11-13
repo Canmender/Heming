@@ -75,3 +75,19 @@ def test_approval_mode_uses_write_tool(soak):
     response = llm.chat(_execute_messages(6))
     assert response.tool_calls[0]["name"] == "run_command"
     assert "command" in response.tool_calls[0]["arguments"]
+
+
+def test_adversarial_mode_actually_reaches_the_coverage_target(soak, capsys):
+    """--mode adversarial 必须真的跑过对抗环并达标。
+
+    以前骨架不接覆盖率命令：每轮 `coverage=None`，两轮后以
+    `coverage_command_failed` 收口，脚本却照样报 0 失败——「测了个寂寞」。
+    现在喂一个会攀升的假覆盖率（0.5 → 0.95），应当以 done 收口。
+    """
+    code = soak.main(["--runs", "2", "--mode", "adversarial", "--json"])
+    assert code == 0
+    payload = __import__("json").loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["failures"] == 0
+    assert payload["stop_reasons"] == {"done": 2}, payload["stop_reasons"]
+    # 每轮至少 plan/execute/reflect/critic/coder/tester/coder/tester/critic/summarize
+    assert payload["llm_calls"] >= 8 * 2

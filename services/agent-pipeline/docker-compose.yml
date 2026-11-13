@@ -37,6 +37,9 @@ services:
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-}
       # http_get 访问内网/本机（默认关；开的理由见 README「网络出口」）。
       AGENT_ALLOW_PRIVATE_HOSTS: ${AGENT_ALLOW_PRIVATE_HOSTS:-0}
+      # 对抗模式的覆盖率命令（在 run 的 cwd 里执行）。空 = 对抗模式提交即 422；
+      # 镜像里没有你的测试依赖，通常要自己做一个装好依赖的镜像再打开这条。
+      AGENT_COVERAGE_COMMAND: ${AGENT_COVERAGE_COMMAND:-}
     volumes:
       - pipeline-data:/app/data
     healthcheck:

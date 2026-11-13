@@ -407,6 +407,8 @@ docker compose up --build               # 服务 :8000 + Prometheus :9090
 
 `--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。
 
+`--mode adversarial` 走对抗环（Coder ↔ Tester）：脚本会喂一个会攀升的假覆盖率（第 1 轮 0.5、第 2 轮 0.95），所以第二轮真的会「达标并通过」，而不是像以前那样因为没接覆盖率、两轮后全落 `coverage_command_failed`（脚本却照报 0 失败——「测了个寂寞」）。摘要里新增 `stop_reasons` 分布，专门用来发现这类「停止原因不对但失败数为 0」的情况。实测 `--runs 200 --concurrency 4 --mode adversarial` → 200 个 run 全部 `done`、0 失败、1,602 次模型调用（约 8 次/run）、P50 131ms。
+
 > 服务侧并发口径：`POST /v1/runs` 超过 `AGENT_MAX_CONCURRENCY` 时**直接 429 + `Retry-After`**，不排队（排队会让客户端超时掩盖背压）；同一个 `run_id` 重复提交是幂等的，只跑一次。`tests/test_concurrency.py` 覆盖了 429/放行/幂等三条。
 
 `--log PATH` 把每个 run 的 JSONL 写到你指定的文件（默认丢弃）。**写不进去会明确失败**：退出码 1 + stderr 报「只写进 N/M 行」，而 run 本身仍成功（`runtime.log_failures` 计数、`/health` 里也看得到 `log_failures`/`log_last_error`）——以前 `_write_log` 是 `except OSError: pass`，日志全丢也一切「正常」。它把「压测」和「调优」接起来了：`soak --log runs.jsonl` 跑出来的就是 `tune` / `DailyTuner` 读的那份日志，字段口径一致（`run_id`/`status`/`stop_reason`/`finished_at`/`llm_calls`/`tokens`）。所以可以这样复现「根据日志自动微调」：
@@ -509,7 +511,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **274 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **275 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

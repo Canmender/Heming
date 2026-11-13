@@ -114,6 +114,26 @@ class CycleLLM(LLMClient):
         )
 
 
+def _escalating_coverage():
+    """对抗模式用的假覆盖率：第 1 轮 0.5、第 2 轮 0.95，之后维持 0.95。
+
+    以前 `--mode adversarial` 不接覆盖率，`adversarial_node` 每轮都拿 None、
+    两轮后以 `coverage_command_failed` 收口——浸泡照样报 0 失败，但对抗环其实
+    一次都没验到「覆盖率达标」。现在给一个会攀升的假数字，第 2 轮就能真的通过。
+    """
+    state = {"n": 0}
+    lock = threading.Lock()
+
+    def runner() -> dict:
+        with lock:
+            state["n"] += 1
+            round_no = state["n"]
+        coverage = 0.5 if round_no == 1 else 0.95
+        return {"coverage": coverage, "output": f"TOTAL {int(coverage * 100)}%", "ok": True}
+
+    return runner
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="agent-pipeline 浸泡测试")
     parser.add_argument("--runs", type=int, default=2000, help="总 run 次数（默认 2000；10 万次请显式给）")
@@ -194,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
         memory=memory,
         metrics=metrics,
         config_store=config_store,
+        # 对抗模式必须接一个真实（这里是会攀升的假）覆盖率：否则两轮都拿不到数字，
+        # 会以 coverage_command_failed 收口，看起来「0 失败」其实什么都没验到。
+        coverage_runner=_escalating_coverage() if args.mode == "adversarial" else None,
         # 不写文件时才丢弃；写了文件就走 runtime 的落盘路径，tune 才能读到
         log_sink=None if args.log else (lambda _row: None),
     )
@@ -240,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
     result_lock = threading.Lock()
     cancelled_count = {"n": 0}
+    # 收口原因分布：只看「失败数」不够——`stop_reason` 才是「为什么停」，
+    # 比如对抗模式以前全落在 coverage_command_failed 却仍算 0 失败。
+    stop_reasons: dict[str, int] = {}
     work: queue.Queue[int] = queue.Queue()
     for index in range(args.runs):
         work.put(index)
@@ -264,6 +290,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result, row = run_once(runtime, task, run_id=run_id)
                 cancelled = result.status == "aborted" and row.get("stop_reason") == "cancelled"
+                with result_lock:
+                    reason = str(result.stop_reason or "done")
+                    stop_reasons[reason] = stop_reasons.get(reason, 0) + 1
                 if cancelled:
                     with result_lock:
                         cancelled_count["n"] += 1
@@ -313,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
             config_store.get(canary_id).stage if canary_id is not None and config_store.get(canary_id) else None
         ),
         "cancelled": cancelled_count["n"],
+        "stop_reasons": dict(sorted(stop_reasons.items())),
         "failures": len(failures),
         "failure_samples": failures[:5],
         "elapsed_s": round(elapsed, 3),
@@ -333,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{summary['runs_per_s']}/s，总耗时 {summary['elapsed_s']}s）"
         )
         print(f"  失败            : {summary['failures']} {summary['failure_samples']}")
+        print(f"  收口原因        : {summary['stop_reasons']}")
         print(f"  P50 / P95       : {summary['p50_ms']}ms / {summary['p95_ms']}ms")
         if args.cancel_rate > 0:
             print(f"  中途取消        : {summary['cancelled']} 个 run（协作式收口，仍出「取消前已完成的内容」）")
