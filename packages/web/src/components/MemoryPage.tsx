@@ -58,8 +58,8 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PageShell } from "./layout/PageShell.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { Switch } from "./ui/Switch.js";
+import { Dialog } from "./ui/Dialog.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
-import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 记忆区：短期记忆 / 数据库记忆 / 个人知识库三个分区，外加智能体记忆开关。
@@ -322,36 +322,12 @@ function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, onClose);
-
+  // 外壳交给 ui/Dialog（d.140）：与确认框、文件预览、插件三件套同一套头部/底栏/投影，
+  // 这里只保留「记忆表单」自己的 body 内边距与 86vh 高度上限。
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[86vh] w-[min(460px,92vw)] overflow-y-auto ui-card p-5"
-      >
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-[14px] font-bold">{title}</h3>
-          <button
-            type="button"
-            aria-label="关闭"
-            onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={16} height={16} aria-hidden="true" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <Dialog ariaLabel={label} title={title} size="sm" maxHeightVh={86} onClose={onClose} bodyClassName="p-5">
+      {children}
+    </Dialog>
   );
 }
 

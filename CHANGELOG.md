@@ -2,6 +2,12 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.64.11（2026-11-13）— 弹窗统一收尾 + 登录页 token 收口（第 11 轮）
+
+- **第 7、8 个弹窗并入 `ui/Dialog`**：`MemoryPage.tsx` 的本地 `Modal` 外壳（460px、自带 header/关闭按钮、`overflow-y-auto` 直接落在面板上）改为 15 行 `<Dialog ariaLabel title size="sm" maxHeightVh={86} bodyClassName="p-5">` 包装，一次覆盖「添加记忆」「添加知识条目」两个表单。滚动从「整个面板滚」变成「body 区滚、头部固定」，与确认框/文件预览/插件三件套一致；同时删掉只被旧外壳使用的 `useModalA11y` import（`Dialog` 内部已接管焦点陷阱与 Esc）。
+- **登录页 token 收口**：`bg-[#fafafa]` → `bg-subtle`（此前靠暗色兼容层的类名桥接兜底，现在两端都吃 token）；登录卡片 `w-[340px]` → `w-[min(340px,100%)]`，320px 级窄窗口不再贴边。
+- 门禁：`pnpm --filter @heming/web typecheck` 过；`LoginPage.test.tsx` + `MemoryPage.test.tsx` **60 例**全过，随后全量 web 套件复跑。
+
 ## d.140.3.63.11（2026-11-13）— 失败态统一（第 10 轮 · 基元采用率起步）
 
 - 审计 A/C 的「失败态 5 种写法」收敛第一刀，目标是把「区块级失败」从裸红字换成已有的 `.ui-alert*` 体系，并把真正整块加载失败的位置接上 `ui/ErrorState`（此前全仓 0 采用）。

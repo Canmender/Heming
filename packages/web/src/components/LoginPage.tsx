@@ -55,12 +55,12 @@ export function LoginPage() {
      * min-w-0 抵消 flex 子项默认的 min-width:auto，避免窗口偏窄时被内容反撑出横向滚动。
      * 请勿删除——删掉就退回「卡片和字样全挤在左边」的状态（已有回归用例守护）。
      */
-    <div className="flex h-full w-full min-w-0 flex-col bg-[#fafafa] min-[900px]:flex-row">
+    <div className="flex h-full w-full min-w-0 flex-col bg-subtle min-[900px]:flex-row">
       {/* 左：登录卡片垂直居中 */}
       <div className="flex flex-1 items-center justify-center p-6">
         <form
           onSubmit={submit}
-          className="w-[340px] ui-card p-7"
+          className="w-[min(340px,100%)] ui-card p-7"
         >
           {/* d.63：页面标题/副标题走全站排版档（18/600 + 12/muted），表单与按钮走控件基元 */}
           <h1 className="ui-page-title mb-1">和鸣</h1>
