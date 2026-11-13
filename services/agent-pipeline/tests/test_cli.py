@@ -106,3 +106,35 @@ def test_ingest_skips_empty_and_binary_and_flags_truncated(tmp_path, monkeypatch
 def test_ingest_missing_path_raises(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         list(iter_knowledge_files([str(tmp_path / "nope")]))
+
+
+def test_serve_passes_coverage_command_into_settings(monkeypatch) -> None:
+    """`serve --coverage-command` 要真的落到 Settings 上（否则对抗模式还是 422）。
+
+    这里把 uvicorn.run 和 create_app 都换掉：只验「参数 → settings → create_app」这条线，
+    不去真的监听端口。
+    """
+    import uvicorn
+
+    import agent_pipeline.service as service_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_create_app(settings=None, runtime=None):
+        captured["settings"] = settings
+        return object()
+
+    def fake_run(app, host, port):  # noqa: ANN001 - 与 uvicorn.run 的签名对齐
+        captured["host"] = host
+        captured["port"] = port
+
+    monkeypatch.setattr(service_mod, "create_app", fake_create_app)
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    monkeypatch.setenv("AGENT_COVERAGE_COMMAND", "pytest -q --cov=src")
+    monkeypatch.setenv("AGENT_LOG_PATH", "runs.jsonl")
+
+    assert main(["serve", "--port", "9123", "--coverage-command", "pytest --cov=app"]) == 0
+
+    settings = captured["settings"]
+    assert settings.coverage_command == "pytest --cov=app", "命令行应当覆盖环境变量"
+    assert captured["port"] == 9123

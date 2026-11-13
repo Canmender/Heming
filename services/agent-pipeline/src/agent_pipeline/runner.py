@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -165,7 +166,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     from .service import create_app
 
-    app = create_app(Settings.from_env())
+    settings = Settings.from_env()
+    # 对抗模式的覆盖率命令：命令行给的值优先于环境变量，省得为了一个参数
+    # 先把环境变量 export 一遍（容器里两者都支持，这里只是本机调试更顺手）。
+    if getattr(args, "coverage_command", None):
+        settings = replace(settings, coverage_command=args.coverage_command)
+    app = create_app(settings)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
@@ -212,6 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="起 HTTP 服务")
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8000)
+    # 与 run 子命令同名：对抗模式的覆盖率命令（不写就只认 AGENT_COVERAGE_COMMAND）。
+    serve.add_argument("--coverage-command", default=None)
     serve.set_defaults(func=_cmd_serve)
 
     tune_cmd = sub.add_parser("tune", help="日志驱动的每日调优")
