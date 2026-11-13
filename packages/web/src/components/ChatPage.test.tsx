@@ -2953,14 +2953,14 @@ describe("ChatPage", () => {
     await waitFor(() => expect(seen).toBeDefined());
 
     expect(streamChat).toHaveBeenCalledTimes(1); // 确定性摘要不发额外请求
-    expect(seen).toHaveLength(5); // 系统提示词 + 摘要 system 段 + 近 2 轮 + 本条 user 轮
-    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" });
-    expect(seen![1].role).toBe("system");
-    expect(seen![1].content).toContain("【早期对话摘要】");
-    expect(seen![1].content).toContain("意图：历史1；历史2；历史3");
-    expect(seen![2]).toEqual({ role: "user", content: "历史5" });
-    expect(seen![3]).toEqual({ role: "user", content: "历史6" });
-    expect(seen![4]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+    expect(seen).toHaveLength(4); // 合并后的 system（提示词 + 摘要）+ 近 2 轮 + 本条 user 轮
+    expect(seen![0].role).toBe("system");
+    expect(seen![0].content).toContain("你是和小鸣");
+    expect(seen![0].content).toContain("【早期对话摘要】");
+    expect(seen![0].content).toContain("意图：历史1；历史2；历史3");
+    expect(seen![1]).toEqual({ role: "user", content: "历史5" });
+    expect(seen![2]).toEqual({ role: "user", content: "历史6" });
+    expect(seen![3]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
     expect(seen!.map((r) => r.content)).not.toContain("历史4"); // 早期原文不直发
   });
 
@@ -2987,10 +2987,11 @@ describe("ChatPage", () => {
     expect(calls[0].messages[1].content).toContain("用户：历史1");
 
     const main = calls[1].messages;
-    expect(main[0]).toEqual({ role: "system", content: "你是和小鸣" });
-    expect(main[1].role).toBe("system");
-    expect(main[1].content).toContain("【早期对话摘要】");
-    expect(main[1].content).toContain("意图：模型摘要意图");
+    // 摘要段与主提示词合并进同一条 system（供应商对多条 system 兼容性差）
+    expect(main.filter((row) => row.role === "system")).toHaveLength(1);
+    expect(main[0].content).toContain("你是和小鸣");
+    expect(main[0].content).toContain("【早期对话摘要】");
+    expect(main[0].content).toContain("意图：模型摘要意图");
 
     // 摘要不落 WS：chunk / finish 各一次（都是主请求的），也没有错误上行
     await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
@@ -3017,12 +3018,12 @@ describe("ChatPage", () => {
 
     await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
     expect(seen).toHaveLength(2);
-    // 首次：保留 8 轮（摘要段 + 近 8 轮 + 系统提示词 + 本条 user 轮）
-    expect(seen[0]).toHaveLength(11);
-    // 重试：aggressive=1 收紧（预算减半、保留轮数 8→4），系统提示词重新前置
-    expect(seen[1]).toHaveLength(7);
-    expect(seen[1][0]).toEqual({ role: "system", content: "你是和小鸣" });
-    expect(seen[1][1].role).toBe("system");
+    // 首次：保留 8 轮（合并后的 system + 近 8 轮 + 本条 user 轮）
+    expect(seen[0]).toHaveLength(10);
+    // 重试：aggressive=1 收紧（预算减半、保留轮数 8→4），system 重新前置且已合并
+    expect(seen[1]).toHaveLength(6);
+    expect(seen[1].filter((row) => row.role === "system")).toHaveLength(1);
+    expect(seen[1][0].content).toContain("你是和小鸣");
     expect(seen[1].at(-1)).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
     // 重试期间不重复上行 chunk；finish 只发一次且是重试成功的全文（无首次尝试的「半」）。
     // E2E 合入后 chunk/finish 帧是信封（帧上 text 置空、正文进 cipher），故帧数查形状、

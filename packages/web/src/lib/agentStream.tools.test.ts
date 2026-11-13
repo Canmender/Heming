@@ -735,9 +735,10 @@ describe("历史压缩缓存（P2-6）", () => {
     // 4 次模型调用（3 轮工具 + 最终回答），历史压缩只有 1 次。
     expect(h.requests).toHaveLength(4);
     expect(prepareHistory).toHaveBeenCalledTimes(1);
-    // 每一轮都带着同一份压缩历史（缓存命中，不是漏掉）。
+    // 每一轮都带着同一份压缩历史（缓存命中，不是漏掉）；
+    // 摘要段与主提示词合并进同一条 system。
     for (const messages of h.requests) {
-      expect(messages.some((m) => m.content === "（压缩过的历史摘要）")).toBe(true);
+      expect(messages.some((m) => String(m.content).includes("（压缩过的历史摘要）"))).toBe(true);
     }
   });
 });

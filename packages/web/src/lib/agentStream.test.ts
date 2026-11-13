@@ -71,6 +71,26 @@ describe("runAgentMentions", () => {
     });
   });
 
+  it("多条 system 合并成一条（历史摘要不再作为第二个 system 发出去）", async () => {
+    const { deps } = makeDeps({
+      prepareHistory: async () => [
+        { role: "system", content: "【早期对话摘要】\n意图：整理安装器说明" },
+        { role: "user", content: "早前消息" },
+      ],
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const sent = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][1] as ChatMessage[];
+    const systems = sent.filter((row) => row.role === "system");
+    expect(systems).toHaveLength(1);
+    // 顺序必须是「主提示词 → 摘要」：摘要的「冲突以最近对话为准」才有意义。
+    expect(String(systems[0].content)).toContain("你是和小鸣");
+    expect(String(systems[0].content)).toContain("早期对话摘要");
+    expect(String(systems[0].content).indexOf("你是和小鸣")).toBeLessThan(
+      String(systems[0].content).indexOf("早期对话摘要"),
+    );
+  });
   it("本条 user 行在工具轮里只组装一次（附件不会被反复读）", async () => {
     const buildUserTurn = vi.fn(async (text: string) => ({
       role: "user" as const,
@@ -689,9 +709,10 @@ describe("runAgentMentions 上下文预算接线", () => {
     expect(prepareHistory.mock.calls[0]).toHaveLength(2); // 正常路径不传 opts
     expect(prepareHistory.mock.calls[0][0]).toEqual(history);
     expect(prepareHistory.mock.calls[0][1]).toBe("a1");
+    // 摘要那条 system 与主提示词合并为一条（供应商对多条 system 态度不一）。
     expect(attemptMessages(deps, 0)).toEqual([
-      { role: "system", content: "你是和小鸣" },
-      ...prepared,
+      { role: "system", content: "你是和小鸣\n\n【早期对话摘要】\n意图：早期" },
+      { role: "user", content: "近两轮" },
       { role: "user", content: "hi" },
     ]);
   });
@@ -733,16 +754,14 @@ describe("runAgentMentions 上下文预算接线", () => {
       { aggressive: 1 },
       { aggressive: 2 },
     ]);
-    // 每次尝试都重新前置系统提示词、重挂本条 user 轮，并用该次 aggressive 的重装结果
-    const expectedSecond: ChatMessage[] = [
-      { role: "user", content: "早前消息" },
-      { role: "system", content: "摘要1" },
-      { role: "system", content: "摘要2" },
-    ];
+    // 每次尝试都重新前置系统提示词、重挂本条 user 轮，并用该次 aggressive 的重装结果；
+    // 该次摘要与主提示词合并进同一条 system（多条 system 供应商兼容性差）。
     for (let i = 0; i < 3; i++) {
       const messages = attemptMessages(deps, i);
-      expect(messages[0]).toEqual({ role: "system", content: "你是和小鸣" });
-      expect(messages[1]).toEqual(expectedSecond[i]);
+      const systems = messages.filter((row) => row.role === "system");
+      expect(systems).toHaveLength(1);
+      expect(String(systems[0].content)).toContain("你是和小鸣");
+      if (i > 0) expect(String(systems[0].content)).toContain(`摘要${i}`);
       expect(messages.at(-1)).toEqual({ role: "user", content: "hi" });
     }
     // 重试期间不重复上行 chunk：chunk 只有第 1 次尝试的那一帧

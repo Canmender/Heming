@@ -776,12 +776,31 @@ export function runAgentMentions(
             : extra;
           const prepared: ChatMessage[] = [...rows, userTurn, ...folded];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
+          /**
+           * 多条 system 合成一条：历史压缩会把摘要以第二条 system 插在 recent 之前，
+           * 而供应商对「多条 system」态度不一（有的只认第一条、有的直接 400）。
+           * 合并只改形状不改内容，顺序保持「主提示词 → 摘要」——摘要本来就带
+           * 「与最近对话冲突时以最近对话为准」的说明。
+           */
+          const systemRows = prepared.filter((row) => row.role === "system");
+          const merged = systemRows.length > 1
+            ? (() => {
+                const text = systemRows
+                  .map((row) => String(row.content ?? ""))
+                  .filter((part) => part.trim())
+                  .join("\n\n");
+                return [
+                  { role: "system" as const, content: text },
+                  ...prepared.filter((row) => row.role !== "system"),
+                ];
+              })()
+            : prepared;
           // 降级提示在已中止时不再补发；拼在正文前，用户能看见「这一轮为什么不一样」。
           if (pendingNotice && !aborted) {
             emitDelta(pendingNotice, aggressive);
             pendingNotice = null;
           }
-          return prepared;
+          return merged;
         };
         const sealChunkHook = deps.sealChunk;
         /** finish 上行：注入 sealFinish → 信封（text 置空）；加密失败返回 false（调用方收口）。 */
