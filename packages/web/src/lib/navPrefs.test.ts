@@ -184,7 +184,7 @@ describe("字体与排版 token（index.css 源码守卫）", () => {
     expect(css).toContain("--placeholder: #8b9199");
   });
 
-  it("四档字号语义类名保持不变（只有行高微调）", () => {
+  it("四档字号语义类名保持不变（尺度值随轮次重定）", () => {
     for (const cls of [
       ".ui-page-title",
       ".ui-page-sub",
@@ -199,8 +199,10 @@ describe("字体与排版 token（index.css 源码守卫）", () => {
     }
     // d.138 尺度重定：页标题 18/26 → 28/36，说明文字 12 → 14，正文 13 → 14。
     // 目标不是「档位更多」而是「档距拉开」：标题至少是正文的 2.0 倍。
-    expect(css).toMatch(/\.ui-page-title\s*\{[^}]*text-\[28px\][^}]*leading-\[36px\]/);
-    expect(css).toMatch(/\.ui-page-sub\s*\{[^}]*text-\[14px\][^}]*leading-\[22px\]/);
+    // d.140 回调：28/36 → 22/30（桌面页头过高），副标题 14/22 → 13/20；正文/注释档不变——
+    // 层级改由「字重 + 颜色 + 分隔线」承担（同屏最多 3 个字号）。
+    expect(css).toMatch(/\.ui-page-title\s*\{[^}]*text-\[22px\][^}]*leading-\[30px\]/);
+    expect(css).toMatch(/\.ui-page-sub\s*\{[^}]*text-\[13px\][^}]*leading-5/);
     expect(css).toMatch(/\.ui-body\s*\{[^}]*text-\[14px\][^}]*leading-\[22px\]/);
     expect(css).toMatch(/\.ui-caption\s*\{[^}]*text-\[12px\][^}]*leading-\[18px\]/);
   });

@@ -10,7 +10,7 @@
  * 本组件只做三件事，不接管任何业务逻辑：
  *   1. `h-full` 的纵向布局 + 固定页头 + 可滚内容区；
  *   2. 页头统一用 `.ui-page-title` / `.ui-page-sub`，右侧 `actions` 槽；
- *   3. 内容宽度按语义档位收口（full / wide 1200 / readable 960 / narrow 720）。
+ *   3. 内容宽度按语义档位收口（full / wide 1200 / readable 960 / form 760 / prose 680 / narrow 720）。
  *
  * 用法：
  *   <PageShell title="插件区" subtitle="…" actions={<button …/>} width="wide">
@@ -22,12 +22,16 @@
  */
 import type { ReactNode } from "react";
 
-export type PageWidth = "full" | "wide" | "readable" | "narrow";
+export type PageWidth = "full" | "wide" | "readable" | "form" | "prose" | "narrow";
 
-const WIDTH_CLASS: Record<PageWidth, string> = {
+/** 宽度档：只用这几档，页面内不要再写 max-w-[…]。
+ *  d.140 新增 form(760) / prose(680)：设置页、文档型说明、单列表单此前各自写 760/720/680/440 四套。 */
+export const WIDTH_CLASS: Record<PageWidth, string> = {
   full: "",
   wide: "max-w-[1200px]",
   readable: "max-w-[960px]",
+  form: "max-w-[760px]",
+  prose: "max-w-[680px]",
   narrow: "max-w-[720px]",
 };
 
@@ -38,7 +42,7 @@ export interface PageShellProps {
   subtitle?: ReactNode;
   /** 页头右侧操作区（按钮、徽标等） */
   actions?: ReactNode;
-  /** 内容宽度档位，默认通栏 */
+  /** 内容宽度档位，默认 wide（1200） */
   width?: PageWidth;
   /** 是否由 PageShell 提供滚动容器（默认 true）；双栏/三栏页面传 false */
   scroll?: boolean;
@@ -48,7 +52,8 @@ export interface PageShellProps {
   bodyClassName?: string;
   /** 页头与内容之间插入的附加行（页签、筛选条等），不滚动 */
   headerExtra?: ReactNode;
-  /** 内容区顶部是否留内边距（默认 true；自带 padding 的段落可关） */
+  /** 内容区顶部是否留内边距（默认 true；自带 padding 的段落可关）。仅 scroll=true 时生效：
+   *  scroll=false 的页面自己管内边距（页签栏与内容列共用同一层 px-6），这里再加会双计。 */
   padded?: boolean;
   children: ReactNode;
 }
@@ -69,8 +74,10 @@ export function PageShell({
     <div className={`flex h-full min-h-0 min-w-0 flex-col ${className}`}>
       {/* 窄窗（<1200）收窄内边距：1280/1024 两档下页头与内容都不贴边也不浪费横向空间。
           断点用 arbitrary variant（max-[1199px]:），不新增 Tailwind breakpoint、不动既有 md:/lg:。
-          d.68：页头纵向统一 py-4（16），横向 24/窄窗 16，与内容区左右内边距同列。 */}
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line-soft px-6 py-4 max-[1199px]:px-4">
+          d.68：页头纵向统一（16），横向 24/窄窗 16，与内容区左右内边距同列。
+          d.140：py-4 → py-3、items-start → items-center——桌面工具一屏要装内容，
+          标题+副标题+actions 居中对齐比「顶对齐 + 上下各 16」省 8–10px，且 actions 不再吊在顶部。 */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line-soft px-6 py-3 max-[1199px]:px-4">
         <div className="min-w-0">
           <h1 className="ui-page-title">{title}</h1>
           {subtitle ? <p className="ui-page-sub">{subtitle}</p> : null}

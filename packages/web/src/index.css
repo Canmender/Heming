@@ -45,6 +45,21 @@
 }
 
 /*
+ * 聊天页横向留白（d.140 R1）：桌面 24px；≤640 收到 12px——375 视口下 24px 两侧
+ * 留白会吃掉 1/8 可用宽度。用变量而不是逐处响应式类，是因为 ChatPage 里 15 处
+ * 内边距（页头/提示条/消息区/composer）必须一起跟随，否则行基线会错位。
+ */
+:root {
+  --chat-gutter: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --chat-gutter: 0.75rem;
+  }
+}
+
+/*
  * ── 主题 token（d.67 T3 暗色主题）────────────────────────────────────
  *
  * light 值 = 改造前 Tailwind 配置里的字面量（逐像素不变）；dark 在
@@ -422,17 +437,21 @@ samp {
  * 配 13px 正文只有 1.38×，全站因此看起来像「同一个字号加粗」而不是有层级。
  * 只改这 6 个语义类的值，669 处 `text-[Npx]` 留给后续逐页收口（见评审报告 §9 步骤 2）。
  *
+ * d.140 回调（d.140 布局重构轮）：28px 页头在 8 个页面上各占 36px 行高 + 上下 16px 内边距，
+ * 桌面工具的首屏内容被页头吃掉近 70px；改为 22/30。层级不再靠「巨大」而是靠**字重 + 颜色 + 分隔线**：
+ * 22 标题 / 14 卡片标题 / 14 正文 / 12 注释——同屏最多 3 个字号而不是 6 个，密度与秩序同时改善。
+ *
  * 行高刻意比 Tailwind 默认松一点：中文方块字在 1.55–1.7 行高下才不挤。
  */
 @layer components {
   .ui-page-title {
-    @apply text-[28px] font-semibold leading-[36px] tracking-[-0.02em] text-ink;
+    @apply text-[22px] font-semibold leading-[30px] tracking-[-0.015em] text-ink;
   }
   .ui-page-sub {
-    @apply mt-1.5 text-[14px] leading-[22px] text-muted;
+    @apply mt-0.5 text-[13px] leading-5 text-muted;
   }
   .ui-section-title {
-    @apply text-[15px] font-semibold leading-[22px] text-ink;
+    @apply text-[14px] font-semibold leading-[22px] text-ink;
   }
   .ui-body {
     @apply text-[14px] leading-[22px] text-ink;
@@ -444,7 +463,7 @@ samp {
     @apply text-[12px] leading-[18px] text-muted;
   }
   .ui-micro {
-    @apply text-[10px] font-medium leading-4 text-muted;
+    @apply text-[11px] font-medium leading-4 text-muted;
   }
   .ui-numeric {
     @apply tabular-nums;

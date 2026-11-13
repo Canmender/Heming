@@ -262,7 +262,7 @@ export function NavRail({
       {/* 全站键盘焦点环（③-2）：一条 :focus-visible 规则覆盖所有 outline-hidden 控件 */}
       <GlobalFocusRing />
       {/* 上组：搜索 + 快捷键帮助（不占导航页键位） */}
-      <div className="flex flex-col items-center gap-1.5 pb-2">
+      <div className="flex flex-col items-center gap-2 pb-2">
         <div className="group relative">
           <button
             type="button"
@@ -282,7 +282,7 @@ export function NavRail({
             aria-label="快捷键帮助"
             title="快捷键"
             onClick={() => onOpenShortcuts?.()}
-            className="flex h-[26px] w-[34px] items-center justify-center rounded-lg text-[13px] font-bold text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="flex h-[32px] w-[34px] items-center justify-center rounded-lg text-[13px] font-semibold text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             ?
           </button>
@@ -329,7 +329,7 @@ export function NavRail({
       </div>
 
       {/* 下组：通知 + 固定开关 + 账户（间距 8px，与上/中组同节奏） */}
-      <div className="flex flex-col items-center gap-2 pt-1.5">
+      <div className="flex flex-col items-center gap-2 pt-2">
         <NotificationCenter />
         <div className="group relative">
           <button
@@ -338,7 +338,7 @@ export function NavRail({
             aria-pressed={pinned}
             title={pinned ? "自动隐藏导航栏（Ctrl+B）" : "固定导航栏常显（Ctrl+B）"}
             onClick={() => setNavMode(otherNavMode(navMode))}
-            className={`flex h-[26px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
+            className={`flex h-[32px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
               pinned ? "text-[var(--body)] hover:bg-[var(--subtle-3)] hover:text-ink" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
             }`}
           >
@@ -353,7 +353,7 @@ export function NavRail({
             aria-label={`账户：${who} · 退出登录`}
             title="退出登录"
             onClick={() => setConfirmLogout(true)}
-            className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-[12px] font-bold text-[var(--body)] transition-colors duration-150 hover:bg-[var(--subtle-3)]"
+            className="flex h-[32px] w-[32px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-[12px] font-bold text-[var(--body)] transition-colors duration-150 hover:bg-[var(--subtle-4)]"
           >
             {avatar ? (
               <img src={avatar} alt="" className="h-full w-full rounded-full object-cover" />
@@ -391,7 +391,7 @@ export function NavRail({
             </>
           }
         >
-          <p className="text-[12px] leading-6">退出后需要重新登录才能继续使用和鸣。</p>
+          <p className="ui-caption leading-6">退出后需要重新登录才能继续使用和鸣。</p>
         </ConfirmDialog>
       )}
     </>

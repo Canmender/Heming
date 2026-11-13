@@ -149,6 +149,16 @@
 - 五个 P0：① **99 个提交未 push**（`origin/main` 停在 `f7150561`）② 卸载执行 `RMDir /r $INSTDIR`，会删掉数据根 `<安装目录>/data`，与安装向导「数据会保留」文案矛盾 ③ **通用外壳 `和鸣安装程序.exe` 在 `/updates/` 是 404**（用户最初要的自定义安装界面就差上传）④ 已发布 `d.140.3.54.10` 与线上部署落后 tag 后 **104 个提交**（web 51 文件 / desktop 7 / setup 5 / pipeline 整包未进包）⑤ `pnpm -r test` 因 server 的 vitest worker 在 Windows 上崩（0xC0000409）**约 27% 假红**，缓解方案 `--no-file-parallelism` 实测 10/10 过。
 - 待拍板：push+本地交付方式、卸载数据策略（保留 vs 改文案）、pipeline 是否接桌面端、真模型浸泡。详见报告 §6。**2026-11-13 已定：不做 docker 容器化；云端保持不变（不重新部署 web/server）。**
 
+### 0.4 本轮交付（2026-11-13，d.140.3.55.10）
+
+- **已 push**：`origin/main` 现为 `61bdeb15`（从 `f7150561` 起共 101 个提交入仓）。
+- **版本**：`d.140.3.54.10` → `d.140.3.55.10`（`auto fix`）。门禁走 `node scripts/release.mjs --desktop`（构建 + 5 包测试全过，6 OK / 3 SKIP）。
+- **内层安装包**：`packages/desktop/release/r93/和鸣 Setup d.140.3.55.10.exe`（335,463,006 B，sha512 `w7mvwSG3…tkQ==`）。
+- **通用外壳（在线版）**：`packages/setup/release/和鸣安装程序.exe`（102,511,849 B）；**离线内嵌版**：`packages/setup/release/和鸣安装程序 d.140.3.55.10.exe`（399,117,326 B，内嵌 r93 内层包）。
+- **已上传** `/opt/heming/updates/`：`和鸣安装程序.exe` 与 `和鸣安装程序 d.140.3.55.10.exe`，远端大小 + sha512 校验通过，公网 HTTP 200（`application/octet-stream`）。
+- **未动**：`latest.yml` 仍指 140.3.54、云端服务未部署/未重启、更新源旧版未清理。
+- **仍未定**：卸载是否会删 `<安装目录>/data`（P0-2，本轮安装包沿用现状）。
+
 ---
 
 ## 1. 项目是什么

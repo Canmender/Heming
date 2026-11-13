@@ -258,7 +258,7 @@ export function AgentFormPanel({
       onSubmit={submit}
       className={
         modal
-          ? "max-h-[90vh] w-[380px] overflow-y-auto rounded-xl border border-line bg-white p-5 shadow-card"
+          ? "max-h-[90vh] w-[380px] max-w-[min(380px,92vw)] overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-card"
           : "ui-card w-full p-5"
       }
     >

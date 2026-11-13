@@ -98,6 +98,18 @@ export function ConversationRail({
   onLoadMore,
 }: ConversationRailProps) {
   const [collapsed, setCollapsed] = useState(false);
+  // 极窄视口（≤900）自动收起成头像栏：264px 固定宽在 375 视口下会把对话区挤成一条缝。
+  // 只在「进入窄视口」时自动收；用户手动展开仍然生效，不做反向强制。
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(max-width: 900px)");
+    if (mq.matches) setCollapsed(true);
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setCollapsed(true);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -320,7 +332,7 @@ export function ConversationRail({
             aria-label="展开对话列表"
             title="展开对话列表"
             onClick={() => setCollapsed(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[#666] hover:bg-[var(--subtle-4)] hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
           >
             ›
           </button>
@@ -354,7 +366,7 @@ export function ConversationRail({
           aria-label="新建对话"
           title="新建对话"
           onClick={onNewConversation}
-          className="mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-[#666] hover:bg-[var(--subtle-4)] hover:text-ink"
+          className="mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
         >
           <PlusIcon width={14} height={14} />
         </button>
@@ -372,7 +384,7 @@ export function ConversationRail({
           aria-label="收起对话列表"
           title="收起对话列表"
           onClick={() => setCollapsed(true)}
-          className="ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-[13px] text-[#666] hover:bg-[var(--subtle-4)] hover:text-ink"
+          className="ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-[13px] text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
         >
           ‹
         </button>
@@ -400,7 +412,7 @@ export function ConversationRail({
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
             searchOpen
               ? "bg-[var(--subtle-4)] text-ink"
-              : "text-[#666] hover:bg-[var(--subtle-4)] hover:text-ink"
+              : "text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
           }`}
         >
           <SearchIcon width={14} height={14} />

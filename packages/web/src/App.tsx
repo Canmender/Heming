@@ -206,7 +206,7 @@ function SharedFilesPanel({
   return (
     <>
       {/* d.68：表头左内边距与文件树行对齐（FileTree 行是 px-2），表头标题不再比内容缩进一档 */}
-      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-2 py-2">
+      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-2 py-1.5">
         {/* d.62：表头用全站统一的 section 档（13/20/600） */}
         <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
         {usage && (
@@ -220,7 +220,7 @@ function SharedFilesPanel({
           aria-label="绑定本地文件到会话"
           title="绑定工作区文件到当前会话（需先打开一个会话）"
           onClick={onBind}
-          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
+          className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
         >
           绑定
         </button>
@@ -228,7 +228,7 @@ function SharedFilesPanel({
           type="button"
           title="上传文件到共享文件"
           onClick={onUpload}
-          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
+          className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
         >
           上传
         </button>
@@ -237,7 +237,7 @@ function SharedFilesPanel({
             type="button"
             aria-label="关闭共享文件面板"
             onClick={onClose}
-            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
+            className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
           >
             关闭
           </button>
@@ -408,25 +408,25 @@ function ReconnectPanel({
   return (
     <div className="flex h-full w-full items-center justify-center px-6">
       <div className="w-full max-w-[380px] text-center">
-        <h1 className="text-[15px] font-extrabold">登录状态已保留</h1>
-        <p className="mt-2 text-[12px] text-[#555]">
+        <h1 className="ui-section-title">登录状态已保留</h1>
+        <p className="ui-body-sm mt-2 text-body">
           {message ? `暂时连不上服务器：${message}` : "正在重新连接服务器…"}
         </p>
-        <p className="mt-1 text-[11px] text-muted">
+        <p className="ui-caption mt-1">
           网络恢复后会自动重试，不需要重新登录。
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
           <button
             type="button"
             onClick={onRetry}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
+            className="ui-btn ui-btn-md ui-btn-primary"
           >
             立即重试
           </button>
           <button
             type="button"
             onClick={onLogout}
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[var(--subtle-2)]"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             退出登录
           </button>
@@ -810,7 +810,7 @@ function AppShell({
   const showFilesPanel = currentPage === "chat";
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden border border-line bg-white">
+    <div className="flex h-screen flex-col overflow-hidden bg-surface">
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
       <TitleBar />
       {/* relative 是导航轨 auto 模式的定位基准：浮层用 absolute 贴在本行内，
@@ -833,7 +833,7 @@ function AppShell({
                 aria-haspopup="dialog"
                 aria-expanded={filesDrawerOpen}
                 onClick={() => setFilesDrawerOpen(true)}
-                className="rounded-md border border-line px-2.5 py-1 text-[12px] shadow-card hover:bg-[var(--subtle-2)]"
+                className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 共享文件
               </button>
@@ -859,8 +859,11 @@ function AppShell({
               role="separator"
               aria-orientation="vertical"
               aria-label="调整目录栏宽度"
+              aria-valuemin={ASIDE_MIN}
+              aria-valuemax={ASIDE_MAX}
+              aria-valuenow={asideWidth}
               onPointerDown={onResizeStart}
-              className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
+              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-150 hover:bg-[var(--line-soft)] motion-reduce:transition-none"
             />
             <SharedFilesPanel
               files={files}
@@ -883,7 +886,7 @@ function AppShell({
             aria-label="关闭共享文件遮罩"
             data-testid="shared-files-backdrop"
             onClick={closeFilesDrawer}
-            className="absolute inset-0 cursor-default bg-black/30"
+            className="absolute inset-0 cursor-default bg-[var(--scrim)]"
           />
           <aside
             id="shared-files-drawer"
@@ -891,7 +894,7 @@ function AppShell({
             role="dialog"
             aria-modal="true"
             aria-label="共享文件"
-            className="relative flex h-full w-[min(360px,90vw)] flex-col border-l border-line-soft bg-white shadow-xl"
+            className="ui-overlay-shadow relative flex h-full w-[min(360px,90vw)] flex-col border-l border-line-soft bg-surface"
           >
             <SharedFilesPanel
               files={files}
