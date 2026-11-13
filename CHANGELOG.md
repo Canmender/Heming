@@ -2,6 +2,12 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.77.11（2026-11-13）— 第 22 轮收尾：设置搜索提示与折行空白
+
+- `packages/web/src/components/SettingsPage.tsx`：删掉搜索框下方与 `placeholder` 重复的常驻提示「按标题、关键词或分区名搜索」；匹配状态（`N 项匹配 · Enter 打开第一项 · Esc 关闭`）改为只在搜索时显示。
+- `packages/web/src/components/FileEditCard.tsx`：把被 JSX 换行切成两段的说明并回一行，去掉中文标点前多余的空格（「； 至少」「目录 （例如」）。
+- 门禁：`SettingsPage` / `KeyStorageCard` / `FileEditCard` 定向测试 56 例通过。
+
 ## d.140.3.76.11（2026-11-13）— UI/UX 第 22 轮：删掉复述型说明，让布局自己说话
 
 用户指令：「避免不必要的辅助标签和说明，让优秀的布局自身发挥作用」。这一轮不减功能，只删「说了等于没说」的话，

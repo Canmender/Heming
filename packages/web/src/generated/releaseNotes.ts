@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.140.3.77.11",
+    "date": "2026-11-13",
+    "title": "小修：设置页搜索不再多说一句",
+    "bullets": [
+      "设置页搜索框下面不再常驻一句「按标题、关键词或分区名搜索」，输入后才显示匹配数量与回车提示。",
+      "修掉「文件编辑」说明里被折行带出的多余空格。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.76.11",
     "date": "2026-11-13",
     "title": "界面安静了一点：该说的话少了，该看的东西更清楚",

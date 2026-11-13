@@ -263,11 +263,11 @@ export function SettingsPage() {
               }}
               className={`w-full max-w-[420px] ui-input ${FOCUS_RING}`}
             />
-            <span className="ui-caption">
-              {searching
-                ? `${results.length} 项匹配 · Enter 打开${results.length > 0 ? "第一项" : ""} · Esc 关闭`
-                : "按标题、关键词或分区名搜索"}
-            </span>
+            {searching && (
+              <span className="ui-caption">
+                {`${results.length} 项匹配 · Enter 打开${results.length > 0 ? "第一项" : ""} · Esc 关闭`}
+              </span>
+            )}
           </div>
           </div>
         </div>

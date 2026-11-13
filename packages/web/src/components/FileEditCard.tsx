@@ -98,8 +98,7 @@ export function FileEditCard({
         <div className="text-ui-sm font-bold text-muted">文件编辑</div>
       </div>
       <div className="mt-1 ui-caption">
-        默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；
-        至少一条可写根才会出现 `file_patch`。
+        默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；至少一条可写根才会出现 `file_patch`。
       </div>
 
       {!fileBridge ? (
@@ -119,8 +118,7 @@ export function FileEditCard({
             </div>
             {config.roots.length === 0 ? (
               <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
-                还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录
-                （例如 Obsidian 库的某个子目录），不要选整个盘。
+                还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录（例如 Obsidian 库的某个子目录），不要选整个盘。
               </div>
             ) : (
               <ul className="mt-1 flex flex-col gap-1">

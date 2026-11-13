@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.77.11",
+    "date": "2026-11-13",
+    "title": "第 22 轮收尾：设置搜索提示与折行空白",
+    "bullets": [
+      "`packages/web/src/components/SettingsPage.tsx`：删掉搜索框下方与 `placeholder` 重复的常驻提示「按标题、关键词或分区名搜索」；匹配状态（`N 项匹配 · Enter 打开第一项 · Esc 关闭`）改为只在搜索时显示。",
+      "`packages/web/src/components/FileEditCard.tsx`：把被 JSX 换行切成两段的说明并回一行，去掉中文标点前多余的空格（「； 至少」「目录 （例如」）。",
+      "门禁：`SettingsPage` / `KeyStorageCard` / `FileEditCard` 定向测试 56 例通过。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.76.11",
     "date": "2026-11-13",
     "title": "UI/UX 第 22 轮：删掉复述型说明，让布局自己说话",
