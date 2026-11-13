@@ -976,9 +976,29 @@ export function runAgentMentions(
             if (!rankedNames.includes(tool.name)) rankedNames.push(tool.name);
           }
           /** 当前可调用（模型看得见）的工具名。检索命中会往里加，下一轮即生效。 */
-          const visible = new Set<string>(
-            useDiscovery ? rankedNames.slice(0, MAX_VISIBLE_TOOLS) : rankedNames,
-          );
+          const pinnedNames = useDiscovery ? rankedNames.slice(0, MAX_VISIBLE_TOOLS) : rankedNames;
+          const visible = new Set<string>(pinnedNames);
+          /**
+           * 检索「解锁」的工具，按揭晓顺序排队。
+           *
+           * 以前 `visible.add()` 无上限：每轮 tool_search 都能再塞 8 个进请求，
+           * 12 轮下来请求里可能挂着 100+ 份 schema——正好毁掉「按需发现」本身想省的那点预算，
+           * 还可能顶到供应商的 tools 数量上限。这里给总数封顶：
+           * 初始可见的（按用户这句话排过序）尽量保留，超出的从**最早揭晓**的开始挤掉
+           * （它们已经不在眼前，模型很难凭空再调；真要再用会重新检索到）。
+           */
+          const revealed: string[] = [];
+          const revealTools = (names: string[]) => {
+            for (const name of names) {
+              if (visible.has(name)) continue;
+              visible.add(name);
+              revealed.push(name);
+            }
+            while (pinnedNames.length + revealed.length > MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT && revealed.length > 0) {
+              const victim = revealed.shift();
+              if (victim) visible.delete(victim);
+            }
+          };
           const toolSearchId = useDiscovery ? TOOL_SEARCH_NAME : "";
           /** 本轮请求要带的 tools：发现模式下 = tool_search + 当前可见工具（按目录原序）。 */
           const toolsForRequest = (): unknown[] => {
@@ -1138,7 +1158,10 @@ export function runAgentMentions(
                 exclude: visible,
                 limit: TOOL_SEARCH_LIMIT,
               });
-              for (const match of matches) visible.add(match.name);
+              for (const match of matches) {
+                // 走 revealTools：总可见数有上限，见上面的注释
+                revealTools([match.name]);
+              }
               const text = matches.length
                 ? `已加入可调用工具（本轮后续即可调用）：\n${matches
                     .map(

@@ -3,6 +3,7 @@ import {
   HEARTBEAT_MS,
   MAX_TOOL_ROUNDS,
   MAX_VISIBLE_TOOLS,
+  TOOL_SEARCH_LIMIT,
   TOOL_SEARCH_NAME,
   runAgentMentions,
 } from "./agentStream.js";
@@ -815,3 +816,34 @@ describe("心跳：长工具调用不被界面看成卡死", () => {
     expect(content).toContain("中间省略");
   });
 });
+
+  it("反复 tool_search 不会把可见工具无上限地堆进请求", async () => {
+    // 每轮 tool_search 都「再解锁」一些工具；以前 visible 是无限增长的 Set，
+    // 12 轮下来请求里能挂 100+ 份 schema——正好毁掉「按需发现」想省的那点预算。
+    const toolNames = Array.from({ length: 40 }, (_, i) => `srv__t${String(i).padStart(2, "0")}`);
+    const rounds: Round[] = [
+      ...Array.from({ length: 9 }, (_, i) => ({
+        text: "",
+        calls: [{ id: `s${i}`, name: TOOL_SEARCH_NAME, args: JSON.stringify({ query: `t${25 + i}` }) }],
+      })),
+      { text: "收尾", calls: [] },
+    ];
+    const { deps, toolOptions } = makeDeps(rounds, {
+      toolNames,
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const sizes = toolOptions.map((tools) => (tools ?? []).length);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1 + MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT);
+
+    // 最早解锁的会被挤掉，最近解锁的还在（挤掉不等于禁用：真要再用会重新检索到）
+    const namesOf = (i: number) =>
+      (toolOptions[i] ?? []).map((t) => (t as { function: { name: string } }).function.name);
+    const last = namesOf(toolOptions.length - 1);
+    expect(last).toContain("srv__t33");
+    expect(last).not.toContain("srv__t25");
+    // 挤掉之后仍然能再检索回来
+    expect(last.length).toBeLessThanOrEqual(1 + MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT);
+  });
