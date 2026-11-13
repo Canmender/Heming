@@ -4,4 +4,6 @@ config/generated.json
 payload/inner-setup.exe
 # 打包产物
 release/
+# 离线内嵌外壳（每版一个 400MB 文件，放这里避免与在线外壳混在一起被当成更新助手）
+release-offline/
 package-lock.json

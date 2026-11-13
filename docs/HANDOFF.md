@@ -159,6 +159,18 @@
 - **未动**：`latest.yml` 仍指 140.3.54、云端服务未部署/未重启、更新源旧版未清理。
 - **仍未定**：卸载是否会删 `<安装目录>/data`（P0-2，本轮安装包沿用现状）。
 
+### 0.5 卸载文案 + 出包修正（2026-11-13，d.140.3.56.10 / d.140.3.56.11）
+
+- **用户决定（m11056 后）**：卸载**按现状连数据一起删**，不加 `customRemoveFiles`；改文案如实告知。`packages/desktop/build/installer.nsh` 三处（欢迎页 / 目录页 / 卸载欢迎页）改为「卸载会把安装目录下的 data 文件夹一并删除（登录状态、插件、知识库），请先备份」，`docs/superpowers/specs/2026-11-07-installer-branding.md` 同步 —— **d.140.3.56.10**（提交 `26bec167`）。
+- **出包事故与修正（d.140.3.56.11，提交 `2cdd72c7`）**：56.10 用 `release.mjs --desktop` 出的内层包 **632,087,183 B**（632MB）。根因 `scripts/build-desktop.mjs` 的 `stageUpdateHelper()` 按 mtime 取 `packages/setup/release` 里最新的 `和鸣安装程序*.exe`，当时最新恰是 399MB 离线内嵌版，被当成更新助手塞进包（`resources/updater/setup.exe` 399MB）。改为**优先通用在线外壳 `和鸣安装程序.exe`**（`const helperSource = existsSync(genericHelper) ? genericHelper : candidates[0];`）；离线外壳移到 `packages/setup/release-offline/`，不再与在线外壳同目录。
+- **最终产物**：
+  - 内层：`packages/desktop/release/r95/和鸣 Setup d.140.3.56.11.exe`，**335,463,940 B**，sha512 `O0fOM3/rwWmLemkuQdmD6XAt8Ywfu4VhyRy5rV6XhAIm8elXRPggOFyYOsNKOK6D3FkE+pV4Vs/l4FtW8Hv2wA==`。
+  - 离线内嵌外壳：`packages/setup/release-offline/和鸣安装程序 d.140.3.56.11.exe`，**399,124,268 B**，hex sha512 `a8a04201348d1f3baa6c6761e1fca464875c17c848ae46315f1b4d7df4325ecfae1da3ea11368b15da89dd69db0a3253e5a8ef4d089f4b7c6017a6b49aee4ade`。
+  - 通用在线外壳：`packages/setup/release/和鸣安装程序.exe`，102,511,849 B（本轮内容未变，无需重传）。
+- **已上传** `/opt/heming/updates/`：`和鸣安装程序 d.140.3.56.11.exe`（远端大小 + sha512 校验通过）；旧 `和鸣安装程序 d.140.3.55.10.exe` 已删除。公网两条 URL 均 200 + `application/octet-stream`（102,511,849 / 399,124,268）。
+- **未动**：`latest.yml` 仍指 140.3.54、云端服务未部署；更新源里 d.135.3.54.7 / d.137.3.54.10 / d.140.3.54.10 三个旧内层包仍在（按「只留当前+上一版」应清，但会直接影响老客户端，留待拍板）。
+- **另一会话的 UI/UX WIP 已隔离**：分支 `wip/uiux-2026-11-13`（`d0efe595`，54 处改动，版本自标 d.140.3.56.0）。**未完成**：`packages/web/src/App.tsx` 引用不存在的 `asideNotice`/`setAsideNotice`（10 处 TS2304，typecheck exit 2）、web **17 failed / 4349 passed**（App.boot 1、App.test 15、navPrefs 1）。**不能直接合入**，接续前先修这一处。
+
 ---
 
 ## 1. 项目是什么
