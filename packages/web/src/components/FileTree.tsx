@@ -100,7 +100,7 @@ function SectionRows({
               <button
                 type="button"
                 aria-label={`发送到会话 ${item.name}`}
-                className="rounded-sm p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                className="rounded-sm p-0.5 text-muted hover:bg-subtle-4 hover:text-ink"
                 onClick={(e) => {
                   e.stopPropagation();
                   onSendToConversation(item);
@@ -113,7 +113,7 @@ function SectionRows({
               <button
                 type="button"
                 aria-label={`预览 ${item.name}`}
-                className="rounded-sm p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                className="rounded-sm p-0.5 text-muted hover:bg-subtle-4 hover:text-ink"
                 onClick={(e) => {
                   e.stopPropagation();
                   onPreview(item);

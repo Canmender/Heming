@@ -138,7 +138,7 @@ export function ContextSettingsCard() {
         <div className="mt-2 ui-caption">
           当前预算 {shownBudget} / 模型上限 {windowLimit} token（{model?.model}，按窗口 60% 计）
           {windowLimit > 0 && settings.budgetTokens > windowLimit ? (
-            <span className="ml-1 text-[#b45309]">已超出上限，下面的选择会被收敛到上限</span>
+            <span className="ml-1 text-[var(--warn)]">已超出上限，下面的选择会被收敛到上限</span>
           ) : null}
         </div>
       ) : null}

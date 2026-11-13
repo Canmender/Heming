@@ -282,7 +282,7 @@ export function AgentFormPanel({
 
       {/* 从模板开始：只填空字段，不想用模板就直接往下填（编辑时不显示，避免误覆盖已有信息） */}
       {mode === "create" && (
-        <div className="mb-3 rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
+        <div className="mb-3 rounded-lg border border-line-soft bg-subtle p-2.5">
           <div className="ui-caption">从模板开始（可选）</div>
           <div className="mt-1.5 grid grid-cols-2 gap-1.5" role="group" aria-label="智能体模板">
             {AGENT_TEMPLATES.map((template, index) => (

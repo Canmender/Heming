@@ -289,7 +289,7 @@ export function RouteGroupsCard() {
 
       {/* 休息名单：为什么冷却、还剩多久、一键恢复（magpie 的 Unrest 同此）。 */}
       {rests.length > 0 && (
-        <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
+        <div className="mt-3 rounded-lg border border-line bg-panel p-3">
           <div className="flex items-center justify-between">
             <span className="text-[12px] font-bold text-muted">休息中的候选</span>
             <button
@@ -327,7 +327,7 @@ export function RouteGroupsCard() {
 
       {/* 逐候选账（d.48）：换候选换的是「谁在花钱」，所以按连接×模型分档列，而不是只给一个总数。 */}
       {usage.length > 0 && (
-        <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
+        <div className="mt-3 rounded-lg border border-line bg-panel p-3">
           <div className="text-[12px] font-bold text-muted">本月逐候选用量</div>
           <ul className="mt-1.5 space-y-1">
             {usage.map((u) => {

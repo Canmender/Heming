@@ -278,7 +278,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                       <button
                         type="button"
                         onClick={() => openPage(page.path)}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[#f7f7f7]"
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-subtle-2"
                       >
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
                           {page.title}

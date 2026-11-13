@@ -181,7 +181,7 @@ export function SearchPanel({
                     part.hit ? (
                       <mark
                         key={partIndex}
-                        className="rounded-[2px] bg-[#fde68a] px-0.5 text-[#3b2b00]"
+                        className="rounded-[2px] bg-[var(--mark-bg)] px-0.5 text-[var(--mark-ink)]"
                       >
                         {part.text}
                       </mark>

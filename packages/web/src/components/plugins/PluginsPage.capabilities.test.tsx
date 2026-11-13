@@ -818,7 +818,7 @@ describe("插件页 · 安装信任行", () => {
 
     expect(within(dialog).getByText("与上次不同")).toBeInTheDocument();
     const warning = within(dialog).getByText("版本未变，但内容有变化");
-    expect(warning.className).toContain("text-[#b42318]");
+    expect(warning.className).toContain("text-[var(--danger)]");
 
     const confirm = within(dialog).getByRole("button", { name: "确认更新" });
     expect(confirm).toBeDisabled();
@@ -843,7 +843,7 @@ describe("插件页 · 安装信任行", () => {
     });
 
     const author = within(dialog).getByText("作者：ACME → Evil Corp");
-    expect(author.className).toContain("text-[#b42318]");
+    expect(author.className).toContain("text-[var(--danger)]");
     expect(within(dialog).getByRole("button", { name: "确认更新" })).toBeDisabled();
   });
 });

@@ -65,7 +65,7 @@ export function PluginCard({
       data-enabled={plugin.enabled}
       role="region"
       aria-label={`插件 ${manifest.name}`}
-      className={`${PLUGIN_CARD} plugin-card p-4 ${highlighted ? "ring-2 ring-[#1a1a1a]/25" : ""}`}
+      className={`${PLUGIN_CARD} plugin-card p-4 ${highlighted ? "ring-2 ring-ink/25" : ""}`}
     >
       <div className="flex items-start gap-3">
         <span

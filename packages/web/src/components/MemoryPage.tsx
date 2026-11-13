@@ -1175,7 +1175,7 @@ export function MemoryPage({
                       key={turn.id}
                       data-memory-id={turn.id}
                       className={`rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-2 ${
-                        highlightMemoryId === turn.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                        highlightMemoryId === turn.id ? "ring-2 ring-ink/25" : ""
                       }`}
                     >
                       <div className="text-[10px] text-muted">
@@ -1584,7 +1584,7 @@ export function MemoryPage({
                 key={entry.id}
                 data-memory-id={entry.id}
                 className={`ui-list-row mt-2 rounded-lg ${
-                  highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                  highlightMemoryId === entry.id ? "ring-2 ring-ink/25" : ""
                 }`}
               >
                 {editing?.id === entry.id ? (
@@ -1721,7 +1721,7 @@ export function MemoryPage({
                 key={entry.id}
                 data-memory-id={entry.id}
                 className={`ui-list-row mt-2 items-start justify-between ${
-                  highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                  highlightMemoryId === entry.id ? "ring-2 ring-ink/25" : ""
                 }`}
               >
                 <div className="min-w-0">

@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.72.11",
+    "date": "2026-11-13",
+    "title": "写死色值清零 + 暗色桥接层删 21 条死规则",
+    "bullets": [
+      "10 处写死色值改成语义 token：",
+      "— `MemoryPage` 3 处、`plugins/PluginCard` 1 处：`ring-[#1a1a1a]/25` → `ring-ink/25`（`ink` 已在 tailwind.config 映射到 `var(--ink)`，带透明度修饰才在暗色下也成立）；",
+      "— `FileTree` 2 处 `hover:bg-[#ebebeb]` → `hover:bg-subtle-4`；`RouteGroupsCard` 2 处`bg-[#fcfcfc]` → `bg-panel`；`UpdateCard`、`assistant/AgentFormPanel` 各 1 处",
+      "— `ContextSettingsCard` `text-[#b45309]` → `text-[var(--warn)]`；",
+      "— `plugins/shared.tsx` 的 `ERROR_TEXT` / `BTN_DANGER_SM`：`text-[#b42318]` → `text-[var(--danger)]`，两条断言该字面量的用例同步改为断言 `var(--danger)`（它们钉的是「错误文案走危险色」，",
+      "新增两个 token：`--mark-bg` / `--mark-ink`（搜索结果命中片段的高亮底与字）。亮色沿用原黄底深字 `#fde68a` / `#3b2b00`；暗色给深黄底浅黄字 `#5f4d12` / `#ffe9a8`——",
+      "暗色兼容层（`index.css` 末尾，d.67 T3 起的按类名兜底）按「类名是否还存在」清理了 21 条死规则，规则数 116 → 42、文件 1229 → 1130 行。清理判据是**纯静态**的：选择器里的十六进制类名",
+      "现状：`grep -rE \"(bg|text|border|divide|ring)-\\[#[0-9a-f]{3,8}\\]\" packages/web/src --include=*.tsx`**生产代码 0 处**（仅剩 2 处出现在 `StorageUsageCard.test.tsx` 的「不得出现」断言里）。",
+      "门禁：web typecheck 过；web **298 文件 / 4372 例**全过；`pnpm -r typecheck`、`pnpm -r build` 过。"
+    ],
+    "paragraphs": [
+      "审计 D2「暗色不靠 token、靠补丁」的最后一段。`bg-[#fafafa]` → `bg-subtle`；`WikiPanel` `hover:bg-[#f7f7f7]` → `hover:bg-subtle-2`；不是「必须写死这个十六进制」）。原来的亮黄底在暗色下刺眼，而桥接层盖不到 `text-[#3b2b00]`。在整个 `src`（含测试）里已无出现，删掉它不可能改变任何渲染，只是不再留垃圾。"
+    ]
+  },
+  {
     "version": "d.140.3.71.11",
     "date": "2026-11-13",
     "title": "技能页两个表单浮层并入 `ui/Dialog`",

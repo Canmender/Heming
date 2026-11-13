@@ -125,6 +125,9 @@
    * 模型页视觉层（d.124 UI/UX 轮）：图表、头像、插图、语义软底此前散落在组件里写死
    * 亮色十六进制，暗色下要么白块要么看不清。统一收成 token，组件只引用变量。
    */
+  /* 搜索结果命中片段的高亮底/字：亮色黄底深字；暗色不能沿用（刺眼且对比不足）。 */
+  --mark-bg: #fde68a;
+  --mark-ink: #3b2b00;
   --chart-1: #2f6feb;
   /* d.140 R2：#7c6bd6 是「AI 紫」，与全站墨色/蓝色语义都不同支；换成蓝绿后
      与 chart-1 蓝色仍可分（色相大约差 130°），也不再落进紫粉套路。 */
@@ -201,6 +204,8 @@
   --switch-off: #3a3d43;
   --switch-knob: #e8eaed;
   /* 模型页视觉层（d.124）：暗色下图表/头像/语义软底单独一套，保证对比度与层次。 */
+  --mark-bg: #5f4d12;
+  --mark-ink: #ffe9a8;
   --chart-1: #7aa2ff;
   --chart-2: #4fd8c0;
   --chart-grid: #303339;
@@ -845,16 +850,18 @@ samp {
  * 暗色兼容层（d.67 T3）——**迁移期桥接，后续把字面量类改成 token 时删**
  * ══════════════════════════════════════════════════════════════════════
  *
- * 背景：暗色只覆盖了语义 token，但既有界面还有大量字面量颜色类（bg-[#fafafa]、
- * text-[#555] 等，共 200+ 处）。本轮不逐个改组件（四轨文件级不重叠，改不动别轨的
- * 文件），改在**类名层面**做等价覆盖：同一类名在暗色下换成语义变量。
+ * 背景：暗色只覆盖了语义 token，而既有界面上还有字面量颜色类（bg-[#fafafa]、
+ * text-[#555] 等）。不逐个改组件的时代用**类名层面**的等价覆盖兜底：同一类名
+ * 在暗色下换成语义变量。
  *
  * 为什么放在文件末尾且不写 @layer：Tailwind 的 utilities 都在 @layer utilities 里，
  * 而未分层（unlayered）样式的优先级高于任何 layer —— 这样不用 !important 也能盖过
  * 「.bg-white」这类工具类；写进 @layer 反而会被 utilities 盖掉。
  *
- * 后续清理方式：把这些字面量类替换成同名 token 类（bg-subtle / text-body 等）后，
- * 逐条删除本段即可，删完暗色自然生效，无需再动这里。
+ * 现状（d.140.3.72.11）：组件里的字面量色值已基本清完（`grep -c "-#\["` 从 102 处降到
+ * 个位数），本段从 116 条降到 42 条；第 18 轮删掉了 21 条「类名已不存在」的死规则。
+ * 剩下的都是仍被引用的少数，等对应类换成 token 后再逐条删——删规则不会改变渲染，
+ * 因为删的都是没有组件在用的类名。
  */
 [data-theme="dark"] .bg-white {
   background-color: var(--surface);
@@ -888,20 +895,6 @@ samp {
 }
 
 /* 浅色提示块：错误 / 警告 / 成功底色 */
-[data-theme="dark"] .bg-\[\#fef3f2\],
-[data-theme="dark"] .bg-\[\#fdf3f2\],
-[data-theme="dark"] .bg-\[\#fdf6f6\] {
-  background-color: var(--danger-soft);
-}
-[data-theme="dark"] .bg-\[\#fffbeb\],
-[data-theme="dark"] .bg-\[\#fffaeb\],
-[data-theme="dark"] .bg-\[\#fffdf5\] {
-  background-color: #2a2418;
-}
-[data-theme="dark"] .bg-\[\#f2faf5\],
-[data-theme="dark"] .bg-\[\#f0fdf4\] {
-  background-color: #16241b;
-}
 
 /* 文字：正文灰 / 次要灰 / 墨色 / 占位 / 语义色 */
 [data-theme="dark"] .text-\[\#555\],
@@ -910,16 +903,10 @@ samp {
 [data-theme="dark"] .text-\[\#444\] {
   color: var(--body);
 }
-[data-theme="dark"] .text-\[\#6f6f6f\] {
-  color: var(--muted);
-}
 [data-theme="dark"] .text-\[\#1a1a1a\],
 [data-theme="dark"] .text-\[\#111\],
 [data-theme="dark"] .text-\[\#222\] {
   color: var(--ink);
-}
-[data-theme="dark"] .text-\[\#b8b8b8\] {
-  color: var(--placeholder);
 }
 [data-theme="dark"] .text-\[\#b42318\],
 [data-theme="dark"] .text-\[\#912018\] {
@@ -931,21 +918,12 @@ samp {
 [data-theme="dark"] .text-\[\#92400e\] {
   color: var(--warn);
 }
-[data-theme="dark"] .text-\[\#1d6b3a\],
-[data-theme="dark"] .text-\[\#15803d\] {
-  color: var(--success);
-}
 
 /* 边框：仍有字面量边框的地方按 token 覆盖 */
 [data-theme="dark"] .border-\[\#ececec\],
 [data-theme="dark"] .border-\[\#e6e6e6\],
 [data-theme="dark"] .border-\[\#e5e7eb\] {
   border-color: var(--line);
-}
-[data-theme="dark"] .border-\[\#fecdca\],
-[data-theme="dark"] .border-\[\#f3c6c2\],
-[data-theme="dark"] .border-\[\#f3d2ce\] {
-  border-color: var(--danger-line);
 }
 /* 浅色 hover 底（hover:bg-[#fafafa] 这类在 utilities 里带伪类，类名不同，单独覆盖）。
    d.68 自检补齐：组件里还有大量 hover:bg-[#f3f3f3]/[#f0f0f0]/[#f5f5f5] 等，只覆盖三个
@@ -979,13 +957,6 @@ samp {
   background-color: var(--subtle);
 }
 /* 语义色 hover：错误/警告/成功底色在暗色下用同一套 soft 值 */
-[data-theme="dark"] .hover\:bg-\[\#fef3f2\]:hover,
-[data-theme="dark"] .hover\:bg-\[\#fdf3f2\]:hover {
-  background-color: var(--danger-soft);
-}
-[data-theme="dark"] .hover\:bg-\[\#fff8e1\]:hover {
-  background-color: #2a2418;
-}
 
 /* 滚动条：暗色下滑块用中灰，避免浅灰细条在深底上发亮 */
 [data-theme="dark"] * {
@@ -1043,28 +1014,10 @@ samp {
 }
 
 /* bg-danger-soft */
-[data-theme="dark"] .bg-\[\#fdecea\],
-[data-theme="dark"] .bg-\[\#fdf0ef\],
-[data-theme="dark"] .bg-\[\#fdf4f3\] {
-  background-color: var(--danger-soft);
-}
 
 /* bg-warn-soft */
-[data-theme="dark"] .bg-\[\#fff7e6\],
-[data-theme="dark"] .bg-\[\#fff8e1\],
-[data-theme="dark"] .bg-\[\#fff8e6\],
-[data-theme="dark"] .bg-\[\#fff9e6\],
-[data-theme="dark"] .bg-\[\#f3f0e6\] {
-  background-color: var(--subtle-2);
-}
 
 /* bg-success-soft */
-[data-theme="dark"] .bg-\[\#ecfdf3\],
-[data-theme="dark"] .bg-\[\#f2fbf4\],
-[data-theme="dark"] .bg-\[\#f4faf4\],
-[data-theme="dark"] .bg-\[\#eef6f0\] {
-  background-color: var(--subtle-2);
-}
 
 /* border-line-2 */
 [data-theme="dark"] .border-\[\#e8e8e8\],
@@ -1084,21 +1037,8 @@ samp {
 }
 
 /* border-danger-2 */
-[data-theme="dark"] .border-\[\#e3b6b2\],
-[data-theme="dark"] .border-\[\#e6b3ae\],
-[data-theme="dark"] .border-\[\#f3c2bd\],
-[data-theme="dark"] .border-\[\#f3d2ce\],
-[data-theme="dark"] .border-\[\#fecdca\] {
-  border-color: var(--danger-line);
-}
 
 /* border-warn-2 */
-[data-theme="dark"] .border-\[\#e5d5a8\],
-[data-theme="dark"] .border-\[\#f0d58c\],
-[data-theme="dark"] .border-\[\#eadfc8\],
-[data-theme="dark"] .border-\[\#f0e0b8\] {
-  border-color: var(--line-strong);
-}
 
 /* text-muted-2 */
 [data-theme="dark"] .text-\[\#777\],
@@ -1114,48 +1054,16 @@ samp {
 }
 
 /* text-body-2 */
-[data-theme="dark"] .text-\[\#333\],
-[data-theme="dark"] .text-\[\#344054\],
-[data-theme="dark"] .text-\[\#475467\] {
-  color: var(--body);
-}
 
 /* text-success-2 */
-[data-theme="dark"] .text-\[\#067647\],
-[data-theme="dark"] .text-\[\#12b76a\],
-[data-theme="dark"] .text-\[\#16a34a\],
-[data-theme="dark"] .text-\[\#1f9d55\] {
-  color: var(--success);
-}
 
 /* text-warn-2 */
-[data-theme="dark"] .text-\[\#d97706\],
-[data-theme="dark"] .text-\[\#c98a00\],
-[data-theme="dark"] .text-\[\#8a6d1f\],
-[data-theme="dark"] .text-\[\#8a7a55\] {
-  color: var(--warn);
-}
 
 /* text-danger-2 */
-[data-theme="dark"] .text-\[\#dc2626\],
-[data-theme="dark"] .text-\[\#c7254e\] {
-  color: var(--danger);
-}
 
 /* text-info-2 */
-[data-theme="dark"] .text-\[\#2563eb\],
-[data-theme="dark"] .text-\[\#1d4ed8\],
-[data-theme="dark"] .text-\[\#3538cd\] {
-  color: var(--body);
-}
 
 /* 补充两条：浅分隔线 `border-[#eee]` 与搜索高亮底色 `bg-[#fff1a8]` */
-[data-theme="dark"] .border-\[\#eee\] {
-  border-color: var(--line);
-}
-[data-theme="dark"] .bg-\[\#fff1a8\] {
-  background-color: var(--subtle-3);
-}
 
 /* ── 模型页 / 实时链路的动效（d.104）─────────────────────────────────
  * 参考 magpie 的路由页：连线用 0.7s 循环的虚线流动表示「正在传输」，节点行 hover

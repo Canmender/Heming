@@ -159,7 +159,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       ) : null}
 
       {hasUpdate && state?.available && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[12px]">
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle px-2.5 py-2 text-[12px]">
           可更新至 <span className="font-bold">{state.available.version}</span>
         </div>
       )}
