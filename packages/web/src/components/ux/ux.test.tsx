@@ -21,8 +21,8 @@ describe("OnboardingCard", () => {
     expect(within(card).getByText("配置模型连接")).toBeInTheDocument();
     expect(within(card).getByText("和智能体对话")).toBeInTheDocument();
     expect(within(card).getByText("建第一个任务")).toBeInTheDocument();
-    // 1/3 完成
-    expect(within(card).getByText(/1\/3\s*已完成/)).toBeInTheDocument();
+    // 进度用标题行的「已完成 1/3 步」可访问名表达，不再写整句说明
+    expect(within(card).getByLabelText("已完成 1/3 步")).toHaveTextContent("1/3");
     // 已完成的步骤只留回执（徽标 + 一句说明），不再放一个禁用的「已完成」按钮
     expect(within(card).queryByRole("button", { name: "已完成" })).toBeNull();
     expect(within(card).getByText("这一步已经完成，不用再动。")).toBeInTheDocument();

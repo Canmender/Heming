@@ -23,7 +23,7 @@ describe("AgentFormModal", () => {
     useLlmStore.setState({ profiles: [{ id: "mp:m", label: "主模型", provider: "openai", apiKey: "k", model: "m" }] });
     rerender(<AgentFormModal open mode="create" onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "架构师" } });
-    fireEvent.change(screen.getByLabelText("系统提示词（仅本机）"), { target: { value: "你是架构师" } });
+    fireEvent.change(screen.getByLabelText("系统提示词（可选，仅本机）"), { target: { value: "你是架构师" } });
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ id: "a1", owner_id: "u1", name: "架构师", avatar: null, description: "" }), {
         status: 201, headers: { "content-type": "application/json" },
@@ -102,7 +102,7 @@ describe("AgentFormModal", () => {
       />,
     );
     expect(screen.getByLabelText("名称")).toHaveValue("架构师");
-    expect(screen.getByLabelText("系统提示词（仅本机）")).toHaveValue("旧提示");
+    expect(screen.getByLabelText("系统提示词（可选，仅本机）")).toHaveValue("旧提示");
 
     fireEvent.click(screen.getByText("删除智能体"));
     // 不弹系统框；确认之前不发请求
@@ -183,7 +183,7 @@ describe("AgentFormModal", () => {
 
     // 提示词在进阶区：展开后是模板内容，且没有被追加两遍
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
-    expect(screen.getByLabelText("系统提示词（仅本机）")).toHaveValue(writing.prompt);
+    expect(screen.getByLabelText("系统提示词（可选，仅本机）")).toHaveValue(writing.prompt);
     // 模板按钮有「已套用」状态（aria-pressed），供读屏与视觉同时识别
     expect(screen.getByRole("button", { name: "使用模板 写作润色" })).toHaveAttribute(
       "aria-pressed",
@@ -198,12 +198,12 @@ describe("AgentFormModal", () => {
     expect(screen.getByLabelText("名称")).toHaveValue(data.name);
     expect(screen.getByLabelText("一句话描述")).toHaveValue(data.description);
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
-    expect(screen.getByLabelText("系统提示词（仅本机）")).toHaveValue(data.prompt);
+    expect(screen.getByLabelText("系统提示词（可选，仅本机）")).toHaveValue(data.prompt);
   });
 
   it("新建时进阶默认收起；编辑且进阶字段非空时默认展开", () => {
     const create = render(<AgentFormModal open mode="create" onClose={() => {}} />);
-    expect(screen.queryByLabelText("系统提示词（仅本机）")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("系统提示词（可选，仅本机）")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "进阶设置（可选）" })).toHaveAttribute(
       "aria-expanded",
       "false",
@@ -220,7 +220,7 @@ describe("AgentFormModal", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByLabelText("系统提示词（仅本机）")).toHaveValue("旧提示");
+    expect(screen.getByLabelText("系统提示词（可选，仅本机）")).toHaveValue("旧提示");
     expect(screen.getByRole("button", { name: "收起进阶设置" })).toHaveAttribute(
       "aria-expanded",
       "true",
@@ -237,7 +237,7 @@ describe("AgentFormModal", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.queryByLabelText("系统提示词（仅本机）")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("系统提示词（可选，仅本机）")).not.toBeInTheDocument();
   });
 
   it("提交 payload 与旧版一致：只有 name/description/avatar 三个字段", async () => {

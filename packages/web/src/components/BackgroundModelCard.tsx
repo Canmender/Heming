@@ -1,5 +1,4 @@
 import { useLlmStore } from "../store/llm.js";
-import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 后台任务模型（d.125）：归档、摘要、议程提取这类后台任务用哪个模型。
@@ -23,16 +22,6 @@ export function BackgroundModelCard() {
     <section className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="text-ui-sm font-medium text-muted">后台任务模型</div>
-        <CardSummary
-          items={
-            backgroundModel
-              ? [
-                  `已选 ${models.find((m) => m.id === backgroundModel)?.name ?? backgroundModel}`,
-                  stale ? "不在当前目录" : "不参与聊天",
-                ]
-              : ["未设置", "插件不自动调用模型"]
-          }
-        />
       </div>
       <div className="mt-1 ui-caption">
         归档、摘要、议程提取等后台任务专用；不参与聊天，挑了便宜的就够

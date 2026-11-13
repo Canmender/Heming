@@ -679,3 +679,62 @@ desktop `node --test` 全过。全程无新增依赖、无联网。
   所以每轮都跑 `pnpm -r typecheck`，不只看定向用例。
 - **窗口宽度与信任**：本轮所有视觉结论都来自无障碍树、`viewportBox` 几何、OCR 与测试断言；
   当前会话的模型不支持读图，因此「像素级对比」由 teammate 显式标注为未做，没有把推断写成实测。
+
+## 23 · 第 22 轮：删辅助说明，让布局自己表达（`d.140.3.76.11`）
+
+用户指令：「避免不必要的辅助标签和说明，让优秀的布局自身发挥作用」。与第 21 轮「补刻度、补三态」相反，
+这一轮只做减法：不减功能，只删「说了等于没说」的文字，把原先靠整句描述的状态交给控件、数值与网格。
+
+### 23.1 判定规则（`.tmp/uiux3/rules.md`，未入库）
+
+- 状态进控件不进句子；同一信息只出现一次；结构性信息用「标签—值」两列或网格。
+- 删：复述标题的副标题/caption、自解释控件旁的解释、与 placeholder 重复的 hint、「在这里可以…」式引导、
+  欢迎式空态 desc、缓存式「当前值摘要」。
+- 留：后果与不可逆、安全与数据边界、格式与范围、环境限制、错误原因 + 重试、`role=alert/status` 可见文本、
+  表单可见 label、废弃入口说明。
+- 呈现替代：`<dl class="grid grid-cols-[auto_minmax(0,1fr)]">`、右对齐 `ui-numeric`、空态 = 标题 + 一个行动。
+
+### 23.2 四路切分
+
+| 线 | 负责 | 写入范围 | 交付 |
+| --- | --- | --- | --- |
+| task-5 | settings-ux | `ModelPage.tsx`、`components/ux/**`、`ModelUsageView/ModelTraceView` | 3 文件 +10/−24；ModelPage 1807→1794 |
+| task-6 | page-structure | `HomePage.tsx`、`components/home/**`、`App.tsx`、`NavRail.tsx`、`ConversationRail.tsx` | 12 处删除；4 个测试文件加断言（代码门禁由 Lead 代跑） |
+| task-7 | interaction-a11y | `MemoryPage.tsx`、`components/knowledge/**`、`Plugins/Skills/Team/TeamBoard` | 6 源文件 + 5 测试；220 例过 |
+| task-8 | copy-sweep（新） | `ChatPage/AssistantPage/InterfacesPage/RegistryPage`、`collaboration/**`、`AgentFormPanel`、插件弹窗 | 8 文件 +16/−42；148/14/128 例过 |
+
+Lead 自留：`components/settings/**`（含删 `CardSummary.tsx`）、`SettingsPage.tsx`、其余设置卡、`ux/OnboardingCard.tsx`、
+`ui/EmptyState|ErrorState|AsyncBoundary`、`layout/PageShell.tsx`、`index.css`。
+
+### 23.3 量化（52 文件，+187/−316）
+
+| 项 | 前 | 后 |
+| --- | --- | --- |
+| `ui-caption` 出现次数 | 392 | 372 |
+| `EmptyState desc` | 32 | 22 |
+| `PageShell subtitle` | 14 | 13 |
+| `settings/CardSummary.tsx` | 24 行 / 9 消费方 | 删除 |
+| `OnboardingCard` 副标题整句 | 1 句 | 标题行 `0/3` 徽标（`aria-label=「已完成 N/3 步」`） |
+
+`KeyStorageCard` 作为参考实现改成「状态句 + 标签-值网格」：原来「当前值摘要 + 状态句 + 两条 caption」四行说同一件事，
+现在一行状态 + 两行「覆盖 / 模型 Key」，警告（明文、无法解密、旧密文备份）仍按条列出。
+
+### 23.4 刻意保留的说明
+
+错误原因与「重试」、`role=alert/status` 可见文本、服务与文件目录状态、HITL 后果句、工具默认关闭与每次确认、
+远程服务不落代码、Key 格式与 URL `/v1`、Coding Plan 余额后果、无桌面桥限制、表单可见 label、废弃入口单句说明。
+团队看板统计行的「只含成员主动共享的任务 / 日程摘要」是全页唯一数据来源说明，按 rules 必留类原样保留（净改动 0）。
+
+### 23.5 门禁
+
+`pnpm --filter @heming/web typecheck` exit 0；`pnpm --filter @heming/web test` **304 文件 / 4437 例全过**；
+定向 15 文件 228 例、`ux.test.tsx` 16 例、任务线合计 220 + 148 + 14 + 128 例。无新增依赖、无联网。
+
+### 23.6 教训
+
+- **「状态摘要」是最容易被当成好设计的坏设计**：它让「确认当前值」变得容易，却制造了第二份真相——卡片内控件
+  才是第一手信息，摘要迟早与控件不一致。设置卡改用标签-值网格后，同一屏少了一行灰字，信息并没有少。
+- **测试会钉住文案，删句子要同步更新断言**：本轮有 4 处断言旧文案（`0/3 已完成` 两句、密钥覆盖范围一句、
+  引导卡进度一句），都是「改产品 → 改测试」而不是弱化断言。
+- **进度这类信息适合进布局**：`0/3` 放标题行右侧 + 三步圆圈，比「三步跑通第一次任务（0/3 已完成）」少 14 个字，
+  且读屏仍能通过 `aria-label` 听到进度。

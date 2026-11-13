@@ -302,8 +302,8 @@ export function AgentFormPanel({
           </div>
           <p className="mt-1.5 ui-caption">
             {activeTemplate
-              ? `已套用「${activeTemplate.label}」：只填了空字段，已输入的内容不会被覆盖。`
-              : "点一个预设，自动填好名称、描述和提示词；也可以直接往下填。"}
+              ? `已套用「${activeTemplate.label}」：只填空字段，不覆盖已输入的内容。`
+              : "点一个预设，自动填好名称、描述与提示词。"}
           </p>
         </div>
       )}
@@ -316,7 +316,7 @@ export function AgentFormPanel({
           role="status"
           className="mb-2 rounded-lg border border-line-soft bg-panel px-2.5 py-1.5 ui-caption"
         >
-          内置智能体：名称、头像和简介由应用维护，不能改；下方的「模型」和「系统提示词」只存本机，可以改。
+          内置智能体的名称、头像与简介由应用维护；模型与系统提示词只存本机。
         </p>
       )}
 
@@ -400,29 +400,24 @@ export function AgentFormPanel({
           >
             {advancedOpen ? "收起进阶设置" : "进阶设置（可选）"}
           </Button>
-          <span className="ui-caption">系统提示词、模型；不填也能直接用</span>
         </div>
       </div>
 
       {advancedOpen && (
         <div id={advancedId}>
           <label className={`${labelCls} mb-3`}>
-            系统提示词（仅本机）
+            系统提示词（可选，仅本机）
             <textarea
               className={`${inputCls} min-h-[72px] resize-y`}
               value={promptText}
               maxLength={8000}
-              placeholder={
-                "例如：你是我的写作编辑，改稿时保留原意，只改病句和重复。\n不填也能用：不写就按默认助手方式回答。"
-              }
+              placeholder="例如：你是我的写作编辑，改稿时保留原意，只改病句和重复。"
               onChange={(e) => setPromptText(e.target.value)}
             />
           </label>
-          <p className="mb-3 -mt-2 ui-caption">只保存在本机，不会上传服务端。</p>
 
           <div className="mb-3">
-            <div className="ui-caption">模型（可选）</div>
-            <p className="mt-0.5 ui-caption">不绑定 = 用默认连接。</p>
+            <div className="ui-caption">模型</div>
             {profiles.length === 0 ? (
               <Button
                 type="button"

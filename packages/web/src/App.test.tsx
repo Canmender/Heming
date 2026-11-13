@@ -163,6 +163,9 @@ describe("App 认证门禁", () => {
 
     expect(await screen.findByText("登录状态已保留")).toBeInTheDocument();
     expect(screen.queryByText("登录你的账号")).not.toBeInTheDocument();
+    // d.142：断连只留「状态 + 原因 + 行动」——「需要重新登录」这类解释句已删，
+    // 否则它会和旁边的「立即重试」说同一件事。
+    expect(screen.queryByText(/网络恢复后会自动重试/)).toBeNull();
     expect(screen.getByRole("button", { name: "立即重试" })).toBeInTheDocument();
     expect(localStorage.getItem("heming.token")).toBe("keep-me");
   });

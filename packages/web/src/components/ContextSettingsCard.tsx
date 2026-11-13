@@ -7,7 +7,6 @@ import {
 import { useLlmStore } from "../store/llm.js";
 import { lookupCapability } from "../lib/modelCaps.js";
 import { Switch } from "./ui/Switch.js";
-import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 上下文预算（设计 §5）：@ 触发链路的历史 token 预算与压缩开关。
@@ -70,13 +69,6 @@ export function ContextSettingsCard() {
     <section className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="text-ui-sm font-bold text-muted">上下文预算</div>
-        <CardSummary
-          items={
-            settings.enabled
-              ? ["已开启", `${shownBudget} token`, `保留最近 ${settings.keepRecentTurns} 轮`]
-              : ["未启用", "发送完整历史"]
-          }
-        />
       </div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行

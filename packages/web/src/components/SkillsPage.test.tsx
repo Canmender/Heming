@@ -508,7 +508,7 @@ describe("SkillsPage 新建技能（简化）", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     expect(
-      screen.getByText(/需要「启用」并「分配给对应智能体」/),
+      screen.getByText(/启用并分配给智能体后，技能才会在对话里生效/),
     ).toBeInTheDocument();
   });
 });

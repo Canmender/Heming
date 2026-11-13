@@ -159,8 +159,8 @@ describe("知识库页 · 三栏装配", () => {
     expect(screen.getByRole("heading", { level: 1, name: "知识库" })).toBeInTheDocument();
     // 只允许一个「知识库」一级标题（文档正文里的 h1 不算页头，按名字区分）
     expect(screen.getAllByRole("heading", { level: 1, name: "知识库" })).toHaveLength(1);
-    // 副标题是 PageShell 的统一排版槽，自拼页头的<span class="ui-section-title">不应残留
-    expect(screen.getByText(/双链、标签、反链、搜索与图谱都在本机计算/)).toBeInTheDocument();
+    // 副标题是 PageShell 的统一排版槽，只保留「文件不会上传」这类安全边界，复述标题的已删
+    expect(screen.getByText(/本地 Markdown 库，文件不会上传/)).toBeInTheDocument();
   });
 
   it("左/中/右三栏都在，标签页显示已打开文件", async () => {

@@ -601,7 +601,7 @@ function KnowledgePageShell({
         bodyClassName="items-center justify-center gap-3 px-6 text-center"
       >
         <p className="ui-body max-w-[440px] text-muted">
-          打开一个本地目录作为知识库：笔记就是普通的 .md 文件，双链、标签、反链、搜索与图谱都在本机计算。
+          笔记就是普通的 .md 文件。
           <span className="mt-1 block font-medium text-ink">文件留在你的设备上，不会上传。</span>
         </p>
         <div className="mt-1 flex items-center gap-2">
@@ -637,7 +637,7 @@ function KnowledgePageShell({
   return (
     <PageShell
       title="知识库"
-      subtitle="本地 Markdown 库：双链、标签、反链、搜索与图谱都在本机计算，文件不会上传。"
+      subtitle="本地 Markdown 库，文件不会上传。"
       /* 三栏工作台（目录 / 编辑器 / 反链）保留通栏：960 会把编辑区压成一条缝，
          而空库态仍用 readable（一句话居中时太宽反而难读）。 */
       width="full"
@@ -1068,9 +1068,6 @@ function KnowledgePageShell({
             </>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <p className="ui-body text-muted">
-                从左侧文件树打开一篇笔记；也可以直接新建。
-              </p>
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
                 写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
@@ -1118,9 +1115,7 @@ function KnowledgePageShell({
                 }
               />
             ) : (
-              <div className="p-3 text-ui-sm leading-5 text-muted">
-                打开一篇笔记后，这里会显示它的反链、出链、未解析链接、大纲与属性。
-              </div>
+              <div className="p-3 ui-caption">反链 · 出链 · 未解析链接 · 大纲 · 属性</div>
             )}
           </aside>
         ) : null}

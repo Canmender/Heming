@@ -90,6 +90,31 @@ describe("NeedsAttention", () => {
     expect(useUiStore.getState().taskFocusId).toBe("t1");
   });
 
+  it("合并行与表头不再附说明句（d.142：标题 + 按钮自解释）", () => {
+    useTaskStore.setState({
+      tasks: [0, 1, 2].map((i) => ({
+        id: `t${i}`,
+        conversationId: "c1",
+        agentId: "system-assistant",
+        agentName: "和小鸣",
+        title: `任务 ${i}`,
+        prompt: "跑",
+        status: "running",
+        createdAt: Date.now() - 60_000,
+        updatedAt: Date.now() - 60_000,
+        steps: [],
+      })),
+    } as never);
+
+    render(<NeedsAttention />);
+    const card = screen.getByRole("region", { name: "需要你处理" });
+    expect(within(card).getByText("还有 1 个任务在跑")).toBeInTheDocument();
+    // 位置说明已删：「查看任务」这个动作本身指向团队页看板。
+    expect(within(card).queryByText(/在团队页看板/)).toBeNull();
+    // 行为说明已删：列表会自己清空，不需要用一句话告诉她。
+    expect(within(card).queryByText(/处理完会自动消失/)).toBeNull();
+  });
+
   it("未读通知：任务收尾可直达任务；approval 类不重复列（HITL 已覆盖）", () => {
     useNotificationStore.getState().push({
       kind: "task",

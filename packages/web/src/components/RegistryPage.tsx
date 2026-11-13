@@ -151,7 +151,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
   return (
     <PageShell
       title="发现 MCP 服务"
-      subtitle="插件源。远程服务不落代码，本地包用本机的 Node / uv 运行；装好后工具默认关闭。"
+      subtitle="远程服务不落代码，本地包在本机运行；装好后工具默认关闭。"
       width="wide"
       actions={
         <>

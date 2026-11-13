@@ -9,7 +9,6 @@ import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
-import { CardSummary } from "./settings/CardSummary.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
@@ -460,9 +459,6 @@ function ProfileSection() {
     <section className="max-w-full ui-card p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="ui-section-title">个人资料</div>
-        <CardSummary
-          items={[`昵称 ${displayName.trim() || "未填写"}`, avatar ? "自定义头像" : "默认头像"]}
-        />
       </div>
 
       <div className="mt-3 flex items-center gap-4">
@@ -660,9 +656,6 @@ function NavModeSection() {
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <div className="ui-section-title">导航栏</div>
-          <CardSummary
-            items={[NAV_MODE_OPTIONS.find((m) => m.id === navMode)?.label ?? "固定常显"]}
-          />
         </div>
         <Button
           type="button"

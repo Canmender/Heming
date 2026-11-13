@@ -163,9 +163,7 @@ export function ModelUsageView({
             <SparkIcon width={20} height={20} />
           </span>
           <div className="text-ui-base font-bold">这个时间段还没有调用</div>
-          <p className="mx-auto mt-1 max-w-[420px] ui-caption">
-            智能体通过模型服务发出的请求会自动记账；发一次对话再回来看。
-          </p>
+          <p className="mx-auto mt-1 max-w-[420px] ui-caption">先发一次对话，这里就有数据了。</p>
         </div>
       ) : (
         summary && (

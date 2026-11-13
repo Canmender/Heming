@@ -1,7 +1,6 @@
 import type { SVGProps } from "react";
 import { PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX, secureStorageStatus } from "../lib/secureStorage.js";
 import { MSG_CACHE_LRU_KEY } from "../lib/e2eSession.js";
-import { CardSummary } from "./settings/CardSummary.js";
 
 /** 三个 d.36 受保护键的中文名：状态提示要能点名，不能只说「部分密钥」。 */
 const KEY_LABELS: Record<string, string> = {
@@ -107,34 +106,22 @@ export function KeyStorageCard() {
     mainLine = `密钥与本地数据已用系统安全存储加密（${platformStorageName()}）`;
   }
 
-  /** 标题旁的当前状态摘要：一句话说清「现在安不安全」，正文再展开点名。 */
-  const summary = !status.desktop
-    ? ["浏览器明文"]
-    : !status.available
-      ? ["明文", "安全存储不可用"]
-      : plaintext.length > 0
-        ? ["有明文", `${plaintext.length} 项`]
-        : ["本机加密"];
-
   return (
     <section
       aria-label="密钥存储"
       className="ui-card mt-3 p-4"
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
-          <LockIcon className="text-muted" />
-          密钥存储
-        </div>
-        <CardSummary items={summary} />
+      <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
+        <LockIcon className="text-muted" />
+        密钥存储
       </div>
       <div className={`mt-1 text-ui-xs ${tone}`}>{mainLine}</div>
-      <div className="mt-1 ui-caption">
-        覆盖模型 Key、MCP 请求头、设备身份私钥、会话加密链与消息缓存（有桌面安全存储时加密；浏览器端为明文）。
-      </div>
-      <div className="mt-1 ui-caption">
-        模型服务商的 Key 在「模型 → 来源」里添加（选服务商，只填一个 Key）；本卡只说明它们存在哪。
-      </div>
+      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-xs">
+        <dt className="text-muted">覆盖</dt>
+        <dd>模型 Key、MCP 请求头、设备身份私钥、会话加密链与消息缓存</dd>
+        <dt className="text-muted">模型 Key</dt>
+        <dd>在「模型 → 来源」添加；本卡只说明存放位置</dd>
+      </dl>
       {undecryptable.length > 0 && (
         <div className="mt-1 text-ui-xs text-amber-700">
           以下内容无法在本机解密（密文仍在，可能来自其他设备或系统账户）：

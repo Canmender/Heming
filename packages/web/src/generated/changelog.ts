@@ -12,6 +12,36 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.76.11",
+    "date": "2026-11-13",
+    "title": "UI/UX 第 22 轮：删掉复述型说明，让布局自己说话",
+    "bullets": [
+      "三条硬规则：状态进控件不进句子；同一信息只出现一次；结构性信息用「标签—值」两列或网格。",
+      "删：复述标题的副标题/caption、自解释控件旁的解释、与 placeholder 重复的 hint、「在这里可以…」引导、欢迎式空态 desc、缓存式「当前值摘要」。",
+      "留：后果与不可逆、安全与数据边界、格式与范围、环境限制、错误原因+重试、`role=alert/status` 可见文本、表单可见 label、废弃入口说明。",
+      "`ui-caption` 392 → 372；`EmptyState desc` 32 → 22；`PageShell subtitle` 14 → 13。",
+      "删除 `packages/web/src/components/settings/CardSummary.tsx`（24 行、9 个消费方）：标题旁那行 12px 灰字是对同一状态的第二次叙述，卡片内的开关/单选/数值本来就已经是第一手信息。`KeyStorageCard` 改为参考实现",
+      "`OnboardingCard`：删「三步跑通第一次任务（x/3 已完成）。」整句，进度收成标题行右侧的 `0/3`（`aria-label=「已完成 0/3 步」`）——三个步骤圆圈与「已完成」徽标本来就表达同一件事。",
+      "删除处不丢信息：`FileEditCard` 的长解释压成「默认没有任何可写根；添加后 `file_read` 才出现，至少一条可写根才出现 `file_patch`」；`AssistantPage` 副标题压成「模型 Key、工具与记忆只留本机；消息不进团队动向。」",
+      "模型与设置：`ModelPage.tsx` 1807→1794（空态长说明、三个 Stat hint、「本页只负责添加来源」段、来源 tab三步引导、路由分组说明等 8 处）；`ModelUsageView.tsx` 空态压到 16 字；`ChatEmptyState.tsx` 只留行为承诺。",
+      "主页与壳层：`HomePage.tsx` 删副标题、四张 Stat 的 6 条解释 hint（保留「含 N 条未读通知」「团队数据加载失败」这两条界面推不出的信息）；`home/NeedsAttention.tsx` 删表头说明、合并行 `detail` 改可选；`home/RecentConversations.tsx`",
+      "记忆/知识库/插件/技能/团队：`MemoryPage.tsx` 删复述副标题与引导句（保留「可被 Obsidian 打开」「只存本机、不参与导出」）；`PluginsPage.tsx` 删与开关/来源徽标重复的统计说明块；`SkillsPage.tsx`、`TeamPage.tsx` 副标题压缩；",
+      "其余页面：`ChatPage.tsx` 两处死指引「请先在设置页配置」→「请先到「模型」页绑定」；`InterfacesPage.tsx` 删内置说明、页脚压成「工具在本机执行，不经过云端。」；`RegistryPage.tsx` 删泛称；`assistant/AgentFormPanel.tsx` 删折叠行说明与"
+    ],
+    "paragraphs": [
+      "用户指令：「避免不必要的辅助标签和说明，让优秀的布局自身发挥作用」。这一轮不减功能，只删「说了等于没说」的话，并把原先靠整句叙述的状态改由控件、数值、网格表达。四路并发（设置与模型、主页壳层、记忆与知识库、其余页面），Lead 负责设置区、基元与最终门禁。",
+      "判定规则（`.tmp/uiux3/rules.md`，未入库）",
+      "量化（52 个文件，+187/−316）「状态句 + 标签-值网格」（覆盖范围、模型 Key 去哪加各占一行）。",
+      "各页删减空态去欢迎句；`home/TeamActivityCard.tsx` desc 压成一句隐私边界；`home/UsageCard.tsx` 删折叠尾句与两处空态解释；`App.tsx` 重连面板删与「立即重试」重复的第三段；`assistant/ConversationRail.tsx` 页脚散文压成「本机运行 · Key 与记忆不出设备」。`knowledge/KnowledgePage.tsx` 副标题只留「文件不会上传」，右栏说明改标签行；`knowledge/SearchPanel.tsx`、`knowledge/TagPanel.tsx` 空态改「标题 + 格式指引」。重复 hint，顺手修掉 placeholder 里字面 `\\n` 的显示缺陷；`collaboration/CollabView.tsx` 协作准备压成一句、计数改「可用 N / 名册 M」；`plugins/PluginDetailDialog.tsx` 只读说明压成「本页只读，不联网」。",
+      "刻意保留",
+      "错误原因与「重试」、`role=alert/status` 可见文本、服务与文件目录状态、HITL 后果句、隐私与安全边界（工具默认关闭、每次确认、远程服务不落代码）、Key 格式与 URL `/v1`、Coding Plan 余额后果、无桌面桥限制、表单可见 label、废弃入口说明。团队看板统计行的「只含成员主动共享的任务 / 日程摘要」是全页唯一的数据来源说明，按 rules 属必留类，原样保留。",
+      "可访问性",
+      "被删文案均不承载读屏名：四页范围内 `aria-describedby` 命中 0，无悬空引用；tablist/`aria-selected`/roving tabindex/tabpanel 契约、失败态 `role=alert` + 「重试」、表单 label 均未动。删掉的进度句改成 `aria-label=「已完成 N/3 步」`，读屏仍能听到进度。",
+      "门禁",
+      "`pnpm --filter @heming/web typecheck` exit 0；`pnpm --filter @heming/web test` **304 文件 / 4437 例全过**；定向：Memory/Plugins/Skills/Team/TeamBoard/knowledge 10 文件 220 例、设置区与首页相关 15 文件 228 例、`ux.test.tsx` 16 例、copy-sweep 8+1+1 文件 148/14/128 例。"
+    ]
+  },
+  {
     "version": "d.140.3.75.11",
     "date": "2026-11-13",
     "title": "UI/UX 第 21 轮：刻度落地、暗色桥接层清零、主页与设置简化",

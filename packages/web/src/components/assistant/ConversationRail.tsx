@@ -304,7 +304,6 @@ export function ConversationRail({
         <EmptyState
           className="px-2 py-6"
           title="还没有对话"
-          desc="在右侧选一个智能体，开始第一段对话。"
           actions={
             <Button
               type="button"
@@ -321,7 +320,6 @@ export function ConversationRail({
       <EmptyState
         className="px-2 py-6"
         title="没有匹配的对话"
-        desc="换个关键词试试，或清空搜索。"
         actions={
           <Button type="button" size="sm" variant="ghost" onClick={closeSearch}>
             清空搜索
@@ -497,8 +495,11 @@ export function ConversationRail({
           {error}
         </p>
       )}
-      <p className="ui-caption border-t border-line-soft px-3 py-2 leading-4">
-        智能体在本机运行：模型 Key、工具与记忆不出设备；消息不进团队动向。
+      {/* d.142：原来是一句「智能体在本机运行：模型 Key、工具与记忆不出设备；
+          消息不进团队动向。」的灰字散文。隐私边界必留，但压成一条状态行——
+          前半句是环境复述（智能体页页头已有「本机运行」），后半句是决策相关的边界。 */}
+      <p className="ui-caption border-t border-line-soft px-3 py-2">
+        本机运行 · Key 与记忆不出设备
       </p>
     </aside>
   );

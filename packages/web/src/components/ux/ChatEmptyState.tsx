@@ -24,7 +24,7 @@ export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
         <EmptyState align="start" title="还没有消息" desc="发送第一条消息，开始这段对话。" />
 
         <div className="mt-3">
-          <p className="ui-caption">不知道说什么？点一条填进输入框，改完再发送：</p>
+          <p className="ui-caption">点一条填进输入框，改完再发送。</p>
           <ul className="mt-1.5 flex flex-col gap-1.5" aria-label="对话示例">
             {examples.map((example) => (
               <li key={example.id}>

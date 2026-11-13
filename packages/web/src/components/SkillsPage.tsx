@@ -1106,7 +1106,7 @@ export function SkillsView({
           </section>
 
           <p className={`mt-2 ${hintCls}`}>
-            技能池 = 所有可用技能的集合。要用于对话，需要「启用」并「分配给对应智能体」。
+            启用并分配给智能体后，技能才会在对话里生效。
           </p>
         </>
       )}

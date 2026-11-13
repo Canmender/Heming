@@ -2376,10 +2376,10 @@ export function ChatPage({
     if (!hasSubtle()) {
       return { ok: false, error: NO_E2E_NOTICE };
     }
-    // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去设置页配置（草稿/chip 保留）
+    // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去「模型」页绑定（草稿/chip 保留）
     const unbound = mentions.find((m) => !resolveProfile(m.agentId));
     if (unbound) {
-      const error = `${unbound.name} 未绑定 LLM 连接，请先在设置页配置`;
+      const error = `${unbound.name} 未绑定 LLM 连接，请先到「模型」页绑定`;
       return { ok: false, error };
     }
     if (!wsHandleRef.current) {
@@ -2544,7 +2544,7 @@ export function ChatPage({
     if (draftText) {
       const unbound = effectiveMentions.find((m) => !resolveProfile(m.agentId));
       if (unbound) {
-        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`, "error");
+        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先到「模型」页绑定`, "error");
         return;
       }
     }

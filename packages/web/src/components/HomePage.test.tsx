@@ -516,7 +516,8 @@ describe("HomePage", () => {
     expect(within(card).getByText("配置模型连接")).toBeInTheDocument();
     expect(within(card).getByText("和智能体对话")).toBeInTheDocument();
     expect(within(card).getByText("建第一个任务")).toBeInTheDocument();
-    expect(within(card).getByText(/0\/3\s*已完成/)).toBeInTheDocument();
+    // 进度用「已完成 0/3 步」的可访问名表达，标题行不再写整句说明
+    expect(within(card).getByLabelText("已完成 0/3 步")).toHaveTextContent("0/3");
 
     fireEvent.click(within(card).getByRole("button", { name: "去配置模型" }));
     expect(useUiStore.getState().page).toBe("model");
@@ -554,7 +555,7 @@ describe("HomePage", () => {
     await act(async () => {});
     const card = screen.getByRole("region", { name: "开始使用" });
     // 2/3 完成（会话 + 任务），只有「配置模型连接」还没做
-    expect(within(card).getByText(/2\/3\s*已完成/)).toBeInTheDocument();
+    expect(within(card).getByLabelText("已完成 2/3 步")).toHaveTextContent("2/3");
     expect(within(card).getByRole("button", { name: "去配置模型" })).toBeEnabled();
   });
 
@@ -654,7 +655,26 @@ describe("HomePage", () => {
     expect(useUiStore.getState().page).toBe("team");
   });
 
-  /* ——— task-4 勘察 P1：首载失败不再静默（空列表 ≠ 记录丢了） ——— */
+  /* ——— d.142 删复述型说明：布局与数字自己说 ——— */
+
+it("页头与统计卡不再有复述型说明句", async () => {
+  mockTeam();
+  render(<HomePage />);
+  await act(async () => {});
+
+  // 页头 = 标题 + 日期 + 两个动作，不再有「要处理什么、上次聊到哪、手上有什么在跑。」的副标题
+  expect(screen.queryByText(/要处理什么/)).toBeNull();
+
+  // 统计卡：数字自解释（0 就是没有），不再写「没有需要你处理的事 / 点开直接处理」这类复述
+  const stats = screen.getByTestId("home-stats");
+  expect(
+    within(stats).queryByText(
+      /没有需要你处理的事|点开直接处理|没有在跑的任务|点开查看进度|本机运行|成员共享的任务与日程/,
+    ),
+  ).toBeNull();
+});
+
+/* ——— task-4 勘察 P1：首载失败不再静默（空列表 ≠ 记录丢了） ——— */
 
   it("首载失败：首屏给出失败原因与「重试」，重试重新拉工作区", async () => {
     const loadWorkspace = vi.fn(async () => undefined);

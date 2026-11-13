@@ -1369,10 +1369,6 @@ export function MemoryPage({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="ui-section-title">数据库 · 长期记忆</div>
-            <div className={`mt-1 ${hintCls}`}>
-              这是<strong className="font-medium text-[var(--body)]">所有智能体共用</strong>的长期记忆；
-              情景记忆按智能体分开，记的是每次对话的过程。
-            </div>
           </div>
           <div className="flex flex-wrap items-start gap-5">
             <div>
@@ -1576,11 +1572,7 @@ export function MemoryPage({
               compact
               className="mt-2"
               title={query ? "无匹配条目" : "还没有条目"}
-              desc={
-                query
-                  ? "换个关键词，或清空搜索框看全部条目。"
-                  : "对话里值得长期记住的事实会自动写进来；也可以在上方手动新增一条。"
-              }
+              desc={query ? "换个关键词，或清空搜索框看全部条目。" : undefined}
             />
           ) : (
             semanticShown.map((entry) => (
@@ -1713,11 +1705,7 @@ export function MemoryPage({
               compact
               className="mt-2"
               title={query ? "无匹配条目" : "还没有条目"}
-              desc={
-                query
-                  ? "换个关键词，或清空搜索框看全部条目。"
-                  : "每组对话收尾时会自动留下摘要（不含原文）；先和智能体聊一轮就会出现在这里。"
-              }
+              desc={query ? "换个关键词，或清空搜索框看全部条目。" : undefined}
             />
           ) : (
             episodicShown.map((entry) => (
@@ -1840,8 +1828,7 @@ export function MemoryPage({
           <div className="min-w-0">
             <div className="ui-section-title">召回记录</div>
             <div className={`mt-1 ${hintCls}`}>
-              本机最近 {RECALL_LOG_MAX} 次召回的记录：注入了哪几条、哪些被预算截掉、回答可能用到了哪条。
-              只存本机，不参与导出；被引用多的记忆会略微加权。
+              只存本机最近 {RECALL_LOG_MAX} 次，不参与导出。
             </div>
           </div>
           {runs.length > 0 && (
@@ -2147,9 +2134,6 @@ export function MemoryPage({
           {reviewBusy ? "复盘中…" : "立即复盘一次"}
         </Button>
       </div>
-      <div className={`mt-1 ${hintCls}`}>
-        任务结束后自动复盘：值得记的事实写进记忆，可复用流程存成技能；失败不影响对话。
-      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="ui-caption">频率</span>
@@ -2379,8 +2363,7 @@ export function MemoryPage({
           <div className="min-w-0">
             <div className="ui-section-title">知识库</div>
             <div className={`mt-1 ${hintCls}`}>
-              多库、双链反链、标签、搜索、图谱与即时预览都在独立的知识库页。库文件仍是普通
-              markdown，可以继续用 Obsidian 打开同一个目录。
+              库文件仍是普通 markdown，可以继续用 Obsidian 打开同一个目录。
             </div>
             <div className={`mt-2 ${hintCls}`}>
               已纳入记忆 <strong>{vaultEntries.length}</strong> 篇 ·{" "}
@@ -2444,7 +2427,6 @@ export function MemoryPage({
     <PageShell
       scroll={false}
       title="记忆"
-      subtitle="智能体的记忆开关、共享记忆库和你的个人知识库。"
       actions={
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
           <span>当前</span>

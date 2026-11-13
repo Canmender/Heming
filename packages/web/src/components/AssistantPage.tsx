@@ -279,16 +279,10 @@ export function AssistantPage() {
             {/* 对话顶部状态条：当前智能体 / 模型绑定 / 编辑与切换。
                 ChatPage 自己的标题栏负责会话内操作，这里只补全局上下文。 */}
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-soft px-4 ui-caption">
-              <span className="ui-body-sm font-medium">对话</span>
-              <span aria-hidden>·</span>
               <span className="min-w-0 truncate">与 {activeConv.agent.name} 的会话</span>
               <span
                 className={`ui-chip ${activeAgentBound ? "" : "text-[var(--danger)]"}`}
-                title={
-                  activeAgentBound
-                    ? "该智能体已绑定模型"
-                    : "该智能体还没有绑定模型，发送会失败"
-                }
+                title={activeAgentBound ? undefined : "还没有绑定模型，发送会失败"}
               >
                 {activeAgentBound ? "模型已绑定" : "未绑定模型"}
               </span>
@@ -312,7 +306,6 @@ export function AssistantPage() {
                   切换智能体
                 </button>
               </span>
-              <span className="hidden sm:inline">本机运行 · 不进团队动向</span>
             </div>
             <div className="flex min-h-0 flex-1 flex-col">
               {/* embedded：隐藏 ChatPage 自己的「返回工作区」按钮（返回会切页并卸载会话）。 */}
@@ -370,7 +363,7 @@ export function AssistantPage() {
   return (
     <PageShell
       title="智能体"
-      subtitle="左边是按智能体分组的对话；也可以让多个智能体分工协作，或在名册里管理智能体。模型 Key、工具和记忆都留在本机。"
+      subtitle="模型 Key、工具与记忆只留本机；消息不进团队动向。"
       scroll={false}
       headerExtra={
         <div
@@ -430,7 +423,7 @@ export function AssistantPage() {
                 <Button
                   type="button"
                   onClick={() => setDeleteTarget(null)}
-                  size="md" variant="ghost" className="ui-caption"
+                  size="md" variant="ghost"
                 >
                   取消
                 </Button>

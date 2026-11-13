@@ -36,7 +36,7 @@ describe("搜索面板", () => {
   it("空查询：语法引导 + 本地数据说明", () => {
     render(<SearchPanel query="" onQueryChange={vi.fn()} hits={[]} onOpenHit={vi.fn()} />);
     expect(screen.getByLabelText("搜索知识库")).toBeInTheDocument();
-    expect(screen.getByText(/数据全部在本机/)).toBeInTheDocument();
+    expect(screen.getByText(/搜索全部在本机完成/)).toBeInTheDocument();
   });
 
   it("输入回调；清空按钮走 onClear", () => {

@@ -232,14 +232,15 @@ describe("MemoryPage 三分区结构", () => {
   });
 
   /** d.62-B 布局迁移守卫：页头统一走 PageShell。 */
-  it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，副标题用 ui-page-sub", () => {
+  it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，且不再有复述式副标题", () => {
     mockApi({ agents: AGENTS });
     renderPage();
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("记忆");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("智能体的记忆开关");
+    // uiux3：副标题原为「智能体的记忆开关、共享记忆库和你的个人知识库」，复述页签，已删。
+    expect(document.querySelector(".ui-page-sub")).toBeNull();
   });
 });
 

@@ -65,9 +65,9 @@ function writeOpenIds(ids: OnboardingStepId[]): void {
 }
 
 export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) {
-  const doneCount = steps.filter((step) => step.done).length;
   // 下一个该做的步骤：三张卡不再同等对待——已完成的是回执，下一步是唯一的主对象。
   const nextIndex = steps.findIndex((step) => !step.done);
+  const doneCount = steps.filter((step) => step.done).length;
   const [openIds, setOpenIds] = useState<OnboardingStepId[]>(readOpenIds);
 
   const toggleOpen = (id: OnboardingStepId) => {
@@ -85,10 +85,15 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-ui-base font-semibold">开始使用</h2>
-          <p className="mt-0.5 text-ui-sm leading-5 text-muted">
-            三步跑通第一次任务（{doneCount}/{steps.length} 已完成）。
-          </p>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-ui-base font-semibold">开始使用</h2>
+            <span
+              className="text-ui-xs tabular-nums text-muted"
+              aria-label={`已完成 ${doneCount}/${steps.length} 步`}
+            >
+              {doneCount}/{steps.length}
+            </span>
+          </div>
         </div>
         <button
           type="button"

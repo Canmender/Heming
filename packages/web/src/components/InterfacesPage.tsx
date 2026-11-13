@@ -381,7 +381,6 @@ export function InterfacesView({
           <div className="flex flex-wrap items-center gap-2">
             <span className="ui-section-title">预置服务</span>
             <span className="ui-chip">未接入</span>
-            <span className="ml-auto text-ui-xs text-muted">随应用内置，无需填地址</span>
           </div>
           <p className="mt-1 text-ui-xs text-muted">
             工具默认关闭；启用后每次调用仍需你确认。
@@ -549,7 +548,7 @@ export function InterfacesView({
 
       {servers.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-line bg-[var(--surface)] p-8 text-center text-ui-md text-muted">
-          还没有 MCP 服务。点右上角「添加 MCP 服务」，填入一个 Streamable HTTP 地址即可接工具。
+          还没有 MCP 服务
         </div>
       ) : (
         <div className="mt-4 flex flex-col gap-3">
@@ -796,7 +795,7 @@ export function InterfacesView({
 
       {enabledCount > 0 && <p className="mt-4 text-ui-xs text-muted">已授权 {enabledCount} 个工具给模型调用。</p>}
       <p className="mt-2 text-ui-xs text-muted">
-        工具调用在本地执行：模型返回调用意图 → 本机调用 MCP 服务 → 结果回灌模型，全程不经过云端。
+        工具在本机执行，不经过云端。
       </p>
 
       {removeTarget && (
@@ -846,7 +845,7 @@ export function InterfacesPage({ registry, plugins }: InterfacesPageProps = {}) 
   return (
     <PageShell
       title="接口区"
-      subtitle={`MCP 服务与工具：接口区已并入插件区的「MCP」视图；此独立入口仅作旧链接兼容（协议 ${MCP_PROTOCOL_VERSION}）。`}
+      subtitle={`MCP 服务与工具已并入插件区的「MCP」视图；此独立入口仅作旧链接兼容（协议 ${MCP_PROTOCOL_VERSION}）。`}
       width="wide"
     >
       <InterfacesView registry={registry} plugins={plugins} />

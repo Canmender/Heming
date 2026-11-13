@@ -10,7 +10,6 @@ import { MAX_FILE_BYTES, MAX_FILES_PER_PATCH, MAX_PATCH_BYTES } from "../lib/fil
 import { isFileEditTool } from "../lib/fileEdit/ruleTargets.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { Button } from "../components/ui/Button.js";
-import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 设置区 · 文件编辑卡。
@@ -93,28 +92,14 @@ export function FileEditCard({
   // 已记住的文件编辑规则（由确认卡「记住本次选择」按目录前缀写入）
   const rules = policy.rules().filter((rule) => isFileEditTool(rule.tool));
 
-  /** 标题旁摘要：一眼看出「到底能不能改文件、改哪、越界怎么办」。 */
-  const summaryItems: (string | false)[] = [];
-  if (!fileBridge) {
-    summaryItems.push("仅桌面端");
-  } else if (config.roots.length === 0) {
-    summaryItems.push("未配置可写根");
-  } else {
-    summaryItems.push(
-      `${config.roots.length}/${MAX_FILE_ROOTS} 个可写根`,
-      `越界${config.outOfRoot === "reject" ? "直接拒绝" : "先问我"}`,
-    );
-  }
-
-  return (
+    return (
     <section aria-label="文件编辑" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="text-ui-sm font-bold text-muted">文件编辑</div>
-        <CardSummary items={summaryItems} />
       </div>
       <div className="mt-1 ui-caption">
-        允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，
-        添加之后 `file_patch` / `file_read` 才会出现在智能体的工具里：任意一条根（含只读）会让 `file_read` 可见，至少一条可写根才会让 `file_patch` 可见。
+        默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；
+        至少一条可写根才会出现 `file_patch`。
       </div>
 
       {!fileBridge ? (

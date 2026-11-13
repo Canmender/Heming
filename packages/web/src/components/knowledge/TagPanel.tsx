@@ -71,9 +71,12 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2" aria-label="标签列表">
         {all.length === 0 ? (
-          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">
-            还没有标签。正文里写 #标签，或在 frontmatter 的 tags 里加一项。
-          </p>
+          <div className="px-2 py-3">
+            <p className="ui-caption">还没有标签</p>
+            <p className="mt-0.5 text-ui-sm leading-5 text-muted">
+              正文写 #标签，或在 frontmatter 的 tags 里加一项。
+            </p>
+          </div>
         ) : visible.length === 0 ? (
           <p className="px-2 py-3 text-ui-sm leading-5 text-muted">没有匹配「{filter.trim()}」的标签。</p>
         ) : (

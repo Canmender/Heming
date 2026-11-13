@@ -53,7 +53,7 @@ export function UsageCard() {
           {/* 分隔符写在文本节点里：两个 span 之间只有 gap，读屏会把「2026-11」和
               「本月还没有…」拼成「2026-11本月还没有…」。 */}
           <span className="text-ui-xs text-muted">
-            {" · "}本月还没有调用记录；接入模型并开始对话后自动统计。
+            {" · "}本月还没有调用记录
           </span>
           <button
             type="button"
@@ -116,7 +116,6 @@ export function UsageCard() {
                     compact
                     className="px-0 py-2"
                     title="还没有调用记录"
-                    desc="接入模型、开始对话后自动累计。"
                   />
                 ) : (
                   modelRows.map(([model, n]) => (
@@ -141,7 +140,6 @@ export function UsageCard() {
                 compact
                 className="px-0 py-2"
                 title="本月还没有调用记录"
-                desc="接入模型并开始对话后，这里按天列出用量（只列到今天）。"
               />
             </div>
           ) : (

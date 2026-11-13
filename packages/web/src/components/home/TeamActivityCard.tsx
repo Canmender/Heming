@@ -107,12 +107,13 @@ export function TeamActivityCard({
             </button>
           </div>
         ) : (
-          // 空态必须给下一步：用户看到「还没有团队动向」时唯一的动作是去团队页开启共享。
+          // 空态 = 标题 + 一个行动（d.142）：前面「成员在团队页开启共享后，这里显示…摘要」
+          // 是把空态标题换个说法再说一遍，删掉；只保留用户猜不到的边界——对话正文不上传。
           <EmptyState
             compact
             align="start"
             title="还没有团队动向"
-            desc="成员在「团队」页开启共享后，这里显示任务和日程摘要；对话正文不上传。"
+            desc="只共享任务与日程，对话正文不上传。"
             action={
               <Button type="button" size="sm" variant="ghost" onClick={onOpenTeam}>
                 去团队页

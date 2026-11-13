@@ -151,7 +151,7 @@ export function SearchPanel({
           <p className="px-2 py-3 text-ui-sm leading-5 text-muted">索引还在建，稍等一下就能搜。</p>
         ) : !trimmed ? (
           <p className="px-2 py-3 text-ui-sm leading-5 text-muted">
-            输入关键词开始搜索。数据全部在本机，不会上传。
+            搜索全部在本机完成，不会上传。
           </p>
         ) : busy ? (
           <p className="px-2 py-3 text-ui-sm text-muted">正在搜索…</p>

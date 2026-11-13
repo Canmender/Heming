@@ -532,12 +532,10 @@ export function PluginsPage({
     () => publishersProp ?? new PublisherTrustStoreClass(),
     [publishersProp],
   );
-  const enabledCount = list.filter((plugin) => plugin.enabled).length;
-
   return (
     <PageShell
       title="插件"
-      subtitle="安装一次，带入技能、工具、MCP 服务和命令；全部在本机管理。"
+      subtitle="技能、工具、MCP 与命令，全部在本机管理。"
       width="wide"
     >
       <PluginStats stats={stats} />
@@ -597,15 +595,6 @@ export function PluginsPage({
             </button>
           );
         })}
-        <span className="ml-auto self-center ui-caption">
-          {tab === "plugins"
-            ? list.length === 0
-              ? "还没有安装插件 · 内置能力随应用版本更新"
-              : `已启用 ${enabledCount}/${list.length} 个插件 · 来自身份已校验的插件仓库`
-            : tab === "skills"
-              ? "和鸣自带 + 社区（论坛）快捷安装"
-              : "和鸣自带/预置 + 注册表社区安装 · 工具授权也在本页"}
-        </span>
       </div>
 
       <div
@@ -736,8 +725,7 @@ export function PluginsPage({
             />
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
-              插件可以声明技能、MCP 服务与命令，也可以带可执行界面（首方签名，装后由宿主开独立窗口）；
-              安装本身不会自动运行程序。连接与工具启用仍由你手动确认。
+              安装本身不会自动运行程序；连接与工具启用仍由你手动确认。
             </p>
 
           </>

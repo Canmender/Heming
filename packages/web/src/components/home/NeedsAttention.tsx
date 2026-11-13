@@ -21,7 +21,8 @@ import { FOCUS_RING } from "../../lib/a11y/focus.js";
 interface AttentionRow {
   key: string;
   title: string;
-  detail: string;
+  /** 只有「用户看不出后果/口径」时才写；能由标题或按钮自解释的就不写。 */
+  detail?: string;
   actionLabel: string;
   onOpen: () => void;
 }
@@ -76,7 +77,6 @@ export function NeedsAttention() {
       out.push({
         key: "task:more",
         title: `还有 ${running.length - 2} 个任务在跑`,
-        detail: "在团队页看板的「任务」里查看全部运行中的任务",
         actionLabel: "查看任务",
         // d.138：任务列表在团队页看板；原来指向 chat/tasks，对话页不认这个视图，
         // 点完整页几乎没变化（只是停在对话 Tab）。
@@ -117,7 +117,6 @@ export function NeedsAttention() {
         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--warn)" }} aria-hidden="true" />
         <span className="text-ui-sm font-bold">需要你处理</span>
         <span className="ui-micro rounded-sm border border-line px-1">{rows.length}</span>
-        <span className="ml-auto ui-caption">处理完会自动消失</span>
       </div>
       <ul>
         {rows.map((row) => (
@@ -129,7 +128,9 @@ export function NeedsAttention() {
             >
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-ui-sm font-medium">{row.title}</span>
-                <span className="block truncate ui-caption">{row.detail}</span>
+                {row.detail ? (
+                  <span className="block truncate ui-caption">{row.detail}</span>
+                ) : null}
               </span>
               <span className="shrink-0 ui-link">{row.actionLabel}</span>
             </button>

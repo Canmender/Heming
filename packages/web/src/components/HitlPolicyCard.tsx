@@ -4,12 +4,6 @@ import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Button } from "../components/ui/Button.js";
-import { CardSummary } from "./settings/CardSummary.js";
-
-/** 档位的中文短名（摘要行用；与下面 ModeRow 的 title 同源语义）。 */
-const MODE_SUMMARY: Record<HitlMode, string> = { strict: "严格", guarded: "受控", trusted: "信任" };
-/** 免问下限的短名：下拉里的长句在标题旁会挤成两行。 */
-const FLOOR_SUMMARY: Record<string, string> = { read: "只读", write: "写入" };
 
 /**
  * 免问下限的选项文案。
@@ -116,14 +110,6 @@ export function HitlPolicyCard({
     <section aria-label="工具调用确认" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="text-ui-sm font-bold text-muted">工具调用确认</div>
-        <CardSummary
-          items={[
-            MODE_SUMMARY[policy.mode] ?? "受控",
-            `免问下限 ${FLOOR_SUMMARY[policy.floor] ?? policy.floor}`,
-            policy.scope === "global" ? "所有智能体共用" : "按智能体分别",
-            rules.length > 0 ? `记住 ${rules.length} 条` : false,
-          ]}
-        />
       </div>
       <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。

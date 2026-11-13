@@ -71,7 +71,9 @@ export function RecentConversations({
       </div>
       {recent.length === 0 ? (
         <div className="flex flex-col items-start gap-1.5 py-1">
-          <p className="ui-caption">还没有对话。挑一个智能体，把它当成同事来用。</p>
+          {/* 空态 = 标题 + 一个行动（d.142）：不再解释「智能体可以当同事用」——
+              标题已经说清缺什么，按钮已经给出下一步。 */}
+          <p className="ui-caption">还没有对话</p>
           <Button
             type="button"
             size="sm" variant="ghost"

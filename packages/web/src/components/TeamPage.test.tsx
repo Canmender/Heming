@@ -119,11 +119,8 @@ beforeEach(() => {
 
 async function renderPage() {
   render(<TeamPage />);
-  // 看板视图里也有一行「N 名成员」统计，所以这里用 getAllByText：
-  // 页面加载完成与否看的是「至少出现一处成员统计」，不假设只有页头那一处。
-  await waitFor(() =>
-    expect(screen.getAllByText(/名成员/).length).toBeGreaterThan(0),
-  );
+  // 页头副标题已精简（uiux3：只保留「全站一个团队」），改用成员名作为「数据已到位」信号。
+  await screen.findAllByText(/爱丽丝|鲍勃/);
 }
 
 describe("团队视图页签（③-1 roving tabindex）", () => {
@@ -154,9 +151,7 @@ describe("团队视图页签（③-1 roving tabindex）", () => {
   it("同屏挂两份也不产生重复 id（useId 前缀）", async () => {
     render(<TeamPage />);
     render(<TeamPage />);
-    await waitFor(() =>
-      expect(screen.getAllByText(/名成员/).length).toBeGreaterThan(0),
-    );
+    await screen.findAllByText(/爱丽丝|鲍勃/);
     const panelIds = screen.getAllByRole("tabpanel").map((el) => el.id);
     expect(new Set(panelIds).size).toBe(panelIds.length);
     const tabIds = screen.getAllByRole("tab").map((el) => el.id);
@@ -318,7 +313,7 @@ describe("团队协作口径（d.88）", () => {
   it("团队只有自己时，说明新同事账号从哪来", async () => {
     vi.mocked(fetchTeam).mockResolvedValue({ members: [member(me, true)], onlineCount: 1 });
     await renderPage();
-    expect(screen.getByText(/团队目前只有你/)).toBeInTheDocument();
+    expect(screen.getByText(/团队是全站名册/)).toBeInTheDocument();
     expect(screen.getByText(/账号由管理员在服务端创建/)).toBeInTheDocument();
   });
 
@@ -447,7 +442,7 @@ describe("团队页布局（d.62-B）", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("团队");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名成员");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("全站一个团队");
   });
 });
 

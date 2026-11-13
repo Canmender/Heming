@@ -13,7 +13,6 @@ import {
 import { isMsgCacheAuxKey } from "../lib/e2e/cacheEnvelope.js";
 import type { StorageLike } from "../lib/memory/types.js";
 import { Button } from "../components/ui/Button.js";
-import { CardSummary } from "./settings/CardSummary.js";
 
 /**
  * 本机存储水位卡（d.31 · P1-1 ①「水位可见」+ ②b「一键清理」）。
@@ -491,14 +490,6 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           <StorageIcon className="text-muted" />
           本机存储
         </div>
-        <CardSummary
-          items={[
-            `已用 ${formatBytes(usage.totalBytes)}`,
-            `${Math.round(percent)}%`,
-            level === "danger" ? "快满了" : level === "warn" ? "已用八成" : "余量充足",
-            quota.estimated ? "配额估算" : "配额实测",
-          ]}
-        />
       </div>
       <div className="mt-1 ui-caption">
         本机存储（浏览器配额）是一条单源预算，写满后新数据会静默丢失。这条水位告诉你还剩多少、是谁占的。

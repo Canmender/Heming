@@ -539,15 +539,7 @@ export function TeamPage() {
     <PageShell
       scroll={false}
       title="团队"
-      subtitle={
-        <>
-          全站一个团队 · {members.length} 名成员 ·{" "}
-          <span title="在线 = 当前打开着和鸣（有实时连接）；关掉即离线">
-            {onlineCount} 人在线
-          </span>{" "}
-          · 今日 {todayCount} 条动向
-        </>
-      }
+      subtitle="全站一个团队"
       actions={
         <span
           className="ui-chip"
@@ -643,7 +635,7 @@ export function TeamPage() {
           )}
           {members.length <= 1 && (
             <p className="mt-1 ui-micro">
-              团队目前只有你。团队是全站名册：新同事的账号由管理员在服务端创建，登录后会自动出现在这里。
+              团队是全站名册；新同事账号由管理员在服务端创建，登录后自动出现。
             </p>
           )}
           {syncError && (
@@ -1010,7 +1002,7 @@ export function TeamPage() {
                     <>
                       <p className="font-medium text-ink">还没有共享的日程</p>
                       <p className="mt-1">
-                        连接「信息中枢」后，团队成员共享的日程摘要会出现在这里（只含标题与到期时间）。
+                        连接「信息中枢」后才会出现（只含标题与到期时间）。
                       </p>
                       <Button
                         type="button"
@@ -1029,7 +1021,7 @@ export function TeamPage() {
                       </p>
                     </>
                   ) : (
-                    <p>暂无日程摘要。信息中枢同步出临期日程后会自动出现。</p>
+                    <p>信息中枢同步出临期日程后会自动出现。</p>
                   )}
                 </div>
               ) : (

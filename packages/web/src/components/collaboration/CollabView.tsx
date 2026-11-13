@@ -376,7 +376,6 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
   const participantsForAside = selected
     .map((id) => agentMap.get(id))
     .filter((a): a is Agent => a !== undefined);
-  const boundAgents = agents.filter((a) => boundIds.has(a.id));
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -410,8 +409,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 <div className="min-w-0">
                   <h2 className="ui-section-title">至少需要 2 个已绑定模型的智能体</h2>
                   <p className="ui-caption mt-1 leading-5">
-                    当前可用 {usableCount} 个。协作会让每个智能体用自己的模型与提示词发言，
-                    未绑定模型的智能体不能参与（本机运行，不会借用别人的 Key）。
+                    当前可用 {usableCount} 个。未绑定的无法参与（各用各的模型与 Key，本机运行）。
                   </p>
                   {/*
                    * d.141 F-07：浏览器版没有桌面桥 → 模型来源面板整块隐藏、无法绑定，
@@ -715,8 +713,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
             <li>最近一次纪要在本机保留一份，不上传。</li>
           </ul>
           <p className="ui-caption mt-2 leading-5">
-            可用智能体 {usableCount} 个 / 名册 {agents.length} 个
-            {boundAgents.length !== agents.length ? "（未绑定的已标灰）" : ""}
+            可用 {usableCount} / 名册 {agents.length}
           </p>
         </section>
       </aside>

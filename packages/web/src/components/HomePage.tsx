@@ -251,7 +251,6 @@ export function HomePage() {
           <span className="ui-caption font-normal"> · {today}</span>
         </>
       }
-      subtitle="要处理什么、上次聊到哪、手上有什么在跑。"
       width="wide"
       bodyClassName="flex flex-col gap-4"
       actions={
@@ -312,39 +311,34 @@ export function HomePage() {
         </h2>
 
         {/* 2. 四张动作指标卡（不是看板数字）：宽窗 4 列，窄窗折成 2 列。
-            data-testid 给测试一个稳定入口，不再靠 `.grid.grid-cols-4 > .ui-card` 猜结构。 */}
+            data-testid 给测试一个稳定入口，不再靠 `.grid.grid-cols-4 > .ui-card` 猜结构。
+            d.142：hint 只留「用户自己看不出来的东西」——待处理的未读构成、今日动向的失败原因；
+            其余数字自解释（0 就是没有），「点开直接处理 / 本机运行 / 成员共享的任务与日程」
+            这类复述句已删，让布局与数字自己说。 */}
         <div data-testid="home-stats" className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
           <Stat
             label="待处理"
             value={pendingCount}
-            hint={
-              pendingCount === 0
-                ? "没有需要你处理的事"
-                : unreadNotifications > 0
-                  ? `含 ${unreadNotifications} 条未读通知`
-                  : "点开直接处理"
-            }
+            hint={unreadNotifications > 0 ? `含 ${unreadNotifications} 条未读通知` : undefined}
             onOpen={pendingCount > 0 ? openPending : undefined}
             actionLabel="打开待处理事项"
           />
           <Stat
             label="运行中任务"
             value={runningTasks.length}
-            hint={runningTasks.length === 0 ? "没有在跑的任务" : "点开查看进度"}
             onOpen={runningTasks.length > 0 ? openRunningTasks : undefined}
             actionLabel="查看运行中的任务"
           />
           <Stat
             label="我的智能体"
             value={agentsRoster.length}
-            hint="本机运行"
             onOpen={() => setPage("chat")}
             actionLabel="打开智能体页"
           />
           <Stat
             label="今日动向"
             value={teamError ? "—" : todayActivities}
-            hint={teamError ? "团队数据加载失败" : "成员共享的任务与日程"}
+            hint={teamError ? "团队数据加载失败" : undefined}
             onOpen={teamError ? undefined : () => setPage("team")}
             actionLabel="打开团队页"
           />

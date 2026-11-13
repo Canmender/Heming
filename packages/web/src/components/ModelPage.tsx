@@ -524,9 +524,9 @@ export function ModelPage() {
                 再排一行 0/0/0 只会让页面显得像没加载完。有任意数据时才出现。 */}
             {profiles.length + providers.length + accounts.length > 0 && (
               <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="可用模型" value={profiles.length} hint="智能体可选的模型" />
-                <Stat label="已添加来源" value={providers.length} hint="订阅、厂商或自定义地址" />
-                <Stat label="订阅账号" value={accounts.length} hint="登录后可用的额度" />
+                <Stat label="可用模型" value={profiles.length} />
+                <Stat label="已添加来源" value={providers.length} />
+                <Stat label="订阅账号" value={accounts.length} />
               </div>
             )}
 
@@ -542,9 +542,6 @@ export function ModelPage() {
                   <ModelIcon width={20} height={20} />
                 </span>
                 <div className="ui-section-title">还没有可用的模型</div>
-                <p className="mx-auto mt-1 max-w-[420px] ui-caption">
-                  添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
-                </p>
                 <Button className="mt-4" onClick={() => setTab("sources")}>
                   添加来源
                 </Button>
@@ -581,15 +578,11 @@ export function ModelPage() {
                   ))}
                   {visibleModels.length === 0 && <li className="ui-caption px-2 py-2">没有匹配的模型。</li>}
                 </ul>
-                <p className="mt-2 ui-caption">
-                  在智能体设置里选这里的模型。路由组与候选链在 magpie 内管理；本页只负责添加来源。
-                </p>
               </div>
             )}
 
             <details className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
-              <p className="mt-1 ui-caption">改显示名、思考档或请求协议；留空的项不动。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <TextField
                   label="属性模型 ID"
@@ -676,9 +669,9 @@ export function ModelPage() {
                       <Avatar name={agent.name} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-ui-md font-bold">{agent.name}</span>
-                        <span className="block truncate ui-caption">
-                          当前：{agent.model}
-                          {agent.detail ? ` · ${agent.detail}` : ""} · {agent.configPath}
+                        <span className="block truncate ui-caption" title={agent.configPath}>
+                          {agent.model}
+                          {agent.detail ? ` · ${agent.detail}` : ""}
                         </span>
                       </span>
                       {agent.id ? (
@@ -799,11 +792,7 @@ export function ModelPage() {
                 <div className="ui-section-title">API Key 服务商</div>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
-              {cli ? (
-                <p className="mt-0.5 ui-caption">
-                  点一个服务商 → 选地址类型 → 只填一个 Key；保存后模型会自动读出来。
-                </p>
-              ) : (
+              {!cli && (
                 // 无桌面桥时下面所有入口都点不动：先说明「为什么」，不摆一排灰按钮让人反复点（F-03）。
                 <div role="note" className="ui-alert ui-alert-muted mt-2">
                   <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
@@ -996,7 +985,6 @@ export function ModelPage() {
                   >
                     <span className="min-w-0">
                       <span className="block text-ui-md font-bold">其他 OpenAI 兼容地址</span>
-                      <span className="block ui-caption">填名称与地址即可，模型可留空自动读取</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-muted">
                       展开
@@ -1330,7 +1318,6 @@ export function ModelPage() {
             <div className="grid items-start gap-3 lg:grid-cols-2">
             <details className="ui-disclosure ui-card p-4 lg:col-span-2">
               <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
-              <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <TextField
                   label="分组名称"

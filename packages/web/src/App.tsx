@@ -457,9 +457,8 @@ function ReconnectPanel({
       <p className="ui-body-sm mt-2 text-body">
         {message ? `暂时连不上服务器：${message}` : "正在重新连接服务器…"}
       </p>
-      <p className="ui-caption mt-1">
-        网络恢复后会自动重试，不需要重新登录。
-      </p>
+      {/* d.142：原来这里还有「网络恢复后会自动重试，不需要重新登录。」——
+          和下面的「立即重试」说同一件事，删掉让状态行 + 原因 + 两个出口自己说话。 */}
       <div className="mt-4 flex items-center justify-center gap-2">
         <Button
           type="button"
