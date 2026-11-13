@@ -633,14 +633,30 @@ export function runAgentMentions(
         const historyWithFork: ChatMessage[] = deps.forkPrefix?.length
           ? [...history, ...deps.forkPrefix]
           : history;
+        /**
+         * 降级提示只讲一次：这几条回落都在「组装请求」里，工具轮每轮都会重进，
+         * 逐轮重复会把气泡刷满；但也不能静默——附件被丢掉、历史压缩失败，
+         * 用户看到的回答会莫名其妙（「我明明传了文件」/「上一轮说过的它怎么忘了」）。
+         */
+        let degradeNoticed = false;
+        // 先存起来、等 emitDelta 可用再外发：这几处回落发生在组装请求阶段，
+        // 早于 emitDelta 的声明（它会用到这里是后声明的 sealChunkHook）。
+        let pendingNotice: string | null = null;
+        const noticeDegrade = (text: string) => {
+          if (degradeNoticed) return;
+          degradeNoticed = true;
+          pendingNotice = text;
+        };
         // 系统提示词：deps.buildSystemPrompt 存在时优先（触发端在此拼装记忆/技能），
         // 抛错回落 getPrompt 的原提示词——上下文组装失败不影响生成
         let prompt: string;
         if (deps.buildSystemPrompt) {
           try {
             prompt = await deps.buildSystemPrompt(m.agentId, userText);
-          } catch {
+          } catch (error) {
             prompt = deps.getPrompt(m.agentId);
+            const reason = error instanceof Error ? error.message : String(error);
+            noticeDegrade(`\n\n（本轮上下文组装失败：${reason}。这一轮只有基础提示词。）`);
           }
         } else {
           prompt = deps.getPrompt(m.agentId);
@@ -713,8 +729,12 @@ export function runAgentMentions(
                   aggressive === undefined
                     ? await deps.prepareHistory(historyWithFork, m.agentId)
                     : await deps.prepareHistory(historyWithFork, m.agentId, { aggressive });
-              } catch {
+              } catch (error) {
                 rows = historyWithFork; // 压缩失败不阻断生成：回落原样历史
+                const reason = error instanceof Error ? error.message : String(error);
+                noticeDegrade(
+                  `\n\n（历史压缩失败：${reason}。这一轮按原始历史发送，可能更快撞到长度上限。）`,
+                );
               }
             }
             historyCache.set(cacheKey, rows);
@@ -724,8 +744,10 @@ export function runAgentMentions(
           if (deps.buildUserTurn) {
             try {
               userTurn = await deps.buildUserTurn(userText, profile);
-            } catch {
-              /* 当前轮附件组装失败不阻断生成：按纯文本行发 */
+            } catch (error) {
+              // 附件（文档正文/图片）没组装出来：这一轮只能是纯文本，必须让用户知道。
+              const reason = error instanceof Error ? error.message : String(error);
+              noticeDegrade(`\n\n（附件没能随这条消息发出：${reason}。这一轮只发了文字。）`);
             }
           }
           /**
@@ -740,6 +762,11 @@ export function runAgentMentions(
             : extra;
           const prepared: ChatMessage[] = [...rows, userTurn, ...folded];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
+          // 降级提示在已中止时不再补发；拼在正文前，用户能看见「这一轮为什么不一样」。
+          if (pendingNotice && !aborted) {
+            emitDelta(pendingNotice, aggressive);
+            pendingNotice = null;
+          }
           return prepared;
         };
         const sealChunkHook = deps.sealChunk;

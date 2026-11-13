@@ -30,6 +30,81 @@ function makeDeps(overrides: Partial<Parameters<typeof runAgentMentions>[3]> = {
 }
 
 describe("runAgentMentions", () => {
+  it("附件组装失败：降级为纯文本并明确告诉用户「文件没发出去」", async () => {
+    const { send, deps } = makeDeps({
+      buildUserTurn: async () => {
+        throw new Error("读取附件失败：ENOENT");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "看看这个文件", deps);
+
+    const frames = send.mock.calls.map((c: unknown[]) => c[0] as { type: string; text?: string });
+    const chunks = frames.filter((f) => f.type === "agent_chunk").map((f) => String(f.text ?? "")).join("");
+    // 用户传了文件却只发了文字：不说清楚，用户会以为模型看过文件了。
+    expect(chunks).toContain("附件没能随这条消息发出");
+    expect(chunks).toContain("ENOENT");
+    expect(frames.filter((f) => f.type === "agent_error")).toHaveLength(0);
+    expect(frames.find((f) => f.type === "agent_finish")).toMatchObject({
+      text: expect.stringContaining("你好"),
+    });
+  });
+
+  it("历史压缩失败：回落原始历史，但把原因说出来（而不是让用户以为它记得）", async () => {
+    const { send, deps } = makeDeps({
+      prepareHistory: async () => {
+        throw new Error("摘要模型不可用");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const frames = send.mock.calls.map((c: unknown[]) => c[0] as { type: string; text?: string });
+    const chunks = frames.filter((f) => f.type === "agent_chunk").map((f) => String(f.text ?? "")).join("");
+    expect(chunks).toContain("历史压缩失败");
+    expect(chunks).toContain("摘要模型不可用");
+    // 回落生效：原始历史（早前消息）仍然在请求里
+    const sent = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][1] as ChatMessage[];
+    expect(sent.map((row) => row.content).join("|")).toContain("早前消息");
+    expect(frames.find((f) => f.type === "agent_finish")).toMatchObject({
+      text: expect.stringContaining("你好"),
+    });
+  });
+
+  it("降级提示每轮只讲一次（工具轮会重复组装请求）", async () => {
+    const calls: { id: string; name: string; args?: string }[] = [{ id: "c1", name: "srv__x" }];
+    const { send, deps } = makeDeps({
+      prepareHistory: async () => {
+        throw new Error("摘要模型不可用");
+      },
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__x", description: "x" } }],
+        meta: () => ({ risk: "read" }),
+        execute: async () => ({ text: "结果", ok: true }),
+      }),
+    });
+    // 第一轮要工具、第二轮收口：组装请求会跑两次。
+    let round = 0;
+    (deps.streamChat as ReturnType<typeof vi.fn>).mockImplementation(async (_p, _m, o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void }) => {
+      round += 1;
+      if (round === 1) {
+        o.onToolCalls?.(calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: "{}" } })));
+        return "";
+      }
+      o.onDelta("好了");
+      return "好了";
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const text = send.mock.calls
+      .map((c: unknown[]) => c[0] as { type: string; text?: string })
+      .filter((f) => f.type === "agent_chunk")
+      .map((f) => String(f.text ?? ""))
+      .join("");
+    expect(text.split("历史压缩失败").length - 1).toBe(1);
+  });
+
   it("工具目录构建失败：降级为纯对话并说明原因，不让整轮「生成出错」", async () => {
     const { send, deps } = makeDeps({
       getTools: () => {
@@ -112,8 +187,12 @@ describe("runAgentMentions", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     const prompts = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(prompts.at(-1)).toEqual({ role: "user", content: "hi" });
+    // 回落生效，但「附件没发出去」要在气泡里说清楚（否则用户以为模型看过文件了）
     expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent_finish", text: "你好" }),
+      expect.objectContaining({ type: "agent_finish", text: expect.stringContaining("附件没能随这条消息发出") }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: expect.stringContaining("你好") }),
     );
   });
 
@@ -380,7 +459,13 @@ describe("runAgentMentions 运行时接线", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
     expect(seenMessages(deps)[0]).toEqual({ role: "system", content: "你是和小鸣" });
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "你好" }));
+    // 回落生效，同时告诉用户「这一轮只有基础提示词」
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: expect.stringContaining("本轮上下文组装失败") }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: expect.stringContaining("你好") }),
+    );
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent_error" }));
   });
 
