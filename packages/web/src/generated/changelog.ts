@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.66.11",
+    "date": "2026-11-13",
+    "title": "安装包外壳（第 13 轮 · packages/setup）",
+    "bullets": [
+      "**窗口自适应**（`packages/setup/main.js`）：新增 `fitToWorkArea()`，按光标所在显示器的 `workAreaSize` 把 900×620 的版心收进工作区（留 32px 边），下限 720×480（`WINDOW_MIN_WIDTH/HEIGHT`）；`BrowserWindow` 同步传 `minWidth/minHeight`。`--capture` 模式支持 `HEMING_SETUP_CAPTURE_SIZE=WxH` 固定窗口尺寸，便于按两档验版。",
+      "**复制失败详情**：`main.js` 新增 `ipcMain.handle(\"setup:copy-text\")`（`clipboard.writeText`）；`preload.js` 暴露 `copyText`；失败屏新增「复制详情」按钮，`app.js` 的 `copyDetail()` 拼「错误说明 + 错误码/详情」，成功后按钮 1.4s 显示「已复制」。",
+      "**焦点落点**：`app.js` 新增 `PRIMARY_ACTION`（ready→bt-start / done→btn-open / error→btn-retry），切屏后把焦点放到该屏的主按钮，键盘用户不用 Tab 找。",
+      "**对比度**：`--faint: #8a8578 → #6f6a5e`（纸上 3.29:1 → 4.81:1）；`.note-sig`/`.footline` 的 `#a39c8b`（2.44:1）改吃 `var(--faint)`。",
+      "**可选中**：`.path-value`/`.detail`/`.done-line`/`.fact dd` 允许选中复制；`::selection` 改为墨色反白，不再出现浏览器默认蓝。",
+      "**失败详情块**：`overflow: hidden → overflow-y: auto`（+ `overscroll-behavior: contain`，`max-height 76 → 96px`），长堆栈不再被无声截断；`.body`/`.detail` 换 8px 细滚条（`scrollbar-width: thin`）。",
+      "**小窗口两档降级**：`@media (max-height: 600px)`（标题栏 46、正文 padding 18/26/12/32、手写字 154、标题 27、大数字 54、印章 50）与 `@media (max-width: 800px)`（单列、隐藏页边注）；新增 `@media (max-width: 800px) and (max-height: 600px)` 再收一档（`path-row 40`、`hint/check/actions` 各让 4px）。",
+      "**可访问性**：进度条补 `aria-label=\"安装进度\"`；窗口按钮 30→32px；四处 `:focus-visible` 轮廓 1px→2px；详情 `font-size 11 → 11.5px`。",
+      "**截图诊断修正**（`lib/capture.js`）：量版面时先隐藏全部 `.screen` 再逐个显示，避免「当前可见那一屏」把主列撑高量出假数据；新增每屏 `main/body clientHeight+scrollHeight`、`actionsBottom`、`clipped`。",
+      "验证（`pnpm --filter @heming/setup typecheck` + `test`，19 例过；`env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron . --capture=…` 实跑三档）：",
+      "— 900×620：四屏 `main 484/484`、`body 530/530`、`actionsBottom ≤556`、`clipped:false`；",
+      "— 800×540：四屏 `main 434/434`、`body 464/464`、`clipped:false`；",
+      "— 720×480：四屏 `main 374/374`、`body 404/404`、`clipped:false`（收紧前 ready 屏差 9px 出滚动条）；",
+      "— 三档 `diagnostics.errors` 均为空。",
+      "未动：`packages/desktop/build/installer.nsh`。NSIS 安装器在这一版里是**静默**执行的（由本外壳下载并带 `/S` 调起），用户看不到它的页面，改文案没有可见收益且本机无法联网重打包验证。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.65.11",
     "date": "2026-11-13",
     "title": "空态收口（第 12 轮 · 基元采用率）",

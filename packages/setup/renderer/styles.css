@@ -15,7 +15,8 @@
   --ink: #161616;
   --ink-soft: #2a2822;
   --muted: #6e695e;
-  --faint: #8a8578;
+  /* d.141：原 #8a8578 在纸上只有 3.29:1，11.5px 的提示字不达标；#6f6a5e 是 4.81:1。 */
+  --faint: #6f6a5e;
   --line: #e3ded1;
   --line-strong: #d9d3c4;
   --seal: #a63d2e;
@@ -43,6 +44,51 @@ body {
 }
 
 [hidden] { display: none !important; }
+
+/* 选中与滚动条：默认的蓝底细条落在纸面上很跳，这里换成墨色反白 + 发丝滚条。 */
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.body,
+.detail {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.body::-webkit-scrollbar,
+.detail::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.body::-webkit-scrollbar-track,
+.detail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.body::-webkit-scrollbar-thumb,
+.detail::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+
+.body::-webkit-scrollbar-thumb:hover,
+.detail::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+}
+
+/* 安装路径、失败详情、装完的目录要能选中复制（工单里经常要贴）；
+   正文其余部分保持不可选，避免整页像文档一样被拖蓝。 */
+.path-value,
+.detail,
+.done-line,
+.fact dd {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
 
 .sheet {
   position: relative;
@@ -95,8 +141,8 @@ body {
 .window-controls { display: flex; gap: 2px; -webkit-app-region: no-drag; }
 
 .win-button {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -111,7 +157,7 @@ body {
 
 .win-button:hover { background: rgba(22, 22, 22, 0.06); color: var(--ink); }
 .win-button-close:hover { background: var(--seal); color: var(--paper); }
-.win-button:focus-visible { outline: 1px solid var(--ink); outline-offset: -1px; }
+.win-button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 
 /* ---------- 主体：正文 + 页边注 ---------- */
 
@@ -250,7 +296,7 @@ body {
 }
 
 .text-button:hover { color: var(--ink); text-decoration-color: var(--ink); }
-.text-button:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+.text-button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
 .primary-button {
   appearance: none;
@@ -271,7 +317,7 @@ body {
 .primary-button::after { content: "\2192"; margin-left: 14px; letter-spacing: 0; }
 .primary-button:hover { background: #2b2a26; }
 .primary-button:active { transform: translateY(1px); }
-.primary-button:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+.primary-button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .primary-button[disabled] { background: var(--line-strong); color: var(--paper); cursor: default; }
 
 .actions { display: flex; align-items: center; gap: 22px; margin-top: 22px; }
@@ -315,7 +361,7 @@ body {
 
 .check input:checked + .check-box { background: var(--ink); }
 .check input:checked + .check-box::after { transform: rotate(42deg) scale(1); }
-.check input:focus-visible + .check-box { outline: 1px solid var(--ink); outline-offset: 2px; }
+.check input:focus-visible + .check-box { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 /* ---------- 安装中：大号真实数字 + 墨点波浪 + 2px 进度 ---------- */
 
@@ -408,13 +454,15 @@ body {
 .detail {
   margin: 0 0 20px;
   padding: 10px 12px;
-  max-height: 76px;
-  overflow: hidden;
+  max-height: 96px;
+  /* 原来是 overflow:hidden——长堆栈被无声截断，用户以为日志只有这么长。 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--paper-raised);
   border-left: 2px solid var(--line-strong);
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.65;
+  font-size: 11.5px;
+  line-height: 1.7;
   color: var(--muted);
   white-space: pre-wrap;
   word-break: break-all;
@@ -440,7 +488,7 @@ body {
 
 .note { margin: 14px 0 0; padding-top: 16px; border-top: 1px solid var(--line); font-size: 11px; line-height: 1.9; }
 
-.note-sig { margin: auto 0 0; padding-top: 18px; font-size: 10px; letter-spacing: 0.26em; color: #a39c8b; }
+.note-sig { margin: auto 0 0; padding-top: 18px; font-size: 10px; letter-spacing: 0.26em; color: var(--faint); }
 
 /* ---------- 版心脚注 ---------- */
 
@@ -453,10 +501,48 @@ body {
   border-top: 1px solid var(--line);
   font-size: 10px;
   letter-spacing: 0.14em;
-  color: #a39c8b;
+  color: var(--faint);
 }
 
 .foot-mark { letter-spacing: 0.34em; }
+
+/* ---------- 小屏与高 DPI 降级 ----------
+ * 窗口尺寸由 main.js 按工作区算（最小 720×480）。900×620 是 100% 缩放下画的版心，
+ * 缩到 125%/150% 的笔记本上只会拿到 ~500 DIP 高度，所以这里按高度分两档收紧。 */
+
+@media (max-height: 600px) {
+  .titlebar { flex-basis: 46px; }
+  .body { gap: 24px; padding: 18px 26px 12px 32px; }
+  .wordmark { width: 154px; margin-bottom: 8px; }
+  .step-label { margin-bottom: 14px; padding-bottom: 9px; }
+  .headline { font-size: 27px; margin-bottom: 8px; }
+  .lede { margin-bottom: 12px; line-height: 1.65; }
+  .path-row { height: 44px; }
+  .hint { margin-bottom: 14px; }
+  .check { margin-bottom: 14px; }
+  .actions { margin-top: 14px; }
+  .metric-value { font-size: 54px; }
+  .wave { height: 20px; margin: 12px 0 14px; }
+  .seal { width: 50px; height: 50px; margin: 14px 0 12px; font-size: 27px; }
+  .footline { flex-basis: 32px; }
+}
+
+/* 又窄又矮（720×480 这一档）：单列之后主列没有页边注分担高度，留白要再让一档，
+   否则「开始安装」那一屏差 9px 出滚动条。 */
+@media (max-width: 800px) and (max-height: 600px) {
+  .path-row { height: 40px; }
+  .hint { margin-bottom: 10px; }
+  .check { margin-bottom: 10px; }
+  .actions { margin-top: 10px; }
+}
+
+@media (max-width: 800px) {
+  .body { grid-template-columns: minmax(0, 1fr); gap: 0; padding-right: 24px; }
+  .column-note { display: none; }
+}
+
+/* 装不下时允许主区滚动，好过把按钮裁掉。 */
+.body { overflow-y: auto; }
 
 @media (prefers-reduced-motion: reduce) {
   .screen.is-current,

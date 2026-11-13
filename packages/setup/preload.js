@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("setup", {
   openFolder: (dir) => ipcRenderer.invoke("setup:open-folder", dir),
   openInstalled: (dir) => ipcRenderer.invoke("setup:open-installed", dir),
   openLog: () => ipcRenderer.invoke("setup:open-log"),
+  copyText: (text) => ipcRenderer.invoke("setup:copy-text", text),
   minimize: () => ipcRenderer.invoke("window:minimize"),
   close: () => ipcRenderer.invoke("window:close"),
   quit: () => ipcRenderer.invoke("app:quit"),

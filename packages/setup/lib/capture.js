@@ -38,6 +38,48 @@ const DIAGNOSTICS_SCRIPT = `(() => {
   const paths = Array.from(document.querySelectorAll("#wordmark-strokes path"));
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio },
+    // 每个屏幕单独量一次：窗口在 125%/150% 缩放的笔记本上会被收小，
+    // 光看截图看不出「按钮被裁在屏幕外」，这里直接给 clientHeight / scrollHeight 与 actions 底边。
+    screens: (() => {
+      const allScreens = Array.from(document.querySelectorAll(".screen"));
+      const restore = allScreens.map((element) => ({
+        element,
+        hidden: element.hidden,
+        current: element.classList.contains("is-current"),
+      }));
+      // 逐个量之前先全部收起：截图流程停在某一屏，那一屏若仍可见会把主列一起撑高，
+      // 量出来的 clientHeight 就不是单屏尺寸了。
+      for (const item of restore) {
+        item.element.hidden = true;
+        item.element.classList.remove("is-current");
+      }
+      const body = document.querySelector(".body");
+      const main = document.getElementById("column-main");
+      const results = ["ready", "work", "done", "error"].map((name) => {
+      const screen = document.getElementById("screen-" + name);
+      if (!screen) return { name, missing: true };
+      screen.hidden = false;
+      screen.classList.add("is-current");
+      const actions = screen.querySelector(".actions");
+      const actionsBottom = actions ? Math.round(actions.getBoundingClientRect().bottom) : null;
+      const result = {
+        name,
+        main: { client: main.clientHeight, scroll: main.scrollHeight },
+        body: { client: body.clientHeight, scroll: body.scrollHeight },
+        actionsBottom,
+        // 底边超出视口 = 用户看不到主按钮
+        clipped: actionsBottom !== null && actionsBottom > window.innerHeight,
+      };
+      screen.hidden = true;
+      screen.classList.remove("is-current");
+      return result;
+      });
+      for (const item of restore) {
+        item.element.hidden = item.hidden;
+        if (item.current) item.element.classList.add("is-current");
+      }
+      return results;
+    })(),
     svg: boxOf(svg),
     svgStyle: svg ? { width: getComputedStyle(svg).width, height: getComputedStyle(svg).height } : null,
     pathCount: paths.length,

@@ -33,6 +33,13 @@
   const DOT_FADE_DELAY_MS = 120;
   const WAVE_DOT_COUNT = 24;
 
+  /** 每屏进入时该拿焦点的元素；安装中不抢焦点（取消是次要动作）。 */
+  const PRIMARY_ACTION = {
+    ready: "btn-start",
+    done: "btn-open",
+    error: "btn-retry",
+  };
+
   const STEP_LABELS = {
     ready: "第 1 步 · 安装位置",
     work: "第 2 步 · 安装",
@@ -276,6 +283,9 @@
       }
     }
     $("step-label").textContent = stepLabel(name);
+    // 键盘与读屏用户换屏后应该落在新屏的主操作上，而不是停在上一个屏幕的按钮上。
+    const focusTarget = PRIMARY_ACTION[name] ? $(PRIMARY_ACTION[name]) : null;
+    if (focusTarget) focusTarget.focus();
     // 预取那行小字只属于「安装位置」屏；进工作屏后进度改由进度条承担。
     const prefetchNote = $("prefetch-note");
     if (prefetchNote && name !== "ready") prefetchNote.hidden = true;
@@ -489,6 +499,24 @@
     $("error-detail").hidden = lines.length === 0;
   }
 
+  /** 失败详情复制：报错截图之外，用户最常要的就是这段文本。 */
+  function copyDetail() {
+    const message = ($("error-message").textContent || "").trim();
+    const detailElement = $("error-detail");
+    const detail = detailElement.hidden ? "" : (detailElement.textContent || "").trim();
+    const text = [message, detail].filter(Boolean).join("\n\n");
+    if (!text) return;
+    void api.copyText(text).then((ok) => {
+      const button = $("btn-copy-detail");
+      if (!button || !ok) return;
+      if (!button.dataset.label) button.dataset.label = button.textContent || "复制详情";
+      button.textContent = "已复制";
+      window.setTimeout(() => {
+        button.textContent = button.dataset.label || "复制详情";
+      }, 1400);
+    });
+  }
+
   function onCancelled() {
     state.busy = false;
     state.phase = "idle";
@@ -638,6 +666,7 @@
     $("btn-open").addEventListener("click", openInstalled);
     $("btn-open-folder").addEventListener("click", openFolder);
     $("btn-pick-payload").addEventListener("click", pickPayload);
+    $("btn-copy-detail").addEventListener("click", copyDetail);
     $("btn-open-log").addEventListener("click", () => api.openLog());
     $("launch-after").addEventListener("change", (event) => {
       state.launchAfter = event.target.checked;

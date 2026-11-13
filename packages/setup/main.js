@@ -23,7 +23,7 @@ const fs = require("node:fs");
  */
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "16";
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, screen, shell } = require("electron");
 
 const pathTools = require("./lib/paths");
 const { createLog } = require("./lib/log");
@@ -35,6 +35,11 @@ const { CODES } = require("./lib/errors");
 
 const WINDOW_WIDTH = 900;
 const WINDOW_HEIGHT = 620;
+/** 最小可用尺寸：再矮主列就要滚动，再窄右侧页边注就挤没了。 */
+const WINDOW_MIN_WIDTH = 720;
+const WINDOW_MIN_HEIGHT = 480;
+/** 与工作区之间至少留出的边（任务栏/窗口阴影的视觉余量）。 */
+const WINDOW_SCREEN_MARGIN = 32;
 const CAPTURE_SETTLE_MS = 260;
 
 /** @type {BrowserWindow|null} */
@@ -171,10 +176,55 @@ async function probeLatestVersion() {
   }
 }
 
+/**
+ * 按当前屏幕工作区收缩窗口。
+ *
+ * 900×620 是按 100% 缩放画的版心；1366×768 的笔记本开到 150% 时可用高度只有约
+ * 500 DIP，固定 620 会把底部按钮区顶到屏幕外。这里只做「装不下就变小」，
+ * 不做等比缩放——版心是纸面版式，缩放会毁掉字号与留白的关系。
+ */
+function fitToWorkArea() {
+  const fallback = { width: WINDOW_WIDTH, height: WINDOW_HEIGHT };
+  let work;
+  try {
+    const cursor = screen.getCursorScreenPoint();
+    work = screen.getDisplayNearestPoint(cursor).workAreaSize;
+  } catch {
+    return fallback;
+  }
+  if (!work || !work.width || !work.height) return fallback;
+  const width = Math.max(
+    WINDOW_MIN_WIDTH,
+    Math.min(WINDOW_WIDTH, work.width - WINDOW_SCREEN_MARGIN)
+  );
+  const height = Math.max(
+    WINDOW_MIN_HEIGHT,
+    Math.min(WINDOW_HEIGHT, work.height - WINDOW_SCREEN_MARGIN)
+  );
+  return { width, height };
+}
+
+/**
+ * 截图验收时的窗口尺寸覆盖（只在 --capture 模式下生效）。
+ *
+ * 版心要按 720×480 / 900×620 两档验：真机是 125%/150% 缩放的笔记本时窗口会被
+ * 收小，靠肉眼看截图看不出「按钮被挤到屏幕外」，所以给脚本一个固定的尺寸入口。
+ */
+function readCaptureSize() {
+  const raw = process.env.HEMING_SETUP_CAPTURE_SIZE;
+  if (!raw || !raw.trim()) return null;
+  const match = /^(\d{3,4})x(\d{3,4})$/.exec(raw.trim());
+  if (!match) return null;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
 function createWindow() {
+  const size = (captureDir && readCaptureSize()) || fitToWorkArea();
   windowRef = new BrowserWindow({
-    width: WINDOW_WIDTH,
-    height: WINDOW_HEIGHT,
+    width: size.width,
+    height: size.height,
+    minWidth: WINDOW_MIN_WIDTH,
+    minHeight: WINDOW_MIN_HEIGHT,
     useContentSize: true,
     resizable: false,
     maximizable: false,
@@ -351,6 +401,14 @@ function registerIpc() {
   ipcMain.handle("setup:open-log", async () => {
     const failure = await shell.openPath(log.path);
     return failure === "";
+  });
+
+  // 安装器里的路径与失败详情要能粘进工单，渲染进程碰不到剪贴板，只能走主进程。
+  ipcMain.handle("setup:copy-text", (_event, text) => {
+    const value = typeof text === "string" ? text : "";
+    if (!value) return false;
+    clipboard.writeText(value);
+    return true;
   });
 
   ipcMain.handle("window:minimize", () => {
