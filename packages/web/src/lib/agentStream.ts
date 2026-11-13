@@ -14,7 +14,7 @@ import { supportsKind } from "./capabilityNotice.js";
 import { IMAGE_TOKEN_COST, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
-import type { ToolImage } from "./mcp/bridge.js";
+import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
 import type { RolloutInput } from "./rollout/types.js";
 
@@ -1300,11 +1300,14 @@ export function runAgentMentions(
                   hasImages && !vision
                     ? `\n（本次返回了 ${result!.images!.length} 张图片，但当前模型不支持读图，已省略）`
                     : "";
+                // 单条工具结果硬上限：MCP 桥那边已经截过，但内置/插件工具不走那座桥，
+                // 一条几十万字的输出会跟着每一轮重发，把预算和 400 一起顶爆。
+                const capped = truncateToolResult(String(result?.text ?? ""));
                 return {
                   role: "tool" as const,
                   tool_call_id: call.id,
                   name: call.function.name,
-                  content: (result?.text ?? "") + note,
+                  content: capped + note,
                 };
               }),
             ];
@@ -1327,10 +1330,12 @@ export function runAgentMentions(
               extra.push({ role: "user", content: "（工具返回的图片）", contentParts: parts });
             }
             // 累计回灌量，供下一轮的预算收口判断（见 MAX_TURN_TOOL_TOKENS）
+            // 口径必须是**真正发出去的那份文本**：按原始 result.text 计，
+            // 一条被截到 8000 字符的大输出会被算成几万 token，直接把预算判死。
             toolTokens += calls.reduce(
               (sum, _call, i) =>
                 sum +
-                estimateTokens(results[i]?.text ?? "") +
+                estimateTokens(truncateToolResult(String(results[i]?.text ?? ""))) +
                 // 与预算层同一个口径（图片不便宜，别按 800 凑合）
                 (results[i]?.images?.length ?? 0) * IMAGE_TOKEN_COST,
               0,

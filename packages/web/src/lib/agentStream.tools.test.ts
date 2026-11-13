@@ -193,12 +193,13 @@ describe("轮次与预算收口（G1）", () => {
 
   it("工具结果超过回灌预算时提前收口，并说明可以继续", async () => {
     const rounds: Round[] = [
-      { text: "", calls: [{ id: "1", name: "srv__x" }] },
+      // 一轮两个调用：单条结果已被截到 8000 字符上限，两条加起来才压得动回合预算。
+      { text: "", calls: [{ id: "1", name: "srv__x" }, { id: "2", name: "srv__x" }] },
       { text: "不该跑到这一轮", calls: [] },
     ];
     const { deps, streamChat } = makeDeps(rounds, {
       risk: () => "read",
-      // 13000 个汉字 ≈ 13000 token，超过 12000 的回合预算
+      // 每条 13000 个汉字（≈13000 token）→ 截到 8000；两条 16000 > 12000 的回合预算
       execute: async () => ({ text: "字".repeat(13000), ok: true }),
     });
 
@@ -791,5 +792,25 @@ describe("心跳：长工具调用不被界面看成卡死", () => {
     await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
     await run;
     expect(finishText(deps.send)).toContain("好了");
+  });
+
+  it("单条工具结果超过上限会被截断，不会跟着每一轮重发", async () => {
+    const huge = "log line\n".repeat(4000); // ≈ 3.6 万字符，远超单条上限
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "c1", name: "srv__x" }] },
+      { text: "好了", calls: [] },
+    ];
+    const { requests, deps } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async () => ({ text: huge, ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 第二轮请求里带着这条工具结果：必须已经截断，且截断标记对模型可见。
+    const toolRow = requests[1].find((row) => row.role === "tool");
+    const content = String(toolRow?.content ?? "");
+    expect(content.length).toBeLessThan(9000);
+    expect(content).toContain("中间省略");
   });
 });
