@@ -231,6 +231,20 @@ agent-pipeline ingest <repo>/docs --prefix repo/ --ext .md
 重排出来的计划也基本一样——白烧一轮模型与工具。`tests/test_replan_brief.py` 钉住「第一次计划看不到评审意见、
 重排那次必须看到具体问题与建议」。
 
+## 计划里有「半成品步骤」时不整条 run 失败
+
+模型的计划 JSON 经常短一两个字段。以前这些情况都会被当成致命错误或悄悄带进计划：
+
+- **漏 `done_when`** → `PlanStep` 构造时拒绝 → 节点抛错 → 整条 run `status=error`（只差一个字段）；
+- **某一步的 goal 写成空串** → 照样进计划，执行提示变成「当前步骤 1/3：\n完成条件：…」，模型只能瞎猜；
+- **步骤里混进字符串 / 数字 / null** → 被跳过（这条以前就是对的），但如果一条都没剩下，直接 `ProtocolError`；
+- 反过来的隐患：跳过空步骤却保留原下标，编号出现窟窿，提示里的「当前步骤 2/3」会让人以为还有一步没显示。
+
+现在的口径：空 `goal` 的步骤丢弃、其余按 `len(steps)+1` 重编号；缺 `done_when` 的补一句可验收的默认条件
+（`DEFAULT_DONE_WHEN` =「本步骤的目标已达成，且有观测结果或产物可以证明」，不写「完成」这种同义反复）；
+一条合法步骤都不剩时，退化成「把用户交代的任务做完」一步，用 `TaskSpec.goal` 当目标——计划质量差是模型的问题，
+调用方该拿到的是尽力完成的答复 + 可观测的降级，而不是 error。`tests/test_plan_repair.py` 4 例。
+
 ## Plan / Execute / Reflect 的「下一步」
 
 `reflect` 节点的返回里除了 `verdict`，还有 `next_step`（步骤下标）。它现在**真的会影响编排**：
@@ -493,7 +507,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **254 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **269 passed / 覆盖率 95.1%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

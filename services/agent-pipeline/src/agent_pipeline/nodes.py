@@ -66,6 +66,10 @@ class Runtime:
 # 与 config.py 的默认提示词解耦：这里只是兜底，避免 Runtime 造出来却少了某条提示词。
 from .config import PROMPTS as DEFAULT_PROMPTS  # noqa: E402  (放在类后面，避免循环导入困扰)
 
+# 模型漏写 done_when 时的兜底验收条件：必须是「能看出来达成没」的表述，
+# 不能写成「完成」这种同义反复（Reflect 会拿它判断要不要继续）。
+DEFAULT_DONE_WHEN = "本步骤的目标已达成，且有观测结果或产物可以证明"
+
 
 def new_state(run_id: str, task: TaskSpec, *, config_version: int = 0) -> dict[str, Any]:
     return {
@@ -264,19 +268,35 @@ def plan_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ProtocolError("Planner 没有给出任何步骤")
     steps: list[PlanStep] = []
-    for index, item in enumerate(raw_steps[: runtime.settings.budget.max_steps]):
+    for item in raw_steps[: runtime.settings.budget.max_steps]:
         if not isinstance(item, dict):
+            continue
+        goal = str(item.get("goal") or "").strip()
+        # 空目标步骤没法执行（提示里会变成「当前步骤 1/3：\n完成条件：…」），别把它塞进计划。
+        if not goal:
             continue
         steps.append(
             PlanStep(
-                id=index + 1,
-                goal=str(item.get("goal") or "").strip(),
-                done_when=str(item.get("done_when") or "").strip(),
+                # 用 len(steps)+1 而不是原下标：跳过的空步骤会留下编号窟窿，执行提示里
+                # 「当前步骤 2/3」会让人以为还有一步没显示。
+                id=len(steps) + 1,
+                goal=goal,
+                # done_when 是 PlanStep 的必填项：模型漏写时以前直接 ValueError 把整条 run
+                # 弄成 error（明明只差一个字段）。补一个能验收的默认条件，让任务继续。
+                done_when=str(item.get("done_when") or "").strip() or DEFAULT_DONE_WHEN,
                 tools_hint=[str(t) for t in (item.get("tools_hint") or []) if str(t).strip()],
             )
         )
     if not steps:
-        raise ProtocolError("Planner 给出的步骤都不合法")
+        # 模型给了一堆没法执行的步骤：退化成「把用户任务做完」一步，而不是让整条 run 失败。
+        # 计划质量差是模型的问题，调用方要拿到的是「尽力完成的答复 + 可观测的降级」。
+        steps = [
+            PlanStep(
+                id=1,
+                goal=task.goal.strip() or "完成用户交代的任务",
+                done_when=DEFAULT_DONE_WHEN,
+            )
+        ]
     _remember(runtime, state, "lesson", f"计划：{task.goal} → " + "；".join(s.goal for s in steps), importance=0.4)
     return {
         **state,
