@@ -158,7 +158,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
         <button
           type="button"
           onClick={() => setAttempt((a) => a + 1)}
-          className="rounded-lg border border-line-soft px-3 py-1.5 text-[13px] shadow-card"
+          className="rounded-lg border border-line-soft px-3 py-1.5 text-[13px]"
         >
           重试
         </button>
@@ -181,7 +181,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
         <a
           href={url}
           download={file.name}
-          className="inline-block rounded-lg border border-line-soft px-3 py-1.5 text-[13px] shadow-card"
+          className="inline-block rounded-lg border border-line-soft px-3 py-1.5 text-[13px]"
         >
           下载
         </a>
@@ -201,7 +201,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
         role="dialog"
         aria-modal="true"
         aria-label={`预览 ${file.name}`}
-        className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] shadow-card"
+        className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] ui-overlay-shadow"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
           <span className="truncate text-[13px] font-bold">{file.name}</span>

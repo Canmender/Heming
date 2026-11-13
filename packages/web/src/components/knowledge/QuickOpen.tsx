@@ -108,7 +108,7 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
         aria-label="快速切换笔记"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
-        className="w-[520px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-surface shadow-card"
+        className="w-[520px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-surface ui-overlay-shadow"
       >
         <input
           ref={inputRef}

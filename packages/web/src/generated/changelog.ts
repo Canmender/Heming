@@ -12,6 +12,21 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.60.11",
+    "date": "2026-11-13",
+    "title": "浮层阴影统一：真浮层用 `.ui-overlay-shadow`，内联元素去投影",
+    "bullets": [
+      "第 6 轮遗留的 `shadow-card` 收尾（审计 A「六套阴影并存」）。按「是否真的浮在内容上」分三类处理，共 28 处：",
+      "— **浮层（13 处）** → `ui-overlay-shadow`：`ChatPage.tsx` 模型下拉/附加上传弹层/回到底部按钮、`ConfirmDialog.tsx` 面板、`EmojiPicker.tsx`、`FilePreviewModal.tsx` 预览面板、`NavRail.tsx` 工具浮签、`NotificationCenter.tsx` 面板、`ShortcutsHelp.tsx` 面板、`SkillsPage.tsx` 详情抽屉、`knowledge/FileTree.tsx` 右键菜单、`knowledge/QuickOpen.tsx` 速开面板、`assistant/AgentFormPanel.tsx` 表单弹窗、`assistant/ConversationRail.tsx` 会话菜单。",
+      "— **内联元素（13 处）** → 去掉投影：`ChatChart.tsx` 缩放按钮 ×2、`ChatPage.tsx` 提示条 ×2 与复制按钮、`FilePreviewModal.tsx` 文本/代码块 ×2、`SettingsPage.tsx` 重试按钮与自定义色点、`ShortcutsHelp.tsx` `<kbd>`、`WikiGraphView.tsx` 工具条、`WikiPanel.tsx` 小按钮。",
+      "— **小卡片（2 处）** → `ui-card`：`InterfacesPage.tsx`「预置服务」、`LoginPage.tsx` 登录卡。",
+      "至此 `packages/web/src` 里 `shadow-card` 使用数归零（`ui/Skeleton.tsx` 的注释除外），投影只剩 `.ui-card`（无阴影，描边）与 `.ui-overlay-shadow`（浮层一档）两种语义。",
+      "**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**；`pnpm -r typecheck`、`pnpm -r build` 通过。",
+      "**发布说明**：`docs/RELEASE-NOTES.md` 补 `d.140.3.60.11`；`docs/UIUX-REFACTOR-2026-11-13.md` 增第 7 轮记录。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.59.11",
     "date": "2026-11-13",
     "title": "卡片壳收口：12 处 shadow-card 手写壳改 `.ui-card`",

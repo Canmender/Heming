@@ -393,4 +393,4 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
 
 const btnPrimary = "ui-btn ui-btn-sm ui-btn-primary";
 const btnGhost =
-  "rounded-lg border border-line px-2 py-1 ui-caption shadow-card hover:bg-[var(--subtle-2)]";
+  "rounded-lg border border-line px-2 py-1 ui-caption hover:bg-[var(--subtle-2)]";

@@ -12,7 +12,7 @@
 | [deploy.md](deploy.md) | 裸机部署（已去 Docker）、两套产物、自动更新源、安装包体积构成与瘦身、备份回滚 |
 | [AUDIT-2026-11-13.md](AUDIT-2026-11-13.md) | **全量自检报告（2026-11-13）**：测试/产物/线上基线、P0–P2 待办（卸载删数据、通用外壳未发布、99 提交未 push、门禁假红）、需拍板事项、复跑命令 |
 | [UIUX-AUDIT-2026-11-13.md](UIUX-AUDIT-2026-11-13.md) | **全应用 UI/UX 审计（2026-11-13）**：139 条问题（S1 9 / S2 73 / S3 57）、五条总体诊断、优先级矩阵、四轮改造方案；分报告见 [AUDIT-A](AUDIT-A-shell-tokens-primitives.md) / [AUDIT-B](AUDIT-B-chat-home-assistant.md) / [AUDIT-C](AUDIT-C-admin-pages.md) |
-| [UIUX-REFACTOR-2026-11-13.md](UIUX-REFACTOR-2026-11-13.md) | **UI/UX 四轮改造记录 + 第 5/6 轮（d.140.3.59.11）**：两轮布局/样式重构 + 两轮设计优化的逐文件清单、遗留项、门禁实跑结果（typecheck / 4367 例测试 / build 全绿）与冒烟清单、回滚方式；第 5 轮补 ModelPage 枚举中文化、7 个字段可见 label 与插件区三处空态收口；第 6 轮把 12 处手写卡片壳收口到 `.ui-card` |
+| [UIUX-REFACTOR-2026-11-13.md](UIUX-REFACTOR-2026-11-13.md) | **UI/UX 四轮改造记录 + 第 5–7 轮（d.140.3.60.11）**：两轮布局/样式重构 + 两轮设计优化的逐文件清单、遗留项、门禁实跑结果（typecheck / 4367 例测试 / build 全绿）与冒烟清单、回滚方式；第 5 轮补 ModelPage 枚举中文化、7 个字段可见 label 与插件区三处空态收口；第 6 轮把 12 处手写卡片壳收口到 `.ui-card`，第 7 轮把 28 处 `shadow-card` 按浮层/内联分类收净 |
 
 ## 2. 功能说明（用户/维护者视角）
 

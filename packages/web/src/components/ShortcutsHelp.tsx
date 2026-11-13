@@ -54,7 +54,7 @@ function KeyCaps({ keys }: { keys: string[] }) {
       {keys.map((k, i) => (
         <span key={`${k}-${i}`} className="flex items-center gap-1">
           {i > 0 && <span className="text-[10px] text-muted">+</span>}
-          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-medium text-body shadow-card">
+          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-medium text-body">
             {k}
           </kbd>
         </span>
@@ -103,7 +103,7 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         aria-label="快捷键"
         onClick={(e) => e.stopPropagation()}
         // d.138：壳与 ConfirmDialog 对齐——遮罩/面板/hover 全走 token，暗色下不再是白面板。
-        className="flex max-h-[80vh] w-[min(480px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-card"
+        className="flex max-h-[80vh] w-[min(480px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] ui-overlay-shadow"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
           <span className="ui-section-title">快捷键</span>

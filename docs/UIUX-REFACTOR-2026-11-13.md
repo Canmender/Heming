@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.59.11）
+# UI/UX 重构交付记录（d.140.3.60.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -136,3 +136,18 @@
 | 未动 | `ChatPage.tsx`（提示条 / 下拉 / 复制按钮）、`ChatChart.tsx`（工具条按钮）、`ConfirmDialog.tsx`（弹窗）、`EmojiPicker.tsx`（浮层）里的 `shadow-card`：这些是浮层与工具条阴影，留给后续「浮层阴影统一」一轮 |
 
 **门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**（新增了 `EmptyState` 的 `framed` 用例）；受影响卡片与 changelog 相关的 6 个测试文件 136 例单独复跑通过。
+## 8. 第 7 轮（`d.140.3.60.11`）· 浮层阴影统一
+
+第 6 轮把卡片壳收编后，`packages/web/src` 里还剩 28 处 `shadow-card`。本轮按「是否真的浮在内容上」分成三类，把阴影从「随手加的装饰」变成两个语义：**卡片 = 描边无阴影**，**浮层 = `ui-overlay-shadow` 一档**。
+
+| 处理 | 处数 | 位置 |
+| --- | --- | --- |
+| → `ui-overlay-shadow` | 13 | `ChatPage.tsx`（模型下拉 / 附加上传弹层 / 回到底部）、`ConfirmDialog.tsx`、`EmojiPicker.tsx`、`FilePreviewModal.tsx`（预览面板）、`NavRail.tsx`（工具浮签）、`NotificationCenter.tsx`、`ShortcutsHelp.tsx`、`SkillsPage.tsx`（详情抽屉）、`knowledge/FileTree.tsx`（右键菜单）、`knowledge/QuickOpen.tsx`（速开面板）、`assistant/AgentFormPanel.tsx`、`assistant/ConversationRail.tsx`（会话菜单） |
+| 去掉投影 | 13 | `ChatChart.tsx`（缩放按钮 ×2）、`ChatPage.tsx`（提示条 ×2 / 复制按钮）、`FilePreviewModal.tsx`（文本、代码块）、`SettingsPage.tsx`（重试按钮 / 自定义色点）、`ShortcutsHelp.tsx`（`<kbd>`）、`WikiGraphView.tsx`（工具条）、`WikiPanel.tsx`（小按钮） |
+| → `ui-card` | 2 | `InterfacesPage.tsx`「预置服务」（`mb-4` + `p-3`）、`LoginPage.tsx` 登录卡（`w-[340px]` + `p-7`） |
+
+**结果**：`grep -rn 'shadow-card' packages/web/src --include=*.tsx` 归零（只剩 `ui/Skeleton.tsx` 的一句注释在提醒「别再手写 shadow-card」）。
+
+**判断标准**（写给下一个改界面的人）：元素下面有内容、会盖住内容 → 浮层，用 `ui-overlay-shadow`；元素与内容同层、只是分组 → 卡片，用 `ui-card`；元素是内容本身的一部分（按钮、提示条、`kbd`、色点）→ 不加投影，靠边框和底色区分。
+
+**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**；`pnpm -r typecheck`、`pnpm -r build` 通过。

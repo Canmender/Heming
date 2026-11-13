@@ -454,7 +454,7 @@ function SkillDetailDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`技能详情 ${skill.name}`}
-        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-[var(--surface)] shadow-card"
+        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-[var(--surface)] ui-overlay-shadow"
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">

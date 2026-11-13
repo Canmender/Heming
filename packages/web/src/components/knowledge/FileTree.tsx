@@ -318,7 +318,7 @@ export function FileTree({
           ref={menuRef}
           role="menu"
           aria-label={`文件操作：${baseName(menu.rel)}`}
-          className="fixed z-50 flex w-[168px] flex-col gap-0.5 rounded-lg border border-line bg-surface p-1 shadow-card"
+          className="fixed z-50 flex w-[168px] flex-col gap-0.5 rounded-lg border border-line bg-surface p-1 ui-overlay-shadow"
           style={{ left: menu.x, top: menu.y }}
         >
           {menuItem("新建笔记", () =>

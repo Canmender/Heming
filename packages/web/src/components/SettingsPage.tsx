@@ -490,7 +490,7 @@ function ProfileSection() {
             setAvatar(undefined);
             setSaved(false);
           }}
-          className="mt-2 rounded-lg border border-line px-3 py-1 text-[12px] shadow-card hover:bg-[var(--subtle-2)]"
+          className="mt-2 rounded-lg border border-line px-3 py-1 text-[12px] hover:bg-[var(--subtle-2)]"
         >
           恢复默认头像
         </button>
@@ -763,7 +763,7 @@ function AppearanceSection() {
               setAccentError(null);
               setApplied(true);
             }}
-            className={`h-6 w-6 rounded-full border border-line shadow-card ${
+            className={`h-6 w-6 rounded-full border border-line ${
               // 选中环用 --ink + --surface 做 offset：写死 #1a1a1a/白 offset 在暗色下
               // 要么环看不见、要么套一圈白光。深色色点（墨黑）也靠 border-line 才不至于融进卡片。
               accent === p.color ? "ring-2 ring-offset-2 ring-[var(--ink)] ring-offset-[var(--surface)]" : ""

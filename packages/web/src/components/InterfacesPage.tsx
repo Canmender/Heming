@@ -375,7 +375,7 @@ export function InterfacesView({
       {missingPresets.length > 0 && (
         <section
           aria-label="预置服务"
-          className="mb-4 rounded-xl border border-line bg-[var(--surface)] p-3 shadow-card"
+          className="mb-4 ui-card p-3"
         >
           <div className="flex flex-wrap items-center gap-2">
             <span className="ui-section-title">预置服务</span>

@@ -366,7 +366,7 @@ function AttachmentPreview({
     return (
       <div
         role="alert"
-        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] text-muted shadow-card"
+        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] text-muted"
       >
         <FileIcon width={15} height={15} />
         <span className="min-w-0 truncate">{file.name}</span>
@@ -419,7 +419,7 @@ function AttachmentPreview({
     <a
       href={url}
       download={file.name}
-      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] shadow-card hover:bg-[var(--subtle-2)]"
+      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-[12px] hover:bg-[var(--subtle-2)]"
     >
       <FileIcon width={15} height={15} />
       <span className="min-w-0 truncate">{file.name}</span>
@@ -2968,7 +2968,7 @@ export function ChatPage({
             <div
               role="menu"
               aria-label="导出会话"
-              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 shadow-card"
+              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 ui-overlay-shadow"
             >
               <button
                 type="button"
@@ -3302,7 +3302,7 @@ export function ChatPage({
                   <button
                     type="button"
                     aria-label="复制消息"
-                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-[var(--surface)] px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block"
+                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-[var(--surface)] px-1.5 py-0.5 text-[10px] text-muted hover:text-ink group-hover:block group-focus-within:block"
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
@@ -3334,7 +3334,7 @@ export function ChatPage({
         <button
           type="button"
           aria-label="滚动到最新消息"
-          className="absolute bottom-32 right-8 z-30 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--body)] shadow-card hover:bg-[var(--subtle-2)]"
+          className="absolute bottom-32 right-8 z-30 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
           onClick={() => scrollToLatest()}
         >
           ↓ 新消息
@@ -3514,7 +3514,7 @@ export function ChatPage({
           />
           {/* 语音双选项浮层：转文字（原 STT）/ 录音（MediaRecorder）；无该 API 时录音项禁用 */}
           {voiceMenu && (
-            <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 shadow-card">
+            <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 ui-overlay-shadow">
               <button
                 type="button"
                 className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[var(--subtle-2)]"

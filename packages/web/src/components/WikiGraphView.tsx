@@ -349,7 +349,7 @@ export function WikiGraphView({
         </svg>
 
         {/* 缩放控件：−/百分比/＋ + 重置视图（双击复位保留为快捷手势） */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line-soft bg-[var(--surface)] px-1 py-0.5 shadow-card">
+        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line-soft bg-[var(--surface)] px-1 py-0.5">
           <button
             type="button"
             aria-label="缩小图谱"

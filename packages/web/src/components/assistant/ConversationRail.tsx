@@ -269,7 +269,7 @@ export function ConversationRail({
           <div
             role="menu"
             data-conv-menu
-            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-[12px] shadow-card"
+            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-[12px] ui-overlay-shadow"
           >
             <button
               type="button"
