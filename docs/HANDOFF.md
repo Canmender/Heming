@@ -147,7 +147,7 @@
 - 报告全文：**[AUDIT-2026-11-13.md](AUDIT-2026-11-13.md)**。基线 HEAD `1563bb03`，工作区干净。
 - 门禁实测：shared 118 / server 268 / web **297 文件 4366 例** / desktop 831 / setup 19 / pipeline **288 passed、覆盖率 95.95%**；`build`、`typecheck`、`plugin:check` 全 exit 0。
 - 五个 P0：① **99 个提交未 push**（`origin/main` 停在 `f7150561`）② 卸载执行 `RMDir /r $INSTDIR`，会删掉数据根 `<安装目录>/data`，与安装向导「数据会保留」文案矛盾 ③ **通用外壳 `和鸣安装程序.exe` 在 `/updates/` 是 404**（用户最初要的自定义安装界面就差上传）④ 已发布 `d.140.3.54.10` 与线上部署落后 tag 后 **104 个提交**（web 51 文件 / desktop 7 / setup 5 / pipeline 整包未进包）⑤ `pnpm -r test` 因 server 的 vitest worker 在 Windows 上崩（0xC0000409）**约 27% 假红**，缓解方案 `--no-file-parallelism` 实测 10/10 过。
-- 待拍板：push+发版、卸载数据策略（保留 vs 改文案）、pipeline 容器真构建、pipeline 是否接桌面端、真模型浸泡。详见报告 §6。
+- 待拍板：push+本地交付方式、卸载数据策略（保留 vs 改文案）、pipeline 是否接桌面端、真模型浸泡。详见报告 §6。**2026-11-13 已定：不做 docker 容器化；云端保持不变（不重新部署 web/server）。**
 
 ---
 
