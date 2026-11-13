@@ -1,0 +1,110 @@
+# UI/UX 重构交付记录（d.140.3.57.11）
+
+- 日期：2026-11-13
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11`
+- 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
+- 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
+
+## 0. 一句话结论
+
+四轮改造都落在「全局杠杆」上（token → 基元 → 壳层 → 页面级定点），**没有引入新的视觉语言**：把已有的 token 体系补全、把重复的定义合并、把写死的字面量收回到变量、把页面级特例拉回基元。净效果是同屏字号档位从 6 档收到 3 档、卡片阴影从 6 套收到 1 套描边、暗色不再依赖 116 条类名补丁兜底。
+
+## 1. 四轮清单
+
+### 第 1 轮 · 布局重构（信息密度与响应式）
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/components/layout/PageShell.tsx` | 页头 `px-6 py-4` → `px-6 py-3`，`items-start` → `items-center`，`gap-4` → `gap-x-4 gap-y-2`；宽度档新增 `form`(760px) / `prose`(680px)，`WIDTH_CLASS` 改为导出；`padded` 注释明确「仅 scroll=true 生效」 |
+| `packages/web/src/index.css` | `.ui-page-title` 28/36 → **22/30**（`tracking-[-0.015em]`）；`.ui-page-sub` 14/22 → **13/20**（`mt-0.5`）；`.ui-section-title` 15 → **14**；`.ui-micro` 10 → **11**；新增 `--chat-gutter`（1.5rem，≤640px 时 0.75rem） |
+| `packages/web/src/App.tsx` | 根节点去掉多余 1px 外框与 `bg-white`；共享文件表头三个按钮统一 `ui-btn ui-btn-sm ui-btn-ghost`；ReconnectPanel 全部改基元类；拖宽手柄 8px → 12px，补 `aria-valuemin/max/now` 与 `hover:bg-[var(--line-soft)]`；抽屉遮罩 `bg-black/30` → `bg-[var(--scrim)]`，面板去 `shadow-xl` 改 `ui-overlay-shadow` |
+| `packages/web/src/components/NavRail.tsx` | 帮助/固定按钮 26 → 32px，头像 28 → 32px，组间距统一 `gap-2`/`pt-2`，`font-bold` → `font-semibold` |
+| `packages/web/src/components/assistant/ConversationRail.tsx` | `<900px` 时自动收起（`matchMedia` + `change` 监听，JSDOM 下安全退化），避免 264px 侧栏在 375 视口把对话区挤成一条缝；`text-[#666]` → `text-muted` |
+| `packages/web/src/components/assistant/AgentFormPanel.tsx` | 弹窗 `w-[380px]` 补 `max-w-[min(380px,92vw)]`，`bg-white` → `bg-surface` |
+| `packages/web/src/components/NotificationCenter.tsx` | 面板补 `max-w-[calc(100vw-80px)]`（原先 60px 轨 + 320px 面板在 375 下越界） |
+| `packages/web/src/components/ChatPage.tsx` | 15 处 `px-6` 统一为 `px-[var(--chat-gutter)]`（页头 / 提示条 / 消息区 / 状态行 / composer / 底部提示） |
+| `packages/web/src/lib/navPrefs.test.ts` | 字号断言同步到 22/30 与 13/20，测试名改为「四档字号语义类名保持不变（尺度值随轮次重定）」 |
+
+### 第 2 轮 · 样式重构（token 与基元收敛）
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/index.css` | 新增 `--danger-on / --warn-on / --success-on / --info-on`（亮色 `#fff`，暗色深底 `#2a0f0f` 等）：原先暗色下亮底 + 白字只有 1.7–2.3:1；新增 `--shadow-overlay` 并让 `.ui-overlay-shadow` 只引用变量；`.ui-card` 删阴影只留 `border-line-soft` 描边；`.ui-alert` 合并同名两份定义（原 271 与 560 各一份，后者覆盖前者，danger/warn/info/success 部分成死代码），补 `muted` 变体；`.ui-btn` / `.ui-segment` / `.ui-filter-chip` 补 `cursor-pointer`，`.ui-btn-danger` 改 `color: var(--danger-on)`；`@layer base` 补统一 `:focus-visible` 焦点环与 `button:not(:disabled)` 光标；`.ui-chip` 改胶囊；`--chart-2` 紫 `#7c6bd6` → 蓝绿 `#0f9d8a`，`--chart-label` 提对比到 `#5c6673` |
+| `packages/web/src/components/ux/OnboardingCard.tsx` | 完成徽标 `text-white` → `text-[var(--success-on)]` |
+| `packages/web/src/components/ToolApprovalModal.tsx`、`home/RecentConversations.tsx` | 危险操作按钮 `text-white` → `text-[var(--danger-on)]` |
+
+### 第 3 轮 · 设计优化 I（字面量 → 语义 token）
+
+批量替换（`ops_replace`，`**/*.tsx`，逐条核对测试断言后再落）：
+
+- `bg-white` → `bg-surface`（16 处 / 14 文件，含 `ConfirmDialog`、`LoginPage`、`Skeleton`、`AgentPicker`…）
+- `bg-black/20`、`bg-black/30` → `bg-[var(--scrim)]`（14 处）；**保留** 图片灯箱 `bg-black/75` 与拖拽层 `bg-black/10`
+- `text-[#555]/#444]` → `text-body`，`text-[#999]/#666]` → `text-muted`，`text-[#2563eb]` → `text-[var(--info)]`，`text-[#15803d]` → `text-[var(--success)]`，`text-[#8a5a00]/#92400e]` → `text-[var(--warn)]`
+- `bg-[#f3f3f3]` → `bg-subtle-3`，`bg-[#f1f1f1]` → `bg-subtle-4`，`bg-[#fffbeb]` → `bg-[var(--warn-soft)]`
+- `accent-[#1a1a1a]` → `accent-[var(--ink)]`，`focus:border-[#bbb]` → `focus:border-ink`，`divide-[#f4f4f4]` → `divide-line-soft`
+- 故意未动：`text-[#b42318]`（`plugins/shared.tsx` 的 `ERROR_TEXT` / `BTN_DANGER_SM`，`PluginsPage.capabilities.test.tsx` 断言该字面量存在）、`text-[#b45309]`（`ContextSettingsCard`，另有测试对它做了反向断言）。这两处留给「把语义类写进测试断言」的下一轮。
+
+### 第 4 轮 · 设计优化 II（可达性与破坏性操作）
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/components/RouteGroupsCard.tsx` | 删候选链接 `ConfirmDialog`（说明「绑定它的智能体会回到默认连接，已有用量记录不受影响」＋「这一步不能撤销」），同时卡片壳换 `ui-card` |
+| `packages/web/src/components/ModelPage.tsx` | 删分组 / 删密钥原为 `onClick` 直执行，改为原地两步确认（`dangerConfirm` state；复用该页 `agentConfirm` 的就地提示习惯），确认后才 `run(...)` |
+| `packages/web/src/App.tsx` | `SharedFilesPanel` 三处 `window.alert`（上传失败 / 未开会话绑定 / 未开会话发送）改为面板内联 `role="alert"` 提示行，可关闭、不阻塞整页；成功时自动清空 |
+| `packages/web/src/components/ui/Switch.tsx` | 视觉仍是 18×32，但用 `after:` 伪元素把命中区撑到 32×48（原按钮高度 18px 远低于 32px 标尺） |
+| `packages/web/src/index.css` | 新增 `.ui-hit`（`::after` 扩 7/6px）供 24–28px 小图标按钮复用 |
+
+## 2. 遗留与未做
+
+审计 139 条里，本轮只覆盖了全部 9 条 S1 与约三分之一的 S2/S3。明确留给后续：
+
+1. **基元采用率**：全仓仍有 265 处手拼 `"ui-btn …"`、`ErrorState` 零采用、`TextField` 仅 1 处。第 3/4 轮只做了「新代码用基元 + 字面量收口」，没有做批量替换（改动面太大、无 typecheck 兜底时风险不可控）。
+2. **三态统一**：加载 4 种 / 空 3 套 / 失败 5 种仍在；需要一次 `ui/AsyncBoundary` 级别的抽象，属独立一轮。
+3. **弹窗壳统一**：11 个弹窗各自拼壳（4 种宽度、2 种圆角）。审计建议抽出 `ui/Dialog`，本轮 `ConfirmDialog` 已是事实标准但未强制。
+4. **ModelPage 表单语义**（S1-9）：20+ 字段仍无可见 label / 必填标记 / 错误关联，CLI 英文枚举仍直接当界面文案。这块需要改的是交互结构而非样式，单独一轮更安全。
+5. **暗色兼容层**：`index.css` 里 116 条按类名覆盖仍是兜底网，本轮把常见字面量换成了 token，但没删桥接规则——删早了会一屏花掉，应等页面全部改用 token 类后再逐条删。
+6. **`.ui-btn` 12px 与页脚 `.ui-caption` 12px** 保持不变：再降会牺牲中文可读性，反而违反「更简洁」的目标。
+
+## 3. 验证与冒烟
+
+**已执行**（合并到主干时 shell 通道恢复，2026-11-13 14:00–14:10）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm -r typecheck` | 通过（5 个包；合并时 `App.tsx` 的 `asideNotice` 状态声明落到 `App` 而不是 `AppShell`，typecheck 报 10 处 `Cannot find name`，已把 `useState` 移到 `SharedFilesPanel` 的宿主 `AppShell` 里） |
+| `pnpm --filter @heming/web test` | **297 个文件 / 4366 例全通过**（唯一失败是 `navPrefs.test.ts` 里旧的 `box-shadow: 0 8px 24px rgba(…0.14)` 字面量断言——第 2 轮已把浮层阴影收成 `--shadow-overlay` 变量，断言同步改为「类引用变量 + 亮暗两档 token 值」） |
+| `pnpm -r build` | 通过（web 的 vite 产物与 server/shared 的 tsc 产物均落盘） |
+
+> 早前那一轮记录写的是「shell 不可用、未跑任何检查」，其风险已由这次的实跑覆盖：三个门禁全绿，没有留下「靠肉眼核对的断言」。
+
+人工冒烟清单（真浏览器回归时按此走）：
+
+1. 宽窗 / 窄窗（<1200）切换：右栏共享文件、拖宽手柄（键盘 Tab 聚焦后方向键行为不变）、窄窗抽屉遮罩颜色与暗色一致。
+2. 375 宽（DevTools 设备模式）：聊天页、智能体页（会话轨自动收起）、通知面板、智能体表单弹窗均无横向滚动。
+3. 亮 / 暗切换：页面标题、卡片描边、图表（`--chart-2` 现在是蓝绿）、危险按钮、完成徽标文字对比。
+4. 键盘：Tab 走一遍导航栏 → 页头按钮 → 列表行，焦点环处处可见（含 `.ui-btn` 与 `.ui-segment`）。
+5. 破坏性操作：删候选链（弹 `ConfirmDialog`）、删分组 / 删密钥（原地两步确认），Esc 可取消。
+6. 共享文件：不开会话点「绑定」/目录里发文件，提示出现在面板内而不是 `alert` 弹窗。
+7. 开关：18px 高的开关点边缘也能切换（命中区已撑大）。
+
+## 4. 回滚
+
+改动集中在样式与壳层，无数据/接口变更。回滚按轮次：
+
+- 只回样式：还原 `packages/web/src/index.css` 至 `d.140.3.55.10` 版本。
+- 只回第 4 轮：`RouteGroupsCard.tsx`、`ModelPage.tsx`、`App.tsx` 三文件的 `dangerConfirm`/`asideNotice` 段。
+
+## 5. 与审计文档的对应
+
+| 审计条目 | 本轮处置 |
+| --- | --- |
+| S1-1 暗色 danger 按钮对比 | 第 2 轮 `--danger-on` |
+| S1-2 暗色完成徽标对比 | 第 2 轮 `--success-on` |
+| S1-3 375 聊天区仅 111px | 第 1 轮会话轨自动收起 |
+| S1-4 智能体表单 380px 溢出 | 第 1 轮 `max-w` |
+| S1-5 通知面板 320px 越界 | 第 1 轮 `max-w` |
+| S1-6/7/8 三处删除零确认 | 第 4 轮 `ConfirmDialog` / 两步确认 |
+| S1-9 表单语义与英文枚举 | **未做**（见 §2.4） |
+| A 组字号 6 档 / 阴影 6 套 | 第 1、2 轮收敛到 3 档 / 1 套 |
+| C 组 17 处手写遮罩 | 第 3 轮收进 `var(--scrim)` |
+| C 组 116 条暗色补丁 | 部分（常见字面量已换 token，桥接规则保留） |

@@ -93,7 +93,7 @@ export function PluginDetailDialog(props: PluginDetailDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
       onClick={props.onClose}
     >
       <div

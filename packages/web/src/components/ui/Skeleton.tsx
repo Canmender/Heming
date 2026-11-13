@@ -32,8 +32,8 @@ export function SkeletonCard({
   return (
     <div
       aria-hidden="true"
-      // d.138：走 .ui-card，别再手写 border + bg-white + shadow-card——
-      // 骨架也是卡片，暗色下必须跟真卡片同底色（写死 bg-white 会闪一块白）。
+      // d.138：走 .ui-card，别再手写 border + bg-surface + shadow-card——
+      // 骨架也是卡片，暗色下必须跟真卡片同底色（写死 bg-surface 会闪一块白）。
       className={`ui-card p-3${className ? ` ${className}` : ""}`}
     >
       <SkeletonLine className="mb-2 h-4 w-2/5" />

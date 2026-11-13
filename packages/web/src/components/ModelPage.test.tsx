@@ -154,7 +154,7 @@ describe("ModelPage · 结构与主路径", () => {
     // 折叠区的翻页箭头走 icons.tsx 的 ChevronIcon（带统一类名），CSS 负责展开旋转
     const summary = (await screen.findByText("模型属性（可选）")).closest("summary");
     expect(summary?.querySelector("svg.ui-disclosure-chevron")).not.toBeNull();
-    // 统计卡走统一卡片基元（阴影/圆角由 token 提供，不再各写 bg-white + 任意 shadow）
+    // 统计卡走统一卡片基元（阴影/圆角由 token 提供，不再各写 bg-surface + 任意 shadow）
     expect(screen.getAllByText("可用模型").some((el) => el.closest(".ui-card") !== null)).toBe(true);
   });
 

@@ -17,7 +17,7 @@ export function PluginPermissionList({
 }) {
   const network = hostPreview(view);
   return (
-    <div aria-label="插件权限" className="mt-2 rounded-lg border border-line-soft bg-white p-2.5">
+    <div aria-label="插件权限" className="mt-2 rounded-lg border border-line-soft bg-surface p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="ui-section-title">权限</span>
         {view.legacy ? (

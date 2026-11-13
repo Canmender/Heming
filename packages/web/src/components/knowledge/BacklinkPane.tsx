@@ -153,7 +153,7 @@ export function BacklinkPane({
                 key={`${link.from}-${link.line}-${index}`}
                 label={
                   <>
-                    <span className="text-[#2563eb]">{link.from}</span>
+                    <span className="text-[var(--info)]">{link.from}</span>
                     {link.alias ? <span className="ml-1 text-muted">（{link.alias}）</span> : null}
                   </>
                 }
@@ -183,7 +183,7 @@ export function BacklinkPane({
                   key={`${link.target}-${link.line}-${index}`}
                   label={
                     <>
-                      {link.resolved ? <span className="text-[#2563eb]">{label}</span> : <span>{label}</span>}
+                      {link.resolved ? <span className="text-[var(--info)]">{label}</span> : <span>{label}</span>}
                       {link.heading ? <span className="ml-1 text-muted">#{link.heading}</span> : null}
                       {link.embed ? <span className="ml-1 text-[10px] text-muted">嵌入</span> : null}
                     </>

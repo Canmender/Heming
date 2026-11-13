@@ -136,10 +136,12 @@ describe("navPrefs · 交互默认值（与规格 / 调研同口径）", () => {
 
   it("浮层阴影亮/暗两档都在 index.css 里定义（暗色不刺眼）", () => {
     const css = readFileSync("src/index.css", "utf8");
+    // d.140：浮层阴影从「类里写死两档」收成 `--shadow-overlay` 变量，
+    // 类只引用变量，暗色通过覆盖变量值实现（少一条同名选择器，也不会漏配）。
     expect(css).toContain(".ui-overlay-shadow {");
-    expect(css).toContain("box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14)");
-    expect(css).toContain('[data-theme="dark"] .ui-overlay-shadow');
-    expect(css).toContain("box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55)");
+    expect(css).toContain("box-shadow: var(--shadow-overlay)");
+    expect(css).toContain("--shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.14)");
+    expect(css).toContain("--shadow-overlay: 0 10px 30px rgb(0 0 0 / 0.55)");
   });
 });
 

@@ -152,7 +152,7 @@ export function AgentPicker({
                     return (
                       <div
                         key={agent.id}
-                        className="flex min-w-0 flex-col rounded-xl border border-line-soft bg-white p-3 transition-colors hover:border-line"
+                        className="flex min-w-0 flex-col rounded-xl border border-line-soft bg-surface p-3 transition-colors hover:border-line"
                       >
                         <button
                           type="button"

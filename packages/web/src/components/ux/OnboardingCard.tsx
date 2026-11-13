@@ -60,7 +60,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
                 aria-hidden="true"
                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${
                   step.done
-                    ? "border-[var(--success)] bg-[var(--success)] text-white"
+                    ? "border-[var(--success)] bg-[var(--success)] text-[var(--success-on)]"
                     : "border-[var(--line-strong)] bg-[var(--surface)] text-[var(--body)]"
                 }`}
               >

@@ -22,7 +22,7 @@ describe("Avatar 圆形头像", () => {
     expect(container.textContent).toBe("爱");
     const span = container.querySelector("span")!;
     expect(span.className).toContain("rounded-full");
-    expect(span.className).toContain("bg-[#f1f1f1]");
+    expect(span.className).toContain("bg-subtle-4");
   });
 
   it("img onError（加载失败）回退首字", () => {

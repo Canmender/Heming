@@ -189,7 +189,7 @@ function KeyDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
@@ -350,7 +350,7 @@ function HubDetailDialog({
   const detail = state.detail;
   const detailHomepage = safeExternalUrl(detail?.homepage);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
@@ -498,7 +498,7 @@ function InstallPreviewDialog({
   useModalA11y(panelRef, onCancel, { active: true });
   const { parsed, target, download, sameName } = preview;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
@@ -602,7 +602,7 @@ function BulkUpdateDialog({
   const skipped = results.filter((item) => item.kind === "skipped").length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"

@@ -54,7 +54,7 @@ function KeyCaps({ keys }: { keys: string[] }) {
       {keys.map((k, i) => (
         <span key={`${k}-${i}`} className="flex items-center gap-1">
           {i > 0 && <span className="text-[10px] text-muted">+</span>}
-          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-medium text-[#444] shadow-card">
+          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-medium text-body shadow-card">
             {k}
           </kbd>
         </span>
@@ -67,7 +67,7 @@ function Group({ title, rows }: { title: string; rows: ShortcutRow[] }) {
   return (
     <section className="mb-4 last:mb-0">
       <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">{title}</h3>
-      <dl className="divide-y divide-[#f4f4f4]">
+      <dl className="divide-y divide-line-soft">
         {rows.map((row) => (
           <div key={`${title}-${row.label}`} className="flex items-center justify-between gap-3 py-1.5">
             <dt className="min-w-0 truncate text-[12px] text-ink">{row.label}</dt>

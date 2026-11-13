@@ -56,7 +56,7 @@ export function ConfirmDialog({
         aria-label={title}
         // 点弹窗内部不冒泡到遮罩（否则点内容就等于拒绝）。
         onClick={(e) => e.stopPropagation()}
-        // d.138：写死的 #ececec / bg-white 在暗色下是一块亮面板，改用 token。
+        // d.138：写死的 #ececec / bg-surface 在暗色下是一块亮面板，改用 token。
         className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">

@@ -29,7 +29,7 @@ import { AGENT_TEMPLATES, type AgentTemplate } from "./agentTemplates.js";
  */
 
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-ink";
 const labelCls = "block ui-caption";
 /** 进阶字段区的锚点 id：折叠按钮用 aria-controls 指向它（渐进披露的入口要能被读屏关联）。 */
 const advancedId = "agent-advanced-fields";
@@ -521,7 +521,7 @@ export function AgentFormPanel({
   if (modal) {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
         onMouseDown={(e) => {
           if (e.target === e.currentTarget && !pendingRef.current) onClose();
         }}

@@ -190,6 +190,9 @@ interface SharedFilesPanelProps {
   onSendToConversation: (item: SharedFileMeta) => void;
   /** 抽屉模式才传：显示面板内的关闭按钮（宽窗 aside 不传，布局与改前一致）。 */
   onClose?: () => void;
+  /** 面板内联提示（d.140 R4：替代 window.alert，不再阻塞、可被读屏播报）。 */
+  notice?: string | null;
+  onDismissNotice?: () => void;
 }
 
 function SharedFilesPanel({
@@ -202,6 +205,8 @@ function SharedFilesPanel({
   onClosePreview,
   onSendToConversation,
   onClose,
+  notice,
+  onDismissNotice,
 }: SharedFilesPanelProps) {
   return (
     <>
@@ -243,6 +248,20 @@ function SharedFilesPanel({
           </button>
         ) : null}
       </div>
+      {notice && (
+        <div role="alert" className="ui-alert ui-alert-warn mx-2 mt-2 items-center">
+          <span className="min-w-0 flex-1">{notice}</span>
+          {onDismissNotice && (
+            <button
+              type="button"
+              onClick={onDismissNotice}
+              className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
+            >
+              知道了
+            </button>
+          )}
+        </div>
+      )}
       <div className="min-h-0 flex-1">
         <FileTree
           items={files}
@@ -480,6 +499,8 @@ function AppShell({
 
   const [files, setFiles] = useState<SharedFileMeta[]>([]);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
+  /** 共享文件面板的内联提示（三处原本会阻塞整页的 window.alert 改为面板内 role="alert"）。 */
+  const [asideNotice, setAsideNotice] = useState<string | null>(null);
 
   /** 右栏文件行 hover「预览」的目标文件（null = 模态关闭）。 */
   const [previewFile, setPreviewFile] = useState<SharedFileMeta | null>(null);
@@ -501,10 +522,11 @@ function AppShell({
       if (!file) return;
       try {
         await uploadFile(file); // base64 编码与 POST 已下沉到 lib/api
+        setAsideNotice(null);
         refreshFiles();
       } catch (e) {
         console.error("上传失败", e);
-        window.alert(`上传失败：${e instanceof Error ? e.message : String(e)}`);
+        setAsideNotice(`上传失败：${e instanceof Error ? e.message : String(e)}`);
       }
     };
     input.click();
@@ -513,9 +535,10 @@ function AppShell({
   /** 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败（行为同提取前）。 */
   const onBindFile = () => {
     if (!useUiStore.getState().activeConversationId) {
-      window.alert("先打开一个会话，再绑定文件");
+      setAsideNotice("先打开一个会话，再绑定文件");
       return;
     }
+    setAsideNotice(null);
     void onUpload();
   };
 
@@ -523,9 +546,10 @@ function AppShell({
   const onSendFileToConversation = (item: SharedFileMeta) => {
     const { page: currentPage, activeConversationId } = useUiStore.getState();
     if (currentPage !== "chat" || !activeConversationId) {
-      window.alert("先打开一个会话，再从目录发送文件");
+      setAsideNotice("先打开一个会话，再从目录发送文件");
       return;
     }
+    setAsideNotice(null);
     useUiStore.getState().sendFileToConversation(activeConversationId, {
       id: item.id,
       name: item.name,
@@ -874,6 +898,8 @@ function AppShell({
               onPreview={setPreviewFile}
               onClosePreview={() => setPreviewFile(null)}
               onSendToConversation={onSendFileToConversation}
+              notice={asideNotice}
+              onDismissNotice={() => setAsideNotice(null)}
             />
           </aside>
         )}
@@ -906,6 +932,8 @@ function AppShell({
               onClosePreview={() => setPreviewFile(null)}
               onSendToConversation={onSendFileToConversation}
               onClose={closeFilesDrawer}
+              notice={asideNotice}
+              onDismissNotice={() => setAsideNotice(null)}
             />
           </aside>
         </div>

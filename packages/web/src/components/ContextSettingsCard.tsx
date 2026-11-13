@@ -29,7 +29,7 @@ const BUDGET_RATIO = 0.6;
 
 const labelCls = "ui-caption";
 const selectCls =
-  "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
+  "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-ink";
 const hintCls = "ui-caption";
 
 /* 开关已抽到 ui/Switch.tsx（d.138）：与记忆页、技能页的三份逐字节相同拷贝合并。 */
@@ -66,7 +66,7 @@ export function ContextSettingsCard() {
   const shownBudget = windowLimit && settings.budgetTokens > windowLimit ? windowLimit : settings.budgetTokens;
 
   return (
-    <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="mt-3 rounded-xl border border-line bg-surface p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">上下文预算</div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行

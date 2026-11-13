@@ -143,6 +143,9 @@ export function ModelPage() {
     null,
   );
   /** 每行待应用的模型输入（按智能体展示名索引，不持久化）。 */
+  /** 待确认的破坏性 CLI 操作（d.140 R4）：删分组/删密钥都是一下就没的操作，
+   *  此前 onClick 直接执行、零确认。这里改成原地两步确认（与 agentConfirm 同一套就地提示习惯）。 */
+  const [dangerConfirm, setDangerConfirm] = useState<{ label: string; args: string[] } | null>(null);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [modelQuery, setModelQuery] = useState("");
@@ -1234,14 +1237,42 @@ export function ModelPage() {
                 >
                   详情
                 </button>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-danger"
-                  disabled={!cli || !groupForm.target.trim()}
-                  onClick={() => void run("删除分组", ["group", "rm", groupForm.target.trim()])}
-                >
-                  删除
-                </button>
+                {dangerConfirm?.args[1] === "rm" ? (
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-danger"
+                      onClick={() => {
+                        const pending = dangerConfirm;
+                        setDangerConfirm(null);
+                        void run(pending.label, pending.args);
+                      }}
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      onClick={() => setDangerConfirm(null)}
+                    >
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-danger"
+                    disabled={!cli || !groupForm.target.trim()}
+                    onClick={() =>
+                      setDangerConfirm({
+                        label: "删除分组",
+                        args: ["group", "rm", groupForm.target.trim()],
+                      })
+                    }
+                  >
+                    删除
+                  </button>
+                )}
               </div>
 
               <div className="mt-3 border-t border-line pt-3">
@@ -1480,14 +1511,42 @@ export function ModelPage() {
                 >
                   轮换
                 </button>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-danger"
-                  disabled={!cli || !gatewayKeyForm.target.trim()}
-                  onClick={() => void run("删除密钥", ["gateway-key", "remove", gatewayKeyForm.target.trim()])}
-                >
-                  删除
-                </button>
+                {dangerConfirm?.args[1] === "remove" ? (
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-danger"
+                      onClick={() => {
+                        const pending = dangerConfirm;
+                        setDangerConfirm(null);
+                        void run(pending.label, pending.args);
+                      }}
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      onClick={() => setDangerConfirm(null)}
+                    >
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-danger"
+                    disabled={!cli || !gatewayKeyForm.target.trim()}
+                    onClick={() =>
+                      setDangerConfirm({
+                        label: "删除密钥",
+                        args: ["gateway-key", "remove", gatewayKeyForm.target.trim()],
+                      })
+                    }
+                  >
+                    删除
+                  </button>
+                )}
               </div>
             </details>
 

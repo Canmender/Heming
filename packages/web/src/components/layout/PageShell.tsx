@@ -46,7 +46,7 @@ export interface PageShellProps {
   width?: PageWidth;
   /** 是否由 PageShell 提供滚动容器（默认 true）；双栏/三栏页面传 false */
   scroll?: boolean;
-  /** 额外容器类（例如 `bg-white`） */
+  /** 额外容器类（例如 `bg-surface`） */
   className?: string;
   /** 内容区额外类（例如 `flex flex-col gap-4`） */
   bodyClassName?: string;

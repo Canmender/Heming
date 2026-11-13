@@ -12,6 +12,7 @@ import { llmHealth, accountKey, modelKey } from "../lib/llmHealth.js";
 import { lookupCapability } from "../lib/modelCaps.js";
 import { byProfileModel, monthKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { PlusIcon } from "./icons.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /** 设置区 · 候选链：一条按声明顺序的模型链，第一个答不了才走下一个。 */
 
@@ -72,7 +73,7 @@ function clampWeight(raw: string): number {
 
 
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-ink";
 const btnGhost =
   "ui-btn ui-btn-sm ui-btn-ghost";
 
@@ -114,6 +115,8 @@ export function RouteGroupsCard() {
   const [strategy, setStrategy] = useState<RouteStrategy>("order");
   const [pick, setPick] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** 待删候选链：删除会连带解绑智能体，属不可撤销操作，必须先确认（d.140 R4）。 */
+  const [pendingDelete, setPendingDelete] = useState<RouteGroup | null>(null);
   /** 休息名单的读取时刻：每次重渲染取一次（够用——这里没有轮询需求）。 */
   const [now, setNow] = useState(() => Date.now());
 
@@ -202,7 +205,7 @@ export function RouteGroupsCard() {
   }
 
   return (
-    <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="ui-card mt-3 p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-muted">候选链</span>
@@ -245,10 +248,7 @@ export function RouteGroupsCard() {
               <button
                 type="button"
                 aria-label={`删除 ${g.label}`}
-                onClick={() => {
-                  removeRoute(g.id);
-                  if (editingId === g.id) resetForm();
-                }}
+                onClick={() => setPendingDelete(g)}
                 className={btnGhost}
               >
                 删除
@@ -478,6 +478,39 @@ export function RouteGroupsCard() {
         </form>
       )}
 
+      {pendingDelete && (
+        <ConfirmDialog
+          title="删除候选链"
+          onCancel={() => setPendingDelete(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-ghost"
+                onClick={() => setPendingDelete(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-danger"
+                onClick={() => {
+                  removeRoute(pendingDelete.id);
+                  if (editingId === pendingDelete.id) resetForm();
+                  setPendingDelete(null);
+                }}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="ui-body-sm">
+            删除「{pendingDelete.label}」后，绑定它的智能体会回到默认连接；已有的用量记录不受影响。
+          </p>
+          <p className="ui-caption mt-2">这一步不能撤销。</p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

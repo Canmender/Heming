@@ -89,7 +89,7 @@ export function RecentConversations() {
                   <span className="block truncate ui-caption">{meta}</span>
                 </span>
                 {conv.unreadCount > 0 ? (
-                  <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-semibold text-white">
+                  <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-semibold text-[var(--danger-on)]">
                     {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
                   </span>
                 ) : null}
