@@ -328,6 +328,16 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     def create_run(body: RunRequest) -> JSONResponse:
         if body.mode not in ("react", "adversarial"):
             raise HTTPException(status_code=422, detail="mode 只能是 react 或 adversarial")
+        # tools_allowed 是执行侧硬约束：写错的工具名不会报错，只会让这个 run 少一份工具，
+        # 调用方却以为「只给只读工具」已经生效。提交时先对一遍可用清单。
+        if body.tools_allowed:
+            known_tools = set(runtime.tools.registry.names())
+            unknown = [name for name in body.tools_allowed if name not in known_tools]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"tools_allowed 里有不存在的工具：{'、'.join(unknown)}（可用：{'、'.join(sorted(known_tools)) or '无'}）",
+                )
         run_id = body.run_id or uuid.uuid4().hex
         with lock:
             existing = runs.get(run_id)

@@ -84,3 +84,15 @@ def test_unknown_fields_are_rejected_instead_of_silently_ignored(runtime_factory
         assert approve.status_code == 422, "未知字段要在查 run 之前就被 422 拦住"
         rollback = client.post("/v1/config/rollback", json={"versionId": 3})
         assert rollback.status_code == 422, rollback.text
+
+def test_tools_allowed_must_name_real_tools(runtime_factory) -> None:
+    """写错的工具名要在提交时报出来：否则这个 run 少一份工具，调用方以为限制生效了。"""
+    with _client(runtime_factory) as client:
+        bad = client.post("/v1/runs", json={"goal": "x", "tools_allowed": ["http_get", "nope__tool"]})
+        assert bad.status_code == 422
+        detail = bad.json()["detail"]
+        assert "nope__tool" in detail  # 指出哪个名字不存在
+        assert "http_get" in detail  # 顺带给可用清单（否则只能靠猜）
+
+        ok = client.post("/v1/runs", json={"goal": "x", "tools_allowed": ["http_get"]})
+        assert ok.status_code == 202

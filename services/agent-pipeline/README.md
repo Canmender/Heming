@@ -234,6 +234,9 @@ curl -s http://localhost:8000/v1/knowledge \
 工具本身不会执行。此前只校验「工具注册过没有」，于是限制成只读工具的一次 run 依然能真跑 `run_command`。
 `tests/test_tools_allowed.py` 2 例钉住「越权不发 schema 也不执行」和「允许的工具照常跑」两条。
 
+清单本身也要对得上真实工具：提交时用 `runtime.tools.registry.names()` 校验一遍，写了不存在的名字直接 `422`（错误里指出是哪几个、并给出可用清单）——否则这个 run 只是「少一份工具」，调用方却以为限制生效了。
+`tests/test_request_validation.py` 的 `test_tools_allowed_must_name_real_tools` 钉住这条。
+
 ## 工具审批（HITL）
 
 `AGENT_APPROVAL_MODE=write` 时，`execute` 节点在跑**非只读**工具前会挂起，等外部裁决：
