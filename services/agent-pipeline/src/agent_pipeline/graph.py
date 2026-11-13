@@ -32,6 +32,7 @@ class PipelineState(TypedDict, total=False):
     adversarial_passed: bool
     replans: int
     steps_executed: int
+    skipped_steps: int
     llm_calls: int
     tokens: int
     status: str

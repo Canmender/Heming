@@ -223,6 +223,7 @@ def run_once(
         # 这三个是「过程是否健康」的一等指标，调优和回滚窗口都要读。
         "replans": int(state.get("replans", 0)),
         "steps_executed": int(state.get("steps_executed", 0)),
+        "skipped_steps": int(state.get("skipped_steps", 0)),
         "adversarial_round": int(state.get("adversarial_round", 0)),
         "adversarial_passed": bool(state.get("adversarial_passed", False)),
         "plan": [s.to_dict() for s in result.plan],

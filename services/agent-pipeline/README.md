@@ -257,6 +257,24 @@ agent-pipeline ingest <repo>/docs --prefix repo/ --ext .md
 一条合法步骤都不剩时，退化成「把用户交代的任务做完」一步，用 `TaskSpec.goal` 当目标——计划质量差是模型的问题，
 调用方该拿到的是尽力完成的答复 + 可观测的降级，而不是 error。`tests/test_plan_repair.py` 4 例。
 
+## Reflect 提前说「完成」时，没做的步骤不算做完
+
+`reflect` 的 `verdict == "done"` 以前会把**所有**没完成的步骤一律改成 `done`，并把 `steps_executed` 抬到计划长度。
+模型只看第一步的观测就回答「做完了」，后面几步从没执行也会被记成做完：看板是绿的、日志写着全部完成、
+调优与落滚统计都被这盏假绿灯污染，Critic 只看最终答复时还会给高分。
+
+现在的口径：
+
+- 只有**当前正在跑的那一步**（`step_index` 指向、状态 `running`）会被标成 `done`——Reflect 正是看着它的观测下的判断；
+- 排在后面、从未执行的步骤标成 `skipped`，累计进 `skipped_steps`（`new_state` 默认 0，`PipelineState` 里显式声明过，
+  否则 LangGraph 不会把它带出节点）；
+- `steps_executed` 保持真实值（不再被抬到计划长度）；
+- Critic 的上下文里会加一句「注意：这次有 N 个计划步骤没有执行就被判定完成，请判断现有观测是否足以支撑结论」，
+  让评审看得见这段缺口，而不是只读最终答复。
+
+`tests/test_early_done.py` 1 例（3 步计划、只做第一步就 done → `["done","skipped","skipped"]`、`skipped_steps == 2`、
+`steps_executed == 1`、评审上下文含「2 个计划步骤没有执行」）。
+
 ## Plan / Execute / Reflect 的「下一步」
 
 `reflect` 节点的返回里除了 `verdict`，还有 `next_step`（步骤下标）。它现在**真的会影响编排**：
@@ -528,8 +546,8 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **284 passed / 覆盖率 95.7%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
-- 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
+- 当前 **285 passed / 覆盖率 96%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出、提前说完成时没做的步骤记 `skipped`（`skipped_steps` 进日志、进评审上下文）。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 
 ## 已知边界

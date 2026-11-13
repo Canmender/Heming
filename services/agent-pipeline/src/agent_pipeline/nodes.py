@@ -107,6 +107,7 @@ def new_state(run_id: str, task: TaskSpec, *, config_version: int = 0) -> dict[s
         "adversarial_round": 0,
         "replans": 0,
         "steps_executed": 0,
+        "skipped_steps": 0,
         "llm_calls": 0,
         "tokens": 0,
         "status": "running",
@@ -551,15 +552,25 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     ]
     updates: dict[str, Any] = {"reflections": [*prior_reflections, reflection.to_dict()]}
     if verdict == "done":
-        # 只有 Reflect 认为完成时才把剩余步骤标记为完成（不覆盖已经 done 的）。
-        for index, step in enumerate(plan):
-            if step.status != "done":
+        # Reflect 说完成时，**不能**把还没执行过的步骤写成 done —— 那是「假成功」：
+        # 看板/日志/调优都会以为整条计划做完了，Critic 也看不出中间空了几步。
+        # 正在跑的那一步（status=running，Reflect 正是看着它的观测判的）标 done；
+        # 排在后面、从没执行过的标 skipped，台账（steps_executed）保持真实值。
+        current = int(state.get("step_index", 0))
+        skipped = 0
+        for position, step in enumerate(plan):
+            if step.status == "done":
+                continue
+            if position == current and step.status == "running":
                 step.status = "done"
-                plan[index] = step
+            else:
+                step.status = "skipped"
+                skipped += 1
+            plan[position] = step
         updates["plan"] = [s.to_dict() for s in plan]
         updates["step_index"] = len(plan)
-        # 全部步骤都完成了，台账也要对齐（否则行里的 steps_executed 会停在半路）
-        updates["steps_executed"] = max(int(state.get("steps_executed", 0)), len(plan))
+        if skipped:
+            updates["skipped_steps"] = int(state.get("skipped_steps", 0)) + skipped
     elif verdict == "replan":
         updates["replans"] = int(state.get("replans", 0)) + 1
         updates["plan"] = []
@@ -632,7 +643,15 @@ def critic_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     if not _budget_left(state, runtime):
         return {**state, "status": "budget"}
     task = TaskSpec(**_task(state))
-    context = _context(runtime, state, extra="请评审当前产物，只输出 JSON。")
+    skipped = int(state.get("skipped_steps", 0))
+    # 有步骤没执行就被判「完成」时，评审必须知道：否则它只看最终答复，会把
+    # 「只做了第一步」判成高分（看板上是一条绿灯的 ok）。
+    note = (
+        f"注意：这次有 {skipped} 个计划步骤没有执行就被判定完成，请判断现有观测是否足以支撑结论。"
+        if skipped
+        else ""
+    )
+    context = _context(runtime, state, extra=f"请评审当前产物，只输出 JSON。{note}")
     data, _ = _call_json(runtime, state, prompt_key="critic", user_text=context)
     try:
         score = float(data.get("score", 0.0))

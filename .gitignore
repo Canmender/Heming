@@ -72,3 +72,8 @@ module-catalog/
 .ui-check-tmp/
 # 跨语言联调测试的临时工作目录（进程退出后句柄可能还占着一小会儿）
 .tmp-pipeline-live-*/
+# 在仓库根跑 agent-pipeline 测试的产物（cwd 决定落地）
+runs.jsonl
+agent-pipeline.db
+.coverage
+pytest-of-*/
