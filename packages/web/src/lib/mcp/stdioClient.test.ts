@@ -128,6 +128,22 @@ describe("stdio 客户端", () => {
     await expect(pending).rejects.toThrow(/子进程可能仍在运行/);
   });
 
+  it("两个客户端实例的 requestId 不重叠（重载后不会撞上主进程里的在途 id）", async () => {
+    const bridge = installBridge();
+    const first = createStdioMcpClient(SERVER);
+    const second = createStdioMcpClient(SERVER);
+
+    await first.initialize();
+    await second.initialize();
+
+    const idOf = (index: number) => bridge.request.mock.calls[index][4] as number;
+    expect(typeof idOf(0)).toBe("number");
+    expect(typeof idOf(1)).toBe("number");
+    // 起点随机化：两个实例从同一批号段开始就会把响应错配给对方
+    expect(idOf(0)).not.toBe(idOf(1));
+    expect(idOf(1)).toBeGreaterThanOrEqual(1_000_000);
+  });
+
   it("缺命令直接抛错（不把空命令交给主进程）", () => {
     installBridge();
     expect(() => createStdioMcpClient({ ...SERVER, command: "" })).toThrow(/启动命令/);

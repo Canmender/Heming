@@ -46,8 +46,12 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
     ...(typeof server.timeoutMs === "number" ? { timeoutMs: server.timeoutMs } : {}),
   };
   let sessionId: string | null = null;
-  /** 请求 id 由渲染层分配：用户中断时要用同一个 id 通知主进程取消。 */
-  let nextRequestId = 1;
+  /**
+   * 请求 id 由渲染层分配：用户中断时要用同一个 id 通知主进程取消。
+   * 起点随机化：页面重载/重连后如果从 1 重新分配，可能和主进程里还没回的在途
+   * 请求撞号（主进程会明确拒绝，但这等于白丢一次调用）。
+   */
+  let nextRequestId = 1_000_000 + Math.floor(Math.random() * 1_000_000_000);
 
   const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
     const requestId = nextRequestId++;

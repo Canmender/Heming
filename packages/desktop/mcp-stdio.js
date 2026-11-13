@@ -395,6 +395,19 @@ function createStdioBridge({
       Number.isInteger(supplied) && supplied > 0 ? supplied : entry.nextId++;
     if (id >= entry.nextId) entry.nextId = id + 1;
     const requestTimeout = clampTimeout(config?.timeoutMs, timeoutMs);
+    /**
+     * 渲染层重载/重连后它会从自己的起点重新分配 id，而主进程这边的在途请求
+     * 还在——两个请求用了同一个 id 时，后一个会把前一个的等决条目盖掉，
+     * 响应也会发给错的那个 promise。宁可明确报错，也不要静默错配。
+     */
+    if (entry.pending.has(id)) {
+      return Promise.reject(
+        new Error(
+          `MCP stdio 请求 id 冲突（${id}）：渲染层分配的 id 与一条在途请求重复。` +
+            "已拒绝这次调用，以免两个请求的响应互相错配。",
+        ),
+      );
+    }
     const message = { jsonrpc: "2.0", id, method };
     if (params !== undefined) message.params = params;
     return new Promise((resolve, reject) => {

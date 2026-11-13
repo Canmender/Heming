@@ -186,6 +186,29 @@ test("用户中断：取消在途请求（发通知 + 立刻拒绝），进程�
   assert.deepEqual(await next, { tools: [] });
 });
 
+test("渲染层重载后撞号：同 id 在途时明确拒绝，不覆盖等决条目", async () => {
+  const { child, writes } = fakeChild();
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 5_000 });
+
+  const first = bridge.request("s1", { command: "x" }, "tools/call", { name: "a" }, { requestId: 9 });
+  // 页面重载后渲染层又从自己的起点数起（极端情况：同一个 id 再进来）
+  await assert.rejects(
+    bridge.request("s1", { command: "x" }, "tools/call", { name: "b" }, { requestId: 9 }),
+    /请求 id 冲突（9）/,
+  );
+  assert.equal(writes.length, 1, "冲突的请求不该再发出去");
+
+  // 第一条仍然正常收口（等决条目没被盖掉）
+  reply(child, { jsonrpc: "2.0", id: 9, result: { content: [{ type: "text", text: "a 的结果" }] } });
+  const result = await first;
+  assert.equal(result.content[0].text, "a 的结果");
+
+  // 收口之后同一个 id 可以复用（比如用户重试）
+  const again = bridge.request("s1", { command: "x" }, "tools/call", {}, { requestId: 9 });
+  reply(child, { jsonrpc: "2.0", id: 9, result: { content: [] } });
+  assert.deepEqual(await again, { content: [] });
+});
+
 test("没有在途请求时取消不影响进程；取消后迟到的响应被丢弃", async () => {
   const { child } = fakeChild();
   const bridge = makeBridge({ spawn: () => child, timeoutMs: 5_000 });
