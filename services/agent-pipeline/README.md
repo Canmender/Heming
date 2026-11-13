@@ -164,6 +164,12 @@ agent-pipeline ingest <repo>/docs --prefix repo/ --ext .md
 两次计费、结果互相覆盖。`tests/test_concurrency.py` 的
 `test_same_run_id_submitted_concurrently_runs_once` 钉住这条。
 
+**同一个 `run_id`、不同的任务必须报错**：幂等重提只对「请求内容完全一致」成立。
+以前只要是同一个 id 就回 202 + 旧状态——调用方把 id 复用到了另一个任务时，
+看到的是上一个任务的进度，怎么查都查不出「新任务根本没跑」。现在服务端为每个
+`run_id` 记下请求指纹（goal / cwd / constraints / mode / coverage_target / tools_allowed），
+不一致就 409，并在 `detail` 里点名变化的字段（`tests/test_run_idempotency.py` 3 例）。
+
 ## 预算截断要看得见
 
 - **单步工具预算**：一步最多 `AGENT_STEP_TOOL_BUDGET`（默认 6）次调用。超出时以前 `calls[:remaining]`

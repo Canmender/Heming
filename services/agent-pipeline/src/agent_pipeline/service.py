@@ -160,6 +160,9 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
 
     runs: dict[str, dict[str, Any]] = {}
     # 取消标记：run_id → Event。run 结束后立刻丢弃，避免长期占用。
+    # run_id → 请求指纹（goal/mode/…）。幂等重提时用来区分「同一个请求重试」与
+    # 「调用方把 run_id 复用到了另一个任务」——后者以前会静默返回上一个任务的状态。
+    requests: dict[str, dict[str, Any]] = {}
     cancels: dict[str, threading.Event] = {}
     # run_id → 执行线程。关停时要能把它们 join 掉，否则容器 SIGTERM 会直接从中间砍断。
     threads: dict[str, threading.Thread] = {}
@@ -255,6 +258,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             if runs.get(key, {}).get("status") == "running":
                 continue
             del runs[key]
+            requests.pop(key, None)
             overflow -= 1
 
     def _execute(run_id: str, task: TaskSpec) -> None:
@@ -339,11 +343,32 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                     detail=f"tools_allowed 里有不存在的工具：{'、'.join(unknown)}（可用：{'、'.join(sorted(known_tools)) or '无'}）",
                 )
         run_id = body.run_id or uuid.uuid4().hex
+        fingerprint: dict[str, Any] = {
+            "goal": body.goal,
+            "cwd": body.cwd,
+            "constraints": list(body.constraints or []),
+            "mode": body.mode,
+            "coverage_target": body.coverage_target,
+            "tools_allowed": list(body.tools_allowed or []),
+        }
         with lock:
             existing = runs.get(run_id)
             if existing is not None:
                 # 幂等提交：同一个 run_id 重复 POST 返回同一份状态。
+                # 但「同一个 id、不同的任务」必须报错：否则调用方以为新任务在跑，
+                # 实际看到的是上一个任务的状态，查多久都查不出问题。
+                recorded = requests.get(run_id)
+                if recorded is not None and recorded != fingerprint:
+                    changed = [key for key in fingerprint if recorded.get(key) != fingerprint[key]]
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "run_id " + run_id + " 已经用于另一个请求（" + ("、".join(changed) or "内容") + " 不同）。"
+                            "幂等重提要求请求内容完全一致；新任务请换一个 run_id。"
+                        ),
+                    )
                 return JSONResponse(status_code=202, content={"run_id": run_id, "status": existing["status"]})
+            requests[run_id] = fingerprint
             if not semaphore.acquire(blocking=False):
                 raise HTTPException(status_code=429, detail="并发已满，请稍后重试", headers={"Retry-After": "5"})
             cancels[run_id] = threading.Event()
