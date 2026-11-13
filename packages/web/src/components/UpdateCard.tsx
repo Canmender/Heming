@@ -132,7 +132,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
   return (
     <section
       aria-label="软件更新"
-      className="max-w-[520px] rounded-xl border border-line bg-surface p-4 shadow-card"
+      className="ui-card max-w-[520px] p-4"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-[12px] font-bold text-muted">软件更新</div>

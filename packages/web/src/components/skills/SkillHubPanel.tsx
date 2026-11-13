@@ -195,7 +195,7 @@ function KeyDialog({
         role="dialog"
         aria-modal="true"
         aria-label="社区 Key"
-        className="w-[min(520px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card"
+        className="w-[min(520px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-bold">社区 Key（{source.name}）</span>
@@ -504,7 +504,7 @@ function InstallPreviewDialog({
         role="dialog"
         aria-modal="true"
         aria-label="安装社区技能"
-        className="w-[min(560px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card"
+        className="w-[min(560px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-bold">安装社区技能</span>

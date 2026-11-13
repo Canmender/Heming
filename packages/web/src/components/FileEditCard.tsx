@@ -92,7 +92,7 @@ export function FileEditCard({
   const rules = policy.rules().filter((rule) => isFileEditTool(rule.tool));
 
   return (
-    <section aria-label="文件编辑" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
+    <section aria-label="文件编辑" className="ui-card mt-3 p-4">
       <div className="text-[12px] font-bold text-muted">文件编辑</div>
       <div className="mt-1 ui-caption">
         允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，

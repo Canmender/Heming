@@ -22,7 +22,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
   return (
     <section
       aria-label="开始使用"
-      className="rounded-xl border border-line-soft bg-[var(--surface)] p-4 shadow-card"
+      className="ui-card p-4"
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">

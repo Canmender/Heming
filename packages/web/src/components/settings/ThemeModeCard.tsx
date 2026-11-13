@@ -55,7 +55,7 @@ export function ThemeModeCard() {
   return (
     <section
       aria-label="主题模式"
-      className="max-w-full rounded-xl border border-line bg-surface p-4 shadow-card"
+      className="ui-card max-w-full p-4"
     >
       <div className="flex items-center gap-2">
         <span className="ui-section-title">主题模式</span>

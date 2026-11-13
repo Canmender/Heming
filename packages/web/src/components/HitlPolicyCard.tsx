@@ -106,7 +106,7 @@ export function HitlPolicyCard({
   };
 
   return (
-    <section aria-label="工具调用确认" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
+    <section aria-label="工具调用确认" className="ui-card mt-3 p-4">
       <div className="text-[12px] font-bold text-muted">工具调用确认</div>
       <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。

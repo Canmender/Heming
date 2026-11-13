@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.58.11）
+# UI/UX 重构交付记录（d.140.3.59.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -124,3 +124,15 @@
 **门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` 297 文件 / 4366 例全通过；`pnpm -r typecheck`、`pnpm -r build` 通过。
 
 **同时修掉的发版缺口**：上一轮 bump 到 `d.140.3.57.11` 时漏写 `docs/RELEASE-NOTES.md` 条目，`changelog.test.ts` 的「最新一条必须有用户版说明」与 `latestUserUpdates` 两例因此失败（4 例）。本轮补 `d.140.3.57.11`、`d.140.3.58.11` 两条用户版说明后重跑 `node scripts/build-changelog.mjs` 恢复绿色。教训写进发版清单：**bump 之后立刻补 RELEASE-NOTES，否则 `pnpm -r test` 必挂**。
+
+## 7. 第 6 轮（`d.140.3.59.11`）· 卡片壳收口
+
+第 2 轮把 `.ui-card` 的 `box-shadow` 删掉后，仓里仍有一批手写卡片壳自带 `shadow-card`——同一屏会出现「有投影 / 无投影」两种卡片。本轮按审计 C-S2-04 收尾：
+
+| 文件 | 改动 |
+| --- | --- |
+| `ContextSettingsCard.tsx`、`KeyStorageCard.tsx`、`StorageUsageCard.tsx`、`HitlPolicyCard.tsx`、`FileEditCard.tsx`、`ux/OnboardingCard.tsx`、`settings/ThemeModeCard.tsx`、`UpdateCard.tsx`、`InterfacesPage.tsx`（两处） | `rounded-xl border border-line[ -soft] bg-surface p-4 shadow-card` → `ui-card` + 原有位置/宽度/内边距类（`mt-3`、`mb-4`、`max-w-[520px]`、`max-w-full`、`p-4`） |
+| `skills/SkillHubPanel.tsx` | 两个浮层（详情 / 安装）不属卡片体系：`shadow-card` → `ui-overlay-shadow` |
+| 未动 | `ChatPage.tsx`（提示条 / 下拉 / 复制按钮）、`ChatChart.tsx`（工具条按钮）、`ConfirmDialog.tsx`（弹窗）、`EmojiPicker.tsx`（浮层）里的 `shadow-card`：这些是浮层与工具条阴影，留给后续「浮层阴影统一」一轮 |
+
+**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**（新增了 `EmptyState` 的 `framed` 用例）；受影响卡片与 changelog 相关的 6 个测试文件 136 例单独复跑通过。

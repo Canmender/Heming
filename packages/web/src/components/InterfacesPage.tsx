@@ -407,7 +407,7 @@ export function InterfacesView({
       )}
 
       {formOpen && (
-        <section className="mb-4 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
+        <section className="ui-card mb-4 p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="ui-caption">
               服务名称
@@ -576,7 +576,7 @@ export function InterfacesView({
               <section
                 key={server.id}
                 aria-label={`MCP 服务 ${server.name}`}
-                className="rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card"
+                className="ui-card p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-bold">{server.name}</span>

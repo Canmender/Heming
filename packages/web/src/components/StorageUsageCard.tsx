@@ -483,7 +483,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
   };
 
   return (
-    <section aria-label="本机存储" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
+    <section aria-label="本机存储" className="ui-card mt-3 p-4">
       <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
         <StorageIcon className="text-muted" />
         本机存储

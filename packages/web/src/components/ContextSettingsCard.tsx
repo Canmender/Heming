@@ -66,7 +66,7 @@ export function ContextSettingsCard() {
   const shownBudget = windowLimit && settings.budgetTokens > windowLimit ? windowLimit : settings.budgetTokens;
 
   return (
-    <section className="mt-3 rounded-xl border border-line bg-surface p-4 shadow-card">
+    <section className="ui-card mt-3 p-4">
       <div className="text-[12px] font-bold text-muted">上下文预算</div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行

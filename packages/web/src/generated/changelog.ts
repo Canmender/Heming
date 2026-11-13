@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.59.11",
+    "date": "2026-11-13",
+    "title": "卡片壳收口：12 处 shadow-card 手写壳改 `.ui-card`",
+    "bullets": [
+      "审计 C-S2-04「卡片四壳」收尾：把剩余 10 处 `rounded-xl border border-line[ -soft] bg-surface p-4 shadow-card` 手写卡片壳改成 `.ui-card` + 位置/内边距类——`ContextSettingsCard.tsx`、`KeyStorageCard.tsx`、`StorageUsageCard.tsx`、`HitlPolicyCard.tsx`、`FileEditCard.tsx`、`ux/OnboardingCard.tsx`、`settings/ThemeModeCard.tsx`、`UpdateCard.tsx`、`InterfacesPage.tsx`（两处）。第 2 轮已把 `.ui-card` 的 `box-shadow` 删掉，这些手写壳此前仍自带 `shadow-card`，同屏出现「有投影/无投影」两种卡片。",
+      "`skills/SkillHubPanel.tsx` 两个浮层（详情/安装）不走卡片体系，`shadow-card` 换成统一的 `ui-overlay-shadow`。",
+      "未动：`ChatPage.tsx`、`ChatChart.tsx`、`ConfirmDialog.tsx`、`EmojiPicker.tsx` 里的 `shadow-card` 属于浮层/工具条/气泡，属浮层阴影而非卡片阴影，留给后续「浮层阴影统一」一轮。",
+      "**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **297 文件 / 4367 例全通过**。",
+      "**发布说明**：`docs/RELEASE-NOTES.md` 补 `d.140.3.59.11`；`docs/UIUX-REFACTOR-2026-11-13.md` 增第 6 轮记录。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.58.11",
     "date": "2026-11-13",
     "title": "ModelPage 枚举中文化 + 空态收口",
