@@ -118,6 +118,7 @@ describe.skipIf(!HAS_PYTHON)("流水线客户端 ↔ 真服务（跨语言）", 
         AGENT_PIPELINE_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
         AGENT_PIPELINE_API_KEY: "test-key",
         AGENT_PIPELINE_MODEL: "test-model",
+        AGENT_SERVICE_TOKEN: "live-token",
         AGENT_LOG_PATH: join(workDir, "runs.jsonl"),
         AGENT_PIPELINE_DB: join(workDir, "pipeline.db"),
         AGENT_COVERAGE_TARGET: "0.9",
@@ -151,7 +152,7 @@ describe.skipIf(!HAS_PYTHON)("流水线客户端 ↔ 真服务（跨语言）", 
 
   it("提交任务 → 轮询到 ok → 读到 answer/stop_reason/llm_calls", async () => {
     const { createPipelineClient } = await import("./client.js");
-    const client = createPipelineClient({ baseUrl: serviceUrl, apiKey: "test-key", pollIntervalMs: 50 });
+    const client = createPipelineClient({ baseUrl: serviceUrl, apiKey: "live-token", pollIntervalMs: 50 });
 
     const run = await client.run({
       goal: "确认当前版本号",
@@ -169,9 +170,25 @@ describe.skipIf(!HAS_PYTHON)("流水线客户端 ↔ 真服务（跨语言）", 
 
   it("health 说得出自己的工具与限额", async () => {
     const { createPipelineClient } = await import("./client.js");
-    const client = createPipelineClient({ baseUrl: serviceUrl });
+    const client = createPipelineClient({ baseUrl: serviceUrl, apiKey: "live-token" });
     const health = await client.health();
     expect(health.running).toBe(0);
     expect(health.tools).toContain("knowledge_search");
   }, 15_000);
+
+  it("服务端开了入站鉴权：不带令牌的客户端被 401，且说得出该配哪个环境变量", async () => {
+    const { createPipelineClient, PipelineError } = await import("./client.js");
+    const client = createPipelineClient({ baseUrl: serviceUrl, pollIntervalMs: 20 });
+
+    const error = await client
+      .run({ goal: "确认当前版本号", runId: `live-auth-${Date.now()}`, mode: "react" })
+      .then(() => null)
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(PipelineError);
+    const failure = error as InstanceType<typeof PipelineError>;
+    expect(failure.kind).toBe("http");
+    expect(failure.status).toBe(401);
+    expect(failure.detail).toContain("AGENT_SERVICE_TOKEN");
+  }, 20_000);
 });

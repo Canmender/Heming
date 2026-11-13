@@ -60,6 +60,7 @@
 - **「继续生成」是续写而不是重发原提问**：`ChatPage.tsx` 的 `retryStream` 以前用 `meta.text` 把原问题整轮重跑——历史里多一条同样的用户消息（模型看到问题被问两次、回答开始自我重复），已执行过的工具也会再跑一次。现在改走 `submitMessage(CONTINUE_PROMPT, …)`（`"继续（接着上一轮往下写，不要重复已经写过的内容；如果上一轮被中断，请先把没说完的结论补完）"`），续写指令本身也落库、上行，别的设备能看到这一轮；只调 `startRun` 不落库是错的（用户消息由 `submitMessage`/`send` 负责发）。`ChatPage.test.tsx` 1 例钉住「原提问全篇只出现 1 次」。
 - **超长工具参数进历史时换成合法 JSON 说明**：`packages/web/src/components/ChatPage.tsx` 的 `historyToolArgs`（上限 `HISTORY_TOOL_ARGS_MAX = 4000`）——原样带回会吃掉整轮预算，而塞半截 JSON 又会让校验历史 `tool_use.input` 的供应商整轮 400；超长时换成 `{"note":"（这次调用的参数过长，历史里已省略原文；它做了什么见下面那条工具结果。）"}`，工具结果照旧保留。`ChatPage.test.tsx` 新增 1 例（`arguments` 长度 < 500、`JSON.parse` 可解、含「参数过长」、工具结果仍在）。
 - **多条 system 合并成一条**（`lib/agentStream.ts` 的 `messagesFor`）：早期对话摘要原先作为第二条 system 插在 recent 之前，而供应商对「多条 system」态度不一（有的只认第一条、有的直接 400）。现在把 `prepared` 里的 system 行按顺序拼成一条（`\n\n` 连接）放在最前、非 system 行顺序不变；只有一条时不改写。`agentStream.test.ts` 新增 1 例钉住「出站只有一条 system」，并同步了三处旧期望（摘要段不再单独成行、行数各处 -1）。
+- **跨语言联调现在带鉴权**（`lib/pipeline/live.test.ts`）：以前起真服务时没设 `AGENT_SERVICE_TOKEN`，「桌面端带 Bearer、服务端校验 Bearer」这层接线没人验过（两边单测各用假对方，都能过）。现在服务端开鉴权，客户端带令牌跑通「提交 → 轮询 → ok」；另加一例断言不带令牌时抛 `PipelineError(kind="http", status=401)` 且 detail 提到 `AGENT_SERVICE_TOKEN`。
 验证：`pnpm --filter @heming/web test` → **297 文件 / 4359 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
