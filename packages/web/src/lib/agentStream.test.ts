@@ -71,6 +71,53 @@ describe("runAgentMentions", () => {
     });
   });
 
+  it("本条 user 行在工具轮里只组装一次（附件不会被反复读）", async () => {
+    const buildUserTurn = vi.fn(async (text: string) => ({
+      role: "user" as const,
+      content: `${text}（含附件）`,
+    }));
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      round += 1;
+      if (round <= 2) {
+        o.onToolCalls?.([
+          {
+            id: `c${round}`,
+            type: "function",
+            function: { name: "srv__x", arguments: "{}" },
+          },
+        ]);
+        return "";
+      }
+      o.onDelta("好了");
+      return "好了";
+    });
+    const { deps } = makeDeps({
+      buildUserTurn,
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__x", description: "x" } }],
+        meta: () => ({ risk: "read" as const }),
+        execute: async () => ({ text: "结果", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "看看这个文件", deps);
+
+    // 三轮请求都带同一条 user 行，但附件只组装一次（否则大图会被读三遍）。
+    expect(buildUserTurn).toHaveBeenCalledTimes(1);
+    const requests = (streamChat as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[1] as ChatMessage[],
+    );
+    expect(requests).toHaveLength(3);
+    for (const rows of requests) {
+      const userRows = rows.filter((row) => row.role === "user");
+      expect(userRows.at(-1)).toMatchObject({ content: "看看这个文件（含附件）" });
+    }
+  });
   it("降级提示每轮只讲一次（工具轮会重复组装请求）", async () => {
     const calls: { id: string; name: string; args?: string }[] = [{ id: "c1", name: "srv__x" }];
     const { send, deps } = makeDeps({

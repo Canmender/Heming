@@ -709,6 +709,29 @@ export function runAgentMentions(
          * 反复压同一份历史、反复调用摘要模型（白花 token 与延迟）。溢出重试换了级别
          * 才是真的需要重新切分，所以 key 取 `aggressive ?? 0`。
          */
+        /**
+         * 本条 user 行：触发端可附文档文本与图片内容片；缺省/抛错回落纯文本行。
+         *
+         * ★ 按尝试缓存（P2-6 同源）：工具轮每轮都重新组装请求，而这一行在一次 run 内
+         * 是常量。不缓存的话，一个几 MB 的附件（图片要读文件转 base64）会被读 12 次，
+         * 白耗磁盘与内存，中途文件被改还会前后不一致。
+         */
+        let userTurnJob: Promise<ChatMessage> | null = null;
+        const userTurnOnce = (): Promise<ChatMessage> => {
+          if (userTurnJob) return userTurnJob;
+          userTurnJob = (async () => {
+            if (!deps.buildUserTurn) return { role: "user", content: userText } as ChatMessage;
+            try {
+              return await deps.buildUserTurn(userText, profile);
+            } catch (error) {
+              // 附件（文档正文/图片）没组装出来：这一轮只能是纯文本，必须让用户知道。
+              const reason = error instanceof Error ? error.message : String(error);
+              noticeDegrade(`\n\n（附件没能随这条消息发出：${reason}。这一轮只发了文字。）`);
+              return { role: "user", content: userText } as ChatMessage;
+            }
+          })();
+          return userTurnJob;
+        };
         const historyCache = new Map<number, ChatMessage[]>();
         /**
          * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
@@ -739,17 +762,8 @@ export function runAgentMentions(
             }
             historyCache.set(cacheKey, rows);
           }
-          /** 本轮 user 行：触发端可附文档文本与图片内容片；缺省/抛错回落纯文本行。 */
-          let userTurn: ChatMessage = { role: "user", content: userText };
-          if (deps.buildUserTurn) {
-            try {
-              userTurn = await deps.buildUserTurn(userText, profile);
-            } catch (error) {
-              // 附件（文档正文/图片）没组装出来：这一轮只能是纯文本，必须让用户知道。
-              const reason = error instanceof Error ? error.message : String(error);
-              noticeDegrade(`\n\n（附件没能随这条消息发出：${reason}。这一轮只发了文字。）`);
-            }
-          }
+          // 本轮 user 行：按尝试缓存（见 userTurnOnce），工具轮不重读附件。
+          const userTurn = await userTurnOnce();
           /**
            * 工具结果回灌预算（G5）：组装请求**之前**折叠较早的工具结果。
            *
