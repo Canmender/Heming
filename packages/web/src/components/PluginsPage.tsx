@@ -55,7 +55,7 @@ import {
   groupToolPacks,
   installResultMessage,
 } from "./plugins/viewModel.js";
-import { BTN_GHOST_SM, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
+import { ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
 import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
 import { pluginPageEntries } from "../lib/pages/registry.js";
 import {
@@ -65,6 +65,7 @@ import {
 import { detectUnitOrphans } from "../lib/units/projection.js";
 import { UnitListView } from "./plugins/UnitListView.js";
 import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 插件区 · 统一能力中枢。
@@ -604,18 +605,18 @@ export function PluginsPage({
           <>
             {/* 安装入口放在列表上方：插件包与官方页面插件都来自我们自己的服务器仓库。 */}
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
-              <button
+              <Button
                 type="button"
                 onClick={() => setRepoDialogOpen(true)}
-                className="ui-btn ui-btn-sm ui-btn-primary"
+                size="sm" variant="primary"
               >
                 <DownloadIcon width={13} height={13} aria-hidden="true" />
                 从插件仓库安装
-              </button>
-              <button type="button" onClick={openInstall} className="ui-btn ui-btn-sm ui-btn-ghost">
+              </Button>
+              <Button type="button" onClick={openInstall} size="sm" variant="ghost">
                 <FileIcon width={13} height={13} aria-hidden="true" />
                 手动粘贴清单
-              </button>
+              </Button>
               <span className="ml-auto hidden ui-micro sm:inline">
                 安装只写本机清单，不运行代码
               </span>
@@ -632,22 +633,22 @@ export function PluginsPage({
                   （插件记录已丢失），可到技能区/接口区清理。
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button
+                  <Button
                     type="button"
-                    className={BTN_GHOST_SM}
+                    size="sm" variant="ghost"
                     aria-label="去技能区清理无主技能"
                     onClick={goSkills}
                   >
                     去技能区
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className={BTN_GHOST_SM}
+                    size="sm" variant="ghost"
                     aria-label="去接口区清理无主服务"
                     onClick={goInterfaces}
                   >
                     去接口区
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

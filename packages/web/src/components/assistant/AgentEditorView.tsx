@@ -1,6 +1,7 @@
 import type { Agent } from "@heming/shared";
 import { AgentFormPanel } from "./AgentFormPanel.js";
 import { ChevronIcon } from "../icons.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 智能体 Tab · 编辑页（d.126 阶段 B）。
@@ -33,15 +34,15 @@ export function AgentEditorView({
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-6 py-5 max-[1199px]:px-4">
         <div className="mb-3 flex items-center gap-2">
-          <button
+          <Button
             type="button"
             onClick={onClose}
             aria-label="返回智能体名册"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
           >
             <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
             返回名册
-          </button>
+          </Button>
           <span className="ui-caption">智能体 · {mode === "create" ? "新建" : "编辑"}</span>
         </div>
         <AgentFormPanel

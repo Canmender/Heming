@@ -1,5 +1,6 @@
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../../lib/a11y/focus.js";
 import type { OnboardingStep, OnboardingTarget } from "../../lib/onboarding.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 首跑「开始使用」引导卡（UX-A · U1）。
@@ -81,13 +82,15 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
             {/* 已完成的步骤不再给按钮：右上「已完成」+ 下方一句回执已经足够，
                 再放一个灰色的「已完成」按钮是三处重复同一件事。 */}
             {!step.done && (
-              <button
+              <Button
                 type="button"
                 onClick={() => onGo(step.target)}
-                className={`ui-btn ui-btn-sm ui-btn-ghost mt-auto self-start ${FOCUS_RING_TIGHT}`}
+                size="sm"
+                variant="ghost"
+                className={`mt-auto self-start ${FOCUS_RING_TIGHT}`}
               >
                 {step.actionLabel}
-              </button>
+              </Button>
             )}
           </li>
         ))}

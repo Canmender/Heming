@@ -8,7 +8,8 @@ import { useUiStore } from "../../store/ui.js";
 import { PageShell } from "../layout/PageShell.js";
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { PluginPageIcon } from "./PluginPageIcon.js";
-import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
+import { CHIP, HINT } from "./shared.js";
+import { Button } from "../ui/Button.js";
 
 /**
  * 插件页 · 声明式渲染（d.124 A 路径）。
@@ -390,14 +391,14 @@ function ActionsBlock({
   return (
     <div className="flex flex-wrap gap-2">
       {block.items.map((item, index) => (
-        <button
+        <Button
           key={`${item.label}:${index}`}
           type="button"
-          className={BTN_GHOST_SM}
+          size="sm" variant="ghost"
           onClick={() => run(item.target)}
         >
           {item.label}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -465,9 +466,9 @@ function UnavailablePage({ message }: { message: string }) {
     <PageShell title="插件页面" subtitle="这个页面暂时打不开。" width="readable">
       <section aria-label="插件页面不可用" className="ui-card p-5">
         <p className="ui-body-sm text-muted">{message}</p>
-        <button type="button" className={`mt-3 ${BTN_GHOST_SM}`} onClick={() => setPage("plugins")}>
+        <Button type="button" size="sm" variant="ghost" className="mt-3" onClick={() => setPage("plugins")}>
           去插件页
-        </button>
+        </Button>
       </section>
     </PageShell>
   );

@@ -3,6 +3,7 @@ import { useChatStore } from "../../store/chat.js";
 import { useUiStore } from "../../store/ui.js";
 import { Avatar } from "../Avatar.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 首页「最近对话」（d.84）：日活用户打开主页的第一诉求是接着上次干。
@@ -57,13 +58,13 @@ export function RecentConversations() {
       {recent.length === 0 ? (
         <div className="flex flex-col items-start gap-1.5 py-1">
           <p className="ui-caption">还没有对话。挑一个智能体，把它当成同事来用。</p>
-          <button
+          <Button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             onClick={() => setPage("chat")}
           >
             去智能体页
-          </button>
+          </Button>
         </div>
       ) : (
         <ul className="flex flex-col">

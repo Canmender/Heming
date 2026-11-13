@@ -3,6 +3,7 @@ import { FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "../lib/hitl/
 import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 免问下限的选项文案。
@@ -189,24 +190,24 @@ export function HitlPolicyCard({
       </label>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => {
             setSessionMsg(null);
             setConfirmClearSession(true);
           }}
-          className="ui-btn ui-btn-sm ui-btn-ghost"
+          size="sm" variant="ghost"
         >
           清空本会话授权
-        </button>
+        </Button>
         {rules.length > 0 && (
-          <button
+          <Button
             type="button"
             onClick={() => setConfirmClearRules(true)}
-            className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
+            size="md" variant="ghost" className="text-[var(--danger)]"
           >
             清空记住的规则
-          </button>
+          </Button>
         )}
         <span className="ui-caption">会话授权只存在内存里，退出应用即失效。</span>
         {saved && (
@@ -290,24 +291,24 @@ export function HitlPolicyCard({
           onCancel={() => setConfirmClearRules(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirmClearRules(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                size="md" variant="ghost" className="ui-caption"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   store.clearRules();
                   setConfirmClearRules(false);
                   bump();
                 }}
-                className="ui-btn ui-btn-sm ui-btn-danger"
+                size="sm" variant="danger"
               >
                 清空
-              </button>
+              </Button>
             </>
           }
         >
@@ -322,20 +323,20 @@ export function HitlPolicyCard({
           onCancel={() => setConfirmClearSession(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirmClearSession(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                size="md" variant="ghost" className="ui-caption"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={clearSession}
-                className="ui-btn ui-btn-sm ui-btn-danger"
+                size="sm" variant="danger"
               >
                 清空授权
-              </button>
+              </Button>
             </>
           }
         >

@@ -1,4 +1,5 @@
 import type { InstalledPlugin } from "../../lib/plugins/index.js";
+import { Button } from "../ui/Button.js";
 import {
   contributionCountsOf,
   contributionText,
@@ -8,8 +9,6 @@ import {
   permissionViewOf,
 } from "./viewModel.js";
 import {
-  BTN_DANGER_SM,
-  BTN_GHOST_SM,
   CHIP,
   HINT,
   PLUGIN_CARD,
@@ -148,49 +147,49 @@ export function PluginCard({
         <span className="text-muted">· 更新于 {formatAt(plugin.updatedAt)}</span>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {page && onOpenPage ? (
-            <button
+            <Button
               type="button"
               aria-label={`打开插件页面 ${manifest.name}`}
               onClick={onOpenPage}
-              className={BTN_GHOST_SM}
+              size="sm" variant="ghost"
             >
               打开页面
-            </button>
+            </Button>
           ) : null}
-          <button
+          <Button
             type="button"
             aria-label={`查看插件详情 ${manifest.name}`}
             onClick={onDetail}
-            className={BTN_GHOST_SM}
+            size="sm" variant="ghost"
           >
             详情
-          </button>
+          </Button>
           {manifest.contributions.mcpServers.length > 0 && (
-            <button
+            <Button
               type="button"
               aria-label={`查看插件 MCP 服务 ${manifest.name}`}
               onClick={onGoInterfaces}
-              className={BTN_GHOST_SM}
+              size="sm" variant="ghost"
             >
               查看 MCP 服务
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             aria-label={`查看插件技能 ${manifest.name}`}
             onClick={onGoSkills}
-            className={BTN_GHOST_SM}
+            size="sm" variant="ghost"
           >
             查看技能
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-label={`卸载插件 ${manifest.name}`}
             onClick={onRemove}
-            className={BTN_DANGER_SM}
+            size="sm" variant="ghost" className="text-[var(--danger)]"
           >
             卸载
-          </button>
+          </Button>
         </div>
       </div>
     </section>

@@ -45,6 +45,7 @@ import {
   type DailyConfig,
 } from "./daily.js";
 import { baseName, ensureMdExt, joinRel, parentOf, stripMdExt } from "./model.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 知识库页（vault）：三栏装配。
@@ -598,20 +599,20 @@ function KnowledgePageShell({
           <span className="mt-1 block font-medium text-ink">文件留在你的设备上，不会上传。</span>
         </p>
         <div className="mt-1 flex items-center gap-2">
-          <button
+          <Button
             type="button"
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
             onClick={() => void store.pickVault()}
           >
             打开本地库
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-md ui-btn-ghost"
+            size="md" variant="ghost"
             onClick={() => void store.loadVaults()}
           >
             重新读取库列表
-          </button>
+          </Button>
         </div>
         {store.ephemeral ? (
           <p className="ui-caption mt-2 max-w-[440px] text-muted">
@@ -644,14 +645,14 @@ function KnowledgePageShell({
             </option>
           ))}
         </select>
-        <button
+        <Button
           type="button"
-          className="ui-btn ui-btn-sm ui-btn-ghost"
+          size="sm" variant="ghost"
           onClick={() => void store.pickVault()}
         >
           <FolderIcon width={14} height={14} />
           打开其它库
-        </button>
+        </Button>
         {activeMeta ? (
           <button
             type="button"
@@ -674,69 +675,69 @@ function KnowledgePageShell({
 
         <span className="ml-auto flex items-center gap-1">
           {/* 第二轮入口：今天 / 新建 / 快速切换 / 设置（键盘路径 Ctrl+O 见下方监听） */}
-          <button
+          <Button
             type="button"
             aria-label="打开今天的日记"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             onClick={() => void openToday()}
           >
             <BookIcon width={14} height={14} />
             今天
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-primary"
+            size="sm" variant="primary"
             onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
           >
             <PlusIcon width={14} height={14} />
             新建笔记
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             title="快速切换笔记（Ctrl+O）"
             onClick={() => setQuickOpenOpen(true)}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
           >
             <SearchIcon width={14} height={14} />
             快速切换
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             title="按卡帕西 LLM Wiki 标准检查目录、根文件与页面 frontmatter"
             onClick={openStandardCheck}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
           >
             <CheckIcon width={14} height={14} />
             标准检查
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-label="知识库设置"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             onClick={() => setSettingsOpen(true)}
           >
             <GearIcon width={14} height={14} />
             设置
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-pressed={graphOpen}
-            className={`ui-btn ui-btn-sm ${graphOpen ? "ui-btn-primary" : "ui-btn-ghost"}`}
+            size="sm" variant={graphOpen ? "primary" : "ghost"}
             onClick={() => setGraphOpen((prev) => !prev)}
           >
             <RouteIcon width={14} height={14} />
             图谱
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-pressed={rightOpen}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             aria-label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
             title={rightOpen ? "收起右栏" : "展开右栏"}
             onClick={() => setRightOpen((prev) => !prev)}
           >
             <ChevronIcon width={14} height={14} className={rightOpen ? "rotate-180" : ""} />
-          </button>
+          </Button>
         </span>
       </header>
 
@@ -949,17 +950,15 @@ function KnowledgePageShell({
                         ["read", "阅读"],
                       ] as const
                     ).map(([mode, label]) => (
-                      <button
+                      <Button
                         key={mode}
                         type="button"
                         aria-pressed={store.mode === mode}
                         onClick={() => store.setMode(mode)}
-                        className={`ui-btn ui-btn-sm ${
-                          store.mode === mode ? "ui-btn-primary" : "ui-btn-ghost"
-                        }`}
+                        size="sm" variant={store.mode === mode ? "primary" : "ghost"}
                       >
                         {label}
-                      </button>
+                      </Button>
                     ))}
                   </span>
                 )}
@@ -1050,20 +1049,20 @@ function KnowledgePageShell({
                 可以快速切换笔记。
               </p>
               <div className="mt-1 flex items-center gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  size="sm" variant="primary"
                   onClick={() => setNewNoteDir("")}
                 >
                   新建笔记
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   onClick={() => void openToday()}
                 >
                   打开今天的日记
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -1126,23 +1125,23 @@ function KnowledgePageShell({
           onCancel={() => setPending(null)}
           footer={
             <>
-              <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={() => setPending(null)}>
+              <Button type="button" size="md" variant="ghost" onClick={() => setPending(null)}>
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => void resolvePending("discard")}
               >
                 不保存
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-primary"
+                size="md" variant="primary"
                 onClick={() => void resolvePending("save")}
               >
                 保存并{pending.label === "关闭这个标签" ? "关闭" : "切换"}
-              </button>
+              </Button>
             </>
           }
         >
@@ -1159,16 +1158,16 @@ function KnowledgePageShell({
           onCancel={() => setRemoveConfirm(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setRemoveConfirm(false)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => {
                   const id = activeMeta.id;
                   setRemoveConfirm(false);
@@ -1176,7 +1175,7 @@ function KnowledgePageShell({
                 }}
               >
                 移除
-              </button>
+              </Button>
             </>
           }
         >

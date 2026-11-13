@@ -12,6 +12,7 @@ import {
 } from "../lib/e2eSession.js";
 import { isMsgCacheAuxKey } from "../lib/e2e/cacheEnvelope.js";
 import type { StorageLike } from "../lib/memory/types.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 本机存储水位卡（d.31 · P1-1 ①「水位可见」+ ②b「一键清理」）。
@@ -565,34 +566,34 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
 
       {/* 清理入口：只给可再生的 */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => {
             setNotice(null);
             setPending("cache");
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
+          size="md" variant="ghost" className="text-[var(--danger)]"
         >
           清理消息缓存
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => {
             setNotice(null);
             setPending("tasks");
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
+          size="md" variant="ghost" className="text-[var(--danger)]"
         >
           清理任务记录
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={onProbe}
           disabled={probing}
-          className="ui-btn ui-btn-sm ui-btn-ghost disabled:opacity-60"
+          size="sm" variant="ghost" className="disabled:opacity-60"
         >
           {probing ? "检测中…" : "重新检测"}
-        </button>
+        </Button>
         <span className="ui-caption">
           「重新检测」会临时写入最多约 32MB 以实测配额，写完即删。
         </span>
@@ -617,20 +618,20 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           onCancel={() => setPending(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setPending(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                size="md" variant="ghost" className="ui-caption"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => runClear(pending)}
-                className="ui-btn ui-btn-sm ui-btn-danger"
+                size="sm" variant="danger"
               >
                 清理
-              </button>
+              </Button>
             </>
           }
         >

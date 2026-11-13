@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginCatalogEntry } from "@heming/shared";
+import { Button } from "../ui/Button.js";
 import {
   fetchPluginCatalog,
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
 import { Dialog } from "../ui/Dialog.js";
 import { PackageIcon, SearchIcon } from "../icons.js";
-import { BTN_GHOST, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "./shared.js";
+import { CHIP, ERROR_TEXT, HINT } from "./shared.js";
 import { EmptyState } from "../ui/EmptyState.js";
 
 /**
@@ -135,14 +136,14 @@ export function PluginRepositoryDialog({
           <span className="ui-caption">
             {loading ? "正在读取插件仓库…" : `共 ${filtered.length} 个插件`}
           </span>
-          <button
+          <Button
             type="button"
-            className={`${BTN_GHOST} ml-auto`}
+            size="md" variant="ghost" className="ml-auto"
             disabled={loading}
             onClick={() => void load()}
           >
             {loading ? "刷新中…" : "刷新"}
-          </button>
+          </Button>
         </div>
 
         <div className="px-4 pb-3 pt-3">
@@ -179,15 +180,15 @@ export function PluginRepositoryDialog({
                   <p className="line-clamp-2 text-[12px] leading-5 text-muted">{item.description}</p>
                   <div className="mt-auto flex items-center justify-between gap-2">
                     <span className={HINT}>安装前会校验签名/指纹</span>
-                    <button
+                    <Button
                       type="button"
-                      className={item.installed ? BTN_GHOST : BTN_PRIMARY}
+                      size="md" variant={item.installed ? "ghost" : "primary"}
                       disabled={item.installed || busyKey === item.key}
                       aria-label={`安装插件 ${item.name}`}
                       onClick={() => void install(item)}
                     >
                       {busyKey === item.key ? "安装中…" : item.installed ? "已安装" : "安装"}
-                    </button>
+                    </Button>
                   </div>
                 </li>
               ))}

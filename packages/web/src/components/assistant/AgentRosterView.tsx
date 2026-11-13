@@ -3,6 +3,7 @@ import type { Agent } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { PlusIcon, SearchIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 智能体 Tab · 名册（d.126 阶段 B）。
@@ -70,21 +71,21 @@ export function AgentRosterView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => onCreate("templates")}
-              className="ui-btn ui-btn-md ui-btn-ghost"
+              size="md" variant="ghost"
             >
               从模板创建
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => onCreate("name")}
-              className="ui-btn ui-btn-md ui-btn-primary"
+              size="md" variant="primary"
             >
               <PlusIcon width={14} height={14} />
               新建智能体
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -118,20 +119,20 @@ export function AgentRosterView({
             desc="从模板开始最快：选个预设、改个名字就能用。"
             actions={
               <>
-                <button
+                <Button
                   type="button"
                   onClick={() => onCreate("name")}
-                  className="ui-btn ui-btn-md ui-btn-primary"
+                  size="md" variant="primary"
                 >
                   新建智能体
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => onCreate("templates")}
-                  className="ui-btn ui-btn-md ui-btn-ghost"
+                  size="md" variant="ghost"
                 >
                   从模板创建
-                </button>
+                </Button>
               </>
             }
           />
@@ -141,13 +142,13 @@ export function AgentRosterView({
             title="没有匹配的智能体"
             desc="换个名字试试，或清空关键词。"
             actions={
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setQuery("")}
               >
                 清空搜索
-              </button>
+              </Button>
             }
           />
         ) : (
@@ -213,25 +214,25 @@ export function AgentRosterView({
                             {bound ? "模型已绑定" : "未绑定模型"}
                           </span>
                           <span className="ml-auto flex items-center gap-1">
-                            <button
+                            <Button
                               type="button"
                               aria-label={`编辑智能体：${agent.name}`}
                               title="编辑智能体"
                               onClick={() => onEdit(agent)}
-                              className="ui-btn ui-btn-sm ui-btn-ghost"
+                              size="sm" variant="ghost"
                             >
                               编辑
-                            </button>
+                            </Button>
                             {bound && (
-                              <button
+                              <Button
                                 type="button"
                                 aria-label={`与智能体 ${agent.name} 开始对话`}
                                 disabled={busy}
                                 onClick={() => onStartChat(agent.id)}
-                                className="ui-btn ui-btn-sm ui-btn-ghost"
+                                size="sm" variant="ghost"
                               >
                                 {busy ? "打开中…" : "开始对话"}
-                              </button>
+                              </Button>
                             )}
                             {/* d.138：没绑模型时不给「开始对话」——进去也发不出消息。
                                 下一步是「编辑」（在里面选模型），所以这里只留编辑。 */}

@@ -1,5 +1,6 @@
 import type { InstalledPlugin } from "../../lib/plugins/index.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { Button } from "../ui/Button.js";
 
 /**
  * 卸载插件的二次确认（d.64 · T2 拆出）。
@@ -22,20 +23,20 @@ export function RemovePluginDialog({
       onCancel={onCancel}
       footer={
         <>
-          <button
+          <Button
             type="button"
             onClick={onCancel}
-            className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+            size="md" variant="ghost" className="text-muted"
           >
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={onConfirm}
-            className="ui-btn ui-btn-md ui-btn-danger"
+            size="md" variant="danger"
           >
             卸载
-          </button>
+          </Button>
         </>
       }
     >

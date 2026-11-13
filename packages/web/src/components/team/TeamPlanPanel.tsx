@@ -8,6 +8,7 @@ import {
 } from "../../lib/api.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { Button } from "../../components/ui/Button.js";
 
 /** 方案项状态的中文与流转顺序（点一下切下一档，与任务一致）。 */
 export const PLAN_STATUS_LABEL: Record<TeamItemStatus, string> = {
@@ -143,13 +144,13 @@ export function TeamPlanPanel({
             rows={2}
             className="ui-input mt-1.5 w-full resize-y"
           />
-          <button
+          <Button
             type="submit"
-            className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+            size="sm" variant="primary" className="mt-2"
             disabled={busy}
           >
             保存
-          </button>
+          </Button>
         </form>
       )}
 
@@ -204,21 +205,21 @@ export function TeamPlanPanel({
           initialFocusRef={cancelRef}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 ref={cancelRef}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setPendingDelete(null)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => void confirmRemove()}
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

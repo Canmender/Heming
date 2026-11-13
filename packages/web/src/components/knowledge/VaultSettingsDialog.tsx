@@ -7,6 +7,7 @@ import {
 import { dailyNotePath } from "../../lib/vault/daily.js";
 import { formatDateTokens } from "../../lib/vault/template.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 知识库设置弹窗：日记文件夹 / 日期格式 / 日记模板。
@@ -47,16 +48,16 @@ export function VaultSettingsDialog({
       initialFocusRef={folderRef}
       footer={
         <>
-          <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={onCancel}>
+          <Button type="button" size="md" variant="ghost" onClick={onCancel}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
             onClick={() => onSave(resolved.config)}
           >
             保存
-          </button>
+          </Button>
         </>
       }
     >

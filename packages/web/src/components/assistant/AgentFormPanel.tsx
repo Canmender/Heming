@@ -9,6 +9,7 @@ import { Avatar } from "../Avatar.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { AGENT_TEMPLATES, type AgentTemplate } from "./agentTemplates.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 智能体表单（创建/编辑）的**唯一实现**（d.126 阶段 B）：
@@ -286,17 +287,17 @@ export function AgentFormPanel({
           <div className="ui-caption">从模板开始（可选）</div>
           <div className="mt-1.5 grid grid-cols-2 gap-1.5" role="group" aria-label="智能体模板">
             {AGENT_TEMPLATES.map((template, index) => (
-              <button
+              <Button
                 key={template.key}
                 type="button"
                 ref={index === 0 ? firstTemplateRef : undefined}
                 aria-label={`使用模板 ${template.label}`}
                 aria-pressed={appliedTemplate === template.key}
                 onClick={() => applyTemplate(template)}
-                className="ui-btn ui-btn-sm ui-btn-ghost justify-start"
+                size="sm" variant="ghost" className="justify-start"
               >
                 {template.label}
-              </button>
+              </Button>
             ))}
           </div>
           <p className="mt-1.5 ui-caption">
@@ -390,15 +391,15 @@ export function AgentFormPanel({
       {/* 进阶：默认收起，新建只填名称即可创建 */}
       <div className="mb-3 border-t border-line-soft pt-3">
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
             aria-expanded={advancedOpen}
             aria-controls={advancedId}
             onClick={() => setAdvancedOpen((open) => !open)}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
           >
             {advancedOpen ? "收起进阶设置" : "进阶设置（可选）"}
-          </button>
+          </Button>
           <span className="ui-caption">系统提示词、模型；不填也能直接用</span>
         </div>
       </div>
@@ -423,13 +424,15 @@ export function AgentFormPanel({
             <div className="ui-caption">模型（可选）</div>
             <p className="mt-0.5 ui-caption">不绑定 = 用默认连接。</p>
             {profiles.length === 0 ? (
-              <button
+              <Button
                 type="button"
                 onClick={gotoSettings}
-                className="mt-1 ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm"
+                variant="ghost"
+                className="mt-1"
               >
                 去设置页添加
-              </button>
+              </Button>
             ) : (
               <select
                 aria-label="绑定连接"
@@ -462,14 +465,14 @@ export function AgentFormPanel({
       )}
 
       <div className="flex justify-end gap-2">
-        <button
+        <Button
           type="button"
           onClick={onClose}
           disabled={pending}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[13px] disabled:opacity-60"
+          size="md" variant="ghost" className="text-[13px] disabled:opacity-60"
         >
           取消
-        </button>
+        </Button>
         {mode === "edit" && isOwner && (
           <button
             type="button"
@@ -480,9 +483,9 @@ export function AgentFormPanel({
             删除智能体
           </button>
         )}
-        <button type="submit" disabled={pending} className="ui-btn ui-btn-sm ui-btn-primary">
+        <Button type="submit" disabled={pending} size="sm" variant="primary">
           {mode === "create" ? "创建" : "保存"}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -494,21 +497,21 @@ export function AgentFormPanel({
         onCancel={() => setConfirmDelete(false)}
         footer={
           <>
-            <button
+            <Button
               type="button"
               onClick={() => setConfirmDelete(false)}
-              className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+              size="md" variant="ghost" className="ui-caption"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               disabled={pending}
               onClick={() => void onDelete()}
-              className="ui-btn ui-btn-sm ui-btn-danger"
+              size="sm" variant="danger"
             >
               删除
-            </button>
+            </Button>
           </>
         }
       >

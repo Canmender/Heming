@@ -3,6 +3,7 @@ import type { VaultIndex } from "../../lib/vault/types.js";
 import { buildGraph, type VaultGraph } from "../../lib/vault/graph.js";
 import type { WikiGraph, WikiPage } from "../../lib/wiki/index.js";
 import { WikiGraphView } from "../WikiGraphView.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 图谱面板：全库 / 局部 1–2 跳切换，点节点打开页面。
@@ -76,37 +77,37 @@ export function GraphPane({ index, activeRel = null, onOpen }: GraphPaneProps) {
         <span className="ui-caption ml-1">节点大小按全库度数，不是局部分布。</span>
 
         <span className="ml-auto flex items-center gap-1" role="group" aria-label="图谱范围">
-          <button
+          <Button
             type="button"
             aria-pressed={scope === "all"}
             onClick={() => setScope("all")}
-            className={`ui-btn ui-btn-sm ${scope === "all" ? "ui-btn-primary" : "ui-btn-ghost"}`}
+            size="sm" variant={scope === "all" ? "primary" : "ghost"}
           >
             全库
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-pressed={scope === "local"}
             onClick={() => setScope("local")}
             disabled={!localAvailable}
             title={localAvailable ? "只看当前页附近的节点" : "先打开一篇笔记才能看局部图"}
-            className={`ui-btn ui-btn-sm ${scope === "local" ? "ui-btn-primary" : "ui-btn-ghost"}`}
+            size="sm" variant={scope === "local" ? "primary" : "ghost"}
           >
             局部
-          </button>
+          </Button>
           {scope === "local" ? (
             <span className="ml-1 flex items-center gap-1" role="group" aria-label="局部跳数">
               {[1, 2].map((n) => (
-                <button
+                <Button
                   key={n}
                   type="button"
                   aria-pressed={depth === n}
                   aria-label={`局部 ${n} 跳`}
                   onClick={() => setDepth(n)}
-                  className={`ui-btn ui-btn-sm ${depth === n ? "ui-btn-primary" : "ui-btn-ghost"}`}
+                  size="sm" variant={depth === n ? "primary" : "ghost"}
                 >
                   {n} 跳
-                </button>
+                </Button>
               ))}
             </span>
           ) : null}

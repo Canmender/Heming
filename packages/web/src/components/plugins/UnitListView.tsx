@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Button } from "../ui/Button.js";
 import {
   CONTRIBUTION_LABELS,
   UNIT_SOURCE_LABELS,
@@ -14,7 +15,7 @@ import {
 } from "../../lib/plugins/index.js";
 import { SearchIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
-import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
+import { CHIP, HINT } from "./shared.js";
 
 /**
  * 插件区「已安装」统一单元列表（d.105 · 阶段 A）。
@@ -120,15 +121,15 @@ export function RepairRecordButton({
   onRepair: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
       aria-label={`修复记录 ${pluginName}`}
       disabled={busy}
       onClick={onRepair}
-      className={BTN_GHOST_SM}
+      size="sm" variant="ghost"
     >
       {busy ? "修复中…" : "修复记录"}
-    </button>
+    </Button>
   );
 }
 
@@ -405,9 +406,9 @@ export function UnitListView({
             title="没有匹配的能力单元"
             desc="换个关键词或来源，或清除筛选看全部。"
             actions={
-              <button type="button" onClick={clearFilters} className={BTN_GHOST_SM}>
+              <Button type="button" onClick={clearFilters} size="sm" variant="ghost">
                 清除筛选
-              </button>
+              </Button>
             }
           />
         </section>

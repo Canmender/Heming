@@ -13,6 +13,7 @@ import { lookupCapability } from "../lib/modelCaps.js";
 import { byProfileModel, monthKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { PlusIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { Button } from "../components/ui/Button.js";
 
 /** 设置区 · 候选链：一条按声明顺序的模型链，第一个答不了才走下一个。 */
 
@@ -74,9 +75,6 @@ function clampWeight(raw: string): number {
 
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-ink";
-const btnGhost =
-  "ui-btn ui-btn-sm ui-btn-ghost";
-
 function newGroupId(): string {
   return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -212,15 +210,17 @@ export function RouteGroupsCard() {
           <span className="ui-caption">第一个答不了才走下一个</span>
         </div>
         {!open && (
-          <button
+          <Button
             type="button"
             aria-label="新建候选链"
             onClick={openCreate}
-            className={`inline-flex items-center gap-1 ${btnGhost}`}
+            size="sm"
+            variant="ghost"
+            className="items-center gap-1"
           >
             <PlusIcon width={12} height={12} aria-hidden="true" />
             新建候选链
-          </button>
+          </Button>
         )}
       </div>
       <div className="mt-1 ui-caption">
@@ -242,17 +242,17 @@ export function RouteGroupsCard() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              <button type="button" aria-label={`编辑 ${g.label}`} onClick={() => openEdit(g)} className={btnGhost}>
+              <Button type="button" aria-label={`编辑 ${g.label}`} onClick={() => openEdit(g)} size="md" variant="ghost">
                 编辑
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 aria-label={`删除 ${g.label}`}
                 onClick={() => setPendingDelete(g)}
-                className={btnGhost}
+                size="md" variant="ghost"
               >
                 删除
-              </button>
+              </Button>
             </div>
           </div>
           <ol className="mt-2 space-y-1">
@@ -292,14 +292,14 @@ export function RouteGroupsCard() {
         <div className="mt-3 rounded-lg border border-line bg-panel p-3">
           <div className="flex items-center justify-between">
             <span className="text-[12px] font-bold text-muted">休息中的候选</span>
-            <button
+            <Button
               type="button"
               aria-label="刷新休息名单"
-              className={btnGhost}
+              size="md" variant="ghost"
               onClick={() => setNow(Date.now())}
             >
               刷新
-            </button>
+            </Button>
           </div>
           <ul className="mt-1.5 space-y-1">
             {rests.map(({ key, rest }) => (
@@ -308,17 +308,17 @@ export function RouteGroupsCard() {
                 <span className="shrink-0 ui-caption">
                   {rest.kind} · 还剩 {formatLeft(rest.until - now)}
                 </span>
-                <button
+                <Button
                   type="button"
                   aria-label={`立即恢复 ${describeRestKey(key, profiles)}`}
-                  className={btnGhost}
+                  size="md" variant="ghost"
                   onClick={() => {
                     llmHealth.unrest(key);
                     setNow(Date.now());
                   }}
                 >
                   立即恢复
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -401,9 +401,9 @@ export function RouteGroupsCard() {
                 </option>
               ))}
             </select>
-            <button type="button" onClick={addMember} className={btnGhost}>
+            <Button type="button" onClick={addMember} size="md" variant="ghost">
               加入
-            </button>
+            </Button>
           </div>
 
           <ol className="mt-2 space-y-1">
@@ -429,32 +429,32 @@ export function RouteGroupsCard() {
                       />
                     </label>
                   )}
-                  <button
+                  <Button
                     type="button"
                     aria-label={`上移 ${p?.label ?? m.profileId}`}
                     disabled={i === 0}
-                    className={btnGhost}
+                    size="md" variant="ghost"
                     onClick={() => moveMember(i, -1)}
                   >
                     上移
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     aria-label={`下移 ${p?.label ?? m.profileId}`}
                     disabled={i === members.length - 1}
-                    className={btnGhost}
+                    size="md" variant="ghost"
                     onClick={() => moveMember(i, 1)}
                   >
                     下移
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     aria-label={`移出 ${p?.label ?? m.profileId}`}
-                    className={btnGhost}
+                    size="md" variant="ghost"
                     onClick={() => setMembers(members.filter((_, j) => j !== i))}
                   >
                     移出
-                  </button>
+                  </Button>
                 </li>
               );
             })}
@@ -465,15 +465,15 @@ export function RouteGroupsCard() {
 
           {error && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
-            <button
+            <Button
               type="submit"
-              className="ui-btn ui-btn-md ui-btn-primary"
+              size="md" variant="primary"
             >
               保存
-            </button>
-            <button type="button" onClick={resetForm} className={btnGhost}>
+            </Button>
+            <Button type="button" onClick={resetForm} size="md" variant="ghost">
               取消
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -484,16 +484,16 @@ export function RouteGroupsCard() {
           onCancel={() => setPendingDelete(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setPendingDelete(null)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => {
                   removeRoute(pendingDelete.id);
                   if (editingId === pendingDelete.id) resetForm();
@@ -501,7 +501,7 @@ export function RouteGroupsCard() {
                 }}
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

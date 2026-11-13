@@ -60,6 +60,7 @@ import { EmptyState } from "./ui/EmptyState.js";
 import { Switch } from "./ui/Switch.js";
 import { Dialog } from "./ui/Dialog.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 记忆区：短期记忆 / 数据库记忆 / 个人知识库三个分区，外加智能体记忆开关。
@@ -85,11 +86,6 @@ const cardCls = "ui-card p-4";
 const inputCls = "mt-1 block w-full ui-input";
 const inputSmCls = "mt-1 block w-full ui-input";
 const labelCls = "block ui-caption";
-const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
-const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
-const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]";
-const btnPrimary = "ui-btn ui-btn-md ui-btn-primary";
-const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const hintCls = "ui-caption";
 /** 召回记录默认只列最近 3 次，其余按需展开。 */
 const RECALL_RUNS_PREVIEW = 3;
@@ -392,12 +388,12 @@ function AddMemoryModal({
         </div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className={btnGhost}>
+          <Button type="button" onClick={onClose} size="md" variant="ghost">
             取消
-          </button>
-          <button type="submit" className={btnPrimary}>
+          </Button>
+          <Button type="submit" size="md" variant="primary">
             保存
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -475,12 +471,12 @@ function KnowledgeModal({
         <div className="mt-1 text-[11px] text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className={btnGhost}>
+          <Button type="button" onClick={onClose} size="md" variant="ghost">
             取消
-          </button>
-          <button type="submit" className={btnPrimary}>
+          </Button>
+          <Button type="submit" size="md" variant="primary">
             保存
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -616,9 +612,9 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
             {used.size > 0 && ` · 疑似引用 ${used.size} 条`}
           </div>
         </div>
-        <button type="button" onClick={onToggle} className={btnGhostSm} aria-expanded={expanded}>
+        <Button type="button" onClick={onToggle} size="sm" variant="ghost" aria-expanded={expanded}>
           {expanded ? "收起" : "明细"}
-        </button>
+        </Button>
       </div>
       {expanded && (
         <div className="mt-2 space-y-1 border-t border-line-soft pt-2">
@@ -1159,14 +1155,14 @@ export function MemoryPage({
                 <span className="ml-auto text-[11px] text-muted">
                   最近 {group.latestAt.slice(5, 16).replace("T", " ")}
                 </span>
-                <button
+                <Button
                   type="button"
                   aria-label={`清空会话 ${key}`}
                   onClick={() => onClearConversation(group.conversationId, key)}
-                  className={btnGhostSm}
+                  size="sm" variant="ghost"
                 >
                   清空
-                </button>
+                </Button>
               </div>
               {open && (
                 <div className="space-y-2 p-2.5">
@@ -1283,14 +1279,14 @@ export function MemoryPage({
       <span className={hintCls}>
         {settings.vaultMemory ? "注入已开启" : "注入已关闭（条目保留，可随时再开）"}
       </span>
-      <button
+      <Button
         type="button"
         onClick={() => void doSyncVault()}
         disabled={vaultBusy}
-        className={`${btnGhost} disabled:opacity-50`}
+        size="md" variant="ghost" className="disabled:opacity-50"
       >
         {vaultBusy ? "同步中…" : "同步知识库"}
-      </button>
+      </Button>
     </div>
   );
 
@@ -1325,14 +1321,14 @@ export function MemoryPage({
                 <div className="truncate text-[12px] font-bold">{entry.key}</div>
                 <div className="mt-0.5 break-words text-[11px] text-muted">{entry.value}</div>
               </div>
-              <button
+              <Button
                 type="button"
                 aria-label={`预览笔记 ${entry.key}`}
                 onClick={() => void previewVaultExcerpt(entry)}
-                className={btnGhostSm}
+                size="sm" variant="ghost"
               >
                 预览片段
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -1344,9 +1340,9 @@ export function MemoryPage({
         <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2 text-[11px] leading-5 text-[var(--body)]">
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-bold">{vaultPreview.rel}</span>
-            <button type="button" onClick={() => setVaultPreview(null)} className={btnGhostSm}>
+            <Button type="button" onClick={() => setVaultPreview(null)} size="sm" variant="ghost">
               关闭预览
-            </button>
+            </Button>
           </div>
           <div className="mt-1 whitespace-pre-wrap break-words">{vaultPreview.text}</div>
         </div>
@@ -1403,16 +1399,16 @@ export function MemoryPage({
               className={inputSmCls}
             />
           </label>
-          <button
+          <Button
             type="button"
             onClick={onSaveRetention}
             // 非法输入时保持可点：让用户点得到「为什么不能保存」，
             // 而不是对着一个灰按钮猜（校验失败用错误色提示）。
             disabled={retentionValid && !retentionDirty}
-            className={btnGhost}
+            size="md" variant="ghost"
           >
             保存
-          </button>
+          </Button>
           <span className={`${hintCls} pb-1.5`}>
             情景记忆超过保留天数后不再参与召回；语义记忆长期保留
           </span>
@@ -1465,49 +1461,49 @@ export function MemoryPage({
               />
               附上辅助账本（用量/召回记录，可再生）
             </label>
-            <button
+            <Button
               type="button"
               onClick={() => void onExportMemoryFile()}
               title={hasDesktopExportBridge() ? "保存到本机导出目录" : "下载为 JSON 文件"}
-              className={btnGhost}
+              size="md" variant="ghost"
             >
               {hasDesktopExportBridge() ? "导出到文件" : "下载文件"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void onExportMemory()}
               title="复制到剪贴板，不产生文件"
-              className={btnGhost}
+              size="md" variant="ghost"
             >
               复制 JSON
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => {
                 setImportOpen((open) => !open);
                 setMemoryMsg(null);
               }}
-              className={btnGhost}
+              size="md" variant="ghost"
             >
               导入
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => setAddOpen(true)}
               disabled={!writeReady}
-              className={`${btnGhost} inline-flex items-center gap-1.5`}
+              size="md" variant="ghost" className="inline-flex items-center gap-1.5"
             >
               <PlusIcon width={13} height={13} />
               添加记忆
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={onConsolidate}
               disabled={!writeReady}
-              className={btnGhost}
+              size="md" variant="ghost"
             >
               立即整理
-            </button>
+            </Button>
           </div>
         </div>
         {writeHint}
@@ -1537,14 +1533,14 @@ export function MemoryPage({
               />
             </label>
             <div className="mt-2 flex items-center gap-2">
-              <button
+              <Button
                 type="button"
                 onClick={onImportMemory}
                 disabled={!importText.trim()}
-                className={btnPrimarySm}
+                size="sm" variant="primary"
               >
                 确认导入
-              </button>
+              </Button>
               <span className={hintCls}>导入会整体替换三层记忆与设置，操作不可撤销</span>
             </div>
           </div>
@@ -1610,9 +1606,9 @@ export function MemoryPage({
                       />
                     </label>
                     <div className="mt-2 flex gap-2">
-                      <button
+                      <Button
                         type="button"
-                        className={btnPrimarySm}
+                        size="sm" variant="primary"
                         onClick={() => {
                           memory.updateSemantic(editing.agentId, editing.id, {
                             key: editing.key,
@@ -1623,14 +1619,14 @@ export function MemoryPage({
                         }}
                       >
                         保存
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                         onClick={() => setEditing(null)}
                       >
                         取消
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -1660,18 +1656,18 @@ export function MemoryPage({
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <button
+                      <Button
                         type="button"
                         aria-label={`${entry.pinned ? "取消置顶" : "置顶"} ${entry.key}`}
                         onClick={() => {
                           memory.updateSemantic(entry.agentId, entry.id, { pinned: !entry.pinned });
                           bump();
                         }}
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                       >
                         {entry.pinned ? "取消置顶" : "置顶"}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         aria-label={`编辑记忆 ${entry.key}`}
                         onClick={() =>
@@ -1682,18 +1678,18 @@ export function MemoryPage({
                             value: entry.value,
                           })
                         }
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                       >
                         编辑
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         aria-label={`删除记忆 ${entry.key}`}
                         onClick={() => setPendingSemantic(entry)}
-                        className={btnDangerSm}
+                        size="sm" variant="ghost" className="text-[var(--danger)]"
                       >
                         <TrashIcon width={13} height={13} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1736,14 +1732,14 @@ export function MemoryPage({
                     </div>
                   )}
                 </div>
-                <button
+                <Button
                   type="button"
                   aria-label={`删除情景 ${entry.summary.slice(0, 12)}`}
                   onClick={() => setPendingEpisodic(entry)}
-                  className={btnDangerSm}
+                  size="sm" variant="ghost" className="text-[var(--danger)]"
                 >
                   <TrashIcon width={13} height={13} />
-                </button>
+                </Button>
               </div>
             ))
           )}
@@ -1768,14 +1764,14 @@ export function MemoryPage({
             placeholder="如：帮我把发布计划整理一下"
             className="min-w-0 flex-1 ui-input"
           />
-          <button
+          <Button
             type="button"
             onClick={onRecall}
             disabled={!recallQuery.trim()}
-            className={btnPrimarySm}
+            size="sm" variant="primary"
           >
             预览召回
-          </button>
+          </Button>
         </div>
         {recall && (
           <div
@@ -1841,13 +1837,13 @@ export function MemoryPage({
             </div>
           </div>
           {runs.length > 0 && (
-            <button
+            <Button
               type="button"
               onClick={() => setClearRunsOpen(true)}
-              className={`${btnGhostSm} shrink-0`}
+              size="sm" variant="ghost" className="shrink-0"
             >
               清除记录
-            </button>
+            </Button>
           )}
         </div>
         {runs.length === 0 ? (
@@ -1870,13 +1866,13 @@ export function MemoryPage({
               ))}
             </ul>
             {runs.length > RECALL_RUNS_PREVIEW && (
-              <button
+              <Button
                 type="button"
                 onClick={() => setRunsOpen((open) => !open)}
-                className={`${btnGhostSm} mt-2`}
+                size="sm" variant="ghost" className="mt-2"
               >
                 {runsOpen ? `只看最近 ${RECALL_RUNS_PREVIEW} 条` : `展开全部 ${runs.length} 条`}
-              </button>
+              </Button>
             )}
           </>
         )}
@@ -1905,14 +1901,14 @@ export function MemoryPage({
                     {` · ${personalNote(usage[row.id])}`}
                   </div>
                 </div>
-                <button
+                <Button
                   type="button"
                   aria-label={`删除冷记忆 ${row.layer} ${row.title}`}
                   onClick={row.pending}
-                  className={`${btnDangerSm} shrink-0`}
+                  size="sm" variant="ghost" className="text-[var(--danger)] shrink-0"
                 >
                   <TrashIcon width={13} height={13} />
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -1925,14 +1921,14 @@ export function MemoryPage({
           onCancel={() => setClearRunsOpen(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setClearRunsOpen(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   recorder.clearLog();
@@ -1943,10 +1939,10 @@ export function MemoryPage({
                   // 卡片上的「累计注入 / 加权」会停清除前的旧快照上（用户看到已清零的权重）。
                   bump();
                 }}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 清除
-              </button>
+              </Button>
             </>
           }
         >
@@ -1963,14 +1959,14 @@ export function MemoryPage({
           onCancel={() => setPendingSemantic(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setPendingSemantic(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   memory.removeSemantic(pendingSemantic.agentId, pendingSemantic.id);
@@ -1981,10 +1977,10 @@ export function MemoryPage({
                   bump();
                   setMemoryMsg({ kind: "ok", text: `已删除记忆：${pendingSemantic.key}` });
                 }}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >
@@ -2001,14 +1997,14 @@ export function MemoryPage({
           onCancel={() => setPendingEpisodic(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setPendingEpisodic(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   memory.removeEpisodic(pendingEpisodic.agentId, pendingEpisodic.id);
@@ -2019,10 +2015,10 @@ export function MemoryPage({
                   bump();
                   setMemoryMsg({ kind: "ok", text: "已删除一条情景记忆" });
                 }}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >
@@ -2037,20 +2033,20 @@ export function MemoryPage({
           onCancel={() => setImportConfirm(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setImportConfirm(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={confirmImportMemory}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 替换并导入
-              </button>
+              </Button>
             </>
           }
         >
@@ -2133,15 +2129,15 @@ export function MemoryPage({
     <section aria-label="复盘沉淀" className={`${cardCls} mt-3`}>
       <div className="flex items-center justify-between gap-3">
         <div className="ui-section-title">复盘沉淀（任务结束后自评）</div>
-        <button
+        <Button
           type="button"
           aria-label="立即复盘一次"
           disabled={reviewBusy}
           onClick={() => void doReviewNow()}
-          className={`${btnGhost} disabled:opacity-50`}
+          size="md" variant="ghost" className="disabled:opacity-50"
         >
           {reviewBusy ? "复盘中…" : "立即复盘一次"}
-        </button>
+        </Button>
       </div>
       <div className={`mt-1 ${hintCls}`}>
         任务结束后自动复盘：值得记的事实写进记忆，可复用流程存成技能；失败不影响对话。
@@ -2289,24 +2285,24 @@ export function MemoryPage({
                           <span className="text-[11px] text-[var(--warn)]">
                             关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
                           </span>
-                          <button
+                          <Button
                             type="button"
                             aria-label={`确认关闭 ${agent.name} 个人数据库`}
                             onClick={() => {
                               setPref(agent.id, { personalDb: false });
                               setPendingDbOff("");
                             }}
-                            className={btnGhostSm}
+                            size="sm" variant="ghost"
                           >
                             确认关闭
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
                             onClick={() => setPendingDbOff("")}
-                            className={btnGhostSm}
+                            size="sm" variant="ghost"
                           >
                             取消
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -2346,9 +2342,9 @@ export function MemoryPage({
               }}
             />
           </label>
-          <button type="button" onClick={onAddManualAgent} className={btnGhost}>
+          <Button type="button" onClick={onAddManualAgent} size="md" variant="ghost">
             添加
-          </button>
+          </Button>
           {manualMsg && (
             <span role="status" className={`${hintCls} pb-1.5`}>
               {manualMsg}
@@ -2383,9 +2379,9 @@ export function MemoryPage({
               {isVaultSourceAvailable() ? "知识库已接入" : "尚未接入本地库"}
             </div>
           </div>
-          <button type="button" onClick={openVaultPage} className={btnPrimary}>
+          <Button type="button" onClick={openVaultPage} size="md" variant="primary">
             打开知识库
-          </button>
+          </Button>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-soft pt-3">
           <div className="flex items-center gap-2">
@@ -2396,14 +2392,14 @@ export function MemoryPage({
             />
             <span className="ui-section-title">知识库参与记忆</span>
           </div>
-          <button
+          <Button
             type="button"
             onClick={() => void doSyncVault()}
             disabled={vaultBusy}
-            className={`${btnGhost} disabled:opacity-50`}
+            size="md" variant="ghost" className="disabled:opacity-50"
           >
             {vaultBusy ? "同步中…" : "同步知识库到记忆"}
-          </button>
+          </Button>
           {vaultMsgRow}
         </div>
         {vaultSync?.truncated ? (
@@ -2524,20 +2520,20 @@ export function MemoryPage({
           onCancel={() => setClearTarget(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setClearTarget(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={confirmClearConversation}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 清空
-              </button>
+              </Button>
             </>
           }
         >

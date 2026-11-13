@@ -12,6 +12,7 @@ import {
   type SnapshotTargets,
 } from "../lib/selfEdit/snapshots.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 自我修改设置卡（挂在技能区）：
@@ -174,20 +175,20 @@ export function SelfEditCard({
           onCancel={() => setRollbackTarget(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setRollbackTarget(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                size="md" variant="ghost" className="ui-caption"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={confirmRollback}
-                className="ui-btn ui-btn-sm ui-btn-danger"
+                size="sm" variant="danger"
               >
                 回滚
-              </button>
+              </Button>
             </>
           }
         >

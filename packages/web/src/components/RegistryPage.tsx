@@ -14,6 +14,7 @@ import { useRegistryStore, type RegistryStore } from "../store/registry.js";
 import { PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
 import { EmptyState } from "./ui/EmptyState.js";
+import { Button } from "../components/ui/Button.js";
 
 /** 搜索防抖：输入过程中的每个字符都打一次 Registry 没有意义。 */
 export const SEARCH_DEBOUNCE_MS = 400;
@@ -142,22 +143,22 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
       width="wide"
       actions={
         <>
-          <button
+          <Button
             type="button"
             onClick={() => void load(undefined, { force: true })}
             disabled={loading}
-            className="ui-btn ui-btn-md ui-btn-ghost"
+            size="md" variant="ghost"
           >
             {loading ? "刷新中…" : "刷新"}
-          </button>
+          </Button>
           {onBack && (
-            <button
+            <Button
               type="button"
               onClick={onBack}
-              className="ui-btn ui-btn-md ui-btn-ghost"
+              size="md" variant="ghost"
             >
               返回 MCP 服务
-            </button>
+            </Button>
           )}
         </>
       }
@@ -178,15 +179,15 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
         />
         <div className="flex flex-wrap items-center gap-1">
           {FILTERS.map((f) => (
-            <button
+            <Button
               key={f.id}
               type="button"
               aria-pressed={filter === f.id}
               onClick={() => setFilter(f.id)}
-              className={`ui-btn ui-btn-sm ${filter === f.id ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+              size="sm" variant={filter === f.id ? "primary" : "ghost"} className={filter === f.id ? undefined : "text-muted"}
             >
               {f.label}
-            </button>
+            </Button>
           ))}
         </div>
         {loadedAt && (
@@ -222,13 +223,13 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           <span>
             {stale ? "无法连接 Registry，正在显示上次缓存。" : error}
           </span>
-          <button
+          <Button
             type="button"
             onClick={() => void load(undefined, { force: true })}
-            className="ui-btn ui-btn-sm ui-btn-ghost border-current"
+            size="sm" variant="ghost" className="border-current"
           >
             重试
-          </button>
+          </Button>
         </div>
       )}
 
@@ -259,14 +260,14 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
 
       {nextCursor && (
         <div className="mt-4 flex justify-center">
-          <button
+          <Button
             type="button"
             disabled={loadingMore}
             onClick={() => void loadMore()}
-            className="ui-btn ui-btn-md ui-btn-ghost"
+            size="md" variant="ghost"
           >
             {loadingMore ? "加载中…" : "加载更多"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -358,13 +359,13 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             仓库
           </a>
         )}
-        <button
+        <Button
           type="button"
           aria-label={`安装 ${entry.title}`}
           disabled={installed || !installable || installing || busy}
           title={installable ? undefined : blockReason}
           onClick={() => option && onInstall(entry, option)}
-          className="ui-btn ui-btn-sm ui-btn-ghost"
+          size="sm" variant="ghost"
         >
           {installing
             ? "安装中…"
@@ -375,7 +376,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
                 : option
                   ? rowBlockLabel(option, runtime)
                   : "暂不支持"}
-        </button>
+        </Button>
       </div>
     </section>
   );

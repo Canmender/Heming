@@ -527,3 +527,47 @@ Tailwind 对自定义调色板生成的是 `--tw-ring-color: color-mix(...)`，�
 现在**生产代码 0 处**（仅剩 2 处在 `StorageUsageCard.test.tsx` 的「不得出现」断言里）。
 门禁：web typecheck 过、**298 文件 / 4372 例**全过、`pnpm -r typecheck` 6 包过、`pnpm -r build` 过。
 
+## 20. 第 19 轮 · 手拼 `ui-btn` 字符串清零（d.140.3.73.11）
+审计 D1「基元建了不用」的最大一块。`ui/Button.tsx` 的文件头注释自己写着「有人忘写 `ui-btn-md`，按钮变成 0 高度」——
+本轮把这句话变成历史。
+
+### 20.1 改了什么
+
+| 形态 | 处理 | 处数 / 文件 |
+| --- | --- | --- |
+| `<button className="ui-btn ui-btn-{sm\|md}[ ui-btn-{primary\|ghost\|danger}][ 其他类名]">` | `size` / `variant` / 剩余类名进 `className` | 239 / 49 |
+| `className={btnGhost \| BTN_GHOST_SM \| BTN_PRIMARY \| BTN_DANGER_SM \| …}` | 同上；引用清零后删常量声明 | 100 / 15 |
+| 条件拼装 `` className={`ui-btn ui-btn-sm ${x ? "ui-btn-primary" : "ui-btn-ghost"}`} `` | `variant={x ? "primary" : "ghost"}` | 14 |
+| 多行 `<button`（插件区，import 重做后回滚重转） | 同上 | 9 |
+| 手工 | `LoginPage` 登录主按钮、`ux/OnboardingCard`、`UpdateCard`、`AgentFormPanel` | 4 |
+
+结果：`<Button` 出现 389 次；`ui-btn` 字面量只剩 3 处 `<label>`（见下）。
+
+### 20.2 有意保留的 3 处 `<label>`
+
+`SettingsPage`（导入配置）、`plugins/InstallDialog`（选择 plugin.json）、`assistant/AgentFormPanel`（选文件）
+都是把 `label` 指向隐藏的 file input 来充当按钮。换成 `<Button>` 会丢掉 label↔input 的关联语义，
+所以保留 `ui-btn` 类名原样——它们是「长得像按钮的 label」，不是按钮。
+
+### 20.3 两个踩过的坑
+
+1. **codemod 的 `</button>` 也跟着换了**：第一版脚本只判断「扫到的 `<button` 是否被转换」，
+   但收尾替换按下一个 `</button>` 定位，遇到 `{cond && …}` 嵌套时会把未转换按钮的收尾也换掉，
+   一次产生 241 个 `TS17002`。处理：`git checkout -- .` 回滚，改成「只有本次真的转换了才吞掉配对收尾」再重跑。
+2. **`plugins/` 目录的 import 破损**：清理 `plugins/shared.tsx` 的 `BTN_*` 导出时，
+   消费方文件的 import 没同步，typecheck 报 65 处 `Cannot find name 'Button'` / 找不到 `BTN_*`。
+   处理：整体 `git checkout -- packages/web/src/components/plugins/` 回到干净态，
+   改用「只在该目录内做转换 + 按名字从 import 里摘」的脚本重做，然后按目录深度补 `../ui/Button.js`。
+
+### 20.4 验证
+
+- `pnpm --filter @heming/web typecheck`：0 错；
+- `pnpm --filter @heming/web test`：**298 文件 / 4372 例**全过；
+- `pnpm -r typecheck` 6 个包全过；`pnpm -r build` 过；
+- 60 个文件、+1143/−1104；`git diff --numstat` 与 `git diff --ignore-cr-at-eol --numstat` 输出一致（无 EOL 噪音）。
+
+### 20.5 剩下什么
+
+`text-[Npx]` 字面量仍有 650 处。这一项不适合机械替换：真正要决定的是「每个字号对应哪一档语义」，
+属于设计决策。在没有视觉校验手段的前提下，我选择不动——把 650 处换成 6 个 token 里挑错的几个，
+看起来像清理，实际是把问题藏起来。

@@ -411,9 +411,9 @@ export function ModelPage() {
       subtitle="所有模型在一个地方：加一个来源，智能体就能选它的模型。"
       width="full"
       actions={
-        <button
+        <Button
           type="button"
-          className="ui-btn ui-btn-md ui-btn-ghost"
+          size="md" variant="ghost"
           onClick={async () => {
             setBusy("refresh");
             try {
@@ -428,7 +428,7 @@ export function ModelPage() {
         >
           <RefreshIcon width={14} height={14} />
           {busy === "refresh" ? "刷新中…" : "刷新模型"}
-        </button>
+        </Button>
       }
       headerExtra={
         // 一级页签统一走 PAGE_TABLIST / pageTabClass（下划线式，与设置页、插件页、记忆页、团队页同一套视觉）。
@@ -573,9 +573,9 @@ export function ModelPage() {
                   </select>
                 </label>
               </div>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+                size="sm" variant="primary" className="mt-2"
                 disabled={!cli || !modelForm.model.trim()}
                 onClick={() => {
                   const model = modelForm.model.trim();
@@ -585,7 +585,7 @@ export function ModelPage() {
                 }}
               >
                 应用
-              </button>
+              </Button>
             </details>
           </section>
         )}
@@ -609,14 +609,14 @@ export function ModelPage() {
             <div className="ui-card p-4">
               <div className="flex items-center justify-between">
                 <div className="ui-section-title">本机智能体（{agents.length}）</div>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli}
                   onClick={() => void loadAgents()}
                 >
                   重新检测
-                </button>
+                </Button>
               </div>
               <ul className="mt-2 divide-y divide-line">
                 {agents.map((agent) => (
@@ -639,9 +639,9 @@ export function ModelPage() {
                             value={agentModelOf(agent)}
                             onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
                           />
-                          <button
+                          <Button
                             type="button"
-                            className="ui-btn ui-btn-sm ui-btn-primary"
+                            size="sm" variant="primary"
                             disabled={!cli || !isModelId(agentModelOf(agent))}
                             onClick={() => {
                               const model = agentModelOf(agent).trim();
@@ -650,10 +650,10 @@ export function ModelPage() {
                             }}
                           >
                             应用
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="ui-btn ui-btn-sm ui-btn-ghost"
+                            size="sm" variant="ghost"
                             disabled={!cli}
                             onClick={() => {
                               if (!agent.id) return;
@@ -661,7 +661,7 @@ export function ModelPage() {
                             }}
                           >
                             恢复默认
-                          </button>
+                          </Button>
                         </span>
                       ) : (
                         <span className="shrink-0 ui-caption">只读（没有对应的模型命令）</span>
@@ -690,9 +690,9 @@ export function ModelPage() {
                         会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
                       </p>
                       <div className="mt-2 flex gap-2">
-                        <button
+                        <Button
                           type="button"
-                          className="ui-btn ui-btn-sm ui-btn-primary"
+                          size="sm" variant="primary"
                           onClick={() => {
                             const target = agentConfirm;
                             setAgentConfirm(null);
@@ -703,14 +703,14 @@ export function ModelPage() {
                           }}
                         >
                           确认写入
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="ui-btn ui-btn-sm ui-btn-ghost"
+                          size="sm" variant="ghost"
                           onClick={() => setAgentConfirm(null)}
                         >
                           取消
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -732,13 +732,13 @@ export function ModelPage() {
                   <CheckIcon width={14} height={14} className="shrink-0" />
                   {notice}
                 </span>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   onClick={() => setNotice(null)}
                 >
                   关闭
-                </button>
+                </Button>
               </div>
             )}
 
@@ -789,13 +789,13 @@ export function ModelPage() {
                         {activePlan.label}
                       </span>
                     </div>
-                    <button
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                       onClick={() => setPresetKey(null)}
                     >
                       取消
-                    </button>
+                    </Button>
                   </div>
 
                   {activePreset.planOptions.length > 1 && (
@@ -840,14 +840,14 @@ export function ModelPage() {
                         if (event.key === "Enter") void addPreset();
                       }}
                     />
-                    <button
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-md ui-btn-primary"
+                      size="md" variant="primary"
                       disabled={!presetKey.key.trim()}
                       onClick={() => void addPreset()}
                     >
                       保存
-                    </button>
+                    </Button>
                   </div>
                   <p className="mt-1.5 ui-caption">
                     {activePlan.hint ?? "保存后会自动读取这个 Key 能用的模型。"}
@@ -972,21 +972,21 @@ export function ModelPage() {
                       />
                     </label>
                     <div className="flex gap-2 sm:col-span-2">
-                      <button
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-md ui-btn-primary"
+                        size="md" variant="primary"
                         disabled={!custom.id.trim()}
                         onClick={() => void addCustom()}
                       >
                         保存
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-md ui-btn-ghost"
+                        size="md" variant="ghost"
                         onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
                       >
                         取消
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1021,31 +1021,31 @@ export function ModelPage() {
                             {row.models !== null ? ` · ${row.models} 个模型` : ""}
                           </span>
                         </span>
-                        <button
+                        <Button
                           type="button"
-                          className="ui-btn ui-btn-sm ui-btn-ghost"
+                          size="sm" variant="ghost"
                           disabled={!cli}
                           aria-expanded={advancedProvider === row.id}
                           onClick={() => void toggleAdvanced(row.id)}
                         >
                           高级
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="ui-btn ui-btn-sm ui-btn-ghost"
+                          size="sm" variant="ghost"
                           disabled={!cli}
                           onClick={() => void run("测试来源", ["provider", "test", row.id])}
                         >
                           测试
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="ui-btn ui-btn-sm ui-btn-danger"
+                          size="sm" variant="danger"
                           disabled={!cli}
                           onClick={() => void run("删除来源", ["provider", "rm", row.id], { refresh: true })}
                         >
                           删除
-                        </button>
+                        </Button>
                       </div>
                       {advancedProvider === row.id && (
                         <div className="rta-enter mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3">
@@ -1072,14 +1072,14 @@ export function ModelPage() {
                                 value={providerForm.key}
                                 onChange={(event) => setProviderForm({ ...providerForm, key: event.target.value })}
                               />
-                              <button
+                              <Button
                                 type="button"
-                                className="ui-btn ui-btn-sm ui-btn-primary"
+                                size="sm" variant="primary"
                                 disabled={!cli || !providerForm.key.trim()}
                                 onClick={() => void run("更新 Key", ["provider", "key", row.id, providerForm.key.trim()])}
                               >
                                 更新 Key
-                              </button>
+                              </Button>
                             </div>
                             <label className="grid gap-1">
                               <span className="ui-caption">来源分发策略</span>
@@ -1121,9 +1121,9 @@ export function ModelPage() {
                                 onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
                               />
                             </div>
-                            <button
+                            <Button
                               type="button"
-                              className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                              size="sm" variant="ghost" className="mt-2"
                               disabled={!cli || !providerForm.fallback.trim()}
                               onClick={() =>
                                 void run("设置备用", [
@@ -1138,7 +1138,7 @@ export function ModelPage() {
                               }
                             >
                               保存备用
-                            </button>
+                            </Button>
                           </div>
 
                           <details className="ui-disclosure mt-3 rounded-lg border border-line bg-[var(--subtle)] px-3 py-2">
@@ -1184,9 +1184,9 @@ export function ModelPage() {
                           </details>
 
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <button
+                            <Button
                               type="button"
-                              className="ui-btn ui-btn-sm ui-btn-primary"
+                              size="sm" variant="primary"
                               disabled={!cli}
                               onClick={() => {
                                 const pairs: string[] = [];
@@ -1203,7 +1203,7 @@ export function ModelPage() {
                               }}
                             >
                               保存设置
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -1257,9 +1257,9 @@ export function ModelPage() {
                 </label>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  size="sm" variant="primary"
                   disabled={!cli || !groupForm.name.trim() || !groupForm.models.trim()}
                   onClick={() =>
                     void run("保存分组", [
@@ -1272,26 +1272,26 @@ export function ModelPage() {
                   }
                 >
                   保存分组
-                </button>
+                </Button>
                 <TextField
                   label="分组 ID"
                   placeholder="分组名（查看/删除用）"
                   value={groupForm.target}
                   onChange={(event) => setGroupForm({ ...groupForm, target: event.target.value })}
                 />
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli || !groupForm.target.trim()}
                   onClick={() => void run("分组详情", ["group", groupForm.target.trim()])}
                 >
                   详情
-                </button>
+                </Button>
                 {dangerConfirm?.args[1] === "rm" ? (
                   <span className="flex items-center gap-1.5">
-                    <button
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-danger"
+                      size="sm" variant="danger"
                       onClick={() => {
                         const pending = dangerConfirm;
                         setDangerConfirm(null);
@@ -1299,19 +1299,19 @@ export function ModelPage() {
                       }}
                     >
                       确认删除
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                       onClick={() => setDangerConfirm(null)}
                     >
                       取消
-                    </button>
+                    </Button>
                   </span>
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-danger"
+                    size="sm" variant="danger"
                     disabled={!cli || !groupForm.target.trim()}
                     onClick={() =>
                       setDangerConfirm({
@@ -1321,7 +1321,7 @@ export function ModelPage() {
                     }
                   >
                     删除
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -1366,9 +1366,9 @@ export function ModelPage() {
                   />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-primary"
+                    size="sm" variant="primary"
                     disabled={!cli || !ruleForm.group.trim() || !ruleForm.use.trim()}
                     onClick={() => {
                       const args = ["group", "rule", "add", ruleForm.group.trim(), `use=${ruleForm.use.trim()}`];
@@ -1380,15 +1380,15 @@ export function ModelPage() {
                     }}
                   >
                     保存规则
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
+                    size="sm" variant="ghost"
                     disabled={!cli || !ruleForm.group.trim()}
                     onClick={() => void run("查看规则", ["group", "rule", ruleForm.group.trim()])}
                   >
                     查看规则
-                  </button>
+                  </Button>
                 </div>
               </div>
             </details>
@@ -1434,9 +1434,9 @@ export function ModelPage() {
                   />
                 </label>
               </div>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+                size="sm" variant="primary" className="mt-2"
                 disabled={!cli}
                 onClick={() =>
                   void run(`${syncKind} ${syncCommand}`, [
@@ -1447,21 +1447,21 @@ export function ModelPage() {
                 }
               >
                 执行
-              </button>
+              </Button>
             </details>
 
             <details className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
+                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
                   查看库
-                </button>
-                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
+                </Button>
+                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
                   同步到智能体
-                </button>
-                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库指令", ["library", "instructions"])}>
+                </Button>
+                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库指令", ["library", "instructions"])}>
                   查看共享指令
-                </button>
+                </Button>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <input
@@ -1486,9 +1486,9 @@ export function ModelPage() {
                   onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
                 />
               </div>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+                size="sm" variant="primary" className="mt-2"
                 disabled={!cli}
                 onClick={() => {
                   if (searchForm.api.trim()) {
@@ -1501,7 +1501,7 @@ export function ModelPage() {
                 }}
               >
                 执行
-              </button>
+              </Button>
             </details>
 
             <details className="ui-disclosure ui-card p-4">
@@ -1524,9 +1524,9 @@ export function ModelPage() {
                   />
                   只读
                 </label>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  size="sm" variant="primary"
                   disabled={!cli || !gatewayKeyForm.name.trim()}
                   onClick={() => {
                     const args = ["gateway-key", "add", gatewayKeyForm.name.trim()];
@@ -1535,36 +1535,36 @@ export function ModelPage() {
                   }}
                 >
                   新建密钥
-                </button>
+                </Button>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli}
                   onClick={() => void run("网关密钥", ["gateway-key", "list"])}
                 >
                   列出密钥
-                </button>
+                </Button>
                 <TextField
                   label="密钥 ID"
                   placeholder="密钥 ID（轮换/删除用）"
                   value={gatewayKeyForm.target}
                   onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, target: event.target.value })}
                 />
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli || !gatewayKeyForm.target.trim()}
                   onClick={() => void run("轮换密钥", ["gateway-key", "rotate", gatewayKeyForm.target.trim()])}
                 >
                   轮换
-                </button>
+                </Button>
                 {dangerConfirm?.args[1] === "remove" ? (
                   <span className="flex items-center gap-1.5">
-                    <button
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-danger"
+                      size="sm" variant="danger"
                       onClick={() => {
                         const pending = dangerConfirm;
                         setDangerConfirm(null);
@@ -1572,19 +1572,19 @@ export function ModelPage() {
                       }}
                     >
                       确认删除
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                       onClick={() => setDangerConfirm(null)}
                     >
                       取消
-                    </button>
+                    </Button>
                   </span>
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-danger"
+                    size="sm" variant="danger"
                     disabled={!cli || !gatewayKeyForm.target.trim()}
                     onClick={() =>
                       setDangerConfirm({
@@ -1594,7 +1594,7 @@ export function ModelPage() {
                     }
                   >
                     删除
-                  </button>
+                  </Button>
                 )}
               </div>
             </details>
@@ -1606,22 +1606,22 @@ export function ModelPage() {
                 只影响那一次会话，不改配置。
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli}
                   onClick={() => void run("最近会话", ["sessions", "--limit", "10"])}
                 >
                   查看最近会话
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!cli}
                   onClick={() => void run("会话（7 天）", ["sessions", "--days", "7", "--limit", "20"])}
                 >
                   近 7 天
-                </button>
+                </Button>
               </div>
             </details>
 
@@ -1638,17 +1638,17 @@ export function ModelPage() {
                     if (event.key === "Enter") void startTerminalRun();
                   }}
                 />
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  size="sm" variant="primary"
                   disabled={!cli || !termCommand.trim()}
                   onClick={() => void startTerminalRun()}
                 >
                   运行
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   disabled={!runId}
                   onClick={() => {
                     if (runId) void cli?.cliKill(runId);
@@ -1656,7 +1656,7 @@ export function ModelPage() {
                   }}
                 >
                   取消
-                </button>
+                </Button>
               </div>
               <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[var(--console-bg)] p-3 text-[12px] text-[var(--console-ink)]">
                 {live || "（输出会出现在这里）"}
@@ -1694,9 +1694,9 @@ export function ModelPage() {
               )}
               {output.title}
             </div>
-            <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => setOutput(null)}>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOutput(null)}>
               关闭
-            </button>
+            </Button>
           </div>
           <pre className="mt-1 max-h-64 w-full overflow-auto whitespace-pre-wrap text-[12px]">{output.text}</pre>
         </div>

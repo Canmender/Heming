@@ -27,6 +27,7 @@ import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
 import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
+import { Button } from "./components/ui/Button.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -220,45 +221,45 @@ function SharedFilesPanel({
           </span>
         )}
         {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
-        <button
+        <Button
           type="button"
           aria-label="绑定本地文件到会话"
           title="绑定工作区文件到当前会话（需先打开一个会话）"
           onClick={onBind}
-          className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
+          size="sm" variant="ghost" className="shrink-0"
         >
           绑定
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           title="上传文件到共享文件"
           onClick={onUpload}
-          className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
+          size="sm" variant="ghost" className="shrink-0"
         >
           上传
-        </button>
+        </Button>
         {onClose ? (
-          <button
+          <Button
             type="button"
             aria-label="关闭共享文件面板"
             onClick={onClose}
-            className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
+            size="sm" variant="ghost" className="shrink-0"
           >
             关闭
-          </button>
+          </Button>
         ) : null}
       </div>
       {notice && (
         <div role="alert" className="ui-alert ui-alert-warn mx-2 mt-2 items-center">
           <span className="min-w-0 flex-1">{notice}</span>
           {onDismissNotice && (
-            <button
+            <Button
               type="button"
               onClick={onDismissNotice}
-              className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
+              size="sm" variant="ghost" className="shrink-0"
             >
               知道了
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -435,20 +436,20 @@ function ReconnectPanel({
           网络恢复后会自动重试，不需要重新登录。
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
-          <button
+          <Button
             type="button"
             onClick={onRetry}
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
           >
             立即重试
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={onLogout}
-            className="ui-btn ui-btn-md ui-btn-ghost"
+            size="md" variant="ghost"
           >
             退出登录
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -851,16 +852,16 @@ function AppShell({
               宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。 */}
           {narrow && showFilesPanel && (
             <div className="flex shrink-0 items-center justify-end border-b border-line-soft px-4 py-1.5">
-              <button
+              <Button
                 type="button"
                 aria-label="打开共享文件"
                 aria-haspopup="dialog"
                 aria-expanded={filesDrawerOpen}
                 onClick={() => setFilesDrawerOpen(true)}
-                className="ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm" variant="ghost"
               >
                 共享文件
-              </button>
+              </Button>
             </div>
           )}
           {/* min-w-0 + overflow-hidden：窄窗下宽页面（settings/team/workspace/memory）不横向撑破主列 */}

@@ -19,6 +19,7 @@ import {
 import { WikiGraphView } from "./WikiGraphView.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PlusIcon } from "./icons.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 个人知识库面板（卡帕西 LLM Wiki 标准的落地界面）。
@@ -215,9 +216,9 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
           {pages.length} 页 · {graph.edges.length} 链接
         </span>
         <div className="ml-auto flex items-center gap-1.5">
-          <button type="button" onClick={initSchema} className={btnGhost}>
+          <Button type="button" onClick={initSchema} size="md" variant="ghost">
             规约
-          </button>
+          </Button>
           {WIKI_KINDS.map((k) => (
             <button
               key={k}
@@ -324,18 +325,18 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                       </option>
                     ))}
                   </select>
-                  <button type="button" disabled={busy} onClick={() => void save()} className={btnPrimary}>
+                  <Button type="button" disabled={busy} onClick={() => void save()} size="md" variant="primary">
                     保存
-                  </button>
+                  </Button>
                   {current && (
-                    <button
+                    <Button
                       type="button"
                       disabled={busy}
                       onClick={() => void removePage(current.path)}
-                      className={btnGhost}
+                      size="md" variant="ghost"
                     >
                       删除
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="ui-caption">
@@ -365,20 +366,20 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
           onCancel={() => setRemoveTarget(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setRemoveTarget(null)}
-                className={btnGhost}
+                size="md" variant="ghost"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => void confirmRemovePage(removeTarget)}
-                className="ui-btn ui-btn-sm ui-btn-danger"
+                size="sm" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >
@@ -390,7 +391,5 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
     </div>
   );
 }
-
-const btnPrimary = "ui-btn ui-btn-sm ui-btn-primary";
 const btnGhost =
   "rounded-lg border border-line px-2 py-1 ui-caption hover:bg-[var(--subtle-2)]";

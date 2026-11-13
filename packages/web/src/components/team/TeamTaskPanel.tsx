@@ -18,6 +18,7 @@ import {
 import { NEXT_STATUS } from "./TeamPlanPanel.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { fmtLocalDateTime, isOverdue } from "../../lib/format/datetime.js";
+import { Button } from "../../components/ui/Button.js";
 
 const STATUS_LABEL: Record<TeamItemStatus, string> = {
   todo: "待开始",
@@ -295,22 +296,22 @@ export function TeamTaskPanel({
                 className="hidden"
                 onChange={(e) => void onPickFile(e.target.files?.[0] ?? null)}
               />
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm" variant="ghost"
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
               >
                 {uploading ? "上传中…" : attachment ? "换一个交付物" : "上传交付物"}
-              </button>
+              </Button>
             </label>
             {attachment && (
               <span className="ui-caption truncate">已选：{attachment.name}</span>
             )}
           </div>
-          <button type="submit" className="ui-btn ui-btn-sm ui-btn-primary self-start" disabled={busy || uploading}>
+          <Button type="submit" size="sm" variant="primary" className="self-start" disabled={busy || uploading}>
             发布任务
-          </button>
+          </Button>
         </form>
       )}
 
@@ -411,21 +412,21 @@ export function TeamTaskPanel({
           initialFocusRef={cancelRef}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 ref={cancelRef}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setPendingDelete(null)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => void confirmRemove()}
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

@@ -6,6 +6,7 @@ import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 对话左栏（d.126 阶段 B）：Claude Code 风格会话栏。
@@ -207,22 +208,22 @@ export function ConversationRail({
             }}
             className="ui-input h-7 min-w-0 flex-1 text-[12px]"
           />
-          <button
+          <Button
             type="button"
             aria-label="保存会话名称"
-            className="ui-btn ui-btn-sm ui-btn-primary"
+            size="sm" variant="primary"
             onClick={() => void commitRename(conv)}
           >
             保存
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             aria-label="取消重命名"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             onClick={cancelRename}
           >
             取消
-          </button>
+          </Button>
         </div>
       );
     }
@@ -305,13 +306,13 @@ export function ConversationRail({
           title="还没有对话"
           desc="在右侧选一个智能体，开始第一段对话。"
           actions={
-            <button
+            <Button
               type="button"
               onClick={onNewConversation}
-              className="ui-btn ui-btn-sm ui-btn-primary w-full"
+              size="sm" variant="primary" className="w-full"
             >
               选择智能体
-            </button>
+            </Button>
           }
         />
       );
@@ -322,9 +323,9 @@ export function ConversationRail({
         title="没有匹配的对话"
         desc="换个关键词试试，或清空搜索。"
         actions={
-          <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={closeSearch}>
+          <Button type="button" size="sm" variant="ghost" onClick={closeSearch}>
             清空搜索
-          </button>
+          </Button>
         }
       />
     );
@@ -399,16 +400,16 @@ export function ConversationRail({
 
       {/* 顶部动作：新建对话 / 搜索（对齐参考图 New / Search）。 */}
       <div className="flex items-center gap-1.5 border-b border-line-soft px-2 py-1.5">
-        <button
+        <Button
           type="button"
           aria-label="新建对话"
           title="新建对话：先选一个智能体"
           onClick={onNewConversation}
-          className="ui-btn ui-btn-sm ui-btn-ghost min-w-0 flex-1 justify-start"
+          size="sm" variant="ghost" className="min-w-0 flex-1 justify-start"
         >
           <PlusIcon width={14} height={14} />
           <span className="truncate">新建对话</span>
-        </button>
+        </Button>
         <button
           type="button"
           aria-label="搜索"
@@ -480,14 +481,14 @@ export function ConversationRail({
           </p>
         ) : null}
         {hasMore && !hasQuery ? (
-          <button
+          <Button
             type="button"
             disabled={loadingMore}
             onClick={onLoadMore}
-            className="ui-btn ui-btn-sm ui-btn-ghost mt-1 w-full"
+            size="sm" variant="ghost" className="mt-1 w-full"
           >
             {loadingMore ? "加载中…" : "加载更多对话"}
-          </button>
+          </Button>
         ) : null}
       </div>
 

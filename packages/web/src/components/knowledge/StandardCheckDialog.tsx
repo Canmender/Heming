@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import type { StandardReport } from "../../lib/vault/standard.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 「标准检查」弹窗（知识库页页头入口）。
@@ -87,21 +88,21 @@ export function StandardCheckDialog({
       initialFocusRef={canRepair ? repairRef : undefined}
       footer={
         <>
-          <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={onClose}>
+          <Button type="button" size="md" variant="ghost" onClick={onClose}>
             关闭
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-md ui-btn-ghost"
+            size="md" variant="ghost"
             onClick={onCheck}
             disabled={checking || repairing}
           >
             {checking ? "检查中…" : "重新检查"}
-          </button>
-          <button
+          </Button>
+          <Button
             ref={repairRef}
             type="button"
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
             onClick={onRepair}
             disabled={!canRepair}
             title={
@@ -113,7 +114,7 @@ export function StandardCheckDialog({
             }
           >
             {repairing ? "补齐中…" : "一键补齐结构"}
-          </button>
+          </Button>
         </>
       }
     >

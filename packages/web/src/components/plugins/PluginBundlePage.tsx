@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "../ui/Button.js";
 import {
   refreshWidgets,
   useWidgetsStore,
@@ -236,13 +237,13 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
           title="这个插件没有页面或已被停用"
           desc={detail}
           actions={
-            <button
+            <Button
               type="button"
               onClick={openPluginDetails}
-              className="ui-btn ui-btn-md ui-btn-primary"
+              size="md" variant="primary"
             >
               打开插件详情
-            </button>
+            </Button>
           }
         />
       </section>
@@ -265,15 +266,15 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
           {page?.summary ? <p className="ui-caption truncate">{page.summary}</p> : null}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          <button
+          <Button
             type="button"
             onClick={rebuild}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             aria-label="重新加载插件页面"
           >
             <RefreshIcon width={12} height={12} aria-hidden="true" />
             重新加载
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -310,20 +311,20 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
                 会按当前安装重新加载一次。
               </p>
               <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-                <button
+                <Button
                   type="button"
                   onClick={rebuild}
-                  className="ui-btn ui-btn-md ui-btn-primary"
+                  size="md" variant="primary"
                 >
                   重建视图
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={openPluginDetails}
-                  className="ui-btn ui-btn-md ui-btn-ghost"
+                  size="md" variant="ghost"
                 >
                   打开插件详情
-                </button>
+                </Button>
               </div>
             </div>
           </div>

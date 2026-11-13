@@ -10,6 +10,7 @@ import {
   type TraceGraph,
   type TraceSnapshot,
 } from "../lib/magpieTrace.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 实时链路（d.104）：模型服务正在做的决定，一张节点图。
@@ -213,9 +214,9 @@ export function ModelTraceView() {
               {key === "all" ? "全部" : EDGE_STATE_LABEL[key]}
             </button>
           ))}
-          <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost ml-1" onClick={() => setPaused((value) => !value)}>
+          <Button type="button" size="sm" variant="ghost" className="ml-1" onClick={() => setPaused((value) => !value)}>
             {paused ? "继续" : "暂停"}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -494,9 +495,9 @@ export function ModelTraceView() {
         <div className="rounded-lg border border-line-soft bg-[var(--subtle)] p-3 text-[12px]">
           <div className="flex items-center justify-between">
             <div className="font-bold">请求详情</div>
-            <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => setSelected(null)}>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(null)}>
               关闭
-            </button>
+            </Button>
           </div>
           {seen && (
             <div className="mt-1 grid gap-x-6 gap-y-0.5 sm:grid-cols-2">

@@ -4,6 +4,7 @@ import { ChevronIcon, FileIcon, FolderIcon, ImageIcon, MoreIcon, PlusIcon } from
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PromptDialog } from "./PromptDialog.js";
 import { ancestorsOf, baseName, ensureMdExt, findEntry, isDir, joinRel, parentOf } from "./model.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 知识库文件树：折叠、当前文件高亮、右键菜单（新建笔记 / 新建文件夹 / 重命名 /
@@ -300,13 +301,13 @@ export function FileTree({
         {tree.length === 0 ? (
           <div className="px-2 py-6 text-center">
             <p className="ui-caption">这个库还没有文件。</p>
-            <button
+            <Button
               type="button"
               onClick={() => setPrompt({ kind: "new-note", dir: "", initial: "" })}
-              className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+              size="sm" variant="ghost" className="mt-2"
             >
               新建第一篇笔记
-            </button>
+            </Button>
           </div>
         ) : (
           renderRows(tree, 0)
@@ -387,20 +388,20 @@ export function FileTree({
           onCancel={() => setConfirmDelete(null)}
           footer={
             <>
-              <button type="button" onClick={() => setConfirmDelete(null)} className="ui-btn ui-btn-md ui-btn-ghost">
+              <Button type="button" onClick={() => setConfirmDelete(null)} size="md" variant="ghost">
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   const rel = confirmDelete;
                   setConfirmDelete(null);
                   onDelete(rel);
                 }}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

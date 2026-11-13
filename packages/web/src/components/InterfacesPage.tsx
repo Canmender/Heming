@@ -19,6 +19,7 @@ import { DEFAULT_PRESET_SERVERS, MCP_PRESETS, presetServerId } from "../lib/mcp/
 import { PageShell } from "./layout/PageShell.js";
 import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 从 `plugin:<插件 id>:<服务 key>` 形态的服务 id 里取出插件 id。
@@ -332,27 +333,27 @@ export function InterfacesView({
       {/* 页头动作原先挂在 PageShell.actions，嵌入后收进视图顶部工具条；
           协议版本也放这一行——去掉页头后它需要一个固定的落点。 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => {
             setDiscover(true);
             setMsg(null);
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost"
+          size="md" variant="ghost"
         >
           从 Registry 发现
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => {
             setFormOpen((v) => !v);
             setMsg(null);
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost"
+          size="md" variant="ghost"
         >
           <PlusIcon width={13} height={13} />
           添加 MCP 服务
-        </button>
+        </Button>
         <span className="ml-auto text-[11px] text-muted">
           MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
         </span>
@@ -392,14 +393,14 @@ export function InterfacesView({
                   <div className="text-[13px] font-bold">{preset.name}</div>
                   <div className="mt-0.5 ui-caption">{preset.hint}</div>
                 </div>
-                <button
+                <Button
                   type="button"
                   aria-label={`接入预置 ${preset.name}`}
                   onClick={() => restorePreset(preset.id)}
-                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  size="sm" variant="primary"
                 >
                   接入
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -437,7 +438,7 @@ export function InterfacesView({
               <span className="ui-caption">常用预设</span>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 {MCP_PRESETS.map((p) => (
-                  <button
+                  <Button
                     key={p.id}
                     type="button"
                     aria-label={`套用预设 ${p.name}`}
@@ -451,11 +452,11 @@ export function InterfacesView({
                       setPresetHint(p.hint);
                       setMsg({ kind: "ok", text: `已填好「${p.name}」，确认后点保存` });
                     }}
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
+                    size="sm" variant="ghost"
                   >
                     {p.name}
                     {p.verified && <span className="ml-1 text-[10px] text-[var(--success)]">已实测</span>}
-                  </button>
+                  </Button>
                 ))}
                 {presetHint && <span className="text-[11px] text-muted">{presetHint}</span>}
               </div>
@@ -518,23 +519,23 @@ export function InterfacesView({
             </label>
           </div>
           <div className="mt-3 flex items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={addServer}
-              className="ui-btn ui-btn-md ui-btn-primary"
+              size="md" variant="primary"
             >
               保存服务
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => {
                 setFormOpen(false);
                 resetForm();
               }}
-              className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+              size="md" variant="ghost" className="text-muted"
             >
               取消
-            </button>
+            </Button>
             {transport === "stdio" && (
               <span className="text-[11px] text-[var(--warn)]">
                 {stdioReady
@@ -653,27 +654,27 @@ export function InterfacesView({
                       />
                       参与对话
                     </label>
-                    <button
+                    <Button
                       type="button"
                       aria-label={`连接 ${server.name}`}
                       onClick={() => void connect(server)}
                       disabled={state === "connecting"}
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                     >
                       {state === "connecting"
                         ? "连接中…"
                         : tools.length
                           ? "刷新工具"
                           : "连接"}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       aria-label={`删除 ${server.name}`}
                       onClick={() => removeServer(server)}
-                      className="ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]"
+                      size="sm" variant="ghost" className="text-[var(--danger)]"
                     >
                       <TrashIcon width={12} height={12} />
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -730,7 +731,7 @@ export function InterfacesView({
                                 />
                               </td>
                               <td className="text-right">
-                                <button
+                                <Button
                                   type="button"
                                   aria-label={`测试 ${tool.name}`}
                                   onClick={() => {
@@ -738,10 +739,10 @@ export function InterfacesView({
                                     setTestArgs("{}");
                                     setTestResult(null);
                                   }}
-                                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                                  size="sm" variant="ghost"
                                 >
                                   测试
-                                </button>
+                                </Button>
                               </td>
                             </tr>
                           );
@@ -761,14 +762,14 @@ export function InterfacesView({
                           className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-[var(--surface)] px-2 py-1.5 font-mono text-[11px] outline-hidden focus:border-ink"
                         />
                         <div className="mt-2 flex items-center gap-2">
-                          <button
+                          <Button
                             type="button"
                             onClick={() => void runTest(server, testFor.split("::")[1])}
                             disabled={testRunning === testFor}
-                            className="ui-btn ui-btn-sm ui-btn-primary"
+                            size="sm" variant="primary"
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
-                          </button>
+                          </Button>
                           <span className="text-[11px] text-muted">按每个工具的说明填写参数（JSON 对象）</span>
                         </div>
                         {testResult && (
@@ -804,20 +805,20 @@ export function InterfacesView({
           onCancel={() => setRemoveTarget(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setRemoveTarget(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={confirmRemoveServer}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

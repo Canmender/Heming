@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getMagpieCliBridge, stripAnsi, tailText, type MagpieCliEvent } from "../../lib/magpieCli.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 交互式命令面板（d.112）：备份/恢复这类要口令的命令在这里跑。
@@ -91,17 +92,17 @@ export function ConsolePanel({
         </div>
         <div className="flex items-center gap-1">
           {status === "running" && runId && (
-            <button
+            <Button
               type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost"
+              size="sm" variant="ghost"
               onClick={() => void bridge?.cliKill(runId)}
             >
               取消
-            </button>
+            </Button>
           )}
-          <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={onClose}>
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
       </div>
       {hint && <p className="mt-1 ui-caption">{hint}</p>}
@@ -125,14 +126,14 @@ export function ConsolePanel({
           }}
           disabled={status !== "running"}
         />
-        <button
+        <Button
           type="button"
-          className="ui-btn ui-btn-sm ui-btn-primary"
+          size="sm" variant="primary"
           disabled={status !== "running" || !runId}
           onClick={() => void send()}
         >
           发送
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { ensureMdExt } from "./model.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 新建笔记弹窗：文件名 + 可选模板。
@@ -36,17 +37,17 @@ export function NewNoteDialog({ dir, templates, onCancel, onCreate }: NewNoteDia
       initialFocusRef={inputRef}
       footer={
         <>
-          <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={onCancel}>
+          <Button type="button" size="md" variant="ghost" onClick={onCancel}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
             disabled={!trimmed}
             onClick={submit}
           >
             新建
-          </button>
+          </Button>
         </>
       }
     >

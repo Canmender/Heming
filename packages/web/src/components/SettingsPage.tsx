@@ -35,6 +35,7 @@ import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { NAV_GROUP_LABEL, navGroupOf } from "../lib/navGroups.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
@@ -43,9 +44,6 @@ import { NAV_GROUP_LABEL, navGroupOf } from "../lib/navGroups.js";
  * 449_000 留出安全窗（评审遗留修正）。
  */
 const MAX_AVATAR_BYTES = 449_000;
-
-const btnGhost =
-  "ui-btn ui-btn-sm ui-btn-ghost";
 
 /** 行内标记渲染：`**粗体**` 加粗、`` `代码` `` 等宽（无 markdown 依赖）。 */
 function InlineText({ text }: { text: string }) {
@@ -380,21 +378,21 @@ export function SettingsPage() {
                       两处共用同一个设置值，不做第二套开关。
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <button
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        size="sm" variant="ghost"
                         onClick={() => useUiStore.getState().setPage("memory")}
                       >
                         打开记忆页
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        size="sm" variant="ghost"
                         // 知识库页由并行的界面任务接入 Page 联合（d.114 已合入 `"vault"`）。
                         onClick={() => useUiStore.getState().setPage("vault")}
                       >
                         打开知识库
-                      </button>
+                      </Button>
                     </div>
                   </section>
                 </div>
@@ -510,13 +508,13 @@ function ProfileSection() {
           error={error}
         />
         <div className="flex items-center gap-3">
-          <button
+          <Button
             type="submit"
             disabled={saving}
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
           >
             {saving ? "保存中…" : "保存"}
-          </button>
+          </Button>
           {saved && (
             <span role="status" className="ui-caption">
               已保存
@@ -581,13 +579,13 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
           <div className="ui-body-sm font-medium">恢复默认外观</div>
           <div className="ui-caption">主题模式跟随系统、主题色墨黑、导航栏常显</div>
         </div>
-        <button
+        <Button
           type="button"
           onClick={() => setConfirmReset(true)}
-          className={btnGhost}
+          size="md" variant="ghost"
         >
           恢复默认外观
-        </button>
+        </Button>
       </div>
 
       {confirmReset && (
@@ -596,20 +594,20 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
           onCancel={() => setConfirmReset(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirmReset(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={resetAppearance}
-                className="ui-btn ui-btn-md ui-btn-primary"
+                size="md" variant="primary"
               >
                 恢复默认
-              </button>
+              </Button>
             </>
           }
         >
@@ -655,14 +653,14 @@ function NavModeSection() {
     <section aria-label="导航栏" className="max-w-full ui-card p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="ui-section-title">导航栏</div>
-        <button
+        <Button
           type="button"
           aria-label="恢复默认导航栏模式"
           onClick={() => setNavMode(DEFAULT_NAV_MODE)}
-          className={btnGhost}
+          size="md" variant="ghost"
         >
           恢复默认
-        </button>
+        </Button>
       </div>
       <div className="mt-1 ui-caption">
         自动隐藏时导航不占内容宽度：鼠标移到窗口左缘或按 Ctrl+B 呼出；移开 0.3 秒后自动收回，Esc 立即收回。
@@ -785,7 +783,7 @@ function AppearanceSection() {
             className="w-[92px] ui-input"
           />
         </label>
-        <button
+        <Button
           type="button"
           aria-label="恢复默认颜色"
           onClick={() => {
@@ -793,10 +791,10 @@ function AppearanceSection() {
             setAccentError(null);
             setApplied(true);
           }}
-          className={btnGhost}
+          size="md" variant="ghost"
         >
           恢复默认
-        </button>
+        </Button>
       </div>
       {accentError && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{accentError}</div>}
     </section>
@@ -954,13 +952,13 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
         })}
       </ul>
       {!showAllLogs && CHANGELOG.length > RECENT_LOG_LIMIT ? (
-        <button
+        <Button
           type="button"
-          className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+          size="sm" variant="ghost" className="mt-2"
           onClick={() => setShowAllLogs(true)}
         >
           显示更早的 {CHANGELOG.length - RECENT_LOG_LIMIT} 个版本
-        </button>
+        </Button>
       ) : null}
         </section>
       </div>

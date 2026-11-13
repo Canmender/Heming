@@ -3,6 +3,7 @@ import { getMagpieCliBridge, type CloudBackupFile } from "../../lib/magpieCli.js
 import { ArchiveIcon, AlertIcon } from "../icons.js";
 import { SectionCard } from "./SectionCard.js";
 import { ConsolePanel } from "./ConsolePanel.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 备份与恢复（d.112）：页面内列出备份、一键新建/恢复。
@@ -82,22 +83,22 @@ export function BackupPanel() {
       description="备份包含来源、Key 与账号登录，用口令加密；口令只在下面的面板里输入。"
       action={
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
             disabled={!bridge}
             onClick={() => void pickRestore()}
           >
             从文件恢复…
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-primary"
+            size="sm" variant="primary"
             disabled={!bridge || !dir}
             onClick={startBackup}
           >
             新建备份
-          </button>
+          </Button>
         </div>
       }
     >
@@ -126,14 +127,14 @@ export function BackupPanel() {
                   {formatSize(file.size)}
                 </span>
               </span>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm" variant="ghost"
                 disabled={!bridge}
                 onClick={() => setConfirmRestore(file.path)}
               >
                 恢复
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -148,20 +149,20 @@ export function BackupPanel() {
               <p className="mt-1 ui-caption break-all">{confirmRestore}</p>
               <p className="mt-1 ui-caption">恢复会覆盖当前的来源、账号与设置。系统会先保留一份自动备份。</p>
               <div className="mt-2 flex gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-danger"
+                  size="sm" variant="danger"
                   onClick={() => startRestore(confirmRestore)}
                 >
                   确认恢复
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   onClick={() => setConfirmRestore(null)}
                 >
                   取消
-                </button>
+                </Button>
               </div>
             </div>
           </div>

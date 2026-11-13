@@ -9,6 +9,7 @@ import {
 import { MAX_FILE_BYTES, MAX_FILES_PER_PATCH, MAX_PATCH_BYTES } from "../lib/fileEdit/limits.js";
 import { isFileEditTool } from "../lib/fileEdit/ruleTargets.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 设置区 · 文件编辑卡。
@@ -176,20 +177,20 @@ export function FileEditCard({
               <option value="write">可写</option>
               <option value="read">只读</option>
             </select>
-            <button
+            <Button
               type="button"
               onClick={pickDirectory}
-              className="ui-btn ui-btn-sm ui-btn-ghost"
+              size="sm" variant="ghost"
             >
               选择目录
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={addRoot}
-              className="ui-btn ui-btn-sm ui-btn-primary"
+              size="sm" variant="primary"
             >
               添加
-            </button>
+            </Button>
           </div>
           {error && (
             <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">

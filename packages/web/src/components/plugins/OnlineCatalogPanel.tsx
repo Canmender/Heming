@@ -1,4 +1,5 @@
 import type { PluginCatalogEntry } from "@heming/shared";
+import { Button } from "../ui/Button.js";
 
 /**
  * 云端插件目录面板（d.86）：只渲染 + 回调，不自己发请求。
@@ -21,7 +22,6 @@ export interface OnlineCatalogPanelProps {
 }
 
 const CHIP = "ui-chip";
-const BTN = "ui-btn ui-btn-sm ui-btn-ghost";
 
 /** 权限一行：主机数 + 风险上限（与插件卡口径一致）。 */
 function permissionLine(entry: PluginCatalogEntry): string {
@@ -76,12 +76,12 @@ export function OnlineCatalogPanel({
           <span className="ml-2 ui-caption">独立插件包：下载后仍走本机校验与安装预览</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button type="button" aria-label="刷新云端插件目录" onClick={onRefresh} className={BTN}>
+          <Button type="button" aria-label="刷新云端插件目录" onClick={onRefresh} size="sm" variant="ghost">
             刷新
-          </button>
-          <button type="button" aria-label="关闭云端插件目录" onClick={onClose} className={BTN}>
+          </Button>
+          <Button type="button" aria-label="关闭云端插件目录" onClick={onClose} size="sm" variant="ghost">
             关闭
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -92,9 +92,9 @@ export function OnlineCatalogPanel({
           <p role="alert" className="ui-body-sm text-[var(--danger)]">
             {error}
           </p>
-          <button type="button" onClick={onRefresh} className={`${BTN} mt-1`}>
+          <Button type="button" onClick={onRefresh} size="sm" variant="ghost" className="mt-1">
             重试
-          </button>
+          </Button>
         </div>
       )}
 
@@ -127,15 +127,15 @@ export function OnlineCatalogPanel({
                     {state.text}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
-                    <button
+                    <Button
                       type="button"
                       aria-label={`载入 ${entry.name}`}
                       onClick={() => onLoad(entry)}
                       disabled={busy}
-                      className="ui-btn ui-btn-sm ui-btn-primary"
+                      size="sm" variant="primary"
                     >
                       {busy ? "下载中…" : "载入清单"}
-                    </button>
+                    </Button>
                   </span>
                 </div>
                 <div className="mt-0.5 ui-caption">

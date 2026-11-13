@@ -16,6 +16,7 @@ import { TeamPlanPanel } from "./TeamPlanPanel.js";
 import { TeamTaskPanel } from "./TeamTaskPanel.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 团队工作台（d.92）：用户自建团队 —— 名字 / 目标 / 方案 / 任务 / 成员。
@@ -299,21 +300,21 @@ export function TeamWorkspace() {
               className="ui-input mt-1.5 w-full resize-y"
             />
             <div className="mt-1.5 flex gap-2">
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary"
+                size="sm" variant="primary"
                 disabled={busy}
                 onClick={() => void onCreateTeam()}
               >
                 创建
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm" variant="ghost"
                 onClick={() => setCreateOpen(false)}
               >
                 取消
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -366,13 +367,13 @@ export function TeamWorkspace() {
             title="还没有团队"
             desc="建一个团队，写下目标与方案，把任务派给成员；智能体也能通过工具帮你维护。"
             actions={
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-primary"
+                size="md" variant="primary"
                 onClick={() => setCreateOpen(true)}
               >
                 新建团队
-              </button>
+              </Button>
             }
           />
         ) : (
@@ -387,23 +388,23 @@ export function TeamWorkspace() {
                     {isOwner ? " · 你是队长" : ""}
                   </p>
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  size="sm" variant="ghost"
                   aria-label="刷新团队数据"
                   disabled={busy}
                   onClick={() => void refreshNow()}
                 >
                   刷新
-                </button>
+                </Button>
                 {isOwner && (
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost text-muted"
+                    size="sm" variant="ghost" className="text-muted"
                     onClick={() => setConfirmDeleteTeam(true)}
                   >
                     删除团队
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -434,9 +435,9 @@ export function TeamWorkspace() {
                       className="ui-input w-full resize-y"
                     />
                     <div className="mt-2 flex gap-2">
-                      <button
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-sm ui-btn-primary"
+                        size="sm" variant="primary"
                         disabled={busy}
                         onClick={() =>
                           void run(
@@ -446,14 +447,14 @@ export function TeamWorkspace() {
                         }
                       >
                         保存
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        size="sm" variant="ghost"
                         onClick={() => setGoalEditing(false)}
                       >
                         取消
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -504,13 +505,13 @@ export function TeamWorkspace() {
                       placeholder="按用户名加成员（对方需已注册）"
                       className="ui-input w-[240px]"
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                       disabled={busy || !memberName.trim()}
                     >
                       添加
-                    </button>
+                    </Button>
                   </form>
                 )}
               </div>
@@ -545,22 +546,22 @@ export function TeamWorkspace() {
           initialFocusRef={cancelDeleteTeamRef}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 ref={cancelDeleteTeamRef}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setConfirmDeleteTeam(false)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 disabled={busy}
                 onClick={() => void deleteTeamNow()}
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >
@@ -578,22 +579,22 @@ export function TeamWorkspace() {
           initialFocusRef={cancelRemoveMemberRef}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 ref={cancelRemoveMemberRef}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setPendingRemoveMember(null)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 disabled={busy}
                 onClick={() => void removeMemberNow()}
               >
                 移除
-              </button>
+              </Button>
             </>
           }
         >

@@ -23,6 +23,7 @@ import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { withPluginNav } from "../lib/pages/registry.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -371,23 +372,23 @@ export function NavRail({
           onCancel={() => setConfirmLogout(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirmLogout(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   setConfirmLogout(false);
                   useAuthStore.getState().logout();
                 }}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 退出登录
-              </button>
+              </Button>
             </>
           }
         >

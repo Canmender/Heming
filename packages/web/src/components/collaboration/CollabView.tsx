@@ -16,6 +16,7 @@ import { useUiStore } from "../../store/ui.js";
 import { Avatar } from "../Avatar.js";
 import { PlusIcon } from "../icons.js";
 import { CollabTurnCard } from "./CollabTurnCard.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 协作工作台（Multi-Agent Collaboration）。
@@ -383,13 +384,13 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
               {statusText}
             </span>
             {run?.status === "done" && run.turns.length > 0 ? (
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
+                size="sm" variant="ghost"
                 onClick={() => void copyRun()}
               >
                 {copyState === "ok" ? "已复制纪要" : "复制纪要"}
-              </button>
+              </Button>
             ) : null}
           </div>
 
@@ -406,20 +407,20 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                     未绑定模型的智能体不能参与（本机运行，不会借用别人的 Key）。
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-primary"
+                      size="sm" variant="primary"
                       onClick={() => onCreateAgent?.()}
                     >
                       新建智能体
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      size="sm" variant="ghost"
                       onClick={() => useUiStore.getState().setPage("model")}
                     >
                       去绑定模型
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -567,30 +568,30 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
               </fieldset>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-md ui-btn-primary"
+                  size="md" variant="primary"
                   disabled={!canStart}
                   onClick={() => void start()}
                 >
                   {running ? "协作进行中…" : "开始协作"}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-md ui-btn-danger"
+                  size="md" variant="danger"
                   disabled={!running}
                   onClick={abort}
                 >
                   中止
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-md ui-btn-ghost"
+                  size="md" variant="ghost"
                   disabled={!run || run.turns.length === 0 || copyState === "ok"}
                   onClick={() => void copyRun()}
                 >
                   {copyState === "ok" ? "已复制纪要" : "复制纪要"}
-                </button>
+                </Button>
                 <span className="ui-caption ml-auto">
                   {selectedAgents.length} 位已选 · 至少 2 位
                 </span>
@@ -634,15 +635,15 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 actions={
                   <div className="flex flex-wrap justify-center gap-2">
                     {TEMPLATES.map((template) => (
-                      <button
+                      <Button
                         key={template.key}
                         type="button"
                         disabled={running}
                         onClick={() => applyTemplate(template)}
-                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        size="sm" variant="ghost"
                       >
                         {template.title}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 }

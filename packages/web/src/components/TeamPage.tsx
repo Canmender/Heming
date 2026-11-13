@@ -36,6 +36,7 @@ import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { TeamBoardView } from "./TeamBoardPage.js";
 import { TeamWorkspace } from "./team/TeamWorkspace.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 团队页（去 IM 后的主入口）：
@@ -584,7 +585,7 @@ export function TeamPage() {
                   : "尚未同步"}
               </span>
             )}
-            <button
+            <Button
               type="button"
               // 从未共享过（也没同步过）时没有可清除的记录：不用一个点了没反应的按钮骗人
               disabled={shareCount === 0 && !share.lastSyncAt}
@@ -593,11 +594,11 @@ export function TeamPage() {
                   ? "还没有可清除的共享记录"
                   : "删除你已上传到团队动向的全部摘要（用量记录请在「用量」页单独清除）"
               }
-              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted disabled:opacity-40"
+              size="sm" variant="ghost" className="ml-auto text-muted disabled:opacity-40"
               onClick={() => setConfirmClear(true)}
             >
               清除共享记录
-            </button>
+            </Button>
           </div>
           {shareCount > 0 ? (
             <p className="mt-1 ui-micro">
@@ -678,13 +679,13 @@ export function TeamPage() {
               ) : rosterError ? (
                 <div className="p-2 text-[12px]">
                   <p role="alert" className="ui-alert ui-alert-danger text-left">名册加载失败：{rosterError}</p>
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
+                    size="sm" variant="ghost" className="mt-1"
                     onClick={() => void loadRoster()}
                   >
                     重试
-                  </button>
+                  </Button>
                 </div>
               ) : filteredMembers.length === 0 ? (
                 <p className="p-2 ui-caption">
@@ -756,13 +757,13 @@ export function TeamPage() {
                         : " · 用量未共享"}
                   </div>
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
+                  size="sm" variant="ghost" className="ml-auto text-muted"
                   onClick={() => setSelectedId(null)}
                 >
                   返回全部
-                </button>
+                </Button>
               </div>
               {/* 成员详情升级（d.109）：从「只是个筛选器」变成「他最近在做什么」——
                   近 3 条可点（点了在动向里高亮那条），没有就不编。 */}
@@ -842,23 +843,23 @@ export function TeamPage() {
             <>
               <div className="flex items-center gap-2 border-b border-line-soft px-6 py-2">
                 {FILTERS.map((f) => (
-                  <button
+                  <Button
                     key={f.key}
                     type="button"
                     aria-pressed={filter === f.key}
                     onClick={() => setFilter(f.key)}
-                    className={`ui-btn ui-btn-sm ${filter === f.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+                    size="sm" variant={filter === f.key ? "primary" : "ghost"} className={filter === f.key ? undefined : "text-muted"}
                   >
                     {f.label}
-                  </button>
+                  </Button>
                 ))}
-            <button
+            <Button
               type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
+              size="sm" variant="ghost" className="ml-auto text-muted"
               onClick={() => void loadFeed(true)}
             >
               刷新
-            </button>
+            </Button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
@@ -876,13 +877,13 @@ export function TeamPage() {
             ) : feedError ? (
               <div className="py-6 text-center text-[12px]">
                 <p role="alert" className="ui-alert ui-alert-danger text-left">动向加载失败：{feedError}</p>
-                <button
+                <Button
                   type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                  size="sm" variant="ghost" className="mt-2"
                   onClick={() => void loadFeed(true)}
                 >
                   重试
-                </button>
+                </Button>
               </div>
             ) : visibleActivities.length === 0 ? (
               <EmptyState
@@ -940,17 +941,17 @@ export function TeamPage() {
             )}
             {hasMore && visibleActivities.length > 0 && (
               <div className="mt-2 flex justify-center">
-                <button
+                <Button
                   type="button"
                   disabled={loadingMore}
                   onClick={() => {
                     setLoadingMore(true);
                     void loadFeed(false).finally(() => setLoadingMore(false));
                   }}
-                  className="ui-btn ui-btn-sm ui-btn-ghost text-muted"
+                  size="sm" variant="ghost" className="text-muted"
                 >
                   {loadingMore ? "加载中…" : "加载更早"}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -967,13 +968,13 @@ export function TeamPage() {
               ) : feedError ? (
                 <div className="py-10 text-center text-[12px]">
                   <p role="alert" className="ui-alert ui-alert-danger text-left">日程加载失败：{feedError}</p>
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                    size="sm" variant="ghost" className="mt-2"
                     onClick={() => void loadFeed(true)}
                   >
                     重试
-                  </button>
+                  </Button>
                 </div>
               ) : agendaActivities.length === 0 ? (
                 <div className="py-10 text-center text-[12px] leading-6 text-muted">
@@ -983,13 +984,13 @@ export function TeamPage() {
                       <p className="mt-1">
                         连接「信息中枢」后，团队成员共享的日程摘要会出现在这里（只含标题与到期时间）。
                       </p>
-                      <button
+                      <Button
                         type="button"
-                        className="ui-btn ui-btn-sm ui-btn-primary mt-3"
+                        size="sm" variant="primary" className="mt-3"
                         onClick={() => setPage("infohub")}
                       >
                         去连接信息中枢
-                      </button>
+                      </Button>
                       <p className="mt-2 ui-caption">信息中枢只在本机运行，不会自动拉起。</p>
                     </>
                   ) : !share.agenda ? (
@@ -1043,25 +1044,25 @@ export function TeamPage() {
                 </span>
                 <div className="ml-auto flex items-center gap-1" role="group" aria-label="用量区间">
                   {(["7d", "30d"] as TeamUsageRange[]).map((r) => (
-                    <button
+                    <Button
                       key={r}
                       type="button"
                       aria-pressed={usageRange === r}
                       onClick={() => setUsageRange(r)}
-                      className={`ui-btn ui-btn-sm ${usageRange === r ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+                      size="sm" variant={usageRange === r ? "primary" : "ghost"} className={usageRange === r ? undefined : "text-muted"}
                     >
                       {r === "7d" ? "近 7 天" : "近 30 天"}
-                    </button>
+                    </Button>
                   ))}
                   {share.usage && (
-                    <button
+                    <Button
                       type="button"
                       disabled={usageSyncing}
                       onClick={() => void syncUsage()}
-                      className="ui-btn ui-btn-sm ui-btn-ghost text-muted"
+                      size="sm" variant="ghost" className="text-muted"
                     >
                       {usageSyncing ? "同步中…" : "刷新"}
-                    </button>
+                    </Button>
                   )}
                   {share.usage && hasUploadedUsage && (
                     <button
@@ -1120,13 +1121,13 @@ export function TeamPage() {
               ) : usageError ? (
                 <div className="py-6 text-center text-[12px]">
                   <p role="alert" className="ui-alert ui-alert-danger text-left">用量加载失败：{usageError}</p>
-                  <button
+                  <Button
                     type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                    size="sm" variant="ghost" className="mt-2"
                     onClick={() => void syncUsage()}
                   >
                     重试
-                  </button>
+                  </Button>
                 </div>
               ) : usage ? (
                 <>
@@ -1216,21 +1217,21 @@ export function TeamPage() {
           onCancel={() => setConfirmClear(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setConfirmClear(false)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={clearing}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => void onClearMine()}
               >
                 {clearing ? "清除中…" : "清除"}
-              </button>
+              </Button>
             </>
           }
         >
@@ -1248,21 +1249,21 @@ export function TeamPage() {
           onCancel={() => setConfirmClearUsage(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setConfirmClearUsage(false)}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={clearingUsage}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
                 onClick={() => void onClearUsage()}
               >
                 {clearingUsage ? "清除中…" : "清除"}
-              </button>
+              </Button>
             </>
           }
         >

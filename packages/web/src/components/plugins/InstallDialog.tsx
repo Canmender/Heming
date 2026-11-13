@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Button } from "../ui/Button.js";
 import {
   MAX_PLUGINS,
   publicKeyFingerprint,
@@ -20,9 +21,6 @@ import {
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
 import {
-  BTN_GHOST,
-  BTN_GHOST_SM,
-  BTN_PRIMARY,
   CHIP,
   ERROR_TEXT,
   HINT,
@@ -269,10 +267,10 @@ export function InstallDialog({
               : "粘贴清单、拖入文件或从云端载入"}
             {preview && blocked ? " · 需先完成上方确认" : ""}
           </span>
-          <button type="button" onClick={onClose} className={BTN_GHOST}>
+          <Button type="button" onClick={onClose} size="md" variant="ghost">
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={submitInstall}
             disabled={!preview || blocked}
@@ -284,10 +282,10 @@ export function InstallDialog({
                 .filter(Boolean)
                 .join(" ") || undefined
             }
-            className={BTN_PRIMARY}
+            size="md" variant="primary"
           >
             {updating ? "确认更新" : "确认安装"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -316,18 +314,18 @@ export function InstallDialog({
                   onChange={onFile}
                   className="hidden"
                 />
-                <label htmlFor="plugin-file-input" className={`cursor-pointer ${BTN_GHOST_SM}`}>
+                <label htmlFor="plugin-file-input" className="cursor-pointer ui-btn ui-btn-sm ui-btn-ghost">
                   选择 plugin.json 文件
                 </label>
-                <button
+                <Button
                   type="button"
                   aria-label={catalogOpen ? "收起云端插件目录" : "从云端浏览插件"}
                   aria-expanded={catalogOpen}
                   onClick={toggleCatalog}
-                  className={BTN_GHOST_SM}
+                  size="sm" variant="ghost"
                 >
                   {catalogOpen ? "收起云端目录" : "从云端浏览"}
-                </button>
+                </Button>
               </div>
             </div>
 

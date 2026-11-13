@@ -124,6 +124,7 @@ import { ErrorState } from "./ui/ErrorState.js";
 import { ComposerHints } from "./ux/ComposerHints.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 空消息列表的**稳定引用**。
@@ -3123,13 +3124,13 @@ export function ChatPage({
             但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
         {visibleMessages.length > windowCount && (
           <div className="mb-3 flex justify-center">
-            <button
+            <Button
               type="button"
               onClick={loadEarlierMessages}
-              className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+              size="md" variant="ghost" className="text-muted"
             >
               加载更早的消息（还有 {visibleMessages.length - windowCount} 条）
-            </button>
+            </Button>
           </div>
         )}
         {visibleMessages.length === 0 && streamEntries.length === 0 ? (

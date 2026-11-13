@@ -24,6 +24,7 @@ import {
   type AssistantTab,
   type StoredAssistantTab,
 } from "./assistant/tabs.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 智能体页（d.126 阶段 B：三个一级 Tab）。
@@ -385,20 +386,20 @@ export function AssistantPage() {
             onCancel={() => setDeleteTarget(null)}
             footer={
               <>
-                <button
+                <Button
                   type="button"
                   onClick={() => setDeleteTarget(null)}
-                  className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                  size="md" variant="ghost" className="ui-caption"
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => void confirmDeleteConversation()}
-                  className="ui-btn ui-btn-sm ui-btn-danger"
+                  size="sm" variant="danger"
                 >
                   删除
-                </button>
+                </Button>
               </>
             }
           >

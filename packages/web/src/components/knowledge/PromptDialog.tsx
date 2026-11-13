@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 知识库里的单行输入弹窗（新建笔记 / 新建文件夹 / 重命名）。
@@ -48,17 +49,17 @@ export function PromptDialog({
       initialFocusRef={inputRef}
       footer={
         <>
-          <button type="button" onClick={onCancel} className="ui-btn ui-btn-md ui-btn-ghost">
+          <Button type="button" onClick={onCancel} size="md" variant="ghost">
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={submit}
             disabled={!trimmed}
-            className="ui-btn ui-btn-md ui-btn-primary"
+            size="md" variant="primary"
           >
             {confirmText}
-          </button>
+          </Button>
         </>
       }
     >

@@ -3,6 +3,7 @@ import type { Agent } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { PlusIcon, SearchIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 对话 Tab 主区 · 没有选中会话时的智能体选择页（d.67 起，d.126 保留）。
@@ -63,21 +64,21 @@ export function AgentPicker({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => onCreate("templates")}
-              className="ui-btn ui-btn-md ui-btn-ghost"
+              size="md" variant="ghost"
             >
               从模板创建
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => onCreate("name")}
-              className="ui-btn ui-btn-md ui-btn-primary"
+              size="md" variant="primary"
             >
               <PlusIcon width={14} height={14} />
               新建智能体
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -105,20 +106,20 @@ export function AgentPicker({
             desc="从模板开始最快：选个预设、改个名字就能用。"
             actions={
               <>
-                <button
+                <Button
                   type="button"
                   onClick={() => onCreate("name")}
-                  className="ui-btn ui-btn-md ui-btn-primary"
+                  size="md" variant="primary"
                 >
                   新建智能体
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => onCreate("templates")}
-                  className="ui-btn ui-btn-md ui-btn-ghost"
+                  size="md" variant="ghost"
                 >
                   从模板创建
-                </button>
+                </Button>
               </>
             }
           />
@@ -128,13 +129,13 @@ export function AgentPicker({
             title="没有匹配的智能体"
             desc="换个名字试试，或清空关键词。"
             actions={
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost"
+                size="md" variant="ghost"
                 onClick={() => setQuery("")}
               >
                 清空搜索
-              </button>
+              </Button>
             }
           />
         ) : (
@@ -211,7 +212,7 @@ export function AgentPicker({
                             >
                               编辑
                             </button>
-                            <button
+                            <Button
                               type="button"
                               aria-label={
                                 bound
@@ -222,10 +223,10 @@ export function AgentPicker({
                               // d.138：没绑模型时「开始对话」是死路——进去也发不出消息。
                               // 这个位置改成唯一有意义的下一步：去绑定模型（打开同一个编辑器）。
                               onClick={() => (bound ? onStartChat(agent.id) : onEdit(agent))}
-                              className={`ui-btn ui-btn-sm ${bound ? "ui-btn-ghost" : "ui-btn-primary"}`}
+                              size="sm" variant={bound ? "ghost" : "primary"}
                             >
                               {busy ? "打开中…" : bound ? "开始对话" : "绑定模型"}
-                            </button>
+                            </Button>
                           </span>
                         </div>
                       </div>

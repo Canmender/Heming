@@ -9,10 +9,6 @@ export const PLUGIN_CARD = "ui-card";
 export const HINT = "ui-caption";
 export const ERROR_TEXT = "ui-body-sm text-[var(--danger)]";
 export const OK_TEXT = "ui-body-sm text-muted";
-export const BTN_GHOST = "ui-btn ui-btn-md ui-btn-ghost";
-export const BTN_GHOST_SM = "ui-btn ui-btn-sm ui-btn-ghost";
-export const BTN_DANGER_SM = "ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]";
-export const BTN_PRIMARY = "ui-btn ui-btn-md ui-btn-primary";
 export const CHIP = "ui-chip";
 
 /** ISO 时间 → 本地「YYYY-MM-DD HH:mm」；缺失或非法返回「—」。 */

@@ -2,6 +2,38 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.73.11（2026-11-13）— 手拼 ui-btn 字符串清零：362 处按钮改用 ui/Button
+
+审计 D1「基元建了不用」的最大一块。此前 `<Button>` 只有 3 个文件在用，而 `className="ui-btn ui-btn-md ui-btn-primary"`
+这类手拼字符串散在 51 个文件、265 处；`Button.tsx` 的文件头注释就写着「有人忘写 ui-btn-md，按钮变成 0 高度」。
+
+### 改法
+
+- `<button className="ui-btn ui-btn-{sm|md}[ ui-btn-{primary|ghost|danger}][ 其他类名]">` → `<Button size variant className="其他类名">`：
+  239 处 / 49 文件。多余类名（`ml-auto`、`shrink-0`、`text-[var(--danger)]` 等）原样留在 `className`。
+- `className={btnGhost | btnGhostSm | BTN_GHOST | BTN_PRIMARY | BTN_DANGER_SM | …}` 常量引用 → `<Button>`：100 处 / 15 文件；
+  常量声明在引用清零后一并删除（`plugins/shared.tsx` 的 `BTN_*` 导出、`SkillsPage` 的 `btnDangerSm`、`RouteGroupsCard` 的 `btnGhost` 等）。
+- 条件样式 `` className={`ui-btn ui-btn-sm ${x ? "ui-btn-primary" : "ui-btn-ghost"}`} `` → `size="sm" variant={x ? "primary" : "ghost"}`：14 处。
+- 剩余 9 处多行写法的 `<button ... className="ui-btn …">` 单独处理（插件区在重做 import 时被 git 恢复过，重新转换）。
+- 手工 4 处：`LoginPage` 登录主按钮、`ux/OnboardingCard`、`UpdateCard`、`assistant/AgentFormPanel`。
+
+### 有意保留
+
+- 3 处 `<label className="… ui-btn ui-btn-sm ui-btn-ghost">`（`SettingsPage`、`plugins/InstallDialog`、`assistant/AgentFormPanel`）：
+  label 通过 `htmlFor` 转发点击给隐藏的 file input，换 `<Button>` 会丢掉 label 语义，保持原样。
+- `ui/Button.tsx` 自身内部的类名拼接与文件头注释。
+
+### 现状
+
+- `<Button` 出现 389 次，`ui-btn` 字面量只剩上述 3 个 label。
+- 转换期间踩到并修掉的两类问题：①codemod 第一版把未转换按钮的 `</button>` 也换了 → 241 个 TS17002，`git checkout -- .` 回滚后加 `done` 条件重跑；
+  ②`plugins/` 目录因 `shared.tsx` 导出清理导致 import 破损，整体恢复后改用「只在该目录内转换 + 按名摘 import」的脚本重做。
+
+### 门禁
+
+- `pnpm --filter @heming/web typecheck`：0 错；`pnpm --filter @heming/web test`：298 文件 / 4372 例全过；
+- `pnpm -r typecheck` 6 个包全过；`pnpm -r build` 过。
+- 60 个文件、+1143/−1104 行；`git diff --numstat` 与 `--ignore-cr-at-eol` 输出一致（无纯 EOL 噪音）。
 ## d.140.3.72.11（2026-11-13）— 写死色值清零 + 暗色桥接层删 21 条死规则
 
 审计 D2「暗色不靠 token、靠补丁」的最后一段。

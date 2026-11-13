@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "../ui/Button.js";
 import type {
   InstalledPlugin,
   PluginContributionKind,
@@ -13,10 +14,6 @@ import { PluginPermissionList } from "./PluginPermissionList.js";
 import { WidgetSettingsCard } from "../settings/WidgetSettingsCard.js";
 import { useWidgetsStore, widgetsAvailable } from "../../lib/widgets/store.js";
 import {
-  BTN_DANGER_SM,
-  BTN_GHOST,
-  BTN_GHOST_SM,
-  BTN_PRIMARY,
   CHIP,
   HINT,
   Switch,
@@ -209,14 +206,14 @@ function PackageDetailBody({
                   <span className={`${CHIP} ui-numeric`}>1</span>
                   <span className="ml-auto ui-caption">{page.title}</span>
                   {onOpenPage ? (
-                    <button
+                    <Button
                       type="button"
                       aria-label="打开插件页面"
                       onClick={onOpenPage}
-                      className={BTN_GHOST_SM}
+                      size="sm" variant="ghost"
                     >
                       打开页面
-                    </button>
+                    </Button>
                   ) : (
                     <span className="ui-caption">{plugin.enabled ? "暂不可用" : "主开关已关闭"}</span>
                   )}
@@ -352,9 +349,9 @@ function PackageDetailBody({
                                 }
                               />
                             ) : (
-                              <button type="button" onClick={onGoInterfaces} className={BTN_GHOST_SM}>
+                              <Button type="button" onClick={onGoInterfaces} size="sm" variant="ghost">
                                 在 MCP Tab 管理
-                              </button>
+                              </Button>
                             )}
                           </li>
                         );
@@ -384,9 +381,9 @@ function PackageDetailBody({
               每次调用仍按 HITL 确认。{pluginEnabled ? "" : "插件已停用：工具开关暂不可操作。"}
             </p>
             {toolPacks.length > 0 && (
-              <button type="button" onClick={onGoInterfaces} className={`mt-1 ${BTN_GHOST_SM}`}>
+              <Button type="button" size="sm" variant="ghost" className="mt-1" onClick={onGoInterfaces}>
                 在 MCP Tab 管理
-              </button>
+              </Button>
             )}
           </section>
 
@@ -415,25 +412,25 @@ function PackageDetailBody({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5">
-          <button type="button" onClick={onGoSkills} className={BTN_GHOST_SM}>
+          <Button type="button" onClick={onGoSkills} size="sm" variant="ghost">
             查看技能
-          </button>
+          </Button>
           {page && onOpenPage ? (
-            <button type="button" onClick={onOpenPage} className={BTN_GHOST_SM}>
+            <Button type="button" onClick={onOpenPage} size="sm" variant="ghost">
               打开页面
-            </button>
+            </Button>
           ) : null}
           {servers.length > 0 && (
-            <button type="button" onClick={onGoInterfaces} className={BTN_GHOST_SM}>
+            <Button type="button" onClick={onGoInterfaces} size="sm" variant="ghost">
               查看 MCP 服务
-            </button>
+            </Button>
           )}
-          <button type="button" onClick={onRemove} className={BTN_DANGER_SM}>
+          <Button type="button" onClick={onRemove} size="sm" variant="ghost" className="text-[var(--danger)]">
             卸载插件
-          </button>
-          <button type="button" onClick={onClose} className={BTN_GHOST}>
+          </Button>
+          <Button type="button" onClick={onClose} size="md" variant="ghost">
             关闭
-          </button>
+          </Button>
         </div>
 
       {pending && (
@@ -442,23 +439,23 @@ function PackageDetailBody({
           onCancel={() => setPending(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setPending(null)}
-                className={BTN_GHOST}
+                size="md" variant="ghost"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   mcp.setToolEnabled(pending.serverId, pending.tool, pending.next);
                   setPending(null);
                 }}
-                className={BTN_GHOST_SM}
+                size="sm" variant="ghost"
               >
                 {pending.next ? "启用" : "停用"}
-              </button>
+              </Button>
             </>
           }
         >

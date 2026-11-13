@@ -19,6 +19,7 @@ import { useSessionTab } from "../lib/sessionState.js";
 import { SkillHubPanel } from "./skills/SkillHubPanel.js";
 import { Dialog } from "./ui/Dialog.js";
 import { Switch } from "./ui/Switch.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -88,10 +89,6 @@ const cardCls = "ui-card p-4";
 const cardInnerCls = "rounded-lg border border-line p-3";
 const chipCls = "ui-chip";
 const badgeCls = "ui-chip";
-const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
-const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
-const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]";
-const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const inputSmCls = "ui-input";
 const hintCls = "ui-caption";
 const errorCls = "ui-body-sm text-[var(--danger)]";
@@ -228,12 +225,12 @@ function SkillCreateDialog({
       initialFocusRef={nameRef}
       footer={
         <>
-          <button type="button" onClick={onClose} className={btnGhostSm}>
+          <Button type="button" onClick={onClose} size="sm" variant="ghost">
             取消
-          </button>
-          <button type="submit" form="skill-create-form" className={btnPrimarySm}>
+          </Button>
+          <Button type="submit" form="skill-create-form" size="sm" variant="primary">
             创建技能
-          </button>
+          </Button>
         </>
       }
     >
@@ -242,16 +239,16 @@ function SkillCreateDialog({
           <div className={hintCls}>从模板开始（可选）</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="技能模板">
             {SKILL_TEMPLATES.map((template) => (
-              <button
+              <Button
                 key={template.key}
                 type="button"
                 aria-label={`使用模板 ${template.label}`}
                 aria-pressed={applied === template.key}
                 onClick={() => applyTemplate(template)}
-                className={btnGhostSm}
+                size="sm" variant="ghost"
               >
                 {template.label}
-              </button>
+              </Button>
             ))}
           </div>
           <p className={`mt-1.5 ${hintCls}`}>
@@ -465,9 +462,9 @@ function SkillDetailDrawer({
               ) : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className={btnGhostSm}>
+          <Button type="button" onClick={onClose} size="sm" variant="ghost">
             关闭
-          </button>
+          </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="text-[12px] font-bold text-muted">描述</div>
@@ -491,18 +488,20 @@ function SkillDetailDrawer({
           </pre>
         </div>
         <div className="flex items-center gap-2 border-t border-line-soft px-4 py-3">
-          <button type="button" onClick={onClose} className={btnPrimarySm}>
+          <Button type="button" onClick={onClose} size="sm" variant="primary">
             完成
-          </button>
+          </Button>
           {skill.source !== "builtin" && (
-            <button
+            <Button
               type="button"
               aria-label={`详情内删除 ${skill.name}`}
               onClick={onDelete}
-              className={`ml-auto ${btnDangerSm}`}
+              size="sm"
+              variant="ghost"
+              className="ml-auto text-[var(--danger)]"
             >
               删除
-            </button>
+            </Button>
           )}
         </div>
       </aside>
@@ -783,29 +782,29 @@ export function SkillsView({
                 {!keyword && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {group.key === "custom" && (
-                      <button
+                      <Button
                         type="button"
                         onClick={() => {
                           setMsg(null);
                           setCreateOpen(true);
                         }}
-                        className={btnPrimarySm}
+                        size="sm" variant="primary"
                       >
                         新建技能
-                      </button>
+                      </Button>
                     )}
                     {group.key === "installed" && (
-                      <button
+                      <Button
                         type="button"
                         onClick={() => {
                           setTab("pool");
                           setImportOpen(true);
                           setMsg(null);
                         }}
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                       >
                         导入 SKILL.md
-                      </button>
+                      </Button>
                     )}
                   </div>
                 )}
@@ -855,33 +854,35 @@ export function SkillsView({
                     </div>
 
                     <div className="mt-3 flex items-center gap-1.5 border-t border-line-soft pt-2 opacity-70 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
-                      <button
+                      <Button
                         type="button"
                         aria-label={`详情 ${skill.name}`}
                         onClick={() => setDetailId(skill.id)}
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                       >
                         详情
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         aria-label={`移除 ${skill.name}`}
                         onClick={() => unassignSkill(skill)}
-                        className={btnGhostSm}
+                        size="sm" variant="ghost"
                       >
                         移除
-                      </button>
+                      </Button>
                       {skill.source === "builtin" ? (
                         <span className={`ml-auto ${hintCls}`}>内置不可删</span>
                       ) : (
-                        <button
+                        <Button
                           type="button"
                           aria-label={`删除 ${skill.name}`}
                           onClick={() => removeSkill(skill)}
-                          className={`ml-auto ${btnDangerSm}`}
+                          size="sm"
+                          variant="ghost"
+                          className="ml-auto text-[var(--danger)]"
                         >
                           删除
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -908,14 +909,14 @@ export function SkillsView({
         />
       </label>
       <div className="mt-2 flex items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={onImport}
           disabled={!importText.trim()}
-          className={btnPrimarySm}
+          size="sm" variant="primary"
         >
           确认导入
-        </button>
+        </Button>
         <span className={hintCls}>支持 SKILL.md、单技能 JSON、整池 JSON</span>
       </div>
     </div>
@@ -930,26 +931,26 @@ export function SkillsView({
             desc="新建一个技能，或粘贴 SKILL.md 导入。技能要「启用 + 分配给智能体」才会用于对话。"
             actions={
               <>
-                <button
+                <Button
                   type="button"
                   onClick={() => {
                     setMsg(null);
                     setCreateOpen(true);
                   }}
-                  className={btnPrimarySm}
+                  size="sm" variant="primary"
                 >
                   新建技能
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => {
                     setImportOpen(true);
                     setMsg(null);
                   }}
-                  className={btnGhost}
+                  size="md" variant="ghost"
                 >
                   导入 SKILL.md
-                </button>
+                </Button>
               </>
             }
           />
@@ -959,29 +960,29 @@ export function SkillsView({
         <>
           <section className={`${cardCls} mt-3`}>
             <div className="flex flex-wrap items-center gap-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   setMsg(null);
                   setCreateOpen(true);
                 }}
-                className={btnPrimarySm}
+                size="sm" variant="primary"
               >
                 新建技能
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   setImportOpen((open) => !open);
                   setMsg(null);
                 }}
-                className={btnGhost}
+                size="md" variant="ghost"
               >
                 导入 SKILL.md
-              </button>
-              <button type="button" onClick={onExportAll} className={btnGhost}>
+              </Button>
+              <Button type="button" onClick={onExportAll} size="md" variant="ghost">
                 导出全部
-              </button>
+              </Button>
               <span className={`ml-auto ${hintCls}`}>
                 共 {list.length} 个 · 已启用 {enabledCount} 个
               </span>
@@ -1055,33 +1056,33 @@ export function SkillsView({
                         </td>
                         <td className="text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <Button
                               type="button"
                               aria-label={`池中详情 ${skill.name}`}
                               onClick={() => setDetailId(skill.id)}
-                              className={btnGhostSm}
+                              size="sm" variant="ghost"
                             >
                               详情
-                            </button>
+                            </Button>
                             {skill.source !== "builtin" && skill.source !== "distilled" && (
-                              <button
+                              <Button
                                 type="button"
                                 aria-label={`沉淀 ${skill.name}`}
                                 onClick={() => distillSkill(skill)}
-                                className={btnGhostSm}
+                                size="sm" variant="ghost"
                               >
                                 转为沉淀
-                              </button>
+                              </Button>
                             )}
                             {skill.source !== "builtin" && (
-                              <button
+                              <Button
                                 type="button"
                                 aria-label={`池中删除 ${skill.name}`}
                                 onClick={() => removeSkill(skill)}
-                                className={btnDangerSm}
+                                size="sm" variant="ghost" className="text-[var(--danger)]"
                               >
                                 删除
-                              </button>
+                              </Button>
                             )}
                           </div>
                         </td>
@@ -1133,39 +1134,39 @@ export function SkillsView({
           )}
           </div>
         <div role="tablist" aria-label="技能视图" className="flex items-center gap-1">
-          <button
+          <Button
             type="button"
             role="tab"
             id="skill-groups-tab"
             aria-controls="skill-groups-panel"
             aria-selected={tab === "groups"}
             onClick={() => setTab("groups")}
-            className={`ui-btn ui-btn-sm ${tab === "groups" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+            size="sm" variant={tab === "groups" ? "primary" : "ghost"} className={tab === "groups" ? undefined : "text-muted"}
           >
             按智能体
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             role="tab"
             id="skill-pool-tab"
             aria-controls="skill-pool-panel"
             aria-selected={tab === "pool"}
             onClick={() => setTab("pool")}
-            className={`ui-btn ui-btn-sm ${tab === "pool" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+            size="sm" variant={tab === "pool" ? "primary" : "ghost"} className={tab === "pool" ? undefined : "text-muted"}
           >
             技能池
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             role="tab"
             id="skill-hub-tab"
             aria-controls="skill-hub-panel"
             aria-selected={tab === "hub"}
             onClick={() => setTab("hub")}
-            className={`ui-btn ui-btn-sm ${tab === "hub" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+            size="sm" variant={tab === "hub" ? "primary" : "ghost"} className={tab === "hub" ? undefined : "text-muted"}
           >
             社区
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -1305,20 +1306,20 @@ export function SkillsView({
           onCancel={() => setRemoveTarget(null)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setRemoveTarget(null)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={confirmRemoveSkill}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 删除
-              </button>
+              </Button>
             </>
           }
         >

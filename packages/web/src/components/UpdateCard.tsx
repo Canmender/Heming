@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { UpdateMotion, installLeadMs } from "./UpdateMotion.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 自动更新卡（桌面安装版专属）。
@@ -170,38 +171,40 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
         </div>
       )}
 
-      <button
+      <Button
         type="button"
         aria-label="检查更新"
         disabled={!canAct || state?.status === "checking"}
         onClick={() => void onAction()}
-        className="mt-2.5 ui-btn ui-btn-sm ui-btn-ghost"
+        size="sm"
+        variant="ghost"
+        className="mt-2.5"
       >
         {installing ? "正在重启并安装…" : buttonLabel(state, busy)}
-      </button>
+      </Button>
       {confirmInstall && (
         <ConfirmDialog
           title="重启并安装更新"
           onCancel={() => setConfirmInstall(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirmInstall(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                size="md" variant="ghost" className="ui-caption"
               >
                 稍后
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   setConfirmInstall(false);
                   setInstalling(true);
                 }}
-                className="ui-btn ui-btn-sm ui-btn-primary"
+                size="sm" variant="primary"
               >
                 重启并安装
-              </button>
+              </Button>
             </>
           }
         >

@@ -20,6 +20,7 @@ import {
   dismissPetMigrationHint,
   shouldShowPetMigrationHint,
 } from "../../lib/widgets/legacy.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 桌面小组件的「窗口设置」卡（d.98 · 规格 §4.2；d.136 起可嵌入插件详情）。
@@ -200,13 +201,13 @@ export function WidgetSettingsCard({
           <p className="mt-1 ui-caption">
             桌宠不再随本体安装，改成可安装的插件（`heming.pet`）。装好后设置会出现在这里。
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => useUiStore.getState().setPage("plugins")}
-            className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+            size="sm" variant="primary" className="mt-2"
           >
             去插件区安装
-          </button>
+          </Button>
         </div>
       )}
 
@@ -217,13 +218,13 @@ export function WidgetSettingsCard({
           <p className="ui-caption">
             还没有安装桌面小组件。桌宠已改为插件，装好后这里会出现它的设置。
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => useUiStore.getState().setPage("plugins")}
-            className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+            size="sm" variant="ghost" className="mt-2"
           >
             去插件区
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="mt-3 space-y-4">
@@ -282,24 +283,24 @@ function WidgetBlock({
           页面型插件没有浮窗，不渲染窗口动作（d.124）。 */}
       {record.widget ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
             disabled={disabled}
             onClick={() => void onAction(record.id, "toggle")}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            size="sm" variant="ghost"
           >
             {state?.visible ? "隐藏" : "显示"}
-          </button>
+          </Button>
           {HOST_ACTIONS.map((item) => (
-            <button
+            <Button
               key={item.action}
               type="button"
               disabled={disabled}
               onClick={() => void onAction(record.id, item.action)}
-              className="ui-btn ui-btn-sm ui-btn-ghost"
+              size="sm" variant="ghost"
             >
               {item.label}
-            </button>
+            </Button>
           ))}
         </div>
       ) : (

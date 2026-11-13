@@ -14,6 +14,7 @@ import {
   type UsageRequests,
   type UsageSummary,
 } from "../lib/magpieUsage.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 用量（d.110）：模型服务自己记的账，做成和鸣自己的图。
@@ -131,14 +132,14 @@ export function ModelUsageView({
             ))}
           </div>
           {onExportCsv && (
-            <button
+            <Button
               type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost"
+              size="sm" variant="ghost"
               onClick={() => onExportCsv(period)}
             >
               <DownloadIcon width={14} height={14} />
               导出 CSV
-            </button>
+            </Button>
           )}
         </div>
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { Wordmark } from "./Wordmark.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 仅登录界面：公开注册在服务端默认 403，此页不再提供注册切换。
@@ -117,13 +118,13 @@ export function LoginPage() {
                 {error}
               </div>
             )}
-            <button
+            <Button
               type="submit"
               disabled={status === "pending"}
-              className={`ui-btn ui-btn-md ui-btn-primary mt-1 w-full ${FOCUS_RING}`}
+              className={`mt-1 w-full ${FOCUS_RING}`}
             >
               {status === "pending" ? "请稍候…" : "登录"}
-            </button>
+            </Button>
             {/* 登录页没有注册入口（服务端默认关闭公开注册）：说清去哪儿要账号，别让新用户干瞪眼 */}
             <p className="ui-caption text-center">账号由团队管理员开通。</p>
           </div>

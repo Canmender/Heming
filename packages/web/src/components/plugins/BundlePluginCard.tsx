@@ -3,7 +3,8 @@ import { UNIT_SOURCE_LABELS, type UnitStatus } from "@heming/shared";
 import type { WidgetRecord } from "../../types/widgets.js";
 import { setWidgetEnabled, uninstallWidget } from "../../lib/widgets/store.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
-import { BTN_DANGER_SM, BTN_GHOST_SM, CHIP, HINT, Switch } from "./shared.js";
+import { CHIP, HINT, Switch } from "./shared.js";
+import { Button } from "../ui/Button.js";
 
 /**
  * 界面插件（bundle 来源）的卡片（d.141）。
@@ -118,24 +119,24 @@ export function BundlePluginCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
         {onOpenPage && (
-          <button
+          <Button
             type="button"
             aria-label={`打开插件页面 ${record.name}`}
             onClick={onOpenPage}
-            className={BTN_GHOST_SM}
+            size="sm" variant="ghost"
           >
             打开页面
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
           aria-label={`卸载插件 ${record.name}`}
           disabled={busy}
           onClick={() => setConfirming(true)}
-          className={BTN_DANGER_SM}
+          size="sm" variant="ghost" className="text-[var(--danger)]"
         >
           卸载
-        </button>
+        </Button>
       </div>
 
       {confirming && (
@@ -144,21 +145,21 @@ export function BundlePluginCard({
           onCancel={() => setConfirming(false)}
           footer={
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => setConfirming(false)}
-                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
+                size="md" variant="ghost" className="text-muted"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => void remove()}
                 disabled={busy}
-                className="ui-btn ui-btn-md ui-btn-danger"
+                size="md" variant="danger"
               >
                 确认卸载
-              </button>
+              </Button>
             </>
           }
         >

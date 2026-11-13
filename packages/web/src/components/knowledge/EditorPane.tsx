@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { EditorMode } from "../../lib/vault/types.js";
 import { loadCodeMirrorEditor } from "./editorCodeMirror.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 知识库编辑器面板：CodeMirror 6 源码编辑 + 分栏预览 + 阅读态。
@@ -214,15 +215,15 @@ export function EditorPane({
           {saving ? "保存中…" : dirty ? "有未保存的修改" : "已保存"}
         </span>
         <span className="text-[10px]">Ctrl+S 保存{" · "}Ctrl+F 搜索</span>
-        <button
+        <Button
           type="button"
           onClick={() => onSaveRef.current?.()}
           disabled={saving || !dirty}
           aria-label="保存当前笔记"
-          className="ui-btn ui-btn-sm ui-btn-ghost ml-auto"
+          size="sm" variant="ghost" className="ml-auto"
         >
           {saving ? "保存中" : "保存"}
-        </button>
+        </Button>
       </div>
     </div>
   );

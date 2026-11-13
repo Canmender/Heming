@@ -27,9 +27,10 @@ import {
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
-import { BTN_GHOST, BTN_GHOST_SM, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "../plugins/shared.js";
+import { CHIP, ERROR_TEXT, HINT } from "../plugins/shared.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { useUiStore } from "../../store/ui.js";
+import { Button } from "../../components/ui/Button.js";
 
 /**
  * 技能社区（虾评）面板（d.109）。
@@ -237,14 +238,14 @@ function KeyDialog({
           />
         </label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-primary"
+            size="sm" variant="primary"
             disabled={busy || !draft.trim()}
             onClick={() => void save()}
           >
             保存 Key
-          </button>
+          </Button>
           {sourceHomepage && (
             <a
               className="ui-link"
@@ -273,14 +274,14 @@ function KeyDialog({
               placeholder="昵称（可留空让上游生成）"
               className="ui-input min-w-[180px] flex-1"
             />
-            <button
+            <Button
               type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost"
+              size="sm" variant="ghost"
               disabled={busy}
               onClick={() => void register()}
             >
               用这个名字创建账号（将在{source.name}创建账号）
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -293,13 +294,13 @@ function KeyDialog({
 
         <div className="mt-3 flex items-center gap-2">
           {hasKey && (
-            <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]" onClick={clear}>
+            <Button type="button" size="sm" variant="ghost" className="text-[var(--danger)]" onClick={clear}>
               清除 Key
-            </button>
+            </Button>
           )}
-          <button type="button" className={`ml-auto ${BTN_GHOST_SM}`} onClick={onClose}>
+          <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
         {savedEncrypted === false && (
           <p className={`mt-1 ${HINT}`}>提示：本机没有系统安全存储，Key 以明文保存；可在桌面端重新保存以获得加密。</p>
@@ -464,19 +465,19 @@ function HubDetailDialog({
 
         <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
           {skill.requiresApiKey && <span className={`mr-auto ${HINT}`}>该技能需要自备社区 Key</span>}
-          <button type="button" className={BTN_GHOST} onClick={onClose}>
+          <Button type="button" size="md" variant="ghost" onClick={onClose}>
             关闭
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className={BTN_PRIMARY}
+            size="md" variant="primary"
             onClick={() => {
               if (detail) onInstall(detail);
             }}
             disabled={state.loading || Boolean(state.error)}
           >
             安装
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -560,12 +561,12 @@ function InstallPreviewDialog({
           以上内容来自第三方社区；安装后写入技能池并标记为「已装」，默认不分配给任何智能体。
         </p>
         <div className="mt-3 flex items-center justify-end gap-2">
-          <button type="button" className={BTN_GHOST} onClick={onCancel}>
+          <Button type="button" size="md" variant="ghost" onClick={onCancel}>
             取消
-          </button>
-          <button type="button" className={BTN_PRIMARY} onClick={onConfirm}>
+          </Button>
+          <Button type="button" size="md" variant="primary" onClick={onConfirm}>
             确认安装
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -662,28 +663,28 @@ function BulkUpdateDialog({
           )}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
-          <button type="button" className={BTN_GHOST} onClick={onClose} disabled={running}>
+          <Button type="button" size="md" variant="ghost" onClick={onClose} disabled={running}>
             {done ? "完成" : "取消"}
-          </button>
+          </Button>
           {running && (
-            <button type="button" className={BTN_GHOST} onClick={onStop}>
+            <Button type="button" size="md" variant="ghost" onClick={onStop}>
               停止
-            </button>
+            </Button>
           )}
           {!done && (
-            <button
+            <Button
               type="button"
-              className={BTN_PRIMARY}
+              size="md" variant="primary"
               disabled={running || rows.length === 0}
               onClick={onConfirm}
             >
               {running ? "更新中…" : "确认更新"}
-            </button>
+            </Button>
           )}
           {done && ok > 0 && (
-            <button type="button" className={BTN_PRIMARY} onClick={onGoAssign}>
+            <Button type="button" size="md" variant="primary" onClick={onGoAssign}>
               去技能区分配
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -1129,9 +1130,9 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
           title="社区未启用"
           desc="服务端没有开启技能社区（或未配置上游），可联系管理员；技能池与导入功能不受影响。"
           actions={
-            <button type="button" className={BTN_GHOST_SM} onClick={() => setReloadStatusTick((n) => n + 1)}>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setReloadStatusTick((n) => n + 1)}>
               重试
-            </button>
+            </Button>
           }
         />
       </section>
@@ -1148,12 +1149,12 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
         <div className="flex flex-wrap items-center gap-2">
           <span className="ui-body-sm font-bold">技能社区 · {source.name}</span>
           <span className={CHIP}>{status!.reachable ? "已连接" : "上游暂不可达"}</span>
-          <button type="button" className={`ml-auto ${BTN_GHOST_SM}`} onClick={() => setKeyOpen(true)}>
+          <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setKeyOpen(true)}>
             社区 Key
-          </button>
-          <button type="button" className={BTN_GHOST_SM} onClick={() => setReloadStatusTick((n) => n + 1)}>
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setReloadStatusTick((n) => n + 1)}>
             刷新
-          </button>
+          </Button>
         </div>
         <p className={`mt-1 ${HINT}`}>
           技能来自第三方社区，内容是指令文本；和鸣不执行随技能下发的代码，安装后默认不分配给任何智能体。
@@ -1167,14 +1168,14 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
           已装 {installedCommunity.length} 个社区技能 · {communityUpdates.length} 个可更新
         </span>
         {communityUpdates.length > 0 && (
-          <button type="button" className={BTN_GHOST_SM} onClick={() => void openBulkUpdate()}>
+          <Button type="button" size="sm" variant="ghost" onClick={() => void openBulkUpdate()}>
             全部更新
-          </button>
+          </Button>
         )}
         {showGoAssign && (
-          <button type="button" className={BTN_GHOST_SM} onClick={goAssign}>
+          <Button type="button" size="sm" variant="ghost" onClick={goAssign}>
             去技能区分配
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1206,24 +1207,24 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
 
       {categories.length > 0 && (
         <div role="group" aria-label="社区分类" className="mb-2 flex flex-wrap gap-1">
-          <button
+          <Button
             type="button"
             aria-pressed={category === ""}
             onClick={() => setCategory("")}
-            className={`ui-btn ui-btn-sm ${category === "" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+            size="sm" variant={category === "" ? "primary" : "ghost"} className={category === "" ? undefined : "text-muted"}
           >
             全部分类
-          </button>
+          </Button>
           {categories.map((item) => (
-            <button
+            <Button
               key={item}
               type="button"
               aria-pressed={category === item}
               onClick={() => setCategory(category === item ? "" : item)}
-              className={`ui-btn ui-btn-sm ${category === item ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+              size="sm" variant={category === item ? "primary" : "ghost"} className={category === item ? undefined : "text-muted"}
             >
               {item}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -1249,16 +1250,16 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
           desc={filterActive ? "换个关键词或分类试试。" : "等社区发布技能后再来看看。"}
           actions={
             filterActive ? (
-              <button
+              <Button
                 type="button"
-                className={BTN_GHOST_SM}
+                size="sm" variant="ghost"
                 onClick={() => {
                   setQuery("");
                   setCategory("");
                 }}
               >
                 清除筛选
-              </button>
+              </Button>
             ) : undefined
           }
         />
@@ -1293,17 +1294,19 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
                     <span className={CHIP}>收藏 {formatCount(item.stars)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
+                    <Button
                       type="button"
-                      className={`ml-auto ${BTN_GHOST_SM}`}
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto"
                       aria-label={`查看 ${item.name} 详情`}
                       onClick={() => setDetailSkill(item)}
                     >
                       详情
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="ui-btn ui-btn-sm ui-btn-primary"
+                      size="sm" variant="primary"
                       disabled={Boolean(busyId) || bulkRunning}
                       onClick={() =>
                         void startInstall({
@@ -1315,7 +1318,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
                       }
                     >
                       {busyId === item.id ? "处理中…" : installed ? "重新安装" : "安装"}
-                    </button>
+                    </Button>
                   </div>
                 </li>
               );
@@ -1323,9 +1326,9 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
           </ul>
           {list.hasMore && (
             <div className="mt-3 flex justify-center">
-              <button type="button" className={BTN_GHOST_SM} disabled={list.loading} onClick={() => setPage((n) => n + 1)}>
+              <Button type="button" size="sm" variant="ghost" disabled={list.loading} onClick={() => setPage((n) => n + 1)}>
                 {list.loading ? "加载中…" : "加载更多"}
-              </button>
+              </Button>
             </div>
           )}
         </>

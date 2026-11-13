@@ -8,6 +8,7 @@ import { useUiStore } from "../store/ui.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { XIcon } from "./icons.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 通知中心入口：铃铛 + 右侧浮层。
@@ -320,23 +321,23 @@ export function NotificationCenter() {
               onCancel={() => setConfirmClear(false)}
               footer={
                 <>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => setConfirmClear(false)}
-                    className="ui-btn ui-btn-md ui-btn-ghost"
+                    size="md" variant="ghost"
                   >
                     取消
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     onClick={() => {
                       clearAll();
                       setConfirmClear(false);
                     }}
-                    className="ui-btn ui-btn-md ui-btn-danger"
+                    size="md" variant="danger"
                   >
                     清空
-                  </button>
+                  </Button>
                 </>
               }
             >

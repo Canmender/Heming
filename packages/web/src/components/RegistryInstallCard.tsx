@@ -6,6 +6,7 @@ import {
   type InstallDecision,
   type RegistryInstallPreview,
 } from "../lib/registry/preview.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 安装第三方 MCP 服务的确认卡。
@@ -69,23 +70,23 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
 
   const footer = (
     <>
-      <button
+      <Button
         type="button"
         ref={cancelRef}
         onClick={() => finish({ approved: false })}
-        className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
+        size="md" variant="ghost" className="text-[var(--danger)]"
       >
         取消安装
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
         disabled={missingRequired}
         title={missingRequired ? "请填写必填请求头" : undefined}
         onClick={approve}
-        className="ui-btn ui-btn-md ui-btn-primary disabled:opacity-40"
+        size="md" variant="primary" className="disabled:opacity-40"
       >
         确认安装
-      </button>
+      </Button>
     </>
   );
 

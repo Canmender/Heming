@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Button } from "../ui/Button.js";
 import {
   UNIT_SOURCE_LABELS,
   blockReasonText,
@@ -9,7 +10,7 @@ import {
   PLUGIN_HEALTH_LABELS,
   type PluginHealth,
 } from "../../lib/plugins/index.js";
-import { BTN_GHOST_SM } from "./shared.js";
+
 
 /**
  * 能力单元诊断（d.105 · 阶段 A；d.113 接入插件健康度）。
@@ -113,15 +114,15 @@ export function UnitDiagnostics({
               <span className="font-medium">{row.name}</span>
               <span className="text-muted">{row.text}</span>
               {row.repairPluginId && onRepair && (
-                <button
+                <Button
                   type="button"
                   aria-label={`修复记录 ${row.name}（诊断）`}
                   disabled={repairingPluginId === row.repairPluginId}
                   onClick={() => onRepair(row.repairPluginId as string)}
-                  className={BTN_GHOST_SM}
+                  size="sm" variant="ghost"
                 >
                   {repairingPluginId === row.repairPluginId ? "修复中…" : "修复记录"}
-                </button>
+                </Button>
               )}
             </li>
           ))}

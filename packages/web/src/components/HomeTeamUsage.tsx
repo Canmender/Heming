@@ -8,6 +8,7 @@ import { useUiStore } from "../store/ui.js";
 import { fmtTokens } from "../lib/format/tokens.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonLine } from "./ui/Skeleton.js";
+import { Button } from "../components/ui/Button.js";
 
 const TOP_N = 5;
 
@@ -69,13 +70,13 @@ export function HomeTeamUsage() {
           「用量」共享未开启：不上传、不采集，也看不到全站排行。开启后只同步近 30
           天的 token 数、模型名与连接名。
         </p>
-        <button
+        <Button
           type="button"
-          className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+          size="sm" variant="ghost" className="mt-2"
           onClick={() => setPage("team")}
         >
           去团队页开启
-        </button>
+        </Button>
       </div>
     );
   }
