@@ -51,7 +51,9 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4345 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
+- **工具调用参数也计入上下文预算**：`packages/web/src/lib/agentContext/tokens.ts` 的 `estimateRowTokens` 以前只看 `content` 与内容片，assistant 行上的 `tool_calls[].function.arguments` 完全不进预算——写文件、批量改代码这类调用的参数可以是几万字符，于是「预算说还能塞 3000 token」的请求其实早已超限，撞 400 后收紧 `aggressive` 也收不回来（超的是参数，不是正文）。现在按「结构开销 8 + 工具名 + 参数」逐条计入（`TOOL_CALL_OVERHEAD = 8`），`role=tool` 行的 `name`/`tool_call_id` 也计入；`packages/web/src/lib/agentContext/context.test.ts` 2 例钉住口径。
+- **超长工具参数进历史时换成合法 JSON 说明**：`packages/web/src/components/ChatPage.tsx` 的 `historyToolArgs`（上限 `HISTORY_TOOL_ARGS_MAX = 4000`）——原样带回会吃掉整轮预算，而塞半截 JSON 又会让校验历史 `tool_use.input` 的供应商整轮 400；超长时换成 `{"note":"（这次调用的参数过长，历史里已省略原文；它做了什么见下面那条工具结果。）"}`，工具结果照旧保留。`ChatPage.test.tsx` 新增 1 例（`arguments` 长度 < 500、`JSON.parse` 可解、含「参数过长」、工具结果仍在）。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4348 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

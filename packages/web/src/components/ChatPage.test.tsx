@@ -1206,6 +1206,57 @@ describe("ChatPage", () => {
     expect(toolRows[1].content).toContain("用户拒绝");
   });
 
+  it("I3d 超长工具参数进历史时被换成合法 JSON 说明，不把整轮预算吃掉", async () => {
+    type SentRow = {
+      role: string;
+      content: string;
+      tool_calls?: { id: string; type: string; function: { name: string; arguments: string } }[];
+    };
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 写文件类工具的参数可能有几万字符：历史里原样带回就是一条吃掉整轮预算，
+    // 而半截 JSON 又会让校验历史 tool_use 的供应商整轮 400。
+    const hugeArgs = JSON.stringify({ path: "a.md", patch: "x".repeat(9000) });
+    const assistant: Message = {
+      ...agentMsg("m2", "我改一下这个文件。", "2026-10-14T01:00:01.000Z"),
+      tools: [
+        {
+          id: "call_1",
+          name: "self__edit",
+          args: hugeArgs,
+          status: "ok",
+          result: "已改 1 处",
+          startedAt: 1,
+          endedAt: 2,
+        },
+      ],
+    } as Message;
+    mockMessagesFetch([msg("m1", "帮我改这个文件", "2026-10-14T01:00:00.000Z"), assistant]);
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: SentRow[] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages as unknown as SentRow[];
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 继续");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const assistantRow = seen!.find((r) => (r.tool_calls?.length ?? 0) > 0);
+    expect(assistantRow).toBeDefined();
+    const args = assistantRow!.tool_calls![0].function.arguments;
+    expect(args.length).toBeLessThan(500);
+    expect(args).not.toContain("x".repeat(100));
+    // 仍是合法 JSON（校验历史 input 的供应商不会因此 400），且说清了为什么省略
+    const parsed = JSON.parse(args) as { note?: string };
+    expect(parsed.note).toContain("参数过长");
+    // 工具结果照旧可读：模型知道那次调用到底做成了什么
+    const toolRow = seen!.find((r) => r.role === "tool");
+    expect(toolRow!.content).toContain("已改 1 处");
+  });
   it("I3c 带附件的同文历史不被当成本轮重复：提示词里只出现一次", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);

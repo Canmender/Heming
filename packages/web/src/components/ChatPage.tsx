@@ -274,6 +274,22 @@ const HISTORY_TOOLS_PER_TURN = 8;
 const HISTORY_TOOL_TEXT_MAX = 1200;
 
 /**
+ * 单条工具**参数**进历史时的字符上限。
+ *
+ * `arguments` 可以是几万字符（写文件、批量改代码），而预算估算要按它算 token；
+ * 超长的不截断就等于让一条历史把整轮预算吃掉。截断后**仍是合法 JSON**：
+ * 部分供应商（Anthropic 风格）会校验历史 tool_use 的 input，塞半截 JSON 会整轮 400。
+ */
+const HISTORY_TOOL_ARGS_MAX = 4000;
+
+/** 把工具参数压进历史长度上限：短的照原样，长的换成一句合法 JSON 说明。 */
+function historyToolArgs(args: string): string {
+  const raw = args.trim() || "{}";
+  if (raw.length <= HISTORY_TOOL_ARGS_MAX) return raw;
+  return JSON.stringify({ note: "（这次调用的参数过长，历史里已省略原文；它做了什么见下面那条工具结果。）" });
+}
+
+/**
  * 把一次工具调用还原成「给模型看的历史文本」。
  *
  * 关键在于**别丢**：模型不知道上一轮查过什么，就会重复查、或者把已核实的事实重新猜
@@ -1509,7 +1525,7 @@ export function ChatPage({
               tool_calls: tools.map((t) => ({
                 id: t.id,
                 type: "function" as const,
-                function: { name: t.name, arguments: t.args.trim() || "{}" },
+                function: { name: t.name, arguments: historyToolArgs(t.args) },
               })),
             });
             for (const t of tools) {

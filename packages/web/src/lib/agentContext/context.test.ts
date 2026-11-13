@@ -116,6 +116,29 @@ describe("estimateRowsTokens：每条 +4 结构开销", () => {
     expect(estimateRowTokens(row)).toBe(1 + 4);
   });
 
+  it("assistant 的工具调用参数也计入预算（历史里 arguments 可能几万字符）", () => {
+    const args = JSON.stringify({ path: "a.md", patch: "x".repeat(4000) });
+    const row = {
+      role: "assistant" as const,
+      content: "我改一下",
+      tool_calls: [{ id: "call_1", type: "function" as const, function: { name: "self__edit", arguments: args } }],
+    };
+    // 结构 + 正文 + 调用结构 + 工具名 + 参数
+    const expected = 4 + estimateTokens("我改一下") + 8 + estimateTokens("self__edit") + estimateTokens(args);
+    expect(estimateRowTokens(row)).toBe(expected);
+    // 参数长到几千字符时，估算必须明显大于「只看正文」——正是以前漏掉的那部分
+    expect(estimateRowTokens(row)).toBeGreaterThan(4 + estimateTokens("我改一下") + 1000);
+  });
+
+  it("工具结果行的 name 与 tool_call_id 也计入（虽然不大，但口径要一致）", () => {
+    const row = {
+      role: "tool" as const,
+      content: "结果",
+      tool_call_id: "call_1",
+      name: "echo",
+    };
+    expect(estimateRowTokens(row)).toBe(4 + estimateTokens("结果") + estimateTokens("call_1") + estimateTokens("echo"));
+  });
   it("与逐条 cost() 口径一致", () => {
     const rows = conversation(4);
     expect(estimateRowsTokens(rows)).toBe(total(rows));

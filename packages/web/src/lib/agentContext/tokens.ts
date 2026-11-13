@@ -67,19 +67,41 @@ export function estimateTokens(text: string): number {
  */
 export const IMAGE_TOKEN_COST = 1500;
 
-/** 单条消息的估算 token：正文 + 内容片（图片按固定成本、文本按字数）+ 结构开销。 */
+/**
+ * 一次工具调用的结构开销（id / type / 分隔符等）。
+ *
+ * 调用本身要占字段，名字短的也有这条固定成本；把它单列出来，
+ * 断言里就能写「这一条 = 结构 + 名字 + 参数」，不用猜。
+ */
+export const TOOL_CALL_OVERHEAD = 8;
+
+/**
+ * 单条消息的估算 token：正文 + 内容片（图片按固定成本、文本按字数）+ 工具调用参数 + 结构开销。
+ *
+ * ★ 以前完全不计 `tool_calls`：assistant 行上的 `arguments` 可以是几万字符（写文件、批量改代码），
+ * 预算里却只算正文。于是「还能塞 3000 token」的判断在带工具历史时是错的，
+ * 撞 400 之后按 `aggressive` 收紧也收不回来——超的是工具参数，不是正文。
+ */
 export function estimateRowTokens(row: ChatMessage): number {
-  const overhead = ROW_TOKEN_OVERHEAD;
+  let sum = ROW_TOKEN_OVERHEAD;
   const parts = row?.contentParts;
   if (!Array.isArray(parts) || !parts.length) {
-    return estimateTokens(String(row?.content ?? "")) + overhead;
+    sum += estimateTokens(String(row?.content ?? ""));
+  } else {
+    for (const part of parts) {
+      if (!part) continue;
+      sum += part.type === "image" ? IMAGE_TOKEN_COST : estimateTokens(String(part.text ?? ""));
+    }
   }
-  let sum = 0;
-  for (const part of parts) {
-    if (!part) continue;
-    sum += part.type === "image" ? IMAGE_TOKEN_COST : estimateTokens(String(part.text ?? ""));
+  for (const call of row?.tool_calls ?? []) {
+    if (!call?.function) continue;
+    sum += TOOL_CALL_OVERHEAD;
+    sum += estimateTokens(String(call.function.name ?? ""));
+    sum += estimateTokens(String(call.function.arguments ?? ""));
   }
-  return sum + overhead;
+  if (row?.tool_call_id) sum += estimateTokens(String(row.tool_call_id));
+  if (row?.name) sum += estimateTokens(String(row.name));
+  return sum;
 }
 
 /** 整段历史的 token 估算：逐条内容 + 每条约 4 token 结构开销。 */
