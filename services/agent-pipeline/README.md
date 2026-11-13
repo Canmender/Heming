@@ -31,6 +31,15 @@ CLI（不需要起服务）：
 set AGENT_PIPELINE_API_KEY=sk-...
 .venv/Scripts/python.exe -m agent_pipeline.runner run --goal "给 utils.py 补测试并跑到 90% 覆盖率" --mode adversarial --coverage-command "pytest --cov=src --cov-report=term-missing"
 
+# 对抗模式漏了 --coverage-command 会直接退 2（和 HTTP 服务的 422 同口径）：
+# 没有覆盖率命令就没法验证「达标」，跑出来的「未达标」会让人以为是模型没写对。
+.venv/Scripts/python.exe -m agent_pipeline.runner run --goal "补测试" --mode adversarial
+# → [run] 对抗模式需要 --coverage-command（例如 "pytest --cov=src --cov-report=term-missing"）…
+#   退出码 2，不烧一次模型调用
+
+# 正常结束但没达到目标时（预算用尽 / 覆盖率不足 / 被取消），输出会带「收口原因：…」
+# 而不是只报「状态：ok」——否则「跑完了」和「做成了」分不出来。
+
 # 起服务（对抗模式的覆盖率命令也可以在命令行给：--coverage-command "pytest --cov=src"）
 .venv/Scripts/python.exe -m agent_pipeline.runner serve --port 8000
 
@@ -511,7 +520,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **275 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **278 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

@@ -28,6 +28,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     coverage_runner = None
     if args.coverage_command:
         coverage_runner = make_coverage_runner(args.coverage_command, cwd=args.cwd or None)
+    if args.mode == "adversarial" and coverage_runner is None:
+        # 和 HTTP 服务同一条口径：没有覆盖率命令时对抗环只能空转两轮，
+        # 最后以「未达标」收场——看起来像任务没做成，其实是没接测试。
+        print(
+            "[run] 对抗模式需要 --coverage-command（例如 \"pytest --cov=src --cov-report=term-missing\"）："
+            "没有它「覆盖率达标」无法验证，只会白跑两轮后报未达标。",
+            file=sys.stderr,
+        )
+        return 2
     runtime = build_runtime(settings, coverage_runner=coverage_runner)
     task = TaskSpec(
         goal=args.goal,
@@ -44,6 +53,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if result.error:
             print(f"错误：{result.error}")
         print(f"耗时 {row['duration_s']}s · 模型调用 {result.llm_calls} 次 · token {result.tokens}")
+        if result.stop_reason:
+            # 预算用尽 / 对抗未达标 / 用户取消都是「正常结束但没达到目标」，
+            # 只看「状态：ok」会让人以为任务真的做成了。
+            print(f"收口原因：{result.stop_reason}")
         if result.coverage is not None:
             print(f"覆盖率：{result.coverage:.0%}")
         print("-" * 60)
@@ -190,6 +203,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "log_path": str(Path(settings.log_path).resolve()),
         "db_path": str(Path(settings.db_path).resolve()),
         "coverage_target": settings.coverage_target,
+        # 对抗模式没它跑不起来（服务端会 422、CLI 会退 2），所以要能在自检里一眼看到
+        "coverage_command": settings.coverage_command or None,
     }
     print(json.dumps(info, ensure_ascii=False, indent=2))
     return 0

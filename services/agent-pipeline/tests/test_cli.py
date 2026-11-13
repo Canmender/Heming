@@ -138,3 +138,58 @@ def test_serve_passes_coverage_command_into_settings(monkeypatch) -> None:
     settings = captured["settings"]
     assert settings.coverage_command == "pytest --cov=app", "命令行应当覆盖环境变量"
     assert captured["port"] == 9123
+
+
+def test_run_adversarial_without_coverage_command_refuses_to_start(tmp_path, monkeypatch, capsys) -> None:
+    """对抗模式没有覆盖率命令时，CLI 直接退 2，而不是白跑两轮再报「未达标」。
+
+    与 HTTP 服务同口径（那边是 422）：没有命令就没法验证「覆盖率达标」，
+    跑出来的「未达标」看起来像模型没写对，实际是根本没接测试。
+    """
+    monkeypatch.setenv("AGENT_LOG_PATH", str(tmp_path / "runs.jsonl"))
+    monkeypatch.setenv("AGENT_PIPELINE_DB", ":memory:")
+    monkeypatch.setenv("AGENT_PIPELINE_API_KEY", "test-key")
+
+    def boom(*_args, **_kwargs):  # pragma: no cover - 不应该走到模型
+        raise AssertionError("对抗模式缺覆盖率命令时不应该开始跑")
+
+    monkeypatch.setattr("agent_pipeline.runner.build_runtime", boom)
+
+    assert main(["run", "--goal", "补测试", "--mode", "adversarial"]) == 2
+    err = capsys.readouterr().err
+    assert "--coverage-command" in err
+    assert "覆盖率达标" in err
+
+
+def test_run_reports_stop_reason_when_it_is_not_a_clean_finish(tmp_path, monkeypatch, capsys) -> None:
+    """`状态：ok` 但 `stop_reason` 非空时也要说清楚（预算用尽/未达标/取消）。"""
+    from agent_pipeline.protocol import RunResult, TaskSpec
+
+    monkeypatch.setenv("AGENT_LOG_PATH", str(tmp_path / "runs.jsonl"))
+    monkeypatch.setenv("AGENT_PIPELINE_DB", ":memory:")
+
+    def fake_run_once(_runtime, _task):
+        result = RunResult(
+            run_id="r1",
+            status="ok",
+            answer="先做到这里。",
+            stop_reason="max_steps",
+        )
+        return result, {"duration_s": 0.1}
+
+    monkeypatch.setattr("agent_pipeline.runner.run_once", fake_run_once)
+
+    assert main(["run", "--goal", "写点东西"]) == 0
+    out = capsys.readouterr().out
+    assert "状态：ok" in out
+    assert "收口原因：max_steps" in out
+
+
+def test_doctor_reports_coverage_command(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("AGENT_LOG_PATH", str(tmp_path / "runs.jsonl"))
+    monkeypatch.setenv("AGENT_PIPELINE_DB", ":memory:")
+    monkeypatch.setenv("AGENT_COVERAGE_COMMAND", "pytest -q --cov=src")
+
+    assert main(["doctor"]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["coverage_command"] == "pytest -q --cov=src"
