@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.68.11",
+    "date": "2026-11-13",
+    "title": "NSIS 安装器补取消确认",
+    "bullets": [
+      "`packages/desktop/build/installer.nsh`：新增 `!define MUI_ABORTWARNING` 与 `MUI_ABORTWARNING_TEXT`。electron-builder 的 assisted 安装器默认不带取消确认，装到一半点「取消」/关窗直接 `Quit`，",
+      "同时在文件头补了「刻意没做的事」：页头那行 `和鸣 140.3.68` 由 electron-builder 按 semver 写死，改它需要在 MUI2.nsh 之后重定义 MUI 宏（我们的 include 在公共头部，够不到）；安装模式页文案来自 `multiUserUi.nsh` 内置 LangString。",
+      "真包验证：`node scripts/build-desktop.mjs --win nsis` 出 `和鸣 Setup d.140.3.67.11.exe`（本地 electronDist，约 3 分钟），启动后 UIA 读页面：欢迎页标题「安装 和鸣」+ 正文原文；安装模式页版本行 `和鸣 140.3.67`；目录页页头「选定安装位置」、",
+      "注：`packages/desktop/release/` 是 `.gitignore` 的产物目录，安装包不入库。"
+    ],
+    "paragraphs": [
+      "已经解到 `$INSTDIR` 的文件就那么留着，用户不知道下次会不会续上。文案写清后果而不是只问「确定吗」：「安装还没完成。现在退出的话，已经解到安装目录里的文件会留在那里，下次要重新运行安装程序才能补全。确定退出吗？」说明「选择安装位置。…卸载时一并删除。」、所需空间 841.8 MB / 可用 46.5 GB、路径预填 `E:\\Heming`；点「取消」弹出确认框，正文逐字为上面那句，按钮「是(Y) / 否(N)」，主窗口控件同时置灰（模态）。"
+    ]
+  },
+  {
     "version": "d.140.3.67.11",
     "date": "2026-11-13",
     "title": "安装外壳微文案 + 主按钮可访问名",
