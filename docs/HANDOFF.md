@@ -168,7 +168,9 @@
   - 离线内嵌外壳：`packages/setup/release-offline/和鸣安装程序 d.140.3.56.11.exe`，**399,124,268 B**，hex sha512 `a8a04201348d1f3baa6c6761e1fca464875c17c848ae46315f1b4d7df4325ecfae1da3ea11368b15da89dd69db0a3253e5a8ef4d089f4b7c6017a6b49aee4ade`。
   - 通用在线外壳：`packages/setup/release/和鸣安装程序.exe`，102,511,849 B（本轮内容未变，无需重传）。
 - **已上传** `/opt/heming/updates/`：`和鸣安装程序 d.140.3.56.11.exe`（远端大小 + sha512 校验通过）；旧 `和鸣安装程序 d.140.3.55.10.exe` 已删除。公网两条 URL 均 200 + `application/octet-stream`（102,511,849 / 399,124,268）。
-- **未动**：`latest.yml` 仍指 140.3.54、云端服务未部署；更新源里 d.135.3.54.7 / d.137.3.54.10 / d.140.3.54.10 三个旧内层包仍在（按「只留当前+上一版」应清，但会直接影响老客户端，留待拍板）。
+- **已发布更新源（用户拍板「清掉过时的，全部让他们重新安装」）**：`node scripts/publish-update.mjs`（`HEMING_RELEASE_DIR=packages/desktop/release/r95`）把 `latest.yml` 指向 **140.3.56**、上传 `和鸣 Setup d.140.3.56.11.exe` + blockmap，远端大小/sha512 校验通过；公网 `/updates/latest.yml` 已返回 140.3.56。老客户端（140.3.54）检查更新会直接拉 335MB 全量包重装，不再保留小版本差分路径。
+- **旧包已清**：服务器 `/opt/heming/updates/` 删掉 `d.135.3.54.7` / `d.137.3.54.10` / `d.140.3.54.10` 三个内层包及各自 `.blockmap`；现存只有 `latest.yml`、`和鸣 Setup d.140.3.56.11.exe(+blockmap)`、`和鸣安装程序.exe`、`和鸣安装程序 d.140.3.56.11.exe`、`modules/`。
+- **仍未动**：云端 web/server 未重新部署（`/api/*` 与线上前端仍是 11-12 的构建）；数据库/配置未变。
 - **另一会话的 UI/UX WIP 已隔离**：分支 `wip/uiux-2026-11-13`（`d0efe595`，54 处改动，版本自标 d.140.3.56.0）。**未完成**：`packages/web/src/App.tsx` 引用不存在的 `asideNotice`/`setAsideNotice`（10 处 TS2304，typecheck exit 2）、web **17 failed / 4349 passed**（App.boot 1、App.test 15、navPrefs 1）。**不能直接合入**，接续前先修这一处。
 
 ---
