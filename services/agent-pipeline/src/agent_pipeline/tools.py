@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from .protocol import Citation, Observation, Risk, ToolRequest, idempotency_key
 
@@ -417,6 +417,10 @@ class ToolRuntime:
 # ---------------------------------------------------------------------------
 
 
+# 跟随重定向的上限：每一跳都要重新过内网检查，超过这个数就当坏链接。
+MAX_REDIRECTS = 3
+
+
 def _host_is_private(host: str) -> bool:
     """URL 里的主机是否指向本机/内网（云元数据 169.254.169.254 也在这类）。
 
@@ -477,18 +481,30 @@ def build_default_registry(
         import requests
 
         url = str(args["url"])
-        if not url.startswith(("http://", "https://")):
-            raise ToolError("只支持 http/https")
-        host = urlparse(url).hostname or ""
-        if not allow_private_hosts and _host_is_private(host):
-            raise ToolError(
-                f"拒绝访问内网地址：{host}（模型给的 URL 可能来自不可信内容，"
-                "访问内网会把内部接口/云元数据带进对话；确实需要时由服务端设置 "
-                "AGENT_ALLOW_PRIVATE_HOSTS=1）"
-            )
-        response = requests.get(url, timeout=float(args.get("timeout_s", 15)), headers={"User-Agent": "agent-pipeline/0.1"})
-        body = response.text[:8000]
-        return {"status": response.status_code, "body": body}
+        timeout = float(args.get("timeout_s", 15))
+        headers = {"User-Agent": "agent-pipeline/0.1"}
+        # 重定向必须逐跳检查：只查首个 URL 的话，一条 302 指向 169.254.169.254
+        # 就把内网守卫绕过去了（requests 默认自动跟随）。所以关掉自动跟随，
+        # 自己跟最多 MAX_REDIRECTS 跳，每一跳都过同一个 _host_is_private。
+        for _hop in range(MAX_REDIRECTS + 1):
+            if not url.startswith(("http://", "https://")):
+                raise ToolError("只支持 http/https")
+            host = urlparse(url).hostname or ""
+            if not allow_private_hosts and _host_is_private(host):
+                raise ToolError(
+                    f"拒绝访问内网地址：{host}（模型给的 URL 可能来自不可信内容，"
+                    "访问内网会把内部接口/云元数据带进对话；确实需要时由服务端设置 "
+                    "AGENT_ALLOW_PRIVATE_HOSTS=1）"
+                )
+            response = requests.get(url, timeout=timeout, headers=headers, allow_redirects=False)
+            if response.status_code not in (301, 302, 303, 307, 308):
+                return {"status": response.status_code, "body": response.text[:8000]}
+            location = str(response.headers.get("Location") or "").strip()
+            if not location:
+                return {"status": response.status_code, "body": response.text[:8000]}
+            url = urljoin(url, location)
+        raise ToolError(f"重定向次数过多（超过 {MAX_REDIRECTS} 次）")
+
 
     @registry.tool(
         name="run_command",

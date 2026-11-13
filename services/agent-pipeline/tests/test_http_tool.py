@@ -152,3 +152,80 @@ def test_http_get_declares_net_risk() -> None:
     schema = spec.openai_schema()
     assert schema["function"]["name"] == "http_get"
     assert schema["function"]["parameters"]["required"] == ["url"]
+
+def test_http_get_rechecks_every_redirect_hop(monkeypatch) -> None:
+    """重定向要逐跳过内网检查：只查首个 URL 会被一条 302 绕过。
+
+    requests 默认自动跟随重定向；如果只对入口 URL 调一次 _host_is_private，
+    一个公开地址 302 到 169.254.169.254 就能把云元数据读回来。
+    """
+    import requests
+
+    seen: list[str] = []
+
+    class _Redirect:
+        status_code = 302
+        text = ""
+        headers = {"Location": "http://169.254.169.254/latest/meta-data/"}
+
+    def fake_get(url, **_kwargs):
+        seen.append(str(url))
+        return _Redirect()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    instance = ToolRuntime(build_default_registry())
+    try:
+        observation = _call(instance, "http://example.com/redirect")
+        assert observation.ok is False
+        assert "内网" in observation.error
+        assert seen == ["http://example.com/redirect"]  # 第二跳在发请求之前就被拦下
+    finally:
+        instance.close()
+
+
+def test_http_get_follows_redirects_and_caps_them(monkeypatch) -> None:
+    import requests
+
+    from agent_pipeline.tools import MAX_REDIRECTS
+
+    calls: list[str] = []
+
+    class _Hop:
+        status_code = 302
+        text = ""
+        headers = {"Location": "/step"}
+
+    class _Final:
+        status_code = 200
+        text = "到达"
+        headers: dict[str, str] = {}
+
+    def fake_get(url, **_kwargs):
+        calls.append(str(url))
+        return _Final() if len(calls) > 1 else _Hop()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    instance = ToolRuntime(build_default_registry(allow_private_hosts=True))
+    try:
+        observation = _call(instance, "http://example.com/start")
+        assert observation.ok is True
+        assert observation.result["status"] == 200
+        assert observation.result["body"] == "到达"
+        assert calls[1] == "http://example.com/step"  # 相对 Location 按当前 URL 补全
+    finally:
+        instance.close()
+
+    # 一直 302：不能无限跟，报「重定向次数过多」。
+    class _Forever:
+        status_code = 307
+        text = ""
+        headers = {"Location": "http://example.com/loop"}
+
+    monkeypatch.setattr(requests, "get", lambda url, **_kwargs: _Forever())
+    instance = ToolRuntime(build_default_registry(allow_private_hosts=True))
+    try:
+        observation = _call(instance, "http://example.com/loop")
+        assert observation.ok is False
+        assert f"超过 {MAX_REDIRECTS} 次" in observation.error
+    finally:
+        instance.close()

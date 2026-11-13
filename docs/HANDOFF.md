@@ -62,6 +62,7 @@
 - **多条 system 合并成一条**（`lib/agentStream.ts` 的 `messagesFor`）：早期对话摘要原先作为第二条 system 插在 recent 之前，而供应商对「多条 system」态度不一（有的只认第一条、有的直接 400）。现在把 `prepared` 里的 system 行按顺序拼成一条（`\n\n` 连接）放在最前、非 system 行顺序不变；只有一条时不改写。`agentStream.test.ts` 新增 1 例钉住「出站只有一条 system」，并同步了三处旧期望（摘要段不再单独成行、行数各处 -1）。
 - **跨语言联调现在带鉴权**（`lib/pipeline/live.test.ts`）：以前起真服务时没设 `AGENT_SERVICE_TOKEN`，「桌面端带 Bearer、服务端校验 Bearer」这层接线没人验过（两边单测各用假对方，都能过）。现在服务端开鉴权，客户端带令牌跑通「提交 → 轮询 → ok」；另加一例断言不带令牌时抛 `PipelineError(kind="http", status=401)` 且 detail 提到 `AGENT_SERVICE_TOKEN`。
 - **同一个 `run_id` 换了任务必须 409**（`services/agent-pipeline/src/agent_pipeline/service.py`）：幂等重提以前只要 id 撞上就回 202 + 旧状态——调用方把 id 复用到了另一个任务时，看到的是上一个任务的进度，怎么查都查不出「新任务根本没跑」。现在为每个 run_id 记请求指纹（goal/cwd/constraints/mode/coverage_target/tools_allowed），内容不一致就 409 并点名变化的字段；指纹随 run 历史一起淘汰（`run_history_limit`）。`tests/test_run_idempotency.py` 3 例（同请求重提幂等、换 goal 409、换 mode 409）→ pytest 258 passed / 95.28%。
+- **`http_get` 的重定向逐跳检查**（`services/agent-pipeline/src/agent_pipeline/tools.py`）：上一轮的 SSRF 守卫只查入口 URL，而 `requests` 默认自动跟随重定向——一个公开地址 302 到 `169.254.169.254` 就能把云元数据读回来。现在关掉自动跟随，自己跟最多 3 跳（`MAX_REDIRECTS`），每一跳都过同一个 `_host_is_private`；跳太多报「重定向次数过多」。`tests/test_http_tool.py` 2 例（302 指向内网在发请求前被拦、相对 Location 正常补全且 307 死循环被截断）→ pytest 260 passed / 95.3%。
 验证：`pnpm --filter @heming/web test` → **297 文件 / 4360 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
