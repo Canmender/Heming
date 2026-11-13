@@ -183,6 +183,20 @@ export interface BuildToolBridgeOptions {
   toolAllowed?: (ref: McpToolRef) => boolean;
 }
 
+/**
+ * 这条错误是不是「连接层坏了」而不是「工具自己报错」。
+ *
+ * 为什么分：工具返回错误（参数不对、目标不存在）只该让模型换个做法；
+ * 而进程退出/超时/连不上说明这台服务已经不可用，界面还显示「已连接」就会一直骗人，
+ * 下一轮也不会自动重连（`mcpNeedsConnect` 看的是连接状态）。这类错误要落状态。
+ */
+const TRANSPORT_FAILURE_RE =
+  /MCP 进程已退出|MCP 进程启动失败|MCP 服务超时|MCP 服务返回 HTTP 5\d\d|fetch failed|ECONNREFUSED|ECONNRESET|EPIPE|请求 id 冲突/;
+
+export function isTransportFailure(message: string): boolean {
+  return TRANSPORT_FAILURE_RE.test(String(message ?? ""));
+}
+
 export function buildToolBridge(
   registry: McpRegistry = mcpRegistry,
   options: BuildToolBridgeOptions = {},
@@ -194,8 +208,8 @@ export function buildToolBridge(
   const tools = toOpenAiTools(catalog);
   return {
     tools,
-    execute: (call, opts) =>
-      executeToolCall(
+    execute: async (call, opts) => {
+      const result = await executeToolCall(
         call,
         catalog,
         {
@@ -207,6 +221,22 @@ export function buildToolBridge(
         },
         // 中断信号一路透传到 callTool：HTTP 立刻 abort，stdio 至少不再等。
         opts,
-      ),
+      );
+      if (!result.ok) {
+        const serverId = catalog.byName.get(call.name)?.ref.serverId;
+        /*
+         * 连接层坏了就把状态改成 stale/error：界面不再挂绿点，下一轮发送时
+         * `mcpNeedsConnect` 也会据此重连——否则进程死了以后每次调用都失败，
+         * 但界面一直显示「已连接」，只能重启应用才恢复。
+         */
+        if (serverId && isTransportFailure(result.text)) {
+          registry.setStatus(serverId, {
+            state: registry.hasDiscovered(serverId) ? "stale" : "error",
+            error: result.text.replace(/^工具调用失败：/, ""),
+          });
+        }
+      }
+      return result;
+    },
   };
 }

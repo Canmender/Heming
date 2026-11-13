@@ -489,6 +489,72 @@ describe("工具桥接（命名空间 + 执行）", () => {
   });
 });
 
+describe("连接层坏了要落状态（否则界面一直挂绿点、也不会自动重连）", () => {
+  it("进程退出这类错误：标记 stale，界面据此显示「已断开」并触发重连", async () => {
+    const reg = new McpRegistry(memStorage());
+    const server = reg.add({
+      id: "s1",
+      name: "本地服务",
+      transport: "stdio",
+      command: "node",
+      args: ["server.js"],
+      enabled: true,
+    });
+    reg.setTools(server.id, [{ name: "echo" }]);
+    reg.setToolEnabled(server.id, "echo", true);
+
+    // 主进程那边的子进程已经死了：桥只会回这条错误
+    (window as unknown as { __mcp_stdio?: unknown }).__mcp_stdio = {
+      request: async () => {
+        throw new Error("MCP 进程已退出（code=1 signal=null）");
+      },
+      stop: async () => true,
+    };
+
+    const bridge = buildToolBridge(reg);
+    expect(bridge).not.toBeNull();
+    // 工具名是 `服务名__工具名`（服务名会被压成合法片段），从桥里取真名
+    const toolName = (bridge!.tools[0] as { function: { name: string } }).function.name;
+    const result = await bridge!.execute({ name: toolName, arguments: "{}" });
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("进程已退出");
+
+    const status = reg.status(server.id);
+    expect(status?.state).toBe("stale");
+    expect(status?.error).toContain("进程已退出");
+
+    delete (window as unknown as { __mcp_stdio?: unknown }).__mcp_stdio;
+  });
+
+  it("只是工具自己报错：不该被当成连接故障", async () => {
+    const reg = new McpRegistry(memStorage());
+    const server = reg.add({
+      id: "s2",
+      name: "本地服务二",
+      transport: "stdio",
+      command: "node",
+      args: ["server.js"],
+      enabled: true,
+    });
+    reg.setTools(server.id, [{ name: "echo" }]);
+    reg.setToolEnabled(server.id, "echo", true);
+    reg.setStatus(server.id, { state: "connected", tools: 1 });
+
+    (window as unknown as { __mcp_stdio?: unknown }).__mcp_stdio = {
+      request: async () => ({ content: [{ type: "text", text: "参数 q 不合法" }], isError: true }),
+      stop: async () => true,
+    };
+
+    const bridge = buildToolBridge(reg);
+    const toolName = (bridge!.tools[0] as { function: { name: string } }).function.name;
+    const result = await bridge!.execute({ name: toolName, arguments: "{}" });
+    expect(result.ok).toBe(false);
+    expect(reg.status(server.id)?.state).toBe("connected");
+
+    delete (window as unknown as { __mcp_stdio?: unknown }).__mcp_stdio;
+  });
+});
+
 describe("工具桥 · 注入期过滤（d.77 插件风险上限）", () => {
   it("toolAllowed 过滤掉的工具不进入桥；全被过滤时返回 null", () => {
     const reg = new McpRegistry(memStorage());
