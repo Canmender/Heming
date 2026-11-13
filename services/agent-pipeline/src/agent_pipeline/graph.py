@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, TypedDict
 
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import NODE_IMPLS, Runtime
@@ -184,11 +185,39 @@ def build_graph(runtime: Runtime, *, checkpointer: Any = None) -> Any:
     return graph.compile(**compile_kwargs)
 
 
+def recursion_limit_for(runtime: Runtime) -> int:
+    """图执行上限：按预算算，不能用 LangGraph 的默认 25。
+
+    每一步都可能「execute 带工具调用 → 回到 execute 继续（最多 step_tool_budget 轮）
+    → reflect」。8 步 × 3 轮就已经超过 25：默认值会让一个正常的长任务在中途抛
+    GraphRecursionError，错误信息是「递归上限」，看起来像图写错了，实际是预算上限。
+    """
+    budget = runtime.settings.budget
+    per_step = max(1, int(budget.step_tool_budget)) + 2  # execute（含工具轮）+ reflect
+    limit = 3 + max(1, int(budget.max_steps)) * per_step
+    limit += 2 * max(1, int(budget.max_adversarial_rounds)) + 4  # 对抗环 + critic/汇总
+    return max(limit, 30)
+
+
 def run_pipeline(runtime: Runtime, task: TaskSpec, *, run_id: str, config_version: int = 0, checkpointer: Any = None) -> dict[str, Any]:
     """跑一次完整流水线，返回最终 state（含 answer/status/observations）。"""
     from .nodes import new_state
 
     graph = build_graph(runtime, checkpointer=checkpointer)
     initial = new_state(run_id, task, config_version=config_version)
-    config: dict[str, Any] = {"configurable": {"thread_id": run_id}}
-    return dict(graph.invoke(initial, config=config))
+    config: dict[str, Any] = {
+        "configurable": {"thread_id": run_id},
+        "recursion_limit": recursion_limit_for(runtime),
+    }
+    try:
+        return dict(graph.invoke(initial, config=config))
+    except GraphRecursionError:
+        # 预算算出来仍撞上限（比如工具轮把图推进得太远）：收口成「预算用尽」，
+        # 不要把「递归上限」这种实现细节当运行错误抛给调用方。
+        fallback = dict(initial)
+        fallback.update(
+            status="budget",
+            stop_reason="recursion_limit",
+            answer="（图执行步数到达上限，已停止；这是实现层的兜底，请调小 budget.max_steps 或 step_tool_budget。）",
+        )
+        return fallback

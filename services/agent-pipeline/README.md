@@ -180,6 +180,28 @@ agent-pipeline ingest <repo>/docs --prefix repo/ --ext .md
 
 `tests/test_step_budget_observable.py`、`tests/test_plan_step_limit.py` 各 1 例。
 
+## 一个步骤原地打转时谁说不
+
+追问「10 万次调用后还稳不稳」时发现的第二个预算漏洞：`steps_executed` 只在**模型不再调工具**时
+才 +1。于是「每一步都调工具、模型从不说完成」的路径上它永远是 0，`route_after_execute` 的
+`max_steps` 检查永远不触发——预算写 8 步，实测跑了 14 步、28 次 execute，最后靠
+`max_llm_calls` 兜底，账单和时延都按 2 倍算，而 `stop_reason` 还是空的。
+
+现在的口径：
+
+- **一步烧光工具预算却仍说继续** → 该步收口成 `failed`、`step_index` 往后走一步、`steps_executed` 记上；
+  计划里已经没有下一步时 `stop_reason="max_steps"`（以前会一路走到评审、以 `status=ok` 收场，看板分不出
+  「全步失败」和「做成」）。
+- **`max_steps` 的封顶写在节点里**：LangGraph 只提交节点返回值，条件边里改 `state["stop_reason"]`
+  不会进最终结果（这条以前让线上一律看到 `stop_reason=null`）。
+- **图递归上限按预算算**：LangGraph 默认 `recursion_limit=25`，而「每步 6 轮工具 + 1 次反思」的 5 步任务
+  就有 30+ 个 superstep，会在中途抛 `GraphRecursionError`（信息看起来像图写错了）。现在
+  `recursion_limit_for()` 按 `max_steps × (step_tool_budget + 2)` 估，兜底下限 30；真撞上时
+  返回 `stop_reason="recursion_limit"` 的说明性答复，不当成运行错误抛给调用方。
+
+`tests/test_step_progress.py` 3 例（封顶、烧光的步骤收口成 failed、正常完成的步骤不被误判）、
+`tests/test_recursion_limit.py` 2 例（随预算增长、30+ superstep 不炸）。
+
 ## 任务的 `cwd` 真的决定命令在哪跑
 
 `TaskSpec.cwd` 以前只写进提示词（「工作目录：D:/proj」），但 `run_command` 总在**服务进程自己的目录**里执行——

@@ -299,10 +299,18 @@ def _cancel_requested(runtime: Runtime, state: dict[str, Any]) -> bool:
 def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     if not _budget_left(state, runtime):
         return {**state, "status": "budget"}
+    # max_steps 的封顶必须写在节点里：条件边对 state 的改动不保证进图状态（LangGraph
+    # 只提交节点返回值），以前只在 route_after_execute 里写 stop_reason，最终结果里是 None。
+    if int(state.get("steps_executed", 0)) >= runtime.settings.budget.max_steps:
+        return {**state, "stop_reason": "max_steps"}
     plan = _plan_of(state)
     index = int(state.get("step_index", 0))
     if index >= len(plan):
-        return {**state, "steps_executed": int(state.get("steps_executed", 0)) + 1}
+        completed = int(state.get("steps_executed", 0)) + 1
+        updates: dict[str, Any] = {**state, "steps_executed": completed}
+        if completed >= runtime.settings.budget.max_steps:
+            updates["stop_reason"] = "max_steps"
+        return updates
     step = plan[index]
     step.status = "running"
     plan[index] = step
@@ -507,6 +515,8 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
                 plan[index] = step
         updates["plan"] = [s.to_dict() for s in plan]
         updates["step_index"] = len(plan)
+        # 全部步骤都完成了，台账也要对齐（否则行里的 steps_executed 会停在半路）
+        updates["steps_executed"] = max(int(state.get("steps_executed", 0)), len(plan))
     elif verdict == "replan":
         updates["replans"] = int(state.get("replans", 0)) + 1
         updates["plan"] = []
@@ -517,6 +527,7 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         updates["stop_reason"] = "reflect_abort"
     else:  # continue
         index = int(state.get("step_index", 0))
+        prior_calls = int(state.get("step_tool_calls", 0))
         # 反射者可以指定「下一步做哪个步骤」：协议里有 next_step、提示词也要求它输出，
         # 但以前没人读——反思说「先去第 3 步补验证」时，执行者仍按顺序往下走，
         # 于是计划里写着「先查证再做决定」也会被做成「按顺序做」。
@@ -532,16 +543,41 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
             updates["step_index"] = target
         step = plan[min(index, len(plan) - 1)] if plan else None
         updates["step_tool_calls"] = 0
-        # 模型偶发只执行一半：本轮观测里有失败就把该步骤留着重试，但最多重试一次（受 max_steps 限制）。
-        if step is not None and step.status not in ("done", "failed"):
+        # 一个步骤把工具预算烧光了、模型却仍不宣布完成，就是在原地打转：把它按失败收口并
+        # 往后走一步。否则 execute/reflect 会在同一步上无限循环，而 max_steps 只按
+        # 「完成的步骤数」计（以前只在该步不调工具时 +1）→ 预算形同废纸，只能靠
+        # max_llm_calls 兜底（实测 8 步预算跑掉 14 步、28 次 execute）。
+        exhausted = (
+            step is not None
+            and step.status == "running"
+            and not jumped
+            and prior_calls >= runtime.settings.budget.step_tool_budget
+        )
+        if exhausted:
+            position = min(index, len(plan) - 1)
+            step.status = "failed"
+            plan[position] = step
+            advanced = min(position + 1, len(plan))
+            updates["step_index"] = advanced
+            updates["steps_executed"] = max(int(state.get("steps_executed", 0)), advanced)
+            updates["plan"] = [s.to_dict() for s in plan]
+            if advanced >= len(plan):
+                # 计划里已经没有「下一个」可试了：这是预算用尽，不是任务做完了。
+                # 以前这里会一路走到 critic、以 status=ok 收场，看板分不出「全步失败」和「做成」。
+                updates["stop_reason"] = "max_steps"
+        elif step is not None and step.status not in ("done", "failed"):
             step.status = "running"
             position = min(index, len(plan) - 1)
             plan[position] = step
             if index >= len(plan):
                 updates["step_index"] = max(0, len(plan) - 1)
             updates["plan"] = [s.to_dict() for s in plan]
+            updates["steps_executed"] = max(int(state.get("steps_executed", 0)), index)
         elif jumped:
             updates["plan"] = [s.to_dict() for s in plan]
+            updates["steps_executed"] = max(int(state.get("steps_executed", 0)), index)
+        else:
+            updates["steps_executed"] = max(int(state.get("steps_executed", 0)), index)
     _remember(runtime, state, "lesson", f"反思（{verdict}）：" + "；".join(reflection.reasons)[:200], importance=0.5)
     # 反思总结出的「经验」比「反思理由」更值得留：下次做同类任务要优先被检索到。
     for lesson in lessons:
