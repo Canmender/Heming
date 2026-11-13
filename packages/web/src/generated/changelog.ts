@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.55.10",
+    "date": "2026-11-13",
+    "title": "补回插件启停/卸载、通用安装器外壳、智能体链路修复",
+    "bullets": [
+      "**插件区又能卸载了**：d.135 删掉 `WidgetsView` 后，bundle（界面）插件只剩只读行。现在恢复启停 / 打开页面 / 卸载（二次确认）三件套，卸载前先停插件引擎与页面视图，修掉 Windows 上「删目录 EPERM」的失败（`packages/web/src/components/plugins/BundlePluginCard.tsx`）。",
+      "**通用安装器外壳**：`packages/setup` 自绘外壳（900×620）启动时读 `${feedUrl}/latest.yml` 决定版本行，探测失败回落 `generated.json`；新增 `--generic` 产物 `和鸣安装程序.exe`（102.5 MB）。外壳与内层 NSIS 分开：外壳负责界面与安装位置选择，内层静默安装。",
+      "**智能体链路修复**：工具回放去重（溢出重试不重放写操作）、跨轮历史带 `assistant(tool_calls)` + `role:\"tool\"` 行、上下文溢出重试真的变短、记忆读侧按偏好收口、MCP 连接状态 `stale` 与自动重连、工具图片结构化回灌、中文工具检索、内容策略拦下不再给空白气泡、stdio 请求 id 不撞号、用户中断真的取消 stdio 工具。",
+      "**文档**：新增 `docs/AUDIT-2026-11-13.md` 全量自检报告（测试/产物/线上基线、P0–P2 待办、需拍板事项）；HANDOFF 补 §0.3 指向。",
+      "**仓库新增**：`services/agent-pipeline`（Python/LangGraph 的 Plan-Execute-Reflect-Critic-对抗-总结流水线，288 例、覆盖率 96%）——独立服务，**不随本次安装包分发**。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.54.10",
     "date": "2026-11-12",
     "title": "信息中枢日程页改用大模型识别",
