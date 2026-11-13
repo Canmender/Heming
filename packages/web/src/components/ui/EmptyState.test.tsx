@@ -46,6 +46,14 @@ describe("EmptyState 统一空态", () => {
     expect(root.className).toContain("text-left");
   });
 
+  it("framed 变体自带卡片描边（空态自己就是一块卡片）", () => {
+    const { container } = render(<EmptyState title="插件列表为空" framed />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("ui-empty");
+    expect(root.className).toContain("ui-card");
+    expect(root.className).toContain("py-8");
+  });
+
   it("标题/说明支持 React 节点（保留强调与换行语义）", () => {
     render(
       <EmptyState

@@ -34,6 +34,7 @@ import {
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
@@ -703,18 +704,13 @@ export function PluginsPage({
 
             {/* 声明式插件为空时的入口保持原样（统一列表里仍有系统/内置单元，所以不能复用空列表态） */}
             {list.length === 0 && (
-              <section
-                className="mt-3 flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
-                aria-label="插件列表为空"
-              >
-                <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
-                  <PackageIcon width={20} height={20} />
-                </span>
-                <p className="ui-section-title">还没有安装插件</p>
-                <p className="ui-caption">
-                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令；用上方的「从插件仓库安装」或
-                  「手动粘贴清单」开始。
-                </p>
+              <section aria-label="插件列表为空" className="mt-3">
+                <EmptyState
+                  framed
+                  icon={<PackageIcon width={20} height={20} />}
+                  title="还没有安装插件"
+                  desc="一份插件清单可以一次带入一组技能、远程 MCP 服务与命令；用上方的「从插件仓库安装」或「手动粘贴清单」开始。"
+                />
               </section>
             )}
 

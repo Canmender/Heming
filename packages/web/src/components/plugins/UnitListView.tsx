@@ -13,6 +13,7 @@ import {
   type PluginHealthLevel,
 } from "../../lib/plugins/index.js";
 import { SearchIcon } from "../icons.js";
+import { EmptyState } from "../ui/EmptyState.js";
 import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
 
 /**
@@ -397,19 +398,18 @@ export function UnitListView({
       </div>
 
       {visible.length === 0 ? (
-        <section
-          role="region"
-          aria-label="筛选无结果"
-          className="flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
-        >
-          <span aria-hidden="true" className="plugin-icon-tile mb-1 h-10 w-10">
-            <SearchIcon width={18} height={18} />
-          </span>
-          <p className="ui-section-title">没有匹配的能力单元</p>
-          <p className="ui-caption">换个关键词或来源，或清除筛选看全部。</p>
-          <button type="button" onClick={clearFilters} className={`mt-1 ${BTN_GHOST_SM}`}>
-            清除筛选
-          </button>
+        <section role="region" aria-label="筛选无结果">
+          <EmptyState
+            framed
+            icon={<SearchIcon width={18} height={18} />}
+            title="没有匹配的能力单元"
+            desc="换个关键词或来源，或清除筛选看全部。"
+            actions={
+              <button type="button" onClick={clearFilters} className={BTN_GHOST_SM}>
+                清除筛选
+              </button>
+            }
+          />
         </section>
       ) : (
         <ul className="grid gap-3">

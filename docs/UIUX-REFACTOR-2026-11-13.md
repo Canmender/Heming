@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.57.11）
+# UI/UX 重构交付记录（d.140.3.58.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -59,9 +59,9 @@
 审计 139 条里，本轮只覆盖了全部 9 条 S1 与约三分之一的 S2/S3。明确留给后续：
 
 1. **基元采用率**：全仓仍有 265 处手拼 `"ui-btn …"`、`ErrorState` 零采用、`TextField` 仅 1 处。第 3/4 轮只做了「新代码用基元 + 字面量收口」，没有做批量替换（改动面太大、无 typecheck 兜底时风险不可控）。
-2. **三态统一**：加载 4 种 / 空 3 套 / 失败 5 种仍在；需要一次 `ui/AsyncBoundary` 级别的抽象，属独立一轮。
+2. **三态统一**：加载 4 种 / 空 3 套 / 失败 5 种仍在；第 5 轮把插件区三处逐字重复的空态收进 `EmptyState framed`，整体仍需一次 `ui/AsyncBoundary` 级别的抽象，属独立一轮。
 3. **弹窗壳统一**：11 个弹窗各自拼壳（4 种宽度、2 种圆角）。审计建议抽出 `ui/Dialog`，本轮 `ConfirmDialog` 已是事实标准但未强制。
-4. **ModelPage 表单语义**（S1-9）：20+ 字段仍无可见 label / 必填标记 / 错误关联，CLI 英文枚举仍直接当界面文案。这块需要改的是交互结构而非样式，单独一轮更安全。
+4. **ModelPage 表单语义**（S1-9）：第 5 轮已做「枚举中文化 + 来源表单/多机同步 7 个字段的可见 label」，其余 20+ 字段仍是 `aria-label`（读屏有名字，但填过内容后看不到这一格是什么），需要按表单分组逐块补 label + 必填/错误关联，属独立一轮。
 5. **暗色兼容层**：`index.css` 里 116 条按类名覆盖仍是兜底网，本轮把常见字面量换成了 token，但没删桥接规则——删早了会一屏花掉，应等页面全部改用 token 类后再逐条删。
 6. **`.ui-btn` 12px 与页脚 `.ui-caption` 12px** 保持不变：再降会牺牲中文可读性，反而违反「更简洁」的目标。
 
@@ -104,7 +104,23 @@
 | S1-4 智能体表单 380px 溢出 | 第 1 轮 `max-w` |
 | S1-5 通知面板 320px 越界 | 第 1 轮 `max-w` |
 | S1-6/7/8 三处删除零确认 | 第 4 轮 `ConfirmDialog` / 两步确认 |
-| S1-9 表单语义与英文枚举 | **未做**（见 §2.4） |
+| S1-9 表单语义与英文枚举 | 第 5 轮部分：枚举中文化 + 7 个字段可见 label（其余见 §2.4） |
 | A 组字号 6 档 / 阴影 6 套 | 第 1、2 轮收敛到 3 档 / 1 套 |
 | C 组 17 处手写遮罩 | 第 3 轮收进 `var(--scrim)` |
 | C 组 116 条暗色补丁 | 部分（常见字面量已换 token，桥接规则保留） |
+
+## 6. 第 5 轮（`d.140.3.58.11`）· 枚举中文化 + 空态收口
+
+第 1–4 轮把全局杠杆（token → 基元 → 壳层）做完后，第 5 轮回到审计剩下的两条结构性问题，取其中可在一次改动里验证干净的部分：
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/components/ModelPage.tsx` | 新增 `ROUTING_LABEL` / `SYNC_KIND_LABEL` / `SYNC_COMMAND_LABEL` / `API_LABEL` 四张映射（CLI 值 → 中文文案），覆盖分组选路策略（两处，18/30 空格两种缩进各一处）、请求协议、多机同步类型与动作——`value` 一律保持原值，命令与协议不变；「其他 OpenAI 兼容地址」4 个字段与「多机同步」3 个字段改为 `<label class="grid gap-1">` + `.ui-caption` 可见文案（文案沿用原 `aria-label`，`getByLabelText` 与读屏名称不变） |
+| `packages/web/src/components/ui/EmptyState.tsx` | 新增 `framed` 变体：`.ui-card` 描边 + `py-8`，用于「空态自己就是一块卡片」的场景；`compact` 与 `className` 行为不变 |
+| `packages/web/src/components/PluginsPage.tsx` | 插件列表为空：手写 `rounded-xl border border-line-soft … shadow-card` 壳 + `plugin-icon-tile h-11 w-11` + `ui-section-title`/`ui-caption` → `<section aria-label="插件列表为空"><EmptyState framed …/></section>`（region 语义与文案逐字保留） |
+| `packages/web/src/components/plugins/UnitListView.tsx` | 筛选无结果：同壳改 `EmptyState framed` + `actions`（「清除筛选」按钮），保留 `role="region" aria-label="筛选无结果"` |
+| `packages/web/src/components/plugins/PluginBundlePage.tsx` | 浏览器降级（`!canMount`）与「无页面 / 已停用」两处：同壳改 `EmptyState framed className="w-full max-w-[520px]"`，后者把「打开插件详情」放进 `actions` |
+
+**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` 297 文件 / 4366 例全通过；`pnpm -r typecheck`、`pnpm -r build` 通过。
+
+**同时修掉的发版缺口**：上一轮 bump 到 `d.140.3.57.11` 时漏写 `docs/RELEASE-NOTES.md` 条目，`changelog.test.ts` 的「最新一条必须有用户版说明」与 `latestUserUpdates` 两例因此失败（4 例）。本轮补 `d.140.3.57.11`、`d.140.3.58.11` 两条用户版说明后重跑 `node scripts/build-changelog.mjs` 恢复绿色。教训写进发版清单：**bump 之后立刻补 RELEASE-NOTES，否则 `pnpm -r test` 必挂**。

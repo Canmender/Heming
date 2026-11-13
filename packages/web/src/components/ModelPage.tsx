@@ -80,6 +80,50 @@ const PLAN_BADGE: Record<PlanKind, { label: string; className: string }> = {
   coding: { label: "Coding Plan", className: "bg-[var(--info-soft)] text-[var(--info)]" },
 };
 
+/**
+ * 选路策略的界面文案（d.140 · 审计 S1-9）。
+ *
+ * CLI 里是 smart/order/rotate… 这类短值，直接当 <option> 文案等于把命令行摊给用户；
+ * 选项显示中文、提交仍走原值，命令输出与后端协议完全不变。
+ */
+const ROUTING_LABEL: Record<string, string> = {
+  smart: "智能分配",
+  order: "按列表顺序",
+  rotate: "轮询",
+  usage: "优先低用量",
+  pace: "按额度节奏",
+  weight: "按权重随机",
+  free: "优先免费",
+  fast: "优先快",
+  cheap: "优先便宜",
+  drain: "先耗完再切换",
+  expiring: "先到期先用",
+};
+
+/** 同步通道：webdav / s3 / github。 */
+const SYNC_KIND_LABEL: Record<string, string> = {
+  webdav: "WebDAV 网盘",
+  s3: "S3 / 对象存储",
+  github: "GitHub 仓库",
+};
+
+/** 同步动作：now / on / off / set。 */
+const SYNC_COMMAND_LABEL: Record<string, string> = {
+  now: "立即同步一次",
+  on: "开启自动同步",
+  off: "关闭自动同步",
+  set: "写入配置项",
+};
+
+/** 请求协议：auto / chat / responses / anthropic / gemini。 */
+const API_LABEL: Record<string, string> = {
+  auto: "自动识别",
+  chat: "Chat Completions",
+  responses: "Responses",
+  anthropic: "Anthropic Messages",
+  gemini: "Gemini",
+};
+
 const GROUP_ROUTING = [
   "smart",
   "order",
@@ -524,7 +568,7 @@ export function ModelPage() {
                 >
                   {["auto", "chat", "responses", "anthropic", "gemini"].map((api) => (
                     <option key={api} value={api}>
-                      {api}
+                      {API_LABEL[api] ?? api}
                     </option>
                   ))}
                 </select>
@@ -890,35 +934,43 @@ export function ModelPage() {
                   </button>
                 ) : (
                   <div className="rta-enter mt-2 grid gap-2 sm:grid-cols-2">
-                    <input
-                      aria-label="来源名称"
-                      className="ui-input"
-                      placeholder="名称（如 relay）"
-                      value={custom.id}
-                      onChange={(event) => setCustom({ ...custom, id: event.target.value })}
-                    />
-                    <input
-                      aria-label="接口地址"
-                      className="ui-input"
-                      placeholder="https://host/v1"
-                      value={custom.url}
-                      onChange={(event) => setCustom({ ...custom, url: event.target.value })}
-                    />
-                    <input
-                      aria-label="自定义 Key"
-                      className="ui-input"
-                      type="password"
-                      placeholder="API Key"
-                      value={custom.key}
-                      onChange={(event) => setCustom({ ...custom, key: event.target.value })}
-                    />
-                    <input
-                      aria-label="模型列表"
-                      className="ui-input"
-                      placeholder="模型 id，逗号分隔（可留空自动读取）"
-                      value={custom.models}
-                      onChange={(event) => setCustom({ ...custom, models: event.target.value })}
-                    />
+                    <label className="grid gap-1">
+                      <span className="ui-caption">来源名称</span>
+                      <input
+                        className="ui-input"
+                        placeholder="名称（如 relay）"
+                        value={custom.id}
+                        onChange={(event) => setCustom({ ...custom, id: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="ui-caption">接口地址</span>
+                      <input
+                        className="ui-input"
+                        placeholder="https://host/v1"
+                        value={custom.url}
+                        onChange={(event) => setCustom({ ...custom, url: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="ui-caption">自定义 Key</span>
+                      <input
+                        className="ui-input"
+                        type="password"
+                        placeholder="API Key"
+                        value={custom.key}
+                        onChange={(event) => setCustom({ ...custom, key: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-1 sm:col-span-2">
+                      <span className="ui-caption">模型列表</span>
+                      <input
+                        className="ui-input"
+                        placeholder="模型 id，逗号分隔（可留空自动读取）"
+                        value={custom.models}
+                        onChange={(event) => setCustom({ ...custom, models: event.target.value })}
+                      />
+                    </label>
                     <div className="flex gap-2 sm:col-span-2">
                       <button
                         type="button"
@@ -1038,7 +1090,7 @@ export function ModelPage() {
                               <option value="">分发策略（保持默认）</option>
                               {GROUP_ROUTING.map((routing) => (
                                 <option key={routing} value={routing}>
-                                  {routing}
+                                  {ROUTING_LABEL[routing] ?? routing}
                                 </option>
                               ))}
                             </select>
@@ -1200,7 +1252,7 @@ export function ModelPage() {
                 >
                   {GROUP_ROUTING.map((routing) => (
                     <option key={routing} value={routing}>
-                      {routing}
+                      {ROUTING_LABEL[routing] ?? routing}
                     </option>
                   ))}
                 </select>
@@ -1360,27 +1412,35 @@ export function ModelPage() {
             <details className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <select aria-label="同步类型" className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
-                  {["webdav", "s3", "github"].map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-                </select>
-                <select aria-label="同步动作" className="ui-input" value={syncCommand} onChange={(event) => setSyncCommand(event.target.value)}>
-                  {["now", "on", "off", "set"].map((command) => (
-                    <option key={command} value={command}>
-                      {command}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  aria-label="同步参数"
-                  className="ui-input"
-                  placeholder="set 的参数：key=value key2=value2"
-                  value={syncValues}
-                  onChange={(event) => setSyncValues(event.target.value)}
-                />
+                <label className="grid gap-1">
+                  <span className="ui-caption">同步类型</span>
+                  <select className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
+                    {["webdav", "s3", "github"].map((kind) => (
+                      <option key={kind} value={kind}>
+                        {SYNC_KIND_LABEL[kind] ?? kind}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1">
+                  <span className="ui-caption">同步动作</span>
+                  <select className="ui-input" value={syncCommand} onChange={(event) => setSyncCommand(event.target.value)}>
+                    {["now", "on", "off", "set"].map((command) => (
+                      <option key={command} value={command}>
+                        {SYNC_COMMAND_LABEL[command] ?? command}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1">
+                  <span className="ui-caption">同步参数</span>
+                  <input
+                    className="ui-input"
+                    placeholder="写入配置时：key=value key2=value2"
+                    value={syncValues}
+                    onChange={(event) => setSyncValues(event.target.value)}
+                  />
+                </label>
               </div>
               <button
                 type="button"

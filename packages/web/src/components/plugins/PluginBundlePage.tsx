@@ -10,6 +10,7 @@ import {
   type WidgetPageRect,
 } from "../../types/widgets.js";
 import { AlertIcon, PackageIcon, RefreshIcon } from "../icons.js";
+import { EmptyState } from "../ui/EmptyState.js";
 import { ERROR_TEXT, HINT } from "./shared.js";
 
 /**
@@ -199,16 +200,13 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   if (!canMount) {
     return (
       <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
-        <div className="flex max-w-[520px] flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-6 py-10 text-center shadow-card">
-          <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
-            <AlertIcon width={20} height={20} />
-          </span>
-          <p className="ui-section-title">插件页面只在安装版里可用</p>
-          <p className={HINT}>
-            插件的页面是插件包自带的 HTML，必须在桌面端的独立沙箱视图里渲染；
-            浏览器里没有这个能力，也不会退化成只读的文字页。
-          </p>
-        </div>
+        <EmptyState
+          framed
+          className="w-full max-w-[520px]"
+          icon={<AlertIcon width={20} height={20} />}
+          title="插件页面只在安装版里可用"
+          desc="插件的页面是插件包自带的 HTML，必须在桌面端的独立沙箱视图里渲染；浏览器里没有这个能力，也不会退化成只读的文字页。"
+        />
       </section>
     );
   }
@@ -231,20 +229,22 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         : `「${record.name}」的清单里没有声明页面（contributions.page）。`;
     return (
       <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
-        <div className="flex max-w-[520px] flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-6 py-10 text-center shadow-card">
-          <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
-            <PackageIcon width={20} height={20} />
-          </span>
-          <p className="ui-section-title">这个插件没有页面或已被停用</p>
-          <p className={HINT}>{detail}</p>
-          <button
-            type="button"
-            onClick={openPluginDetails}
-            className="ui-btn ui-btn-md ui-btn-primary"
-          >
-            打开插件详情
-          </button>
-        </div>
+        <EmptyState
+          framed
+          className="w-full max-w-[520px]"
+          icon={<PackageIcon width={20} height={20} />}
+          title="这个插件没有页面或已被停用"
+          desc={detail}
+          actions={
+            <button
+              type="button"
+              onClick={openPluginDetails}
+              className="ui-btn ui-btn-md ui-btn-primary"
+            >
+              打开插件详情
+            </button>
+          }
+        />
       </section>
     );
   }

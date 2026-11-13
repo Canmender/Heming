@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.58.11",
+    "date": "2026-11-13",
+    "title": "ModelPage 枚举中文化 + 空态收口",
+    "bullets": [
+      "**审计 S1-9（部分）**：`ModelPage.tsx` 的英文 CLI 值不再直接当选项文案——新增 `ROUTING_LABEL`（smart/order/rotate… → 智能分配/按列表顺序/轮询…）、`SYNC_KIND_LABEL`（webdav/s3/github）、`SYNC_COMMAND_LABEL`（now/on/off/set）、`API_LABEL`（auto/chat/responses/anthropic/gemini）四张映射表，选项显示中文、`value` 仍是原值，命令与协议不变。覆盖分组选路策略（两处）、请求协议、多机同步类型/动作。",
+      "**可见标签**：「其他 OpenAI 兼容地址」4 个字段（来源名称/接口地址/自定义 Key/模型列表）与「多机同步」3 个字段（同步类型/同步动作/同步参数）改成 `<label>` 包住控件 + `.ui-caption` 可见文案，填过内容后仍知道这一格是什么；文案沿用原 `aria-label`，读屏名称与既有测试的 `getByLabelText` 不变。其余 20+ 字段仍是 `aria-label`（见遗留项）。",
+      "**空态收口**：`EmptyState` 新增 `framed` 变体（`.ui-card` 描边 + `py-8`）。`PluginsPage.tsx`（插件列表为空）、`plugins/UnitListView.tsx`（筛选无结果）、`plugins/PluginBundlePage.tsx`（浏览器降级 / 无页面或已停用）三处逐字重复的 `rounded-xl border border-line-soft … shadow-card` 手写壳改成 `<EmptyState framed>`；保留原 `aria-label` 与 region 语义、标题与说明文案逐字不变，测试断言不动。",
+      "**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` 297 文件 / 4366 例；`pnpm -r typecheck`、`pnpm -r build` 通过（见 `docs/UIUX-REFACTOR-2026-11-13.md` §6）。",
+      "**发布说明**：`docs/RELEASE-NOTES.md` 补 `d.140.3.57.11`（上一轮漏写，`changelog.test.ts` 的「最新一条必须有用户版说明」因此失败）与 `d.140.3.58.11` 两条。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.57.11",
     "date": "2026-11-13",
     "title": "UI/UX 第 2–4 轮并回主干：令牌收敛、语义前景色、破坏性操作确认",
