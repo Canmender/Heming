@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionTab } from "../lib/sessionState.js";
+import { EmptyState } from "./ui/EmptyState.js";
 import type {
   TeamActivity,
   TeamActivityKind,
@@ -884,14 +885,15 @@ export function TeamPage() {
                 </button>
               </div>
             ) : visibleActivities.length === 0 ? (
-              <div className="ui-empty">
-                <p>还没有可见的动向。</p>
-                <p className="mt-1 ui-caption">
-                  {shareCount > 0
+              <EmptyState
+                compact
+                title="还没有可见的动向。"
+                desc={
+                  shareCount > 0
                     ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
-                    : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"}
-                </p>
-              </div>
+                    : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"
+                }
+              />
             ) : (
               <ul className="space-y-1">
                 {visibleActivities.map((a) => (

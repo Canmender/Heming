@@ -3,6 +3,7 @@ import { listAgents } from "../lib/agentsApi.js";
 import { SelfEditCard } from "./SelfEditCard.js";
 import { PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { EmptyState } from "./ui/EmptyState.js";
 import { useModalA11y } from "./useModalA11y.js";
 import {
   skillPool,
@@ -935,34 +936,34 @@ export function SkillsView({
     <>
       {list.length === 0 ? (
         <section className={`${cardCls} mt-3`}>
-          <div className="ui-empty">
-            <p className="ui-empty-title">技能池还是空的</p>
-            <p className="ui-empty-desc">
-              新建一个技能，或粘贴 SKILL.md 导入。技能要「启用 + 分配给智能体」才会用于对话。
-            </p>
-            <div className="ui-empty-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  setMsg(null);
-                  setCreateOpen(true);
-                }}
-                className={btnPrimarySm}
-              >
-                新建技能
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setImportOpen(true);
-                  setMsg(null);
-                }}
-                className={btnGhost}
-              >
-                导入 SKILL.md
-              </button>
-            </div>
-          </div>
+          <EmptyState
+            title="技能池还是空的"
+            desc="新建一个技能，或粘贴 SKILL.md 导入。技能要「启用 + 分配给智能体」才会用于对话。"
+            actions={
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMsg(null);
+                    setCreateOpen(true);
+                  }}
+                  className={btnPrimarySm}
+                >
+                  新建技能
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportOpen(true);
+                    setMsg(null);
+                  }}
+                  className={btnGhost}
+                >
+                  导入 SKILL.md
+                </button>
+              </>
+            }
+          />
           {importPanel}
         </section>
       ) : (

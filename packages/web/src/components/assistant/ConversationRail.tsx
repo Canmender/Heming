@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
+import { EmptyState } from "../ui/EmptyState.js";
 import { PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
@@ -299,27 +300,33 @@ export function ConversationRail({
   const renderEmpty = () => {
     if (sorted.length === 0) {
       return (
-        <div className="ui-empty px-2 py-6">
-          <p className="ui-empty-title">还没有对话</p>
-          <p className="ui-empty-desc">在右侧选一个智能体，开始第一段对话。</p>
-          <button
-            type="button"
-            onClick={onNewConversation}
-            className="ui-btn ui-btn-sm ui-btn-primary mt-2 w-full"
-          >
-            选择智能体
-          </button>
-        </div>
+        <EmptyState
+          className="px-2 py-6"
+          title="还没有对话"
+          desc="在右侧选一个智能体，开始第一段对话。"
+          actions={
+            <button
+              type="button"
+              onClick={onNewConversation}
+              className="ui-btn ui-btn-sm ui-btn-primary w-full"
+            >
+              选择智能体
+            </button>
+          }
+        />
       );
     }
     return (
-      <div className="ui-empty px-2 py-6">
-        <p className="ui-empty-title">没有匹配的对话</p>
-        <p className="ui-empty-desc">换个关键词试试，或清空搜索。</p>
-        <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={closeSearch}>
-          清空搜索
-        </button>
-      </div>
+      <EmptyState
+        className="px-2 py-6"
+        title="没有匹配的对话"
+        desc="换个关键词试试，或清空搜索。"
+        actions={
+          <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={closeSearch}>
+            清空搜索
+          </button>
+        }
+      />
     );
   };
 

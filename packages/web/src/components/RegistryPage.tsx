@@ -13,6 +13,7 @@ import { hasStdioBridge } from "../lib/mcp/index.js";
 import { useRegistryStore, type RegistryStore } from "../store/registry.js";
 import { PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 /** 搜索防抖：输入过程中的每个字符都打一次 Registry 没有意义。 */
 export const SEARCH_DEBOUNCE_MS = 400;
@@ -232,13 +233,14 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
       )}
 
       {loading && entries.length === 0 ? (
-        <div className="ui-empty rounded-xl border border-dashed border-line bg-[var(--surface)]">
-          <p className="ui-empty-desc">正在连接 Registry…</p>
-        </div>
+        <EmptyState framed className="border-dashed" title="正在连接 Registry…" />
       ) : visible.length === 0 ? (
-        <div className="ui-empty rounded-xl border border-dashed border-line bg-[var(--surface)]">
-          <p className="ui-empty-desc">{entries.length === 0 ? "没有拉到可展示的服务。检查网络后重试。" : "没有匹配的服务。"}</p>
-        </div>
+        <EmptyState
+          framed
+          className="border-dashed"
+          title={entries.length === 0 ? "没有拉到可展示的服务" : "没有匹配的服务"}
+          desc={entries.length === 0 ? "检查网络后重试，或稍后再来看。" : undefined}
+        />
       ) : (
         <div className="mt-4 flex flex-col ui-card">
           {visible.map((entry) => (

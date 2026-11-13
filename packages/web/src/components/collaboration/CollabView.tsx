@@ -10,6 +10,7 @@ import { estimateTurnCount, runCollaboration } from "../../lib/collaboration/eng
 import { createCollaborationAsk } from "../../lib/collaboration/run.js";
 import { loadLastRun, saveLastRun } from "../../lib/collaboration/history.js";
 import { resolveBoundProfile } from "../../lib/llmRoute.js";
+import { EmptyState } from "../ui/EmptyState.js";
 import { useLlmStore } from "../../store/llm.js";
 import { useUiStore } from "../../store/ui.js";
 import { Avatar } from "../Avatar.js";
@@ -625,25 +626,27 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 ))}
               </ol>
             ) : (
-              <div className="ui-empty rounded-xl border border-dashed border-line-soft">
-                <p className="ui-empty-title">从模板开始，或自己填写任务</p>
-                <p className="ui-empty-desc">
-                  模板只填充任务、模式与轮数；参与者和顺序仍可调整。
-                </p>
-                <div className="ui-empty-actions flex-wrap justify-center">
-                  {TEMPLATES.map((template) => (
-                    <button
-                      key={template.key}
-                      type="button"
-                      disabled={running}
-                      onClick={() => applyTemplate(template)}
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
-                    >
-                      {template.title}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <EmptyState
+                framed
+                className="border-dashed"
+                title="从模板开始，或自己填写任务"
+                desc="模板只填充任务、模式与轮数；参与者和顺序仍可调整。"
+                actions={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {TEMPLATES.map((template) => (
+                      <button
+                        key={template.key}
+                        type="button"
+                        disabled={running}
+                        onClick={() => applyTemplate(template)}
+                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                      >
+                        {template.title}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
             )}
           </section>
         </div>

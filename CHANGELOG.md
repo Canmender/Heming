@@ -2,6 +2,13 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.140.3.65.11（2026-11-13）— 空态收口（第 12 轮 · 基元采用率）
+
+- **6 处手写空态并入 `ui/EmptyState`**：`RegistryPage.tsx` 两处（加载中 / 无结果，原来只有一个 `ui-empty-desc` 段落，现在有标题 + 说明）、`SkillsPage.tsx` 技能池空态（两个操作按钮进 `actions`）、`TeamPage.tsx` 动向空态（`compact` 收紧留白）、`collaboration/CollabView.tsx` 模板空态（`framed` + 模板按钮组）、`assistant/ConversationRail.tsx` 两处（无对话 / 无匹配结果）。
+- 视觉：`RegistryPage` 与 `CollabView` 原来用 `border-dashed` 表示「占位」，保留虚线（`framed` 走 `.ui-card` 实线描边，再叠 `border-dashed` 覆盖）；对话列表两处仍用 `px-2 py-6` 的窄版，只把内部结构换成统一组件。
+- 文案微调：`RegistryPage` 的「没有拉到可展示的服务。检查网络后重试。」拆成标题 + 说明「检查网络后重试，或稍后再来看。」，其余文案逐字保留（`AssistantPage.test.tsx` 仍按「没有匹配的对话」断言）。
+- 门禁：`pnpm --filter @heming/web typecheck` 过；受影响 8 个测试文件 **101 例**全过，随后全量 web 套件复跑。
+
 ## d.140.3.64.11（2026-11-13）— 弹窗统一收尾 + 登录页 token 收口（第 11 轮）
 
 - **第 7、8 个弹窗并入 `ui/Dialog`**：`MemoryPage.tsx` 的本地 `Modal` 外壳（460px、自带 header/关闭按钮、`overflow-y-auto` 直接落在面板上）改为 15 行 `<Dialog ariaLabel title size="sm" maxHeightVh={86} bodyClassName="p-5">` 包装，一次覆盖「添加记忆」「添加知识条目」两个表单。滚动从「整个面板滚」变成「body 区滚、头部固定」，与确认框/文件预览/插件三件套一致；同时删掉只被旧外壳使用的 `useModalA11y` import（`Dialog` 内部已接管焦点陷阱与 Esc）。

@@ -12,6 +12,18 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.65.11",
+    "date": "2026-11-13",
+    "title": "空态收口（第 12 轮 · 基元采用率）",
+    "bullets": [
+      "**6 处手写空态并入 `ui/EmptyState`**：`RegistryPage.tsx` 两处（加载中 / 无结果，原来只有一个 `ui-empty-desc` 段落，现在有标题 + 说明）、`SkillsPage.tsx` 技能池空态（两个操作按钮进 `actions`）、`TeamPage.tsx` 动向空态（`compact` 收紧留白）、`collaboration/CollabView.tsx` 模板空态（`framed` + 模板按钮组）、`assistant/ConversationRail.tsx` 两处（无对话 / 无匹配结果）。",
+      "视觉：`RegistryPage` 与 `CollabView` 原来用 `border-dashed` 表示「占位」，保留虚线（`framed` 走 `.ui-card` 实线描边，再叠 `border-dashed` 覆盖）；对话列表两处仍用 `px-2 py-6` 的窄版，只把内部结构换成统一组件。",
+      "文案微调：`RegistryPage` 的「没有拉到可展示的服务。检查网络后重试。」拆成标题 + 说明「检查网络后重试，或稍后再来看。」，其余文案逐字保留（`AssistantPage.test.tsx` 仍按「没有匹配的对话」断言）。",
+      "门禁：`pnpm --filter @heming/web typecheck` 过；受影响 8 个测试文件 **101 例**全过，随后全量 web 套件复跑。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.64.11",
     "date": "2026-11-13",
     "title": "弹窗统一收尾 + 登录页 token 收口（第 11 轮）",
