@@ -337,17 +337,27 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
       const created = await submit(request, signal);
       let runId = created.runId;
       // 服务端可能返回 202 但已经有结果（极快的 run）——先查一次再决定是否轮询。
-      for (;;) {
-        const raw = await requestJson<RawRun>(`/v1/runs/${encodeURIComponent(runId)}`, { method: "GET" }, signal);
-        runId = raw.run_id ?? runId;
-        await handleApprovals(raw, runId, signal);
-        if (TERMINAL.has(String(raw.status))) return normalizeRun(raw, runId);
-        if (now() - started > runTimeoutMs) {
-          // 超时不代表服务端停了：请求取消，让它别再白烧模型。
-          await cancel(runId).catch(() => undefined);
-          throw new PipelineError("timeout", `流水线超过 ${Math.round(runTimeoutMs / 60_000)} 分钟仍未结束，已请求取消`);
+      try {
+        for (;;) {
+          const raw = await requestJson<RawRun>(`/v1/runs/${encodeURIComponent(runId)}`, { method: "GET" }, signal);
+          runId = raw.run_id ?? runId;
+          await handleApprovals(raw, runId, signal);
+          if (TERMINAL.has(String(raw.status))) return normalizeRun(raw, runId);
+          if (now() - started > runTimeoutMs) {
+            // 超时不代表服务端停了：请求取消，让它别再白烧模型。
+            await cancel(runId).catch(() => undefined);
+            throw new PipelineError("timeout", `流水线超过 ${Math.round(runTimeoutMs / 60_000)} 分钟仍未结束，已请求取消`);
+          }
+          await sleep(pollIntervalMs, signal);
         }
-        await sleep(pollIntervalMs, signal);
+      } catch (error) {
+        // 用户中止时轮询确实停了，但服务端不会停：它还在跑工具、烧模型。
+        // 必须显式请求取消（不带上已中止的 signal，否则这条请求也当场失败）；
+        // 取消请求本身失败就吞掉——用户已经决定不等了，不该因为这个再报一次错。
+        if (error instanceof PipelineError && error.kind === "aborted") {
+          await cancel(runId).catch(() => undefined);
+        }
+        throw error;
       }
     },
 

@@ -253,6 +253,26 @@ describe("agent-pipeline 客户端", () => {
     expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(true);
   });
 
+  it("用户中止（signal abort）时也请求服务端取消，别让它在后台继续跑工具", async () => {
+    const controller = new AbortController();
+    const { client, calls } = makeClient(
+      [
+        { match: "POST /v1/runs", responses: [jsonResponse({ run_id: "r1", status: "running" }, 202)] },
+        { match: "GET /v1/runs/r1", responses: [RUNNING()] },
+        { match: "POST /v1/runs/r1/cancel", responses: [jsonResponse({ ok: true }, 202)] },
+      ],
+      {
+        sleep: async () => {
+          controller.abort();
+          throw new PipelineError("aborted", "已中止（用户点了停止）");
+        },
+      },
+    );
+
+    await expect(client.run({ goal: "x" }, { signal: controller.signal })).rejects.toMatchObject({ kind: "aborted" });
+    // 轮询停了不等于服务端停了：必须显式 POST /cancel（以前只停轮询，服务端把工具跑完）。
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/v1/runs/r1/cancel"))).toBe(true);
+  });
   it("待审批的工具调用交给调用方裁决，并回填 /approve", async () => {
     const approval: PipelineApproval = {
       call_id: "c9",
