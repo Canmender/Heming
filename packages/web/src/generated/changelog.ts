@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.56.11",
+    "date": "2026-11-13",
+    "title": "修出包：更新助手只收通用在线外壳",
+    "bullets": [
+      "d.140.3.56.10 出包时，`build-desktop.mjs` 把 `packages/setup/release` 里 mtime 最新的外壳当成更新助手，而当时最新的是 399MB 的**离线内嵌版**，于是安装包从 335MB 涨到 632MB（`resources/updater/setup.exe` 399MB）。现在明确优先用通用在线外壳 `和鸣安装程序.exe`（102MB），只有它不存在时才退回带版本外壳。",
+      "离线内嵌外壳改放 `packages/setup/release-offline/`，不再与在线外壳混在同一目录。"
+    ],
+    "paragraphs": []
+  },
+  {
+    "version": "d.140.3.56.10",
+    "date": "2026-11-13",
+    "title": "卸载文案与事实对齐：会删除安装目录下的 data",
+    "bullets": [
+      "用户决定「按现状连数据一起删」。安装向导三处（欢迎页 / 目录页 / 卸载欢迎页）原先写「卸载不会删除本机数据」，而 electron-builder 默认卸载执行 `RMDir /r $INSTDIR`，`<安装目录>/data`（登录态、插件、知识库）实际会被一起删掉——文案与行为相反。现在统一改成如实告知，并提示先备份。",
+      "不改卸载行为。需要保留数据的用户，卸载前把 `<安装目录>/data` 复制到别处。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.55.10",
     "date": "2026-11-13",
     "title": "补回插件启停/卸载、通用安装器外壳、智能体链路修复",

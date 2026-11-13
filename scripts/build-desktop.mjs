@@ -132,9 +132,14 @@ function stageUpdateHelper() {
     return;
   }
   mkdirSync(helperDir, { recursive: true });
-  copyFileSync(candidates[0], target);
+  // 更新助手必须是「通用在线外壳」（102MB）；离线内嵌版动辄 400–700MB，装进包里会让安装包翻倍
+  // （d.140.3.56.10 出包时踩过：最新产物是 399MB 的离线版，安装包从 335MB 涨到 632MB）。
+  // 有通用外壳就优先用它，只有不存在时才退回最新的带版本外壳。
+  const genericHelper = join(setupReleaseDir, "和鸣安装程序.exe");
+  const helperSource = existsSync(genericHelper) ? genericHelper : candidates[0];
+  copyFileSync(helperSource, target);
   const megabytes = Math.round(statSync(target).size / 1048576);
-  console.log(`[build-desktop] 更新助手已暂存：${relative(root, candidates[0])}（${megabytes} MB）`);
+  console.log(`[build-desktop] 更新助手已暂存：${relative(root, helperSource)}（${megabytes} MB）`);
 }
 
 stageUpdateHelper();

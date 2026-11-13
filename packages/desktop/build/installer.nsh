@@ -9,16 +9,16 @@
 ; 模板插入 MUI_PAGE_WELCOME / MUI_PAGE_FINISH 之前生效——所以写成 include 而不是 post 脚本。
 
 !define MUI_WELCOMEPAGE_TITLE "安装 和鸣"
-!define MUI_WELCOMEPAGE_TEXT "和鸣是一个本机优先的 AI 工作站：模型连接、工具与记忆都保存在这台设备上。$\r$\n$\r$\n下一步可以自选安装位置；卸载时不会删除你的本机数据。"
+!define MUI_WELCOMEPAGE_TEXT "和鸣是一个本机优先的 AI 工作站：模型连接、工具与记忆都保存在这台设备上。$\r$\n$\r$\n下一步可以自选安装位置。卸载时会把安装目录下的 data 文件夹一并删除，请先备份需要保留的内容。"
 
 !define MUI_FINISHPAGE_TITLE "安装完成"
 !define MUI_FINISHPAGE_TEXT "和鸣已经安装好。$\r$\n$\r$\n模型 Key、工具与记忆只保存在本机。"
 !define MUI_FINISHPAGE_RUN_TEXT "运行 和鸣"
 
-!define MUI_DIRECTORYPAGE_TEXT_TOP "选择安装位置。数据与设置始终保存在本机，卸载时不会被删除。"
+!define MUI_DIRECTORYPAGE_TEXT_TOP "选择安装位置。登录状态、插件与知识库等数据会存到这里的 data 文件夹，卸载时一并删除。"
 
 !define MUI_UNWELCOMEPAGE_TITLE "卸载 和鸣"
-!define MUI_UNWELCOMEPAGE_TEXT "卸载只会移除程序，本机数据与设置会保留。"
+!define MUI_UNWELCOMEPAGE_TEXT "卸载会删除程序与安装目录下的 data 文件夹（登录状态、插件、知识库）。请先备份要保留的数据。"
 
 !macro customWelcomePage
   !insertmacro MUI_PAGE_WELCOME

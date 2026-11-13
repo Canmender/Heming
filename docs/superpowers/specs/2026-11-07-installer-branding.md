@@ -44,10 +44,10 @@ r63 安装包仍是 electron-builder 默认外观：无欢迎页、NSIS 自带 m
 `build/installer.nsh` 在 electron-builder 模板公共头部展开，因此 `MUI_*` 定义先于
 `MUI_PAGE_WELCOME` / `MUI_PAGE_FINISH` 生效：
 
-- 新增欢迎页（assisted 安装器默认没有）：标题「安装 和鸣」，正文说明本机优先与卸载保留数据；
-- 目录页顶部说明「数据与设置始终保存在本机」；
+- 新增欢迎页（assisted 安装器默认没有）：标题「安装 和鸣」，正文说明本机优先，并明确卸载会删除 `<安装目录>/data`（d.140.3.56.10 起改正：此前文案与事实相反，写着「不会删除」）；
+- 目录页顶部说明数据存到安装目录下的 `data` 文件夹、卸载一并删除；
 - 完成页「安装完成 / 运行 和鸣」；
-- 卸载欢迎页「卸载 和鸣 / 卸载只会移除程序，本机数据与设置会保留」。
+- 卸载欢迎页「卸载 和鸣 / 卸载会删除程序与 `data` 文件夹，请先备份」。
 
 安装行为不变：`oneClick:false`、`allowToChangeInstallationDirectory:true`、中文语言 2052。
 
