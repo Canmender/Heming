@@ -676,7 +676,7 @@ export function TeamPage() {
                 </div>
               ) : rosterError ? (
                 <div className="p-2 text-[12px]">
-                  <p role="alert" className="text-[var(--danger)]">名册加载失败：{rosterError}</p>
+                  <p role="alert" className="ui-alert ui-alert-danger text-left">名册加载失败：{rosterError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
@@ -874,7 +874,7 @@ export function TeamPage() {
               </div>
             ) : feedError ? (
               <div className="py-6 text-center text-[12px]">
-                <p role="alert" className="text-[var(--danger)]">动向加载失败：{feedError}</p>
+                <p role="alert" className="ui-alert ui-alert-danger text-left">动向加载失败：{feedError}</p>
                 <button
                   type="button"
                   className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
@@ -964,7 +964,7 @@ export function TeamPage() {
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : feedError ? (
                 <div className="py-10 text-center text-[12px]">
-                  <p role="alert" className="text-[var(--danger)]">日程加载失败：{feedError}</p>
+                  <p role="alert" className="ui-alert ui-alert-danger text-left">日程加载失败：{feedError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
@@ -1117,7 +1117,7 @@ export function TeamPage() {
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : usageError ? (
                 <div className="py-6 text-center text-[12px]">
-                  <p role="alert" className="text-[var(--danger)]">用量加载失败：{usageError}</p>
+                  <p role="alert" className="ui-alert ui-alert-danger text-left">用量加载失败：{usageError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-2"

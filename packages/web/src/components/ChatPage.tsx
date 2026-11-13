@@ -120,6 +120,7 @@ import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
 import { ChatEmptyState } from "./ux/ChatEmptyState.js";
+import { ErrorState } from "./ui/ErrorState.js";
 import { ComposerHints } from "./ux/ComposerHints.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
@@ -3149,19 +3150,13 @@ export function ChatPage({
             </div>
           ) : messagesError ? (
             // A1 失败态：失败与「真的没有消息」必须长得不一样
-            <div className="flex h-full flex-col items-center justify-center text-center">
-              <div role="alert" className="text-[13px] font-bold text-[var(--danger)]">
-                加载失败：{messagesError}
-              </div>
-              <button
-                type="button"
-                className="mt-2 rounded-lg border border-line bg-[var(--surface)] px-3 py-1.5 text-[12px] text-[var(--body)] hover:bg-[var(--subtle-2)]"
-                onClick={() => {
+            <div className="flex h-full items-center justify-center">
+              <ErrorState
+                title={<>加载失败：{messagesError}</>}
+                onRetry={() => {
                   void useChatStore.getState().loadMessages(convId);
                 }}
-              >
-                重试
-              </button>
+              />
             </div>
           ) : (
             // A1 真空态 + UX-A：只有「加载成功且确实为空」才显示；示例只填入不发送

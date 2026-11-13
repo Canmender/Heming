@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.63.11",
+    "date": "2026-11-13",
+    "title": "失败态统一（第 10 轮 · 基元采用率起步）",
+    "bullets": [
+      "审计 A/C 的「失败态 5 种写法」收敛第一刀，目标是把「区块级失败」从裸红字换成已有的 `.ui-alert*` 体系，并把真正整块加载失败的位置接上 `ui/ErrorState`（此前全仓 0 采用）。",
+      "**区块级裸红字 → `.ui-alert ui-alert-danger`**（保留原文案与重试按钮，测试按文本查询不受影响）：",
+      "— `TeamPage.tsx` 4 处：名册 / 动向 / 日程 / 用量加载失败；",
+      "— `TeamBoardPage.tsx`：看板加载失败；",
+      "— `HomePage.tsx`：团队数据加载失败（原 `span.min-w-0.truncate` 在 flex 行内，改为 `div.ui-alert.flex-1.items-center` + 内层 `span.truncate`，列宽不再被长错误串撑开）；",
+      "— `FilePreviewModal.tsx`：预览加载失败；",
+      "— `MemoryPage.tsx` 2 处：新建 / 编辑记忆表单内错误。",
+      "**接上 `ui/ErrorState`**（首个真实使用点）：",
+      "— `ChatPage.tsx` 历史消息整段加载失败：原「13px 加粗红字 + 手拼重试按钮」→ `<ErrorState title={<>加载失败：{messagesError}</>} onRetry={…} />`，与外层 `flex h-full items-center justify-center` 一起居中；`role=\"alert\"` 由组件提供。",
+      "— `TeamBoardPage.tsx` 看板整页加载失败：同上，`className=\"py-10\"` 保留原留白。",
+      "未动（有意保留）：字段级错误仍是 `ui-caption text-[var(--danger)]`（在输入框正下方，换成提示条会把表单撑开）；`plugins/shared.tsx` 的 `ERROR_TEXT`/`BTN_DANGER_SM` 字面量被 `PluginsPage.capabilities.test.tsx` 钉住，留待与其他插件区改动同批处理；`HomeTeamUsage` 的 11px muted 提示行属于「弱提示」不是失败。",
+      "门禁：`pnpm --filter @heming/web typecheck` 过、web **298 文件 / 4372 例**全过。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.62.11",
     "date": "2026-11-13",
     "title": "模型页表单语义收口（S1-9 收尾）",

@@ -3,6 +3,7 @@ import type { TeamActivity, TeamActivityKind, TeamMember } from "@heming/shared"
 import { Avatar } from "./Avatar.js";
 import { CalendarIcon, TaskIcon } from "./icons.js";
 import { EmptyState } from "./ui/EmptyState.js";
+import { ErrorState } from "./ui/ErrorState.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
 import { activitySummaryLabel } from "../lib/team/labels.js";
 
@@ -236,16 +237,7 @@ export function TeamBoardView({
             ))}
           </div>
         ) : error ? (
-          <div className="py-10 text-center text-[12px]">
-            <p role="alert" className="text-[var(--danger)]">看板加载失败：{error}</p>
-            <button
-              type="button"
-              onClick={onRetry}
-              className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
-            >
-              重试
-            </button>
-          </div>
+          <ErrorState className="py-10" title={<>看板加载失败：{error}</>} onRetry={onRetry} />
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             <section aria-label="任务" className={`flex flex-col rounded-xl bg-[var(--subtle-2)] p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>

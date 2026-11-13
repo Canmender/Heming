@@ -414,7 +414,7 @@ function AddMemoryModal({
         <div className="mt-1 text-[11px] text-muted">
           同一主题键再次保存会覆盖旧内容（记忆按智能体 + 主题去重）
         </div>
-        {error && <div className={`mt-2 ${errorCls}`}>{error}</div>}
+        {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={onClose} className={btnGhost}>
             取消
@@ -497,7 +497,7 @@ function KnowledgeModal({
           />
         </label>
         <div className="mt-1 text-[11px] text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
-        {error && <div className={`mt-2 ${errorCls}`}>{error}</div>}
+        {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={onClose} className={btnGhost}>
             取消

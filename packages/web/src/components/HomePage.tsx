@@ -549,7 +549,9 @@ export function HomePage() {
               </div>
             ) : teamError ? (
               <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
-                <span role="alert" className="min-w-0 truncate text-[var(--danger)]">加载失败：{teamError}</span>
+                <div role="alert" className="ui-alert ui-alert-danger min-w-0 flex-1 items-center">
+                  <span className="min-w-0 truncate">加载失败：{teamError}</span>
+                </div>
                 <button
                   type="button"
                   onClick={loadTeam}

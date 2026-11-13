@@ -1,7 +1,7 @@
-# UI/UX 重构交付记录（d.140.3.62.11）
+# UI/UX 重构交付记录（d.140.3.63.11）
 
 - 日期：2026-11-13
-- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11` → 第 8 轮 `d.140.3.61.11` → 第 9 轮 `d.140.3.62.11`
+- 版本基线：`d.140.3.55.10`（HEAD `e7151e9b`）→ 第 1 轮随 `d.140.3.56.x` 出包 → 第 2–4 轮 `d.140.3.57.11` → 第 5 轮 `d.140.3.58.11` → 第 6 轮 `d.140.3.59.11` → 第 7 轮 `d.140.3.60.11` → 第 8 轮 `d.140.3.61.11` → 第 9 轮 `d.140.3.62.11` → 第 10 轮 `d.140.3.63.11`
 - 配套审计：`docs/UIUX-AUDIT-2026-11-13.md`（139 条：S1 9 / S2 73 / S3 57，含三份分报告索引）
 - 技能说明：用户指定的 `mshumer/unslop`、`alchaincyf/huashu-skills` 本机无外网无法拉取；本次以本机 `anthropic-frontend-design`（anti-slop 铁律）与 `ui-design-pro`（UI UX Pro Max 原则）作为审计与改造标尺，两者冲突处以 anti-slop 为准（字体、去装饰、去 emoji 图标）。
 
@@ -212,3 +212,23 @@
 **验证**：`ModelPage.test.tsx` 的 `getByLabelText` 覆盖 12 个字段名（属性模型 ID、模型显示名、来源分发策略、错误处理、规则分组 / 模型 / token 阈值、新密钥名称、更新 Key、API Key、命令…），改用 label 后全部照旧通过——测试没有为了改法而改断言。
 
 **门禁**：`pnpm -r typecheck` 通过；`pnpm --filter @heming/web test` **298 文件 / 4372 例全通过**；`pnpm -r build` 通过。
+
+## 11. 第 10 轮（`d.140.3.63.11`）· 失败态统一（审计「三态各自为战」起步）
+
+审计里「失败态 5 种写法」的第一刀。**没有新增组件**：仓里早有 `ui/ErrorState` 与 `.ui-alert*` 两套失败样式，缺的是采用率（`ErrorState` 本轮之前全仓 0 采用）。
+
+| 处理 | 处数 | 位置 | 说明 |
+| --- | --- | --- | --- |
+| 区块级裸红字 → `.ui-alert ui-alert-danger` | 8 | `TeamPage` ×4、`TeamBoardPage`、`HomePage`、`FilePreviewModal`、`MemoryPage` ×2 | 原文案与重试按钮一字不动，测试的文本查询不受影响 |
+| 整块加载失败 → `ErrorState` | 2 | `ChatPage`（历史消息）、`TeamBoardPage`（看板） | 手拼的「13px 加粗红字 + 圆角按钮」换成与空态同骨架的失败块，`role="alert"` 由组件提供 |
+
+**分类标准**（写下来避免下一轮又混）：
+
+- 整块区域没内容可用（整页 / 整个列表区加载失败）→ `ErrorState`：图标 + 一句话 + 重试，和空态同骨架，只是语义更重。
+- 区块内的一条失败（侧栏、卡内小段、表单校验汇总）→ `.ui-alert ui-alert-danger`：单行、浅底、有描边，不抢版面。
+- 字段级错误（输入框正下方）→ `ui-caption text-[var(--danger)]` 保持不动：换成提示条会把表单撑开、把相邻字段推走。
+- 弱提示（如「用量排行暂时取不到」）→ 保持 `text-muted`，它不是失败，不该染红。
+
+**有意未动**：`plugins/shared.tsx` 的 `ERROR_TEXT` / `BTN_DANGER_SM` 字面量被 `PluginsPage.capabilities.test.tsx:821/846` 钉住（断言 `text-[#b42318]` 必须存在），留到插件区整体改色时同批处理。
+
+**门禁**：`pnpm --filter @heming/web typecheck` 通过；`pnpm --filter @heming/web test` **298 文件 / 4372 例全通过**。
