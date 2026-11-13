@@ -12,6 +12,18 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.140.3.67.11",
+    "date": "2026-11-13",
+    "title": "安装外壳微文案 + 主按钮可访问名",
+    "bullets": [
+      "`packages/setup/renderer/index.html`：右栏 `<dt>版本</dt>` → `<dt>将要安装</dt>`。这一行在在线形态来自更新服务器的 `latest.yml`（`app.js:422-423` 注释：把「版本」换成本次真正会装上的版本），与下面的「现有版本」成对阅读才不歧义。",
+      "三个 `.primary-button`（`btn-start` / `btn-open` / `btn-retry`）补 `aria-label`：箭头 `→` 是 `.primary-button::after` 伪元素，Chromium 会把它算进无障碍名字（打包版 UIA 实测读到「开始安装→」），加 `aria-label` 后读屏只念动词短语。",
+      "打包验证：`node scripts/build-setup.mjs` 实跑通过（`packages/setup/release/和鸣安装程序 d.140.3.66.11.exe`，97.8 MB，用本地 `electronDist` 离线打包）；启动该 exe 后用 UIA 读窗口，确认窗口标题「安装 和鸣」、DIP 尺寸 900×622、标题栏/正文/页边注/页脚四段结构、`开始安装` 拿到焦点（`PRIMARY_ACTION` 生效）、预取进度「正在准备安装包 · 21%」在跑，点「退出」正常关窗未开始安装。",
+      "版面复验：`--capture` 在 900×620 与 720×480 两档四屏均 `main.client==scroll`、`body.client==scroll`、`clipped:false`、`errors:[]`。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.140.3.66.11",
     "date": "2026-11-13",
     "title": "安装包外壳（第 13 轮 · packages/setup）",
