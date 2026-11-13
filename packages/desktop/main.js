@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, screen, ipcMain, Notification, protocol, net, WebContentsView } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -16,6 +16,9 @@ const {
   resolveWidgetRequest,
   contentTypeFor,
   widgetCspHeaders,
+  frameAncestorSource,
+  injectWidgetBridgeScript,
+  isWidgetBridgeRequest,
 } = require("./app-protocol");
 const { createPluginStore } = require("./plugin-store");
 const { createWidgetHost } = require("./plugin-host");
@@ -195,11 +198,12 @@ const TRUSTED_CHANNELS = [
   "widgets:publish",
   "widgets:migrateLegacy",
   "widgets:chat-config-reply",
-  // d.124 B 路径：插件自带页面的视图运行时（挂载/边界/卸载）。
-  // 只认主窗口：页面 rect 与视图归属由主窗决定，插件窗口/页面视图自己都碰不到。
-  "widgets:page-mount",
-  "widgets:page-bounds",
-  "widgets:page-unmount",
+  // d.141：插件页面在主窗的 <iframe> 里（widget:// 直接内嵌），主进程只登记
+  // 「当前打开的页面」并按帧身份派发调用。只认主窗口：页面帧没有独立 webContents。
+  "widgets:page-open",
+  "widgets:page-close",
+  "widgets:page-call",
+  "widgets:page-send",
   // contract §4：主窗拉插件首页卡片（只读；插件渲染面拿不到这份桥）
   "plugins:homecards",
 ];
@@ -261,6 +265,45 @@ function resolveAppUrl(env) {
   if (e.HEMING_WEB_URL) return e.HEMING_WEB_URL;
   if (hasEmbeddedWeb()) return EMBEDDED_URL;
   return APP_DEFAULT_URL;
+}
+
+/**
+ * d.141：允许内嵌 widget:// 页面的宿主 origin 列表。
+ *
+ * 页面从主进程的独立视图变成主窗里的 `<iframe>` 后，`frame-ancestors` 不能
+ * 再是 `'none'`（那会把宿主自己也挡掉）；但也不能放开成 `*`。这里只列主窗
+ * 真实可能的加载源：内嵌产物 `app://heming` + 当前 `resolveAppUrl()` 的 origin
+ * （开发期 HEMING_DEV_URL / 远程 HEMING_WEB_URL），由 app-protocol 归一化去重。
+ */
+function widgetFrameAncestors() {
+  const origins = [EMBEDDED_ORIGIN];
+  const appSource = frameAncestorSource(resolveAppUrl());
+  if (appSource) origins.push(appSource);
+  return origins;
+}
+
+/** d.141：页面通道的 sender 判定，只认主窗口 webContents（fail-closed）。 */
+function isMainWindowSender(event) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const contents = mainWindow.webContents;
+  return Boolean(contents && !contents.isDestroyed() && event && event.sender === contents);
+}
+
+/**
+ * d.141：请求里的 id 必须对得上当前打开的页面。
+ * close/send 允许 payload 不带 id（主窗自己的信任级别 + 只有一个活动页面），
+ * 带了 id 就必须精确匹配——这条是给 page-call/page-send 防「拿着别人的 id 串门」。
+ */
+function activePageOwns(payload) {
+  const page = widgetHost ? widgetHost.activePage : null;
+  if (!page) return false;
+  const id = payload && payload.id;
+  return typeof id !== "string" || id === "" || id === page.id;
+}
+
+/** d.141：页面通道的统一失败形状（preload/渲染层不用区分抛异常与业务失败）。 */
+function pageScopeError(message) {
+  return { ok: false, error: { code: "ERR_WIDGET_PAGE_SCOPE", message } };
 }
 
 function isSafeExternalUrl(url) {
@@ -513,6 +556,23 @@ function installWidgetProtocol() {
     } catch {
       return new Response("bad request", { status: 400 });
     }
+    // d.141：桥脚本走保留路径，**先于**插件文件解析——插件产物不可能占用它
+    // （即便目录里放了同名文件，也不会被读到），版本升级也无法劫持宿主 RPC。
+    if (isWidgetBridgeRequest(urlPath)) {
+      try {
+        const bridge = await fs.promises.readFile(path.join(__dirname, "widget-frame-bridge.js"));
+        return new Response(bridge, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/javascript; charset=utf-8",
+            "Cache-Control": "no-store",
+          },
+        });
+      } catch (err) {
+        console.log("[heming] 读取页面桥脚本失败:", (err && err.message) || err);
+        return new Response("bridge unavailable", { status: 500 });
+      }
+    }
     const record = widgetStore ? widgetStore.get(pluginId) : null;
     const rootDir = widgetStore && record ? widgetStore.currentDir(pluginId) : null;
     if (!record || !rootDir || record.error) {
@@ -520,7 +580,12 @@ function installWidgetProtocol() {
     }
     const permissions = record.permissions || {};
     // 本机网关 origin 精确到端口（审计 P0-1：不再有回环通配）
-    const widgetCspOpts = { ...cspOptions(), gatewayOrigin: await resolveWidgetGatewayOrigin() };
+    const widgetCspOpts = {
+      ...cspOptions(),
+      gatewayOrigin: await resolveWidgetGatewayOrigin(),
+      // d.141：页面被主窗 iframe 内嵌，宿主要在主窗的真实加载源里
+      frameAncestors: widgetFrameAncestors(),
+    };
     const resolved = resolveWidgetRequest(urlPath, rootDir, (target) => {
       try {
         return fs.existsSync(target);
@@ -536,7 +601,14 @@ function installWidgetProtocol() {
     }
     try {
       const body = await fs.promises.readFile(resolved.file);
-      return new Response(body, {
+      // d.141：HTML 入口注入桥脚本。插件自己的 CSP 会挡内联脚本，所以必须走
+      // 同源的真实请求（/__heming_frame_bridge.js）；非 HTML 与超上限的产物原样返回。
+      const isHtml = /\.html?$/i.test(resolved.file);
+      const injected = isHtml ? injectWidgetBridgeScript(body) : null;
+      if (isHtml && !injected) {
+        console.log(`[heming] 页面 HTML 超过桥注入上限，跳过注入：${resolved.file}`);
+      }
+      return new Response(injected || body, {
         status: 200,
         headers: {
           "Content-Type": contentTypeFor(resolved.file),
@@ -749,8 +821,9 @@ if (!gotLock) {
     // CSP 违例收集（report-only 期的主要证据来源；enforce 期也能看到被挡了什么）
     attachCspReportLogger(win);
     win.on("close", () => {
-      // d.124 B 路径：主窗关闭前先销毁页面视图（视图生命周期不能长过宿主窗口）
-      if (widgetHost) widgetHost.pageUnmount();
+      // d.141：页面是主窗里的 iframe，主窗关掉页面自然消失；这里只清宿主登记，
+      // 避免 widgetHost 里残留一个指向已销毁窗口的 activePage。
+      if (widgetHost) widgetHost.pageClose();
     });
     win.on("closed", () => {
       if (mainWindow === win) mainWindow = null;
@@ -792,6 +865,20 @@ if (!gotLock) {
       event.preventDefault();
       console.log("[heming] 拦截离开应用的导航，转系统浏览器打开:", url);
       openInSystemBrowser(url);
+    });
+
+    // d.141：插件页面是主窗里的 <iframe>，子 frame 只允许停留在「当前打开的那个
+    // 插件页面」的 widget:// 源内。页面跳到别的插件、跳到外网、或 activePage 已经
+    // 换人，都直接拦下（页面没有独立窗口，不存在放它出去的正当理由）。
+    win.webContents.on("will-frame-navigate", (event, details) => {
+      const info = details && typeof details === "object" ? details : event;
+      const target = typeof details === "string" ? details : String((info && info.url) || "");
+      if (!info || info.isMainFrame !== false) return;
+      const page = widgetHost ? widgetHost.activePage : null;
+      const allowed = page ? `widget://${page.id}/` : "";
+      if (allowed && target.startsWith(allowed)) return;
+      event.preventDefault();
+      console.log("[heming] 拦截插件页面子 frame 导航:", target);
     });
 
     // 开发模式 F12 快捷键打开开发者工具（Ctrl+Shift+I 由菜单 role 提供）
@@ -1440,8 +1527,6 @@ app.whenReady().then(() => {
       nativeImage,
       screen,
       ipcMain,
-      // d.124 B 路径：页面视图用（独立 origin 的 WebContentsView，嵌在主窗内容区）
-      WebContentsView,
       app,
       store: widgetStore,
       preloadPath: path.join(__dirname, "widget-preload.js"),
@@ -1583,13 +1668,26 @@ app.whenReady().then(() => {
       widgetHost.action(payload && payload.id, payload && payload.action),
     );
     secureIpc.handle("widgets:state", (_event, payload) => widgetHost.stateOf(payload && payload.id));
-    /* ── d.124 B 路径：界面插件自带页面的视图（只认主窗口；rect 由 web 侧算，这里钳制） ── */
-    secureIpc.handle("widgets:page-mount", (_event, payload) => widgetHost.pageMount(payload));
-    secureIpc.on("widgets:page-bounds", (_event, payload) => {
-      widgetHost.pageBounds(payload);
+    /* ── d.141：插件页面内嵌在主窗 iframe 里，通道只认主窗口 sender + 当前页面 ── */
+    secureIpc.handle("widgets:page-open", (event, payload) => {
+      if (!isMainWindowSender(event)) return pageScopeError("页面通道只接受主窗口请求");
+      if (!widgetHost) return pageScopeError("插件宿主尚未就绪");
+      return widgetHost.pageOpen(payload);
     });
-    secureIpc.on("widgets:page-unmount", () => {
-      widgetHost.pageUnmount();
+    secureIpc.on("widgets:page-close", (event, payload) => {
+      if (!isMainWindowSender(event)) return;
+      if (!activePageOwns(payload)) return;
+      if (widgetHost) widgetHost.pageClose();
+    });
+    secureIpc.handle("widgets:page-call", (event, payload) => {
+      if (!isMainWindowSender(event)) return pageScopeError("页面通道只接受主窗口请求");
+      if (!widgetHost) return pageScopeError("插件宿主尚未就绪");
+      return widgetHost.pageCall(payload);
+    });
+    secureIpc.on("widgets:page-send", (event, payload) => {
+      if (!isMainWindowSender(event)) return;
+      if (!activePageOwns(payload)) return;
+      if (widgetHost) widgetHost.pageSend(payload);
     });
     secureIpc.handle("widgets:publish", (_event, payload) => {
       const result = widgetHost.publish(payload);

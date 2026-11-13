@@ -504,11 +504,14 @@ await data.dataDelete("cache");
 - **旧宿主兼容**：`data*` 是后加的方法，插件作者按「可能不存在」探测（`typeof data.dataGet === "function"`），
   或在包装层按 `null` / `false` / `[]` 降级；不要因为缺方法白屏。
 
-### 10.7 界面插件页面（d.124）
+### 10.7 界面插件页面（d.124 / d.141）
 
-`contributions.page = { title, icon?, summary?, entry }`：`entry` 是包内 `.html`，宿主在**主窗内容区**用
-`WebContentsView` 拉起一个 `widget://<插件 id>/` 沙箱视图（同 `preload`、同 CSP，`rect` 由宿主算并钳制）。
-它与界面插件的独立窗口（插件详情 →「窗口设置」）可并存；停用/卸载/更新/切页时视图销毁，不留孤儿。清单字段、导航入口与安全边界见 §13.3–§13.6。
+`contributions.page = { title, icon?, summary?, entry }`：`entry` 是包内 `.html`，宿主在**主窗内容区**的
+`<iframe>` 里加载 `widget://<插件 id>/`（独立 origin：沙箱、`contextIsolation`、无 `nodeIntegration`、同 CSP）。
+d.141 之前这里是主进程的 `WebContentsView`，它永远盖在渲染层之上、不参与 DOM——应用自己的命令面板/对话框
+反而被它挡住；现在页面是渲染层里的普通帧，圆角、布局、浮层叠放都按正常 DOM 生效。
+它与界面插件的独立窗口（插件详情 →「窗口设置」）可并存；停用/卸载/更新/切页时 `activePage` 作废、
+帧被卸载，不留孤儿。清单字段、导航入口与安全边界见 §13.3–§13.6。
 
 ## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
 
@@ -636,7 +639,7 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 | 路径 | 清单字段 | 渲染位置 | 执行代码 | 可用范围 |
 |---|---|---|---|---|
 | **A · 声明式页** | v5 `contributions.page.blocks` | web 组件 `PluginDeclarativePage`（宿主按受控块渲染） | 否（内容是数据，全部转义） | 安装版 + 浏览器版 |
-| **B · 自带页** | v4 bundle `contributions.page.entry` | 主进程 `WebContentsView`，嵌在主窗内容区的 `widget://<插件 id>/` 沙箱 | 是（同 widget 沙箱与 CSP，仅首方签名包） | 仅安装版（浏览器版给降级说明） |
+| **B · 自带页** | v4 bundle `contributions.page.entry` | 主窗渲染层 `<iframe>` + `widget://<插件 id>/` 沙箱（独立 origin、同 CSP、无 preload/node） | 是（同 widget 沙箱与 CSP，仅首方签名包） | 仅安装版（浏览器版给降级说明） |
 
 两条路径共用同一份**页面注册表**：声明式页 + 自带页被投影成导航/路由/命令面板的同一份数据，
 各处只读这份投影、不各自判断。
@@ -687,7 +690,7 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 | 项 | 口径 |
 |---|---|
 | 路由 id | `plugin:<插件 id>`；`Page` 联合类型加模板字面量，`normalizePage` 放行 `plugin:` 前缀 |
-| 有效性 | 由路由守卫判：未装/停用/记录损坏 → 入口不出现，直开路由 `fallbackPage` 回主页；浏览器版里 bundle 页不可用（入口不出现；宿主缺页面视图能力时显示降级说明）；**不写进 `navOrder`** |
+| 有效性 | 由路由守卫判：未装/停用/记录损坏 → 入口不出现，直开路由 `fallbackPage` 回主页；浏览器版里 bundle 页不可用（入口不出现；宿主缺 `pageOpen` 能力时显示降级说明）；**不写进 `navOrder`** |
 | 导航顺序 | 8 个宿主页 → 声明式插件页（首次安装时间升序）→ bundle 插件页（同序）；同刻按 pluginId 字典序 |
 | 稳定性 | 插件升级不改位置（沿用首次 `installedAt`）；卸载后重装排到末尾 |
 | 分组 / 快捷键 | 归「能力」组；**不分配快捷键**（数字键仍只绑 8 个宿主页） |
@@ -696,23 +699,32 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 
 ### 13.4 自带页运行时（桌面端）
 
-- IPC：`widgets:page-mount { id, rect, intent? }`、`widgets:page-bounds { rect }`、`widgets:page-unmount`。
-  web 侧占位 div 用 `ResizeObserver` + `getBoundingClientRect()` 上报内容区坐标。
-- 页面意图（d.139）：`pageMount` 可带 `intent`（与首页卡 `actions[].intent` 同一套 token）。主进程校验格式后把
-  `#intent=<token>` 拼到 `widget://<id>/<entry>` 再 `loadURL`；hash 只存在于页面自己的地址里，`will-navigate`
-  的同 origin 判定会剥掉 hash，宿主不理解语义——由插件页读 `location.hash` 自行解释（信息中枢据此选页签）。
-  非法/缺失的 `intent` 不拼 hash，页面按默认状态启动。
-- 主进程建/复用 `WebContentsView`：`preload = widget-preload.js`、`sandbox: true`、`contextIsolation: true`、
-  `nodeIntegration: false`，`loadURL("widget://<id>/<entry>")`，CSP 用 `widgetCspHeaders(record.permissions)`。
-- 坐标口径：主窗 `contentView` 坐标系（CSS px = DIP）；主进程对 rect 做边界钳制（宽高 ≥1、超出内容区裁掉）。
-- 身份校验：页面视图的 `webContents.id` 登记进 runtime map，任何 IPC 先按 sender 反查，查不到即拒绝；
-  页面视图**不允许**拖拽/托盘/穿透类通道（返回「不适用于页面」）。
-- 导航守卫：`will-navigate` 只允许同 origin；`setWindowOpenHandler` 一律 deny；`will-download` 取消。
-- 生命周期对账：切页 / 主窗 resize / 最小化恢复 / 插件停用 / 卸载 / 更新 → 销毁视图；主窗关闭先销毁视图再关窗，
-  **不留孤儿视图**。
-- 失败态：视图创建失败（entry 缺失/包损坏）→ 返回 `{ ok:false, error }`，web 显示原因 +「重建视图 / 打开插件详情」，不白屏。
-- 浏览器（无桌面桥）：bundle 页不可用（导航不出现入口；宿主缺 `pageMount` 时显示「插件页面只在安装版里可用」降级说明），不渲染空壳。
-- 主题：复用 `widget:info` 的 `theme`，主窗切主题按现有 `widget:event` 推送（不新增通道）。
+- IPC：`widgets:page-open { id, intent? } → { ok, url, version } | { ok:false, error }`、`widgets:page-close`、
+  `widgets:page-call`、`widgets:page-send`，以及主进程 → 主窗的 `widgets:page-event`。渲染层拿到 `url` 后
+  **自己给 iframe 赋 `src`**；页面卸载时 `pageClose`。旧的 `page-mount / page-bounds / page-unmount` 已删除。
+- 页面意图（d.139）：`pageOpen` 可带 `intent`（与首页卡 `actions[].intent` 同一套 token）。主进程校验格式后把
+  `#intent=<token>` 拼到 `widget://<id>/<entry>` 再返回；hash 只存在于页面自己的地址里，宿主不理解语义——
+  由插件页读 `location.hash` 自行解释（信息中枢据此选页签）。非法/缺失的 `intent` 不拼 hash，页面按默认状态启动。
+- 宿主侧：`<iframe sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer">`，页头在帧外，
+  加载/错误是帧上的覆盖层；CSP 用 `widgetCspHeaders(record.permissions)`，`frame-ancestors` 只放行主窗 origin
+  （`app://heming` 或开发期 `http://localhost:5173`）；主窗 CSP 相应放开 `frame-src 'self' app: widget:`。
+- 桥：插件 HTML 由 `widget://` 处理器注入 `/__heming_frame_bridge.js`（保留路径，插件产物抢不到），
+  帧里得到 `window.__heming_widget`，但它是 **postMessage 代理**：`{__heming_frame:1, kind:"call"|"result"|"event"}`
+  → 宿主 `message` 监听（校验 `event.origin` 与 `event.source`）→ 主窗 preload → 主进程。
+  页面帧**没有 preload、没有 node**，能力集合与独立窗口一一对应、不新增。
+- 窗口类能力在页面帧里不存在：`show/hide/toggle/setScale/setInteractive/drag*/resetPosition/setClickThrough`
+  一律 `ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`，`state()` 为 `null`（页面没有自己的窗口）。
+- 身份校验：`pageCall/pageSend` 只接受**主窗** sender、且必须是当前 `activePage` 的 id；行内调用还要过
+  `event.frame === mainFrame`。窗口类 IPC 对帧目标统一拒绝。
+- 导航守卫：`widget://` 的导航与开窗一律拒绝（`will-navigate` / `setWindowOpenHandler` / `will-download`）；
+  主窗的 `will-frame-navigate` 对子 frame 只放行 `widget://<activePage.id>/` 前缀，切到别的插件或外网即拦。
+- 生命周期对账：切页 / 插件停用 / 卸载 / 更新 / 主窗关闭 → `activePage` 作废（下一次调用返回
+  `ERR_WIDGET_PAGE_SCOPE`），web 侧卸载 iframe。页面**不再需要** resize 对账（帧随 DOM 布局自适应）。
+- 失败态：`pageOpen` 失败（记录缺失/停用/entry 损坏）→ `{ ok:false, error }`，web 显示原因 +
+  「重新加载 / 打开插件详情」，不白屏。
+- 浏览器（无桌面桥）：bundle 页不可用（导航不出现入口；宿主缺 `pageOpen` 时显示「插件页面只在安装版里可用」
+  降级说明），不渲染空壳。
+- 主题：复用 `widget:info` 的 `theme`，主窗切主题按现有 `widget:event` 经 `widgets:page-event` 下行（不新增通道）。
 - **签名覆盖（d.124 修复）**：`contributions.page` 进入首方签名文本——bundle 的 `title/icon/summary/entry`
   被 canonical-v1 覆盖，签名后改标题/入口/摘要验签必失败；`page.entry` 指向的代码字节仍由 `packageSha256` 覆盖。
   canonicalizer 三处（`scripts/sign-plugin.mjs` / `packages/desktop/plugin-signature.js` /
@@ -724,9 +736,9 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 |---|---|---|
 | 安装预览 | 贡献行多一项「页面 1」 | 同左（`page` 计入预览） |
 | 存储 | 不新增键（页面从 `heming.plugins.v1` 的清单派生） | 主进程 `installed.json` 记录增加 `page`，`widgets:list` 暴露 |
-| 更新 | 清单替换即生效；正停在该页按新清单重渲染 | `entry`/`page` 变化或版本更新 → 主进程销毁旧视图，下次进入重建；设置与 `data/` 保留 |
-| 停用 | 入口消失，页面不渲染 | 入口消失 + 视图立即销毁 |
-| 卸载 | 记录删除 → 入口与路由消失；正停在该页 → 回主页 | 同左 + 删除包目录（现有事务），视图先销毁 |
+| 更新 | 清单替换即生效；正停在该页按新清单重渲染 | `entry`/`page` 变化或版本更新 → `activePage` 作废（旧帧报 `ERR_WIDGET_PAGE_SCOPE`，下次进入重开）；设置与 `data/` 保留 |
+| 停用 | 入口消失，页面不渲染 | 入口消失 + `activePage` 立即作废 |
+| 卸载 | 记录删除 → 入口与路由消失；正停在该页 → 回主页 | 同左 + 删除包目录（现有事务），先作废 `activePage` |
 | 降级 | 沿用现有口径 | 沿用现有口径；页面随包回旧版 |
 | 新增权限 | 页面不新增权限，无需重新确认 | 页面**不**新增权限项（CSP 仍按 `permissions.network`），无需重新确认 |
 
@@ -736,9 +748,12 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 
 1. 声明式页：禁止任何 HTML/脚本入口（markdown 渲染器沿用聊天侧「禁原始 HTML」配置）；链接只允许 `http(s)` 与宿主页面跳转，
    外链走系统浏览器确认。
-2. 自带页：只能在 `widget://<id>/` 内导航；`frame-src 'none'` 不变（不自嵌外网、不互嵌）；`connect-src` 仍按
-   `permissions.network` 白名单；`script-src 'self'`；无 `nodeIntegration`；**无新增桥方法**（页面场景不写窗口几何）。
-3. 视图隔离：页面视图的 `webContents.id` 登记进 runtime map；任何 IPC 先按 sender 反查，查不到即拒绝。
+2. 自带页：页面只能加载当前插件的 `widget://<id>/`；插件自己的策略仍是 `frame-src 'none'`（不自嵌外网、不互嵌），
+   `connect-src` 仍按 `permissions.network` 白名单，`script-src 'self'`，无 `nodeIntegration`、无 preload；
+   宿主策略放行 `frame-src 'self' app: widget:`（方案级来源，具体插件由 `will-frame-navigate` 逐次校验）；
+   **无新增桥方法**（页面场景不写窗口几何，窗口类能力直接抛 `ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`）。
+3. 帧隔离：页面帧没有独立 `webContents`，所有 `page-call/page-send` 只认**主窗** sender 且必须命中当前
+   `activePage`（行内调用再核 `event.frame === mainFrame`），查不到即拒。
 4. 反冒充：`heming.*` 仍是首方保留命名；bundle 页面只有首方签名包能装（现有 `plugin-package.js` + `official-keys.json`）；
    第三方页面在 v1 只能走声明式（零代码）。
 5. 隐私：页面不上传任何数据；声明式页展示的是本机清单数据；自带页的数据读写仍只到

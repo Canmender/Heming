@@ -464,9 +464,17 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
   for (const ch of channelsIn(widgetHostSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
     assert.ok(ch.startsWith(IPC_WIDGET_PREFIX), `plugin-host 注册了非 widget: 通道：${ch}`);
   }
+  for (const ch of channelsIn(widgetHostSrc, /^\s+(?:handle|on)\("([^"]+)"/gm)) {
+    assert.ok(ch.startsWith(IPC_WIDGET_PREFIX), `plugin-host 注册了非 widget: 通道：${ch}`);
+  }
+  // plugin-host 只**发送**主窗页面事件，不注册任何 widgets: 通道（那是主窗经 secureIpc 的安装/管理面）
   assert.ok(
-    !widgetHostSrc.includes('"widgets:'),
+    !/^\s+(?:handle|on)\("widgets:/m.test(widgetHostSrc),
     "plugin-host 不应注册 widgets: 通道（那是主窗经 secureIpc 的安装/管理面）",
+  );
+  assert.ok(
+    widgetHostSrc.includes('send("widgets:page-event"'),
+    "plugin-host 应把页面事件中继到主窗（widgets:page-event）",
   );
 
   // widget preload 是插件代码能看到的**全部**宿主能力：不许出现 secrets/mcp/files/会话桥
@@ -503,32 +511,61 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
   assert.ok(!mainCode.includes("isPetWindowUrl("), "桌宠窗口特判已删除（widget 走独立 origin + 清单）");
 });
 
-// ── d.124 B 路径：界面插件自带页面的视图运行时接线（主窗内容区 WebContentsView）──
-test("main.js：页面视图通道经 secureIpc 注册且只认主窗口（widgets:page-* 进受信清单）", () => {
+// ── d.141：界面插件页面改为渲染层 <iframe> 内嵌 widget://（主进程只登记 + 授权）──
+test("main.js：页面通道经 secureIpc 注册且只认主窗口（widgets:page-* 进受信清单）", () => {
   const trusted = mainCode.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
   assert.ok(trusted, "必须有 TRUSTED_CHANNELS 清单");
-  for (const ch of ["widgets:page-mount", "widgets:page-bounds", "widgets:page-unmount"]) {
+  for (const ch of ["widgets:page-open", "widgets:page-close", "widgets:page-call", "widgets:page-send"]) {
     assert.ok(trusted[1].includes(`"${ch}"`), `受信清单应含 ${ch}`);
   }
-  assert.ok(/secureIpc\.handle\("widgets:page-mount"/.test(mainCode), "挂载走 secureIpc.handle");
-  assert.ok(/secureIpc\.on\("widgets:page-bounds"/.test(mainCode), "边界上报走 secureIpc.on（fire-and-forget）");
-  assert.ok(/secureIpc\.on\("widgets:page-unmount"/.test(mainCode), "卸载走 secureIpc.on");
+  assert.ok(/secureIpc\.handle\("widgets:page-open"/.test(mainCode), "打开页面走 secureIpc.handle");
+  assert.ok(/secureIpc\.handle\("widgets:page-call"/.test(mainCode), "页面调用走 secureIpc.handle");
+  assert.ok(/secureIpc\.on\("widgets:page-close"/.test(mainCode), "关闭页面走 secureIpc.on（fire-and-forget）");
+  assert.ok(/secureIpc\.on\("widgets:page-send"/.test(mainCode), "页面 send 走 secureIpc.on");
+
+  // 授权 fail-closed：只认主窗 webContents，且必须是当前登记的页面
+  assert.ok(mainCode.includes("isMainWindowSender(event)"), "页面通道必须校验 sender 是主窗口");
+  assert.ok(mainCode.includes("activePageOwns(payload)"), "页面通道必须校验 activePage.id 匹配");
+  assert.ok(mainCode.includes('code: "ERR_WIDGET_PAGE_SCOPE"'), "越权调用要给明确错误码");
+
+  // 旧的 WebContentsView 页面视图通道必须彻底消失（避免残留一条无实现的入口）
+  for (const ch of ["widgets:page-mount", "widgets:page-bounds", "widgets:page-unmount"]) {
+    assert.ok(!mainCode.includes(`"${ch}"`), `${ch} 应随 WebContentsView 方案一并删除`);
+  }
 });
 
-test("main.js：页面视图把 WebContentsView 注入宿主，并在主窗关闭前销毁视图", () => {
-  assert.ok(mainCode.includes("WebContentsView"), "主进程需要 electron.WebContentsView");
+test("main.js：页面跑在渲染层 iframe 里——不再建 WebContentsView，widget:// 注入桥并放行主窗作为祖先", () => {
+  assert.ok(!mainCode.includes("WebContentsView"), "主进程不再需要 electron.WebContentsView");
+  assert.ok(!mainCode.includes("pageMount("), "不再有页面挂载（改用 pageOpen）");
   assert.ok(
-    /createWidgetHost\(\{[\s\S]{0,400}WebContentsView/.test(mainCode),
-    "createWidgetHost 依赖里必须注入 WebContentsView",
+    /win\.on\("close",\s*\(\)\s*=>\s*\{[\s\S]{0,300}pageClose\(\)/.test(mainCode),
+    "主窗关闭只需要清 activePage（iframe 随渲染层消失）",
+  );
+
+  // 子 frame 导航守卫：只允许当前插件页面的 widget:// origin
+  assert.ok(mainCode.includes('"will-frame-navigate"'), "主窗要守子框架导航");
+  assert.ok(
+    /const allowed = page \? `widget:\/\/\$\{page\.id}\/` : ""/.test(mainCode),
+    "子 frame 的允许前缀必须由 activePage.id 现算（换页面即失效）",
   );
   assert.ok(
-    /win\.on\("close",\s*\(\)\s*=>\s*\{[\s\S]{0,200}pageUnmount\(\)/.test(mainCode),
-    "主窗关闭前必须先销毁页面视图（不留孤儿）",
+    /if \(allowed && target\.startsWith\(allowed\)\) return;/.test(mainCode),
+    "子 frame 只许留在 widget://<activePage.id>/ 里",
   );
-  // 页面视图仍由 widget:// 协议处理器提供内容：CSP 按插件 permissions 生成
+
   const protocol = mainCode.match(/function installWidgetProtocol\(\)[\s\S]*?\n\}/);
   assert.ok(protocol, "未找到 installWidgetProtocol");
+  // 保留路径：桥脚本先于插件文件解析（插件文件不能占这条路径）
+  assert.ok(protocol[0].includes("isWidgetBridgeRequest(urlPath)"), "保留路径必须先于插件文件解析");
+  assert.ok(protocol[0].includes("widget-frame-bridge.js"), "桥脚本由主进程读文件返回");
+  assert.ok(protocol[0].includes("application/javascript"), "桥脚本要按 JS 返回");
+  // HTML 响应注入桥
+  assert.ok(protocol[0].includes("injectWidgetBridgeScript(body)"), "HTML 响应要注入桥");
+  // CSP frame-ancestors 放行主窗（本方案的核心：widget:// 页面被主窗 iframe 嵌入）
   assert.ok(protocol[0].includes("widgetCspHeaders(permissions"), "页面与浮窗共用同一份 widget CSP");
+  assert.ok(protocol[0].includes("frameAncestors"), "widget CSP 要带主窗 origin 列表");
+  assert.ok(mainCode.includes("widgetFrameAncestors"), "主窗 origin 列表由 widgetFrameAncestors 提供");
+  assert.ok(mainCode.includes("EMBEDDED_ORIGIN"), "至少放行 app://heming");
 });
 
 test("main.js：只带页面的 bundle（无浮窗）origin 也允许用本机网关（按渲染能力判定）", () => {

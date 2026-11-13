@@ -15,6 +15,12 @@ const {
   buildWidgetCsp,
   widgetCspHeaders,
   resolveWidgetRequest,
+  frameAncestorSource,
+  injectWidgetBridgeScript,
+  isWidgetBridgeRequest,
+  WIDGET_BRIDGE_PATH,
+  WIDGET_BRIDGE_TAG,
+  WIDGET_BRIDGE_INJECT_MAX_BYTES,
   isAssetRequest,
   normalizeCspMode,
   parseCspViolation,
@@ -208,6 +214,13 @@ test("buildCsp：其余基线指令齐全", () => {
   assert.ok(directiveOf(policy, "img-src").includes("data:"));
   assert.ok(directiveOf(policy, "img-src").includes("blob:"));
   assert.ok(directiveOf(policy, "font-src").includes("data:"));
+});
+
+test("buildCsp：主窗允许嵌 widget:// 帧（d.141 插件页面改成 iframe 内嵌）", () => {
+  // 宿主页面要能嵌插件页面；只放方案级来源，具体可嵌哪个插件由 will-frame-navigate 逐次校验。
+  assert.deepEqual(directiveOf(buildCsp(), "frame-src"), ["'self'", "app:", "widget:"]);
+  // 插件页自己的策略不受影响：插件之间仍不能互嵌（buildWidgetCsp 的 frame-src 'none'）。
+  assert.deepEqual(directiveOf(buildWidgetCsp({}), "frame-src"), ["'none'"]);
 });
 
 test("buildCsp：主窗口**不放** unsafe-eval（pixi 已随桌宠搬进 widget 插件）", () => {
@@ -447,4 +460,110 @@ test("buildCsp：本机回环只认 127.0.0.1 / localhost（IPv6 字面量端口
   assert.ok(connect.includes("http://127.0.0.1:*"));
   assert.ok(connect.includes("http://localhost:*"));
   assert.ok(!connect.some((source) => source.includes("[::1]")));
+});
+
+// ── d.141：插件页面从原生视图改为 <iframe> 内嵌（frame-ancestors / 桥注入 / 保留路径） ──
+
+test("frameAncestorSource：只归一化 app/http/https 的 origin，非法输入返回 null", () => {
+  assert.equal(frameAncestorSource("app://heming"), "app://heming");
+  assert.equal(frameAncestorSource("app://heming/plugin/acme.page"), "app://heming");
+  assert.equal(frameAncestorSource("http://127.0.0.1:5173/index.html?x=1#y"), "http://127.0.0.1:5173");
+  assert.equal(frameAncestorSource("https://heming.example/app"), "https://heming.example");
+  assert.equal(frameAncestorSource("file:///C:/heming/index.html"), null);
+  assert.equal(frameAncestorSource("javascript:alert(1)"), null);
+  assert.equal(frameAncestorSource("/plugin/acme.page"), null);
+  assert.equal(frameAncestorSource(""), null);
+  assert.equal(frameAncestorSource("   "), null);
+  assert.equal(frameAncestorSource(undefined), null);
+  assert.equal(frameAncestorSource("app:heming"), null);
+});
+
+test("buildWidgetCsp：不传 frameAncestors 时 frame-ancestors 仍是 'none'（浮窗/后台页零变化）", () => {
+  assert.deepEqual(directiveOf(buildWidgetCsp({}), "frame-ancestors"), ["'none'"]);
+  assert.deepEqual(directiveOf(buildWidgetCsp({ chat: true }), "frame-ancestors"), ["'none'"]);
+  // 空数组 / 全是非法值 → 同样回落 'none'
+  assert.deepEqual(directiveOf(buildWidgetCsp({}, { frameAncestors: [] }), "frame-ancestors"), ["'none'"]);
+  assert.deepEqual(
+    directiveOf(buildWidgetCsp({}, { frameAncestors: ["file:///x", "about:blank"] }), "frame-ancestors"),
+    ["'none'"],
+  );
+});
+
+test("buildWidgetCsp：传 frameAncestors 时是 'self' + 宿主 origin（去重、只影响这一条指令）", () => {
+  const policy = buildWidgetCsp(
+    { chat: true },
+    { gatewayOrigin: "http://127.0.0.1:4321", frameAncestors: ["app://heming", "app://heming", "http://127.0.0.1:5173"] },
+  );
+  assert.deepEqual(directiveOf(policy, "frame-ancestors"), ["'self'", "app://heming", "http://127.0.0.1:5173"]);
+  // 其余指令不受影响：插件页面依然不能嵌外部页面（frame-src 'none'）
+  assert.deepEqual(directiveOf(policy, "frame-src"), ["'none'"]);
+  assert.deepEqual(directiveOf(policy, "object-src"), ["'none'"]);
+  assert.deepEqual(directiveOf(policy, "form-action"), ["'none'"]);
+  assert.deepEqual(directiveOf(policy, "default-src"), ["'self'"]);
+  // 网关联通仍然只给声明了 chat 的插件，且精确到端口
+  assert.ok(directiveOf(policy, "connect-src").includes("http://127.0.0.1:4321"));
+});
+
+test("widgetCspHeaders：enforce 模式下把 frameAncestors 透传进 CSP 头", () => {
+  const headers = widgetCspHeaders({}, { mode: "enforce", frameAncestors: ["app://heming"] });
+  assert.deepEqual(Object.keys(headers), [CSP_HEADER]);
+  assert.deepEqual(directiveOf(headers[CSP_HEADER], "frame-ancestors"), ["'self'", "app://heming"]);
+  // 不传 → 老的 'none' 语义
+  const none = widgetCspHeaders({}, { mode: "enforce" });
+  assert.deepEqual(directiveOf(none[CSP_HEADER], "frame-ancestors"), ["'none'"]);
+});
+
+test("isWidgetBridgeRequest：保留路径严格相等，插件文件抢不到", () => {
+  assert.equal(isWidgetBridgeRequest(WIDGET_BRIDGE_PATH), true);
+  assert.equal(isWidgetBridgeRequest("/__heming_frame_bridge.js"), true);
+  // 大小写 / 前后缀 / 子路径都不算（否则插件可以用同名文件冒充桥）
+  assert.equal(isWidgetBridgeRequest("/__HEMING_FRAME_BRIDGE.JS"), false);
+  assert.equal(isWidgetBridgeRequest("/__heming_frame_bridge.js?v=1"), false);
+  assert.equal(isWidgetBridgeRequest("/__heming_frame_bridge.js.map"), false);
+  assert.equal(isWidgetBridgeRequest("/files/__heming_frame_bridge.js"), false);
+  assert.equal(isWidgetBridgeRequest("__heming_frame_bridge.js"), false);
+  assert.equal(isWidgetBridgeRequest("/"), false);
+  assert.equal(isWidgetBridgeRequest(""), false);
+  assert.equal(isWidgetBridgeRequest(undefined), false);
+});
+
+test("injectWidgetBridgeScript：插到第一个 <head …> 开标签之后，不碰正文其它内容", () => {
+  const html = "<!doctype html>\n<html><head lang=\"zh\"><meta charset=\"utf-8\"></head><body>页面</body></html>";
+  const out = injectWidgetBridgeScript(Buffer.from(html, "utf8")).toString("utf8");
+  assert.ok(out.includes(`<head lang="zh">${WIDGET_BRIDGE_TAG}<meta charset="utf-8">`));
+  assert.ok(out.endsWith("<body>页面</body></html>"));
+  // 只插一次
+  assert.equal(out.split(WIDGET_BRIDGE_PATH).length - 1, 1);
+});
+
+test("injectWidgetBridgeScript：无 head 回落 <body>，都没有则追加到末尾", () => {
+  const withBody = injectWidgetBridgeScript("<div>片段</div><body class=\"x\"><p>hi</p></body>").toString("utf8");
+  assert.equal(withBody, `<div>片段</div><body class="x">${WIDGET_BRIDGE_TAG}<p>hi</p></body>`);
+
+  const fragment = injectWidgetBridgeScript("<p>没有 head 也没有 body</p>").toString("utf8");
+  assert.equal(fragment, `<p>没有 head 也没有 body</p>${WIDGET_BRIDGE_TAG}`);
+});
+
+test("injectWidgetBridgeScript：已引用过桥文件时原样返回（幂等），超 8MB 返回 null", () => {
+  const already = `<html><head>${WIDGET_BRIDGE_TAG}</head><body></body></html>`;
+  const result = injectWidgetBridgeScript(already);
+  assert.equal(result.toString("utf8"), already);
+
+  const huge = Buffer.alloc(WIDGET_BRIDGE_INJECT_MAX_BYTES + 1, 0x20);
+  assert.equal(injectWidgetBridgeScript(huge), null);
+});
+
+test("injectWidgetBridgeScript：按字节处理非 UTF-8 页面（GBK 正文不被改写）", () => {
+  // “页面”的 GBK 字节是 D2 B3 C3 E6；用 latin1 往返后必须一字节不差
+  const gbk = Buffer.concat([
+    Buffer.from("<html><body>", "latin1"),
+    Buffer.from([0xd2, 0xb3, 0xc3, 0xe6]),
+    Buffer.from("</body></html>", "latin1"),
+  ]);
+  const out = injectWidgetBridgeScript(gbk);
+  assert.ok(out);
+  const injectedAt = out.indexOf(Buffer.from(WIDGET_BRIDGE_TAG, "latin1"));
+  assert.ok(injectedAt > 0);
+  const withoutTag = Buffer.concat([out.subarray(0, injectedAt), out.subarray(injectedAt + WIDGET_BRIDGE_TAG.length)]);
+  assert.deepEqual([...withoutTag], [...gbk]);
 });

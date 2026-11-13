@@ -12,6 +12,24 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.141.3.78.11",
+    "date": "2026-11-13",
+    "title": "插件页面真正内嵌：改为 `widget://` iframe",
+    "bullets": [
+      "桌面端：删掉整套页面视图运行时（`pageMount` / `pageBounds` / `pageUnmount` / `PAGE_VIEW_FLAG` /`WebContentsView`），`packages/desktop/plugin-host.js` 只登记「当前打开的页面」（activePage）并派发调用。",
+      "新增 `packages/desktop/widget-frame-bridge.js`（纯浏览器 IIFE）：在插件页里实现 `window.__heming_widget`—— postMessage RPC + 事件下行；窗口类 API（show/hide/setScale/drag*/…）一律",
+      "`packages/desktop/main.js` + `app-protocol.js`：`widget://` 处理器保留路径 `/__heming_frame_bridge.js`并把它注入插件 HTML（第一个 `<head>` 之后 → 无 head 回落 body → 追加；8MB 上限；按字节安全）；",
+      "主窗桥：`pageOpen` / `pageClose` / `pageCall` / `pageSend` / `onPageEvent`（`packages/desktop/preload.js`），IPC `widgets:page-open|close|call|send|event` 只认主窗 sender 且必须命中当前 activePage。",
+      "Web 端：`PluginBundlePage.tsx` 改成 iframe 宿主（页头仍在帧外，加载/错误是帧上的覆盖层，消息中继校验 `event.origin` + `event.source`，重新加载 = 重挂帧），新增",
+      "安全边界不变：插件只在沙箱里跑、不能开窗、不能导航出去、能力不因有页面而增加；插件之间仍不能互嵌（widget 策略的 `frame-src 'none'` 保留）。",
+      "门禁：`pnpm --filter @heming/desktop typecheck|test` exit 0（851 例全过，新增页面桥 13 例）；`pnpm --filter @heming/web typecheck|test` exit 0（4445 例全过）。",
+      "真机验收（Electron 45 + 真实安装的 heming.infohub 1.4.0）：插件页在 DOM 里是`iframe[data-testid=plugin-page-frame]`，`src=widget://heming.infohub/files/index.html#intent=search`，"
+    ],
+    "paragraphs": [
+      "用户反馈：「插件内容是悬浮在和鸣上，他应该内嵌在其中」。根因不是样式，而是实现：bundle 插件页（信息中枢 / 自动化 / studio…）此前由主进程建 `WebContentsView` 叠在渲染层**之上**，它不参与 DOM，所以永远盖住应用自己的浮层（命令面板、对话框、通知），观感上就是一块外挂的独立窗口。这一轮把页面搬进渲染层：主窗里一个真正的 `<iframe>`，页面帧没有 preload / 没有 node，能力仍只经主进程转发。`ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`，`state()` 为 null（页面没有自己的窗口）。widget CSP 的 `frame-ancestors` 参数化（只放行主窗 origin，默认仍是 `'none'`）；主窗 CSP 新增 `frame-src 'self' app: widget:`；`will-frame-navigate` 的子 frame 只允许停留在当前插件的 `widget://<id>/` 前缀内。`packages/web/src/lib/pluginPageFrame.ts` 承载 postMessage 协议与调用/事件中继。落在 12px 圆角、`overflow:hidden` 的卡片内，页头在帧外；帧内 `info()` / `dataKeys()` 往返正常，`show()` / `setScale()` 抛 `ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`；插件页打开时命令面板（Ctrl+K）盖在帧之上（`elementFromPoint` 命中浮层而非 IFRAME）；主窗内无 `webview`、无原生视图残留。"
+    ]
+  },
+  {
     "version": "d.140.3.78.11",
     "date": "2026-11-13",
     "title": "知识库空态快捷键提示补空格",

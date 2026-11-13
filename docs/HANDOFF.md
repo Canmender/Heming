@@ -173,6 +173,15 @@
 - **仍未动**：云端 web/server 未重新部署（`/api/*` 与线上前端仍是 11-12 的构建）；数据库/配置未变。
 - **另一会话的 UI/UX WIP 已隔离**：分支 `wip/uiux-2026-11-13`（`d0efe595`，54 处改动，版本自标 d.140.3.56.0）。**未完成**：`packages/web/src/App.tsx` 引用不存在的 `asideNotice`/`setAsideNotice`（10 处 TS2304，typecheck exit 2）、web **17 failed / 4349 passed**（App.boot 1、App.test 15、navPrefs 1）。**不能直接合入**，接续前先修这一处。
 
+### 0.6 插件页面内嵌：原生视图 → iframe（2026-11-13，d.141.3.78.11）
+
+- **用户原话**：「我的视觉效果中，插件内容是悬浮在和鸣上，他应该内嵌在其中」。追问后确认指 bundle 插件页（信息中枢/自动化）：页面像一块外挂窗口浮在应用上。
+- **根因**：不是样式。d.124 的实现是主进程 `WebContentsView` + `addChildView`，原生层永远盖在渲染层之上、不参与 DOM，所以应用自己的命令面板/对话框反被它挡住；`PluginBundlePage.tsx` 的文件头注释当时就写着「宿主里多画的任何元素都看不见」。
+- **改法**：主窗里一个真 `<iframe src="widget://<id>/<entry>">`（`sandbox="allow-scripts allow-same-origin"`、`referrerPolicy="no-referrer"`），页头在帧外、加载/错误是帧上的覆盖层。页面帧**没有 preload、没有 node**：能力经 `/__heming_frame_bridge.js`（`widget://` 处理器的保留路径注入到插件 HTML）→ `postMessage` → 宿主 `message`（校验 origin+source）→ 主窗 preload → 主进程，窗口类 API 一律 `ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`。规格：`docs/superpowers/specs/2026-11-13-d141-plugin-page-inline.md`（含实测与偏差）。
+- **安全边界没松**：插件自己仍 `frame-src 'none'`（不能互嵌/嵌外网），宿主才放开 `frame-src 'self' app: widget:`；`will-frame-navigate` 的子 frame 只许 `widget://<activePage.id>/`；所有 `page-call/page-send` 只认主窗 sender + 当前 activePage（行内再核 `mainFrame`）。
+- **门禁**：desktop typecheck+test exit 0（851 例）、web typecheck+test exit 0（4445 例）。
+- **真机验收方法（可复用）**：新数据根首屏要登录，所以先用 `HEMING_SEED_USERS=admin:admin123` + `startServer(8787,"127.0.0.1",<临时库>)` 起 `packages/server`，再用 `VITE_API_BASE=http://127.0.0.1:8787 pnpm --filter @heming/web exec vite build` + 拷进 `packages/desktop/web-dist`（否则主窗还打线上 API），CDP 填表单登录。**教训：在本会话的 bash 执行器里起 Electron GUI 进程必崩（`EXIT=-2147483645`/`0x80000003`，改动前同样崩），必须经桌面 Shell 启动**（`.tmp/launch-heming.cmd` + 快捷方式 → `launch_app`）。实测：iframe 在圆角卡片内、帧内 `info()/dataKeys()` 往返正常、`show()` 抛 `ERR_WIDGET_PAGE_VIEW_UNSUPPORTED`、Ctrl+K 命令面板盖在帧之上。
+
 ---
 
 ## 1. 项目是什么

@@ -1200,9 +1200,10 @@ test("widget-preload 暴露 data* 方法且只调用 widget: 通道", () => {
   }
 });
 
-/* ───────────────────── 页面视图（d.124 B 路径：WebContentsView） ───────────────────── */
+/* ─────────────── 插件页面（d.141：渲染层 iframe + widget:// 内嵌） ─────────────── */
 
 const PAGE_SPEC = { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/page/index.html" };
+const PAGE_URL = "widget://acme.page/files/page/index.html";
 
 /** 一只「只有页面、没有浮窗」的界面插件记录（bundle 可只声明 page）。 */
 function pageRecord(overrides = {}) {
@@ -1226,28 +1227,43 @@ function pageStore(overrides = {}) {
   return store;
 }
 
-/** 假主窗：只需要 contentView + 内容区尺寸（页面视图 rect 的坐标系）。 */
-function fakePageMainWindow(content = { width: 1200, height: 800 }) {
-  const children = [];
+/**
+ * 假主窗：页面帧的唯一合法 sender。
+ *
+ * d.141 之后主进程不再往主窗 contentView 里塞视图，只需要 webContents（send/mainFrame）
+ * ——渲染层负责把 widget:// 页面装进 <iframe>。
+ */
+function fakePageMainWindow() {
+  const sent = [];
   let destroyed = false;
-  return {
-    _children: children,
+  const mainFrame = { name: "main" };
+  const webContents = {
+    _sent: sent,
+    mainFrame,
     isDestroyed: () => destroyed,
-    getContentBounds: () => ({ x: 0, y: 0, width: content.width, height: content.height }),
-    contentView: {
-      addChildView: (view) => children.push(view),
-      removeChildView: (view) => {
-        const index = children.indexOf(view);
-        if (index >= 0) children.splice(index, 1);
-      },
-    },
+    send: (ch, payload) => sent.push({ ch, payload }),
+  };
+  return {
+    _sent: sent,
+    webContents,
+    isDestroyed: () => destroyed,
     destroy: () => {
       destroyed = true;
     },
   };
 }
 
-/** 建一个带主窗的宿主（页面视图测试用）。 */
+/** 主窗收到的页面事件（按投递顺序）：{id, channel, payload}。 */
+function pageEvents(main) {
+  return main.webContents._sent.filter((item) => item.ch === "widgets:page-event").map((item) => item.payload);
+}
+
+/** 页面帧发起的 IPC 事件（sender = 主窗 webContents，frame = 主框架）。 */
+function frameEvent(main, extra = {}) {
+  return { sender: main.webContents, frame: main.webContents.mainFrame, ...extra };
+}
+
+/** 建一个带主窗的宿主（插件页面测试用）。 */
 function makePageHost(overrides = {}) {
   const main = overrides.main || fakePageMainWindow();
   const store = overrides.store || pageStore();
@@ -1255,182 +1271,191 @@ function makePageHost(overrides = {}) {
   return { ...made, store, main };
 }
 
-test("页面视图：mount 建 WebContentsView（沙箱 + widget-preload + widget:// 独立 origin）并嵌进主窗内容区", async () => {
-  const { host, createdViews, main } = makePageHost();
-  host.start();
-  const result = await host.pageMount({ id: "acme.page", rect: { x: 50, y: 60, width: 700, height: 500 } });
-  assert.deepEqual(result, { ok: true });
+test("插件页面：pageOpen 只解析地址并登记 activePage，不创建任何 WebContentsView", () => {
+  const { host, createdViews, logs } = makePageHost();
 
-  const view = createdViews[0];
-  assert.ok(view, "应创建一个 WebContentsView");
-  const prefs = view.opts.webPreferences;
-  assert.equal(prefs.preload, "/tmp/widget-preload.js");
-  assert.equal(prefs.sandbox, true);
-  assert.equal(prefs.contextIsolation, true);
-  assert.equal(prefs.nodeIntegration, false);
-  assert.equal(prefs.spellcheck, false);
-  assert.deepEqual(prefs.additionalArguments, ["--heming-page-view"]);
-  assert.equal(view.webContents._url, "widget://acme.page/files/page/index.html");
-  assert.deepEqual(view.bounds, { x: 50, y: 60, width: 700, height: 500 });
-  assert.deepEqual(main._children, [view]);
+  const result = host.pageOpen({ id: "acme.page" });
+
+  assert.deepEqual(result, { ok: true, url: PAGE_URL, version: "1.0.0" });
   assert.equal(host.pageCount, 1);
+  assert.equal(host.activePage.id, "acme.page");
+  assert.equal(host.activePage.url, PAGE_URL);
+  assert.equal(createdViews.length, 0, "d.141 起不再建 WebContentsView");
+  assert.ok(logs.some((line) => line.includes(`插件页面已打开：${PAGE_URL}`)));
 });
 
-test("页面视图：意图 token 合法时拼进 hash，插件页自己解释；非法/缺省不加 hash", async () => {
-  const { host, createdViews } = makePageHost();
-  host.start();
+test("插件页面：意图 token 合法时拼进 hash，插件页自己解释；非法/缺省不加 hash", () => {
+  const { host } = makePageHost();
 
-  await host.pageMount({ id: "acme.page", rect: {}, intent: "agenda" });
-  assert.equal(createdViews[0].webContents._url, "widget://acme.page/files/page/index.html#intent=agenda");
+  assert.equal(host.pageOpen({ id: "acme.page", intent: "agenda" }).url, `${PAGE_URL}#intent=agenda`);
 
-  // 大写/空白/超长/以符号开头都算非法：退化成普通挂载，不给页面添噪音
+  // 大写/空白/超长/以符号开头都算非法：退化成普通入口，不给页面添噪音
   for (const intent of ["Agenda", "  ", "9" + "a".repeat(40), "-x", 42, null, undefined]) {
-    await host.pageMount({ id: "acme.page", rect: {}, intent });
     assert.equal(
-      createdViews[createdViews.length - 1].webContents._url,
-      "widget://acme.page/files/page/index.html",
+      host.pageOpen({ id: "acme.page", intent }).url,
+      PAGE_URL,
       `非法 intent ${JSON.stringify(intent)} 不应改变入口地址`,
     );
   }
 
   // 首尾空白会被裁掉，不产生空格 hash
-  await host.pageMount({ id: "acme.page", rect: {}, intent: "  search  " });
-  assert.equal(createdViews[createdViews.length - 1].webContents._url, "widget://acme.page/files/page/index.html#intent=search");
+  assert.equal(host.pageOpen({ id: "acme.page", intent: "  search  " }).url, `${PAGE_URL}#intent=search`);
 });
 
-test("页面视图：rect 按主窗内容区钳制（负坐标归零、超出裁掉、宽高至少 1）", async () => {
-  const { host, createdViews } = makePageHost();
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: { x: -20, y: -5, width: 9999, height: 9999 } });
-  assert.deepEqual(createdViews[0].bounds, { x: 0, y: 0, width: 1200, height: 800 });
-
-  // 非法数字回落默认值；0 宽高被钳到 1
-  await host.pageMount({ id: "acme.page", rect: { x: "abc", y: null, width: 0, height: -50 } });
-  assert.deepEqual(createdViews[1].bounds, { x: 0, y: 0, width: 1, height: 1 });
-});
-
-test("页面视图：page-bounds 更新边界并钳制；卸载后调用无副作用", async () => {
-  const { host, createdViews } = makePageHost();
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: { x: 0, y: 0, width: 200, height: 200 } });
-  const view = createdViews[0];
-
-  assert.equal(host.pageBounds({ rect: { x: 10, y: 20, width: 300, height: 400 } }), true);
-  assert.deepEqual(view.bounds, { x: 10, y: 20, width: 300, height: 400 });
-
-  // 越界：x/y 夹到内容区内（至少留 1px 可见），height 被内容区剩余高度裁掉
-  host.pageBounds({ rect: { x: -100, y: 10000, width: 50, height: 50 } });
-  assert.deepEqual(view.bounds, { x: 0, y: 799, width: 50, height: 1 });
-
-  host.pageUnmount();
-  assert.equal(host.pageBounds({ rect: { x: 1, y: 1, width: 2, height: 2 } }), false);
-});
-
-test("页面视图：重复 mount 先销毁旧视图再建新的（同一时刻只有一个，不留孤儿）", async () => {
-  const { host, createdViews, main } = makePageHost();
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: { x: 0, y: 0, width: 100, height: 100 } });
-  const first = createdViews[0];
-  await host.pageMount({ id: "acme.page", rect: { x: 0, y: 0, width: 100, height: 100 } });
-  const second = createdViews[1];
-
-  assert.equal(first.webContents._closed, true, "旧视图必须被销毁");
-  assert.equal(second.webContents._closed, false);
-  assert.deepEqual(main._children, [second], "内容区里只该有最新视图");
-  assert.equal(host.pageCount, 1);
-});
-
-test("页面视图：unmount 移除并销毁视图，重复调用无害", async () => {
-  const { host, createdViews, main } = makePageHost();
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: { x: 5, y: 6, width: 100, height: 100 } });
-  const view = createdViews[0];
-
-  assert.equal(host.pageUnmount(), true);
-  assert.equal(view.webContents._closed, true);
-  assert.deepEqual(main._children, []);
-  assert.equal(host.pageCount, 0);
-  assert.equal(host.pageUnmount(), false);
-});
-
-test("页面视图：未安装 / 停用 / 文件坏 / 没有 page 都拒绝，且 error 是可直接展示的中文", async () => {
+test("插件页面：未安装 / 停用 / 文件坏 / 没有 page / 缺 id / 主窗不可用 都拒绝，文案可直接展示", () => {
   const missing = makePageHost({ store: makeStore() });
-  missing.host.start();
-  assert.match((await missing.host.pageMount({ id: "acme.page", rect: {} })).error, /未安装/);
+  const notInstalled = missing.host.pageOpen({ id: "acme.page" });
+  assert.equal(notInstalled.ok, false);
+  assert.match(notInstalled.error, /未安装/);
 
   const disabled = makePageHost({ store: pageStore({ enabled: false }) });
-  disabled.host.start();
-  assert.match((await disabled.host.pageMount({ id: "acme.page", rect: {} })).error, /已停用/);
+  assert.match(disabled.host.pageOpen({ id: "acme.page" }).error, /已停用/);
 
   const broken = makePageHost({ store: pageStore({ error: "插件文件缺失，请重新安装" }) });
-  broken.host.start();
-  assert.match((await broken.host.pageMount({ id: "acme.page", rect: {} })).error, /文件缺失/);
+  assert.match(broken.host.pageOpen({ id: "acme.page" }).error, /文件缺失/);
 
   const noPage = makePageHost({ store: pageStore({ page: undefined }) });
-  noPage.host.start();
-  assert.match((await noPage.host.pageMount({ id: "acme.page", rect: {} })).error, /没有声明页面/);
+  assert.match(noPage.host.pageOpen({ id: "acme.page" }).error, /没有声明页面/);
 
-  // 非法 id / 主窗不可用
-  assert.match((await missing.host.pageMount({ rect: {} })).error, /缺少插件 id/);
+  // 非法 id / 入口非法 / 主窗不可用
+  assert.match(missing.host.pageOpen({}).error, /缺少插件 id/);
+  const badEntry = makePageHost({ store: pageStore({ page: { ...PAGE_SPEC, entry: "../escape.html" } }) });
+  assert.match(badEntry.host.pageOpen({ id: "acme.page" }).error, /页面入口非法/);
   const noMain = makeHost({ store: pageStore(), getMainWindow: () => null });
-  noMain.host.start();
-  assert.match((await noMain.host.pageMount({ id: "acme.page", rect: {} })).error, /主窗口不可用/);
+  assert.match(noMain.host.pageOpen({ id: "acme.page" }).error, /主窗口不可用/);
 });
 
-test("页面视图：加载失败 → 返回错误并销毁刚建的视图（不白屏、不留空视图）", async () => {
-  const { host, createdViews, main, setNextViewLoadError } = makePageHost();
-  host.start();
-  setNextViewLoadError(new Error("ERR_FILE_NOT_FOUND"));
-  const result = await host.pageMount({ id: "acme.page", rect: { x: 0, y: 0, width: 100, height: 100 } });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /页面加载失败/);
-  assert.equal(createdViews[0].webContents._closed, true);
-  assert.deepEqual(main._children, []);
-  assert.equal(host.pageCount, 0);
-});
-
-test("页面视图：sender 反查——info/settings/data/openPage/log 可用，跨插件读不到数据", async () => {
+test("插件页面：切换页面直接覆盖登记（同一时刻只服务一个），pageClose 幂等", () => {
   const store = pageStore();
-  store.setRecords([pageRecord(), pageRecord({ id: "acme.other", name: "另一个页面插件" })]);
-  const { host, createdViews, openedPages, logs } = makePageHost({ store });
+  const other = pageRecord({ id: "acme.other", name: "另一个页面插件" });
+  store.setRecords([pageRecord(), other]);
+  const { host } = makePageHost({ store });
+
+  assert.equal(host.pageOpen({ id: "acme.page" }).ok, true);
+  assert.equal(host.pageOpen({ id: "acme.other" }).ok, true);
+  assert.equal(host.activePage.id, "acme.other");
+  assert.equal(host.pageCount, 1);
+
+  assert.equal(host.pageClose(), true);
+  assert.equal(host.activePage, null);
+  assert.equal(host.pageCount, 0);
+  assert.equal(host.pageClose(), false);
+});
+
+test("插件页面：pageCall 方法表派发到既有 widget:* 通道（错误走 {ok:false}，不抛）", async () => {
+  const { host } = makePageHost();
   host.start();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const view = createdViews[0];
-  const event = { sender: view.webContents };
+  host.pageOpen({ id: "acme.page" });
 
-  assert.equal(invokeChannel("widget:info", event).pluginId, "acme.page");
-  assert.equal(invokeChannel("widget:info", event).pluginName, "页面插件");
-  assert.deepEqual(invokeChannel("widget:settings-get", event), {});
-  assert.deepEqual(invokeChannel("widget:data-set", event, { key: "cache", value: { hits: 2 } }), {
-    key: "cache",
-    bytes: Buffer.byteLength(JSON.stringify({ hits: 2 }, null, 2), "utf8"),
+  const info = await host.pageCall({ id: "acme.page", method: "info" });
+  assert.equal(info.ok, true);
+  assert.equal(info.value.pluginId, "acme.page");
+  assert.equal(info.value.pluginName, "页面插件");
+  assert.deepEqual((await host.pageCall({ id: "acme.page", method: "settings" })).value, {});
+
+  // 多参方法：args 数组还原成既有通道的载荷形状
+  assert.deepEqual(
+    (await host.pageCall({ id: "acme.page", method: "dataSet", payload: ["cache", { hits: 2 }] })).value,
+    { key: "cache", bytes: Buffer.byteLength(JSON.stringify({ hits: 2 }, null, 2), "utf8") },
+  );
+  // 单参方法：非数组 payload 也按一个参数处理
+  assert.deepEqual((await host.pageCall({ id: "acme.page", method: "dataGet", payload: "cache" })).value, {
+    hits: 2,
   });
-  assert.deepEqual(invokeChannel("widget:data-get", event, { key: "cache" }), { hits: 2 });
-  assert.deepEqual(invokeChannel("widget:data-dir", event), { dir: "/plugins/acme.page/data" });
+  assert.deepEqual((await host.pageCall({ id: "acme.page", method: "dataDir" })).value, {
+    dir: "/plugins/acme.page/data",
+  });
 
-  invokeChannel("widget:open-page", event, { page: "infohub" });
+  // 未知方法：明确错误码，而不是静默 no-op
+  const unknown = await host.pageCall({ id: "acme.page", method: "nope" });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.code, "ERR_WIDGET_UNKNOWN_METHOD");
+
+  // 非当前页面 / 没打开：越权一律 fail-closed
+  const other = await host.pageCall({ id: "acme.other", method: "info" });
+  assert.equal(other.ok, false);
+  assert.equal(other.error.code, "ERR_WIDGET_PAGE_SCOPE");
+  host.pageClose();
+  const closed = await host.pageCall({ id: "acme.page", method: "info" });
+  assert.equal(closed.ok, false);
+  assert.equal(closed.error.code, "ERR_WIDGET_PAGE_SCOPE");
+});
+
+test("插件页面：pageSend 只派发 log/openSettings/openPage，其余方法与非当前页都静默丢弃", () => {
+  const { host, openedPages, logs } = makePageHost();
+  host.start();
+  host.pageOpen({ id: "acme.page" });
+
+  assert.equal(host.pageSend({ id: "acme.page", method: "openPage", payload: { page: "infohub" } }), true);
   assert.deepEqual(openedPages, [{ page: "infohub", pluginId: "acme.page" }]);
-  invokeChannel("widget:log", event, "页面日志");
+
+  assert.equal(host.pageSend({ id: "acme.page", method: "log", payload: "页面日志" }), true);
   assert.ok(logs.some((line) => line.includes("[widgets:acme.page] 页面日志")));
 
-  // 别的插件 sender（不是当前页面视图）拿不到数据
-  const stranger = { sender: { fake: true } };
-  assert.equal(invokeChannel("widget:info", stranger), null);
-  assert.equal(invokeChannel("widget:data-get", stranger, { key: "cache" }), null);
+  // invoke 方法不许走 send 通道（不新增能力）
+  assert.equal(host.pageSend({ id: "acme.page", method: "info" }), false);
+  assert.equal(host.pageSend({ id: "acme.other", method: "log" }), false);
 });
 
-test("页面视图：窗口几何/拖拽/穿透通道一律拒绝（返回明确错误而不是静默 no-op）", async () => {
-  const { host, createdViews, logs } = makePageHost();
+test("插件页面：settings / event / lifecycle / engine-event 都经主窗 widgets:page-event 中继", async () => {
+  const permissions = { events: ["notify", "theme", "lifecycle"] };
+  const store = pageStore({ permissions });
+  const { host, main } = makePageHost({ store });
   host.start();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const view = createdViews[0];
-  const event = { sender: view.webContents };
+  host.pageOpen({ id: "acme.page" });
 
-  // invoke 类：抛中文错误（页面视图没有独立窗口）
-  assert.throws(() => invokeChannel("widget:show", event), /页面视图不支持窗口操作/);
-  assert.throws(() => invokeChannel("widget:set-scale", event, { dir: 1 }), /页面视图不支持窗口操作/);
-  assert.throws(() => invokeChannel("widget:set-click-through", event, true), /页面视图不支持窗口操作/);
-  // 状态只读 unsupported → null（不伪造 visible/scale）
+  // settings：页面自己 setSetting → 主进程回推同一份最新设置
+  await host.pageCall({ id: "acme.page", method: "setSetting", payload: ["bubble", false] });
+  assert.deepEqual(pageEvents(main).at(-1), {
+    id: "acme.page",
+    channel: "settings",
+    payload: { bubble: false },
+  });
+
+  // event：主题切换沿用既有权限门禁，声明 theme 才收
+  assert.equal(host.publish({ kind: "theme", theme: "dark" }), "delivered");
+  assert.deepEqual(pageEvents(main).at(-1), {
+    id: "acme.page",
+    channel: "event",
+    payload: { kind: "theme", theme: "dark" },
+  });
+
+  // lifecycle：插件被停用 → 中继给页面，然后作废登记
+  store.setRecords([pageRecord({ enabled: false })]);
+  host.reconcile();
+  const lifecycle = pageEvents(main).at(-1);
+  assert.equal(lifecycle.channel, "lifecycle");
+  assert.ok(lifecycle.payload, "生命周期事件应带载荷");
+  assert.equal(host.activePage, null);
+
+  // engine-event：只有该插件自己的页面收；别的插件 id 不投递
+  store.setRecords([pageRecord({ permissions })]);
+  host.reconcile();
+  assert.equal(host.pageOpen({ id: "acme.page" }).ok, true);
+  assert.equal(host._internal.sendPageEvent("acme.page", "engine-event", { event: "progress" }), true);
+  assert.deepEqual(pageEvents(main).at(-1), {
+    id: "acme.page",
+    channel: "engine-event",
+    payload: { event: "progress" },
+  });
+  assert.equal(host._internal.sendPageEvent("acme.other", "engine-event", { event: "progress" }), false);
+});
+
+test("插件页面：帧 sender 反查——主窗 + 当前页面才认；窗口几何/拖拽/穿透通道继续拒绝", async () => {
+  const { host, main, logs } = makePageHost();
+  host.start();
+  host.pageOpen({ id: "acme.page" });
+  const event = frameEvent(main);
+
+  // 数据/信息类走 withRuntimeOrPage 的页面分支
+  assert.equal(invokeChannel("widget:info", event).pluginId, "acme.page");
+  assert.deepEqual(invokeChannel("widget:settings-get", event), {});
+  assert.deepEqual(invokeChannel("widget:data-dir", event), { dir: "/plugins/acme.page/data" });
+
+  // 页面帧没有独立窗口：invoke 类抛明确错误，state 只读为 null
+  assert.throws(() => invokeChannel("widget:show", event), /插件页面不支持窗口操作/);
+  assert.throws(() => invokeChannel("widget:set-scale", event, { dir: 1 }), /插件页面不支持窗口操作/);
+  assert.throws(() => invokeChannel("widget:set-click-through", event, true), /插件页面不支持窗口操作/);
   assert.equal(invokeChannel("widget:state", event), null);
 
   // send 类：不执行、不炸，留下日志
@@ -1445,122 +1470,92 @@ test("页面视图：窗口几何/拖拽/穿透通道一律拒绝（返回明确
   ]) {
     assert.doesNotThrow(() => invokeChannel(channel, event, true), channel);
   }
-  assert.ok(logs.some((line) => /页面视图不支持窗口操作通道/.test(line)));
+  assert.ok(logs.some((line) => /插件页面不支持窗口操作通道/.test(line)));
 
-  // reload 不是窗口几何操作：允许页面自己重载
-  invokeChannel("widget:reload", event);
-  assert.equal(view.webContents._reloaded, 1);
+  // 陌生 sender / 子框架 sender 一律不认（fail-closed）
+  assert.equal(invokeChannel("widget:info", { sender: { fake: true } }), null);
+  assert.equal(invokeChannel("widget:info", frameEvent(main, { frame: { name: "child" } })), null);
 
-  // 卸载后 sender 失效（fail-closed）
-  host.pageUnmount();
+  // 页面关闭后 sender 失效
+  host.pageClose();
   assert.equal(invokeChannel("widget:info", event), null);
 });
 
-test("页面视图：导航只允许自身 origin；window.open deny；下载取消", async () => {
-  const { host, createdViews, fakeSession } = makePageHost();
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const view = createdViews[0];
-  const wc = view.webContents;
-
-  const prevented = [];
-  const navEvent = { preventDefault: () => prevented.push(true) };
-  wc._listeners["will-navigate"](navEvent, "widget://acme.page/other.html");
-  assert.equal(prevented.length, 0, "同 origin 内的翻页应放行");
-  wc._listeners["will-navigate"](navEvent, "https://evil.example/");
-  assert.equal(prevented.length, 1, "离开自身 origin 必须拦截");
-  wc._listeners["will-navigate"](navEvent, "widget://acme.other/x.html");
-  assert.equal(prevented.length, 2, "也不许导航到别的插件 origin");
-
-  const redirectEvent = { preventDefault: () => prevented.push(true) };
-  wc._listeners["will-redirect"](redirectEvent, "https://evil.example/");
-  assert.equal(prevented.length, 3);
-
-  assert.deepEqual(wc._openHandler({ url: "https://evil.example/" }), { action: "deny" });
-
-  // 下载：只取消本页面发起的（同 session 其他页面的下载不受影响）
-  const downloadEvent = { prevented: 0, preventDefault() { this.prevented += 1; } };
-  fakeSession.emit("will-download", downloadEvent, { getURL: () => "https://evil.example/file.zip" }, wc);
-  assert.equal(downloadEvent.prevented, 1);
-  const otherEvent = { prevented: 0, preventDefault() { this.prevented += 1; } };
-  fakeSession.emit("will-download", otherEvent, { getURL: () => "x" }, { fake: true });
-  assert.equal(otherEvent.prevented, 0);
-});
-
-test("页面视图：停用 / 卸载 / 版本更新 / 页面入口变化 → 对账立即销毁视图", async () => {
+test("插件页面：停用 / 卸载 / 版本更新 / 页面入口变化 → 对账立即作废登记", () => {
   const store = pageStore();
-  const { host, createdViews, main } = makePageHost({ store });
-  host.start();
-  await host.pageMount({ id: "acme.page", rect: {} });
+  const { host } = makePageHost({ store });
 
   // 停用
+  host.pageOpen({ id: "acme.page" });
   store.setRecords([pageRecord({ enabled: false })]);
   host.reconcile();
-  assert.equal(createdViews[0].webContents._closed, true);
-  assert.deepEqual(main._children, []);
+  assert.equal(host.activePage, null);
+  assert.equal(host.pageCount, 0);
 
-  // 重新启用 + 进入页面 → 再挂一次；然后卸载
+  // 重新启用 → 再打开；然后卸载
   store.setRecords([pageRecord({ enabled: true })]);
   host.reconcile();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const second = createdViews[1];
+  assert.equal(host.pageOpen({ id: "acme.page" }).ok, true);
   store.setRecords([]);
   host.reconcile();
-  assert.equal(second.webContents._closed, true);
+  assert.equal(host.activePage, null);
 
   // 版本更新
   store.setRecords([pageRecord()]);
   host.reconcile();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const third = createdViews[2];
+  host.pageOpen({ id: "acme.page" });
   store.setRecords([pageRecord({ version: "2.0.0" })]);
   host.reconcile();
-  assert.equal(third.webContents._closed, true);
+  assert.equal(host.activePage, null);
 
   // 同版本但页面入口变了
+  host.pageOpen({ id: "acme.page" });
   store.setRecords([pageRecord({ page: { ...PAGE_SPEC, entry: "files/page/other.html" } })]);
   host.reconcile();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const fourth = createdViews[3];
-  store.setRecords([pageRecord({ page: { ...PAGE_SPEC, entry: "files/page/new.html" } })]);
-  host.reconcile();
-  assert.equal(fourth.webContents._closed, true);
+  assert.equal(host.activePage, null);
 });
 
-test("页面视图：主窗关闭 / destroyAll / 主窗不可用 时销毁视图，不留孤儿", async () => {
+test("插件页面：destroyAll / 主窗销毁后主动清登记，页面调用 fail-closed", async () => {
   const first = makePageHost();
   first.host.start();
-  await first.host.pageMount({ id: "acme.page", rect: {} });
+  first.host.pageOpen({ id: "acme.page" });
   first.host.destroyAll();
-  assert.equal(first.createdViews[0].webContents._closed, true);
+  assert.equal(first.host.activePage, null);
+  assert.equal(first.host.pageCount, 0);
 
+  // 主窗销毁：activePage 还在，但拿不到合法 sender → 调用被拒（不留越权通道）
   const second = makePageHost();
   second.host.start();
-  await second.host.pageMount({ id: "acme.page", rect: {} });
+  second.host.pageOpen({ id: "acme.page" });
   second.main.destroy();
-  assert.equal(second.host.pageBounds({ rect: { x: 0, y: 0, width: 10, height: 10 } }), false);
-  assert.equal(second.createdViews[0].webContents._closed, true);
-  assert.equal(second.host.pageCount, 0);
+  const result = await second.host.pageCall({ id: "acme.page", method: "info" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "ERR_WIDGET_PAGE_SCOPE");
+  assert.match(second.host.pageOpen({ id: "acme.page" }).error, /主窗口不可用/);
+
+  // 主窗销毁后事件中继也没有去处（不抛）
+  assert.equal(second.host._internal.sendPageEvent("acme.page", "event", { kind: "theme" }), false);
 });
 
-test("页面视图：主题切换按现有 widget:event 通道推送给页面（不新增通道）", async () => {
+test("插件页面：主题切换按现有事件通道推给页面（声明 theme 才收，未声明 no-target）", () => {
   const store = pageStore({ permissions: { events: ["theme"] } });
-  const { host, createdViews } = makePageHost({ store });
+  const { host, main } = makePageHost({ store });
   host.start();
-  await host.pageMount({ id: "acme.page", rect: {} });
-  const view = createdViews[0];
+  host.pageOpen({ id: "acme.page" });
 
   assert.equal(host.publish({ kind: "theme", theme: "dark" }), "delivered");
-  assert.deepEqual(view.webContents._sent.find((item) => item.ch === "widget:event").payload, {
-    kind: "theme",
-    theme: "dark",
+  assert.deepEqual(pageEvents(main).at(-1), {
+    id: "acme.page",
+    channel: "event",
+    payload: { kind: "theme", theme: "dark" },
   });
+
   // 未声明 theme 权限的插件页面收不到
-  const plain = pageStore();
-  const second = makePageHost({ store: plain });
-  second.host.start();
-  await second.host.pageMount({ id: "acme.page", rect: {} });
-  assert.equal(second.host.publish({ kind: "theme", theme: "dark" }), "no-target");
+  const plain = makePageHost({ store: pageStore() });
+  plain.host.start();
+  plain.host.pageOpen({ id: "acme.page" });
+  assert.equal(plain.host.publish({ kind: "theme", theme: "dark" }), "no-target");
+  assert.deepEqual(pageEvents(plain.main), []);
 });
 
 /* ───────────────── 沙箱 bundle 插件：后台常驻页 / 首页卡片 / 信息中枢 / 通知 ───────────────── */

@@ -397,9 +397,11 @@ test("主窗暴露 __heming_widgets，且只调用 widgets: 前缀通道", async
     "settingsSet",
     "action",
     "state",
-    "pageMount",
-    "pageBounds",
-    "pageUnmount",
+    "pageOpen",
+    "pageClose",
+    "pageCall",
+    "pageSend",
+    "onPageEvent",
     "publish",
     "migrateLegacy",
     "onOpenPage",
@@ -423,14 +425,15 @@ test("主窗暴露 __heming_widgets，且只调用 widgets: 前缀通道", async
     { requestId: "cc-1", config: { agents: [], binding: { agentId: null } } },
   ]);
 
-  // d.124：页面视图三件套（挂载 invoke / 边界 fire-and-forget / 卸载 fire-and-forget）
-  const pageRect = { x: 0, y: 56, width: 1000, height: 700 };
-  bridge.pageMount({ id: "acme.page", rect: pageRect });
-  assert.deepEqual(invoked.at(-1), ["widgets:page-mount", { id: "acme.page", rect: pageRect }]);
-  bridge.pageBounds({ rect: pageRect });
-  assert.deepEqual(sent.at(-1), ["widgets:page-bounds", { rect: pageRect }]);
-  bridge.pageUnmount();
-  assert.deepEqual(sent.at(-1), ["widgets:page-unmount"]);
+  // d.141：页面改成渲染层 iframe（打开/关闭 invoke+send，帧内 RPC 走 call/send，事件中继单向）
+  bridge.pageOpen({ id: "acme.page", intent: "agenda" });
+  assert.deepEqual(invoked.at(-1), ["widgets:page-open", { id: "acme.page", intent: "agenda" }]);
+  bridge.pageCall({ id: "acme.page", method: "info" });
+  assert.deepEqual(invoked.at(-1), ["widgets:page-call", { id: "acme.page", method: "info" }]);
+  bridge.pageSend({ id: "acme.page", method: "log", payload: "hi" });
+  assert.deepEqual(sent.at(-1), ["widgets:page-send", { id: "acme.page", method: "log", payload: "hi" }]);
+  bridge.pageClose();
+  assert.deepEqual(sent.at(-1), ["widgets:page-close"]);
 
   // 所有通道都必须落在 widgets: 前缀（主窗专用；不会误用 widget 窗口的通道）
   for (const [channel] of [...sent, ...invoked]) {

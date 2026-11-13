@@ -157,16 +157,24 @@ export interface WidgetPageSpec {
   entry: string;
 }
 
-/** 页面视图的位置与尺寸（主窗内容区坐标，CSS px = DIP）。 */
-export interface WidgetPageRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+/**
+ * 页面打开结果（`pageOpen`，d.141 起页面内嵌为渲染层 iframe）。
+ *
+ * 成功时 `url` 是主进程拼好的 `widget://<id>/<entry>` 完整地址（已带 intent 与版本
+ * query），宿主**直接**塞给 `iframe.src`，不要再自己拼参数；`version` 是本次打开的
+ * 插件版本（与记录里的版本一致，便于页面自证）。
+ */
+export type WidgetPageOpenResult =
+  | { ok: true; url: string; version: string }
+  | { ok: false; error: string };
 
-/** 页面视图挂载结果（失败时 error 已是可直接展示的中文）。 */
-export type WidgetPageMountResult = { ok: true } | { ok: false; error: string };
+/** 页面内调用一次宿主方法的结果（失败码如 `ERR_WIDGET_UNKNOWN_METHOD`）。 */
+export type WidgetPageCallResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: { code: string; message: string } };
+
+/** 主进程 → 页面帧的推送通道（`onPageEvent`）。 */
+export type WidgetPageEventChannel = "settings" | "event" | "lifecycle" | "engine-event";
 
 /** 宿主动作（规格 §2.3「窗口通用动作」）：全部由主进程执行，渲染层不碰窗口 API。 */
 export type WidgetHostAction =
@@ -279,19 +287,26 @@ export interface WidgetsBridge {
   /** 读窗口状态；未安装/记录损坏时主进程返回 `null`（不是伪造的默认值）。 */
   state(input: { id: string }): Promise<WidgetState | null>;
   /**
-   * d.124：把界面插件的页面视图挂到主窗内容区（进入 `plugin:<id>` 页面时调用）。
+   * d.141：打开界面插件的页面，返回可内嵌的 `widget://` 地址（进入 `plugin:<id>` 时调用）。
    *
-   * 主进程会先销毁上一个页面视图再创建；无 `page` 贡献/已停用的插件会被拒绝。
-   * 旧版桌面端没有该方法 —— 调用方必须降级而不是假定存在。
-   *
-   * d.139：`intent` 是首页卡 action 透传的页面意图（如 `agenda`），宿主把它拼成
-   * `#intent=<intent>` 给 sandbox 页读；纯提示字段，缺省即「普通进入」。
+   * 主进程负责校验清单/启停/入口存在并拼好地址（含 `intent` 与版本 query），渲染层
+   * 只把它交给 iframe。旧版桌面端没有该方法 —— 调用方必须降级而不是假定存在。
    */
-  pageMount?(input: { id: string; rect: WidgetPageRect; intent?: string }): Promise<WidgetPageMountResult>;
-  /** 更新页面视图边界（窗口/布局变化时；fire-and-forget，主进程自己钳制）。 */
-  pageBounds?(input: { rect: WidgetPageRect }): void;
-  /** 移除并销毁当前页面视图（离开页面/切页时；重复调用无害）。 */
-  pageUnmount?(): void;
+  pageOpen?(input: { id: string; intent?: string }): Promise<WidgetPageOpenResult>;
+  /** 关闭当前页面（离开页面/切页时；重复调用无害）。 */
+  pageClose?(): void;
+  /** 页面帧里的 `call` 方法：主进程代为执行并回结果；未知方法回 `ok:false`。 */
+  pageCall?(input: { id: string; method: string; payload?: unknown }): Promise<WidgetPageCallResult>;
+  /** 页面帧里的 fire-and-forget 方法（log/openSettings/openPage）。 */
+  pageSend?(input: { id: string; method: string; payload?: unknown }): void;
+  /**
+   * 主进程 → 主窗的页面事件（settings/event/lifecycle/engine-event）。
+   *
+   * 返回退订函数；旧 preload 没有该方法时调用方必须 no-op。
+   */
+  onPageEvent?(
+    cb: (msg: { id: string; channel: WidgetPageEventChannel; payload: unknown }) => void,
+  ): () => void;
   /** 脱敏事件转发（fire-and-forget；主进程按权限决定是否转给 widget）。 */
   publish(event: WidgetNotifyEvent): void;
   /**

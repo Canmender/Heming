@@ -396,20 +396,28 @@ contextBridge.exposeInMainWorld("__heming_widgets", {
   /** 运行时状态 { visible, scale, clickThrough }（未运行为 null）。 */
   state: (payload) => ipcRenderer.invoke("widgets:state", payload),
   /**
-   * d.124：把界面插件的**页面视图**挂到主窗内容区（进入 `plugin:<id>` 页面时调用）。
-   *
-   * 主进程先销毁旧视图再按记录新建（同一时刻只有一个页面视图）；返回 `{ ok:false, error }`
-   * 时 error 已是可直接展示的中文（未安装/停用/没有页面/加载失败）。旧版桌面端没有此方法，
-   * 调用方用 `typeof bridge.pageMount === "function"` 判定并降级。
+   * d.141：打开插件页面（进入 `plugin:<id>` 页面时调用）。主进程只解析地址并登记
+   * 「当前打开的页面」，页面本身由渲染层的 <iframe> 加载 `widget://<id>/<entry>`。
+   * 返回 `{ ok:false, error }` 时 error 已是可直接展示的中文（未安装/停用/没有页面）。
+   * 旧版桌面端没有此方法，调用方用 `typeof bridge.pageOpen === "function"` 判定并降级。
    */
-  pageMount: (input) => ipcRenderer.invoke("widgets:page-mount", input),
+  pageOpen: (input) => ipcRenderer.invoke("widgets:page-open", input),
+  /** 关闭当前插件页面（离开页面/切页；重复调用无害）。 */
+  pageClose: () => ipcRenderer.send("widgets:page-close"),
   /**
-   * 更新页面视图边界（窗口/布局变化时）。rect 是主窗内容区坐标（DIP），主进程自己钳制；
-   * fire-and-forget：高频 resize 不该等一次 IPC 往返。
+   * 页面帧的 RPC（iframe 里 widget-frame-bridge.js 经 postMessage 转过来）；
+   * 永不抛：错误走 `{ ok:false, error:{code,message} }`。
    */
-  pageBounds: (input) => ipcRenderer.send("widgets:page-bounds", input),
-  /** 移除并销毁当前页面视图（离开页面/切页时；重复调用无害）。 */
-  pageUnmount: () => ipcRenderer.send("widgets:page-unmount"),
+  pageCall: (input) => ipcRenderer.invoke("widgets:page-call", input),
+  /** 页面帧的单向调用（log/openSettings/openPage 这类不需要回执的）。 */
+  pageSend: (input) => ipcRenderer.send("widgets:page-send", input),
+  /** 页面事件中继（settings/event/lifecycle/engine-event）。返回取消订阅函数。 */
+  onPageEvent: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("widgets:page-event", listener);
+    return () => ipcRenderer.removeListener("widgets:page-event", listener);
+  },
   /** 把通知中心的新条目脱敏后转发给声明了 permissions.events 含 notify 的 widget。 */
   publish: (payload) => ipcRenderer.send("widgets:publish", payload),
   /** 老 localStorage["heming.pet.v1"] 一次性并入 heming.pet 的设置（幂等）。 */

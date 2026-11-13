@@ -191,6 +191,14 @@ function buildCsp(opts = {}) {
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["frame-ancestors", ["'none'"]],
+    /*
+     * d.141：插件页面从原生视图改成 `<iframe>` 内嵌，**宿主**页面必须允许嵌
+     * `widget://` 的帧。只放方案级来源（不写具体插件 id）：可嵌的插件页仍由
+     * 主窗 `will-frame-navigate` 按当前打开的那个插件逐次校验，CSP 只是第一道闸。
+     * 注意这是主窗策略；`buildWidgetCsp` 里的 `frame-src 'none'` 不变——
+     * 插件之间依然不能互嵌。
+     */
+    ["frame-src", ["'self'", "app:", "widget:"]],
     ["form-action", ["'self'"]],
   ];
   return directives.map(([name, values]) => `${name} ${values.join(" ")}`).join("; ");
@@ -265,6 +273,26 @@ function gatewaySourceOf(origin) {
 }
 
 /**
+ * `frame-ancestors` 的宿 origin 归一化（d.141）：只接受带 host 的 `app:` / `http:` / `https:`。
+ *
+ * 不用 `URL.origin`：非特殊 scheme（`app://`）在 Node 的 URL 实现里 origin 是字符串
+ * `"null"`，拿去比较必然不命中，所以自己拼 `scheme//host[:port]`。
+ * 非法输入（空串/相对路径/`javascript:` 等）返回 null，调用方忽略。
+ */
+function frameAncestorSource(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (!url.host) return null;
+  if (url.protocol !== "app:" && url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return `${url.protocol}//${url.host}`;
+}
+
+/**
  * 生成一个界面插件的 CSP 策略串。
  *
  * ★ 审计 P0-1：`connect-src` **不再含本机回环通配**（`127.0.0.1:*` / `localhost:*`）。
@@ -275,7 +303,10 @@ function gatewaySourceOf(origin) {
  *   3. 清单 `permissions.network` 里显式声明的 host（逐条，仍无 `https:` 通配）。
  *
  * @param {{network?: string[], eval?: boolean, chat?: boolean}} [permissions] 归一化后的 permissions
- * @param {{gatewayOrigin?: string}} [opts] 本机网关 origin（如 `http://127.0.0.1:4321`）
+ * @param {{gatewayOrigin?: string, frameAncestors?: string[]}} [opts]
+ *   `gatewayOrigin`：本机网关 origin（如 `http://127.0.0.1:4321`）；
+ *   `frameAncestors`：允许把本页面放进 <iframe> 的宿 origin 列表（d.141）。
+ *   **不传 = `'none'`**（浮窗 / 后台常驻页 / 其它调用方仍是谁都不许嵌）。
  */
 function buildWidgetCsp(permissions = {}, opts = {}) {
   const permissionsObject = permissions && typeof permissions === "object" ? permissions : {};
@@ -292,6 +323,15 @@ function buildWidgetCsp(permissions = {}, opts = {}) {
     else if (source) connect.push(source);
   }
 
+  // d.141：插件页面可以从「主进程原生视图」改为渲染层 <iframe> 内嵌，只有这条指令需要
+  // 按调用方放开到宿主主窗的 origin。`'self'` 保留（widget 页面之间互嵌仍属自嵌）。
+  const ancestors = ["'self'"];
+  for (const origin of Array.isArray(opts.frameAncestors) ? opts.frameAncestors : []) {
+    const source = frameAncestorSource(origin);
+    if (source) ancestors.push(source);
+  }
+  const frameAncestors = ancestors.length > 1 ? [...new Set(ancestors)] : ["'none'"];
+
   const directives = [
     ["default-src", ["'self'"]],
     ["script-src", script],
@@ -303,7 +343,7 @@ function buildWidgetCsp(permissions = {}, opts = {}) {
     ["connect-src", [...new Set(connect)]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'none'"]],
-    ["frame-ancestors", ["'none'"]],
+    ["frame-ancestors", frameAncestors],
     // d.110：界面插件不得嵌外部页面（也不允许 widget:// 互嵌）
     ["frame-src", ["'none'"]],
     ["form-action", ["'none'"]],
@@ -315,13 +355,70 @@ function buildWidgetCsp(permissions = {}, opts = {}) {
  * 一次 `widget://` 响应要带的 CSP 头。
  *
  * @param {{network?: string[], eval?: boolean, chat?: boolean}} [permissions]
- * @param {{mode?: "off"|"report"|"enforce", gatewayOrigin?: string}} [opts]
+ * @param {{mode?: "off"|"report"|"enforce", gatewayOrigin?: string, frameAncestors?: string[]}} [opts]
  */
 function widgetCspHeaders(permissions = {}, opts = {}) {
   const mode = normalizeCspMode(opts.mode);
   if (mode === "off") return {};
   const header = mode === "enforce" ? CSP_HEADER : CSP_REPORT_ONLY_HEADER;
-  return { [header]: buildWidgetCsp(permissions, { gatewayOrigin: opts.gatewayOrigin }) };
+  return {
+    [header]: buildWidgetCsp(permissions, {
+      gatewayOrigin: opts.gatewayOrigin,
+      frameAncestors: opts.frameAncestors,
+    }),
+  };
+}
+
+/* ───────────────── 插件页面桥注入（d.141：<iframe> 内嵌 widget:// 页面） ───────────────── */
+
+/** 桥文件的保留路径：`widget://<id>/__heming_frame_bridge.js` 永远返回宿主那份桥。 */
+const WIDGET_BRIDGE_PATH = "/__heming_frame_bridge.js";
+
+/** 注入到 HTML 里的桥 <script>（相对根路径，插件自己的文件抢不到这个路径）。 */
+const WIDGET_BRIDGE_TAG = `<script src="${WIDGET_BRIDGE_PATH}"></script>`;
+
+/**
+ * 注入上限：超过就不注入（记日志），避免为一坨超大 HTML 复制一份内存。
+ * 8MB 对插件页面（打包产物）足够宽松，同时能挡住「拿 500MB 文件当 HTML」的坏包。
+ */
+const WIDGET_BRIDGE_INJECT_MAX_BYTES = 8 * 1024 * 1024;
+
+/** 是否是桥文件的保留请求（主进程必须在插件文件解析**之前**判它）。 */
+function isWidgetBridgeRequest(urlPath) {
+  return String(urlPath || "") === WIDGET_BRIDGE_PATH;
+}
+
+/**
+ * 把桥 <script> 注入到一份 HTML 响应体里（d.141 §5）。
+ *
+ * 插入位置：
+ * 1. 第一个 `<head …>` 开标签之后（桥在页面自己的脚本之前执行）；
+ * 2. 没有 head → 第一个 `<body …>` 开标签之后；
+ * 3. 都没有（HTML 片段/极简文档）→ 追加到末尾。
+ *
+ * ★ 全程按 **latin1 字节** 处理：HTML 可能不是 UTF-8（GBK 页面很常见），先 decode 成
+ *   UTF-8 再 encode 回去会静默损坏正文。注入的标签是纯 ASCII，字节安全。
+ *
+ * @param {Buffer|string} body 响应体
+ * @returns {Buffer|null} 注入后的 Buffer；超过上限返回 null（调用方原样返回并记日志）
+ */
+function injectWidgetBridgeScript(body) {
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
+  if (bytes.length > WIDGET_BRIDGE_INJECT_MAX_BYTES) return null;
+  const source = bytes.toString("latin1");
+  // 幂等：插件页面自己引过一次就别插第二遍（否则 bridge 自守卫会让第二个空转，白白多一次请求）
+  if (source.includes(WIDGET_BRIDGE_PATH)) return bytes;
+  const head = /<head\b[^>]*>/i.exec(source);
+  if (head) {
+    const at = head.index + head[0].length;
+    return Buffer.from(source.slice(0, at) + WIDGET_BRIDGE_TAG + source.slice(at), "latin1");
+  }
+  const bodyTag = /<body\b[^>]*>/i.exec(source);
+  if (bodyTag) {
+    const at = bodyTag.index + bodyTag[0].length;
+    return Buffer.from(source.slice(0, at) + WIDGET_BRIDGE_TAG + source.slice(at), "latin1");
+  }
+  return Buffer.from(source + WIDGET_BRIDGE_TAG, "latin1");
 }
 
 /**
@@ -413,5 +510,12 @@ module.exports = {
   buildWidgetCsp,
   widgetCspHeaders,
   resolveWidgetRequest,
+  // d.141：插件页面 <iframe> 内嵌需要的桥保留路径 + HTML 注入
+  WIDGET_BRIDGE_PATH,
+  WIDGET_BRIDGE_TAG,
+  WIDGET_BRIDGE_INJECT_MAX_BYTES,
+  isWidgetBridgeRequest,
+  injectWidgetBridgeScript,
+  frameAncestorSource,
   parseCspViolation,
 };

@@ -7,55 +7,100 @@ import {
 import { useUiStore } from "../../store/ui.js";
 import {
   widgetsBridge,
-  type WidgetPageMountResult,
-  type WidgetPageRect,
+  type WidgetPageCallResult,
+  type WidgetsBridge,
 } from "../../types/widgets.js";
 import { AlertIcon, PackageIcon, RefreshIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { ERROR_TEXT, HINT } from "./shared.js";
+import {
+  ERR_BRIDGE_MISSING,
+  ERR_CALL_FAILED,
+  ERR_UNKNOWN_METHOD,
+  eventMessage,
+  frameOrigin,
+  isFrameEventTrusted,
+  parseFrameMessage,
+  payloadOfArgs,
+  relayKindOf,
+  resultMessage,
+  type FrameCallMessage,
+  type FrameOutboundMessage,
+  type FrameResultMessage,
+} from "../../lib/pluginPageFrame.js";
 
 /**
- * 插件页面（d.124 B 路径）的 web 宿主（规格 §5.2）。
+ * 插件页面（d.124 B 路径 / d.141 内嵌）的渲染层宿主。
  *
- * 职责边界很窄：**页面内容不归渲染层**。插件自带 HTML 由主进程在 `widget://` 独立
- * origin 的沙箱 `WebContentsView` 里跑，主窗只做三件事：
- * 1. 量出一个占位区的矩形（主窗 contentView 坐标，CSS px = DIP），交给 `pageMount`；
- * 2. 窗口/布局变化时把新矩形推给 `pageBounds`；
- * 3. 离开页面（卸载/切页）时 `pageUnmount` 销毁视图，不留孤儿（规格 §2.6）。
+ * d.141 起页面不再由主进程用原生 `WebContentsView` 盖在渲染层上，而是渲染层卡片里
+ * 的一个 `<iframe src="widget://<id>/<entry>">`。这样页面**在 DOM 里**，应用自己的
+ * 浮层/抽屉/对话框能正常盖住它（原生视图永远在最上层，这正是用户反馈的「悬浮」问题）。
  *
- * ★ 为什么占位区只放一个空 div：视图是**原生层**，永远盖在渲染层之上，宿主里
- *   多画的任何元素都看不见。所以页头工具条刻意放在占位区**外面**（上方），
- *   否则会被视图整块遮住。
+ * 职责分三层：
+ * 1. 生命周期：挂载时 `pageOpen({id, intent})` 拿主进程拼好的 url → `iframe.src`；
+ *    卸载/切页时 `pageClose()`。重新加载 = iframe key 自增重挂。
+ * 2. 中继：只接受**本插件 origin + 当前 iframe contentWindow** 的 postMessage
+ *    （`isFrameEventTrusted`），把 `call` 拆成 `pageCall`/`pageSend` 并把结果
+ *    `postMessage` 回帧；`onPageEvent` 的下行事件同样只投进本帧。
+ * 3. 状态：页头保留在 iframe 之外；加载/错误态是叠在 iframe 之上的 DOM 节点
+ *    （层级由 DOM 顺序决定，自然能被应用浮层盖住）。
  *
- * ★ 坐标口径（规格 §5.3）：`getBoundingClientRect()` 相对**视口**原点，而 Electron
- *   窗口的视口就是主窗 `contentView`（自定义标题栏是渲染层 HTML，本来就算在内容区里），
- *   主窗 `zoomFactor` 恒为 1，所以 CSS px 直接就是 DIP，不做任何缩放换算。
+ * ★ 旧桌面端/浏览器没有 `pageOpen` 时**降级说明**而不是空壳（规格 §1）：组件渲染
+ *   前先判方法是否存在，缺失就不发任何 IPC。
  *
- * ★ 旧桌面端/浏览器没有 `pageMount` 时**降级说明**而不是空壳（规格 §2.8）：
- *   组件渲染前先判方法是否存在，缺失就不发任何 IPC。
+ * ★ 能力不增加（规格 §1）：帧里能调的方法由主进程桥的方法表白名单决定，渲染层
+ *   只做「转发 + 未知方法回 `ERR_WIDGET_UNKNOWN_METHOD`」。
  */
-
-/** 占位区在宿主里的测量结果 → IPC 契约；取整并钳到 ≥1（主进程还会再钳一次）。 */
-function measureRect(el: HTMLElement): WidgetPageRect {
-  const box = el.getBoundingClientRect();
-  return {
-    x: Math.round(box.left),
-    y: Math.round(box.top),
-    width: Math.max(1, Math.round(box.width)),
-    height: Math.max(1, Math.round(box.height)),
-  };
-}
-
-/** 矩形指纹：ResizeObserver 会为「同尺寸的重复通知」反复触发，去重后再上报。 */
-function rectKey(rect: WidgetPageRect): string {
-  return `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
-}
 
 function reasonOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type MountPhase = "mounting" | "ready" | "error";
+function failedResult(code: string, message: string): WidgetPageCallResult {
+  return { ok: false, error: { code, message } };
+}
+
+/** 把帧桥的一次 `call` 落成桥调用，并把结果打包成下行 result（任何异常都回错，不让帧干等）。 */
+async function relayFrameCall(
+  bridge: WidgetsBridge,
+  pluginId: string,
+  call: FrameCallMessage,
+): Promise<FrameResultMessage> {
+  const kind = relayKindOf(call.method);
+  if (!kind) {
+    return resultMessage(
+      call.id,
+      failedResult(ERR_UNKNOWN_METHOD, `插件页面不支持方法：${call.method}`),
+    );
+  }
+  const payload = payloadOfArgs(call.args);
+  try {
+    if (kind === "send") {
+      if (typeof bridge.pageSend !== "function") {
+        return resultMessage(
+          call.id,
+          failedResult(ERR_BRIDGE_MISSING, `当前桌面端不支持页面方法：${call.method}`),
+        );
+      }
+      bridge.pageSend({ id: pluginId, method: call.method, payload });
+      return resultMessage(call.id, { ok: true, value: undefined });
+    }
+    if (typeof bridge.pageCall !== "function") {
+      return resultMessage(
+        call.id,
+        failedResult(ERR_BRIDGE_MISSING, `当前桌面端不支持页面方法：${call.method}`),
+      );
+    }
+    return resultMessage(
+      call.id,
+      await bridge.pageCall({ id: pluginId, method: call.method, payload }),
+    );
+  } catch (err) {
+    return resultMessage(call.id, failedResult(ERR_CALL_FAILED, reasonOf(err)));
+  }
+}
+
+type FramePhase = "loading" | "ready" | "error";
 
 export interface PluginBundlePageProps {
   /** 界面插件 id（= 安装目录名，如 `heming.pet`）；路由 `plugin:<pluginId>` 传入。 */
@@ -66,22 +111,27 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   const record = useWidgetsStore((s) => s.records.find((item) => item.id === pluginId));
   const loaded = useWidgetsStore((s) => s.loaded);
 
-  const [phase, setPhase] = useState<MountPhase>("mounting");
-  const [mountError, setMountError] = useState<string | null>(null);
-  /** 手动重建视图：自增即触发「卸载 → 重新挂载」一轮。 */
+  const [phase, setPhase] = useState<FramePhase>("loading");
+  const [pageError, setPageError] = useState<string | null>(null);
+  /** 主进程返回的 `widget://` 地址；为空表示还没打开成功（iframe 不挂载）。 */
+  const [frameSrc, setFrameSrc] = useState<string | null>(null);
+  /** 重新加载 = key 自增，让 iframe 换一个 DOM 节点重挂。 */
+  const [frameKey, setFrameKey] = useState(0);
+  /** 打开失败后重试：自增触发「pageClose → pageOpen」一轮。 */
   const [generation, setGeneration] = useState(0);
 
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  /** 挂载轮次：异步 IPC 返回时用它判「这一轮还是不是当前轮」，避免旧结果杀掉新视图。 */
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  /** 打开轮次：异步返回时用它判「这一轮还是不是当前轮」，避免旧结果杀掉新页面。 */
   const runSeq = useRef(0);
 
   const bridge = widgetsBridge();
-  const canMount = typeof bridge?.pageMount === "function";
+  const canMount = typeof bridge?.pageOpen === "function";
   const page = record?.page;
   const usable = Boolean(record && record.enabled && page);
   const pageEntry = page?.entry ?? "";
   const version = record?.version ?? "";
   const enabled = record?.enabled ?? false;
+  const frameTitle = page?.title || record?.name || pluginId;
 
   /**
    * 直接进页面（没先走插件区）时列表可能还没拉过：补一次。
@@ -94,102 +144,128 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   }, [canMount]);
 
   /**
-   * 视图生命周期：挂载 → 尺寸变化 → 清理。
+   * 页面生命周期：打开 → 等 ready → 关闭。
    *
-   * 依赖只放**原始值**（id / entry / 版本 / 启停 / 重建轮次），不放 `record` 对象：
-   * 列表每次刷新都会换新对象，拿对象当依赖会让视图无故销毁重建（页面里的输入会丢）。
+   * 依赖只放**原始值**（id / entry / 版本 / 启停 / 打开轮次），不放 `record` 对象：
+   * 列表每次刷新都会换新对象，拿对象当依赖会让页面无故重开（页面里的输入会丢）。
    */
   useEffect(() => {
     if (!canMount || !usable) return;
-    const el = hostRef.current;
     const activeBridge = widgetsBridge();
-    const pageMount = activeBridge?.pageMount;
-    if (!el || !activeBridge || !pageMount) return;
+    const pageOpen = activeBridge?.pageOpen;
+    if (!activeBridge || !pageOpen) return;
 
     const runId = ++runSeq.current;
     let disposed = false;
-    let ready = false;
-    let lastKey = "";
+    const pluginOrigin = frameOrigin(pluginId);
 
-    const report = (): void => {
-      if (disposed || runId !== runSeq.current || !ready) return;
-      const rect = measureRect(el);
-      const key = rectKey(rect);
-      if (key === lastKey) return;
-      lastKey = key;
-      activeBridge.pageBounds?.({ rect });
+    setPhase("loading");
+    setPageError(null);
+    setFrameSrc(null);
+
+    const postToFrame = (message: FrameOutboundMessage): void => {
+      iframeRef.current?.contentWindow?.postMessage(message, pluginOrigin);
     };
 
-    // ResizeObserver 覆盖窗口缩放/DPI 变化/侧栏开合/全屏切换（规格 §5.3）；
-    // jsdom 等没有它的环境退回 window.resize，至少不错过窗口级变化。
-    const observer =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => report()) : null;
-    if (observer) observer.observe(el);
-    else window.addEventListener("resize", report);
-
-    const mount = async (): Promise<void> => {
-      const rect = measureRect(el);
-      lastKey = rectKey(rect);
-      setPhase("mounting");
-      setMountError(null);
-      /**
-       * 首页卡的 action 会先导航到这里、再把「页面意图」投进 store（d.139）。
-       * 用 `getState()` 读而不是当 effect 依赖：意图只是一次性提示，不该因为
-       * store 变化重建视图（重建会丢插件页里的输入）。取走即清，避免下次从
-       * 侧边栏进来时被旧意图劫持；pluginId 不匹配就当作普通进入。
-       */
-      const pending = useUiStore.getState().pluginPageIntent;
-      const intent = pending?.pluginId === pluginId ? pending.intent : undefined;
-      if (intent !== undefined) useUiStore.getState().consumePluginPageIntent();
-      let result: WidgetPageMountResult;
-      try {
-        result = await pageMount({
-          id: pluginId,
-          rect,
-          // 无意图时不带这个键：旧宿主/旧测试按 `{ id, rect }` 全等比对也能过。
-          ...(intent === undefined ? {} : { intent }),
-        });
-      } catch (err) {
-        // IPC 本身失败（桥断了/主进程未就绪）：与业务失败同一套错误态，别白屏。
-        if (runId !== runSeq.current) return;
-        if (disposed) {
-          activeBridge.pageUnmount?.();
-          return;
-        }
-        setPhase("error");
-        setMountError(`挂载插件页面失败：${reasonOf(err)}`);
+    const onMessage = (event: MessageEvent): void => {
+      if (disposed || runId !== runSeq.current) return;
+      // 双重校验：本插件 origin + 当前 iframe 的 contentWindow（规格 §3）。
+      if (!isFrameEventTrusted(event, iframeRef.current?.contentWindow ?? null, pluginId)) {
         return;
       }
-      if (runId !== runSeq.current) return; // 已有新一轮挂载：收尾交给它
-      if (disposed) {
-        // 组件已走但视图已建：主动销毁，别留孤儿（规格 §2.6）。重复调用无害。
-        activeBridge.pageUnmount?.();
-        return;
-      }
-      if (result?.ok) {
-        ready = true;
+      const message = parseFrameMessage(event.data);
+      if (!message) return;
+      if (message.kind === "ready") {
         setPhase("ready");
         return;
       }
-      // 失败时也清一次视图：主进程可能已建过半个视图，它盖在错误提示上面就什么都看不到。
-      activeBridge.pageUnmount?.();
-      setPhase("error");
-      setMountError(result?.error ?? "页面视图创建失败");
+      void relayFrameCall(activeBridge, pluginId, message).then((reply) => {
+        if (disposed || runId !== runSeq.current) return;
+        postToFrame(reply);
+      });
     };
-    void mount();
+
+    window.addEventListener("message", onMessage);
+
+    const unsubscribe = activeBridge.onPageEvent?.((msg) => {
+      if (disposed || runId !== runSeq.current) return;
+      if (msg.id !== pluginId) return;
+      postToFrame(eventMessage(msg.channel, msg.payload));
+    });
+
+    /**
+     * 首页卡的 action 会先导航到这里、再把「页面意图」投进 store（d.139）。
+     * 用 `getState()` 读而不是当 effect 依赖：意图只是一次性提示，不该因为
+     * store 变化重开页面（重开会丢插件页里的输入）。取走即清，避免下次从
+     * 侧边栏进来时被旧意图劫持；pluginId 不匹配就当作普通进入。
+     */
+    const pending = useUiStore.getState().pluginPageIntent;
+    const intent = pending?.pluginId === pluginId ? pending.intent : undefined;
+    if (intent !== undefined) useUiStore.getState().consumePluginPageIntent();
+
+    pageOpen({
+      id: pluginId,
+      // 无意图时不带这个键，保持与旧调用方/假桥的浅比对兼容。
+      ...(intent === undefined ? {} : { intent }),
+    })
+      .then((result) => {
+        if (runId !== runSeq.current) return; // 已有新一轮打开：收尾交给它
+        if (disposed) {
+          // 组件已走但页面已打开：主动关掉，别留孤儿（重复调用无害）。
+          activeBridge.pageClose?.();
+          return;
+        }
+        if (!result?.ok) {
+          setPageError(result?.error ?? "插件页面打开失败");
+          setPhase("error");
+          return;
+        }
+        setFrameSrc(result.url);
+      })
+      .catch((err: unknown) => {
+        // IPC 本身失败（桥断了/主进程未就绪）：与业务失败同一套错误态，别白屏。
+        if (runId !== runSeq.current) return;
+        if (disposed) {
+          activeBridge.pageClose?.();
+          return;
+        }
+        setPageError(`挂载插件页面失败：${reasonOf(err)}`);
+        setPhase("error");
+      });
 
     return () => {
       disposed = true;
-      observer?.disconnect();
-      window.removeEventListener("resize", report);
-      activeBridge.pageUnmount?.();
+      window.removeEventListener("message", onMessage);
+      unsubscribe?.();
+      activeBridge.pageClose?.();
     };
   }, [canMount, usable, pluginId, pageEntry, version, enabled, generation]);
 
-  const rebuild = useCallback((): void => {
-    setMountError(null);
-    setPhase("mounting");
+  /**
+   * 打开失败后重试（也用于页头的「重新加载」在无 iframe 时兜底）：
+   * 自增轮次重走 pageClose → pageOpen。
+   */
+  const retry = useCallback((): void => {
+    setPageError(null);
+    setPhase("loading");
+    setFrameSrc(null);
     setGeneration((n) => n + 1);
+  }, []);
+
+  /** 页头「重新加载」：已内嵌时只换 iframe 节点重挂，不重新走主进程 pageOpen。 */
+  const reload = useCallback((): void => {
+    if (!frameSrc) {
+      retry();
+      return;
+    }
+    setPageError(null);
+    setPhase("loading");
+    setFrameKey((n) => n + 1);
+  }, [frameSrc, retry]);
+
+  /** onload 兜底：帧桥的 ready 可能先到也可能后到，任一到达都撤加载态。 */
+  const handleFrameLoad = useCallback((): void => {
+    setPhase((current) => (current === "error" ? current : "ready"));
   }, []);
 
   /** 错误态/空态的出路：回到插件区（这里有该插件的启停、更新、卸载入口）。 */
@@ -197,7 +273,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
     useUiStore.getState().setPage("plugins");
   }, []);
 
-  // ── 降级：浏览器 / 旧版桌面端没有页面视图方法（规格 §2.8、§5.2.3） ──
+  // ── 降级：浏览器 / 旧版桌面端没有 pageOpen（规格 §1） ──
   if (!canMount) {
     return (
       <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
@@ -206,13 +282,13 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
           className="w-full max-w-[520px]"
           icon={<AlertIcon width={20} height={20} />}
           title="插件页面只在安装版里可用"
-          desc="插件的页面是插件包自带的 HTML，必须在桌面端的独立沙箱视图里渲染；浏览器里没有这个能力，也不会退化成只读的文字页。"
+          desc="插件的页面是插件包自带的 HTML，必须由桌面端以沙箱 iframe 内嵌渲染；浏览器里没有这个能力，也不会退化成只读的文字页。"
         />
       </section>
     );
   }
 
-  // ── 列表还没读到：先别急着实例化视图（记录是挂载的前提） ──
+  // ── 列表还没读到：先别急着打开页面（记录是前提） ──
   if (!loaded) {
     return (
       <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
@@ -250,7 +326,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
     );
   }
 
-  // ── 正常态：页头工具条（占位区外，不会被视图遮住）+ 占位区（视图叠在它上面） ──
+  // ── 正常态：页头（iframe 之外）+ 圆角卡片里的 iframe（加载/错误态叠在它上面） ──
   return (
     <section aria-label="插件页面" className="flex h-full min-h-0 flex-col gap-2 p-3">
       <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-3 py-2">
@@ -268,7 +344,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         <div className="ml-auto flex items-center gap-1.5">
           <Button
             type="button"
-            onClick={rebuild}
+            onClick={reload}
             size="sm" variant="ghost"
             aria-label="重新加载插件页面"
           >
@@ -279,21 +355,32 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
       </header>
 
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)]">
-        {/* 视图的落点：铺满内容区，position: relative 作为主进程叠放坐标的基准。 */}
-        <div
-          ref={hostRef}
-          data-testid="plugin-page-host"
-          style={{ position: "relative" }}
-          className="h-full w-full"
-        >
-          {phase === "mounting" && !mountError ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <p className="ui-caption">正在加载插件页面…</p>
-            </div>
-          ) : null}
-        </div>
+        {frameSrc ? (
+          /**
+           * 页面内容：`widget://` 独立 origin 的沙箱 iframe。
+           * `allow-same-origin` 让页面能读自己的 localStorage / 用相对资源；
+           * `allow-scripts` 是页面自身逻辑；不额外给 top-navigation/popup 等能力。
+           */
+          <iframe
+            key={frameKey}
+            ref={iframeRef}
+            src={frameSrc}
+            title={frameTitle}
+            data-testid="plugin-page-frame"
+            className="h-full w-full border-0"
+            sandbox="allow-scripts allow-same-origin"
+            referrerPolicy="no-referrer"
+            onLoad={handleFrameLoad}
+          />
+        ) : null}
 
-        {mountError ? (
+        {phase === "loading" && !pageError ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <p className="ui-caption">正在加载插件页面…</p>
+          </div>
+        ) : null}
+
+        {pageError ? (
           <div
             role="alert"
             aria-label="插件页面错误"
@@ -305,18 +392,18 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
                 <AlertIcon width={20} height={20} />
               </span>
               <p className="ui-section-title">插件页面没能显示出来</p>
-              <p className={ERROR_TEXT}>{mountError}</p>
+              <p className={ERROR_TEXT}>{pageError}</p>
               <p className={HINT}>
-                页面视图由主进程创建，包文件损坏、入口缺失或插件刚更新过都可能失败；重建视图
-                会按当前安装重新加载一次。
+                页面由插件包自带的 HTML 渲染，包文件损坏、入口缺失或插件刚更新过都可能失败；
+                重新加载会按当前安装再打开一次。
               </p>
               <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
                 <Button
                   type="button"
-                  onClick={rebuild}
+                  onClick={retry}
                   size="md" variant="primary"
                 >
-                  重建视图
+                  重新加载
                 </Button>
                 <Button
                   type="button"

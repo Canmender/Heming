@@ -1,15 +1,18 @@
 "use strict";
 
 /**
- * 界面插件渲染面的**唯一**桥（规格 §3.4；d.124 §5.2 扩展为「页面视图」共用）。
+ * 界面插件渲染面的**唯一**桥（规格 §3.4；d.124 §5.2 扩展出后台常驻页）。
  *
- * 三个宿主场景共用这一份 preload：
+ * 两个宿主场景共用这一份 preload：
  * - widget 窗口（`widget://<id>/…` 的独立透明窗，可拖拽/穿透/托盘）；
- * - 页面视图（d.124 B 路径：主窗内容区里的 `WebContentsView`，只占一块矩形）；
  * - 后台常驻页（沙箱 bundle 插件的 `contributions.background`，`show:false` 的隐藏窗口）。
- * 主进程建页面视图时用 `--heming-page-view` 参数标记（见 plugin-host.js 的 PAGE_VIEW_FLAG），
- * 本文件据此把**窗口几何类** API 换成明确的不支持错误——页面没有独立窗口，
- * 静默 no-op 会让插件作者以为「拖拽/穿透生效了」。
+ * 后台页用 `--heming-widget-mode=background` 参数标记（见 plugin-host.js 的
+ * BACKGROUND_FLAG），本文件据此把**窗口几何类** API 换成明确的不支持错误——
+ * 后台页没有独立窗口，静默 no-op 会让插件作者以为「拖拽/穿透生效了」。
+ *
+ * ★ d.141 起插件自带页面不再由主进程建 `WebContentsView`，改为主窗里的
+ *   `<iframe>` + `widget-frame-bridge.js`（postMessage RPC），所以本文件不再有
+ *   「页面视图模式」。
  *
  * ★ 这是整条插件链最关键的收口：widget 页是第三方/第一方插件的代码，它能拿到的
  *   全部宿主能力就是下面这些方法。**不许**出现 secrets / mcp / files / 会话 / 记忆
@@ -21,28 +24,25 @@
  * ★ 坐标不上报：拖拽只发"按下/移动了/抬起"三个信号，位移由主进程按屏幕光标计算。
  *   渲染层的 clientX 会随窗口移动而失真，拿它算位置一定跑偏。
  *
- * ★ 主进程侧每个通道都按 sender 反查「是不是这个 widget 自己的窗口/页面视图」，
+ * ★ 主进程侧每个通道都按 sender 反查「是不是这个 widget 自己的窗口/后台页」，
  *   查不到直接拒绝；本文件不承担安全判断，只做最小暴露面。
  */
 
 const { contextBridge, ipcRenderer } = require("electron");
 
-/** 页面视图标记参数（与 plugin-host.js 的 PAGE_VIEW_FLAG 是同一字面量，改一处必须改两处）。 */
-const PAGE_VIEW_FLAG = "--heming-page-view";
-
 /**
  * 后台常驻页标记参数（与 plugin-host.js 的 BACKGROUND_FLAG 是同一字面量）。
  *
- * 后台页是 `show:false` 的隐藏窗口：它有自己的 webContents，但用户看不见、也拖不动。
- * 语义上与页面视图一样属于「没有窗口的渲染面」，所以复用同一套 unsupported 处理。
+ * 后台页是 `show:false` 的隐藏窗口：它有自己的 webContents，但用户看不见、也拖不动，
+ * 语义上属于「没有窗口的渲染面」，窗口动作整组 unsupported。
  */
 const BACKGROUND_FLAG = "--heming-widget-mode=background";
 
-/** 当前 preload 是否跑在页面视图里（sandbox preload 里 process.argv 只读可用）。 */
-const PAGE_VIEW_MODE = (() => {
+/** 当前 preload 是否跑在后台常驻页里（sandbox preload 里 process.argv 只读可用）。 */
+const BACKGROUND_MODE = (() => {
   try {
     if (!Array.isArray(process.argv)) return false;
-    return process.argv.includes(PAGE_VIEW_FLAG) || process.argv.includes(BACKGROUND_FLAG);
+    return process.argv.includes(BACKGROUND_FLAG);
   } catch {
     return false;
   }
@@ -57,29 +57,29 @@ function subscribe(channel, callback) {
 }
 
 /**
- * 页面视图不支持某个窗口动作时的错误（中文、可直接展示）。
+ * 后台页不支持某个窗口动作时的错误（中文、可直接展示）。
  * 同步动作抛错、invoke 动作 reject —— 两种都是「明确失败」，不是静默忽略。
  */
-function pageUnsupported(name) {
-  const error = new Error(`界面插件页面视图不支持窗口操作：${name}（插件页面由宿主布局管理）`);
+function unsupportedError(name) {
+  const error = new Error(`界面插件后台页不支持窗口操作：${name}（后台页没有独立窗口）`);
   error.code = "ERR_WIDGET_PAGE_VIEW_UNSUPPORTED";
   return error;
 }
 
 function unsupportedSync(name) {
   return () => {
-    throw pageUnsupported(name);
+    throw unsupportedError(name);
   };
 }
 
 function unsupportedInvoke(name) {
-  return () => Promise.reject(pageUnsupported(name));
+  return () => Promise.reject(unsupportedError(name));
 }
 
 /**
  * 窗口动作（只有 widget 窗口有意义）。
  *
- * 页面视图里整组退化为 unsupported：`state()` 返回 null（只读 unsupported），
+ * 后台页里整组退化为 unsupported：`state()` 返回 null（只读 unsupported），
  * 其余抛/拒绝明确错误。注意主进程侧还有第二道拒绝（不管渲染层调了什么都不会动窗口）。
  *
  * ★ 为什么不用 `...windowApi` 摊进来：`packages/shared/src/plugin/widget.test.ts` 会
@@ -87,38 +87,38 @@ function unsupportedInvoke(name) {
  *   方法在源码里看不见，桥方法名单就失去守卫。所以 11 个窗口方法必须**逐条内联**。
  */
 contextBridge.exposeInMainWorld("__heming_widget", {
-  /* ── 窗口（页面视图里是 unsupported，见上） ── */
-  /** 页面视图没有窗口状态：null 表示 unsupported，绝不伪造 visible/scale。 */
-  state: PAGE_VIEW_MODE ? () => Promise.resolve(null) : () => ipcRenderer.invoke("widget:state"),
+  /* ── 窗口（后台页里是 unsupported，见上） ── */
+  /** 后台页没有窗口状态：null 表示 unsupported，绝不伪造 visible/scale。 */
+  state: BACKGROUND_MODE ? () => Promise.resolve(null) : () => ipcRenderer.invoke("widget:state"),
   /** 显示自己（主进程会 showInactive，不抢焦点）。 */
-  show: PAGE_VIEW_MODE ? unsupportedInvoke("show") : () => ipcRenderer.invoke("widget:show"),
-  hide: PAGE_VIEW_MODE ? unsupportedSync("hide") : () => ipcRenderer.send("widget:hide"),
-  toggle: PAGE_VIEW_MODE ? unsupportedSync("toggle") : () => ipcRenderer.send("widget:toggle"),
+  show: BACKGROUND_MODE ? unsupportedInvoke("show") : () => ipcRenderer.invoke("widget:show"),
+  hide: BACKGROUND_MODE ? unsupportedSync("hide") : () => ipcRenderer.send("widget:hide"),
+  toggle: BACKGROUND_MODE ? unsupportedSync("toggle") : () => ipcRenderer.send("widget:toggle"),
   /**
    * 缩放：两种语义
    *   setScale(1) / setScale(-1)   相对切一档
    *   setScale({ dir: 1 })         同上（兼容旧形状）
    * 绝对档位由宿主托盘/主窗设置决定，插件不自选（避免和用户偏好打架）。
    */
-  setScale: PAGE_VIEW_MODE
+  setScale: BACKGROUND_MODE
     ? unsupportedInvoke("setScale")
     : (dir) =>
         ipcRenderer.invoke("widget:set-scale", typeof dir === "object" ? dir : { dir: dir === -1 ? -1 : 1 }),
   /** 鼠标穿透开关；只有清单 clickThrough:"auto" 的 widget 生效。 */
-  setClickThrough: PAGE_VIEW_MODE
+  setClickThrough: BACKGROUND_MODE
     ? unsupportedInvoke("setClickThrough")
     : (on) => ipcRenderer.invoke("widget:set-click-through", on === true),
   /** 上报「光标此刻是否在可交互区」。只在值变化时调用（mousemove 是高频事件）。 */
-  setInteractive: PAGE_VIEW_MODE
+  setInteractive: BACKGROUND_MODE
     ? unsupportedSync("setInteractive")
     : (on) => ipcRenderer.send("widget:set-interactive", on === true),
-  dragStart: PAGE_VIEW_MODE ? unsupportedSync("dragStart") : () => ipcRenderer.send("widget:drag-start"),
-  dragMove: PAGE_VIEW_MODE ? unsupportedSync("dragMove") : () => ipcRenderer.send("widget:drag-move"),
-  dragEnd: PAGE_VIEW_MODE ? unsupportedSync("dragEnd") : () => ipcRenderer.send("widget:drag-end"),
-  resetPosition: PAGE_VIEW_MODE
+  dragStart: BACKGROUND_MODE ? unsupportedSync("dragStart") : () => ipcRenderer.send("widget:drag-start"),
+  dragMove: BACKGROUND_MODE ? unsupportedSync("dragMove") : () => ipcRenderer.send("widget:drag-move"),
+  dragEnd: BACKGROUND_MODE ? unsupportedSync("dragEnd") : () => ipcRenderer.send("widget:drag-end"),
+  resetPosition: BACKGROUND_MODE
     ? unsupportedSync("resetPosition")
     : () => ipcRenderer.send("widget:reset-position"),
-  /** 重新加载自己（换模型/换绑定后重新读配置）。页面视图与浮窗都允许。 */
+  /** 重新加载自己（换模型/换绑定后重新读配置）。浮窗与后台页都允许。 */
   reload: () => ipcRenderer.send("widget:reload"),
 
   /* ── 宿主环境 ── */
