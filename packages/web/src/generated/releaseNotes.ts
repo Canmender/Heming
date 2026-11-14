@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.146.3.85.11",
+    "date": "2026-11-14",
+    "title": "设计审计报告收尾",
+    "bullets": [
+      "内部文档整理：一份设计审计从「发现问题」写到「修了什么、还差什么」，方便后来人接手。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.146.3.84.11",
     "date": "2026-11-14",
     "title": "窗口顶部那条边现在齐了",
