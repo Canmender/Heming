@@ -203,8 +203,9 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               type="button"
               role="tab"
               aria-selected={view === v}
+              aria-label={`知识库视图 ${VIEW_LABEL[v]}`}
               onClick={() => setView(v)}
-              className={`${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-ui-sm ${
+              className={`ui-hit min-h-8 ${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-ui-sm ${
                 view === v ? "bg-ink font-semibold text-white" : "text-muted hover:bg-subtle-2"
               }`}
             >
@@ -225,7 +226,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               type="button"
               aria-label={`新建${KIND_LABEL[k]}`}
               onClick={() => createPage(k)}
-              className={`inline-flex items-center gap-1 ${btnGhost}`}
+              className={`ui-hit inline-flex items-center gap-1 ${btnGhost}`}
             >
               <PlusIcon width={12} height={12} aria-hidden="true" />
               {KIND_LABEL[k]}
@@ -235,7 +236,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
       </div>
 
       {ephemeral && (
-        <div role="status" className="mb-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-ui-xs text-warn">
+        <div role="status" className="mb-2 rounded-lg bg-warn-soft px-2.5 py-1.5 ui-body-sm text-warn">
           浏览器临时模式：知识库只存在于当前页面，关掉就没了。桌面端会落成真实 markdown
           文件，可直接用 Obsidian 打开。
         </div>

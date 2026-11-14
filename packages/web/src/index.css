@@ -353,7 +353,9 @@
 
   /* 过滤胶囊：全部/进行中/成功… 默认浅底可点，选中态用主题色填充（与分段控件区分语义） */
   .ui-filter-chip {
-    @apply inline-flex cursor-pointer items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[12px] leading-5 text-muted transition-colors;
+    /* min-h-8：筛选 chip 此前 30px，命中区差 2px 就过不了门禁。撑本体而不是挂 .ui-hit——
+     * 这些 chip 常在 overflow-x-auto 行里，伪元素纵向会被裁掉。 */
+    @apply inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[12px] leading-5 text-muted transition-colors;
     background-color: var(--subtle-2);
   }
   .ui-filter-chip:hover {

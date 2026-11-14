@@ -224,12 +224,15 @@ export function ModelTraceView() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          {/* P2 可达性：`.ui-filter-chip` 本体 30px 高（py-1 + leading-5 + 描边），
+              补 `min-h-8` 撑到 32；相邻 chip 只隔 4px，横向不扩（宽度本就 >32），
+              纵向 +1px 不会吃掉邻居。 */}
           {(["all", "live", "ok", "failed"] as const).map((key) => (
             <button
               key={key}
               type="button"
               aria-pressed={filter === key}
-              className="ui-filter-chip"
+              className="ui-filter-chip ui-hit min-h-8"
               onClick={() => setFilter(key)}
             >
               {key === "all" ? "全部" : EDGE_STATE_LABEL[key]}

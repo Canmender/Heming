@@ -77,3 +77,6 @@ runs.jsonl
 agent-pipeline.db
 .coverage
 pytest-of-*/
+
+# 临时日志（跑量测/测试时落在工作区里的 .log 不进版本库）
+*.log

@@ -146,11 +146,13 @@ export function TeamBoardView({
       <div className="shrink-0 border-b border-line-soft bg-subtle px-6 py-2.5">
         {/* 成员 chips 单行横向滚动：1100 窄窗下不再折成两行占掉内容高度。 */}
         <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
+          {/* P2 可达性：胶囊本体只有 27px 高，`min-h-8` 撑到 32 命中区（轨道行溢出滚动，
+              伪元素扩区会被 `overflow-x-auto` 裁掉，所以必须撑本体）。 */}
           <button
             type="button"
             aria-pressed={selectedId === null}
             onClick={() => onSelectMember(null)}
-            className={`shrink-0 rounded-full border px-2.5 py-1 text-ui-xs ${
+            className={`ui-hit inline-flex min-h-8 shrink-0 items-center rounded-full border px-2.5 py-1 text-ui-xs ${
               selectedId === null
                 ? "border-ink bg-ink text-white"
                 : "border-line text-muted hover:bg-surface"
@@ -164,7 +166,7 @@ export function TeamBoardView({
               type="button"
               aria-pressed={m.user.id === selectedId}
               onClick={() => onSelectMember(m.user.id === selectedId ? null : m.user.id)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-ui-xs ${
+              className={`ui-hit flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-ui-xs ${
                 m.user.id === selectedId
                   ? "border-ink bg-ink text-white"
                   : "border-line text-body hover:bg-surface"
@@ -184,7 +186,10 @@ export function TeamBoardView({
           ))}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 ui-caption">
-          <div className="flex items-center gap-1" role="group" aria-label="时间范围">
+          {/* 时间范围：原来是手拼的两颗 22px 高文字按钮，选中态只有一层浅底；
+              改用全站唯一分段控件（.ui-segment 已 min-h-8），语义也从「按钮」变成
+              互斥筛选，与记忆页「复盘频率」等同类切换一致。 */}
+          <div className="ui-segment-group" role="group" aria-label="时间范围">
             {(
               [
                 ["today", "今日"],
@@ -196,9 +201,7 @@ export function TeamBoardView({
                 type="button"
                 aria-pressed={range === value}
                 onClick={() => setRange(value)}
-                className={`rounded-md px-2 py-0.5 ${
-                  range === value ? "bg-subtle-3 text-ink" : "text-muted hover:bg-subtle-2"
-                }`}
+                className="ui-segment"
               >
                 {label}
               </button>
@@ -218,7 +221,7 @@ export function TeamBoardView({
           <button
             type="button"
             onClick={onRetry}
-            className="rounded-lg border border-line bg-surface px-2.5 py-1 ui-caption hover:bg-subtle-2"
+            className="ui-hit inline-flex min-h-8 items-center rounded-lg border border-line bg-surface px-2.5 py-1 ui-caption hover:bg-subtle-2"
           >
             刷新
           </button>
@@ -247,11 +250,11 @@ export function TeamBoardView({
         >
           <div className="grid gap-4 md:grid-cols-2">
             <section aria-label="任务" className={`flex flex-col rounded-xl bg-subtle-2 p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
-              <div className="mb-2 flex items-center gap-1.5 ui-section-title">
+              <h2 className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <TaskIcon width={14} height={14} />
                 任务
                 <span className="ui-micro font-normal">{tasks.length}</span>
-              </div>
+              </h2>
               {tasks.length === 0 ? (
                 <EmptyState
                   compact
@@ -274,11 +277,11 @@ export function TeamBoardView({
             </section>
 
             <section aria-label="日程" className={`flex flex-col rounded-xl bg-subtle-2 p-3 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
-              <div className="mb-2 flex items-center gap-1.5 ui-section-title">
+              <h2 className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <span className="h-2 w-2 rounded-full bg-line-strong" aria-hidden="true" />
                 日程
                 <span className="ui-micro font-normal">{agenda.length}</span>
-              </div>
+              </h2>
               {agenda.length === 0 ? (
                 <EmptyState
                   compact

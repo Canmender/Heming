@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.145.3.82.11",
+    "date": "2026-11-14",
+    "title": "门禁扩到 20 个视图，子页签里的问题不会漏了",
+    "bullets": [
+      "`scripts/design-audit.mjs` 现在逐页点开 `main [role=\"tab\"]`，每个视图各量一遍（28 条记录：8 页 + 20 视图），视图记成 `settings~外观` 这种 slug；门槛不变（溢出/对比度/11px 正文/",
+      "`settings~关于`：20 个「更新日志 d.xxx」折叠行 724×30，命中区差 2px → `min-h-8`。",
+      "`settings~高级`：4 句 11px 正文（安全存储/密钥位置说明）→ 13px。",
+      "`settings~外观`、`settings~关于`、`memory~个人知识库`：整页只有 h1（卡片标题是 `div`），读屏拿不到大纲 → 5 处 `div.ui-section-title` 改 `<h2>`、知识库入口卡补 h2（视觉不变）。",
+      "`memory~个人知识库`：5 个「新建 …」58×28 + 3 个 48×30 无标签视图页签 →`ui-hit` / `min-h-8`，页签补 `aria-label=\"知识库视图 目录/图谱/页面\"`。",
+      "`plugins~技能`：4 个 20×20「＋添加技能」→ `ui-hit`。",
+      "`plugins~MCP`：6 处 11px（说明句升 13px、命令行片段留等宽 12px）。",
+      "另有 `team~看板/团队日程/用量`、`model~运行` 的命中区与标题层级；团队看板「今日/全部」22px 高的切换项换成 `.ui-segment-group`。"
+    ],
+    "paragraphs": [
+      "上一版的门禁只量每个导航页的默认页签（8 个视图）。审计报告 §1 写得很清楚：真正的内容在二级页签里——团队 5 个、模型 3 个、插件 3 个、设置 5 个，合计 20 个视图。只量第一屏，等于「检查了封面」。",
+      "**门禁本身**有效命中区/emoji/字号档/标题层级）。",
+      "**扩上去后立刻抓到的 6 组问题（都已修）**",
+      "**基元一处**：`.ui-filter-chip` 本体 `min-h-8`（此前 30px，逐实例补 `ui-hit` 不是长久做法；这些 chip 常在 `overflow-x-auto` 行里，伪元素纵向会被裁掉，必须撑本体）。",
+      "**顺带根治一条假红**：`App.test` 的「没有打开会话时点绑定给出内联提示」不是超时问题——它依赖上一个用例留下的 `page=chat`，且智能体页上已有别的 `role=\"alert\"`，`findByRole(\"alert\")`在状态巧合时才会通过。现在显式设 `page: \"chat\"`、`activeConversationId: null`，并按文案定位通知，跨两次全量跑稳定。",
+      "**验证**：`tsc --noEmit` 0 错误；web 全量 **4464 passed / 304 files**（连跑两次一致）；`vite build` 通过；`pnpm design:audit` 浅色/深色 28 个视图全绿（8 页 + 20 视图）。"
+    ]
+  },
+  {
     "version": "d.145.3.81.11",
     "date": "2026-11-14",
     "title": "行高收成一档，标题栏兜底走 8pt，代码不再是红色",

@@ -57,7 +57,7 @@ describe("WikiPanel 三视图", () => {
 
   it("「目录」视图列出全部页面并标出孤儿页链接数", async () => {
     render(<WikiPanel bridge={seeded()} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     expect(screen.getByText("LLM")).toBeInTheDocument();
     expect(screen.getByText("孤立")).toBeInTheDocument();
     // LLM 指向和鸣有 1 条出链 + 1 条入链 = degree 2
@@ -67,7 +67,7 @@ describe("WikiPanel 三视图", () => {
 
   it("目录检索按标题与正文过滤", async () => {
     render(<WikiPanel bridge={seeded()} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     fireEvent.change(screen.getByLabelText("检索知识库"), { target: { value: "大语言" } });
     expect(screen.getByText("LLM")).toBeInTheDocument();
     expect(screen.queryByText("和鸣")).not.toBeInTheDocument();
@@ -75,7 +75,7 @@ describe("WikiPanel 三视图", () => {
 
   it("点目录条目进页面视图，能读到正文", async () => {
     render(<WikiPanel bridge={seeded()} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     fireEvent.click(await screen.findByText("LLM"));
     expect(await screen.findByLabelText("页面标题")).toHaveValue("LLM");
     // 正文已剥掉 frontmatter，只剩内容本身
@@ -86,7 +86,7 @@ describe("WikiPanel 三视图", () => {
   it("保存：写页面 + 同步 index.md + 追加 log.md", async () => {
     const bridge = seeded();
     render(<WikiPanel bridge={bridge} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     fireEvent.click(screen.getByText("LLM"));
     fireEvent.click(await screen.findByLabelText("页面正文"));
     fireEvent.change(screen.getByLabelText("页面正文"), {
@@ -103,7 +103,7 @@ describe("WikiPanel 三视图", () => {
   it("改标题会换文件名落盘（slug 化）", async () => {
     const bridge = seeded();
     render(<WikiPanel bridge={bridge} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     fireEvent.click(screen.getByText("LLM"));
     fireEvent.change(await screen.findByLabelText("页面标题"), {
       target: { value: "大语言 模型?" },
@@ -131,7 +131,7 @@ describe("WikiPanel 三视图", () => {
   it("删除页面后从列表消失，并记一条 log", async () => {
     const bridge = seeded();
     render(<WikiPanel bridge={bridge} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "知识库视图 目录" }));
     fireEvent.click(screen.getByText("孤立"));
     fireEvent.click(await screen.findByRole("button", { name: "删除" }));
     fireEvent.click(

@@ -775,7 +775,7 @@ export function SkillsView({
                   setMsg(null);
                   setAddFor(group.key);
                 }}
-                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-subtle-3 disabled:opacity-40"
+                className="ui-hit flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-subtle-3 disabled:opacity-40"
               >
                 <PlusIcon width={12} height={12} />
               </button>

@@ -2360,7 +2360,7 @@ export function MemoryPage({
       <section aria-label="打开知识库" className={cardCls}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="ui-section-title">知识库</div>
+            <h2 className="ui-section-title">知识库</h2>
             <div className={`mt-1 ${hintCls}`}>
               库文件仍是普通 markdown，可以继续用 Obsidian 打开同一个目录。
             </div>

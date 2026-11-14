@@ -489,15 +489,54 @@ async function run() {
   }
 
   const report = { base: webBase, theme: THEME, at: new Date().toISOString(), pages: {}, failures: [] };
-  for (const [label, slug] of PAGES) {
-    await goPage(cdp, sid, label);
+
+  /*
+   * 每一页下面还有二级页签（团队 5 个、模型 3 个、插件 3 个、设置 5 个……），
+   * 合计 20 个视图。只量每页第一个页签会漏掉后面那些——审计报告里「设置/高级」
+   * 的 16px 一次性字号、插件「技能」页最密的命中区，都是只在子视图里才暴露的问题。
+   * 这里把 main 里的 [role=tab] 逐个点开各量一遍，slug 记成 `settings~外观`。
+   */
+  const auditView = async (slug, tabLabel) => {
     const metrics = await evalJs(cdp, sid, `(${pageAudit.toString()})()`);
-    report.pages[slug] = { label, metrics };
-    if (SHOTS) await shoot(cdp, sid, path.join(SHOTS, `${slug}-${THEME}.png`));
+    report.pages[slug] = { label: tabLabel || slug, metrics };
     log(
-      `[audit] ${slug.padEnd(8)} 字号档=${String(metrics.fontTierCount).padEnd(2)} 11px正文=${metrics.body11} ` +
+      `[audit] ${slug.padEnd(14)} 字号档=${String(metrics.fontTierCount).padEnd(2)} 11px正文=${metrics.body11} ` +
         `对比度不合格=${metrics.contrastFail} 命中区<32=${metrics.hitUnder32.length} 横向溢出=${metrics.docOverflowX}`,
     );
+    return metrics;
+  };
+  const clickTab = async (index) => {
+    const ok = await evalJs(
+      cdp,
+      sid,
+      `(() => {
+        const tabs = [...document.querySelectorAll('main [role="tab"]')];
+        if (!tabs[${index}]) return null;
+        tabs[${index}].click();
+        return tabs[${index}].textContent.trim();
+      })()`,
+    );
+    await sleep(450);
+    return ok;
+  };
+
+  for (const [label, slug] of PAGES) {
+    await goPage(cdp, sid, label);
+    await auditView(slug, label);
+    if (SHOTS) await shoot(cdp, sid, path.join(SHOTS, `${slug}-${THEME}.png`));
+
+    let tabCount = 0;
+    try {
+      tabCount = await evalJs(cdp, sid, `document.querySelectorAll('main [role="tab"]').length`);
+    } catch {
+      tabCount = 0;
+    }
+    // 0/1 个页签没有额外视图；第一个页签通常就是默认视图，从下标 1 开始点。
+    for (let i = 1; i < tabCount; i += 1) {
+      const tabLabel = await clickTab(i);
+      if (!tabLabel) continue;
+      await auditView(`${slug}~${tabLabel}`, `${label}·${tabLabel}`);
+    }
   }
 
   // ---------- 判定 ----------

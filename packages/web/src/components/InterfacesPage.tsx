@@ -354,7 +354,7 @@ export function InterfacesView({
           <PlusIcon width={14} height={14} />
           添加 MCP 服务
         </Button>
-        <span className="ml-auto text-ui-xs text-muted">
+        <span className="ml-auto ui-caption">
           MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
         </span>
       </div>
@@ -382,7 +382,7 @@ export function InterfacesView({
             <span className="ui-section-title">预置服务</span>
             <span className="ui-chip">未接入</span>
           </div>
-          <p className="mt-1 text-ui-xs text-muted">
+          <p className="mt-1 text-ui-sm text-muted">
             工具默认关闭；启用后每次调用仍需你确认。
           </p>
           <div className="mt-2 flex flex-col gap-2">
@@ -457,7 +457,7 @@ export function InterfacesView({
                     {p.verified && <span className="ml-1 text-ui-xs text-success">已实测</span>}
                   </Button>
                 ))}
-                {presetHint && <span className="text-ui-xs text-muted">{presetHint}</span>}
+                {presetHint && <span className="ui-caption">{presetHint}</span>}
               </div>
             </div>
             {transport === "http" ? (
@@ -536,7 +536,7 @@ export function InterfacesView({
               取消
             </Button>
             {transport === "stdio" && (
-              <span className="text-ui-xs text-warn">
+              <span className="text-ui-sm text-warn">
                 {stdioReady
                   ? "会在本机启动这条命令，请确认来源可信"
                   : "当前环境不支持 stdio（需桌面端）；配置可先保存"}
@@ -678,18 +678,19 @@ export function InterfacesView({
                 </div>
 
                 {server.transport === "stdio" && !stdioReady && (
-                  <p className="mt-2 text-ui-xs text-warn">
+                  <p className="mt-2 text-ui-sm text-warn">
                     stdio 服务只能在桌面端连接；当前是浏览器环境。
                   </p>
                 )}
 
                 {connError[server.id] && (
-                  <p role="alert" className="mt-2 text-ui-xs text-danger">
+                  <p role="alert" className="mt-2 text-ui-sm text-danger">
                     {connError[server.id]}
                   </p>
                 )}
 
-                <p className="mt-1 truncate font-mono text-ui-xs text-muted">
+                {/* 命令行片段：12px 等宽（命令不是正文，但 11px 在这类等宽串上会糊） */}
+                <p className="mt-1 truncate font-mono ui-caption">
                   {server.transport === "http" ? server.url : `${server.command} ${(server.args ?? []).join(" ")}`}
                 </p>
 
@@ -769,12 +770,12 @@ export function InterfacesView({
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
                           </Button>
-                          <span className="text-ui-xs text-muted">按每个工具的说明填写参数（JSON 对象）</span>
+                          <span className="ui-caption">按每个工具的说明填写参数（JSON 对象）</span>
                         </div>
                         {testResult && (
                           <pre
                             role="status"
-                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 text-ui-xs ${
+                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 ui-caption ${
                               testResult.ok
                                 ? "border-success-line bg-success-soft text-success"
                                 : "border-danger-line bg-danger-soft text-danger"
@@ -793,8 +794,8 @@ export function InterfacesView({
         </div>
       )}
 
-      {enabledCount > 0 && <p className="mt-4 text-ui-xs text-muted">已授权 {enabledCount} 个工具给模型调用。</p>}
-      <p className="mt-2 text-ui-xs text-muted">
+      {enabledCount > 0 && <p className="mt-4 ui-caption">已授权 {enabledCount} 个工具给模型调用。</p>}
+      <p className="mt-2 ui-caption">
         工具在本机执行，不经过云端。
       </p>
 

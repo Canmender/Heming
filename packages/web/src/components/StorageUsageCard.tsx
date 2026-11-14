@@ -522,7 +522,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
           />
         </div>
-        <div role="status" aria-label="存储水位" className={`mt-1 text-ui-xs ${statusColor}`}>
+        <div role="status" aria-label="存储水位" className={`mt-1 text-ui-sm ${statusColor}`}>
           {statusText}
           <span className="text-muted">（{Math.round(percent)}%）</span>
         </div>
@@ -559,7 +559,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           <div
             role="status"
             aria-label="消息缓存加密状态"
-            className={`mt-2 text-ui-xs ${encryptionLine.tone}`}
+            className={`mt-2 text-ui-sm ${encryptionLine.tone}`}
           >
             {encryptionLine.text}
           </div>

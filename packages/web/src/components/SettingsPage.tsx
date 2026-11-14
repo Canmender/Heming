@@ -661,7 +661,7 @@ function NavModeSection() {
     <section aria-label="导航栏" className="max-w-full ui-card p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <div className="ui-section-title">导航栏</div>
+          <h2 className="ui-section-title">导航栏</h2>
         </div>
         <Button
           type="button"
@@ -741,7 +741,7 @@ function AppearanceSection() {
       className="max-w-full ui-card p-4"
     >
       <div className="flex items-center gap-2">
-        <span className="ui-section-title">主题色</span>
+        <h2 className="ui-section-title">主题色</h2>
         {/* d.138：色点原本只有 title/aria-label 带名字，界面上六个圆点没有一处文字说明；
             选中后也看不出「现在是什么色」。这里把当前色名写出来（自定义色显示「自定义」）。 */}
         <span className="ui-caption">
@@ -886,7 +886,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
           <UpdateCard currentVersion={appVersionLabel()} />
         ) : (
           <section aria-label="软件更新" className="ui-card p-4">
-            <div className="ui-section-title">软件更新</div>
+            <h2 className="ui-section-title">软件更新</h2>
             <p className="mt-1 ui-caption leading-5">
               当前在网页里打开，更新由桌面安装版自动检查并提示；网页版会随服务端一起更新，不用手动升级。
             </p>
@@ -900,7 +900,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
           className="max-w-full ui-card p-4"
         >
       <div className="flex items-center justify-between gap-3">
-        <div className="ui-section-title">更新日志</div>
+        <h2 className="ui-section-title">更新日志</h2>
         <span className="ui-caption">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 ui-caption">
@@ -918,7 +918,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                 aria-expanded={open}
                 aria-label={`更新日志 ${entry.version}`}
                 onClick={() => setLogState((prev) => toggleLog(prev, entry.version, isCurrent))}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-subtle"
+                className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-subtle"
               >
                 <span className="text-ui-sm font-semibold">{entry.version}</span>
                 {isCurrent && (

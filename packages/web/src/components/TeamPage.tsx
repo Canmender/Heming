@@ -992,6 +992,9 @@ export function TeamPage() {
 
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              {/* 门禁只量默认视图，但日程视图此前整屏只有 h1：空态/加载态下没有任何分区标题。
+                  这一句标题在三种状态下都渲染，读屏才有可跳的大纲。 */}
+              <h2 className="mb-2 ui-section-title">团队日程</h2>
               <p className="rounded-lg border border-line-soft bg-subtle px-2.5 py-2 ui-body-sm text-muted">
                 团队日程只显示成员共享的日程标题与到期档位；不含日程正文与来源信息。
               </p>
@@ -1049,7 +1052,11 @@ export function TeamPage() {
                   }
                 />
               ) : (
-                <ul className="mt-2 space-y-1">
+                <>
+                  {/* 审计 P2-h1：本视图此前只有页头 h1，列表直接铺开、没有标题层级；
+                      同一页「用量」视图的 h2（本机用量…）已经这么做了，这里补一个同档标题。 */}
+                  <h2 className="mt-3 ui-section-title">临期日程</h2>
+                  <ul className="mt-1 space-y-1">
                   {agendaActivities.map((a) => (
                     <li
                       key={a.id}
@@ -1076,6 +1083,7 @@ export function TeamPage() {
                     </li>
                   ))}
                 </ul>
+                </>
               )}
             </div>
           )}
@@ -1108,11 +1116,13 @@ export function TeamPage() {
                       {usageSyncing ? "同步中…" : "刷新"}
                     </Button>
                   )}
+                  {/* P2 可达性：危险操作、纯描边胶囊只有 20px 高；撑到 32px 命中区
+                      （二次确认由 ConfirmDialog 兜底，这里只改可点面积）。 */}
                   {share.usage && hasUploadedUsage && (
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="rounded-sm border border-danger-line px-2 py-1 text-ui-xs text-danger hover:bg-danger-soft"
+                      className="ui-hit inline-flex min-h-8 items-center rounded-sm border border-danger-line px-2 text-ui-xs text-danger hover:bg-danger-soft"
                     >
                       清除我的用量
                     </button>
@@ -1153,7 +1163,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="mx-0.5 underline underline-offset-2 hover:text-danger"
+                      className="ui-hit mx-0.5 underline underline-offset-2 hover:text-danger"
                     >
                       清除我的用量
                     </button>

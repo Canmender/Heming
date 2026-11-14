@@ -115,21 +115,22 @@ export function KeyStorageCard() {
         <LockIcon className="text-muted" />
         密钥存储
       </div>
-      <div className={`mt-1 text-ui-xs ${tone}`}>{mainLine}</div>
-      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-xs">
+      {/* 13px：这是承诺边界的正文陈述（不是元信息），11px 在 .ui-card 底上既小又难读。 */}
+      <div className={`mt-1 text-ui-sm ${tone}`}>{mainLine}</div>
+      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
         <dt className="text-muted">覆盖</dt>
         <dd>模型 Key、MCP 请求头、设备身份私钥、会话加密链与消息缓存</dd>
         <dt className="text-muted">模型 Key</dt>
         <dd>在「模型 → 来源」添加；本卡只说明存放位置</dd>
       </dl>
       {undecryptable.length > 0 && (
-        <div className="mt-1 text-ui-xs text-amber-700">
+        <div className="mt-1 text-ui-sm text-amber-700">
           以下内容无法在本机解密（密文仍在，可能来自其他设备或系统账户）：
           {undecryptable.join("、")}
         </div>
       )}
       {backedUp.length > 0 && (
-        <div className="mt-1 text-ui-xs text-amber-700">
+        <div className="mt-1 text-ui-sm text-amber-700">
           以下内容的旧密文无法在当前账户解密，已在本机原样备份：
           {backedUp.join("、")}
         </div>

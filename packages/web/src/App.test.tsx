@@ -632,13 +632,17 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
 
   it("没有打开会话时点绑定给出内联提示（不静默失败）", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    // 这块目录栏只在智能体页可见，且前一个用例可能留下 activeConversationId
+    // （有会话时点「绑定」走上传分支、不出内联提示）。显式置为「智能体页 + 无会话」，
+    // 用例才只验它自己声明的那条路径——先前靠上一个用例的残留状态，才会偶发红。
+    useUiStore.setState({ page: "chat", activeConversationId: null });
     render(<App />);
     await screen.findByRole("button", { name: "主页" });
     fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
-    // 默认 1s 的 findBy 超时在全量并行跑（304 个文件抢 CPU）时偶发假红，
-    // 这里放宽到 4s：等的是同一个状态，不是改断言。
-    const inlineAlert = await screen.findByRole("alert", {}, { timeout: 4000 });
-    expect(inlineAlert).toHaveTextContent("先打开一个会话，再绑定文件");
+    // 智能体页上可能已有别的失败提示（role=alert），所以按文案定位这条通知，
+    // 再确认它落在了一个 alert 里——等的是同一个状态，不是改断言。
+    const notice = await screen.findByText("先打开一个会话，再绑定文件", {}, { timeout: 4000 });
+    expect(notice.closest('[role="alert"]')).not.toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
