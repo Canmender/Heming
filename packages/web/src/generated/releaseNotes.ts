@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.146.3.83.11",
+    "date": "2026-11-14",
+    "title": "导航栏能直接展开子页面",
+    "bullets": [
+      "鼠标停在或键盘选中导航项，右侧会列出这个页面下面的视图（团队看板、模型运行、插件技能等），点一下直达，不用先点进去再找标签。",
+      "读屏用户现在能听到每个按钮是做什么的：图标按钮都会报出名称。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.145.3.83.11",
     "date": "2026-11-14",
     "title": "窗口拉窄也不会挤成一团",

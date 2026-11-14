@@ -53,6 +53,8 @@ const THRESHOLDS = {
   contrastFail: 0, // 低于 WCAG AA 的文本节点数
   body11: 0, // 11px 且文本 >12 字的「正文冒充元信息」节点
   hitUnder32: 0, // 有效命中区（含 ::after）小于 32×32 的可点元素
+  unnamedClickables: 0, // 可点元素没有可访问名（无 aria-label / 无文本 / 无 title）
+  imgNoAlt: 0, // <img> 缺 alt（含 alt="" 之外的缺失；装饰图应显式 alt=""）
   emoji: 0, // 用 emoji 当图标/装饰
   fontTiers: 7, // 单页字号档位上限（现网 5–7，收口目标 5）
   headingLevels: 2, // 至少两级标题（h1 + h2/h3，级别不限字号；字号由静态守卫管）
@@ -285,6 +287,35 @@ function pageAudit() {
     return hasIcon && text.length === 0;
   };
 
+  /*
+   * 可访问名：能说出「这个按钮是什么」才算。没有 aria-label、没有可见文本、
+   * 没有 title、也没有带 alt 的图片时，读屏只会念「按钮」——这是 D2 同类的坑，
+   * 静态 grep（aria-label）抓不到，只有挂着 DOM 才看得见。
+   */
+  const accessibleName = (el) => {
+    const aria = (el.getAttribute("aria-label") || "").trim();
+    if (aria) return aria;
+    const labelledby = el.getAttribute("aria-labelledby");
+    if (labelledby) {
+      const target = labelledby
+        .split(/\s+/)
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .map((n) => (n.innerText || n.textContent || "").trim())
+        .join(" ")
+        .trim();
+      if (target) return target;
+    }
+    // 用 textContent 而不是 innerText：innerText 依赖布局，Chrome 在元素被移出
+    // 合成层/离屏时可能返回空串——首版用它误判了 22 个「有字但被判无名字」的按钮
+    // （「规约」「保存分组」「应用」都中招）。可访问名关心的是「有没有文本」，不是「此刻画没画出来」。
+    const text = (el.textContent || "").trim();
+    if (text) return text;
+    const title = (el.getAttribute("title") || "").trim();
+    if (title) return title;
+    const imgAlt = [...el.querySelectorAll("img[alt]")].map((i) => i.getAttribute("alt").trim()).join(" ").trim();
+    return imgAlt;
+  };
   const main = document.querySelector("main") || document.body;
   const textNodes = [];
   const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
@@ -334,14 +365,30 @@ function pageAudit() {
       const ah = parseFloat(after.height);
       if (Number.isFinite(aw) && Number.isFinite(ah)) { w = Math.max(w, aw); h = Math.max(h, ah); }
     }
+    const name = accessibleName(el);
     clickables.push({
       label: (el.getAttribute("aria-label") || el.innerText || "").trim().slice(0, 30),
+      tag: el.tagName.toLowerCase() + (el.getAttribute("role") ? `[role=${el.getAttribute("role")}]` : ""),
       w: Math.round(w),
       h: Math.round(h),
       iconOnly: isIconOnly(el),
-      hasLabel: !!(el.getAttribute("aria-label") || (el.innerText || "").trim() || el.getAttribute("title")),
+      hasLabel: !!name,
+      name,
+      html: el.outerHTML.replace(/\s+/g, " ").slice(0, 120),
+      textContent: (el.textContent || "").trim().slice(0, 40),
+      innerTextLen: (el.innerText || "").length,
+      disabled: !!el.disabled,
     });
   }
+
+  const unnamedClickables = clickables
+    .filter((c) => !c.name)
+    .map((c) => ({ label: c.label || c.tag, w: c.w, h: c.h, html: c.html, textContent: c.textContent, innerTextLen: c.innerTextLen, disabled: c.disabled }));
+
+  const imgNoAlt = [...main.querySelectorAll("img")].filter((img) => {
+    if (!visible(img)) return false;
+    return !img.hasAttribute("alt");
+  }).length;
 
   const headings = [...main.querySelectorAll("h1,h2,h3")].filter(visible).map((el) => ({
     level: el.tagName.toLowerCase(),
@@ -361,6 +408,8 @@ function pageAudit() {
     body11Sample: textNodes.filter((t) => t.size <= 11 && t.text.length > 12).slice(0, 4).map((t) => t.text),
     hitUnder32: clickables.filter((c) => c.w < 32 || c.h < 32),
     iconOnlyNoLabel: clickables.filter((c) => c.iconOnly && !c.hasLabel).length,
+    unnamedClickables,
+    imgNoAlt,
     clickableCount: clickables.length,
     headings,
     emoji,
@@ -527,7 +576,7 @@ async function run() {
     report.pages[slug] = { label: tabLabel || slug, metrics };
     log(
       `[audit] ${slug.padEnd(14)} 字号档=${String(metrics.fontTierCount).padEnd(2)} 11px正文=${metrics.body11} ` +
-        `对比度不合格=${metrics.contrastFail} 命中区<32=${metrics.hitUnder32.length} 横向溢出=${metrics.docOverflowX}`,
+        `对比度不合格=${metrics.contrastFail} 命中区<32=${metrics.hitUnder32.length} 无名字可点=${metrics.unnamedClickables.length} 横向溢出=${metrics.docOverflowX}`,
     );
     return metrics;
   };
@@ -586,6 +635,8 @@ async function run() {
       ["对比度不合格", m.contrastFail, THRESHOLDS.contrastFail, "="],
       ["11px 正文", m.body11, THRESHOLDS.body11, "="],
       ["有效命中区<32", m.hitUnder32.length, THRESHOLDS.hitUnder32, "="],
+      ["无名字可点", m.unnamedClickables.length, THRESHOLDS.unnamedClickables, "="],
+      ["图片缺 alt", m.imgNoAlt, THRESHOLDS.imgNoAlt, "="],
       ["emoji", m.emoji, THRESHOLDS.emoji, "="],
       ["字号档位", m.fontTierCount, THRESHOLDS.fontTiers, "<="],
       // 判「有二级标题」而不是「有 16px 的标题」：h2 用 .ui-section-title（14px）也合法，

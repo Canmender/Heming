@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
 import { MemoryPage } from "./MemoryPage.js";
 import { PluginsPage } from "./PluginsPage.js";
+import { SettingsPage } from "./SettingsPage.js";
 import { useUiStore } from "../store/ui.js";
 import {
   AgentPrefsStore,
@@ -196,5 +197,69 @@ describe("命令面板意图消费 · 插件定位", () => {
     });
     await waitFor(() => expect(useUiStore.getState().paletteIntent).toBeNull());
     expect(screen.getAllByText("天气能力包").length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 导航轨飞出菜单投递的 `focus-tab` 意图（2026-11-14 审计 §4-F1）。
+ *
+ * 团队/模型页早就有消费方；插件/记忆/设置是这次补的，
+ * 所以这里只验「点了「页 · 视图」之后，该页的页签真的切过去、意图被清空」。
+ */
+describe("命令面板意图消费 · 二级页签定位（focus-tab）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ page: "home", paletteIntent: null });
+  });
+  afterEach(() => cleanup());
+
+  it("插件页：focus-tab → MCP 页签", async () => {
+    const storage = makeStorage();
+    const pool = new SkillPool(storage, () => T0);
+    const store = new PluginStore(storage, pool, () => T0, fakeMcp().port);
+
+    render(<PluginsPage plugins={store} />);
+    act(() => {
+      useUiStore.getState().setPage("plugins");
+      useUiStore.getState().setPaletteIntent("focus-tab", { page: "plugins", tab: "mcp" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(useUiStore.getState().paletteIntent).toBeNull();
+  });
+
+  it("记忆页：focus-tab → 个人知识库页签", async () => {
+    const memory = new MemoryStore(makeStorage(), () => T0);
+    const kb = new KnowledgeBase(makeStorage(), () => T0);
+    const prefs = new AgentPrefsStore(makeStorage());
+
+    render(<MemoryPage memory={memory} kb={kb} prefs={prefs} fetchSharedFiles={async () => []} />);
+    act(() => {
+      useUiStore.getState().setPage("memory");
+      useUiStore.getState().setPaletteIntent("focus-tab", { page: "memory", tab: "wiki" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "个人知识库" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    expect(useUiStore.getState().paletteIntent).toBeNull();
+  });
+
+  it("设置页：focus-tab → 外观页签", async () => {
+    render(<SettingsPage />);
+    act(() => {
+      useUiStore.getState().setPage("settings");
+      useUiStore.getState().setPaletteIntent("focus-tab", { page: "settings", tab: "appearance" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(useUiStore.getState().paletteIntent).toBeNull();
   });
 });

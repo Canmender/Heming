@@ -715,6 +715,16 @@ export function MemoryPage({
     consumePaletteIntent();
   }, [paletteIntent, consumePaletteIntent]);
 
+  // 导航轨的二级视图入口（2026-11-14 审计 §4-F1）：`{ kind: "focus-tab", data: { page: "memory", tab } }`。
+  // 只管切页签（智能体 / 数据库 / 个人知识库），不做条目定位——定位是 focus-memory 的事。
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-tab") return;
+    const { page: targetPage, tab: want } = paletteIntent.data ?? {};
+    if (targetPage !== "memory" || !want) return;
+    if ((MEMORY_TABS as readonly string[]).includes(want)) setTab(want as TabKey);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent, setTab]);
+
   // 把命中条目滚进视野，并在 2 秒后淡出高亮（跳过来第一眼要看见它）。
   useEffect(() => {
     if (!highlightMemoryId) return;

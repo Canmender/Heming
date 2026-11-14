@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   HomeIcon,
   TeamIcon,
@@ -21,6 +29,7 @@ import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
 import { NAV_GROUP_LABEL, navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
+import { navViewName, navViewsOf } from "../lib/navViews.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { withPluginNav } from "../lib/pages/registry.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
@@ -95,6 +104,17 @@ const RAIL_WIDTH = "w-14";
  * 命中区不到 32 的控件一律套 RAIL_CTRL，新增按钮别再写一次性 h-[…] w-[…]。
  */
 const RAIL_CTRL = "flex h-8 w-8 items-center justify-center rounded-lg";
+
+/**
+ * 二级视图飞出菜单的开/关延时（2026-11-14 审计 §4-F1）。
+ *
+ * 为什么不是「hover 即开」：鼠标从轨顶扫到轨底会依次掠过 8 个导航项，
+ * 立刻弹菜单会串出一排开开关关的浮层，比没有菜单更吵。120ms 是「停一下」的判定阈值，
+ * 与浮签（Tip）的即时淡入不冲突——浮签 120ms 淡入、菜单 120ms 后展开，时间上刚好接上。
+ * 关闭用 160ms：比打开略长，手指从图标移到右侧菜单要跨 8px 缝隙，短了会闪。
+ */
+const MENU_OPEN_DELAY_MS = 120;
+const MENU_CLOSE_DELAY_MS = 160;
 
 /**
  * 元素当前是否是「键盘可见焦点」。
@@ -192,6 +212,22 @@ export function NavRail({
    */
   const keyboardFocusRef = useRef(false);
 
+  /**
+   * 二级视图飞出菜单（2026-11-14 审计 §4-F1）。
+   *
+   * 状态就是「当前展开的是哪一页的菜单」（null = 全收起），一个导航项同一时刻只开一个。
+   * 与 Tip 共用 hover 语义，但两者**不共存**：有二级视图的项只出菜单（菜单头里带页名与
+   * 快捷键），没有二级视图的项才出 Tip——否则同一位置（left-full ml-2）会叠两层浮层。
+   */
+  const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
+  const [openMenu, setOpenMenu] = useState<NavPage | null>(null);
+  const menuOpenTimer = useRef<number | null>(null);
+  const menuCloseTimer = useRef<number | null>(null);
+  /** 键盘打开菜单后要把焦点送进第一项；hover 打开则不动焦点。 */
+  const pendingMenuFocus = useRef(false);
+  /** 每个导航项的外壳（菜单的定位容器 + 焦点回位锚点），按页 id 取。 */
+  const navItemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
   const clearHideTimer = () => {
     if (hideTimer.current !== null) {
       window.clearTimeout(hideTimer.current);
@@ -199,8 +235,139 @@ export function NavRail({
     }
   };
 
+  /** 清掉飞出菜单的开/关定时器（移入菜单、点项、收起时都要清，避免滞后触发）。 */
+  const clearMenuTimers = () => {
+    if (menuOpenTimer.current !== null) {
+      window.clearTimeout(menuOpenTimer.current);
+      menuOpenTimer.current = null;
+    }
+    if (menuCloseTimer.current !== null) {
+      window.clearTimeout(menuCloseTimer.current);
+      menuCloseTimer.current = null;
+    }
+  };
+
+  /** 悬停 120ms 后展开该页菜单；已在开的那一页则直接返回（不重启计时）。 */
+  const scheduleMenuOpen = (target: NavPage) => {
+    if (navViewsOf(target).length === 0) return;
+    if (menuOpenTimer.current !== null) {
+      window.clearTimeout(menuOpenTimer.current);
+      menuOpenTimer.current = null;
+    }
+    // 扫过相邻项时，上一项排的「160ms 后收起」必须作废——否则它会在新菜单刚开
+    // 出来 40ms 后把 openMenu 清掉，菜单闪一下就没（鼠标横扫导航轨时必现）。
+    if (menuCloseTimer.current !== null) {
+      window.clearTimeout(menuCloseTimer.current);
+      menuCloseTimer.current = null;
+    }
+    if (openMenu === target) return;
+    menuOpenTimer.current = window.setTimeout(() => {
+      menuOpenTimer.current = null;
+      setOpenMenu(target);
+    }, MENU_OPEN_DELAY_MS);
+  };
+
+  /** 移出导航项 160ms 后收起（给「从图标挪到右侧菜单」的 8px 缝隙留时间）。 */
+  const scheduleMenuClose = () => {
+    if (menuOpenTimer.current !== null) {
+      window.clearTimeout(menuOpenTimer.current);
+      menuOpenTimer.current = null;
+    }
+    if (menuCloseTimer.current !== null) window.clearTimeout(menuCloseTimer.current);
+    menuCloseTimer.current = window.setTimeout(() => {
+      menuCloseTimer.current = null;
+      setOpenMenu(null);
+    }, MENU_CLOSE_DELAY_MS);
+  };
+
+  /** 立刻展开（键盘路径：ArrowRight/ArrowDown），并把焦点排进第一项。 */
+  const openMenuNow = (target: NavPage, focusFirst: boolean) => {
+    clearMenuTimers();
+    pendingMenuFocus.current = focusFirst;
+    setOpenMenu(target);
+  };
+
+  /** 立刻收起；传了页 id 就把焦点还给该项的导航按钮（键盘回位）。 */
+  const closeMenuNow = (returnTo?: NavPage) => {
+    clearMenuTimers();
+    pendingMenuFocus.current = false;
+    setOpenMenu(null);
+    if (returnTo) {
+      navItemRefs.current
+        .get(returnTo)
+        ?.querySelector<HTMLElement>("button[aria-haspopup]")
+        ?.focus();
+    }
+  };
+
+  /**
+   * 键盘打开后把焦点送进菜单第一项。
+   * 放在 effect 里而不是 `requestAnimationFrame`：菜单是同一帧渲染出来的，
+   * effect 提交后节点已在 DOM 上，测试（act 同步刷）与真实运行都不用等定时器。
+   */
+  useEffect(() => {
+    if (!openMenu || !pendingMenuFocus.current) return;
+    pendingMenuFocus.current = false;
+    navItemRefs.current.get(openMenu)?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [openMenu]);
+
+  /**
+   * 点到轨道以外就收起菜单。
+   *
+   * 键盘（ArrowRight）打开的菜单不会被鼠标移开带走，用户点一下正文回来，
+   * 菜单会一直僵在屏上——那条路径必须显式收。内部判定用「项外壳」：
+   * pinned 与 auto 两种模式的 <nav> 不是同一个节点，而每个项的外壳（连同它的
+   * 飞出菜单）始终登记在 navItemRefs 里，两种模式都成立。
+   */
+  useEffect(() => {
+    if (!openMenu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const inside = [...navItemRefs.current.values()].some((el) => el?.contains(e.target as Node));
+      if (inside) return;
+      clearMenuTimers();
+      setOpenMenu(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [openMenu]);
+
+  /** 菜单内键盘：↑↓ 在项间环走、Home/End 跳首尾、Esc 收起并回位、Tab 收起后交还浏览器。 */
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>, target: NavPage) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenuNow(target);
+      return;
+    }
+    if (e.key === "Tab") {
+      // 不拦默认行为：先把焦点还给导航项，浏览器接着按 DOM 顺序搬到下一个可聚焦元素。
+      // 若直接 unmount 菜单，焦点会掉到 document.body（Tab 之后什么都选不中）。
+      closeMenuNow(target);
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const items = Array.from(
+      e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    );
+    if (items.length === 0) return;
+    e.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? items.length - 1
+          : e.key === "ArrowDown"
+            ? (current + 1) % items.length
+            : (current - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
+
   /** 收起浮层；若焦点因鼠标点击留在导航里，先 blur，避免焦点停在 inert 元素上。 */
   const closeOverlay = () => {
+    // 导航整体收起时，挂在它上面的二级视图菜单也必须一起收（否则会留下几像素的孤儿浮层）
+    clearMenuTimers();
+    setOpenMenu(null);
     const nav = navRef.current;
     const active = document.activeElement as HTMLElement | null;
     if (nav && active && nav.contains(active)) active.blur();
@@ -230,6 +397,8 @@ export function NavRail({
   useEffect(
     () => () => {
       if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+      if (menuOpenTimer.current !== null) window.clearTimeout(menuOpenTimer.current);
+      if (menuCloseTimer.current !== null) window.clearTimeout(menuCloseTimer.current);
     },
     [],
   );
@@ -258,6 +427,14 @@ export function NavRail({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (hasOpenModal()) return;
+      // 二级视图菜单开着时按 Esc 先收菜单（焦点回导航项），再按一次才收整条导航轨——
+      // 与「先关最内层浮层」的通用预期一致。
+      if (openMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenuNow(openMenu);
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       closeNav();
@@ -269,7 +446,7 @@ export function NavRail({
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [auto, navOpen, closeNav]);
+  }, [auto, navOpen, closeNav, openMenu]);
 
   /**
    * 可见导航项（固定顺序、不可用的插件页撤下）。
@@ -349,6 +526,10 @@ export function NavRail({
           const shortcut = it.digit ? `Alt ${it.digit}` : "";
           // 显示名固定在本文件（含插件页标题，插件页也要能在这条轨上被点到）
           const label = it.label;
+          // 二级视图（§4-F1）：有才挂飞出菜单；没有的页保持原来的 Tip，不硬造一层。
+          const views = navViewsOf(it.page);
+          const hasViews = views.length > 0;
+          const menuOpen = openMenu === it.page;
           return (
             <Fragment key={it.page}>
               {divider ? <div aria-hidden="true" className="h-px w-6 bg-line-soft" /> : null}
@@ -357,14 +538,45 @@ export function NavRail({
                   {NAV_GROUP_LABEL[group]}
                 </span>
               ) : null}
-              <div className="group relative" data-nav-group={group}>
+              <div
+                className="group relative"
+                data-nav-group={group}
+                ref={(el) => {
+                  if (el) navItemRefs.current.set(it.page, el);
+                  else navItemRefs.current.delete(it.page);
+                }}
+                onMouseEnter={hasViews ? () => scheduleMenuOpen(it.page) : undefined}
+                onMouseLeave={hasViews ? scheduleMenuClose : undefined}
+              >
                 <button
                   type="button"
                   aria-label={label}
                   aria-describedby={groupLabelId}
                   aria-keyshortcuts={it.digit ? `Alt+${it.digit}` : undefined}
                   aria-current={active ? "page" : undefined}
+                  // 有二级视图的项是「可展开的导航入口」：菜单由 hover/ArrowRight 打开，
+                  // 点本体仍是「进默认视图」，所以只是 popup 按钮，不是纯菜单按钮。
+                  aria-haspopup={hasViews ? "menu" : undefined}
+                  aria-expanded={hasViews ? menuOpen : undefined}
+                  onKeyDown={
+                    hasViews
+                      ? (e) => {
+                          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                            e.preventDefault();
+                            openMenuNow(it.page, true);
+                            return;
+                          }
+                          if (e.key === "Escape" && menuOpen) {
+                            e.preventDefault();
+                            closeMenuNow(it.page);
+                          }
+                        }
+                      : undefined
+                  }
                   onClick={() => {
+                    // 点本体 = 进该页默认视图，并把菜单收起（菜单是「跳去某一层」的旁路）
+                    clearMenuTimers();
+                    setOpenMenu(null);
                     setPage(it.page);
                     // auto 模式 + 鼠标点击：导航已完成使命，直接收起。
                     // 键盘激活（Enter）保留浮层，让焦点连续、可继续 Tab/Esc。
@@ -376,7 +588,53 @@ export function NavRail({
                 >
                   {it.icon}
                 </button>
-                <Tip label={label} shortcut={shortcut || undefined} />
+
+                {hasViews && menuOpen ? (
+                  /**
+                   * 飞出菜单：贴在本项右侧（left-full + 8px），与浮签同一层（z-20），
+                   * 所以不会盖住左侧导航轨的其它项；轨道宽度不变。
+                   * 菜单头是纯装饰（aria-hidden）：可访问名由 role=menu 的 aria-label 与
+                   * 每个 menuitem 的「页 · 视图」给全，读屏不必再念一遍页名。
+                   */
+                  <div
+                    role="menu"
+                    aria-label={`${label}的视图`}
+                    data-testid={`nav-menu-${it.page}`}
+                    onMouseEnter={clearMenuTimers}
+                    onMouseLeave={scheduleMenuClose}
+                    onKeyDown={(e) => onMenuKeyDown(e, it.page)}
+                    className="absolute left-full top-1/2 z-20 ml-2 w-44 -translate-y-1/2 rounded-lg border border-line-soft bg-surface py-1 ui-overlay-shadow"
+                  >
+                    <div
+                      aria-hidden="true"
+                      className="flex items-center justify-between gap-2 px-2.5 pb-1 pt-0.5 ui-caption"
+                    >
+                      <span>{label}</span>
+                      {shortcut ? <Kbd>{shortcut}</Kbd> : null}
+                    </div>
+                    {views.map((view) => (
+                      <button
+                        key={view.key}
+                        type="button"
+                        role="menuitem"
+                        aria-label={navViewName(label, view)}
+                        onClick={() => {
+                          // 先落页、再投一次一次性意图：宿主页挂载后第一帧消费，
+                          // 已挂载时靠 store 订阅重渲染触发，两条路径落地一致。
+                          setPage(it.page);
+                          setPaletteIntent("focus-tab", { page: it.page, tab: view.key });
+                          closeMenuNow();
+                          if (auto && !keyboardFocusRef.current) closeOverlay();
+                        }}
+                        className="flex min-h-8 w-full items-center px-2.5 text-left text-ui-sm text-body transition-colors duration-fast hover:bg-subtle-2 hover:text-ink"
+                      >
+                        {view.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <Tip label={label} shortcut={shortcut || undefined} />
+                )}
               </div>
             </Fragment>
           );

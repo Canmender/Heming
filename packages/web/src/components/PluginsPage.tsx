@@ -205,6 +205,16 @@ export function PluginsPage({
     consumePaletteIntent();
   }, [paletteIntent, consumePaletteIntent, plugins]);
 
+  // 导航轨的二级视图入口（2026-11-14 审计 §4-F1）：`{ kind: "focus-tab", data: { page: "plugins", tab } }`。
+  // 只切页签，不开详情：与 open-plugin 的「定位某个插件」职责不同，所以单独一段。
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-tab") return;
+    const { page: targetPage, tab: want } = paletteIntent.data ?? {};
+    if (targetPage !== "plugins" || !want) return;
+    if ((PLUGINS_TABS as readonly string[]).includes(want)) setTab(want as TabKey);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
   useEffect(() => {
     if (!highlightPluginId) return;
     const el = document.querySelector(`[data-plugin-id="${highlightPluginId}"]`);

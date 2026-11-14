@@ -417,3 +417,189 @@ describe("NavRail 分组（固定 8 项）", () => {
     expect(lines).toHaveLength(3);
   });
 });
+
+/**
+ * 二级视图飞出菜单（2026-11-14 审计 §4-F1）。
+ *
+ * 只断言结构与状态机：hover 延时用 fake timers 拨表，不真实等待 120/160ms；
+ * 键盘路径全同步（ArrowRight 立刻展开，不等延时），所以不用动定时器。
+ */
+describe("NavRail 二级视图飞出菜单（§4-F1）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useUiStore.setState({
+      page: "home",
+      navOrder: [...NEW_DEFAULT],
+      navMode: "pinned",
+      navOpen: false,
+      paletteIntent: null,
+    });
+    useAuthStore.setState({
+      token: "t1",
+      user: { id: "u1", username: "alice", displayName: "爱丽丝" },
+      status: "authed",
+      error: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const navButton = (name: string) => screen.getByRole("button", { name });
+
+  it("有二级视图的项挂 aria-haspopup/aria-expanded；单视图页不挂", () => {
+    render(<NavRail />);
+    for (const name of ["团队", "插件", "记忆", "模型", "设置"]) {
+      const btn = navButton(name);
+      expect(btn).toHaveAttribute("aria-haspopup", "menu");
+      expect(btn).toHaveAttribute("aria-expanded", "false");
+    }
+    // 主页 / 智能体 / 知识库没有页内页签：不挂 popup，也不挂空菜单
+    for (const name of ["主页", "智能体", "知识库"]) {
+      expect(navButton(name)).not.toHaveAttribute("aria-haspopup");
+    }
+  });
+
+  it("悬停 120ms 展开、移出 160ms 收起（扫过不弹）", () => {
+    render(<NavRail />);
+    const btn = navButton("团队");
+    const box = btn.closest("div") as HTMLElement;
+
+    fireEvent.mouseEnter(box);
+    // 未到延时：不展开，避免鼠标扫过整条轨时串出一排浮层
+    act(() => {
+      vi.advanceTimersByTime(110);
+    });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    const menu = screen.getByRole("menu", { name: "团队的视图" });
+    expect(btn).toHaveAttribute("aria-expanded", "true");
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(5);
+    // 项名是「页 · 视图」，与命令面板的「模型 › 运行」同一种说法
+    expect(within(menu).getByRole("menuitem", { name: "团队 · 看板" })).toBeInTheDocument();
+
+    fireEvent.mouseLeave(box);
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(screen.getByRole("menu", { name: "团队的视图" })).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(btn).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("从一项移到另一项：新菜单不会被上一项的关闭计时器掐掉（横扫不闪）", () => {
+    render(<NavRail />);
+    const team = navButton("团队");
+    const model = navButton("模型");
+    const teamBox = team.closest("div") as HTMLElement;
+    const modelBox = model.closest("div") as HTMLElement;
+
+    fireEvent.mouseEnter(teamBox);
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    expect(screen.getByRole("menu", { name: "团队的视图" })).toBeInTheDocument();
+
+    // 扫到下一项：团队排的 160ms 关闭计时器必须作废
+    fireEvent.mouseLeave(teamBox);
+    fireEvent.mouseEnter(modelBox);
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    act(() => {
+      vi.advanceTimersByTime(60);
+    });
+    expect(screen.getByRole("menu", { name: "模型的视图" })).toBeInTheDocument();
+  });
+
+  it("键盘：ArrowRight 展开并把焦点送进第一项，↑↓ 环走，Escape 收起且焦点回导航项", () => {
+    render(<NavRail />);
+    const btn = navButton("团队");
+    btn.focus();
+
+    fireEvent.keyDown(btn, { key: "ArrowRight" });
+    const menu = screen.getByRole("menu", { name: "团队的视图" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(document.activeElement).toBe(items[0]);
+
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[0]);
+    // 首项再上一步环到末项
+    fireEvent.keyDown(items[0], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+
+    fireEvent.keyDown(items[items.length - 1], { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(btn);
+
+    // Tab 也收起菜单，但焦点必须落在导航项上（不能掉到 body）
+    fireEvent.keyDown(btn, { key: "ArrowRight" });
+    const again = within(screen.getByRole("menu", { name: "团队的视图" })).getAllByRole("menuitem");
+    fireEvent.keyDown(again[0], { key: "Tab" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("点轨道以外收起菜单（键盘打开的菜单不会僵在屏上）", () => {
+    render(<NavRail />);
+    fireEvent.keyDown(navButton("团队"), { key: "ArrowRight" });
+    expect(screen.getByRole("menu", { name: "团队的视图" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // 点在菜单内部不该收（否则点不动菜单项）
+    fireEvent.keyDown(navButton("团队"), { key: "ArrowRight" });
+    fireEvent.pointerDown(
+      within(screen.getByRole("menu", { name: "团队的视图" })).getAllByRole("menuitem")[0],
+    );
+    expect(screen.getByRole("menu", { name: "团队的视图" })).toBeInTheDocument();
+  });
+
+  it("点「团队 · 看板」= 进团队页 + 投递 focus-tab 意图，菜单收起", () => {
+    render(<NavRail />);
+    fireEvent.keyDown(navButton("团队"), { key: "ArrowRight" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "团队 · 看板" }));
+
+    const s = useUiStore.getState();
+    expect(s.page).toBe("team");
+    expect(s.paletteIntent).toMatchObject({
+      kind: "focus-tab",
+      data: { page: "team", tab: "board" },
+    });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("点导航项本体仍是「进默认视图」：不发意图、只切页", () => {
+    render(<NavRail />);
+    fireEvent.click(navButton("设置"));
+    const s = useUiStore.getState();
+    expect(s.page).toBe("settings");
+    expect(s.paletteIntent).toBeNull();
+  });
+
+  it("auto 模式下 Esc 先收菜单、再按一次才收整条导航", () => {
+    useUiStore.setState({ navMode: "auto", navOpen: true });
+    render(<NavRail />);
+    const btn = navButton("模型");
+    fireEvent.keyDown(btn, { key: "ArrowRight" });
+    expect(screen.getByRole("menu", { name: "模型的视图" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    // 最内层先关：整条导航还没收
+    expect(useUiStore.getState().navOpen).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(useUiStore.getState().navOpen).toBe(false);
+  });
+});

@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.146.3.83.11",
+    "date": "2026-11-14",
+    "title": "导航轨能直接展开二级视图，门禁开始管「可访问名」",
+    "bullets": [
+      "新建 `packages/web/src/lib/navViews.ts`：`NAV_VIEWS` 登记 5 页 20 个真实页签（key 与各页 tabs 常量逐字一致），提供 `navViewsOf()` / `navViewName()`（「团队 · 看板」这种「页 · 视图」名）。",
+      "`NavRail.tsx`：hover 120ms 开、移出 160ms 关；点导航项本体仍是「进默认视图」，行为不变。键盘：ArrowRight/ArrowDown 立即展开并把焦点送进第一项，↑↓ 环走 + Home/End，Esc 收起且焦点回导航项，Tab 收起后先回焦导航项再交浏览器。aria：`aria-haspopup=\"menu\"`/`aria-expanded`、`role=\"menu\"` + `role=\"menuitem\"`；菜单 `left-full ml-2 z-20 w-44`，不挡其它轨道项。",
+      "点菜单项 = `setPage(page)` + `setPaletteIntent(\"focus-tab\", { page, tab })`；`SettingsPage.tsx` / `PluginsPage.tsx` / `MemoryPage.tsx` 新增 focus-tab 消费（白名单校验 → setTab → consume），团队/模型沿用已有消费方。",
+      "顺手修两个交互缺陷：横扫相邻轨道项时，上一项的 160ms 关闭计时器会把新菜单掐掉（菜单闪一下即消失）；Tab 离开菜单时焦点掉到 `body`。",
+      "说明：home / chat 是单视图，vault 的「图谱」是右侧面板开关而非视图层，均未硬造二级项；`knowledge/KnowledgePage.tsx` 同理未动。",
+      "`unnamedClickables`（没有可访问名的可点元素：无 aria-label/aria-labelledby、无文本、无 title、无带 alt 的图片）与 `imgNoAlt`（可见 `<img>` 缺 alt），门槛都是 0。",
+      "口径坑（已写进代码注释）：首版用 `innerText` 判「有没有文本」，Chrome 对部分离屏/合成元素返回空串，误判 22 个「有字」的按钮（「规约」「保存分组」「应用」）。可访问名关心「有没有文本」而不是「此刻画没画出来」，改用 `textContent`。",
+      "明细里带 `html/textContent/disabled`，下次真出问题能直接看到是哪个按钮。"
+    ],
+    "paragraphs": [
+      "审计 §4-F1 说「20 个视图只有 8 个导航入口」：团队 5、模型 4、插件 3、设置 5、记忆 3 这些页签，只能先进页面再发现。本版把二级视图挂到导航轨上，同时给门禁补两项可访问性检查。",
+      "**导航轨飞出菜单（F1）**",
+      "**门禁新增两项可访问性检查**",
+      "**验证**：`tsc --noEmit` 0 错误；web 全量 **4475 passed / 304 files**（新增 NavRail 8 例、paletteLocalConsume 3 例）；`pnpm design:audit` 浅色三视口 78 条记录、深色 26 条记录全绿（含新增两项）；门禁明细 `.tmp/design-audit-2026-11-14/gate-f1.json`。"
+    ]
+  },
+  {
     "version": "d.145.3.83.11",
     "date": "2026-11-14",
     "title": "门禁扩到多视口：窄窗也不许挤",

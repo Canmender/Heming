@@ -209,6 +209,16 @@ export function SettingsPage() {
     consumePaletteIntent();
   }, [paletteIntent, consumePaletteIntent, jumpToCard]);
 
+  // 导航轨的二级视图入口（2026-11-14 审计 §4-F1）：`{ kind: "focus-tab", data: { page: "settings", tab } }`。
+  // 与上面的 focus-settings 分开：focus-settings 是「定位并高亮某张卡」，这条只切分组页签。
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-tab") return;
+    const { page: targetPage, tab: want } = paletteIntent.data ?? {};
+    if (targetPage !== "settings" || !want) return;
+    if (isSettingsTabId(want)) setTab(want);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
   const searching = query.trim().length > 0;
 
   return (
