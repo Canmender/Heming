@@ -29,9 +29,9 @@ describe("resolveAgentMemoryPrefs", () => {
     expect(resolveAgentMemoryPrefs([1, 2])).toEqual({});
   });
 
-  it("缺字段回落：短期关、长期关、个人数据库允许", () => {
+  it("缺字段回落：三个开关都取全开缺省（记忆无界面开关）", () => {
     expect(resolveAgentMemoryPrefs({ a1: { shortTerm: true } })).toEqual({
-      a1: { shortTerm: true, longTerm: false, personalDb: true },
+      a1: { shortTerm: true, longTerm: true, personalDb: true },
     });
     expect(resolveAgentMemoryPrefs({ a1: {} })).toEqual({ a1: { ...DEFAULT_AGENT_PREFS } });
   });
@@ -46,28 +46,31 @@ describe("resolveAgentMemoryPrefs", () => {
         a3: { personalDb: false, extra: 1 },
       }),
     ).toEqual({
-      a1: { shortTerm: false, longTerm: false, personalDb: true },
-      a3: { shortTerm: false, longTerm: false, personalDb: false },
+      // 非布尔值一律回落全开缺省；只有显式 false 会被收敛函数保留（但 get 不再采信）。
+      a1: { shortTerm: true, longTerm: true, personalDb: true },
+      a3: { shortTerm: true, longTerm: true, personalDb: false },
     });
   });
 });
 
 describe("AgentPrefsStore", () => {
-  it("未配置取缺省，set 后按 agentId 落盘且读取一致", () => {
+  it("读取恒为全开；set 仍按 agentId 落盘（旧 false 不再生效）", () => {
     const map = new Map<string, string>();
     const store = new AgentPrefsStore(makeStorage(map));
 
     expect(store.get("a1")).toEqual(DEFAULT_AGENT_PREFS);
 
-    store.set("a1", { shortTerm: true });
-    expect(store.get("a1")).toEqual({ shortTerm: true, longTerm: false, personalDb: true });
+    // set 仍能写落盘，但 get 恒全开——记忆页已删除，没有关掉它的入口。
+    store.set("a1", { shortTerm: false });
+    expect(store.get("a1")).toEqual(DEFAULT_AGENT_PREFS);
     expect(JSON.parse(map.get(AGENT_PREFS_KEY) as string)).toEqual({
-      a1: { shortTerm: true, longTerm: false, personalDb: true },
+      a1: { shortTerm: false, longTerm: true, personalDb: true },
     });
 
-    // 重新水合：从同一存储构造仍读到已落盘值
+    // 重新水合：旧落盘值读得到，但 get 依旧全开
     const reloaded = new AgentPrefsStore(makeStorage(map));
-    expect(reloaded.get("a1").shortTerm).toBe(true);
+    expect(reloaded.all()).toEqual({ a1: { shortTerm: false, longTerm: true, personalDb: true } });
+    expect(reloaded.get("a1")).toEqual(DEFAULT_AGENT_PREFS);
     expect(reloaded.get("a2")).toEqual(DEFAULT_AGENT_PREFS);
   });
 

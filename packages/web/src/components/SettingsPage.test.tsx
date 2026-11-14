@@ -373,7 +373,7 @@ describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
     goTab("导航");
     const region = screen.getByRole("region", { name: "导航顺序" });
     const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
-    const expected = ["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"];
+    const expected = ["主页", "团队", "会话", "协作", "插件", "知识库", "模型", "设置"];
     expect(labels).toHaveLength(8);
     for (const [index, name] of expected.entries()) expect(labels[index]).toContain(name);
     expect(screen.queryByRole("button", { name: /^上移 / })).not.toBeInTheDocument();
@@ -383,7 +383,7 @@ describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
   });
 
   it("存储里残留自定义顺序时，展示的仍是固定 8 项（旧的拖拽排序不再生效）", () => {
-    useUiStore.getState().setNavOrder(["settings", "memory", "home", "team", "plugins"]);
+    useUiStore.getState().setNavOrder(["settings", "memory", "home", "team", "plugins"] as never);
     render(<SettingsPage />);
     goTab("导航");
     const region = screen.getByRole("region", { name: "导航顺序" });
@@ -781,7 +781,7 @@ describe("设置区布局（d.62-B）", () => {
     expect(headings[0]).toHaveTextContent("设置");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("不用重启");
     // d.138 改回左对齐：760 的宽度上限保留（表单行不宜过长），但不再 mx-auto——
-    // 居中会让设置页左边缘与首页/记忆/插件页对不上，同站出现两种对齐网格。
+    // 居中会让设置页左边缘与首页/插件页对不上，同站出现两种对齐网格。
     const column = document.querySelector('[class*="max-w-[760px]"]');
     expect(column).not.toBeNull();
     expect(column?.className).not.toContain("mx-auto");

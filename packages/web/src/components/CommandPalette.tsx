@@ -34,7 +34,6 @@ import {
   BookIcon,
   GearIcon,
   HomeIcon,
-  MemoryIcon,
   PlugIcon,
   SkillsIcon,
   SparkIcon,
@@ -534,13 +533,6 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         // 复用既有 focusTask：切任务区 + taskFocusId，任务区自己选中该记录并消费。
         if (item.taskId) focusTask(item.taskId, item.conversationId);
         break;
-      case "memory":
-        // 记忆页是懒加载页：先投定位意图再切页，挂载后由它消费并高亮该条。
-        if (item.memoryId) {
-          setPaletteIntent("focus-memory", { memoryId: item.memoryId, layer: item.memoryLayer });
-          setPage("memory");
-        }
-        break;
       case "plugin":
         // 插件页同理：投插件 id，挂载后打开该插件详情并高亮卡片。
         if (item.pluginId) {
@@ -718,7 +710,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                 <>
                   <p>没有匹配「{query}」的结果。</p>
                   <p className="mt-1 ui-caption">
-                    换成更短的关键词试试；按 Esc 清空后，也可以用左侧导航去「记忆」「知识库」里逐条翻。
+                    换成更短的关键词试试；按 Esc 清空后，也可以用左侧导航去「会话」「知识库」里逐条翻。
                   </p>
                   {archiveError ? (
                     <p className="mt-1 text-ui-xs text-danger">
@@ -796,8 +788,6 @@ function kindIcon(kind: PaletteItem["kind"]) {
       return <PlugIcon {...p} />;
     case "task":
       return <TaskIcon {...p} />;
-    case "memory":
-      return <MemoryIcon {...p} />;
     case "skill":
       return <SkillsIcon {...p} />;
     case "archive":

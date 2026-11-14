@@ -340,24 +340,17 @@ describe("App 记忆区接线", () => {
     useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("page=memory 渲染记忆区（三分区 + 内置智能体开关），不再落到占位页", async () => {
+  it("page=memory 是已删除的旧页：兼容落到设置页，不再渲染记忆区", async () => {
     setToken("t1");
     mockFetch();
     useUiStore.setState({ page: "memory" });
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "记忆" })).toBeInTheDocument();
-    for (const label of ["智能体", "数据库", "个人知识库"]) {
-      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
-    }
-    // 单内置智能体：不再有智能体选择器，开关表里只有「和小鸣」
-    expect(screen.queryByLabelText("选择智能体")).toBeNull();
-    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0);
+    // 记忆页已删除（d.146.5）：记忆默认全开、后台运行；旧链接/旧会话视图落设置页。
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "数据库" })).toBeNull();
     expect(screen.queryByText("占位页面")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "数据库" }));
-    expect(screen.getByRole("group", { name: "语义记忆条目" })).toBeInTheDocument();
   });
 });
 
@@ -383,7 +376,7 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(window, { key: "4", altKey: true });
     expect(useUiStore.getState().page).toBe("team");
     fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("memory");
+    expect(useUiStore.getState().page).toBe("collab");
     fireEvent.keyDown(window, { key: "6", altKey: true });
     expect(useUiStore.getState().page).toBe("settings");
     fireEvent.keyDown(window, { key: "8", altKey: true });
@@ -474,7 +467,7 @@ describe("App 导航快捷键与隐藏态", () => {
 
     fireEvent.click(screen.getByLabelText("关闭预览"));
     fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("memory");
+    expect(useUiStore.getState().page).toBe("collab");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(await screen.findByRole("dialog", { name: "命令面板" })).toBeInTheDocument();
   });

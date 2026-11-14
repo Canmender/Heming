@@ -10,11 +10,8 @@ import { pluginCommandDetail, searchPluginCommands } from "./pluginCommands.js";
 import { PALETTE_PAGES, findPalettePage, type PalettePage } from "./pages.js";
 import { PALETTE_SETTINGS, findPaletteSetting, type PaletteSettingSection } from "./settings.js";
 import {
-  searchLocalMemories,
   searchLocalPlugins,
   searchLocalTasks,
-  type LocalLayerKind,
-  type LocalMemoryItem,
   type LocalPluginItem,
   type LocalSnapshot,
   type LocalTaskItem,
@@ -144,7 +141,6 @@ export type PaletteItemKind =
   | "action"
   | "plugin-command"
   | "task"
-  | "memory"
   | "plugin"
   | "member"
   | "skill"
@@ -171,9 +167,6 @@ export interface PaletteItem {
   /** task 项：任务 id 与所属会话（跳转用）。 */
   taskId?: string;
   conversationId?: string;
-  /** memory 项：记忆条目 id 与所在层（定位用）。 */
-  memoryId?: string;
-  memoryLayer?: LocalLayerKind;
   /** plugin 项：插件 id（定位用）。 */
   pluginId?: string;
   /** plugin-command 项：原始命令（执行时按 target 分发）。 */
@@ -199,7 +192,6 @@ export type PaletteGroupId =
   | "action"
   | "plugin-command"
   | "task"
-  | "memory"
   | "plugin"
   | "member"
   | "skill"
@@ -221,7 +213,6 @@ export const GROUP_LABELS: Record<PaletteGroupId, string> = {
   action: "常用动作",
   "plugin-command": "插件命令",
   task: "任务",
-  memory: "记忆",
   plugin: "插件",
   member: "团队成员",
   skill: "技能",
@@ -237,7 +228,6 @@ export const GROUP_LIMITS: Record<PaletteGroupId, number> = {
   action: 4,
   "plugin-command": 5,
   task: 5,
-  memory: 5,
   plugin: 5,
   member: MEMBER_LIMIT,
   skill: SKILL_LIMIT,
@@ -252,7 +242,6 @@ const SEARCH_ORDER: PaletteGroupId[] = [
   "action",
   "plugin-command",
   "task",
-  "memory",
   "plugin",
   "member",
   "skill",
@@ -363,17 +352,6 @@ export function taskPaletteItem(t: LocalTaskItem): PaletteItem {
     detail: t.detail,
     taskId: t.id,
     conversationId: t.conversationId,
-  };
-}
-
-export function memoryPaletteItem(m: LocalMemoryItem): PaletteItem {
-  return {
-    kind: "memory",
-    id: `memory:${m.id}`,
-    name: m.name,
-    detail: m.detail,
-    memoryId: m.id,
-    memoryLayer: m.layer,
   };
 }
 
@@ -522,14 +500,10 @@ export function searchPalette(
   const taskRes = local
     ? searchLocalTasks(q, local.tasks, GROUP_LIMITS.task)
     : { hits: [] as LocalTaskItem[], total: 0 };
-  const memoryRes = local
-    ? searchLocalMemories(q, local.memories, GROUP_LIMITS.memory)
-    : { hits: [] as LocalMemoryItem[], total: 0 };
   const pluginRes = local
     ? searchLocalPlugins(q, local.plugins, GROUP_LIMITS.plugin)
     : { hits: [] as LocalPluginItem[], total: 0 };
   found.set("task", taskRes.hits.map(taskPaletteItem));
-  found.set("memory", memoryRes.hits.map(memoryPaletteItem));
   found.set("plugin", pluginRes.hits.map(pluginPaletteItem));
 
   const groups: PaletteGroup[] = [];
@@ -540,7 +514,6 @@ export function searchPalette(
     action: PALETTE_ACTIONS.filter((a) => matches(q, a.label, a.description, a.keywords)).length,
     "plugin-command": commandRes.total,
     task: taskRes.total,
-    memory: memoryRes.total,
     plugin: pluginRes.total,
     // 成员/技能的命中总数要自己数：`searchAllDetailed` 只给「成员+技能」合计，
     // 且它会把结果截断，不能反推每类各有多少。

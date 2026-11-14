@@ -11,7 +11,7 @@ import {
   HomeIcon,
   TeamIcon,
   AssistantIcon,
-  MemoryIcon,
+  SparkIcon,
   GearIcon,
   UserIcon,
   PackageIcon,
@@ -42,14 +42,15 @@ import { Kbd } from "./ui/Kbd.js";
  *
  * 固定顺序（2026-11-14 审计 A-04 起）：不再读 `store.navOrder`。
  * 顺序可调时用户会把「设置」拖到中间，而 Alt+N 的号仍是旧的——顺序与编号两套真源；
- * 现在顺序写死、编号也写死，两者一一对应，轨上从上到下就是 1、2、8、0、5、6。
+ * 现在顺序写死、编号也写死，两者一一对应，轨上从上到下就是 1、2、8、5、0、6。
  *
- * **默认可视 8 项**：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置。
+ * **默认可视 8 项**：主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置。
+ * （记忆页 d.146.5 已删除：记忆默认全开、无界面，第 5 项换成协作，数字键 5 也随之归协作。）
  * 另外还有带页面的插件（信息中枢 / 自动化 / 工作流等）：它们默认不出现，
  * 装好且启用后才由 `withPluginNav()` 追加到**最下面**（d.119 用户口径：上面这 8 项
  * 从上到下的顺序原样不动，插件入口不许插在中间）。插件页不占数字快捷键。
  *
- * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 会话、0 插件；
+ * 数字键沿用既有绑定：1 主页、2 团队、5 协作、6 设置、8 会话、0 插件；
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
@@ -60,7 +61,8 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "chat", label: "会话", icon: <AssistantIcon width={18} height={18} />, digit: "8" },
   // 插件（能力中枢）：插件包 + 技能 / 工具 / MCP / 组件
   { page: "plugins", label: "插件", icon: <PackageIcon width={18} height={18} />, digit: "0" },
-  { page: "memory", label: "记忆", icon: <MemoryIcon width={18} height={18} />, digit: "5" },
+  // 协作（d.146.5）：和鸣 + 本机智能体的独立工作台；记忆页已删除，第 5 位与数字键 5 交给它
+  { page: "collab", label: "协作", icon: <SparkIcon width={18} height={18} />, digit: "5" },
   // 知识库：本地 vault（文件树/双链/标签/搜索/图谱），数据不出设备
   { page: "vault", label: "知识库", icon: <BookIcon width={18} height={18} /> },
   { page: "model", label: "模型", icon: <ModelIcon width={18} height={18} /> },

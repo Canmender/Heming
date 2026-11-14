@@ -16,7 +16,7 @@ import type { InstalledPlugin } from "../plugins/store.js";
  *
  * ## 为什么记忆要绕道 exportAll
  * `MemoryStore` 没有「列出全部智能体的语义/情景」的 API，工作记忆更是只有按会话读的口
- * （`MemoryPage.tsx` 里也有同样的注释）。`exportAll()` 返回的是**本机内存态序列化**，
+ * 。`exportAll()` 返回的是**本机内存态序列化**，
  * 解析它枚举三层是当前唯一不新增 store API 的读法；解析失败一律当空，不抛。
  */
 

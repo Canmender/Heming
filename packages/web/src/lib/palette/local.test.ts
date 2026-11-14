@@ -14,7 +14,8 @@ import type { InstalledPlugin } from "../plugins/store.js";
 /**
  * 命令面板 · 本机三组（d.61）的纯函数用例。
  *
- * 覆盖：任务/记忆/插件三个来源的检索口径与排序、三层记忆的枚举、分组顺序与上限、
+ * 覆盖：任务/记忆/插件三个来源的检索口径与排序、三层记忆的枚举、分组顺序与上限
+ * （d.146.5 删记忆页后记忆不再进命令面板分组，local.ts 的记忆检索工具保留）、
  * 以及「只在本机数据上匹配」这一隐私边界（本模块不含任何网络/写操作，用例也不 mock 网络）。
  */
 
@@ -152,7 +153,7 @@ describe("本机搜索 · 记忆", () => {
   it("超过上限时截断并保留 total", () => {
     const list = Array.from({ length: 7 }, (_, i) => mem(`m${i}`, `语义 · 偏好 ${i}`, "semantic"));
     const out = searchLocalMemories("偏好", list);
-    expect(out.hits).toHaveLength(GROUP_LIMITS.memory);
+    expect(out.hits).toHaveLength(5);
     expect(out.total).toBe(7);
   });
 });
@@ -187,14 +188,14 @@ describe("分组集成 · 顺序与上限", () => {
     plugins: [plugin()],
   };
 
-  it("分组顺序：页面→设置→动作→任务→记忆→插件→成员→技能→归档", () => {
+  it("分组顺序：页面→设置→动作→任务→插件→成员→技能→归档", () => {
     const groups = searchPalette("周报", { members: [], archiveHits: [], local });
     expect(groups.map((g) => g.id)).toEqual(["task"]);
     const all = searchPalette("天气", { members: [], archiveHits: [], local });
     expect(all.map((g) => g.id)).toEqual(["plugin"]);
   });
 
-  it("三组同屏时顺序固定（任务在记忆前、记忆在插件前）", () => {
+  it("两组同屏时顺序固定（任务在插件前）", () => {
     const groups = searchPalette("阿和", {
       members: [],
       archiveHits: [],
@@ -204,7 +205,7 @@ describe("分组集成 · 顺序与上限", () => {
         plugins: [plugin({ name: "阿和工具包" })],
       },
     });
-    expect(groups.map((g) => g.id)).toEqual(["task", "memory", "plugin"]);
+    expect(groups.map((g) => g.id)).toEqual(["task", "plugin"]);
   });
 
   it("组内只有同类型条目，且每组上限生效、total 可算「还有 N 条」", () => {
@@ -225,7 +226,7 @@ describe("分组集成 · 顺序与上限", () => {
 
   it("不传 local 时这三组为空（旧行为不变）", () => {
     const groups = searchPalette("周报", { members: [], archiveHits: [] });
-    expect(groups.some((g) => ["task", "memory", "plugin"].includes(g.id))).toBe(false);
+    expect(groups.some((g) => ["task", "plugin"].includes(g.id))).toBe(false);
   });
 
   it("条目只带定位 id，不携带任何报告/记忆正文快照进面板项名", () => {

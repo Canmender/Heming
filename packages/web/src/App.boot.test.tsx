@@ -19,7 +19,6 @@ vi.mock("./components/TeamBoardPage.js", () => ({ TeamBoardPage: () => <div>Team
 vi.mock("./components/ChatPage.js", () => ({ ChatPage: () => <div>ChatPage</div> }));
 vi.mock("./components/RadarContacts.js", () => ({ RadarContacts: () => <div>RadarContacts</div> }));
 vi.mock("./components/SettingsPage.js", () => ({ SettingsPage: () => <div>SettingsPage</div> }));
-vi.mock("./components/MemoryPage.js", () => ({ MemoryPage: () => <div>MemoryPage</div> }));
 vi.mock("./components/FileTree.js", () => ({ FileTree: () => <div>FileTree</div> }));
 vi.mock("./components/FilePreviewModal.js", () => ({ FilePreviewModal: () => null }));
 

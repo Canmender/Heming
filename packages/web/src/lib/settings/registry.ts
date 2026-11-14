@@ -120,9 +120,8 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     section: "navigation",
   },
   {
-    // d.114：知识库与记忆是**入口卡**，不是第二套开关——
-    // 真正的开关只有 MemorySettings.vaultMemory 一个（记忆页承载），
-    // 这里只负责把用户送到记忆页/知识库页，避免两处各存一份口径。
+    // d.146.5：记忆页已删除，记忆默认全开（后台运行、无界面）。这张卡只解释口径，
+    // 并把用户送到知识库页；真正的设置值仍只有 MemorySettings.vaultMemory 一个。
     id: "memory-vault",
     title: "知识库与记忆",
     keywords: [

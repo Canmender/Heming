@@ -5,12 +5,13 @@ import { isPluginPagePage } from "./pages/ids.js";
  * 导航分组：53px 图标轨放不下分组标题，用「组内紧凑 + 组间细线」表达。
  *
  * 导航默认 8 项，分组按「干活 → 能力 → 资料 → 系统」：
- * - `work`（工作台）：主页 / 团队 / 会话；
+ * - `work`（工作台）：主页 / 团队 / 会话 / 协作；
  * - `capability`（能力）：插件（安装后带入技能、工具、MCP 服务与页面），
  *   以及**已安装插件的页面入口**（声明式插件页与沙箱 bundle 插件页，d.128 起追加在
  *   导航最下面，分组表里仍算「能力」，所以末尾会有一次「系统 → 能力」的分隔线，
  *   位置稳定不跳动）；
- * - `resources`（资料）：记忆 / 知识库 / 模型；
+ * - `resources`（资料）：知识库 / 模型；
+ *   （记忆页 d.146.5 已删除：记忆默认全开、无界面，导航里不再有记忆。）
  * - `system`（系统）：设置。
  *
  * 为什么固定分组而不是让用户自定义组：导航顺序本来就是用户可调的（设置区 · 导航），
@@ -38,8 +39,8 @@ export const NAV_GROUP_OF: Partial<Record<NavPage, NavGroupId>> = {
   home: "work",
   team: "work",
   chat: "work",
+  collab: "work",
   plugins: "capability",
-  memory: "resources",
   vault: "resources",
   model: "resources",
   settings: "system",

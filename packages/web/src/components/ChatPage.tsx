@@ -3054,7 +3054,7 @@ export function ChatPage({
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-chat-gutter py-3">
+      <header className="relative flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-chat-gutter">
         {!embedded && (
           <IconButton
             label="返回"
@@ -3063,9 +3063,10 @@ export function ChatPage({
             onClick={leave}
           />
         )}
-        {/* d.126-C：对话界面不再展示头像（智能体身份由标题承载），消息流是纯转录 */}
-        <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>
-        <span className="ui-caption flex items-center gap-1">
+        {/* 极简顶栏：标题小字 + 通道状态 + 右侧 ghost 图标（无厚边框、无头像）。
+            embedded（会话页内嵌）时标题由页面顶部元信息条承载，这里不再重复智能体名。 */}
+        {!embedded && <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>}
+        <span className="flex items-center gap-1.5 text-ui-xs text-muted">
           <span
             aria-hidden="true"
             className={`h-1.5 w-1.5 rounded-full ${
@@ -3255,8 +3256,9 @@ export function ChatPage({
         onDrop={onMessagesDrop}
         className="flex-1 overflow-y-auto px-chat-gutter pb-5 pt-6"
       >
-        {/* d.62：消息列 880 居中——宽屏下中文长行的可读宽度约 80 字；滚动容器保持在外层。 */}
-        <div className="mx-auto w-full max-w-[880px]">
+        {/* 消息列 760 居中——宽屏下中文长行的可读宽度；滚动容器保持在外层。
+            输入区/工具栏用同一宽度档（视觉上是同一根竖线）。 */}
+        <div className="mx-auto w-full max-w-[760px]">
         {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
             但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
         {visibleMessages.length > windowCount && (
@@ -3362,10 +3364,8 @@ export function ChatPage({
             <Fragment key={m.id}>
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
               {showSeparator ? (
-                <div className="mb-3 flex justify-center">
-                  <span className="rounded-full bg-subtle-3 px-2.5 py-0.5 text-ui-xs text-muted">
-                    {formatDayClock(m.createdAt)}
-                  </span>
+                <div className="mb-4 flex justify-center">
+                  <span className="text-ui-xs text-muted">{formatDayClock(m.createdAt)}</span>
                 </div>
               ) : null}
               {/* 消息行（d.126-C）：不展示头像、不用左右气泡；按「普通 agent 工具输出」排列——
@@ -3373,7 +3373,7 @@ export function ChatPage({
                   （旧消息没有后两块 → 只渲染正文，不占位也不崩）。 */}
               <div
                 id={`msg-${m.id}`}
-                className={`group relative mb-5 flex items-start gap-2${
+                className={`group relative mb-6 flex items-start gap-2${mine ? " justify-end" : ""}${
                   searchOpen && activeSearchId === m.id
                     ? " rounded-lg bg-warn-soft ring-1 ring-warn-line"
                     : ""
@@ -3397,24 +3397,24 @@ export function ChatPage({
                 <div
                   data-message-bubble=""
                   className={`min-w-0 text-ui-md leading-relaxed ${
-                    mine ? "max-w-[92%]" : "flex-1"
+                    mine ? "max-w-[80%]" : "flex-1"
                   }`}
                 >
                   {mine ? (
-                    // 用户输入：一块提示（浅底 + 细边框），不占头像列、不挤右侧气泡
-                    <div className="rounded-lg border border-line bg-subtle-2 px-3.5 py-2.5">
-                      <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
+                    // 用户输入：右对齐浅底气泡（无边框），署名/时间压到极小并弱化
+                    <div className="rounded-3xl bg-subtle-3 px-4 py-2.5">
+                      <div className="mb-1 flex items-baseline justify-end gap-2 text-ui-xs leading-4 text-muted">
                         <span>我</span>
-                        <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
+                        <time dateTime={m.createdAt} className="shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
                         </time>
                       </div>
                       {messageBody}
                     </div>
                   ) : (
-                    // 助手输出：署名一行 + 思考块 + 工具调用块 + 正文（无气泡底色/圆角）
-                    <div className="px-0.5">
-                      <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
+                    // 助手输出：全宽、无气泡；署名/时间极小弱化 + 思考块 + 工具轨迹 + 正文
+                    <div>
+                      <div className="mb-1 flex items-baseline gap-2 text-ui-xs leading-4 text-muted">
                         <span>{senderName || "智能体"}</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
@@ -3426,7 +3426,7 @@ export function ChatPage({
                       {transcript?.tools && transcript.tools.length > 0 ? (
                         <ToolTraceGroup tools={transcript.tools} />
                       ) : null}
-                      <div className="mt-1 break-words">{messageBody}</div>
+                      <div className="mt-1.5 break-words text-ui-base leading-7">{messageBody}</div>
                     </div>
                   )}
                 </div>
@@ -3476,9 +3476,9 @@ export function ChatPage({
           新消息
         </button>
       ) : null}
-      <form onSubmit={send} className="relative border-t border-line-soft">
-        {/* d.62：输入区与消息列同宽（880 居中），工具栏/提示/快捷键提示全部对齐这一宽度。 */}
-        <div className="mx-auto w-full max-w-[880px]">
+      <form onSubmit={send} className="relative shrink-0 px-chat-gutter pb-4 pt-2">
+        {/* 输入区与消息列同宽（760 居中）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
+        <div className="mx-auto w-full max-w-[760px]">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
         {!subtleOk && (
           <p
@@ -3569,8 +3569,11 @@ export function ChatPage({
             ) : null}
           </div>
         ) : null}
-        {/* 工具行：表情 / 图片 / 文件（左上角） */}
-        <div className="flex items-center gap-1 px-chat-gutter pt-2">
+        {/* 圆角输入容器：工具行 + 待发附件 + 无边框 textarea + 语音/圆形发送按钮都在这一块里。
+            只保留一层 border（focus-within 加深），视觉上是一个完整输入框。 */}
+        <div className="rounded-3xl border border-line bg-surface transition-colors focus-within:border-line-strong">
+        {/* 工具行：表情 / 图片 / 文件（容器内左上角） */}
+        <div className="flex items-center gap-1 px-2 pt-1.5">
           <IconButton
             label="表情"
             className={emojiOpen ? "bg-subtle-3" : ""}
@@ -3596,7 +3599,7 @@ export function ChatPage({
         {pendingFiles.length > 0 ? (
           <ul
             aria-label="待发附件"
-            className="flex flex-wrap items-center gap-2 px-chat-gutter pt-2"
+            className="flex flex-wrap items-center gap-2 px-2 pt-2"
           >
             {pendingFiles.map((p) => (
               <li
@@ -3639,7 +3642,7 @@ export function ChatPage({
           role="separator"
           aria-label="调整输入栏高度"
           aria-orientation="horizontal"
-          className="group -mt-1.5 flex h-3 cursor-row-resize items-center justify-center"
+          className="group flex h-2 cursor-row-resize items-center justify-center opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100"
           onPointerDown={onComposerDragStart}
           onPointerMove={onComposerDragMove}
           onPointerUp={onComposerDragEnd}
@@ -3647,7 +3650,7 @@ export function ChatPage({
         >
           <span className="h-[2px] w-10 rounded-full bg-line-soft transition-colors group-hover:bg-line-strong" />
         </div>
-        <div className="relative flex items-end gap-2 px-chat-gutter pb-3" style={{ height: composerHeight }}>
+        <div className="relative flex items-end gap-2 px-2 pb-2" style={{ height: composerHeight }}>
           {emojiOpen && (
             <EmojiPicker
               onPick={(e) => {
@@ -3665,7 +3668,7 @@ export function ChatPage({
             ref={composerRef}
             aria-label="消息输入框"
             aria-describedby={unboundAgent ? UNBOUND_NOTICE_ID : undefined}
-            className={`h-full w-full flex-1 resize-none rounded-lg border border-line-strong px-3 py-2 text-sm leading-relaxed outline-hidden focus:border-ink ${FOCUS_RING}`}
+            className={`h-full w-full flex-1 resize-none bg-transparent px-1.5 py-1 text-ui-base leading-6 outline-hidden placeholder:text-muted ${FOCUS_RING}`}
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
@@ -3706,19 +3709,19 @@ export function ChatPage({
             aria-label="语音输入"
             title="语音输入"
             disabled={uploading}
-            className={`inline-flex h-8 items-center rounded-lg border px-2.5 disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               listening
-                ? "border-ink bg-ink"
-                : "border-line text-muted hover:bg-subtle-3"
+                ? "border-ink bg-ink text-surface"
+                : "border-transparent text-muted hover:bg-subtle-2 hover:text-ink"
             }`}
             onClick={() => setVoiceMenu((v) => !v)}
           >
             <MicIcon width={16} height={16} />
           </button>
-          <Button
+          {/* 圆形发送按钮：图标 + aria-label（读屏名与 hover 提示仍是「发送」）。 */}
+          <button
             type="submit"
-            variant="primary"
-            size="md"
+            aria-label="发送"
             disabled={
               (!draft.trim() && pendingFiles.length === 0) ||
               uploading ||
@@ -3734,14 +3737,29 @@ export function ChatPage({
                   ? unboundNoticeText(unboundAgent.name)
                   : "发送"
             }
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
           >
-            发送
-          </Button>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M8 12.5V3.5M8 3.5L4 7.5M8 3.5L12 7.5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
-        {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。
-            「与 X 的对话 · 发送后自动交给智能体」已删——页头（AssistantPage 状态条）
-            与对话标题已经说过同一件事，这里再写一遍是纯占位（B 轨 E6）。 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-chat-gutter pb-2">
+        </div>
+        {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。 */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2">
           <span className="ml-auto">
             <ComposerHints streaming={activeLocal.length > 0} />
           </span>

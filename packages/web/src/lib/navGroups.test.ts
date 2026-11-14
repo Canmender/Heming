@@ -33,11 +33,12 @@ describe("导航分组", () => {
     expect(needsGroupDivider(null, "home")).toBe(false);
     expect(needsGroupDivider("home", "team")).toBe(false);
     expect(needsGroupDivider("team", "chat")).toBe(false);
+    // 会话 → 协作：都属工作台
+    expect(needsGroupDivider("chat", "collab")).toBe(false);
     // 工作台 → 能力
-    expect(needsGroupDivider("chat", "plugins")).toBe(true);
+    expect(needsGroupDivider("collab", "plugins")).toBe(true);
     // 能力 → 资料
-    expect(needsGroupDivider("plugins", "memory")).toBe(true);
-    expect(needsGroupDivider("memory", "vault")).toBe(false);
+    expect(needsGroupDivider("plugins", "vault")).toBe(true);
     expect(needsGroupDivider("vault", "model")).toBe(false);
     // 已装插件追加在末尾（设置之后）：与设置跨组画线，插件之间同组不画
     expect(needsGroupDivider("model", "settings")).toBe(true);

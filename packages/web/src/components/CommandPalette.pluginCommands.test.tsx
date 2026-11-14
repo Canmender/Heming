@@ -105,12 +105,12 @@ describe("命令面板 · 插件命令分组", () => {
 describe("命令面板 · 插件命令的三种 target 分发", () => {
   it("page → 切到目标页并关闭面板", () => {
     const onClose = vi.fn();
-    commandsStub.current = [cmd({ target: { kind: "page", page: "memory" } })];
+    commandsStub.current = [cmd({ target: { kind: "page", page: "collab" } })];
     render(<CommandPalette onClose={onClose} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
     fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
-    expect(useUiStore.getState().page).toBe("memory");
+    expect(useUiStore.getState().page).toBe("collab");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

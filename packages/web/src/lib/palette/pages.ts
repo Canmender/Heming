@@ -9,7 +9,8 @@ import type { Page } from "../../store/ui.js";
  * 快捷键与 App 的映射一致」钉住（见 lib/palette/palette.test.ts）。
  *
  * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
- * 1 主页 / 2 团队 / 5 记忆 / 6 设置 / 8 会话 / 0 插件。
+ * 1 主页 / 2 团队 / 5 协作 / 6 设置 / 8 会话 / 0 插件。记忆页已删除（默认全开、无界面），
+ * 数字键 5 交给「协作」页。
  * 幕僚 / 信息中枢 / 自动化已迁到沙箱插件（页面入口由插件页装出来），
  * 模型路由页已删除——它们都不在页面目录里。
  */
@@ -33,7 +34,12 @@ export const PALETTE_PAGES: PalettePage[] = [
     description: "安装、删除或启停插件：技能、工具、MCP 服务与页面",
     digit: "0",
   },
-  { page: "memory", label: "记忆", description: "三层记忆与本机数据", digit: "5" },
+  {
+    page: "collab",
+    label: "协作",
+    description: "多智能体协作：和鸣 + 本机智能体，按顺序/主管/辩论一起干活",
+    digit: "5",
+  },
   {
     page: "vault",
     label: "知识库",

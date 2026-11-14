@@ -57,7 +57,6 @@ const FILTERS: { id: NotificationFilter; label: string }[] = [
   { id: "task", label: "任务" },
   { id: "approval", label: "待确认" },
   { id: "staff", label: "幕僚" },
-  { id: "memory", label: "记忆" },
 ];
 
 export function NotificationCenter() {
@@ -111,8 +110,8 @@ export function NotificationCenter() {
     markRead(item.id);
     setOpen(false);
     if (item.kind === "memory") {
-      // 记忆写回失败：去记忆页看「知识库参与记忆」卡的状态与重试入口。
-      useUiStore.getState().setPage("memory");
+      // 记忆页已删除（记忆默认全开、后台运行）：历史通知点开落到设置页的记忆卡说明。
+      useUiStore.getState().setPage("settings");
       return;
     }
     if (item.kind === "staff") {

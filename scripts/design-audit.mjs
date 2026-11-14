@@ -86,7 +86,7 @@ const PAGES = [
   ["团队", "team"],
   ["会话", "chat"],
   ["插件", "plugins"],
-  ["记忆", "memory"],
+  ["协作", "collab"],
   ["知识库", "vault"],
   ["模型", "model"],
   ["设置", "settings"],

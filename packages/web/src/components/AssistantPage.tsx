@@ -6,7 +6,6 @@ import { useUiStore } from "../store/ui.js";
 import { useLlmStore } from "../store/llm.js";
 import { resolveBoundProfile } from "../lib/llmRoute.js";
 import { ChatPage } from "./ChatPage.js";
-import { PageShell } from "./layout/PageShell.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { clearDraft } from "../lib/drafts.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
@@ -152,11 +151,9 @@ export function AssistantPage() {
   const loadFailure = !workspaceReady && workspaceError ? `会话列表加载失败：${workspaceError}` : null;
 
   return (
-    <PageShell
-      title="会话"
-      subtitle="模型 Key、工具与记忆只留本机；消息不进团队动向。"
-      scroll={false}
-    >
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
+      {/* 视觉上不再有厚页头（复刻 ChatGPT / Claude 的极简对话布局）；h1 保留给读屏与设计审计。 */}
+      <h1 className="sr-only">会话</h1>
       <div className="flex min-h-0 flex-1 flex-col">
         {loadFailure ? (
           <div
@@ -196,12 +193,16 @@ export function AssistantPage() {
           <section className="flex min-w-0 flex-1 flex-col">
             {activeConv ? (
               <>
-                {/* 会话顶部状态条：当前智能体 / 模型绑定 / 去模型页。
-                    ChatPage 自己的标题栏负责会话内操作，这里只补全局上下文。 */}
-                <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-soft px-4 ui-caption">
+                {/* 会话顶部元信息条：极轻的一行（会话归属 / 模型绑定 / 去模型页），
+                    无边框、无底色；下方 ChatPage 自己的顶栏只留通道状态与 ghost 图标。 */}
+                <div className="flex h-10 shrink-0 items-center gap-2 px-5 text-ui-xs text-muted">
                   <span className="min-w-0 truncate">与 {activeConv.agent.name} 的会话</span>
                   <span
-                    className={`ui-chip ${activeAgentBound ? "" : "text-danger"}`}
+                    className={`shrink-0 rounded-full border px-2 py-px ${
+                      activeAgentBound
+                        ? "border-line text-muted"
+                        : "border-warn-line bg-warn-soft text-warn"
+                    }`}
                     title={activeAgentBound ? undefined : "还没有绑定模型，发送会失败"}
                   >
                     {activeAgentBound ? "模型已绑定" : "未绑定模型"}
@@ -210,7 +211,7 @@ export function AssistantPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="ui-hit"
+                      className="ui-hit text-muted"
                       onClick={() => useUiStore.getState().setPage("model")}
                     >
                       模型设置
@@ -270,6 +271,6 @@ export function AssistantPage() {
           </p>
         </ConfirmDialog>
       ) : null}
-    </PageShell>
+    </div>
   );
 }

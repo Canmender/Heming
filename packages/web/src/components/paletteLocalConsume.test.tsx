@@ -1,34 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
-import { MemoryPage } from "./MemoryPage.js";
 import { PluginsPage } from "./PluginsPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { useUiStore } from "../store/ui.js";
-import {
-  AgentPrefsStore,
-  KnowledgeBase,
-  MemoryStore,
-  type StorageLike,
-} from "../lib/memory/index.js";
+import type { StorageLike } from "../lib/memory/index.js";
 import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool } from "../lib/skills/index.js";
 import type { McpServerConfig } from "../lib/mcp/index.js";
 
-// 记忆页会拉名册与共享文件：单测里全部给桩，避免打真实接口。
-vi.mock("../lib/agentsApi.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/agentsApi.js")>();
-  return { ...actual, listAgents: vi.fn(async () => []) };
-});
-vi.mock("../lib/export/file.js", () => ({
-  hasDesktopExportBridge: () => false,
-  saveExportFile: vi.fn(),
-}));
-
 /**
- * 命令面板本机三组 → 目标页定位（d.61）。
+ * 命令面板本机组 → 目标页定位（d.61；d.146.5 删记忆页后只剩插件/设置）。
  *
  * 只验「意图到达后，页面真的定位并高亮到那一条、意图被清空」这条接线；
- * 三个来源的检索口径在 `lib/palette/local.test.ts` 里单独覆盖。
+ * 检索口径在 `lib/palette/local.test.ts` 里单独覆盖。
  */
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
@@ -99,64 +83,6 @@ function pluginManifest(): Record<string, unknown> {
   };
 }
 
-describe("命令面板意图消费 · 记忆定位", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ page: "home", paletteIntent: null });
-  });
-  afterEach(() => cleanup());
-
-  it("收到 focus-memory 意图后切到记忆区并高亮该条，意图被清空", async () => {
-    const memory = new MemoryStore(makeStorage(), () => T0);
-    const kb = new KnowledgeBase(makeStorage(), () => T0);
-    const prefs = new AgentPrefsStore(makeStorage());
-    const entry = memory.upsertSemantic({
-      agentId: "a1",
-      key: "称呼",
-      value: "用户希望被称为阿和",
-      source: "manual",
-    });
-
-    render(<MemoryPage memory={memory} kb={kb} prefs={prefs} fetchSharedFiles={async () => []} />);
-
-    act(() => {
-      useUiStore.getState().setPaletteIntent("focus-memory", { memoryId: entry.id, layer: "semantic" });
-    });
-
-    await waitFor(() => {
-      const el = document.querySelector(`[data-memory-id="${entry.id}"]`);
-      expect(el).toBeTruthy();
-      expect(el!.className).toContain("ring-2");
-    });
-    expect(useUiStore.getState().paletteIntent).toBeNull();
-  });
-
-  it("意图消费后不会重复高亮（幂等）", async () => {
-    const memory = new MemoryStore(makeStorage(), () => T0);
-    const kb = new KnowledgeBase(makeStorage(), () => T0);
-    const prefs = new AgentPrefsStore(makeStorage());
-    const entry = memory.upsertSemantic({
-      agentId: "a1",
-      key: "称呼",
-      value: "叫阿和",
-      source: "manual",
-    });
-
-    render(<MemoryPage memory={memory} kb={kb} prefs={prefs} fetchSharedFiles={async () => []} />);
-    act(() => {
-      useUiStore.getState().setPaletteIntent("focus-memory", { memoryId: entry.id, layer: "semantic" });
-    });
-    await waitFor(() => expect(useUiStore.getState().paletteIntent).toBeNull());
-
-    // 再次渲染（模拟父级重渲染）不应该因为「残留意图」又高亮一次
-    act(() => {
-      useUiStore.getState().setPage("home");
-    });
-    expect(document.querySelector(`[data-memory-id="${entry.id}"]`)).toBeTruthy();
-    expect(useUiStore.getState().paletteIntent).toBeNull();
-  });
-});
-
 describe("命令面板意图消费 · 插件定位", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -203,7 +129,7 @@ describe("命令面板意图消费 · 插件定位", () => {
 /**
  * 导航轨飞出菜单投递的 `focus-tab` 意图（2026-11-14 审计 §4-F1）。
  *
- * 团队/模型页早就有消费方；插件/记忆/设置是这次补的，
+ * 团队/模型页早就有消费方；插件/设置是这次补的，
  * 所以这里只验「点了「页 · 视图」之后，该页的页签真的切过去、意图被清空」。
  */
 describe("命令面板意图消费 · 二级页签定位（focus-tab）", () => {
@@ -226,26 +152,6 @@ describe("命令面板意图消费 · 二级页签定位（focus-tab）", () => 
 
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
-    });
-    expect(useUiStore.getState().paletteIntent).toBeNull();
-  });
-
-  it("记忆页：focus-tab → 个人知识库页签", async () => {
-    const memory = new MemoryStore(makeStorage(), () => T0);
-    const kb = new KnowledgeBase(makeStorage(), () => T0);
-    const prefs = new AgentPrefsStore(makeStorage());
-
-    render(<MemoryPage memory={memory} kb={kb} prefs={prefs} fetchSharedFiles={async () => []} />);
-    act(() => {
-      useUiStore.getState().setPage("memory");
-      useUiStore.getState().setPaletteIntent("focus-tab", { page: "memory", tab: "wiki" });
-    });
-
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: "个人知识库" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
     });
     expect(useUiStore.getState().paletteIntent).toBeNull();
   });

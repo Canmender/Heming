@@ -28,7 +28,13 @@ export type Page =
   | "workflows"
   | "vault"
   | "plugins"
+  /**
+   * 记忆页已删除（d.146.5）：记忆默认全开、全部在后台自动运行，不再有界面。
+   * 字符串仍留在 `Page` 里，只为解析旧链接/旧会话视图，路由会落到设置页。
+   */
   | "memory"
+  /** 多智能体协作（d.146.5）：和鸣 + 本机智能体的独立工作台页面。 */
+  | "collab"
   | "settings"
   // d.124：插件页面（插件包声明的页面入口）。具体有哪些由 `lib/pages/registry.ts`
   // 按「已装且启用」投影；这里只表达「页面 id 可以是插件页」这一形状事实。
@@ -58,8 +64,11 @@ export type PageView = "board" | "tasks" | "skills" | "interfaces" | "plugins" |
 export type NavPage = Page;
 
 /**
- * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+ * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置）。
  * 快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。
+ *
+ * 记忆页已删除（d.146.5，记忆默认全开、无界面），原来的第 5 项换成「协作」，
+ * 数字键 5 随之归协作页；`memory` 字符串仍可解析旧链接，但不再进导航。
  *
  * 幕僚 / 信息中枢 / 自动化 / 工作流这些旧页面的历史顺序仍认在 `LEGACY_DEFAULT_NAV_ORDERS`
  * 里：老用户存过这些默认值，必须能识别并迁到当前 8 项，否则会被当成「自定义顺序」。
@@ -67,15 +76,15 @@ export type NavPage = Page;
  * 模型路由页已由 magpie 路由组取代、彻底删除，`Page` 类型仍保留这些字符串，
  * 供旧链接、通知跳转使用。
  *
- * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/会话）→ 能力（插件 + 已装插件页）→
- * 资料（记忆/知识库/模型）→ 系统（设置）。
+ * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/会话/协作）→ 能力（插件 + 已装插件页）→
+ * 资料（知识库/模型）→ 系统（设置）。
  */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
   "team",
   "chat",
+  "collab",
   "plugins",
-  "memory",
   "vault",
   "model",
   "settings",
@@ -323,7 +332,7 @@ export interface VaultIntent {
  * - 不落 localStorage —— 面板关掉就该忘掉，重启后残留一个「打开通知中心」很怪；
  * - `token` 自增，保证「同一种意图连点两次」也能各自消费一次（不会因为 kind 相同被合并）；
  * - 消费即清空，消费端以 `token` 为 effect 依赖，天然幂等、不会重复打开；
- * - `data` 只放跳转所需的定位信息（任务/记忆/插件 id），**不放任何内容正文**。
+ * - `data` 只放跳转所需的定位信息（任务/插件 id），**不放任何内容正文**。
  */
 export type PaletteIntentKind =
   /** 会话页只有一个内置智能体：命令面板「新建会话」→ 直接开一段新对话。 */
@@ -331,8 +340,6 @@ export type PaletteIntentKind =
   | "notifications"
   /** d.64：命令面板插件命令（target=skill）→ 技能区定位并打开详情。 */
   | "focus-skill"
-  /** d.61：命令面板本机搜索 → 记忆条目定位。 */
-  | "focus-memory"
   /** d.61：命令面板本机搜索 → 插件卡片定位。 */
   | "open-plugin"
   /** d.108：命令面板插件命令（target=settings）→ 设置页定位到某张卡。 */
@@ -348,10 +355,6 @@ export type PaletteIntentKind =
 export interface PaletteIntentData {
   /** open-plugin：插件 id（target=unit 时是单元 id）。 */
   id?: string;
-  /** focus-memory：记忆条目 id。 */
-  memoryId?: string;
-  /** focus-memory：条目所在层（三层记忆）。 */
-  layer?: "working" | "episodic" | "semantic";
   /** focus-settings：设置卡 id（`SETTINGS_CARDS` 的 id）；设置页据此滚动+高亮。 */
   card?: string;
   /** focus-tab：目标宿主页（目前只有 team / model 消费）。 */

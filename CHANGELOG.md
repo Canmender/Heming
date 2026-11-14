@@ -2,6 +2,61 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.147.4.85.11（2026-11-14）— 会话界面复刻 ChatGPT / Claude，记忆页退场，协作独立成页
+
+界面对齐 ChatGPT / Claude 官方那种极简会话形态：左侧只留会话列表，右侧消息居中、助手消息无气泡，
+输入框收成一个大圆角容器。同时按产品口径删除记忆页（记忆默认全开、全部后台运行，没有开关入口），
+并把多智能体协作从会话页里拆出来，单独做成「协作」页——参与者固定内置的「和小鸣」，可并入本机
+Claude Code / Codex 等本机智能体。
+
+**会话页（纯视觉重构）**
+- `components/AssistantPage.tsx`：去掉 `PageShell` 厚页头，改满高两栏 + `<h1 class="sr-only">会话</h1>`；
+  原状态条压成 h-10 无边框元信息行（「与 和小鸣 的会话」+ 绑定 chip + ghost「模型设置」）。
+- `components/assistant/ConversationRail.tsx`：浅底 268px 侧栏，顶部产品名 + `<h2>会话列表</h2>` + 收起；
+  整行圆角主按钮「新对话」（`aria-label="新建会话"`）+ 常驻轻量搜索；会话行圆角、当前行浅底、
+  标题截断、时间弱化；折叠头像条、草稿徽标、改名/删除菜单、加载更多与错误条全部保留。
+- `components/ChatPage.tsx`（只改 JSX/className）：`h-11` 极轻单行头部；消息列与 composer 均
+  `max-w-[760px]` 居中；助手消息全宽无气泡（署名 `text-ui-xs`、正文 `leading-7`），用户消息右对齐
+  `max-w-[80%] rounded-3xl bg-subtle-3`；输入区收进 `rounded-3xl border` 大容器，textarea 无边框，
+  工具行在容器内（左表情/图片/文件，右语音 + 圆形 `bg-ink` 发送，`aria-label="发送"`、`type=submit`）；
+  提示条、未绑定模型提示、录音态、待发附件、通知条、拖拽把手全部保留。
+- `components/ux/ChatEmptyState.tsx`：居中「有什么可以帮你的？」+ 弱化副文案 + `rounded-full` 示例 chips。
+- 外观断言同步：`ChatPage.test.tsx` 的 `max-w-[880px]` → `max-w-[760px]`；设计审计的标题层级与
+  11px 正文门槛复绿。
+
+**记忆：页面删除，默认全开**
+- 删除 `components/MemoryPage.tsx`（2389 行）与 `MemoryPage.test.tsx`（1211 行）；导航轨、命令面板
+  页面项、`navViews` 页签、通知中心筛选项、设置页记忆卡、「记忆定位」意图与 `focus-memory` 全链路摘除。
+  `?page=memory` / 旧链接回落设置页；设置页保留静态说明「记忆默认全开、没有独立界面」，知识库入口不变。
+- `lib/memory/agentPrefs.ts`：`DEFAULT_AGENT_PREFS` 三项改 `true`，`get()` 恒返回全开（旧落盘 `false`
+  不再生效，避免页面删了行为还沿用旧开关）；`set/all` 与落盘键保持不变。
+- `lib/palette/search.ts` 删「记忆」分组与条目（`local.ts` 的记忆检索工具保留为内部库）；
+  通知中心的「记忆」筛选删除，历史记忆通知跳设置页说明。
+
+**多智能体协作：独立页面**
+- 从 `def54709` 恢复 `lib/collaboration/{engine,types,run,history}.ts` 及测试，新增
+  `components/collaboration/CollaborationPage.tsx`（653 行，PageShell 标题「协作」）与回合卡片。
+- 参与者：固定内置「和小鸣」（不可取消）+ 本机智能体（`magpie ls` → `magpieAgents.parseAgents` 检测
+  Claude Code / Codex 等，至少两位才能开始）。模型映射：和小鸣走 `resolveBoundProfile(SYSTEM_AGENT_ID)`，
+  本机智能体按模型名匹配本机 LLM 档案（`profiles.find(p => p.model === agent.model)`），缺失则禁用该参与者。
+- 三种模式（顺序 / 主管 / 辩论）、轮数 1–3、开始/停止、逐回合卡片、清空、上一次运行恢复
+  （`heming.collab.last.v1`）。发言统一走 `streamChatRouted` + `COLLAB_SYSTEM_RULES`。
+- 导航第 5 项改「协作」（`Alt+5`，`SparkIcon`），命令面板页面项与设置区导航同步；`App.tsx` 增加
+  `CollaborationPage` 懒加载路由。
+- 说明：本机智能体只能以其**当前模型的网关档案**发言——`magpie-cli` 白名单里没有执行 prompt 的命令；
+  浏览器环境没有桌面桥时页面会显式提示。
+
+**其他**
+- 导航默认 8 项：主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置；`Page`/`NavPage`/`DEFAULT_NAV_ORDER`、
+  导航分组（协作归工作台）、命令面板页面表、设置区导航标签全部同步；已删除页 `memory` 的旧顺序项在
+  恢复时被剔除。命令面板空态文案改为「去『会话』『知识库』里逐条翻」。
+- README 能力清单与 `docs/HANDOFF.md` 顶部新增本轮小节；`docs/RELEASE-NOTES.md` 新增用户版条目。
+
+**验证**：`pnpm typecheck` 全绿；web 全量 vitest **302 files / 4405 tests 全绿**；server 15 files / 271 tests；
+shared 8 files / 119 tests；`pnpm build` 全包通过；desktop `node --test` 全绿；`pnpm plugin:check` 通过；
+`pnpm design:audit` 三个断点全门槛通过；手工验收（新建会话、会话列表交互、协作页三模式跑通、
+设置页记忆说明、命令面板「新建会话 / 协作」）。
+
 ## d.146.4.85.11（2026-11-14）— 单智能体 + 会话模式：删掉自建智能体与多智能体协作
 
 产品从「智能体平台」收成「一个内置智能体、会话式工作」，对齐 Codex / Claude Code：全产品只有内置的

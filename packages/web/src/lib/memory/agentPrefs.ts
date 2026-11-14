@@ -2,10 +2,11 @@ import type { StorageLike } from "./types.js";
 import { createDefaultStorage, isPlainObject, readJson, writeJson } from "./storage.js";
 
 /**
- * 智能体级记忆偏好（`heming.memory.agentPrefs.v1`）：
- * - 短期/长期记忆默认关闭，需按智能体手动开启；
- * - 个人数据库默认允许（个人知识库默认允许使用），关闭需页面二次确认。
- * 读取时统一走 `resolveAgentMemoryPrefs`，缺字段与脏数据一律回落缺省值。
+ * 智能体级记忆偏好（`heming.memory.agentPrefs.v1`）。
+ *
+ * d.146.5 起记忆页删除：短期/长期/个人数据库**默认全开且不可关闭**，全部在后台自动运行。
+ * 落盘结构保留（旧版本可能写过 false），但 `get()` 一律返回全开——页面没了就没有关它的入口，
+ * 读旧值时再把记忆关掉只会让行为与产品承诺不一致。
  */
 
 export const AGENT_PREFS_KEY = "heming.memory.agentPrefs.v1";
@@ -20,8 +21,8 @@ export interface AgentMemoryPrefs {
 }
 
 export const DEFAULT_AGENT_PREFS: AgentMemoryPrefs = {
-  shortTerm: false,
-  longTerm: false,
+  shortTerm: true,
+  longTerm: true,
   personalDb: true,
 };
 
@@ -50,9 +51,9 @@ export class AgentPrefsStore {
     this.prefs = readJson(this.storage, AGENT_PREFS_KEY, {}, resolveAgentMemoryPrefs);
   }
 
-  /** 单智能体偏好：未配置即缺省（短期关、长期关、个人数据库允许）。 */
-  get(agentId: string): AgentMemoryPrefs {
-    return { ...(this.prefs[agentId] ?? DEFAULT_AGENT_PREFS) };
+  /** 单智能体偏好：记忆无界面开关，恒为全开（旧落盘值不再生效）。 */
+  get(_agentId: string): AgentMemoryPrefs {
+    return { ...DEFAULT_AGENT_PREFS };
   }
 
   set(agentId: string, patch: Partial<AgentMemoryPrefs>): AgentMemoryPrefs {

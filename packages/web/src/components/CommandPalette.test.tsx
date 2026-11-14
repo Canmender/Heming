@@ -12,7 +12,7 @@ vi.mock("../lib/api.js", async (importOriginal) => {
   return { ...actual, fetchTeam: vi.fn() };
 });
 
-// 本机三组（任务/记忆/插件）在面板挂载时读一次快照：单测里换成可控数据。
+// 本机两组（任务/插件）在面板挂载时读一次快照：单测里换成可控数据。
 // 只覆盖 readLocalSnapshot，检索函数仍走真实实现（searchLocal* 是纯函数）。
 const localSnapshot = vi.hoisted(() => ({
   current: { tasks: [] as unknown[], memories: [] as unknown[], plugins: [] as unknown[] },
@@ -185,9 +185,9 @@ describe("命令面板 v2 · 检索", () => {
   it("按页面名检索并跳转", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
-    fireEvent.change(searchBox(), { target: { value: "记忆" } });
-    fireEvent.click(OPTION("记忆"));
-    expect(useUiStore.getState().page).toBe("memory");
+    fireEvent.change(searchBox(), { target: { value: "协作" } });
+    fireEvent.click(OPTION("协作"));
+    expect(useUiStore.getState().page).toBe("collab");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -373,7 +373,7 @@ describe("命令面板 v2 · 最近使用", () => {
   });
 });
 
-describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
+describe("命令面板 · 本机两组（任务 / 插件）", () => {
   const taskFixture = {
     id: "t1",
     conversationId: "c1",
@@ -443,14 +443,11 @@ describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("记忆命中 → 投 focus-memory 意图并切记忆区", () => {
+  it("记忆页删除后：记忆条目不再进面板（搜条目名不出「记忆」组）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "阿和" } });
-    expect(screen.getByText("记忆")).toBeInTheDocument();
-    fireEvent.click(OPTION("语义 · 称呼"));
-    const s = useUiStore.getState();
-    expect(s.page).toBe("memory");
-    expect(s.paletteIntent).toMatchObject({ kind: "focus-memory", data: { memoryId: "m1", layer: "semantic" } });
+    expect(screen.queryByText("记忆")).not.toBeInTheDocument();
+    expect(screen.getByText("没有匹配「阿和」的结果。")).toBeInTheDocument();
   });
 
   it("插件命中 → 投 open-plugin 意图并切插件区", () => {
@@ -463,19 +460,18 @@ describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
     expect(s.paletteIntent).toMatchObject({ kind: "open-plugin", data: { id: "acme.weather" } });
   });
 
-  it("三组同屏时顺序固定：任务 → 记忆 → 插件", () => {
+  it("两组同屏时顺序固定：任务 → 插件", () => {
     localSnapshot.current = {
       tasks: [taskFixture],
-      memories: [{ ...memoryFixture, name: "语义 · 周报偏好", detail: "用户喜欢周报" }],
+      memories: [],
       plugins: [{ ...pluginFixture, manifest: { ...pluginFixture.manifest, name: "周报工具包" } }],
     };
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "周报" } });
-    const labels = ["任务", "记忆", "插件"].map((t) => screen.getByText(t));
-    // getByText 按文档顺序返回，这里断言三个标题在 DOM 里的相对顺序
+    const labels = ["任务", "插件"].map((t) => screen.getByText(t));
+    // getByText 按文档顺序返回，这里断言两个标题在 DOM 里的相对顺序
     const order = labels.map((el) => Array.from(el.parentElement!.parentElement!.children).indexOf(el.parentElement!));
     expect(order[0]).toBeLessThan(order[1]);
-    expect(order[1]).toBeLessThan(order[2]);
   });
 
   it("本机命中超过上限时显示「还有 N 条」", () => {

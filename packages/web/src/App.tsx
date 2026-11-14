@@ -46,11 +46,16 @@ const TeamPage = lazy(() => import("./components/TeamPage.js").then((m) => ({ de
 const AssistantPage = lazy(() =>
   import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })),
 );
+// 协作（d.146.5）：多智能体协作独立页，恢复的 collaboration 引擎只在进这页时下载。
+const CollaborationPage = lazy(() =>
+  import("./components/collaboration/CollaborationPage.js").then((m) => ({
+    default: m.CollaborationPage,
+  })),
+);
 const ModelPage = lazy(() => import("./components/ModelPage.js").then((m) => ({ default: m.ModelPage })));
 const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
 );
-const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
 // 知识库（d.114）：整个 knowledge 目录（含 CodeMirror 编辑器）只在进这页时才下载。
 const KnowledgePage = lazy(() =>
   import("./components/knowledge/KnowledgePage.js").then((m) => ({ default: m.KnowledgePage })),
@@ -120,8 +125,9 @@ export function PageFallback() {
 
 /**
  * Alt+数字键目标页。导航固定 8 项，其中 6 个带数字键：
- * 1 主页、2 团队（承接原团队看板）、5 记忆、6 设置、8 会话（单智能体的对话页）、
- * 0 插件。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
+ * 1 主页、2 团队（承接原团队看板）、5 协作（和鸣 + 本机智能体）、6 设置、
+ * 8 会话（单智能体的对话页）、0 插件。记忆页已删除（记忆默认全开、无界面），
+ * 第 5 位与数字键 5 交给协作页。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
  * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
  *
  * 这里的键位必须与 NavRail 的 `digit` 严格对应（那边是快捷键提示的唯一来源）。
@@ -129,7 +135,7 @@ export function PageFallback() {
 const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
   "1": "home",
   "2": "team",
-  "5": "memory",
+  "5": "collab",
   "6": "settings",
   "8": "chat",
   "0": "plugins",
@@ -849,6 +855,9 @@ function AppShell({
     ) : currentPage === "chat" ? (
       // 会话（本机运行）：单智能体的会话列表 + 对话；d.67 起承接「任务」视图
       <AssistantPage />
+    ) : currentPage === "collab" ? (
+      // 协作（d.146.5）：多智能体协作——和鸣 + 本机智能体，按顺序/主管/辩论一起干活
+      <CollaborationPage />
     ) : currentPage === "model" ? (
       // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
       <ModelPage />
@@ -858,9 +867,6 @@ function AppShell({
     ) : currentPage === "plugins" ? (
       // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
       <PluginsPage />
-    ) : currentPage === "memory" ? (
-      // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
-      <MemoryPage />
     ) : isPluginPagePage(currentPage) ? (
       // 插件页面（d.124）：入口来自已装插件的页面贡献，渲染路径由来源决定
       // （声明式 = 宿主按 blocks 渲染；界面插件 = 主进程 widget:// 沙箱视图）

@@ -143,7 +143,6 @@ describe("开关（Switch）配色跟随主题", () => {
 
   it.each([
     "src/components/ContextSettingsCard.tsx",
-    "src/components/MemoryPage.tsx",
     "src/components/SkillsPage.tsx",
   ])("%s 使用统一开关基元，不再各自复制一套", (file) => {
     const src = readFileSync(file, "utf8");

@@ -71,6 +71,7 @@ const NAV_LABELS: Record<NavPage, string> = {
   home: "主页",
   team: "团队",
   chat: "会话",
+  collab: "协作",
   staff: "幕僚",
   infohub: "信息中枢",
   automations: "自动化",
@@ -380,7 +381,7 @@ export function SettingsPage() {
                 <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
                   <NavigationSection />
                 </div>
-                {/* d.114 知识库与记忆：只做**入口**，开关本体在记忆页（单一真源）。 */}
+                {/* d.146.5 记忆页已删除：记忆默认全开、全部后台运行，这里只解释口径并给知识库入口。 */}
                 <div
                   data-settings-id="memory-vault"
                   className={anchorClass(highlightId === "memory-vault")}
@@ -388,17 +389,10 @@ export function SettingsPage() {
                   <section className="mt-3 ui-card p-4">
                     <h2 className="ui-section-title">知识库与记忆</h2>
                     <p className="mt-1 ui-caption">
-                      知识库参与记忆的开关、已纳入篇数与同步状态都在记忆页；这里只做入口，
-                      两处共用同一个设置值，不做第二套开关。
+                      记忆默认全开：短期/长期/个人知识库都由内置智能体在后台自动运行，没有独立界面，
+                      也没有开关页。知识库笔记的纳入与同步在知识库页。
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm" variant="ghost"
-                        onClick={() => useUiStore.getState().setPage("memory")}
-                      >
-                        打开记忆页
-                      </Button>
                       <Button
                         type="button"
                         size="sm" variant="ghost"

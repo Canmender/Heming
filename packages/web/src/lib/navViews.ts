@@ -57,11 +57,6 @@ export const NAV_VIEWS: Partial<Record<Page, readonly NavView[]>> = {
     { key: "navigation", label: "导航" },
     { key: "about", label: "关于" },
   ],
-  memory: [
-    { key: "agents", label: "智能体" },
-    { key: "database", label: "数据库" },
-    { key: "wiki", label: "个人知识库" },
-  ],
 };
 
 /** 空视图表（避免每次调用都新建数组，也避免调用方拿到 undefined 再判空）。 */

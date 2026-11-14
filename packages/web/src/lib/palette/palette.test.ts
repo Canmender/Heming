@@ -50,7 +50,7 @@ describe("palette · 页面目录", () => {
     expect(digits).toEqual({
       home: "1",
       team: "2",
-      memory: "5",
+      collab: "5",
       settings: "6",
       chat: "8",
       plugins: "0",
@@ -136,7 +136,7 @@ describe("palette · 最近使用（本机 ≤5）", () => {
 
   it("容量上限 5：超出淘汰最旧的一条", () => {
     const store = fakeStorage();
-    for (const id of ["home", "team", "chat", "plugins", "memory", "settings"] as const) {
+    for (const id of ["home", "team", "chat", "plugins", "collab", "settings"] as const) {
       recordRecent({ kind: "page", id }, store);
     }
     const list = loadRecent(store);

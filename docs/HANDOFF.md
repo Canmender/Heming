@@ -1,14 +1,59 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.146.4.85.11`
-- 本轮标签：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
+- 当前版本：`d.147.4.85.11`
+- 本轮标签：**会话界面复刻 ChatGPT / Claude + 记忆页退场 + 多智能体协作独立成页**（分支 `refactor/single-agent`）。上一轮（d.146.4.85.11）把产品收成「唯一内置智能体 + 会话模式」；本轮在此之上做三件事：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
 
-## 0. 2026-11-14 单智能体 + 会话模式重构（分支 `refactor/single-agent`，版本 d.146.4.85.11）
+## 0. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
+
+用户口径：智能体界面「复刻一般智能体应用」（参考 ChatGPT / Claude 官方极简风）；记忆页**界面完全去掉**，
+全部按默认值在后台运行；多智能体协作**单独做一个页面**完成。本轮是特性变更（版本特性位 146 → 147），
+没有数据格式/接口不兼容：旧 `page=memory` 链接回落设置页，旧记忆偏好落盘值读出来即全开。
+
+**会话页（纯视觉，`packages/web`）**
+- `components/AssistantPage.tsx`：去 `PageShell` 页头，满高两栏 + `<h1 class="sr-only">会话</h1>`；状态条压成
+  h-10 无边框元信息行（「与 和小鸣 的会话」+ 绑定状态 chip + ghost「模型设置」）；空态提示进会话列表。
+- `components/assistant/ConversationRail.tsx`：浅底 268px 侧栏，产品名 + `<h2>会话列表</h2>` + 收起；
+  整行圆角主按钮「新对话」+ 常驻轻量搜索；行圆角 / 当前行浅底 / hover / 标题截断 / 时间弱化；
+  折叠头像条、草稿徽标、改名删除、加载更多、错误条全保留。
+- `components/ChatPage.tsx` 仅 JSX/className：`h-11` 单行头；消息列与输入区 `max-w-[760px]` 居中；
+  助手全宽无气泡（署名 `text-ui-xs` + 正文 `leading-7`）、用户 `max-w-[80%] rounded-3xl bg-subtle-3`；
+  输入区 `rounded-3xl border` 大容器 + 无边框 textarea + 容器内工具行 + 圆形发送（aria-label「发送」）。
+  业务流程（流式、HITL、导出、搜索、多选、录音、附件）未动。
+- `components/ux/ChatEmptyState.tsx`：居中「有什么可以帮你的？」+ 示例 chips。
+
+**记忆：删除页面，默认全开**
+- 删除 `components/MemoryPage.tsx`（2389 行）与 `MemoryPage.test.tsx`（1211 行）；`lib/navViews.ts` 记忆页签、
+  `lib/palette/search.ts` 记忆分组与条目、`store/ui.ts` 的 `focus-memory` 意图、通知中心「记忆」筛选、
+  `settings/registry.ts` 记忆页描述全部摘除；`Page` 联合里保留 `memory` 仅用于解析旧链接（路由回落设置页）。
+- `lib/memory/agentPrefs.ts`：三开关默认 `true`，`get()` 恒返回全开（旧落盘 false 不再生效），`set/all` 保留。
+- 设置页记忆卡变为静态说明（默认全开、无独立界面），知识库入口不变；`local.ts` 的记忆检索工具保留为内部库。
+
+**协作：独立页面**
+- 恢复 `lib/collaboration/{engine,types,run,history}.ts`（三模式纯编排、`ask` 注入、last-run 历史），新增
+  `components/collaboration/CollaborationPage.tsx`（653 行）+ `CollabTurnCard.tsx`；`App.tsx` 懒加载路由，
+  导航第 5 项「协作」（`Alt+5`）。
+- 参与者：固定「和小鸣」（不可取消）+ 本机智能体（`magpie ls` + `parseAgents` 检测，≥2 位可开始）。
+  和小鸣走 `resolveBoundProfile(SYSTEM_AGENT_ID)`；本机智能体按模型名匹配本机 LLM 档案，缺失则禁用并说明。
+- 发言统一 `streamChatRouted` + `COLLAB_SYSTEM_RULES`；本机 CLI 只作为模型身份参与（`magpie-cli` 不执行 prompt）。
+
+**导航与命令面板**
+- 默认 8 项：主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置；`DEFAULT_NAV_ORDER`、`NAV_GROUP_OF`
+  （协作归工作台）、`NavRail`、`SettingsPage` NAV_LABELS、命令面板页面表与动作全部同步。
+- 命令面板：删「记忆」分组与 `focus-memory`，空态文案改「去『会话』『知识库』里逐条翻」；
+  `paletteConsume`、`NavRail`、`SettingsPage`、`App` 等测试同步改「协作」/`collab`。
+
+**门禁**：`pnpm typecheck` 全绿；web 全量 vitest **302 files / 4405 tests 全绿**；server 15 files / 271 tests；
+shared 8 files / 119 tests；`pnpm build` 全包通过；desktop `node --test` 全绿；`pnpm plugin:check` 通过；
+`pnpm design:audit` 三个断点全门槛通过。手工验收：新建/切换/改名/删除会话、会话列表搜索与折叠、
+协作页三模式（顺序/主管/辩论）跑通、设置页记忆说明、命令面板「新建会话 / 协作」。
+
+## 0-历史. 2026-11-14 单智能体 + 会话模式重构（分支 `refactor/single-agent`，版本 d.146.4.85.11）
 
 产品口径变了：**全产品只有一个内置智能体「和小鸣」（id `system-assistant`），不可创建 / 修改 / 删除**，
 交互对齐 Codex / Claude Code —— 会话列表 + 当前对话，不再有智能体名册、编辑页与多智能体协作。
@@ -361,7 +406,7 @@ packages/
 │   ├── lib/team/                              # 团队共享设置与摘要采集（任务/日程两类、幂等 sourceId、隐私白名单，d.54）
 │   ├── store/{chat,ui,llm,auth,tokenUsage,hitl,registry}.ts
 │   └── components/                            # HomePage、TeamPage、AssistantPage（会话页）+ ChatPage、SettingsPage、
-│                                              #   SkillsPage、PluginsPage、MemoryPage、InterfacesPage、
+│                                              #   SkillsPage、PluginsPage、CollaborationPage（协作页）、InterfacesPage、
 │                                              #   RegistryPage、InfohubPage、InfohubHomeCard、WikiPanel、
 │                                              #   ToolApprovalModal、ConfirmDialog、AgentStreamBubble 等
 ├── infohub/                    # 本机归档边车（Python ≥3.11，d.45 源码并入）

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message } from "@heming/shared";
+import { SYSTEM_AGENT } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
@@ -161,7 +162,7 @@ export function ConversationRail({
       return (
         <div
           key={conv.id}
-          className="mb-0.5 flex items-center gap-1 rounded-md bg-subtle-3 px-2 py-1"
+          className="mb-0.5 flex items-center gap-1 rounded-lg bg-subtle-3 px-2 py-1"
         >
           <input
             aria-label="会话名称"
@@ -202,8 +203,8 @@ export function ConversationRail({
     return (
       <div
         key={conv.id}
-        className={`group relative mb-0.5 flex items-center rounded-md transition-colors ${
-          active ? "bg-subtle-4" : "hover:bg-subtle-2"
+        className={`group relative mb-0.5 flex items-center rounded-lg transition-colors ${
+          active ? "bg-subtle-3" : "hover:bg-subtle-2"
         }`}
       >
         <button
@@ -212,16 +213,18 @@ export function ConversationRail({
           aria-label={`打开会话：${title}`}
           aria-current={active ? "true" : undefined}
           onClick={() => onOpen(conv.id)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2.5 py-2 text-left"
         >
-          <span className="ui-body-sm min-w-0 flex-1 truncate">{title}</span>
+          <span className={`min-w-0 flex-1 truncate text-ui-sm ${active ? "text-ink" : "text-body"}`}>
+            {title}
+          </span>
           {draft ? (
             <span className="ui-chip shrink-0" title="有未发送的草稿">
               草稿
             </span>
           ) : null}
           {conv.lastMessageAt ? (
-            <span className="ui-micro shrink-0 text-muted">
+            <span className="shrink-0 text-ui-xs tabular-nums text-muted">
               {formatClock(conv.lastMessageAt)}
             </span>
           ) : null}
@@ -232,7 +235,7 @@ export function ConversationRail({
           aria-haspopup="menu"
           aria-expanded={menuFor === conv.id}
           onClick={() => setMenuFor((cur) => (cur === conv.id ? null : conv.id))}
-          className={`mr-1 rounded-sm p-1 text-muted transition-opacity hover:bg-subtle-3 hover:text-ink focus:opacity-100 ${
+          className={`mr-1 rounded-md p-1 text-muted transition-opacity hover:bg-subtle-3 hover:text-ink focus:opacity-100 ${
             menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >
@@ -303,8 +306,8 @@ export function ConversationRail({
 
   if (collapsed) {
     return (
-      <aside className="flex w-[60px] shrink-0 flex-col border-r border-line-soft">
-        <header className="flex items-center justify-center border-b border-line-soft py-2">
+      <aside className="flex w-[60px] shrink-0 flex-col border-r border-line-soft bg-subtle">
+        <header className="flex items-center justify-center py-2">
           <button
             type="button"
             aria-label="展开会话列表"
@@ -328,7 +331,7 @@ export function ConversationRail({
                 aria-current={active ? "true" : undefined}
                 onClick={() => onOpen(conv.id)}
                 className={`mb-1 flex w-full justify-center rounded-lg p-1 transition-colors ${
-                  active ? "bg-subtle-4" : "hover:bg-subtle-2"
+                  active ? "bg-subtle-3" : "hover:bg-subtle-2"
                 }`}
               >
                 <Avatar
@@ -354,73 +357,89 @@ export function ConversationRail({
   }
 
   return (
-    <aside className="flex w-[264px] shrink-0 flex-col border-r border-line-soft">
-      <header className="flex items-center gap-2 border-b border-line-soft px-3 py-2.5">
-        {/* 二级标题：页头 h1 是「会话」，栏头用 h2 给读屏用户两级大纲（设计审计门槛）。 */}
-        <h2 className="ui-section-title min-w-0 truncate">会话列表</h2>
-        <span className="ui-micro text-muted">{sorted.length}</span>
-        <button
-          type="button"
-          aria-label="收起会话列表"
-          title="收起会话列表"
-          onClick={() => setCollapsed(true)}
-          className="ui-hit ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
-        >
-          <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
-        </button>
+    <aside className="flex w-[268px] shrink-0 flex-col border-r border-line-soft bg-subtle">
+      <header className="px-3 pb-1 pt-3">
+        <div className="flex items-center gap-2">
+          {/* 单智能体产品：栏顶第一行就是产品/智能体名。 */}
+          <span className="min-w-0 truncate text-ui-md font-semibold text-ink">
+            {SYSTEM_AGENT.name}
+          </span>
+          <span className="ui-micro text-muted">{sorted.length}</span>
+          <button
+            type="button"
+            aria-label="收起会话列表"
+            title="收起会话列表"
+            onClick={() => setCollapsed(true)}
+            className="ui-hit ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-subtle-2 hover:text-ink"
+          >
+            <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
+          </button>
+        </div>
+        {/* 二级标题：主区 h1 是「会话」（sr-only），栏头用 h2 给读屏用户两级大纲（设计审计门槛）。 */}
+        <h2 className="mt-1 text-ui-sm font-medium text-muted">会话列表</h2>
       </header>
 
-      {/* 顶部动作：新建会话 / 搜索（对齐参考图 New / Search）。 */}
-      <div className="flex items-center gap-1.5 border-b border-line-soft px-2 py-1.5">
+      {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。 */}
+      <div className="px-2 pb-2 pt-1">
         <Button
           type="button"
           aria-label="新建会话"
           title="新建会话"
           onClick={onNewConversation}
           busy={opening}
-          size="sm" variant="ghost" className="min-w-0 flex-1 justify-start"
+          size="md"
+          variant="primary"
+          className="w-full justify-center"
         >
-          <PlusIcon width={14} height={14} />
-          <span className="truncate">新建会话</span>
+          <PlusIcon width={16} height={16} aria-hidden="true" />
+          新对话
         </Button>
+      </div>
+
+      {/* 常驻轻量搜索：放大镜在输入框内左侧；「搜索」按钮与「搜索会话」输入框都保留（无障碍/测试同源）。 */}
+      <div id="assistant-conversation-search" className="relative mx-2 mb-1">
         <button
           type="button"
           aria-label="搜索"
           title={searchOpen ? "收起搜索" : "搜索会话"}
           aria-expanded={searchOpen}
           aria-controls="assistant-conversation-search"
-          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-          className={`ui-hit flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
-            searchOpen
-              ? "bg-subtle-4 text-ink"
-              : "text-muted hover:bg-subtle-4 hover:text-ink"
-          }`}
+          onClick={() => {
+            if (searchOpen) {
+              closeSearch();
+            } else {
+              setSearchOpen(true);
+              searchRef.current?.focus();
+            }
+          }}
+          className="ui-hit absolute left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted transition-colors hover:text-ink"
         >
-          <SearchIcon width={14} height={14} />
+          <SearchIcon width={14} height={14} aria-hidden="true" />
         </button>
+        <input
+          ref={searchRef}
+          type="search"
+          aria-label="搜索会话"
+          value={query}
+          onChange={(e) => {
+            setSearchOpen(true);
+            setQuery(e.target.value);
+          }}
+          onFocus={() => setSearchOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              closeSearch();
+            }
+          }}
+          placeholder="搜索会话…"
+          className={`h-8 w-full rounded-lg border bg-transparent pl-8 pr-2 text-ui-sm outline-hidden transition-colors placeholder:text-placeholder ${
+            searchOpen ? "border-line-strong bg-surface" : "border-transparent hover:border-line"
+          }`}
+        />
       </div>
 
-      {searchOpen ? (
-        <div id="assistant-conversation-search" className="border-b border-line-soft px-2 py-1.5">
-          <input
-            ref={searchRef}
-            type="search"
-            aria-label="搜索会话"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                closeSearch();
-              }
-            }}
-            placeholder="搜索会话…"
-            className="w-full rounded-lg border border-line px-2 py-1 text-ui-sm outline-hidden focus:border-ink"
-          />
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {visible.length === 0 ? renderEmpty() : visible.map(renderRow)}
         {hasQuery && visible.length > 0 ? (
           <p className="ui-caption px-2 py-1">{visible.length} 条匹配</p>
@@ -438,12 +457,12 @@ export function ConversationRail({
       </div>
 
       {error && (
-        <p role="alert" className="border-t border-line-soft px-3 py-2 ui-body-sm text-danger">
+        <p role="alert" className="border-t border-line-soft px-3 py-2 text-ui-sm text-danger">
           {error}
         </p>
       )}
-      {/* 隐私边界必留：压成一条状态行（页头已有「本机运行」）。 */}
-      <p className="ui-caption border-t border-line-soft px-3 py-2">
+      {/* 隐私边界必留：压成一条弱化状态行。 */}
+      <p className="px-3 pb-3 pt-2 text-center text-ui-sm text-muted">
         本机运行 · Key 与记忆不出设备
       </p>
     </aside>

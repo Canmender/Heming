@@ -77,9 +77,16 @@ describe("刷新恢复：当前页与会话落 sessionStorage（d.79）", () => 
   it("readSessionView 只认宿主页；脏值/未知页/非 JSON 一律回落 null（不猜）", () => {
     sessionStorage.setItem(
       SESSION_VIEW_KEY,
+      JSON.stringify({ page: "collab", activeConversationId: "c9" }),
+    );
+    expect(readSessionView()).toEqual({ page: "collab", activeConversationId: "c9" });
+
+    // 已删除的记忆页不在宿主页集合里：不恢复（旧链接兼容由 resolvePage 负责，不在刷新路径）
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
       JSON.stringify({ page: "memory", activeConversationId: "c9" }),
     );
-    expect(readSessionView()).toEqual({ page: "memory", activeConversationId: "c9" });
+    expect(readSessionView()).toBeNull();
 
     // 已合并的旧页 id 不在宿主页集合里：不恢复（旧链接兼容由 resolvePage 负责，不在刷新路径）
     sessionStorage.setItem(SESSION_VIEW_KEY, JSON.stringify({ page: "interfaces" }));
@@ -148,14 +155,14 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序：固定 8 项（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）", () => {
-    // 工作台（主页 → 团队 → 智能体）→ 能力（插件）→ 资料（记忆/知识库/模型）→ 系统（设置）
+  it("默认顺序：固定 8 项（主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置）", () => {
+    // 工作台（主页 → 团队 → 会话 → 协作）→ 能力（插件）→ 资料（知识库/模型）→ 系统（设置）
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "team",
       "chat",
+      "collab",
       "plugins",
-      "memory",
       "vault",
       "model",
       "settings",
@@ -163,10 +170,10 @@ describe("ui store 导航顺序", () => {
   });
 
   it("moveNav 上移/下移生效并落盘", () => {
-    useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(3);
-    useUiStore.getState().moveNav("memory", 1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(4);
+    useUiStore.getState().moveNav("collab", -1);
+    expect(useUiStore.getState().navOrder.indexOf("collab")).toBe(2);
+    useUiStore.getState().moveNav("collab", 1);
+    expect(useUiStore.getState().navOrder.indexOf("collab")).toBe(3);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -181,7 +188,7 @@ describe("ui store 导航顺序", () => {
   });
 
   it("恢复默认", () => {
-    useUiStore.getState().setNavOrder(["settings", "memory", "home"]);
+    useUiStore.getState().setNavOrder(["settings", "collab", "home"]);
     expect(useUiStore.getState().navOrder[0]).toBe("settings");
     useUiStore.getState().resetNavOrder();
     expect(useUiStore.getState().navOrder).toEqual([...DEFAULT_NAV_ORDER]);
@@ -189,12 +196,12 @@ describe("ui store 导航顺序", () => {
 });
 
 describe("normalizeNavOrder / readStoredNavOrder", () => {
-  it("去重、剔除未知页、缺失项补在末尾", () => {
+  it("去重、剔除未知页（含已删除的记忆页）、缺失项补在末尾", () => {
     expect(normalizeNavOrder(["memory", "memory", "chat", 42, "home"])).toEqual([
-      "memory",
       "chat",
       "home",
       "team",
+      "collab",
       "plugins",
       "vault",
       "model",
@@ -224,8 +231,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "team",
       "home",
       "plugins",
-      "memory",
       "chat",
+      "collab",
       "vault",
       "model",
     ]);
@@ -239,8 +246,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "home",
       "team",
       "chat",
+      "collab",
       "plugins",
-      "memory",
       "vault",
       "model",
     ]);
@@ -260,13 +267,13 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "settings",
     ]);
     expect(readStoredNavOrder({ getItem: () => legacyDefault })).toEqual([...DEFAULT_NAV_ORDER]);
-    // 用户亲手排过的顺序（哪怕很短）不被升级覆盖
+    // 用户亲手排过的顺序（哪怕很短）不被升级覆盖；已删除的记忆页被剔除
     expect(readStoredNavOrder({ getItem: () => '["memory","settings"]' })).toEqual([
-      "memory",
       "settings",
       "home",
       "team",
       "chat",
+      "collab",
       "plugins",
       "vault",
       "model",
