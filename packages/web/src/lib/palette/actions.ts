@@ -1,15 +1,15 @@
 /**
- * 命令面板 · 常用动作目录（5 个）。
+ * 命令面板 · 常用动作目录。
  *
  * 这里只放**元数据**，真正执行在 `CommandPalette` 里按 `id` 分发到既有 store
  * （`useUiStore` 切页 / 设置直达 / 意图槽）。刻意不把执行函数写在这里：
  * 纯数据便于单测「动作名可被检索到」，也让执行点集中在一处、便于断言。
  *
- * 不新增 IPC、不引依赖：五个动作全部走已有能力。
+ * 不新增 IPC、不引依赖：动作全部走已有能力。
  */
 export type PaletteActionId =
   | "new-task"
-  | "new-agent"
+  | "new-chat"
   | "notifications"
   | "settings"
   | "plugins"
@@ -39,10 +39,10 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
     keywords: ["任务", "派活", "运行", "task"],
   },
   {
-    id: "new-agent",
-    label: "新建智能体",
-    description: "创建并配置一个本机智能体",
-    keywords: ["智能体", "助手", "agent", "新建"],
+    id: "new-chat",
+    label: "新建会话",
+    description: "和小鸣开始一段新的对话",
+    keywords: ["会话", "对话", "新建", "chat", "conversation"],
   },
   {
     id: "notifications",

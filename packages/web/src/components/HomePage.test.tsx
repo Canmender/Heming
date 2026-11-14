@@ -46,7 +46,7 @@ const AGENT_ROSTER = [
   {
     id: "a1",
     owner_id: "u1",
-    name: "我的智能体甲",
+    name: "我的会话甲",
     avatar: null,
     description: "帮我写代码",
   },
@@ -149,10 +149,10 @@ describe("HomePage", () => {
       screen.getByRole("heading", { name: new RegExp(`${greeting}，${user.displayName}`) }),
     ).toBeInTheDocument();
 
-    // 动作指标卡（不是看板数字）：待处理/运行中/智能体/今日动向
+    // 动作指标卡（不是看板数字）：待处理/运行中/会话/今日动向
     expect(within(statCard("待处理")).getByText("0")).toBeInTheDocument();
     expect(within(statCard("运行中任务")).getByText("0")).toBeInTheDocument();
-    expect(within(statCard("我的智能体")).getByText("2")).toBeInTheDocument();
+    expect(within(statCard("会话")).getByText("0")).toBeInTheDocument();
     expect(within(statCard("今日动向")).getByText("1")).toBeInTheDocument();
 
     // 页头两个动作入口
@@ -251,7 +251,7 @@ describe("HomePage", () => {
         {
           id: "c-new",
           type: "agent",
-          agent: { id: "a1", name: "我的智能体甲", avatar: null, owner_id: "u1", description: "" },
+          agent: { id: "a1", name: "我的会话甲", avatar: null, owner_id: "u1", description: "" },
           unreadCount: 2,
           lastMessageAt: new Date(now.getTime() - 60_000).toISOString(),
         },
@@ -265,7 +265,7 @@ describe("HomePage", () => {
     const names = within(recent)
       .getAllByRole("button", { name: /^继续与/ })
       .map((b) => b.textContent ?? "");
-    expect(names[0]).toContain("我的智能体甲");
+    expect(names[0]).toContain("我的会话甲");
     expect(names[1]).toContain("和小鸣");
     // 未读角标
     expect(within(recent).getByText("2")).toBeInTheDocument();
@@ -273,7 +273,7 @@ describe("HomePage", () => {
     expect(screen.queryByText("全部名册")).toBeNull();
 
     fireEvent.click(
-      within(recent).getByRole("button", { name: "继续与 我的智能体甲 的对话：我的智能体甲" }),
+      within(recent).getByRole("button", { name: "继续与 我的会话甲 的对话：我的会话甲" }),
     );
     expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("c-new");
@@ -632,7 +632,7 @@ describe("HomePage", () => {
     expect(screen.queryByRole("region", { name: "最近对话" })).toBeNull();
   });
 
-  it("引导卡不在场时，最近对话空态自己给下一步（去智能体页）", async () => {
+  it("引导卡不在场时，最近对话空态自己给下一步（去会话页）", async () => {
     useOnboardingStore.setState({ dismissedAt: Date.now() });
     mockTeam();
     render(<HomePage />);
@@ -640,7 +640,7 @@ describe("HomePage", () => {
 
     const recent = screen.getByRole("region", { name: "最近对话" });
     expect(within(recent).getByText(/还没有对话/)).toBeInTheDocument();
-    fireEvent.click(within(recent).getByRole("button", { name: "去智能体页" }));
+    fireEvent.click(within(recent).getByRole("button", { name: "去会话页" }));
     expect(useUiStore.getState().page).toBe("chat");
   });
 

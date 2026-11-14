@@ -1,60 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Agent, Conversation } from "@heming/shared";
-import { useSessionTab } from "../lib/sessionState.js";
+import type { Conversation } from "@heming/shared";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useLlmStore } from "../store/llm.js";
 import { resolveBoundProfile } from "../lib/llmRoute.js";
 import { ChatPage } from "./ChatPage.js";
-import { CollabView } from "./collaboration/CollabView.js";
 import { PageShell } from "./layout/PageShell.js";
-import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { clearDraft } from "../lib/drafts.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
-import { AgentPicker } from "./assistant/AgentPicker.js";
-import { AgentRosterView } from "./assistant/AgentRosterView.js";
-import { AgentEditorView } from "./assistant/AgentEditorView.js";
-import {
-  ASSISTANT_STORED_TABS,
-  ASSISTANT_TAB_ITEMS,
-  ASSISTANT_TAB_KEY,
-  isLegacyAssistantTab,
-  normalizeAssistantTab,
-  type AssistantTab,
-  type StoredAssistantTab,
-} from "./assistant/tabs.js";
-import { Button } from "../components/ui/Button.js";
+import { conversationTitle } from "./assistant/conversationTitle.js";
+import { Button } from "./ui/Button.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 /**
- * 智能体页（d.126 阶段 B：三个一级 Tab）。
+ * 会话页（单智能体 · 会话模式，对齐 Codex / Claude Code）。
  *
- * - **对话**：左栏是 Claude Code 风格会话栏（顶部新建/搜索，按智能体分组，
- *   组内一级信息是**会话名**，当前会话高亮）；主区在选中会话时嵌 `ChatPage`
- *   （embedded，隐藏它自己的「返回工作区」），没有选中时是智能体选择页。
- * - **协作**：Multi-Agent 多人工作台（`CollabView` 原样收进）。
- * - **智能体**：名册（系统/自建分组、模型绑定状态、搜索）；新建/编辑进入
- *   **页内编辑视图**（`AgentEditorView`，不再弹窗），保存/取消后回名册。
+ * 产品只剩**一个内置智能体**（`SYSTEM_AGENT`，不可创建/修改/删除），所以本页不再有
+ * 一级 Tab、没有智能体选择页/名册/编辑页，也没有多智能体协作视图：
  *
- * 三个视图**同一时刻只渲染一个**：切走的分支直接卸载，不会出现两处同时订阅同一条流。
- * 会话与名册数据全部来自既有 store（`useChatStore` / `useUiStore` / `useLlmStore`），
+ * - 左侧：`ConversationRail`，全部会话一条扁平列表（新建会话直接建 fresh 会话）；
+ * - 右侧：有选中会话时是「状态条 + embedded ChatPage」，没有选中时是新建会话空态。
+ *
+ * 会话与模型数据全部来自既有 store（`useChatStore` / `useUiStore` / `useLlmStore`），
  * 本页不新增第二套状态。
  *
- * 旧 sessionStorage 值 `work` / `chat` / `tasks` 统一归一为「对话」（不丢会话记忆）；
- * `pageView` 意图（tasks / chat）也都落到「对话」。
+ * 意图消费：命令面板「新建会话」投递 `paletteIntent = new-session`，本页消费即建一段
+ * fresh 会话（token 变化触发、消费即清，天然幂等）。旧导航意图（tasks / chat）已没有
+ * 对应视图可切，读到就清掉，避免残留意图被别的页面消费。
  */
-
-/** 智能体 Tab 的两种页面态：名册 / 编辑页（新建或编辑）。 */
-type AgentEditorState =
-  | { mode: "create"; startAt: "name" | "templates" }
-  | { mode: "edit"; agent: Agent };
-
 export function AssistantPage() {
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages);
-  const agentsRoster = useChatStore((s) => s.agentsRoster);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
-  const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   /** 首帧是否已拉到工作区 / 首帧失败原因（store 只在首帧写，后台刷新失败不推翻已就绪）。 */
   const workspaceReady = useChatStore((s) => s.workspaceReady);
   const workspaceError = useChatStore((s) => s.workspaceError);
@@ -65,146 +44,98 @@ export function AssistantPage() {
   const conversationsLoadingMore = useChatStore((s) => s.conversationsLoadingMore);
   const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
-  const openingConversation = useUiStore((s) => s.openConversation);
-  /** 一次性视图意图（d.67）：旧「通用智能体」链接折叠成 chat + pageView="tasks"。 */
+  const openConversation = useUiStore((s) => s.openConversation);
+  /** 一次性命令面板意图：`new-session` = 直接开始一段新会话（消费即清）。 */
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
   const pageView = useUiStore((s) => s.pageView);
 
-  // 绑定状态只用于「模型已绑定」提示与名册/选择页的可用性标记。
+  // 绑定状态只用于状态条上的「模型已绑定」提示。
   const llmBindings = useLlmStore((s) => s.bindings);
   const llmRoutes = useLlmStore((s) => s.routes);
   const llmProfiles = useLlmStore((s) => s.profiles);
 
-  const [openingId, setOpeningId] = useState<string | null>(null);
+  /** 正在新建会话（防重；同时作为 rail 的 busy 态）。 */
+  const [opening, setOpening] = useState(false);
+  /** 新建 / 改名 / 删除 / 加载更多的失败原因：进 rail 底部错误区，不挡列表。 */
   const [error, setError] = useState("");
-  /** 智能体 Tab 的页面态：null = 名册；有值 = 编辑页（新建/编辑）。 */
-  const [editor, setEditor] = useState<AgentEditorState | null>(null);
-  /** 待确认删除的会话（d.128）：rail 只发请求，二次确认在页面上统一做。 */
+  /** 待确认删除的会话：rail 只发请求，二次确认在页面上统一做。 */
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
-  /** 名册首载失败（store 没有这个字段，失败原因就近存本页，切走即清）。 */
-  const [rosterError, setRosterError] = useState<string | null>(null);
 
-  /**
-   * 默认落在「对话」。key 沿用 v1 以保留会话记忆；旧值 `work` / `chat` / `tasks`
-   * 在读取时归一为 `chat`（见 assistant/tabs.ts），绝不落到空白视图。
-   */
-  const [storedTab, setStoredTab] = useSessionTab<StoredAssistantTab>(
-    ASSISTANT_TAB_KEY,
-    "chat",
-    ASSISTANT_STORED_TABS,
-  );
-  const tab: AssistantTab = normalizeAssistantTab(storedTab);
-  const setTab = useCallback(
-    (next: AssistantTab) => {
-      setStoredTab(next);
-    },
-    [setStoredTab],
-  );
-  // 读到旧键就顺手回写规范化值：之后刷新不再走归一分支（记忆保留，枚举干净）。
+  // 旧导航意图（tasks / chat）已没有对应视图可切：读走即清，避免残留意图被别的页面消费。
   useEffect(() => {
-    if (isLegacyAssistantTab(storedTab)) setStoredTab(normalizeAssistantTab(storedTab));
-  }, [storedTab, setStoredTab]);
+    if (pageView) useUiStore.getState().consumePageView();
+  }, [pageView]);
 
-  // 命令面板「新建智能体」的消费点（d.60）。
-  // 面板只投一次内存意图并切到本页；本页是懒加载路由，可能晚一帧才挂载，
-  // 所以在「挂载后 effect」里读，读到就打开编辑页并消费（token 变化即触发，幂等）。
-  const paletteIntent = useUiStore((s) => s.paletteIntent);
-  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
-  useEffect(() => {
-    if (paletteIntent?.kind !== "agent-create") return;
-    // 新建/编辑是「智能体」Tab 的动作：从任何 Tab 走命令面板过来都切过去，
-    // 否则建完回到「协作」，用户会以为没生效。
-    setTab("agents");
-    setEditor({ mode: "create", startAt: "name" });
-    consumePaletteIntent();
-  }, [paletteIntent, consumePaletteIntent, setTab]);
-
-  // 视图意图消费（d.67）：旧 setPage("tasks")、通知中心 focusTask 等落在本页时切到对话。
-  // 读走即清，避免切走再回来仍被上一次跳转钉在某个 Tab。
-  //
-  // openConversation（通知/系统通知「打开某个会话」）会投 pageView="chat"：
-  // 它必须把当前 Tab 切回对话并显示该会话，否则会话会在看不见的视图下打开。
-  useEffect(() => {
-    if (!pageView) return;
-    const view: string | null = useUiStore.getState().consumePageView();
-    if (view === "tasks" || view === "chat") setTab("chat");
-  }, [pageView, setTab]);
-
-  // 对话与名册都从服务端取：智能体页是独立入口，不依赖用户先去别的页。
-  // d.141（F-01）：此前两处 `.catch(() => {})` 把首载失败吞掉，用户断网几秒回来
-  // 看到的是「空列表」而不是「加载失败」，会以为对话/智能体丢了。现在：会话失败由
-  // store 记录（workspaceError，仅首帧写）并上屏 + 给「重试」；名册没有 store 字段，
-  // 失败原因就近存本页，同样上屏 + 重试。
+  // 会话从服务端取：会话页是独立入口，不依赖用户先去别的页。
+  // 首帧失败由 store 记录（workspaceError，仅首帧写）并上屏 + 给「重试」；
+  // 后台刷新失败不提示——旧数据仍可用，弹一次「失败」反而更吓人。
   useEffect(() => {
     void loadWorkspace().catch(() => {
       /* 错误已由 store 记录，这里不重复处理 */
     });
-    void loadAgentsRoster().catch((err: unknown) => {
-      setRosterError(err instanceof Error ? err.message : String(err));
-    });
-  }, [loadWorkspace, loadAgentsRoster]);
+  }, [loadWorkspace]);
 
   const retryLoad = useCallback(() => {
-    setRosterError(null);
     void loadWorkspace().catch(() => {});
-    void loadAgentsRoster().catch((err: unknown) => {
-      setRosterError(err instanceof Error ? err.message : String(err));
-    });
-  }, [loadWorkspace, loadAgentsRoster]);
+  }, [loadWorkspace]);
 
-  const sortedAgents = useMemo(() => {
-    return [...agentsRoster].sort((a, b) => {
-      if (a.id === "system-assistant") return -1;
-      if (b.id === "system-assistant") return 1;
-      return a.name.localeCompare(b.name, "zh");
-    });
-  }, [agentsRoster]);
+  /**
+   * 新建一段 fresh 会话并打开：单智能体下不再需要「先选一个智能体」。
+   * 所有「新建会话」入口（rail 顶部、rail 空态、主区空态、命令面板意图）共用它。
+   */
+  const startNewConversation = useCallback(async () => {
+    if (opening) return;
+    setOpening(true);
+    setError("");
+    try {
+      // fresh：每段对话彼此独立保存，绝不复用上一段（Claude Code 式多段对话）。
+      const convId = await openAgent(SYSTEM_AGENT_ID, { fresh: true });
+      openConversation(convId);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? `新建会话失败：${err.message}` : "新建会话失败");
+    } finally {
+      setOpening(false);
+    }
+  }, [opening, openAgent, openConversation]);
+
+  // 命令面板「新建会话」意图的消费点：本页是懒加载路由，可能晚一帧才挂载，
+  // 所以放在挂载后的 effect 里读；token 变化即触发（同一种意图连点两次也各自消费）。
+  useEffect(() => {
+    if (paletteIntent?.kind !== "new-session") return;
+    // 正有一段在新建：先不清意图，等 `opening` 落回 false 后这个 effect 再跑一次再消费，
+    // 否则意图会被「这次新建」吞掉。
+    if (opening) return;
+    consumePaletteIntent();
+    void startNewConversation();
+  }, [paletteIntent, consumePaletteIntent, startNewConversation, opening]);
 
   const activeConv = conversations.find((c) => c.id === activeConversationId);
   const activeAgentBound = useMemo(
     () => (activeConv ? Boolean(resolveBoundProfile(activeConv.agent.id)) : false),
-    // llm* 一并进 deps：绑定变化后「模型已绑定」提示要跟着变（与 boundOf 同口径）
+    // llm* 一并进 deps：绑定变化后「模型已绑定」提示要跟着变
     [activeConv, llmBindings, llmRoutes, llmProfiles],
   );
-
-  const boundOf = useCallback(
-    (agentId: string) => Boolean(resolveBoundProfile(agentId)),
-    [llmBindings, llmRoutes, llmProfiles],
-  );
-
-  /** 打开/复用与某智能体的会话；fresh=true 时新建一段（Claude Code 式多段对话）。 */
-  const startChat = async (agentId: string, options: { fresh?: boolean } = {}) => {
-    if (openingId) return;
-    setOpeningId(agentId);
-    setError("");
-    try {
-      // 缺省幂等复用已有会话；组标题旁「＋」传 fresh 新开一段。
-      const convId = options.fresh ? await openAgent(agentId, { fresh: true }) : await openAgent(agentId);
-      openingConversation(convId);
-      setTab("chat");
-    } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : "打开会话失败");
-    } finally {
-      setOpeningId(null);
-    }
-  };
 
   /** 会话改名：失败时把原因放进页内错误条（rail 保留输入供重试）。 */
   const renameConversationTitle = async (convId: string, title: string) => {
     try {
       await renameConversation(convId, title);
+      setError("");
     } catch (err) {
       setError(err instanceof Error && err.message ? `改名失败：${err.message}` : "改名失败");
       throw err;
     }
   };
 
-  /** 删除会话（二次确认后）：删的是整段对话与消息；正停在这段时回选择页。 */
+  /** 删除会话（二次确认后）：删的是整段对话与消息；正停在这段时回空态。 */
   const confirmDeleteConversation = async () => {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
     setDeleteTarget(null);
     try {
       await deleteConversation(id);
+      setError("");
       clearDraft(id);
       if (activeConversationId === id) useUiStore.setState({ activeConversationId: null });
     } catch (err) {
@@ -212,187 +143,21 @@ export function AssistantPage() {
     }
   };
 
-  /** 回到选择页：清空当前会话，主区显示智能体列表（对话仍在左栏，随时可点回来）。 */
-  const backToPicker = () => {
-    useUiStore.setState({ activeConversationId: null });
-  };
+  /** 待删会话的显示名：服务端 title → 首条消息 → 时间兜底（与 rail 一致）。 */
+  const deleteTitle = deleteTarget
+    ? conversationTitle(deleteTarget, messages[deleteTarget.id])
+    : "";
 
-  /** 打开智能体编辑页（智能体 Tab）。 */
-  const openAgentEditor = (agent: Agent) => {
-    setTab("agents");
-    setEditor({ mode: "edit", agent });
-  };
-  /** 新建智能体：从选择页/名册/协作/命令面板都能进同一个编辑页。 */
-  const openAgentCreate = (startAt: "name" | "templates") => {
-    setTab("agents");
-    setEditor({ mode: "create", startAt });
-  };
-  const closeAgentEditor = () => setEditor(null);
-
-  /** 创建成功：直接切回对话并打开那段会话（复用 openAgent + openConversation，不新增路由）。 */
-  const onAgentCreated = (created: Agent) => {
-    setEditor(null);
-    setTab("chat");
-    void startChat(created.id);
-  };
-
-  /** Tab 键盘导航：左右方向键切换、Home/End 到两端（tablist 的标准键盘语义）。 */
-  const onTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const count = ASSISTANT_TAB_ITEMS.length;
-    let next = index;
-    if (e.key === "ArrowRight") next = (index + 1) % count;
-    else if (e.key === "ArrowLeft") next = (index - 1 + count) % count;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = count - 1;
-    else return;
-    e.preventDefault();
-    const key = ASSISTANT_TAB_ITEMS[next].key;
-    setTab(key);
-    document.getElementById(`assistant-tab-${key}`)?.focus();
-  };
-
-  const renderChatTab = () => (
-    <div className="flex min-h-0 flex-1">
-      <ConversationRail
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        messages={messages}
-        openingId={openingId}
-        error={error}
-        onOpen={openingConversation}
-        onNewConversation={backToPicker}
-        onNewForAgent={(agentId) => void startChat(agentId, { fresh: true })}
-        onRename={(id, title) => renameConversationTitle(id, title)}
-        onDeleteRequest={(conv) => setDeleteTarget(conv)}
-        hasMore={conversationsHasMore}
-        loadingMore={conversationsLoadingMore}
-        onLoadMore={() => {
-          void loadMoreConversations().catch((err) => {
-            setError(err instanceof Error && err.message ? `加载更多失败：${err.message}` : "加载更多失败");
-          });
-        }}
-      />
-
-      <section className="flex min-w-0 flex-1 flex-col">
-        {activeConv ? (
-          <>
-            {/* 对话顶部状态条：当前智能体 / 模型绑定 / 编辑与切换。
-                ChatPage 自己的标题栏负责会话内操作，这里只补全局上下文。 */}
-            <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-soft px-4 ui-caption">
-              <span className="min-w-0 truncate">与 {activeConv.agent.name} 的会话</span>
-              <span
-                className={`ui-chip ${activeAgentBound ? "" : "text-danger"}`}
-                title={activeAgentBound ? undefined : "还没有绑定模型，发送会失败"}
-              >
-                {activeAgentBound ? "模型已绑定" : "未绑定模型"}
-              </span>
-              <span className="ml-auto flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ui-hit"
-                  onClick={() => {
-                    const agent =
-                      agentsRoster.find((a) => a.id === activeConv.agent.id) ?? activeConv.agent;
-                    openAgentEditor(agent);
-                  }}
-                >
-                  编辑智能体
-                </Button>
-                <Button size="sm" variant="ghost" className="ui-hit" onClick={backToPicker}>
-                  切换智能体
-                </Button>
-              </span>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col">
-              {/* embedded：隐藏 ChatPage 自己的「返回工作区」按钮（返回会切页并卸载会话）。 */}
-              <ChatPage embedded />
-            </div>
-          </>
-        ) : (
-          <AgentPicker
-            agents={sortedAgents}
-            boundOf={boundOf}
-            openingId={openingId}
-            onStartChat={(agentId) => void startChat(agentId)}
-            onEdit={openAgentEditor}
-            onCreate={openAgentCreate}
-          />
-        )}
-      </section>
-    </div>
-  );
-
-  const renderAgentsTab = () =>
-    editor ? (
-      <AgentEditorView
-        key={`${editor.mode}-${editor.mode === "edit" ? editor.agent.id : editor.startAt}`}
-        mode={editor.mode}
-        {...(editor.mode === "edit" ? { agent: editor.agent } : { startAt: editor.startAt })}
-        onCreated={onAgentCreated}
-        onClose={closeAgentEditor}
-      />
-    ) : (
-      <AgentRosterView
-        agents={sortedAgents}
-        boundOf={boundOf}
-        openingId={openingId}
-        error={error}
-        onStartChat={(agentId) => void startChat(agentId)}
-        onEdit={openAgentEditor}
-        onCreate={openAgentCreate}
-      />
-    );
-
-  /**
-   * 首载失败的提示文案：对话看 workspaceError（只在还没成功过时），其余视图看名册。
-   * 已加载成功过一次的后台刷新失败不提示——旧数据仍可用，弹一次「失败」反而更吓人。
-   */
-  const loadFailure =
-    tab === "chat"
-      ? !workspaceReady && workspaceError
-        ? `对话列表加载失败：${workspaceError}`
-        : null
-      : rosterError
-        ? `智能体列表加载失败：${rosterError}`
-        : null;
+  /** 首载失败的提示文案：只在还没成功过时提示（成功过的后台刷新失败不提示）。 */
+  const loadFailure = !workspaceReady && workspaceError ? `会话列表加载失败：${workspaceError}` : null;
 
   return (
     <PageShell
-      title="智能体"
+      title="会话"
       subtitle="模型 Key、工具与记忆只留本机；消息不进团队动向。"
       scroll={false}
-      headerExtra={
-        <div
-          className={`${PAGE_TABLIST} flex-wrap items-center gap-2 border-b border-line-soft px-6 pt-2`}
-          role="tablist"
-          aria-label="智能体视图"
-        >
-          {ASSISTANT_TAB_ITEMS.map((t, index) => (
-            <button
-              key={t.key}
-              id={`assistant-tab-${t.key}`}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.key}
-              aria-controls={`assistant-panel-${t.key}`}
-              tabIndex={tab === t.key ? 0 : -1}
-              onClick={() => setTab(t.key)}
-              onKeyDown={(e) => onTabKeyDown(e, index)}
-              className={pageTabClass(tab === t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      }
     >
-      <div
-        id={`assistant-panel-${tab}`}
-        role="tabpanel"
-        aria-labelledby={`assistant-tab-${tab}`}
-        className="flex min-h-0 flex-1 flex-col"
-      >
+      <div className="flex min-h-0 flex-1 flex-col">
         {loadFailure ? (
           <div
             role="alert"
@@ -404,43 +169,107 @@ export function AssistantPage() {
             </Button>
           </div>
         ) : null}
-        {tab === "chat" ? (
-          renderChatTab()
-        ) : tab === "collab" ? (
-          <CollabView agents={sortedAgents} onCreateAgent={() => openAgentCreate("name")} />
-        ) : (
-          renderAgentsTab()
-        )}
-        {deleteTarget ? (
-          <ConfirmDialog
-            title="删除这段对话"
-            onCancel={() => setDeleteTarget(null)}
-            footer={
+        <div className="flex min-h-0 flex-1">
+          <ConversationRail
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            messages={messages}
+            opening={opening}
+            error={error}
+            onOpen={openConversation}
+            onNewConversation={() => void startNewConversation()}
+            onRename={(id, title) => renameConversationTitle(id, title)}
+            onDeleteRequest={(conv) => setDeleteTarget(conv)}
+            hasMore={conversationsHasMore}
+            loadingMore={conversationsLoadingMore}
+            onLoadMore={() => {
+              void loadMoreConversations().catch((err) => {
+                setError(
+                  err instanceof Error && err.message
+                    ? `加载更多失败：${err.message}`
+                    : "加载更多失败",
+                );
+              });
+            }}
+          />
+
+          <section className="flex min-w-0 flex-1 flex-col">
+            {activeConv ? (
               <>
-                <Button
-                  type="button"
-                  onClick={() => setDeleteTarget(null)}
-                  size="md" variant="ghost"
-                >
-                  取消
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void confirmDeleteConversation()}
-                  size="sm" variant="danger"
-                >
-                  删除
-                </Button>
+                {/* 会话顶部状态条：当前智能体 / 模型绑定 / 去模型页。
+                    ChatPage 自己的标题栏负责会话内操作，这里只补全局上下文。 */}
+                <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-soft px-4 ui-caption">
+                  <span className="min-w-0 truncate">与 {activeConv.agent.name} 的会话</span>
+                  <span
+                    className={`ui-chip ${activeAgentBound ? "" : "text-danger"}`}
+                    title={activeAgentBound ? undefined : "还没有绑定模型，发送会失败"}
+                  >
+                    {activeAgentBound ? "模型已绑定" : "未绑定模型"}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ui-hit"
+                      onClick={() => useUiStore.getState().setPage("model")}
+                    >
+                      模型设置
+                    </Button>
+                  </span>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col">
+                  {/* embedded：隐藏 ChatPage 自己的「返回工作区」按钮（返回会切页并卸载会话）。 */}
+                  <ChatPage embedded />
+                </div>
               </>
-            }
-          >
-            <p className="text-ui-sm leading-6">
-              删除「{deleteTarget.title ?? "这段对话"}」？这段对话的消息会一起删除，**不可恢复**；
-              智能体本身与其他对话不受影响。
-            </p>
-          </ConfirmDialog>
-        ) : null}
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+                <EmptyState
+                  className="max-w-[360px]"
+                  title="开始新会话"
+                  desc="每段会话彼此独立保存；也可以从左侧选择历史会话继续。"
+                  actions={
+                    <Button
+                      type="button"
+                      size="md"
+                      variant="primary"
+                      busy={opening}
+                      onClick={() => void startNewConversation()}
+                    >
+                      {opening ? "新建中…" : "新建会话"}
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+          </section>
+        </div>
       </div>
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="删除这段会话"
+          onCancel={() => setDeleteTarget(null)}
+          footer={
+            <>
+              <Button type="button" onClick={() => setDeleteTarget(null)} size="md" variant="ghost">
+                取消
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void confirmDeleteConversation()}
+                size="md" variant="danger"
+              >
+                删除
+              </Button>
+            </>
+          }
+        >
+          <p className="text-ui-sm leading-6">
+            删除「{deleteTitle}」？这段会话的消息会一起删除，不可恢复；
+            其他会话不受影响。
+          </p>
+        </ConfirmDialog>
+      ) : null}
     </PageShell>
   );
 }

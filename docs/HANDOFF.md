@@ -1,14 +1,59 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.140.3.54.10`
+- 当前版本：`d.146.4.85.11`
 - 本轮标签：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
 
-## 0. 2026-11-13 智能体链路修复 + Multi-Agent 流水线（未提交）
+## 0. 2026-11-14 单智能体 + 会话模式重构（分支 `refactor/single-agent`，版本 d.146.4.85.11）
+
+产品口径变了：**全产品只有一个内置智能体「和小鸣」（id `system-assistant`），不可创建 / 修改 / 删除**，
+交互对齐 Codex / Claude Code —— 会话列表 + 当前对话，不再有智能体名册、编辑页与多智能体协作。
+本轮是**破坏性**变更（版本破坏位 146.3 → 146.4），旧的自建智能体数据在服务端首次启动时归并。
+
+**协议层（packages/shared/src/schemas.ts）**
+- 新增 `SYSTEM_AGENT_ID` 与冻结常量 `SYSTEM_AGENT`（`owner_id: null`），shared/server/web 共用这一份定义。
+- 删 `AgentBodySchema`/`AgentBody`（只服务已删的自建接口）。
+- `AgentConversationBodySchema.agentId` 改可选：服务端对缺省/遗留值一律归一到内置智能体。
+
+**服务端（packages/server）**
+- `store.ts`：`SYSTEM_AGENTS` 从 shared `SYSTEM_AGENT` 派生；Store 接口与内存实现删 `createAgent/updateAgent/deleteAgent`；
+  `listAgents` 恒返回单条；`createAgentConversation(userId, _agentId, opts)` 忽略传入 id（兼容旧客户端）、
+  按内置智能体幂等建会话，删「只能给自己的智能体建会话」校验。
+- `sqliteStore.ts`：构造时跑一次迁移（事务）：`conversation_agents` 指向自建智能体的行改挂 `system-assistant` →
+  删旧行 → `DELETE FROM agents WHERE owner_id IS NOT NULL`；异常回滚重抛，重复执行幂等。**会话与消息原文不动，只换归属。**
+- `app.ts`：只留 `GET /api/agents`（只读单条、不下发 `system_prompt`）；`POST /api/agents`、`PUT/DELETE /api/agents/:id`
+  已删除（未匹配 404）；`POST /api/conversations` 的 `agentId` 可选并静默归一。
+
+**前端（packages/web）**
+- `components/AssistantPage.tsx`：446 → 275 行纯会话页。无一级 Tab / 选择页 / 名册 / 编辑页 / 协作视图；新建统一
+  `openAgent(SYSTEM_AGENT_ID, { fresh: true })`；状态条显示「与 X 的会话 + 模型绑定是否就绪 + 模型设置」。
+- `components/assistant/ConversationRail.tsx`：510 → 450 行，扁平会话列表（按最近活动排序、搜索、改名、删除、
+  草稿标记、折叠头像栏、分页），不再按智能体分组。
+- 删除 18 个文件：`assistant/{AgentPicker,AgentRosterView,AgentEditorView,AgentFormPanel,agentTemplates,tabs}`、
+  `AgentFormModal(.test)`、`collaboration/*`、`lib/collaboration/*`。
+- 导航/文案：导航第 8 项「智能体」→「会话」，首页统计卡改会话数，命令面板「新建智能体」→「新建会话」
+  （`PaletteIntentKind: new-session`，由 AssistantPage 消费），设置区导航、空态链接同步。
+- 记忆页去「手动登记智能体 / 选择智能体 / 全部智能体 / 名册降级」；记忆开关只剩「和小鸣」一行；复盘容量固定按它算。
+- 技能页去「给哪个智能体用」下拉；启用/新建/沉淀一律 `assign(SYSTEM_AGENT_ID, …)`；子页签「按智能体」→「已分配」。
+- 插件设置 agent 字段与主窗 chatConfig 桥接固定内置智能体；HITL 卡片去掉「授权作用域」选择（单智能体下两种作用域等价）。
+
+**数据与兼容性注意**
+- 迁移会 `DELETE` 所有 `owner_id` 非 NULL 的 agents 行（不可逆）；生产首启前备份 db。消息/会话保留。
+- 记忆偏好、技能分配、HITL 规则等仍按 agentId 为键存本地，只是 UI 不再暴露别的 key；旧自建智能体的记忆
+  **不会**自动并入内置智能体。
+- 缓存旧 agentId 的老客户端页建会话仍成功（服务端归一），但 WS 流式帧会因 agent 不一致被拒；刷新后恢复。
+
+**门禁**：`pnpm typecheck` 全绿；web 全量 vitest **299 files / 4413 tests**（基线 297/4366，净 +47 例）；
+server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包通过；desktop `node --test` 全绿；
+`pnpm plugin:check` 通过；`pnpm design:audit` 三个断点全门槛通过（脚本页面清单同步「会话」，会话栏头改 h2 拿到
+两级标题大纲，记忆容量标签收回 12 字内）。手工验收：新建/切换/改名/删除会话、模型绑定、记忆页、技能页、
+命令面板「新建会话」、插件设置 agent 字段。
+
+## 0-历史. 2026-11-13 智能体链路修复 + Multi-Agent 流水线（未提交）
 
 两条线并行推进，都在工作区里，**尚未提交**（与同轮安装器/插件卡片改动混在一起，提交时按目录拆分）。
 
@@ -294,7 +339,7 @@ packages/
 ├── shared/src/schemas.ts       # 协议单一真源：Message（enc/cipher/chainKid/n/recalledAt）、
 │                               #   MessagePayload（text/mentions/file/forward/reactions）、WS 事件
 ├── server/src/
-│   ├── app.ts                  # REST：auth/profile/agents/agent conversations/files/team/team activities/e2e
+│   ├── app.ts                  # REST：auth/profile/agents（只读单条）/agent conversations/files/team activities/e2e
 │   ├── ws.ts                   # auth/send_message/agent_chunk|finish|error（人类 IM 与通话信令已删）
 │   ├── store.ts + sqliteStore.ts  # Store 双实现（契约测试双跑）
 │   └── db.ts                   # CREATE TABLE IF NOT EXISTS + 幂等 ALTER 迁移
@@ -315,7 +360,7 @@ packages/
 │   ├── lib/charts/ tone/ wiki/ docs/          # 图表、去 AI 味、Wiki、文档解析
 │   ├── lib/team/                              # 团队共享设置与摘要采集（任务/日程两类、幂等 sourceId、隐私白名单，d.54）
 │   ├── store/{chat,ui,llm,auth,tokenUsage,hitl,registry}.ts
-│   └── components/                            # HomePage、TeamPage、ChatPage（智能体页）、SettingsPage、
+│   └── components/                            # HomePage、TeamPage、AssistantPage（会话页）+ ChatPage、SettingsPage、
 │                                              #   SkillsPage、PluginsPage、MemoryPage、InterfacesPage、
 │                                              #   RegistryPage、InfohubPage、InfohubHomeCard、WikiPanel、
 │                                              #   ToolApprovalModal、ConfirmDialog、AgentStreamBubble 等

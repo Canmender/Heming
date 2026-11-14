@@ -418,9 +418,9 @@ describe("插件页 · 三个 Tab", () => {
       "id",
       "plugins-skills-panel",
     );
-    // 完整技能视图：搜索框与「按智能体 / 技能池」子页签都在（旧的只读摘要已删除）
+    // 完整技能视图：搜索框与「已分配 / 技能池」子页签都在（旧的只读摘要已删除）
     expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("button", { name: /在技能区管理/ })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 

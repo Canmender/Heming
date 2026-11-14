@@ -430,9 +430,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         // 任务区已是「常驻启动面板」，直接填写目标即可运行，不需要先建任务。
         setPage("tasks");
         break;
-      case "new-agent":
-        // 先投意图再切页：AssistantPage 是懒加载页，挂载后才消费意图并打开新建弹窗。
-        setPaletteIntent("agent-create");
+      case "new-chat":
+        // 先投意图再切页：AssistantPage 是懒加载页，挂载后才消费意图并开始一段新会话。
+        setPaletteIntent("new-session");
         setPage("chat");
         break;
       case "notifications":

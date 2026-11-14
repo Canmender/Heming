@@ -7,14 +7,14 @@ import {
 } from "../lib/navPrefs.js";
 
 /**
- * 导航页（固定 8 项：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+ * 导航页（固定 8 项：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
  *
  * 旧的幕僚 / 信息中枢 / 自动化 / 工作流页面字符串仍**保留在类型里**：
  * 旧链接、命令面板与通知中心的跳转、桌宠气泡的 route、插件命令清单里都还可能出现这些
  * 字符串。它们不再有对应页面——`resolvePage` 会折叠到现在的插件页（信息中枢 /
  * 自动化由沙箱 bundle 插件提供，幕僚与工作流入口已下线），保证旧入口不白屏。
  *
- * 智能体页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
+ * 会话页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
  */
 export type Page =
   | "home"
@@ -58,7 +58,7 @@ export type PageView = "board" | "tasks" | "skills" | "interfaces" | "plugins" |
 export type NavPage = Page;
 
 /**
- * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+ * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
  * 快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。
  *
  * 幕僚 / 信息中枢 / 自动化 / 工作流这些旧页面的历史顺序仍认在 `LEGACY_DEFAULT_NAV_ORDERS`
@@ -67,7 +67,7 @@ export type NavPage = Page;
  * 模型路由页已由 magpie 路由组取代、彻底删除，`Page` 类型仍保留这些字符串，
  * 供旧链接、通知跳转使用。
  *
- * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/智能体）→ 能力（插件 + 已装插件页）→
+ * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/会话）→ 能力（插件 + 已装插件页）→
  * 资料（记忆/知识库/模型）→ 系统（设置）。
  */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
@@ -326,7 +326,8 @@ export interface VaultIntent {
  * - `data` 只放跳转所需的定位信息（任务/记忆/插件 id），**不放任何内容正文**。
  */
 export type PaletteIntentKind =
-  | "agent-create"
+  /** 会话页只有一个内置智能体：命令面板「新建会话」→ 直接开一段新对话。 */
+  | "new-session"
   | "notifications"
   /** d.64：命令面板插件命令（target=skill）→ 技能区定位并打开详情。 */
   | "focus-skill"

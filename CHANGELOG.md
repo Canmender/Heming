@@ -2,6 +2,63 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.146.4.85.11（2026-11-14）— 单智能体 + 会话模式：删掉自建智能体与多智能体协作
+
+产品从「智能体平台」收成「一个内置智能体、会话式工作」，对齐 Codex / Claude Code：全产品只有内置的
+「和小鸣」，不可创建、不可修改、不可删除；对话入口只剩会话列表 + 当前对话。**破坏性**：自建智能体的
+写接口（`/api/agents` 的增删改）删除，已有自建智能体的对话会在服务端首次启动时归并到内置智能体，
+多智能体协作（顺序/主管/辩论）整体移除。
+
+**共享协议**
+- `packages/shared/src/schemas.ts`：新增 `SYSTEM_AGENT_ID = "system-assistant"` 与冻结的内置智能体常量
+  `SYSTEM_AGENT`（`owner_id: null`）；删掉只服务于自建接口的 `AgentBodySchema`/`AgentBody`。
+- `AgentConversationBodySchema.agentId` 改为**可选**：产品只剩一个智能体，请求体不再需要它，旧客户端
+  传来的任何值都由服务端静默归一到内置智能体（不再 400）。
+
+**服务端**
+- `store.ts`：`SYSTEM_AGENTS` 由 shared 的 `SYSTEM_AGENT` 派生（保留导出名与空的 `systemPrompt`）；
+  Store 接口与内存实现删除 `createAgent` / `updateAgent` / `deleteAgent`，`listAgents` 恒返回那一条。
+- `createAgentConversation(userId, _agentId, opts)` 忽略传入的 agentId（兼容旧客户端），按内置智能体
+  幂等开新会话；不再做「只能给自己的智能体建会话」校验。
+- `sqliteStore.ts`：构造时执行一次迁移（事务内）——把 `conversation_agents` 里指向自建智能体的行改挂
+  `system-assistant`、删除旧行、`DELETE FROM agents WHERE owner_id IS NOT NULL`；异常回滚并抛出，重复
+  执行幂等。会话与消息原文保留，只换归属。
+- `app.ts`：`GET /api/agents` 保留（只读、恒单元素、永不下发 `system_prompt`）；`POST /api/agents` 与
+  `PUT/DELETE /api/agents/:id` 删除（未匹配 → 404）。`POST /api/conversations` 的 `agentId` 缺省或遗留
+  值都归一到内置智能体。
+
+**前端**
+- `AssistantPage.tsx` 重写为纯会话页（446 → 275 行）：无一级 Tab、无智能体选择/名册/编辑页、无协作视图；
+  左上「会话」+ 会话列表，右上状态条「与 和小鸣 的会话 / 模型绑定状态 / 模型设置」，空态「开始新会话」。
+  新建入口统一走 `openAgent(SYSTEM_AGENT_ID, { fresh: true })`，`opening` 防重。
+- `assistant/ConversationRail.tsx` 扁平化（510 → 450 行）：不再按智能体分组，直接按最近活动排会话；
+  保留搜索/改名/删除/草稿标记/折叠头像栏/分页。
+- 删除 18 个文件：`assistant/{AgentPicker,AgentRosterView,AgentEditorView,AgentFormPanel,agentTemplates,tabs}`、
+  `AgentFormModal(.test)`、`collaboration/{CollabView,CollabTurnCard,CollabView.test}`、`lib/collaboration/**`
+  （引擎/运行/历史/类型与三个测试）。
+- 导航与文案：导航轨第 8 项「智能体」→「会话」，首页统计卡「我的智能体」→「会话」（改数会话数），
+  命令面板「新建智能体」→「新建会话」（`paletteIntent: new-session`），设置区导航标签、空态链接同步。
+- 记忆页：删除「手动登记智能体」「选择智能体/全部智能体」下拉与名册失败降级，页头静态显示内置智能体；
+  记忆开关只保留「和小鸣」一行；复盘容量固定按内置智能体算（内部偏好/记忆仍按 agentId 为键存储）。
+- 技能页：删除名册拉取与「给哪个智能体用」下拉，启用/新建/沉淀一律 `assign(SYSTEM_AGENT_ID, …)`；
+  子页签「按智能体」→「已分配」。
+- 插件设置的 agent 字段与主窗 chatConfig 桥接固定为内置智能体（不再拉名册）；HITL 卡片不再暴露
+  「所有智能体共用 / 按智能体分别授权」作用域选择（单智能体下两者等价），改为静态说明。
+- `scripts/design-audit.mjs` 的页面清单「智能体」同步为「会话」；会话栏栏头改成 `<h2>会话列表</h2>`，
+  读屏能拿到「会话 → 会话列表」两级大纲，设计审计的「标题层级」门槛复绿。
+
+**破坏性与数据影响**
+- 自建智能体行会被服务端启动迁移删除（不可逆），其会话与消息保留、归到内置智能体；生产首启前请备份 db。
+- 记忆偏好、技能分配、HITL 规则等按 agentId 存的键仍留在本地，只是 UI 不再展示/操作非内置智能体的 key；
+  旧自建智能体的记忆不会自动并入内置智能体。
+- 缓存了旧 agentId 的老客户端页面在服务端升级后建会话仍成功，但其 WS 流式帧会因 agent 不一致被拒；
+  刷新/重新拉 `GET /api/agents` 即恢复。
+
+**验证**：`pnpm typecheck` 全绿；web 全量 vitest **299 files / 4413 tests 全绿**（基线 297/4366，净 +47 例）；
+server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包通过；desktop `node --test` 全绿；
+`pnpm plugin:check` 通过；`pnpm design:audit` 三个断点全门槛通过（会话栏补了 h2、记忆容量标签收回 12 字内）；
+手工验收（新建/切换/改名/删除会话、模型绑定、记忆页、技能页、命令面板「新建会话」、插件设置 agent 字段）。
+
 ## d.146.3.85.11（2026-11-14）— 审计报告结项：加 §8 总账，修标题层级
 
 报告 `docs/DESIGN-AUDIT-2026-11-14.md` 从「一份审计」变成「审计 + 实施记录 + 结项」，本版只动文档。

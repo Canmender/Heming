@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionTab } from "../lib/sessionState.js";
 import { useUiStore } from "../store/ui.js";
-import type { Agent, SharedFileMeta } from "@heming/shared";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID, type SharedFileMeta } from "@heming/shared";
 import { WikiPanel } from "./WikiPanel.js";
 import {
   COLD_MIN_INJECTED,
@@ -43,7 +43,6 @@ import { lastVaultBoot, syncVaultMemoryNow } from "../lib/vault/boot.js";
 import { recallRecorder, type RecallRecorder } from "../lib/memory/runRecorder.js";
 import { buildMemoryExport } from "../lib/memory/exportBundle.js";
 import { hasDesktopExportBridge, saveExportFile } from "../lib/export/file.js";
-import { listAgents } from "../lib/agentsApi.js";
 import { useLlmStore } from "../store/llm.js";
 import {
   getLastReviewReport,
@@ -211,7 +210,7 @@ function loadLayers(memory: MemoryStore, agentId: string): Layers {
   const globalSemantic = memory.semanticGlobal().filter(isNotVault);
   const working = Object.values(data?.working ?? {})
     .flat()
-    .filter((turn) => !agentId || turn.agentId === agentId)
+    .filter((turn) => turn.agentId === agentId)
     .filter((turn) => {
       const at = Date.parse(turn.at);
       return Number.isFinite(at) && at >= now - WORKING_TTL_MS;
@@ -689,10 +688,8 @@ export function MemoryPage({
     activeIndex: tabOrder.indexOf(tab),
     onChange: (index) => setTab(tabOrder[index]),
   });
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [manualAgents, setManualAgents] = useState<Agent[]>([]);
-  const [rosterError, setRosterError] = useState("");
-  const [agentId, setAgentId] = useState("");
+  /** 全产品唯一内置智能体：记忆仍按 agentId 存，UI 不再让用户切换。 */
+  const agentId = SYSTEM_AGENT_ID;
   /** 本机存储是可变单例：每次写操作后自增，驱动视图重算。 */
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
@@ -709,7 +706,6 @@ export function MemoryPage({
       // 语义条目在「数据库」页签（全局公用桶）渲染，情景/短期在「智能体」页签，
       // 所以按命中层选页签——否则切过去看不到那条。
       setTab(paletteIntent.data?.layer === "semantic" ? "database" : "agents");
-      setAgentId(""); // 不限定智能体：命中的条目不论在哪个桶都看得见
       setHighlightMemoryId(id);
     }
     consumePaletteIntent();
@@ -734,35 +730,8 @@ export function MemoryPage({
     return () => window.clearTimeout(timer);
   }, [highlightMemoryId]);
 
-  // 名册加载：既给首载用，也给失败横幅的「重试」用（失败不是空态，必须 alert + 可重试）。
-  const loadRoster = useCallback(async () => {
-    setRosterError("");
-    try {
-      const list = await listAgents();
-      setAgents(list);
-    } catch (err: unknown) {
-      // 名册失败只降级选择器与开关表，记忆页本身照常可用
-      setRosterError(
-        `智能体名册加载失败，已降级为「全部智能体」：${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadRoster();
-  }, [loadRoster]);
-
   const layers = useMemo(() => loadLayers(memory, agentId), [memory, agentId, tick]);
   const settings = memory.getSettings();
-  const agentName = useCallback(
-    (id: string) => {
-      const found = agents.find((a) => a.id === id) ?? manualAgents.find((a) => a.id === id);
-      return found?.name ?? id;
-    },
-    [agents, manualAgents],
-  );
 
   // 短期记忆
   const groups = useMemo(() => groupWorking(layers.working), [layers.working]);
@@ -852,21 +821,8 @@ export function MemoryPage({
 
   const kbEntries = kb.list();
 
-  // 智能体记忆开关
-  const [pendingDbOff, setPendingDbOff] = useState("");
-  const [manualAgentId, setManualAgentId] = useState("");
-  const [manualAgentName, setManualAgentName] = useState("");
-  const [manualMsg, setManualMsg] = useState("");
-
-  const displayAgents = useMemo(() => {
-    const map = new Map<string, Agent>();
-    for (const agent of agents) map.set(agent.id, agent);
-    for (const agent of manualAgents) if (!map.has(agent.id)) map.set(agent.id, agent);
-    for (const id of Object.keys(prefs.all())) {
-      if (!map.has(id)) map.set(id, { id, owner_id: "", name: id, avatar: null, description: "" });
-    }
-    return [...map.values()];
-  }, [agents, manualAgents, prefs, tick]);
+  // 智能体记忆开关（唯一内置智能体；偏好仍以 agentId 为键存储）
+  const [pendingDbOff, setPendingDbOff] = useState(false);
 
   const onClearConversation = (conversationId: string, label: string) => {
     setClearTarget({ conversationId, label: conversationId || label || "未命名会话" });
@@ -981,9 +937,8 @@ export function MemoryPage({
   };
 
   const onRecall = () => {
-    // 工作记忆按会话召回：取当前选中智能体最近一轮所在会话
     const conversationId =
-      layers.working.find((turn) => !agentId || turn.agentId === agentId)?.conversationId ?? "";
+      layers.working.find((turn) => turn.agentId === agentId)?.conversationId ?? "";
     // 预览与真实生成走同一条路：把个性化账本与知识库选项一起传进去，
     // 否则「预览里看到的排序/条目」和「实际注入的」会是两套（体感缺口）。
     const recalled = recallMemory(
@@ -1049,65 +1004,29 @@ export function MemoryPage({
   ].sort((a, b) => (usage[b.id]?.injected ?? 0) - (usage[a.id]?.injected ?? 0));
 
 
-  const onAddManualAgent = () => {
-    const id = manualAgentId.trim();
-    const name = manualAgentName.trim() || id;
-    if (!id) {
-      setManualMsg("请填写智能体 ID");
-      return;
-    }
-    if (displayAgents.some((agent) => agent.id === id)) {
-      setManualMsg("该智能体已在列表中");
-      return;
-    }
-    setManualAgents((list) => [...list, { id, owner_id: "", name, avatar: null, description: "" }]);
-    setManualAgentId("");
-    setManualAgentName("");
-    setManualMsg(`已添加：${name}`);
-  };
-
   const setPref = (id: string, patch: Partial<AgentMemoryPrefs>) => {
     prefs.set(id, patch);
     bump();
   };
 
-  const onPersonalDbToggle = (id: string, next: boolean) => {
+  const onPersonalDbToggle = (next: boolean) => {
     if (!next) {
       // 个人知识库默认允许使用：关闭必须二次确认
-      setPendingDbOff(id);
+      setPendingDbOff(true);
       return;
     }
-    setPendingDbOff("");
-    setPref(id, { personalDb: true });
+    setPendingDbOff(false);
+    setPref(agentId, { personalDb: true });
   };
 
-  /** 写入口统一门控：需选定具体智能体，且记忆总开关（enabled）为开。 */
-  const writeReady = !!agentId && settings.enabled;
+  /** 写入口统一门控：记忆总开关（enabled）为开。 */
+  const writeReady = settings.enabled;
 
   const writeHint = (
     <>
       {!settings.enabled && (
         <div className={`mt-2 ${hintCls}`}>
           关闭后不再记录，也不向智能体注入记忆；已有记忆仍可查看、导出与删除
-        </div>
-      )}
-      {!agentId && (
-        <div className={`mt-2 ${hintCls} flex flex-wrap items-center gap-2`}>
-          <span>添加记忆与立即整理需要先选择一个具体智能体（记忆按智能体隔离）：</span>
-          {/* 选择器不只在页头：按钮就在这儿，让用户就地选，而不是跑到右上角找（审计 P1-5） */}
-          <select
-            aria-label="选择要添加记忆的智能体"
-            value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            className="ui-input w-auto"
-          >
-            <option value="">选择智能体…</option>
-            {[...agents, ...manualAgents].map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
-          </select>
         </div>
       )}
     </>
@@ -1168,7 +1087,7 @@ export function MemoryPage({
                   <span className="truncate">会话 {clip(key, 24)}</span>
                 </button>
                 <span className="text-ui-xs text-muted">
-                  {group.agentIds.map((id) => agentName(id)).join("、")} · {group.turns.length} 轮
+                  {SYSTEM_AGENT.name} · {group.turns.length} 轮
                 </span>
                 <span className="ml-auto text-ui-xs text-muted">
                   最近 {group.latestAt.slice(5, 16).replace("T", " ")}
@@ -1195,7 +1114,6 @@ export function MemoryPage({
                       <div className="text-ui-xs text-muted">
                         {turn.at.slice(11, 16)}
                         {turn.partial && " · 中断"}
-                        {!agentId && ` · ${agentName(turn.agentId)}`}
                       </div>
                       <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-body">
                         用户：{turn.userText}
@@ -1645,9 +1563,6 @@ export function MemoryPage({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-ui-md font-semibold">{entry.key}</span>
                         {entry.pinned && <span className={badgeCls}>置顶</span>}
-                        {!agentId && (
-                          <span className="text-ui-xs text-muted">{agentName(entry.agentId)}</span>
-                        )}
                       </div>
                       <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-body">
                         {entry.value}
@@ -1729,7 +1644,7 @@ export function MemoryPage({
                 <div className="min-w-0">
                   <div className="text-ui-xs text-muted">
                     {entry.at.slice(0, 10)}
-                    {!agentId && ` · ${agentName(entry.agentId)}`} · {entry.sourceTurns} 轮
+                    {` · ${entry.sourceTurns} 轮`}
                   </div>
                   <div className="mt-0.5 break-words text-ui-sm text-body">{entry.summary}</div>
                   {personalNote(usage[entry.id]) && (
@@ -1902,7 +1817,6 @@ export function MemoryPage({
                   <div className="mt-0.5 break-words text-ui-sm text-body">{row.body}</div>
                   <div className="mt-0.5 text-ui-xs text-muted">
                     {row.layer}
-                    {!agentId && ` · ${agentName(row.agentId)}`}
                     {` · ${personalNote(usage[row.id])}`}
                   </div>
                 </div>
@@ -2082,25 +1996,21 @@ export function MemoryPage({
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewMsg, setReviewMsg] = useState("");
 
-  /** 容量条按「当前选中智能体」算；没选就显示全体上限说明。 */
+  /** 容量条按唯一内置智能体算。 */
   const reviewAgentId = agentId;
-  const capacity = reviewAgentId ? reviewCapacity(reviewAgentId) : null;
+  const capacity = reviewCapacity(reviewAgentId);
 
   const patchReview = (patch: Partial<typeof reviewSettings>) => {
     const next = setReviewSettings(patch);
     setReviewSettingsState(next);
   };
 
-  /** 手动复盘：拿该智能体最近一轮对话当素材；没有轮次就明确提示，不空跑模型。 */
+  /** 手动复盘：拿内置智能体最近一轮对话当素材；没有轮次就明确提示，不空跑模型。 */
   const doReviewNow = async () => {
-    if (!reviewAgentId) {
-      setReviewMsg("请先在上方选择一个智能体");
-      return;
-    }
     const turns = memory.working("", reviewAgentId);
     const window = turns.slice(-6);
     if (!window.length) {
-      setReviewMsg("该智能体还没有可复盘的对话（记忆区「短期记忆」里能看到）");
+      setReviewMsg(`「${SYSTEM_AGENT.name}」还没有可复盘的对话（记忆区「短期记忆」里能看到）`);
       return;
     }
     setReviewBusy(true);
@@ -2190,7 +2100,7 @@ export function MemoryPage({
       {capacity && (
         <div className="mt-3">
           <div className="flex items-center justify-between text-ui-xs text-muted">
-            <span>语义记忆容量（该智能体）</span>
+            <span>语义记忆容量</span>
             <span>
               {capacity.used} / {capacity.limit} 字符
             </span>
@@ -2226,133 +2136,83 @@ export function MemoryPage({
 
   /* -------------------------------------------------------- 智能体开关 */
 
+  const pref = prefs.get(agentId);
   const agentPrefsCard = (
     <section aria-label="智能体记忆开关" className={`${cardCls} mt-3`}>
       <div className="ui-section-title">智能体记忆开关</div>
       <div className={`mt-1 ${hintCls}`}>
-        短期与长期记忆默认关闭，需要为每个智能体单独开启；个人数据库默认允许。
+        短期与长期记忆默认关闭；个人数据库默认允许。
       </div>
-      {displayAgents.length === 0 && (
-        <div className={`mt-3 ${hintCls}`}>名册为空：可在下方手动登记智能体 ID</div>
-      )}
-      {displayAgents.length > 0 && (
-        <table className="ui-table mt-3">
-          <thead>
-            <tr>
-              <th>智能体</th>
-              <th className="text-center">短期记忆</th>
-              <th className="text-center">长期记忆</th>
-              <th className="text-center">个人数据库</th>
+      <table className="ui-table mt-3">
+        <thead>
+          <tr>
+            <th>智能体</th>
+            <th className="text-center">短期记忆</th>
+            <th className="text-center">长期记忆</th>
+            <th className="text-center">个人数据库</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="align-middle">
+            <td className="py-2 pr-2">
+              {/* 只显示名称；原始 id 收进 title，需要排查时悬停可见（d.77）。 */}
+              <div className="ui-body-sm font-semibold" title={`智能体 ID：${SYSTEM_AGENT.id}`}>
+                {SYSTEM_AGENT.name}
+              </div>
+            </td>
+            <td className="py-2 text-center">
+              <Switch
+                label={`${SYSTEM_AGENT.name} 短期记忆`}
+                checked={pref.shortTerm}
+                onChange={(next) => setPref(agentId, { shortTerm: next })}
+              />
+            </td>
+            <td className="py-2 text-center">
+              <Switch
+                label={`${SYSTEM_AGENT.name} 长期记忆`}
+                checked={pref.longTerm}
+                onChange={(next) => setPref(agentId, { longTerm: next })}
+              />
+            </td>
+            <td className="py-2 text-center">
+              <Switch
+                label={`${SYSTEM_AGENT.name} 个人数据库`}
+                checked={pref.personalDb}
+                onChange={onPersonalDbToggle}
+              />
+            </td>
+          </tr>
+          {pendingDbOff && (
+            <tr className="bg-subtle-2">
+              <td colSpan={4} className="px-2 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="ui-body-sm text-warn">
+                    关闭后「{SYSTEM_AGENT.name}」将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
+                  </span>
+                  <Button
+                    type="button"
+                    aria-label={`确认关闭 ${SYSTEM_AGENT.name} 个人数据库`}
+                    onClick={() => {
+                      setPref(agentId, { personalDb: false });
+                      setPendingDbOff(false);
+                    }}
+                    size="sm" variant="ghost"
+                  >
+                    确认关闭
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setPendingDbOff(false)}
+                    size="sm" variant="ghost"
+                  >
+                    取消
+                  </Button>
+                </div>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {displayAgents.map((agent) => {
-              const pref = prefs.get(agent.id);
-              return (
-                <Fragment key={agent.id}>
-                  <tr className="align-middle">
-                    <td className="py-2 pr-2">
-                      {/* 只显示名称；原始 id（含 UUID）收进 title，需要排查时悬停可见（d.77）。 */}
-                      <div className="ui-body-sm font-semibold" title={`智能体 ID：${agent.id}`}>
-                        {agent.name}
-                      </div>
-                    </td>
-                    <td className="py-2 text-center">
-                      <Switch
-                        label={`${agent.name} 短期记忆`}
-                        checked={pref.shortTerm}
-                        onChange={(next) => setPref(agent.id, { shortTerm: next })}
-                      />
-                    </td>
-                    <td className="py-2 text-center">
-                      <Switch
-                        label={`${agent.name} 长期记忆`}
-                        checked={pref.longTerm}
-                        onChange={(next) => setPref(agent.id, { longTerm: next })}
-                      />
-                    </td>
-                    <td className="py-2 text-center">
-                      <Switch
-                        label={`${agent.name} 个人数据库`}
-                        checked={pref.personalDb}
-                        onChange={(next) => onPersonalDbToggle(agent.id, next)}
-                      />
-                    </td>
-                  </tr>
-                  {pendingDbOff === agent.id && (
-                    <tr className="bg-subtle-2">
-                      <td colSpan={4} className="px-2 py-2" >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="ui-body-sm text-warn">
-                            关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
-                          </span>
-                          <Button
-                            type="button"
-                            aria-label={`确认关闭 ${agent.name} 个人数据库`}
-                            onClick={() => {
-                              setPref(agent.id, { personalDb: false });
-                              setPendingDbOff("");
-                            }}
-                            size="sm" variant="ghost"
-                          >
-                            确认关闭
-                          </Button>
-                          <Button
-                            type="button"
-                            onClick={() => setPendingDbOff("")}
-                            size="sm" variant="ghost"
-                          >
-                            取消
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-      <div className="mt-3 border-t border-line-soft pt-3">
-        <div className={hintCls}>名册里没有的智能体，可手动登记 ID 与名称（偏好仍按 ID 持久化）</div>
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className={`${labelCls} w-[150px]`}>
-            智能体 ID
-            <input
-              aria-label="智能体 ID"
-              className={inputSmCls}
-              value={manualAgentId}
-              maxLength={64}
-              onChange={(e) => {
-                setManualAgentId(e.target.value);
-                setManualMsg("");
-              }}
-            />
-          </label>
-          <label className={`${labelCls} w-[150px]`}>
-            名称
-            <input
-              aria-label="智能体名称"
-              className={inputSmCls}
-              value={manualAgentName}
-              maxLength={32}
-              onChange={(e) => {
-                setManualAgentName(e.target.value);
-                setManualMsg("");
-              }}
-            />
-          </label>
-          <Button type="button" onClick={onAddManualAgent} size="md" variant="ghost">
-            添加
-          </Button>
-          {manualMsg && (
-            <span role="status" className={`${hintCls} pb-1.5`}>
-              {manualMsg}
-            </span>
           )}
-        </div>
-      </div>
+        </tbody>
+      </table>
     </section>
   );
 
@@ -2440,39 +2300,15 @@ export function MemoryPage({
       width="wide"
       title="记忆"
       actions={
-        <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
           <span>智能体</span>
-          <select
-            aria-label="选择智能体"
-            value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            className="ui-input w-auto"
-          >
-            <option value="">全部智能体</option>
-            {[...agents, ...manualAgents].map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
-          </select>
-        </label>
+          <span className="ui-chip">{SYSTEM_AGENT.name}</span>
+        </div>
       }
       headerExtra={
         <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
           {/* 标签栏与内容同一条 1200 基线：PageShell 的 wide 档负责内容，这里只补页头内边距。 */}
           <div className="mx-auto w-full max-w-[1200px]">
-          {rosterError && (
-            <div className="mb-2 flex items-center gap-2">
-              {/* 加载失败是「失败」不是「空」：用 alert 断言式播报，并给可重试入口。 */}
-              <p role="alert" className="ui-alert ui-alert-warn min-w-0 flex-1">
-                {rosterError}
-              </p>
-              <Button type="button" size="sm" variant="ghost" onClick={() => void loadRoster()}>
-                重试
-              </Button>
-            </div>
-          )}
-
           {/* 上侧横向标签页：选中项白底、下边框与内容区连成一体（与设置页同一视觉语言） */}
           <div role="tablist" aria-label="记忆分区" className={PAGE_TABLIST} onKeyDown={tabs.onKeyDown}>
             {tabOrder.map((key, index) => {

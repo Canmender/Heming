@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 import type {
   User,
   Message,
@@ -83,14 +84,21 @@ export interface TeamTaskUpdateInput {
 }
 
 /**
- * 系统预设 agent 元数据单一真源：内存注册表与 sqlite agents 表 upsert 共用，
- * seedPreset 侧的 SYSTEM_AGENT_NAME 亦由此派生，避免三处字面量漂移。
+ * 系统预设 agent 元数据单一真源：内存注册表与 sqlite agents 表 upsert 共用。
+ * 产品决策（单智能体）：全产品唯一内置智能体，元数据从 shared 的 SYSTEM_AGENT 派生，
+ * 不再另立字面量；systemPrompt 是部署侧内部字段（sqlite 落 system_prompt 列，永不进 API）。
  */
 export const SYSTEM_AGENTS: Record<
   string,
   { name: string; avatar: string | null; description: string; systemPrompt: string }
 > = {
-  "system-assistant": { name: "和小鸣", avatar: null, description: "和鸣官方预设智能体", systemPrompt: "" },
+  [SYSTEM_AGENT_ID]: {
+    name: SYSTEM_AGENT.name,
+    avatar: SYSTEM_AGENT.avatar ?? null,
+    description: SYSTEM_AGENT.description,
+    // 系统提示词是服务端部署侧字段：当前版本为空串（客户端本地提示词不落库）。
+    systemPrompt: "",
+  },
 };
 
 export interface Store {
@@ -108,7 +116,8 @@ export interface Store {
   updateProfile(userId: string, patch: { displayName: string; avatar?: string }): User;
   /**
    * 建智能体一对一会话（幂等，已存在则返回原会话 id）。
-   * agent 必须存在于名册；自建 agent 仅属主可开，系统预设 agent 谁都能开。
+   * 产品只有唯一内置智能体：`agentId` 参数仅为旧客户端兼容而保留——**忽略传入值**，
+   * 一律挂 `SYSTEM_AGENT_ID`（旧版自建 agent id 静默归一，不报错）。
    */
   createAgentConversation(
     userId: string,
@@ -152,15 +161,10 @@ export interface Store {
   /** 全部已登记设备公钥 { [userId]: devices[] }（GET /api/e2e/keys，登录可读）。 */
   listE2eKeys(): Record<string, E2eDeviceKeys[]>;
   /**
-   * 智能体名册：用户自建 + 已播种的系统 agent（未播种时仅用户自建）。
+   * 智能体名册：恒为唯一内置智能体（`SYSTEM_AGENT_ID`）的单元素数组。
    * 返回结构不含 system_prompt（部署边界：系统提示词永不进 API）。
    */
   listAgents(): Agent[];
-  createAgent(ownerId: string, body: { name: string; avatar?: string | null; description: string }): Agent;
-  /** owner_id IS NULL（系统）或非 ownerId → 抛 "forbidden"；不存在 → "agent not found"。 */
-  updateAgent(id: string, ownerId: string, patch: { name?: string; avatar?: string | null; description?: string }): Agent;
-  /** 权限同 updateAgent；删除同时清理 conversation_agents 关联。 */
-  deleteAgent(id: string, ownerId: string): void;
   // —— M4 共享文件（app.ts 内存 Map 迁入 Store 的持久化契约，双实现同语义）——
   /** 落库一个共享文件（元数据 + base64 内容），返回入参 meta。 */
   addFile(meta: SharedFileMeta, contentBase64: string): SharedFileMeta;
@@ -311,9 +315,10 @@ export function createMemoryStore(): Store {
   >();
   const messages = new Map<string, Message[]>();
   // 智能体名册（closure 级，随 store 实例隔离——与 users/conversations 同层）。
-  // 系统 agent 不在此预置：由 ensurePresetGroup 从 SYSTEM_AGENTS 登记（对齐 sqlite 的
-  // INSERT ... ON CONFLICT DO UPDATE），未播种时两实现 listAgents 均不含系统 agent。
+  // 单智能体产品：构造即登记唯一内置智能体（与 sqlite 启动时 ensureSystemAgents 同口径），
+  // 保证任何时候 listAgents / createAgentConversation 都有且只有「和小鸣」。
   const agents = new Map<string, Agent>();
+  agents.set(SYSTEM_AGENT_ID, { ...SYSTEM_AGENT });
   // 共享文件（M4：app.ts 闭包 Map 迁入 Store——与 users/messages 同层的 store 实例级资源）
   const files = new Map<string, { meta: SharedFileMeta; contentBase64: string }>();
   // E2E 设备公钥（Task 2）：userId →（ikEcdh → 设备公钥包）；Map 插入序即登记序
@@ -421,20 +426,18 @@ export function createMemoryStore(): Store {
       users.set(userId, { user, passwordHash: row.passwordHash });
       return user;
     },
-    createAgentConversation(userId, agentId, options = {}) {
-      const agent = agents.get(agentId);
-      if (!agent) throw new Error("agent not found");
-      // 只能和自己名下的智能体私聊：系统预设 agent（owner_id 为 null）属于公共资源，
-      // 允许任何人私聊；自建 agent 仅属主可开，避免拿别人的 agent 当自己的聊天对象。
-      if (agent.owner_id !== null && agent.owner_id !== userId) {
-        throw new Error("not your agent");
-      }
-      // 旧行为（fresh 缺省）：同一用户 × 同一 agent 幂等复用；`fresh: true` 则每次新开一段
+    createAgentConversation(userId, _agentId, options = {}) {
+      mustUser(userId);
+      // 单智能体产品：忽略传入 agentId（旧客户端仍可能传自建 agent id），一律挂唯一内置智能体。
+      // 不再有名册存在性 / 属主校验——自建智能体能力已删除，旧 id 静默归一。
+      const agent = agents.get(SYSTEM_AGENT_ID)!;
+      // 旧行为（fresh 缺省）：同一用户 × 唯一智能体幂等复用；`fresh: true` 则每次新开一段
       // （Claude Code 式「同一智能体多段对话」；老客户端/旧链接不受影响）。
       const title = (options.title ?? "").trim().slice(0, 80);
       if (!options.fresh) {
         const found = [...conversations].find(
-          ([, c]) => c.kind === "agent" && c.agentPeerId === agentId && c.members.includes(userId),
+          ([, c]) =>
+            c.kind === "agent" && c.agentPeerId === SYSTEM_AGENT_ID && c.members.includes(userId),
         );
         if (found) return { id: found[0], type: "agent", agent };
       }
@@ -442,7 +445,7 @@ export function createMemoryStore(): Store {
       conversations.set(id, {
         members: [userId],
         kind: "agent",
-        agentPeerId: agentId,
+        agentPeerId: SYSTEM_AGENT_ID,
         ...(title ? { title } : {}),
       });
       messages.set(id, []);
@@ -452,8 +455,8 @@ export function createMemoryStore(): Store {
       const out: Conversation[] = [];
       for (const [id, conv] of conversations) {
         if (!conv.members.includes(userId)) continue;
-        // 智能体一对一：对方是名册项而非 users 行，取不到（agent 被删）就不出这条会话——
-        // 宁可不显示，也不给前端一个没有 agent 字段的半截对象。
+        // 智能体一对一：对方是唯一内置智能体（名册项而非 users 行）；兜底取不到就不出这条
+        // 会话——宁可不显示，也不给前端一个没有 agent 字段的半截对象。
         const agent = conv.agentPeerId ? agents.get(conv.agentPeerId) : undefined;
         if (agent)
           out.push({
@@ -545,46 +548,9 @@ export function createMemoryStore(): Store {
       return out;
     },
     listAgents() {
-      return [...agents.values()];
-    },
-    createAgent(ownerId, body) {
-      mustUser(ownerId);
-      const agent: Agent = {
-        id: randomUUID(),
-        owner_id: ownerId,
-        name: body.name,
-        avatar: body.avatar ?? null,
-        description: body.description,
-      };
-      agents.set(agent.id, agent);
-      return agent;
-    },
-    updateAgent(id, ownerId, patch) {
-      const cur = agents.get(id);
-      if (!cur) throw new Error("agent not found");
-      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
-      const next: Agent = {
-        ...cur,
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-      };
-      agents.set(id, next);
-      return next;
-    },
-    deleteAgent(id, ownerId) {
-      const cur = agents.get(id);
-      if (!cur) throw new Error("agent not found");
-      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
-      agents.delete(id);
-      // 同步清理指向该 agent 的一对一会话（sqlite 侧对应 DELETE conversation_agents；
-      // 会话行本身靠 INNER JOIN 自然消失，这里需要显式删，避免留下无法展示的孤儿）。
-      for (const [convId, conv] of conversations) {
-        if (conv.agentPeerId === id) {
-          conversations.delete(convId);
-          messages.delete(convId);
-        }
-      }
+      // 单智能体产品：名册恒为唯一内置智能体（构造时已登记，此处再兜一层）。
+      const agent = agents.get(SYSTEM_AGENT_ID);
+      return agent ? [agent] : [];
     },
     addFile(meta, contentBase64) {
       files.set(meta.id, { meta, contentBase64 });

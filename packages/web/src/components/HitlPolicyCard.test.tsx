@@ -53,12 +53,11 @@ describe("HitlPolicyCard", () => {
     expect(JSON.parse(storage.getItem(HITL_KEY) as string).floor).toBe("write");
   });
 
-  it("改授权作用域即时落盘", () => {
+  it("不再暴露多智能体授权作用域选择（单内置智能体）", () => {
     render(<HitlPolicyCard policyStore={store} storage={storage} />);
 
-    fireEvent.change(screen.getByLabelText("授权作用域"), { target: { value: "per-agent" } });
-
-    expect(store.get().scope).toBe("per-agent");
+    expect(screen.queryByLabelText("授权作用域")).toBeNull();
+    expect(screen.getByText(/规则与「本会话授权」都只对它生效/)).toBeInTheDocument();
   });
 
   it("没有「全部放行」档（它与自我修改工具组合后等于任意代码静默执行）", () => {

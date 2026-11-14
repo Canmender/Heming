@@ -21,13 +21,13 @@ beforeEach(() => {
 });
 
 describe("RecentConversations", () => {
-  it("空态：标题 + 去智能体页的按钮（不含解释句）", () => {
+  it("空态：标题 + 去会话页的按钮（不含解释句）", () => {
     render(<RecentConversations />);
     const card = screen.getByRole("region", { name: "最近对话" });
     expect(within(card).getByText(/还没有对话/)).toBeInTheDocument();
     // d.142：空态只说缺什么 + 给一个行动，不再写「挑一个智能体，当成同事来用」这类欢迎句。
     expect(card.textContent).not.toMatch(/当成同事|挑一个智能体/);
-    fireEvent.click(within(card).getByRole("button", { name: "去智能体页" }));
+    fireEvent.click(within(card).getByRole("button", { name: "去会话页" }));
     expect(useUiStore.getState().page).toBe("chat");
   });
 

@@ -373,7 +373,7 @@ describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
     goTab("导航");
     const region = screen.getByRole("region", { name: "导航顺序" });
     const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
-    const expected = ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"];
+    const expected = ["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"];
     expect(labels).toHaveLength(8);
     for (const [index, name] of expected.entries()) expect(labels[index]).toContain(name);
     expect(screen.queryByRole("button", { name: /^上移 / })).not.toBeInTheDocument();

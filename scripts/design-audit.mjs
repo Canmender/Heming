@@ -84,7 +84,7 @@ if (WIDTHS.length === 0) {
 const PAGES = [
   ["主页", "home"],
   ["团队", "team"],
-  ["智能体", "chat"],
+  ["会话", "chat"],
   ["插件", "plugins"],
   ["记忆", "memory"],
   ["知识库", "vault"],

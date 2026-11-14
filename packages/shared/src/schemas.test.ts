@@ -13,7 +13,8 @@ import {
   UpdateProfileBodySchema,
   UserSchema,
   AgentSchema,
-  AgentBodySchema,
+  SYSTEM_AGENT,
+  SYSTEM_AGENT_ID,
   E2eDeviceKeysSchema,
   ReencryptBodySchema,
   TeamActivityInputSchema,
@@ -85,9 +86,12 @@ describe("Conversation 标题与多段会话字段（d.128）", () => {
   });
 
   it("AgentConversationBodySchema 支持 fresh/title；UpdateConversationBodySchema 只收 title", () => {
+    // 单智能体后 agentId 可选（旧客户端仍可带；空串非法）。
+    expect(AgentConversationBodySchema.safeParse({}).success).toBe(true);
     expect(AgentConversationBodySchema.safeParse({ agentId: "a1" }).success).toBe(true);
     expect(AgentConversationBodySchema.safeParse({ agentId: "a1", fresh: true, title: "t" }).success).toBe(true);
     expect(AgentConversationBodySchema.safeParse({ agentId: "a1", fresh: "yes" }).success).toBe(false);
+    expect(AgentConversationBodySchema.safeParse({ agentId: "" }).success).toBe(false);
     expect(UpdateConversationBodySchema.safeParse({ title: "" }).success).toBe(true);
     expect(UpdateConversationBodySchema.safeParse({ title: "x".repeat(81) }).success).toBe(false);
     expect(UpdateConversationBodySchema.safeParse({}).success).toBe(false);
@@ -179,12 +183,16 @@ describe("会话与智能体", () => {
     expect(ConversationSchema.safeParse({ type: "group", id: "c1", name: "g", memberCount: 1 }).success).toBe(false);
   });
 
-  it("AgentConversationBody / AgentSchema / AgentBody", () => {
+  it("AgentConversationBody / AgentSchema", () => {
     expect(AgentConversationBodySchema.safeParse({ agentId: "a1" }).success).toBe(true);
-    expect(AgentConversationBodySchema.safeParse({ peerId: "u1" }).success).toBe(false);
+    expect(AgentConversationBodySchema.safeParse({}).success).toBe(true);
     expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "n", avatar: null, description: "" }).success).toBe(true);
-    expect(AgentBodySchema.safeParse({ name: "n" }).success).toBe(true);
-    expect(AgentBodySchema.safeParse({ name: "" }).success).toBe(false);
+  });
+
+  it("唯一内置智能体常量自洽", () => {
+    expect(SYSTEM_AGENT.id).toBe(SYSTEM_AGENT_ID);
+    expect(SYSTEM_AGENT.owner_id).toBeNull();
+    expect(AgentSchema.safeParse(SYSTEM_AGENT).success).toBe(true);
   });
 
   it("ConversationSchema 拒绝 unreadCount 负数", () => {

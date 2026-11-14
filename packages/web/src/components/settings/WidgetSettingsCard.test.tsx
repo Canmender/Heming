@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { WidgetSettingsCard } from "./WidgetSettingsCard.js";
 import { resetWidgetsStore } from "../../lib/widgets/store.js";
-import { useChatStore } from "../../store/chat.js";
 import { useUiStore } from "../../store/ui.js";
 import type { WidgetRecord, WidgetsBridge } from "../../types/widgets.js";
 
@@ -80,12 +80,6 @@ beforeEach(() => {
   resetWidgetsStore();
   delete window.__heming_widgets;
   localStorage.clear();
-  useChatStore.setState({
-    agentsRoster: [
-      { id: "a1", owner_id: null, name: "小助手", avatar: null, description: "" },
-    ],
-    loadAgentsRoster: async () => {},
-  });
   useUiStore.setState({ page: "settings" });
 });
 
@@ -162,7 +156,7 @@ describe("WidgetSettingsCard · 通用表单", () => {
 
     fireEvent.change(screen.getByLabelText("打扰强度"), { target: { value: "quiet" } });
     fireEvent.click(screen.getByRole("switch", { name: "在桌面显示" }));
-    fireEvent.change(screen.getByLabelText("绑定智能体"), { target: { value: "a1" } });
+    fireEvent.change(screen.getByLabelText("绑定智能体"), { target: { value: SYSTEM_AGENT_ID } });
 
     await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(3));
     expect(settingsSet.mock.calls[0][0]).toEqual({
@@ -175,7 +169,7 @@ describe("WidgetSettingsCard · 通用表单", () => {
     });
     expect(settingsSet.mock.calls[2][0]).toEqual({
       id: "heming.pet",
-      patch: { agentId: "a1" },
+      patch: { agentId: SYSTEM_AGENT_ID },
     });
     expect(await screen.findByText("已保存")).toBeTruthy();
   });

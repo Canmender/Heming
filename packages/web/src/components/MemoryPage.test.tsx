@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import type { Agent, SharedFileMeta } from "@heming/shared";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID, type SharedFileMeta } from "@heming/shared";
 import { MemoryPage } from "./MemoryPage.js";
 import {
   AGENT_PREFS_KEY,
@@ -56,10 +56,8 @@ vi.mock("../lib/export/file.js", () => ({
 const T0 = new Date("2026-10-17T08:00:00.000Z").getTime();
 const ISO = "2026-10-17T08:00:00.000Z";
 
-const AGENTS: Agent[] = [
-  { id: "a1", owner_id: "u1", name: "阿和", avatar: null, description: "通用助理" },
-  { id: "a2", owner_id: "u1", name: "小码", avatar: null, description: "编码助手" },
-];
+/** 全产品唯一内置智能体；内部记忆/偏好仍按 agentId 存。 */
+const AGENT_ID = SYSTEM_AGENT_ID;
 
 const FILES: SharedFileMeta[] = [
   {
@@ -91,15 +89,10 @@ function jsonRes(body: unknown, status = 200): Response {
   });
 }
 
-/** 名册/共享文件都走真实 api 层（fetch mock）：可按需返回失败。 */
-function mockApi(routes: { agents?: Agent[] | "fail"; files?: SharedFileMeta[] | "fail" } = {}) {
+/** 共享文件走真实 api 层（fetch mock）：可按需返回失败。 */
+function mockApi(routes: { files?: SharedFileMeta[] | "fail" } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
-    if (url === "/api/agents") {
-      return Promise.resolve(
-        routes.agents === "fail" ? jsonRes({ error: "boom" }, 500) : jsonRes(routes.agents ?? []),
-      );
-    }
     if (url === "/api/files") {
       return Promise.resolve(
         routes.files === "fail" ? jsonRes({ error: "boom" }, 500) : jsonRes(routes.files ?? []),
@@ -136,18 +129,6 @@ function renderPage(mem: MemoryStore = memory) {
   return render(<MemoryPage memory={mem} kb={kb} prefs={prefs} />);
 }
 
-/** 等名册进选择器（未选中智能体时页头与提示条各有一个选择器，不能全局按 option 查）。 */
-async function waitForAgentRoster(name = "阿和") {
-  const select = (await screen.findByLabelText("选择智能体")) as HTMLSelectElement;
-  await waitFor(() => expect(within(select).getByRole("option", { name })).toBeInTheDocument());
-}
-
-/** 等名册到位后选中智能体（未选中时写操作被禁用）。 */
-async function pickAgent(id = "a1", name = "阿和") {
-  await waitForAgentRoster(name);
-  fireEvent.change(screen.getByLabelText("选择智能体"), { target: { value: id } });
-}
-
 function openTab(name: "智能体" | "数据库" | "个人知识库") {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
@@ -156,8 +137,8 @@ const semanticList = () => screen.getByRole("group", { name: "语义记忆条目
 const episodicList = () => screen.getByRole("group", { name: "情景记忆条目" });
 
 describe("MemoryPage 三分区结构", () => {
-  it("渲染「记忆区」标题、三个分区切换与智能体选择器", async () => {
-    mockApi({ agents: AGENTS });
+  it("渲染「记忆区」标题、三个分区切换与唯一内置智能体", async () => {
+    mockApi();
     renderPage();
 
     expect(screen.getByRole("heading", { name: "记忆" })).toBeInTheDocument();
@@ -175,13 +156,14 @@ describe("MemoryPage 三分区结构", () => {
     // 「40 轮后过期」在抬头和下方说明卡里各有一句，用抬头那句唯一的文案定位
     expect(within(shortTerm).getByText(/^会话级缓冲/)).toHaveTextContent("满 40 轮后过期");
 
-    expect(await screen.findAllByRole("option", { name: "阿和" })).not.toHaveLength(0);
-    expect(screen.getByRole("option", { name: "小码" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "全部智能体" })).toBeInTheDocument();
+    // 单内置智能体：页头只显示名称，没有选择器/「全部智能体」选项
+    expect(screen.queryByLabelText("选择智能体")).toBeNull();
+    expect(screen.queryByRole("option", { name: "全部智能体" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0);
   });
 
   it("页签键盘可达：整组一个 Tab 停靠点，←/→/Home/End 切换分区", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
 
     const agentsTab = screen.getByRole("tab", { name: "智能体" });
@@ -205,35 +187,9 @@ describe("MemoryPage 三分区结构", () => {
     expect(agentsTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("名册加载失败：降级「全部智能体」并内联中文提示，页面照常可用", async () => {
-    mockApi({ agents: "fail" });
-    renderPage();
-
-    expect(await screen.findByText(/名册加载失败/)).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "全部智能体" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "阿和" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "短期记忆" })).toBeInTheDocument();
-    expect(screen.getByText(/名册为空/)).toBeInTheDocument();
-  });
-
-  it("名册加载失败用 alert 播报且可重试，恢复后横幅消失（失败≠空态）", async () => {
-    const fetchSpy = mockApi({ agents: "fail" });
-    renderPage();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/名册加载失败/);
-    const retry = screen.getByRole("button", { name: "重试" });
-
-    // 重试时接口恢复：名册回到下拉框，失败横幅消失。
-    fetchSpy.mockImplementation(() => Promise.resolve(jsonRes(AGENTS)));
-    fireEvent.click(retry);
-    expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-  });
-
   /** d.62-B 布局迁移守卫：页头统一走 PageShell。 */
   it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，且不再有复述式副标题", () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
@@ -246,16 +202,16 @@ describe("MemoryPage 三分区结构", () => {
 
 describe("MemoryPage 短期记忆", () => {
   it("按会话分组展示、可折叠，并能清空指定会话", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     memory.appendTurn({
       conversationId: "c1",
-      agentId: "a1",
+      agentId: AGENT_ID,
       userText: "部署端口是多少",
       assistantText: "监听 8787",
     });
     memory.appendTurn({
       conversationId: "c2",
-      agentId: "a2",
+      agentId: AGENT_ID,
       userText: "帮我写周报",
       assistantText: "好的",
     });
@@ -293,10 +249,10 @@ describe("MemoryPage 短期记忆", () => {
 
 describe("MemoryPage 数据库记忆", () => {
   it("展示保留天数与总量，可调整 retentionDays 并落盘", async () => {
-    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     memory.addEpisodic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       conversationId: "c1",
       summary: "用户：部署端口是多少｜助手：监听 8787",
       sourceTurns: 6,
@@ -318,7 +274,7 @@ describe("MemoryPage 数据库记忆", () => {
   });
 
   it("保留天数非法：保存仍可点，提示用错误色且不改设置", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
     openTab("数据库");
 
@@ -337,10 +293,10 @@ describe("MemoryPage 数据库记忆", () => {
   });
 
   it("手动添加的条目不显示「置信度」，自动提取的仍显示（d.77）", async () => {
-    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     memory.upsertSemantic({
-      agentId: "a2",
+      agentId: AGENT_ID,
       key: "偏好-语言",
       value: "默认使用简体中文",
       source: "explicit",
@@ -362,22 +318,21 @@ describe("MemoryPage 数据库记忆", () => {
     expect(autoRow).toHaveTextContent("置信度 0.80");
   });
 
-  it("检索过滤语义/情景条目，删除后条目消失", async () => {    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+  it("检索过滤语义/情景条目，删除后条目消失", async () => {    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     memory.upsertSemantic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       key: "偏好-语言",
       value: "默认使用简体中文",
       source: "manual",
     });
     memory.addEpisodic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       conversationId: "c1",
       summary: "用户：部署端口是多少｜助手：监听 8787",
       sourceTurns: 6,
     });
     renderPage();
-    await pickAgent();
     openTab("数据库");
 
     expect(within(semanticList()).getByText("称呼")).toBeInTheDocument();
@@ -405,21 +360,20 @@ describe("MemoryPage 数据库记忆", () => {
         name: "删除",
       }),
     );
-    expect(memory.episodic("a1")).toHaveLength(0);
+    expect(memory.episodic(AGENT_ID)).toHaveLength(0);
     expect(within(episodicList()).getByText("还没有条目")).toBeInTheDocument();
   });
 
-  it("添加/编辑/置顶语义条目仍工作；未选智能体时写入口禁用", async () => {
-    mockApi({ agents: AGENTS });
+  it("添加/编辑/置顶语义条目仍工作（写入口默认可用）", async () => {
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
-    expect(screen.getByRole("button", { name: "添加记忆" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "立即整理" })).toBeDisabled();
-    expect(screen.getByText(/需要先选择一个具体智能体/)).toBeInTheDocument();
+    // 唯一内置智能体已固定：写入口不再需要先选智能体
+    expect(screen.getByRole("button", { name: "添加记忆" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "立即整理" })).toBeEnabled();
+    expect(screen.queryByText(/需要先选择一个具体智能体/)).not.toBeInTheDocument();
 
-    await pickAgent();
     fireEvent.click(screen.getByRole("button", { name: "添加记忆" }));
     const dialog = screen.getByRole("dialog", { name: "添加记忆" });
     fireEvent.change(within(dialog).getByLabelText("主题"), { target: { value: "称呼" } });
@@ -442,15 +396,14 @@ describe("MemoryPage 数据库记忆", () => {
   });
 
   it("「立即整理」把情景条目提炼为语义候选", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     memory.addEpisodic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       conversationId: "c1",
       summary: "用户：记住我的称呼是阿和｜助手：好的，以后这样称呼你",
       sourceTurns: 6,
     });
     renderPage();
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "立即整理" }));
@@ -461,9 +414,8 @@ describe("MemoryPage 数据库记忆", () => {
   });
 
   it("记忆总开关/自动记忆落盘，关闭总开关后写入口禁用", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     const auto = screen.getByRole("switch", { name: "自动记忆" });
@@ -482,11 +434,10 @@ describe("MemoryPage 数据库记忆", () => {
   });
 
   it("导出复制 JSON；非法导入内联报错，合法导入生效", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     const writeText = mockClipboard();
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "复制 JSON" }));
@@ -510,7 +461,7 @@ describe("MemoryPage 数据库记忆", () => {
           __global__: [
             {
               id: "s9",
-              agentId: "a1",
+              agentId: AGENT_ID,
               key: "部署端口",
               value: "8787",
               scope: "user",
@@ -530,27 +481,25 @@ describe("MemoryPage 数据库记忆", () => {
     fireEvent.click(screen.getByRole("button", { name: "替换并导入" }));
 
     expect(await screen.findByText(/导入成功/)).toBeInTheDocument();
-    await pickAgent();
     expect(within(semanticList()).getByText("部署端口")).toBeInTheDocument();
   });
 
   it("召回预览展示三层命中条目与预算占用字符数", async () => {
-    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "部署端口", value: "8787", source: "manual" });
+    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "部署端口", value: "8787", source: "manual" });
     memory.addEpisodic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       conversationId: "c1",
       summary: "用户：部署端口是多少｜助手：监听 8787",
       sourceTurns: 6,
     });
     memory.appendTurn({
       conversationId: "c1",
-      agentId: "a1",
+      agentId: AGENT_ID,
       userText: "部署端口是多少",
       assistantText: "监听 8787",
     });
     renderPage();
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "部署端口" } });
@@ -573,82 +522,64 @@ describe("MemoryPage 数据库记忆", () => {
 
 describe("MemoryPage 智能体记忆开关", () => {
   it("缺省为短期关/长期关/个人数据库允许，切换后写入 localStorage", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
 
-    const short = await screen.findByRole("switch", { name: "阿和 短期记忆" });
+    const short = await screen.findByRole("switch", { name: "和小鸣 短期记忆" });
     expect(short).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("switch", { name: "阿和 长期记忆" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "和小鸣 长期记忆" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(screen.getByRole("switch", { name: "阿和 个人数据库" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "和小鸣 个人数据库" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
 
     fireEvent.click(short);
-    expect(screen.getByRole("switch", { name: "阿和 短期记忆" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "和小鸣 短期记忆" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
     const stored = JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string);
-    expect(stored.a1).toEqual({ shortTerm: true, longTerm: false, personalDb: true });
+    expect(stored[AGENT_ID]).toEqual({ shortTerm: true, longTerm: false, personalDb: true });
 
-    fireEvent.click(screen.getByRole("switch", { name: "阿和 长期记忆" }));
-    expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string).a1.longTerm).toBe(true);
+    fireEvent.click(screen.getByRole("switch", { name: "和小鸣 长期记忆" }));
+    expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string)[AGENT_ID].longTerm).toBe(true);
   });
 
   it("关闭个人数据库需二次确认，确认后落盘", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
 
-    const dbSwitch = await screen.findByRole("switch", { name: "阿和 个人数据库" });
+    const dbSwitch = await screen.findByRole("switch", { name: "和小鸣 个人数据库" });
     fireEvent.click(dbSwitch);
 
     // 第一次点击只弹出确认，不改变状态
-    expect(screen.getByRole("switch", { name: "阿和 个人数据库" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "和小鸣 个人数据库" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
     expect(screen.getByText(/个人知识库默认允许使用，确认关闭？/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "确认关闭 阿和 个人数据库" }));
-    expect(screen.getByRole("switch", { name: "阿和 个人数据库" })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("button", { name: "确认关闭 和小鸣 个人数据库" }));
+    expect(screen.getByRole("switch", { name: "和小鸣 个人数据库" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string).a1.personalDb).toBe(false);
+    expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string)[AGENT_ID].personalDb).toBe(false);
   });
 
   it("智能体列只显示名称，原始 ID 收进 title（d.77）", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
 
-    // 等名册到位后取表格里的名称单元格（下拉框里也有同名 option，按 title 定位）
+    // 表格里只有唯一内置智能体一行；原始 id 收进 title
     const card = await screen.findByRole("region", { name: "智能体记忆开关" });
-    const nameCell = await within(card).findByTitle("智能体 ID：a1");
-    expect(nameCell).toHaveTextContent("阿和");
+    const nameCell = await within(card).findByTitle(`智能体 ID：${SYSTEM_AGENT_ID}`);
+    expect(nameCell).toHaveTextContent("和小鸣");
     // 原始 id 不再作为正文出现
-    expect(screen.queryByText("a1")).toBeNull();
-  });
-
-  it("名册读不到时可手动登记智能体，偏好仍按 ID 持久化", async () => {
-    mockApi({ agents: "fail" });
-    renderPage();
-    await screen.findByText(/名册加载失败/);
-
-    fireEvent.change(screen.getByLabelText("智能体 ID"), { target: { value: "a9" } });
-    fireEvent.change(screen.getByLabelText("智能体名称"), { target: { value: "临时助手" } });
-    fireEvent.click(screen.getByRole("button", { name: "添加" }));
-
-    const sw = screen.getByRole("switch", { name: "临时助手 短期记忆" });
-    fireEvent.click(sw);
-    expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string).a9).toEqual({
-      shortTerm: true,
-      longTerm: false,
-      personalDb: true,
-    });
+    expect(screen.queryByText(AGENT_ID)).toBeNull();
   });
 });
 
@@ -696,7 +627,7 @@ describe("记忆区 · 复盘沉淀卡", () => {
     render(<MemoryPage memory={memory} prefs={prefs} fetchSharedFiles={async () => []} />);
     fireEvent.click(screen.getByRole("button", { name: "立即复盘一次" }));
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent(/请先在上方选择一个智能体|还没有可复盘的对话/),
+      expect(screen.getByRole("status")).toHaveTextContent(/还没有可复盘的对话/),
     );
   });
 });
@@ -730,11 +661,11 @@ describe("MemoryPage 召回可观测性", () => {
 
   /** 复刻聊天页那一轮：召回 → 注入旁路 → 收尾落档。 */
   function recordTurn(rec: RecallRecorder, mem: MemoryStore, query: string, answer: string) {
-    const recalled = recallMemory(mem, { agentId: "a1", conversationId: "c1", query }, rec.usageView);
+    const recalled = recallMemory(mem, { agentId: AGENT_ID, conversationId: "c1", query }, rec.usageView);
     const { observability } = summarizeInjection(recalled);
-    rec.capture("a1", "c1", query, observability);
+    rec.capture(AGENT_ID, "c1", query, observability);
     clock.at += 60_000;
-    rec.settle({ agentId: "a1", conversationId: "c1", userText: query, assistantText: answer });
+    rec.settle({ agentId: AGENT_ID, conversationId: "c1", userText: query, assistantText: answer });
   }
 
   function renderWith(rec: RecallRecorder, mem: MemoryStore) {
@@ -748,12 +679,11 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("预览逐条标注打分，且「注入」与「预算外未注入」分开显示", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     for (let i = 0; i < 5; i++) {
-      memory.upsertSemantic({ agentId: "a1", key: `部署方案${i}`, value: longValue(i), source: "manual" });
+      memory.upsertSemantic({ agentId: AGENT_ID, key: `部署方案${i}`, value: longValue(i), source: "manual" });
     }
     renderPage();
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "部署" } });
@@ -775,8 +705,8 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("同键旧值不显示成漏召回，而是标注「被同键新值覆盖」", async () => {
-    mockApi({ agents: AGENTS });
-    const winner = memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "王总", source: "manual" });
+    mockApi();
+    const winner = memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "王总", source: "manual" });
     // 手工再灌一条同键旧条目：upsertSemantic 会按键合并，历史脏数据只能这样造
     const raw = JSON.parse(memoryMap.get(MEMORY_KEYS.semantic) as string);
     const oldIso = new Date(T0 - 30 * 86_400_000).toISOString();
@@ -785,7 +715,6 @@ describe("MemoryPage 召回可观测性", () => {
     const seeded = new MemoryStore(makeStorage(memoryMap), () => T0);
 
     renderPage(seeded);
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "称呼" } });
@@ -798,9 +727,8 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("没有留档时给出可操作的空态，且不出现清除按钮", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderWith(makeRecorder(), memory);
-    await pickAgent();
     openTab("数据库");
 
     expect(screen.getByText(/还没有记录/)).toBeInTheDocument();
@@ -808,16 +736,15 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("召回记录默认只列最近 3 条，展开明细可见注入/未注入/疑似引用", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     for (let i = 0; i < 4; i++) {
-      memory.upsertSemantic({ agentId: "a1", key: `部署方案${i}`, value: longValue(i), source: "manual" });
+      memory.upsertSemantic({ agentId: AGENT_ID, key: `部署方案${i}`, value: longValue(i), source: "manual" });
     }
     const rec = makeRecorder();
     for (let i = 0; i < 4; i++) {
       recordTurn(rec, memory, `部署方案 ${i}`, `部署方案 ${i} 已确认，重启即可`);
     }
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     const rows = () => screen.getByRole("list", { name: "召回记录列表" });
@@ -844,9 +771,9 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("语义卡带「最近注入 / 疑似引用」注脚，清除记录后注脚与留档一起消失", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     memory.upsertSemantic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       key: "线上端口",
       value: "线上监听 8787 端口",
       source: "manual",
@@ -854,7 +781,6 @@ describe("MemoryPage 召回可观测性", () => {
     const rec = makeRecorder();
     recordTurn(rec, memory, "线上端口", "线上监听 8787 端口，重启即可");
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     const card = semanticList();
@@ -878,18 +804,17 @@ describe("MemoryPage 召回可观测性", () => {
    * B 只共享「部署」这一个二字词（不足 2 个词、长度也不到 3）→ 永远不算被引用。
    */
   const seedTwin = () => {
-    memory.upsertSemantic({ agentId: "a1", key: "部署目录", value: "生产放在 /var/www", source: "manual" });
-    memory.upsertSemantic({ agentId: "a1", key: "部署端口", value: "8787", source: "manual" });
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "部署目录", value: "生产放在 /var/www", source: "manual" });
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "部署端口", value: "8787", source: "manual" });
   };
   const RECORDS = 6;
 
   it("被引用过的记忆带加权注脚；反复注入却没被引用的进「长期未被引用」清单", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     seedTwin();
     const rec = makeRecorder();
     for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     const card = semanticList();
@@ -905,12 +830,11 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("召回预览标出乘子，并把提权的那条排到同等相关度的另一条之前", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     seedTwin();
     const rec = makeRecorder();
     for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "部署" } });
@@ -924,12 +848,11 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("清除召回记录把加权账本一起清零（不留「有权重、无档案」）", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     seedTwin();
     const rec = makeRecorder();
     recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     const card = semanticList();
@@ -947,15 +870,14 @@ describe("MemoryPage 召回可观测性", () => {
   });
 
   it("删除记忆后它的计数从账本里摘掉，不留孤儿 id", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     seedTwin();
     const rec = makeRecorder();
     for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
     const before = memory
-      .semantic("a1")
+      .semantic(AGENT_ID)
       .find((entry) => entry.key === "部署端口") as { id: string };
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "删除记忆 部署端口" }));
@@ -972,17 +894,17 @@ describe("MemoryPage 召回可观测性", () => {
    * 清单若只看全局桶，私有条目和情景沉淀白占预算也永远列不出来。
    */
   it("「长期未被引用」覆盖私有语义与情景条目，按注入次数排，删除时连计数一起摘", async () => {
-    mockApi({ agents: AGENTS });
-    const shared = memory.upsertSemantic({ agentId: "a1", key: "灰度批次", value: "灰度先放五个用户", source: "manual" });
+    mockApi();
+    const shared = memory.upsertSemantic({ agentId: AGENT_ID, key: "灰度批次", value: "灰度先放五个用户", source: "manual" });
     const priv = memory.upsertSemantic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       key: "内网网段",
       value: "内网固定 10.20.0.0/16",
       source: "manual",
-      bucket: "a1",
+      bucket: AGENT_ID,
     });
     const epi = memory.addEpisodic({
-      agentId: "a1",
+      agentId: AGENT_ID,
       conversationId: "c9",
       summary: "上周确认灰度先放五个用户",
       sourceTurns: 6,
@@ -997,7 +919,6 @@ describe("MemoryPage 召回可观测性", () => {
     );
     const rec = makeRecorder();
     renderWith(rec, memory);
-    await pickAgent();
     openTab("数据库");
 
     const cold = screen.getByRole("list", { name: "长期未被引用的记忆" });
@@ -1022,26 +943,7 @@ describe("MemoryPage 召回可观测性", () => {
     expect(screen.getByRole("list", { name: "长期未被引用的记忆" })).not.toHaveTextContent("上周确认灰度");
   });
 
-  it("未选中智能体时冷清单标出条目归属（私有条目跨智能体混排，不写来源看不出是谁的）", async () => {
-    mockApi({ agents: AGENTS });
-    const priv = memory.upsertSemantic({
-      agentId: "a2",
-      key: "小码的构建参数",
-      value: "小码用 pnpm -r build",
-      source: "manual",
-      bucket: "a2",
-    });
-    logMap.set(USAGE_KEY, JSON.stringify({ [priv.id]: { injected: 8, used: 0, lastAt: ISO } }));
-    const rec = makeRecorder();
-    renderWith(rec, memory);
-    openTab("数据库");
-
-    const cold = screen.getByRole("list", { name: "长期未被引用的记忆" });
-    // 「全部智能体」视角：layers.semantic 是所有桶的并集，私有条目同样进清单
-    expect(within(cold).getByText("小码的构建参数")).toBeInTheDocument();
-    expect(within(cold).getAllByText(/小码/).length).toBeGreaterThan(0);
   });
-});
 
 /**
  * 导出到文件（d.35）：默认不附辅助账本（与 exportAll 逐字节一致）；
@@ -1051,7 +953,7 @@ describe("MemoryPage 导出到文件", () => {
   const AUX_RUN: RecallRun = {
     id: "rr-1",
     at: ISO,
-    agentId: "a1",
+    agentId: AGENT_ID,
     conversationId: "c1",
     query: "部署端口",
     recalled: { semantic: 1, episodic: 0, working: 0 },
@@ -1082,9 +984,9 @@ describe("MemoryPage 导出到文件", () => {
   }
 
   it("两个导出按钮文案可区分：文件下载 vs 复制到剪贴板（d.77）", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     const writeText = mockClipboard();
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     renderWithAux();
     openTab("数据库");
 
@@ -1106,8 +1008,8 @@ describe("MemoryPage 导出到文件", () => {
   });
 
   it("默认不附辅助账本：导出内容与 exportAll() 逐字节一致", async () => {
-    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     renderWithAux();
     openTab("数据库");
 
@@ -1125,8 +1027,8 @@ describe("MemoryPage 导出到文件", () => {
   });
 
   it("勾选后导出内容含 aux（usage/recallLog/note），data 不变", async () => {
-    mockApi({ agents: AGENTS });
-    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    mockApi();
+    memory.upsertSemantic({ agentId: AGENT_ID, key: "称呼", value: "阿和", source: "manual" });
     renderWithAux();
     openTab("数据库");
 
@@ -1155,7 +1057,7 @@ describe("MemoryPage 导出到文件", () => {
       via: "desktop",
       path: "C:\\Users\\u\\Heming\\exports\\记忆导出-2026-10-17.json",
     });
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderWithAux();
     openTab("数据库");
 
@@ -1168,28 +1070,23 @@ describe("MemoryPage 导出到文件", () => {
 
 
 describe("记忆区入口摩擦（d.81）", () => {
-  it("未选智能体时提示条里就地给选择器，选中后写入口立即可用", async () => {
-    mockApi({ agents: AGENTS });
+  it("唯一内置智能体：写入口默认可用，页面上没有智能体选择器", async () => {
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
-
-    expect(screen.getByRole("button", { name: "添加记忆" })).toBeDisabled();
-    // 选择器不只在页头：按钮旁边就能选（审计 P1-5，原来要跑到右上角找）
-    const inline = screen.getByLabelText("选择要添加记忆的智能体");
-    fireEvent.change(inline, { target: { value: "a1" } });
 
     expect(screen.getByRole("button", { name: "添加记忆" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "立即整理" })).toBeEnabled();
+    // 选择器与「先选智能体」提示都已消失（内置智能体固定）
+    expect(screen.queryByLabelText("选择要添加记忆的智能体")).toBeNull();
+    expect(screen.queryByLabelText("选择智能体")).toBeNull();
     expect(screen.queryByText(/需要先选择一个具体智能体/)).not.toBeInTheDocument();
-    // 页头选择器与内联选择器是同一份状态
-    expect((screen.getByLabelText("选择智能体") as HTMLSelectElement).value).toBe("a1");
+    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0);
   });
 
   it("个人知识库 Tab 不显示写死的 0 徽标；有准确数字的分类仍显示", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
 
     const wiki = screen.getByRole("tab", { name: "个人知识库" });
     expect(wiki.textContent).toBe("个人知识库");
@@ -1247,9 +1144,8 @@ describe("MemoryPage · 知识库参与记忆", () => {
   });
 
   it("数据库 Tab：知识库卡片有开关与同步按钮，开关写 MemorySettings.vaultMemory", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     const card = screen.getByRole("region", { name: "知识库参与记忆" });
@@ -1263,12 +1159,11 @@ describe("MemoryPage · 知识库参与记忆", () => {
   });
 
   it("未接入知识库时点同步：如实说明原因，不静默无事发生", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     syncVaultMemoryNowMock.mockResolvedValue(
       syncResult({ ok: false, scanned: 0, added: 0, total: 0, error: "知识库未接入：没有本地库" }),
     );
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "同步知识库" }));
@@ -1276,14 +1171,13 @@ describe("MemoryPage · 知识库参与记忆", () => {
   });
 
   it("已纳入条目显示篇数，并可按指针预览正文片段", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     memory.upsertVaultEntries([
       { rel: "notes/发布计划.md", vaultId: "v1", mtime: ISO, hash: "h1", value: "发布计划：周五前完成回归" },
       { rel: "notes/端口.md", vaultId: "v1", mtime: ISO, hash: "h2", value: "端口：线上监听 8787" },
     ]);
     setVaultDocSource(fakeVaultSource({ "notes/发布计划.md": "# 发布计划\n\n周五前完成回归。" }));
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     const card = screen.getByRole("region", { name: "知识库参与记忆" });
@@ -1295,10 +1189,9 @@ describe("MemoryPage · 知识库参与记忆", () => {
   });
 
   it("同步按钮：调粘合层同步并回报数量（结果直接用返回值）", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     syncVaultMemoryNowMock.mockResolvedValue(syncResult());
     renderPage();
-    await waitForAgentRoster();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "同步知识库" }));
@@ -1307,9 +1200,8 @@ describe("MemoryPage · 知识库参与记忆", () => {
   });
 
   it("个人知识库 Tab：主入口换成「打开知识库」入口卡，旧 WikiPanel 折叠保留", async () => {
-    mockApi({ agents: AGENTS });
+    mockApi();
     renderPage();
-    await waitForAgentRoster();
     openTab("个人知识库");
 
     expect(screen.getByRole("region", { name: "打开知识库" })).toBeInTheDocument();

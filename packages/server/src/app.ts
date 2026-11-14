@@ -8,7 +8,6 @@ import {
   AgentConversationBodySchema,
   UpdateConversationBodySchema,
   CreateFileBodySchema,
-  AgentBodySchema,
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
   CreateTeamActivitiesBodySchema,
@@ -21,6 +20,7 @@ import {
   UpdateTeamPlanBodySchema,
   CreateTeamTaskBodySchema,
   UpdateTeamTaskBodySchema,
+  SYSTEM_AGENT_ID,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -769,10 +769,15 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     try {
-      const created = store.createAgentConversation(userId(req), parsed.data.agentId, {
-        fresh: parsed.data.fresh,
-        title: parsed.data.title,
-      });
+      // 产品只有一个内置智能体：agentId 缺省/遗留值都归一到这里（store 内部也只认这一个）。
+      const created = store.createAgentConversation(
+        userId(req),
+        parsed.data.agentId ?? SYSTEM_AGENT_ID,
+        {
+          fresh: parsed.data.fresh,
+          title: parsed.data.title,
+        },
+      );
       const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
       res.status(201).json(row ?? { ...created, unreadCount: 0 });
     } catch (e) {
@@ -896,53 +901,11 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.send(Buffer.from(stored.contentBase64, "base64"));
   });
 
-  // —— M3 智能体名册：错误口径 forbidden→403、agent not found→404、其余 400 ——
+  // —— 智能体名册：产品只有唯一内置智能体（不可创建/修改/删除，对齐 Codex/Claude Code）——
+  // 旧版的 POST /api/agents 与 PUT/DELETE /api/agents/:id 已随自建智能体功能删除，未匹配路由 → 404。
 
   app.get("/api/agents", authOnly, (_req, res) => {
     res.json(store.listAgents());
-  });
-
-  app.post("/api/agents", authOnly, (req, res) => {
-    const parsed = AgentBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "invalid body" });
-      return;
-    }
-    try {
-      res.status(201).json(
-        store.createAgent(userId(req), {
-          name: parsed.data.name,
-          avatar: parsed.data.avatar ?? null,
-          description: parsed.data.description,
-        }),
-      );
-    } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
-    }
-  });
-
-  app.put("/api/agents/:id", authOnly, (req, res) => {
-    const parsed = AgentBodySchema.partial().safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "invalid body" });
-      return;
-    }
-    try {
-      res.json(store.updateAgent(req.params.id, userId(req), parsed.data));
-    } catch (e) {
-      const msg = (e as Error).message;
-      res.status(msg === "forbidden" ? 403 : msg === "agent not found" ? 404 : 400).json({ error: msg });
-    }
-  });
-
-  app.delete("/api/agents/:id", authOnly, (req, res) => {
-    try {
-      store.deleteAgent(req.params.id, userId(req));
-      res.status(204).end();
-    } catch (e) {
-      const msg = (e as Error).message;
-      res.status(msg === "forbidden" ? 403 : msg === "agent not found" ? 404 : 400).json({ error: msg });
-    }
   });
 
   // —— E2E Task 2：设备公钥分发（设计 §3.1）与明文重封装（§7）——

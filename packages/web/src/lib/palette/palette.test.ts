@@ -94,7 +94,7 @@ describe("palette · 设置分区与动作目录", () => {
   it("常用动作固定 9 个（d.114 知识库新增 4 个）", () => {
     expect(PALETTE_ACTIONS.map((a) => a.id)).toEqual([
       "new-task",
-      "new-agent",
+      "new-chat",
       "notifications",
       "settings",
       "plugins",
@@ -104,6 +104,7 @@ describe("palette · 设置分区与动作目录", () => {
       "vault-settings",
     ]);
     expect(findPaletteAction("new-task")?.label).toBe("新建任务");
+    expect(findPaletteAction("new-chat")?.label).toBe("新建会话");
     expect(findPaletteAction("plugins")?.label).toBe("插件管理");
     expect(findPaletteAction("vault-daily")?.label).toBe("打开今天的日记");
     expect(findPaletteAction("nope")).toBeUndefined();

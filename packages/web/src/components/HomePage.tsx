@@ -47,7 +47,7 @@ function probeHealth(): Promise<"正常" | "失败"> {
  */
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
-  const { loadWorkspace, agentsRoster, loadAgentsRoster } = useChatStore();
+  const { loadWorkspace } = useChatStore();
   /** 首帧是否已拉到工作区 / 首载失败原因（store 只在首帧写，后台刷新失败不推翻已就绪）。 */
   const workspaceReady = useChatStore((s) => s.workspaceReady);
   const workspaceError = useChatStore((s) => s.workspaceError);
@@ -72,14 +72,13 @@ export function HomePage() {
   /** 上次成功拉团队数据的时间：首页不轮询，至少让用户知道数据有多旧、并能手动刷新。 */
   const [lastTeamLoadAt, setLastTeamLoadAt] = useState<number | null>(null);
 
-  // 真实数据优先：挂载时加载工作区数据、云端健康探测与智能体名册。
+  // 真实数据优先：挂载时加载工作区数据与云端健康探测（单智能体固定，不再取名册）。
   // 首载失败不由本页吞掉：store 记 workspaceError（仅首帧写），首屏据此提示 + 给「重试」。
   useEffect(() => {
     void loadWorkspace().catch(() => {
       /* 错误已由 store 记录（workspaceError），首屏的失败条据此渲染 */
     });
-    void loadAgentsRoster().catch(() => {});
-  }, [loadWorkspace, loadAgentsRoster]);
+  }, [loadWorkspace]);
 
   /**
    * 首载失败的重试：只重拉工作区，失败原因仍由 store 写回 workspaceError。
@@ -274,7 +273,7 @@ export function HomePage() {
           所以第一屏只放可执行的三块：开始使用（仅首跑）/ 需要你处理 / 最近对话（继续上次）。
           统计与动向回答的是「我做了多少」，下沉到第二屏。
 
-          两块劝进只留一块：引导卡在场时，最近对话空态（同样劝「去智能体页」）不再出现。
+          两块劝进只留一块：引导卡在场时，最近对话空态（同样劝「去会话页」）不再出现。
           顺序也有意为之——先给「马上要处理的」，再给「上次干到哪」，最后才是引导（新用户没有前置项）。 */}
       <div data-testid="home-focus" className="flex flex-col gap-3">
         {/* 0. 首载失败：断网几秒回来时列表是空的，不说清楚会被读成「记录/智能体丢了」。
@@ -334,10 +333,10 @@ export function HomePage() {
             actionLabel="查看运行中的任务"
           />
           <Stat
-            label="我的智能体"
-            value={agentsRoster.length}
+            label="会话"
+            value={conversations.length}
             onOpen={() => setPage("chat")}
-            actionLabel="打开智能体页"
+            actionLabel="打开会话页"
           />
           <Stat
             label="今日动向"

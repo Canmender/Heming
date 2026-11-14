@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SYSTEM_AGENT } from "@heming/shared";
 import type { WidgetRecord, WidgetSettingField, WidgetState } from "../../types/widgets.js";
-import { useChatStore } from "../../store/chat.js";
 import { useUiStore } from "../../store/ui.js";
 import {
   refreshWidgets,
@@ -77,26 +77,12 @@ export function WidgetSettingsCard({
     [records, onlyPluginId],
   );
 
-  const needsAgents = useMemo(
-    () =>
-      visibleRecords.some((record) =>
-        (record.widget?.settings?.fields ?? []).some((field) => field.type === "agent"),
-      ),
-    [visibleRecords],
-  );
-  const agentsRoster = useChatStore((state) => state.agentsRoster);
-  const loadAgentsRoster = useChatStore((state) => state.loadAgentsRoster);
+  // 单智能体：插件设置的「agent」字段只在唯一内置智能体里选，不再拉名册。
+  const agentsRoster = useMemo(() => [SYSTEM_AGENT], []);
 
   useEffect(() => {
     void refreshWidgets();
   }, []);
-
-  useEffect(() => {
-    if (!needsAgents) return;
-    void loadAgentsRoster().catch(() => {
-      /* 名册拉不到时下拉框只显示「不绑定」，不影响其它字段 */
-    });
-  }, [needsAgents, loadAgentsRoster]);
 
   useEffect(() => {
     // 迁移提示只属于设置 → 外观那个独立卡；嵌进插件详情时不再重复打扰。
@@ -395,7 +381,7 @@ function SettingRow({
               {agent.name}
             </option>
           ))}
-          {/* 已绑定但名册里没有（智能体被删/名册没拉到）：保留当前值，不静默清空 */}
+          {/* 已绑定但不在唯一内置智能体上（历史自建 id）：保留当前值，不静默清空 */}
           {current && !agents.some((agent) => agent.id === current) && (
             <option value={current}>{current}</option>
           )}

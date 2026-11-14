@@ -1,42 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AssistantPage } from "./AssistantPage.js";
 import { useChatStore } from "../store/chat.js";
-import { hasDraft, setDraft } from "../lib/drafts.js";
+import { clearDraft, hasDraft, setDraft } from "../lib/drafts.js";
 import { useUiStore } from "../store/ui.js";
 import { useLlmStore } from "../store/llm.js";
 import { useAuthStore } from "../store/auth.js";
 
 /**
- * d.141 F-07：CollabView 用桌面桥是否存在来决定空态 CTA（浏览器里模型来源整块隐藏，
- * 「新建智能体 / 去绑定模型」会走进死循环）。测试按需挂/撤一个最小桥。
- */
-function stubDesktopBridge(on: boolean) {
-  const w = window as unknown as { __heming_magpie?: unknown };
-  if (on) {
-    w.__heming_magpie = {
-      status: async () => ({ available: true, running: true }),
-      start: async () => ({ status: { available: true, running: true } }),
-      stop: async () => ({ available: true, running: false }),
-      gateway: async () => ({}),
-    };
-  } else {
-    delete w.__heming_magpie;
-  }
-}
-
-/**
- * 智能体页（d.126 阶段 B）：
- * - 三个一级 Tab：对话 / 协作 / 智能体；
- * - 对话 Tab：Claude Code 风格左栏（新建/搜索、按智能体分组、会话名为一级信息、
- *   当前会话高亮、草稿标识、折叠），主区嵌 ChatPage（embedded）；
- * - 智能体 Tab：名册 + **独立编辑页**（不再弹窗），保存/取消后回名册；
- * - 协作 Tab：CollabView 原样收进。
+ * 会话页（单智能体 · 会话模式，d.150）。
  *
- * ChatPage 换成探针，重点验证：
- * - 三个视图**同一时刻只挂载一个**；
- * - 旧 Tab 值 work/chat/tasks 归一为对话并回写规范值；pageView 意图（tasks/chat）落到对话；
- * - 编辑页不是 dialog（不再弹窗），删除仍有二次确认。
+ * 产品只剩一个内置智能体，页面从「三 Tab 的智能体页」收口成纯会话页：
+ * - 没有一级 Tab、没有智能体名册/编辑页、没有多智能体协作视图；
+ * - 左侧 ConversationRail 是一条扁平会话列表，新建会话直接建 fresh 会话；
+ * - 右侧是状态条 + embedded ChatPage（没有选中会话时是新建会话空态）。
+ *
+ * ChatPage 换成探针，只验证「谁在什么时候挂载」，不跑对话链路。
  */
 vi.mock("./ChatPage.js", () => ({
   ChatPage: ({ embedded }: { embedded?: boolean }) => (
@@ -46,40 +25,45 @@ vi.mock("./ChatPage.js", () => ({
   ),
 }));
 
-const profile = { id: "p1", label: "本地", provider: "openai" as const, apiKey: "k", model: "m" };
-const agent = {
-  id: "a1",
-  owner_id: "u1",
+/** 内置智能体（shared 的 SYSTEM_AGENT；这里只用到 id/name/avatar）。 */
+const systemAgent = {
+  id: "system-assistant",
+  owner_id: null,
   name: "和小鸣",
   avatar: null,
-  description: "和鸣内置智能体",
+  description: "和鸣官方预设智能体",
 };
-const agent2 = {
-  id: "a2",
-  owner_id: "u1",
-  name: "小研",
-  avatar: null,
-  description: "负责调研",
-};
+
+const profile = { id: "p1", label: "本地", provider: "openai" as const, apiKey: "k", model: "m" };
 
 const conv1 = {
   id: "c1",
   type: "agent",
-  agent: { id: "a1", owner_id: "u1", name: "和小鸣", avatar: null, description: "和鸣内置智能体" },
+  agent: systemAgent,
   unreadCount: 0,
   lastMessageAt: "2026-11-09T03:00:00.000Z",
 };
 const conv2 = {
   id: "c2",
   type: "agent",
-  agent: { id: "a2", owner_id: "u1", name: "小研", avatar: null, description: "负责调研" },
+  agent: systemAgent,
   unreadCount: 0,
   lastMessageAt: "2026-11-08T03:00:00.000Z",
 };
-const conv3 = {
+/** openAgent(fresh) 建出来的新会话（id 与 mock 返回值一致）。 */
+const convNew = {
+  id: "c9",
+  type: "agent",
+  agent: systemAgent,
+  unreadCount: 0,
+  lastMessageAt: null,
+};
+/** 服务端有 title 的会话：用来证明搜索只看会话名，不看消息正文。 */
+const convTitled = {
   id: "c3",
   type: "agent",
-  agent: { id: "a2", owner_id: "u1", name: "小研", avatar: null, description: "负责调研" },
+  agent: systemAgent,
+  title: "竞品调研",
   unreadCount: 0,
   lastMessageAt: null,
 };
@@ -96,20 +80,16 @@ function userMessage(id: string, convId: string, text: string) {
   };
 }
 
-const TAB_KEY = "heming.tab.assistant.v1";
+const messages: Record<string, unknown[]> = {
+  c1: [userMessage("m1", "c1", "整理一下这周的会议纪要")],
+  c2: [userMessage("m2", "c2", "调研一下竞品定价")],
+  c3: [userMessage("m3", "c3", "整理一下这周的会议纪要")],
+};
 
-function tab(name: "对话" | "协作" | "智能体") {
-  return screen.getByRole("tab", { name });
-}
-
-function seedConversations() {
-  useChatStore.setState({
-    conversations: [conv1, conv2] as never,
-    messages: {
-      c1: [userMessage("m1", "c1", "整理一下这周的会议纪要")],
-      c2: [userMessage("m2", "c2", "调研一下竞品定价")],
-    } as never,
-  });
+/** 主区空态的「新建会话」（rail 顶部还有一个同名按钮，取 DOM 里最后一个 = 主区）。 */
+function mainNewConversationButton(): HTMLElement {
+  const buttons = screen.getAllByRole("button", { name: "新建会话" });
+  return buttons[buttons.length - 1]!;
 }
 
 beforeEach(() => {
@@ -126,593 +106,317 @@ beforeEach(() => {
     activeConversationId: null,
     taskDraft: null,
     taskFocusId: null,
+    paletteIntent: null,
   });
   useChatStore.setState({
-    conversations: [conv1] as never,
-    messages: { c1: [userMessage("m1", "c1", "整理一下这周的会议纪要")] } as never,
-    agentsRoster: [agent] as never,
+    conversations: [conv1, conv2] as never,
+    messages: messages as never,
+    workspaceReady: true,
+    workspaceError: "",
+    conversationsHasMore: false,
+    conversationsLoadingMore: false,
     loadWorkspace: vi.fn(async () => undefined),
-    loadAgentsRoster: vi.fn(async () => undefined),
-    openAgent: vi.fn(async () => "c1"),
+    loadMoreConversations: vi.fn(async () => undefined),
+    // 新建会话的返回值：会话已预先放进 conversations（模拟 store 建完并刷新后的状态）。
+    openAgent: vi.fn(async () => "c9"),
     renameConversation: vi.fn(async () => undefined),
     deleteConversation: vi.fn(async () => undefined),
   });
   useLlmStore.setState({
     profiles: [profile],
-    bindings: { a1: "p1" },
+    bindings: { "system-assistant": "p1" },
     prompts: {},
     routes: [],
   });
 });
 
-describe("智能体页 · 三个一级 Tab", () => {
-  it("默认落在「对话」，三个 Tab 都在且 aria-selected 正确", () => {
+describe("会话页结构 · 单智能体、没有 Tab", () => {
+  it("没有一级 Tab、智能体名册、协作视图或自建智能体入口", () => {
     render(<AssistantPage />);
 
-    expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-    expect(tab("协作")).toHaveAttribute("aria-selected", "false");
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "false");
-    // 对话 Tab 没有选中会话时主区是智能体选择页（选一个再进 embedded ChatPage）
-    expect(screen.getByText("选择智能体")).toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.queryByText("智能体名册")).toBeNull();
+    expect(screen.queryByText("协作设置")).toBeNull();
+    expect(screen.queryByText("新建智能体")).toBeNull();
+    expect(screen.queryByText("选择智能体")).toBeNull();
+    // 页头是「会话」，主区空态引导新建会话
+    expect(screen.getByRole("heading", { name: "会话" })).toBeInTheDocument();
+    expect(screen.getByText("开始新会话")).toBeInTheDocument();
     expect(screen.queryByTestId("chat-standalone")).toBeNull();
-    expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+    expect(screen.queryByTestId("chat-embed")).toBeNull();
   });
 
-  it("点「协作」/「智能体」互斥切换：同一时刻只渲染一个视图", () => {
-    // 协作视图需要两位已绑定模型的参与者才会渲染设置表单
-    useChatStore.setState({ agentsRoster: [agent, agent2] as never });
-    useLlmStore.setState({ bindings: { a1: "p1", a2: "p1" } });
+  it("旧的 pageView 导航意图读到即清（不再切 Tab）", async () => {
+    useUiStore.setState({ pageView: "tasks" });
     render(<AssistantPage />);
-
-    fireEvent.click(tab("协作"));
-    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("协作设置")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-embed")).not.toBeInTheDocument();
-
-    fireEvent.click(tab("智能体"));
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("智能体名册")).toBeInTheDocument();
-    expect(screen.queryByLabelText("协作设置")).not.toBeInTheDocument();
-
-    fireEvent.click(tab("对话"));
-    expect(screen.getByText("选择智能体")).toBeInTheDocument();
-    expect(screen.queryByText("智能体名册")).not.toBeInTheDocument();
+    await waitFor(() => expect(useUiStore.getState().pageView).toBeNull());
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
-  it("旧 Tab 值 work/chat/tasks 归一为「对话」，并回写规范值；collab/agents 各归各位", async () => {
-    for (const legacy of ["work", "chat", "tasks"]) {
-      window.sessionStorage.setItem(TAB_KEY, JSON.stringify(legacy));
-      const { unmount } = render(<AssistantPage />);
-      expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-      await waitFor(() =>
-        expect(JSON.parse(window.sessionStorage.getItem(TAB_KEY) ?? '""')).toBe("chat"),
-      );
-      unmount();
-    }
-
-    window.sessionStorage.setItem(TAB_KEY, JSON.stringify("collab"));
-    const collab = render(<AssistantPage />);
-    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
-    collab.unmount();
-
-    window.sessionStorage.setItem(TAB_KEY, JSON.stringify("agents"));
+  it("首载失败：页头下方 alert + 重试按钮", async () => {
+    useChatStore.setState({ workspaceReady: false, workspaceError: "网络断了" });
     render(<AssistantPage />);
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
-  });
 
-  it("tablist 键盘：左右方向键切换并移动焦点", () => {
-    render(<AssistantPage />);
-    const chatTab = tab("对话");
-    chatTab.focus();
-
-    fireEvent.keyDown(chatTab, { key: "ArrowRight" });
-    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
-    expect(tab("协作")).toHaveFocus();
-
-    fireEvent.keyDown(tab("协作"), { key: "ArrowLeft" });
-    expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-    expect(tab("对话")).toHaveFocus();
-
-    fireEvent.keyDown(tab("对话"), { key: "End" });
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("会话列表加载失败：网络断了");
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() =>
+      expect(useChatStore.getState().loadWorkspace).toHaveBeenCalledTimes(2),
+    );
   });
 });
 
-describe("对话 Tab · Claude Code 风格会话栏", () => {
-  it("按智能体分组：组标题是智能体名，组内一级信息是会话名，当前会话高亮", () => {
-    seedConversations();
+describe("会话栏 · 扁平列表与打开会话", () => {
+  it("会话扁平展示（不再按智能体分组），当前会话高亮", () => {
     useUiStore.setState({ activeConversationId: "c1" });
     render(<AssistantPage />);
 
-    // 分组（section 的可访问名）
-    expect(screen.getByRole("region", { name: "和小鸣 的对话" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "小研 的对话" })).toBeInTheDocument();
+    // 不再有「X 的对话」分组
+    expect(screen.queryByRole("region", { name: /的对话/ })).toBeNull();
 
-    // 会话名来自首条用户消息，智能体名只在组标题上
-    const current = screen.getByRole("button", {
-      name: "打开与 和小鸣 的对话：整理一下这周的会议纪要",
-    });
+    const current = screen.getByRole("button", { name: "打开会话：整理一下这周的会议纪要" });
     expect(current).toHaveAttribute("aria-current", "true");
     expect(
-      screen.getByRole("button", { name: "打开与 小研 的对话：调研一下竞品定价" }),
+      screen.getByRole("button", { name: "打开会话：调研一下竞品定价" }),
     ).not.toHaveAttribute("aria-current");
   });
 
-  it("没有可读消息时用时间/「新的对话」兜底，不再只显示智能体名", () => {
-    useChatStore.setState({ conversations: [conv3] as never, messages: {} as never });
-    render(<AssistantPage />);
-    expect(
-      screen.getByRole("button", { name: "打开与 小研 的对话：新的对话" }),
-    ).toBeInTheDocument();
-  });
-
-  it("服务端会话有 title 时优先显示标题（不再从消息推导）", () => {
-    useChatStore.setState({
-      conversations: [{ ...conv2, title: "竞品调研（第二段）" }] as never,
-      messages: {} as never,
-    });
-    render(<AssistantPage />);
-    expect(
-      screen.getByRole("button", { name: "打开与 小研 的对话：竞品调研（第二段）" }),
-    ).toBeInTheDocument();
-  });
-
-  it("组右侧 + 直接新建该智能体的会话；顶部「新建对话」回到选择页", async () => {
-    seedConversations();
-    render(<AssistantPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "新建与 小研 的对话" }));
-    // d.128：组右侧「＋」是新建一段会话（fresh），不是复用已有会话
-    await waitFor(() =>
-      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a2", { fresh: true }),
-    );
-    expect(useUiStore.getState().activeConversationId).toBe("c1");
-    expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-
-    fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
-    expect(useUiStore.getState().activeConversationId).toBeNull();
-    expect(screen.getByText("选择智能体")).toBeInTheDocument();
-  });
-
-  it("搜索先点「搜索」再出现输入框；按会话名/智能体名过滤，可清空", () => {
-    seedConversations();
-    render(<AssistantPage />);
-
-    expect(screen.queryByLabelText("搜索对话")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-
-    const search = screen.getByLabelText("搜索对话");
-    expect(search).toHaveFocus();
-
-    fireEvent.change(search, { target: { value: "竞品" } });
-    expect(
-      screen.getByRole("button", { name: "打开与 小研 的对话：调研一下竞品定价" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "打开与 和小鸣 的对话：整理一下这周的会议纪要" }),
-    ).toBeNull();
-
-    fireEvent.change(search, { target: { value: "不存在" } });
-    expect(screen.getByText("没有匹配的对话")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(
-      screen.getByRole("button", { name: "打开与 和小鸣 的对话：整理一下这周的会议纪要" }),
-    ).toBeInTheDocument();
-  });
-
-  it("有草稿的会话带「草稿」标识，草稿清理后消失", async () => {
-    seedConversations();
-    localStorage.setItem(
-      "heming.draft.c1",
-      JSON.stringify({ text: "还没发出去的话", at: Date.now() }),
-    );
-    render(<AssistantPage />);
-    expect(screen.getByRole("button", { name: /打开与 和小鸣 的对话/ })).toHaveTextContent(
-      "草稿",
-    );
-
-    act(() => localStorage.removeItem("heming.draft.c1"));
-    // 草稿订阅只在写入时通知；这里直接重渲染一次验证标识来自存储
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-    fireEvent.change(screen.getByLabelText("搜索对话"), { target: { value: "会议" } });
-    expect(screen.getByRole("button", { name: /打开与 和小鸣 的对话/ })).not.toHaveTextContent(
-      "草稿",
-    );
-  });
-
-  it("左栏可折叠：收起后只剩头像入口，再展开恢复会话名", () => {
-    seedConversations();
-    render(<AssistantPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "收起对话列表" }));
-    expect(screen.getByRole("button", { name: "展开对话列表" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "打开与 和小鸣 的对话：整理一下这周的会议纪要" }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "展开对话列表" }));
-    expect(screen.getByRole("button", { name: "收起对话列表" })).toBeInTheDocument();
-  });
-
-  it("点会话行进入对话：主区显示状态条与 ChatPage（embedded）", () => {
-    seedConversations();
-    render(<AssistantPage />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "打开与 和小鸣 的对话：整理一下这周的会议纪要" }),
-    );
-
-    expect(useUiStore.getState().activeConversationId).toBe("c1");
-    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
-    expect(screen.getByText("与 和小鸣 的会话")).toBeInTheDocument();
-    expect(screen.getByText("模型已绑定")).toBeInTheDocument();
-    expect(screen.queryByText("选择智能体")).toBeNull();
-  });
-
-  it("对话进行中点「切换智能体」回到选择页，对话仍在左栏", () => {
-    seedConversations();
+  it("选中会话：状态条 + 单个 embedded ChatPage；点另一条会话就地切换", () => {
     useUiStore.setState({ activeConversationId: "c1" });
     render(<AssistantPage />);
-    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "切换智能体" }));
-    expect(useUiStore.getState().activeConversationId).toBeNull();
-    expect(screen.getByText("选择智能体")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "打开与 和小鸣 的对话：整理一下这周的会议纪要" }),
-    ).toBeInTheDocument();
-  });
-});
+    expect(screen.getByText("与 和小鸣 的会话")).toBeInTheDocument();
+    expect(screen.getAllByTestId("chat-embed")).toHaveLength(1);
+    expect(screen.queryByTestId("chat-standalone")).toBeNull();
+    expect(screen.queryByText("开始新会话")).toBeNull();
 
-describe("对话 Tab · 没有选中会话时的智能体选择页", () => {
-  it("系统/自建分组；点卡片开始对话并留在对话 Tab", async () => {
-    seedConversations();
-    useChatStore.setState({
-      agentsRoster: [{ ...agent, id: "system-assistant", name: "和小鸣" }, agent2] as never,
-    });
-    useLlmStore.setState({ bindings: { "system-assistant": "p1", a2: "p1" } });
-    render(<AssistantPage />);
-
-    expect(screen.getByText("选择智能体")).toBeInTheDocument();
-    expect(screen.getByText("系统智能体")).toBeInTheDocument();
-    expect(screen.getByText("自建智能体")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "与智能体 小研 开始对话" }));
-    await waitFor(() => expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a2"));
-    expect(useUiStore.getState().activeConversationId).toBe("c1");
-    expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打开会话：调研一下竞品定价" }));
+    expect(useUiStore.getState().activeConversationId).toBe("c2");
+    expect(screen.getAllByTestId("chat-embed")).toHaveLength(1);
   });
 
-  it("智能体 ≥5 个才出现选择页搜索框；空结果可清空", () => {
-    const roster = [
-      agent,
-      ...Array.from({ length: 5 }, (_, i) => ({
-        id: `own-${i}`,
-        owner_id: "u1",
-        name: `自建助手${i + 1}`,
-        avatar: null,
-        description: i === 0 ? "专门写周报" : "",
-      })),
-    ];
-    useChatStore.setState({ agentsRoster: roster as never });
-    render(<AssistantPage />);
-
-    const search = screen.getByLabelText("搜索智能体");
-    fireEvent.change(search, { target: { value: "周报" } });
-    // d.138：未绑定模型的卡片，头部与右下按钮都指向「先绑定模型」，可访问名随之变化；
-    // 这里要断言的仍是「搜索是否筛掉了其它卡片」。
-    expect(
-      screen.getByRole("button", { name: "编辑智能体 自建助手1：先绑定模型" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" })).toBeNull();
-
-    fireEvent.change(search, { target: { value: "不存在的名字" } });
-    expect(screen.getByText("没有匹配的智能体")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(
-      screen.getByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" }),
-    ).toBeInTheDocument();
-  });
-
-  it("选择页的「编辑」进入智能体 Tab 的编辑页（不是弹窗）", () => {
-    useChatStore.setState({ agentsRoster: [agent, agent2] as never });
-    render(<AssistantPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "编辑智能体：小研" }));
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "编辑智能体" })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "编辑智能体" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("名称")).toHaveValue("小研");
-  });
-
-  it("名册为空时选择页给出「新建智能体」「从模板创建」两个直达动作（进编辑页）", () => {
-    useChatStore.setState({ agentsRoster: [] });
-    render(<AssistantPage />);
-
-    expect(screen.getByText("还没有智能体")).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "从模板创建" })[0]);
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "使用模板 通用助手" })).toHaveFocus();
-    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
-  });
-});
-
-describe("智能体 Tab · 名册与独立编辑页", () => {
-  it("名册按系统/自建分组、显示模型绑定状态；编辑打开独立页面，取消回名册", () => {
-    useChatStore.setState({
-      agentsRoster: [{ ...agent, id: "system-assistant", name: "和小鸣" }, agent2] as never,
-    });
-    useLlmStore.setState({ bindings: { "system-assistant": "p1" } });
-    render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
-
-    expect(screen.getByText("智能体名册")).toBeInTheDocument();
-    expect(screen.getByText("系统智能体")).toBeInTheDocument();
-    expect(screen.getByText("自建智能体")).toBeInTheDocument();
+  it("模型已绑定时状态条给「模型已绑定」；未绑定时提示并可去「模型设置」", () => {
+    useUiStore.setState({ activeConversationId: "c1" });
+    const first = render(<AssistantPage />);
     expect(screen.getByText("模型已绑定")).toBeInTheDocument();
-    // 小研没有绑定
-    expect(screen.getAllByText("未绑定模型").length).toBeGreaterThanOrEqual(1);
+    first.unmount();
 
-    // 编辑按钮常显（不是 hover 才出现）
-    const edit = screen.getByRole("button", { name: "编辑智能体：小研" });
-    expect(edit.className).not.toContain("opacity-0");
-    fireEvent.click(edit);
-    expect(screen.getByRole("heading", { name: "编辑智能体" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    expect(screen.getByText("智能体名册")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "编辑智能体" })).toBeNull();
-  });
-
-  it("名册搜索：按名称/简介过滤，空结果可清空", () => {
-    const roster = [
-      agent,
-      ...Array.from({ length: 5 }, (_, i) => ({
-        id: `own-${i}`,
-        owner_id: "u1",
-        name: `自建助手${i + 1}`,
-        avatar: null,
-        description: i === 0 ? "专门写周报" : "",
-      })),
-    ];
-    useChatStore.setState({ agentsRoster: roster as never });
+    useLlmStore.setState({ bindings: {} });
     render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
+    expect(screen.getByText("未绑定模型")).toBeInTheDocument();
+    expect(screen.getByText("未绑定模型")).toHaveAttribute(
+      "title",
+      "还没有绑定模型，发送会失败",
+    );
 
-    const search = screen.getByLabelText("搜索智能体");
-    fireEvent.change(search, { target: { value: "周报" } });
-    // d.138：未绑定模型的卡片，头部与右下按钮都指向「先绑定模型」，可访问名随之变化；
-    // 这里要断言的仍是「搜索是否筛掉了其它卡片」。
-    expect(
-      screen.getByRole("button", { name: "编辑智能体 自建助手1：先绑定模型" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "模型设置" }));
+    expect(useUiStore.getState().page).toBe("model");
+  });
+});
 
-    fireEvent.change(search, { target: { value: "不存在" } });
-    expect(screen.getByText("没有匹配的智能体")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(
-      screen.getByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" }),
-    ).toBeInTheDocument();
+describe("新建会话", () => {
+  it("主区空态「新建会话」→ 直接建 fresh 会话（单智能体，不再选人）并打开", async () => {
+    useChatStore.setState({ conversations: [conv1, conv2, convNew] as never });
+    render(<AssistantPage />);
+
+    fireEvent.click(mainNewConversationButton());
+
+    await waitFor(() =>
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
+        fresh: true,
+      }),
+    );
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
   });
 
-  it("新建智能体走独立编辑页，保存（创建）后直接开聊并回到对话 Tab", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ id: "a9", owner_id: "u1", name: "新助手", avatar: null, description: "" }),
-        { status: 201, headers: { "content-type": "application/json" } },
+  it("会话栏顶部「新建会话」走同一个入口", async () => {
+    useChatStore.setState({ conversations: [conv1, conv2, convNew] as never });
+    render(<AssistantPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: "新建会话" })[0]!);
+
+    await waitFor(() =>
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
+        fresh: true,
+      }),
+    );
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+  });
+
+  it("新建失败：错误进 rail 底部 alert，主区仍是空态", async () => {
+    useChatStore.setState({
+      openAgent: vi.fn(async () => {
+        throw new Error("服务不可用");
+      }),
+    });
+    render(<AssistantPage />);
+    fireEvent.click(mainNewConversationButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("新建会话失败：服务不可用");
+    expect(useUiStore.getState().activeConversationId).toBeNull();
+    expect(screen.getByText("开始新会话")).toBeInTheDocument();
+  });
+
+  it("进行中防重：按钮 busy 且再次点击不会再建", async () => {
+    let resolve: (id: string) => void = () => {};
+    const pending = new Promise<string>((r) => {
+      resolve = r;
+    });
+    useChatStore.setState({ openAgent: vi.fn(() => pending) });
+    render(<AssistantPage />);
+
+    fireEvent.click(mainNewConversationButton());
+    await waitFor(() => expect(screen.getByText("新建中…")).toBeInTheDocument());
+    expect(screen.getByText("新建中…").closest("button")).toHaveAttribute("aria-busy", "true");
+
+    fireEvent.click(screen.getByText("新建中…"));
+    expect(useChatStore.getState().openAgent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolve("c9");
+      await pending;
+    });
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+  });
+});
+
+describe("改名与删除", () => {
+  function openRowMenu(title: string) {
+    fireEvent.click(screen.getByRole("button", { name: `会话操作：${title}` }));
+  }
+
+  it("行内改名：输入新名字保存后调用 renameConversation", async () => {
+    render(<AssistantPage />);
+    openRowMenu("整理一下这周的会议纪要");
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+    fireEvent.change(screen.getByLabelText("会话名称"), { target: { value: "周会纪要" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+
+    await waitFor(() =>
+      expect(useChatStore.getState().renameConversation).toHaveBeenCalledWith(
+        "c1",
+        "周会纪要",
       ),
     );
-    render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
-
-    fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
-    expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "新助手" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建" }));
-
-    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c1"));
-    expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a9");
-    expect(tab("对话")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "新建智能体" })).toBeNull();
   });
 
-  it("编辑本人智能体：保存走 PUT 后回名册；删除仍有应用内二次确认", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 204 }));
-    render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
-    fireEvent.click(screen.getByRole("button", { name: "编辑智能体：和小鸣" }));
-
-    fireEvent.change(screen.getByLabelText("一句话描述"), { target: { value: "帮我写周报" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true),
-    );
-    // 保存成功回名册
-    await waitFor(() => expect(screen.getByText("智能体名册")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "编辑智能体：和小鸣" }));
-    fireEvent.click(screen.getByText("删除智能体"));
-    const confirm = screen.getByRole("dialog", { name: "删除智能体" });
-    expect(within(confirm).getByText(/此操作不可恢复/)).toBeInTheDocument();
-    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true),
-    );
-    await waitFor(() => expect(screen.getByText("智能体名册")).toBeInTheDocument());
-  });
-
-  it("从模板创建：落在第一个模板上，只填空白字段", () => {
-    render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
-    fireEvent.click(screen.getByRole("button", { name: "从模板创建" }));
-
-    const tpl = screen.getByRole("button", { name: "使用模板 写作润色" });
-    fireEvent.click(tpl);
-    expect(screen.getByLabelText("名称")).toHaveValue("写作润色");
-    expect(tpl).toHaveAttribute("aria-pressed", "true");
-  });
-});
-
-describe("智能体页 · 协作 Tab 与意图跳转", () => {
-  beforeEach(() => stubDesktopBridge(false));
-
-  it("协作 Tab 原样收进：可用智能体不足 2 个时给出绑定引导", () => {
-    stubDesktopBridge(true);
-    render(<AssistantPage />);
-    fireEvent.click(tab("协作"));
-    expect(screen.getByText("至少需要 2 个已绑定模型的智能体")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "去绑定模型" })).toBeInTheDocument();
-    expect(screen.getByText(/当前可用 1 个/)).toBeInTheDocument();
-  });
-
-  it("浏览器无桌面桥：说明原因，且不给做不到的建人按钮", () => {
-    render(<AssistantPage />);
-    fireEvent.click(tab("协作"));
-    expect(screen.getByText("至少需要 2 个已绑定模型的智能体")).toBeInTheDocument();
-    expect(screen.getByText(/当前是浏览器预览/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "新建智能体" })).toBeNull();
-    expect(screen.getByRole("button", { name: "去模型页查看" })).toBeInTheDocument();
-  });
-
-  it("协作里「新建智能体」也进智能体 Tab 的编辑页", () => {
-    stubDesktopBridge(true);
-    render(<AssistantPage />);
-    fireEvent.click(tab("协作"));
-    fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
-    expect(tab("智能体")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument();
-  });
-
-  it("pageView=tasks 意图：切到对话并消费；之后手动切走不被钉住", async () => {
-    useUiStore.setState({ pageView: "tasks" });
-    render(<AssistantPage />);
-
-    await waitFor(() => expect(tab("对话")).toHaveAttribute("aria-selected", "true"));
-    expect(useUiStore.getState().pageView).toBeNull();
-
-    fireEvent.click(tab("协作"));
-    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("通知中心 openConversation（pageView=chat）会把协作切回对话并显示会话", async () => {
-    seedConversations();
-    render(<AssistantPage />);
-    fireEvent.click(tab("协作"));
-
-    act(() => useUiStore.getState().openConversation("c1"));
-    await waitFor(() => expect(tab("对话")).toHaveAttribute("aria-selected", "true"));
-    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
-    expect(screen.getByText("与 和小鸣 的会话")).toBeInTheDocument();
-  });
-
-  it("命令面板「新建智能体」意图：切到智能体 Tab 并打开编辑页", async () => {
-    render(<AssistantPage />);
-    act(() => useUiStore.getState().setPaletteIntent("agent-create"));
-    await waitFor(() => expect(tab("智能体")).toHaveAttribute("aria-selected", "true"));
-    expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument();
-    expect(useUiStore.getState().paletteIntent).toBeNull();
-  });
-});
-
-describe("会话左栏 · 改名与删除（d.128）", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ activeConversationId: "c2" });
+  it("改名失败：页内错误条给原因，输入保留可重试", async () => {
     useChatStore.setState({
-      conversations: [{ ...conv2, title: "竞品调研" }] as never,
-      messages: {} as never,
-      agentsRoster: [] as never,
-      loadWorkspace: vi.fn(async () => undefined),
-      loadAgentsRoster: vi.fn(async () => undefined),
-      openAgent: vi.fn(async () => "c2"),
-      renameConversation: vi.fn(async () => undefined),
-      deleteConversation: vi.fn(async () => undefined),
+      renameConversation: vi.fn(async () => {
+        throw new Error("服务端拒绝");
+      }),
     });
-  });
-
-  it("⋯ → 重命名：行内输入提交后调用 renameConversation", async () => {
     render(<AssistantPage />);
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：竞品调研" }));
+    openRowMenu("整理一下这周的会议纪要");
     fireEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
-    const input = screen.getByLabelText("会话名称");
-    fireEvent.change(input, { target: { value: "竞品调研（新）" } });
+    fireEvent.change(screen.getByLabelText("会话名称"), { target: { value: "周会纪要" } });
     fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("改名失败：服务端拒绝");
+    expect(screen.getByLabelText("会话名称")).toHaveValue("周会纪要");
+  });
+
+  it("删除有二次确认；确认后删会话、清草稿，当前会话回空态", async () => {
+    setDraft("c1", "没发出去的话");
+    useUiStore.setState({ activeConversationId: "c1" });
+    render(<AssistantPage />);
+
+    openRowMenu("整理一下这周的会议纪要");
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    const dialog = screen.getByRole("dialog", { name: "删除这段会话" });
+    expect(dialog).toHaveTextContent("删除「整理一下这周的会议纪要」？");
+    expect(dialog).toHaveTextContent("不可恢复");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() =>
-      expect(useChatStore.getState().renameConversation).toHaveBeenCalledWith("c2", "竞品调研（新）"),
+      expect(useChatStore.getState().deleteConversation).toHaveBeenCalledWith("c1"),
+    );
+    expect(hasDraft("c1")).toBe(false);
+    expect(useUiStore.getState().activeConversationId).toBeNull();
+    expect(screen.queryByTestId("chat-embed")).toBeNull();
+    expect(screen.getByText("开始新会话")).toBeInTheDocument();
+  });
+
+  it("取消删除不调用接口，对话保持打开", () => {
+    useUiStore.setState({ activeConversationId: "c1" });
+    render(<AssistantPage />);
+    openRowMenu("整理一下这周的会议纪要");
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除这段会话" })).getByRole("button", {
+        name: "取消",
+      }),
+    );
+
+    expect(screen.queryByRole("dialog", { name: "删除这段会话" })).toBeNull();
+    expect(useChatStore.getState().deleteConversation).not.toHaveBeenCalled();
+    expect(useUiStore.getState().activeConversationId).toBe("c1");
+  });
+});
+
+describe("搜索与分页", () => {
+  it("搜索只匹配会话名，不匹配消息正文", async () => {
+    useChatStore.setState({ conversations: [conv1, convTitled] as never });
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    const search = screen.getByLabelText("搜索会话");
+
+    // c3 的 title 是「竞品调研」，消息正文却是会议纪要：搜正文不应命中 c3
+    fireEvent.change(search, { target: { value: "会议纪要" } });
+    expect(
+      screen.getByRole("button", { name: "打开会话：整理一下这周的会议纪要" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开会话：竞品调研" })).toBeNull();
+
+    fireEvent.change(search, { target: { value: "竞品" } });
+    expect(screen.getByRole("button", { name: "打开会话：竞品调研" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "打开会话：整理一下这周的会议纪要" }),
+    ).toBeNull();
+  });
+
+  it("无匹配时给空态，「清空搜索」恢复列表", () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "zzz" } });
+
+    expect(screen.getByText("没有匹配的会话")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
+    expect(screen.queryByText("没有匹配的会话")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "打开会话：整理一下这周的会议纪要" }),
+    ).toBeInTheDocument();
+  });
+
+  it("还有下一页时「加载更多会话」可用", async () => {
+    useChatStore.setState({ conversationsHasMore: true });
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+
+    await waitFor(() =>
+      expect(useChatStore.getState().loadMoreConversations).toHaveBeenCalledTimes(1),
     );
   });
+});
 
-  it("⋯ → 删除：二次确认后调用 deleteConversation 并清空当前会话", async () => {
-    setDraft("c2", "还没发的草稿");
+describe("命令面板意图 · 新建会话", () => {
+  it("收到 new-session 意图后直接建 fresh 会话并清空意图", async () => {
+    useChatStore.setState({ conversations: [conv1, conv2, convNew] as never });
     render(<AssistantPage />);
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：竞品调研" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
-    expect(screen.getByRole("dialog", { name: "删除这段对话" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    await waitFor(() => expect(useChatStore.getState().deleteConversation).toHaveBeenCalledWith("c2"));
-    expect(useUiStore.getState().activeConversationId).toBeNull();
-    // 该会话的草稿也不该留在 rail 上（无「草稿」chip 残留）
-    expect(hasDraft("c2")).toBe(false);
+    act(() => useUiStore.getState().setPaletteIntent("new-session"));
+
+    await waitFor(() =>
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
+        fresh: true,
+      }),
+    );
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+    expect(useUiStore.getState().paletteIntent).toBeNull();
+    // 意图消费后不应再出现自建智能体 UI
+    expect(screen.queryByText("新建智能体")).toBeNull();
   });
 });
 
-describe("会话列表分页（d.130）", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ page: "chat", activeConversationId: null });
-    useChatStore.setState({
-      conversations: [{ ...conv2, title: "竞品调研" }] as never,
-      messages: {} as never,
-      agentsRoster: [] as never,
-      workspaceReady: true,
-      conversationsHasMore: true,
-      conversationsLoadingMore: false,
-      loadMoreConversations: vi.fn(async () => undefined),
-    });
-  });
-
-  it("还有下一页时显示「加载更多对话」，点击调用 loadMoreConversations", () => {
-    render(<AssistantPage />);
-    fireEvent.click(screen.getByRole("button", { name: "加载更多对话" }));
-    expect(useChatStore.getState().loadMoreConversations).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("首载失败不再静默（d.141 F-01）", () => {
-  it("会话首载失败：出 role=alert + 「重试」，重试会重新拉取", async () => {
-    const loadWorkspace = vi.fn(async () => undefined);
-    useChatStore.setState({
-      conversations: [] as never,
-      messages: {} as never,
-      workspaceReady: false,
-      workspaceError: "网络中断",
-      loadWorkspace,
-    });
-    render(<AssistantPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("对话列表加载失败：网络中断");
-
-    const before = loadWorkspace.mock.calls.length; // 挂载时已拉过一次
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(loadWorkspace.mock.calls.length).toBeGreaterThan(before));
-  });
-
-  it("名册首载失败：切到「智能体」出提示与重试，点击后重新拉名册", async () => {
-    const loadAgentsRoster = vi.fn(async () => {
-      throw new Error("网关超时");
-    });
-    useChatStore.setState({ agentsRoster: [] as never, loadAgentsRoster });
-    render(<AssistantPage />);
-    fireEvent.click(tab("智能体"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("智能体列表加载失败：网关超时");
-
-    const before = loadAgentsRoster.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(loadAgentsRoster.mock.calls.length).toBeGreaterThan(before));
-  });
+// 测试间清理：草稿是模块级内存，避免上一条用例的 c1 草稿影响后续断言。
+afterEach(() => {
+  clearDraft("c1");
 });

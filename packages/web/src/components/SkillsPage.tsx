@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listAgents } from "../lib/agentsApi.js";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 import { SelfEditCard } from "./SelfEditCard.js";
 import { PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -27,7 +27,7 @@ type SkillTab = "groups" | "pool" | "hub";
 const SKILL_TAB_ORDER: readonly SkillTab[] = ["groups", "pool", "hub"];
 
 /**
- * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
+ * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图；分配对象固定为唯一内置智能体。
  * 数据只来自本机 lib/skills 的单例（测试注入独立实例），不重写存储：
  * 启用、删除、导入、沉淀全部走 SkillPool 的既有 API。
  */
@@ -149,22 +149,18 @@ export const SKILL_TEMPLATES: readonly SkillTemplate[] = [
  * 新建技能弹窗（d.68 简化）：
  * - 必填只有「名称」与「技能内容」，其余可空；
  * - 3 个模板只填空字段；
- * - 创建后若当前已选智能体，自动分配给它（否则技能建了却「不会用于对话」，新手最容易踩）。
+ * - 创建后直接分配给唯一内置智能体（否则技能建了却「不会用于对话」，新手最容易踩）。
  */
 function SkillCreateDialog({
   open,
   skills,
-  agentId,
-  agentName,
   onClose,
   onCreated,
 }: {
   open: boolean;
   skills: SkillPool;
-  agentId: string;
-  agentName: string;
   onClose: () => void;
-  onCreated: (skill: SkillDefinition, assigned: boolean) => void;
+  onCreated: (skill: SkillDefinition) => void;
 }) {
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
@@ -209,9 +205,9 @@ function SkillCreateDialog({
       enabled: true,
       version: "1.0.0",
     });
-    // 自动分配给当前智能体：否则「建好了却不会用于对话」是新手最容易踩的坑。
-    if (agentId) skills.assign(agentId, created.id);
-    onCreated(created, Boolean(agentId));
+    // 单一内置智能体：建好即分配，否则「建好了却不会用于对话」是新手最容易踩的坑。
+    skills.assign(SYSTEM_AGENT_ID, created.id);
+    onCreated(created);
     onClose();
   };
 
@@ -323,9 +319,7 @@ function SkillCreateDialog({
         </label>
 
         <p className={`mt-2 ${hintCls}`}>
-          {agentId
-            ? `创建后会自动分配给「${agentName}」，对话时就能用。`
-            : "还没有选择智能体：先建在技能池，选中智能体后再分配即可用于对话。"}
+          {`创建后会自动分配给「${SYSTEM_AGENT.name}」，对话时就能用。`}
         </p>
 
       </form>
@@ -547,7 +541,7 @@ export type SkillsPageProps = SkillsViewProps;
  * 为什么把技能区从「页」降级成「视图」：导航里技能区与插件区各有一个入口，
  * 但插件技能本来就会物化进技能池、分配与启停是同一份数据——两个入口只是
  * 把同一个能力面拆成两处。合并后插件区（能力中心）承载一个「技能」Tab，
- * 本视图保留技能池、按智能体分配、导入/沉淀/删除、搜索与分组，只去掉页面外壳。
+ * 本视图保留技能池、分配、导入/沉淀/删除、搜索与分组，只去掉页面外壳。
  */
 export function SkillsView({
   skills = skillPool,
@@ -609,28 +603,12 @@ export function SkillsView({
   /** 新建技能弹窗（d.68：名称 + 内容即可创建，模板只填空字段）。 */
   const [createOpen, setCreateOpen] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  /** 智能体名册（技能按智能体分配；名册拉不到时退化为「未选择」）。 */
-  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
-  const [agentId, setAgentId] = useState<string>("");
+  /** 全产品唯一内置智能体：技能仍按 agentId 存分配，但 UI 不再让用户切换。 */
+  const agentId = SYSTEM_AGENT_ID;
+  const agentName = SYSTEM_AGENT.name;
   /** 「＋ 添加技能」浮层：当前要往哪个分类里加（null = 关闭）。 */
   const [addFor, setAddFor] = useState<SkillCategory | null>(null);
   const closeAddPanel = () => setAddFor(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    listAgents()
-      .then((list) => {
-        if (cancelled) return;
-        setAgents(list.map((a) => ({ id: a.id, name: a.name })));
-        setAgentId((cur) => cur || list[0]?.id || "");
-      })
-      .catch(() => {
-        /* 名册失败：不阻塞技能池浏览，只是无法按智能体分配 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const bump = () => {
     setTick((n) => n + 1);
@@ -638,15 +616,13 @@ export function SkillsView({
     onChanged?.();
   };
 
-  const agentName = agents.find((a) => a.id === agentId)?.name ?? "未选择智能体";
-
   // tick 只用于在 store 变更后强制重读快照（store 非响应式）。
   const list = useMemo(() => skills.list(), [skills, tick]);
   const usages = useMemo(() => skills.usages(), [skills, tick]);
 
-  /** 当前智能体已分配的技能 id 集合（未选智能体时为空）。 */
+  /** 内置智能体已分配的技能 id 集合。 */
   const assignedIds = useMemo(
-    () => new Set(agentId ? skills.assigned(agentId) : []),
+    () => new Set(skills.assigned(agentId)),
     // tick 让 store 变更后重算
     [skills, agentId, tick],
   );
@@ -671,14 +647,12 @@ export function SkillsView({
     list.filter((skill) => categorizeSkill(skill) === key && !assignedIds.has(skill.id));
 
   const assignSkill = (skill: SkillDefinition) => {
-    if (!agentId) return;
     skills.assign(agentId, skill.id);
     bump();
     setMsg({ kind: "ok", text: `已为「${agentName}」添加技能：${skill.name}` });
   };
 
   const unassignSkill = (skill: SkillDefinition) => {
-    if (!agentId) return;
     skills.unassign(agentId, skill.id);
     bump();
     setMsg({ kind: "ok", text: `已从「${agentName}」移除技能：${skill.name}` });
@@ -711,8 +685,8 @@ export function SkillsView({
   const distillSkill = (skill: SkillDefinition) => {
     try {
       const copy = skills.distill(skill.id);
-      // 沉淀 = 已验证可用：直接分配给当前智能体，避免「沉淀完却看不见」
-      if (agentId) skills.assign(agentId, copy.id);
+      // 沉淀 = 已验证可用：直接分配给内置智能体，避免「沉淀完却看不见」
+      skills.assign(agentId, copy.id);
       bump();
       setMsg({ kind: "ok", text: `已沉淀为「${copy.name}」` });
     } catch (err) {
@@ -770,7 +744,6 @@ export function SkillsView({
                 type="button"
                 aria-label={`为${group.title}添加技能`}
                 title={`为${group.title}添加技能`}
-                disabled={!agentId}
                 onClick={() => {
                   setMsg(null);
                   setAddFor(group.key);
@@ -786,9 +759,7 @@ export function SkillsView({
                 <div className={hintCls}>
                   {keyword
                     ? `没有匹配「${query.trim()}」的技能`
-                    : agentId
-                      ? `「${agentName}」还没有这类技能，点上方 ＋ 添加。`
-                      : group.empty}
+                    : `「${agentName}」还没有这类技能，点上方 ＋ 添加。`}
                 </div>
                 {!keyword && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -939,7 +910,7 @@ export function SkillsView({
         <section className={`${cardCls} mt-3`}>
           <EmptyState
             title="技能池还是空的"
-            desc="新建一个技能，或粘贴 SKILL.md 导入。技能要「启用 + 分配给智能体」才会用于对话。"
+            desc={`新建一个技能，或粘贴 SKILL.md 导入。技能启用并分配给「${SYSTEM_AGENT.name}」后，对话时才会生效。`}
             actions={
               <>
                 <Button
@@ -1106,7 +1077,7 @@ export function SkillsView({
           </section>
 
           <p className={`mt-2 ${hintCls}`}>
-            启用并分配给智能体后，技能才会在对话里生效。
+            启用并分配给「{SYSTEM_AGENT.name}」后，技能才会在对话里生效。
           </p>
         </>
       )}
@@ -1118,30 +1089,9 @@ export function SkillsView({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           {tab !== "hub" && (
-            <>
-              <label htmlFor="skill-agent-select" className="ui-caption">
-                给哪个智能体用
-              </label>
-              <select
-                id="skill-agent-select"
-                aria-label="选择智能体"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                className={`${inputSmCls} min-w-[160px]`}
-              >
-                {agents.length === 0 && <option value="">（名册加载中…）</option>}
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-              <span className={hintCls}>
-                {agentId
-                  ? `已分配 ${assignedIds.size} 个技能；只有已分配的技能才会用于「${agentName}」的对话`
-                  : "先选择智能体，才能把技能分配给它使用"}
-              </span>
-            </>
+            <span className={hintCls}>
+              技能启用并分配给「{agentName}」后即在对话里生效；当前已分配 {assignedIds.size} 个
+            </span>
           )}
           </div>
         <div
@@ -1161,7 +1111,7 @@ export function SkillsView({
             onClick={() => setTab("groups")}
             size="sm" variant={tab === "groups" ? "primary" : "ghost"} className={tab === "groups" ? undefined : "text-muted"}
           >
-            按智能体
+            已分配
           </Button>
           <Button
             type="button"
@@ -1289,7 +1239,7 @@ export function SkillsView({
 
       {/* 自我优化：让智能体改自己的记忆/技能/MCP。与「技能」同属能力配置，故放这里 */}
       <SelfEditCard
-        agents={agents}
+        agents={[{ id: SYSTEM_AGENT_ID, name: SYSTEM_AGENT.name }]}
         agentId={agentId}
         targets={{ memory: memoryStore, skills, mcp: mcpRegistry }}
       />
@@ -1297,16 +1247,12 @@ export function SkillsView({
       <SkillCreateDialog
         open={createOpen}
         skills={skills}
-        agentId={agentId}
-        agentName={agentName}
         onClose={() => setCreateOpen(false)}
-        onCreated={(skill, assigned) => {
+        onCreated={(skill) => {
           bump();
           setMsg({
             kind: "ok",
-            text: assigned
-              ? `已新建技能「${skill.name}」，并分配给「${agentName}」；对话时就会用上。`
-              : `已新建技能「${skill.name}」；选中智能体后到「技能池」分配，才会用于对话。`,
+            text: `已新建技能「${skill.name}」，并分配给「${agentName}」；对话时就会用上。`,
           });
         }}
       />
@@ -1346,7 +1292,7 @@ export function SkillsView({
           }
         >
           <p className="text-ui-sm leading-6">
-            删除技能「{removeTarget.name}」？技能定义、使用统计和所有智能体上的分配都会被移除，
+            删除技能「{removeTarget.name}」？技能定义、使用统计和分配记录都会被移除，
             此操作不可恢复。
           </p>
         </ConfirmDialog>

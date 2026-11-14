@@ -6,64 +6,96 @@ import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useNotificationStore } from "../store/notifications.js";
 
-// 只验「命令面板意图到达后，消费端会打开对应浮层并清空意图」这条接线，
-// 不在这里跑完整对话链路：把 ChatPage 与名册请求都按掉。
-vi.mock("./ChatPage.js", () => ({ ChatPage: () => null }));
+// 只验「命令面板意图到达后，消费端会执行对应动作并清空意图」这条接线，
+// 不在这里跑完整对话链路：把 ChatPage 与会话加载都按掉。
+vi.mock("./ChatPage.js", () => ({
+  ChatPage: () => <div data-testid="chat-embed" />,
+}));
 
 /**
- * 命令面板意图消费点（d.60）。
+ * 命令面板意图消费点（d.60；d.150 起会话页只有一个内置智能体）。
  *
- * 命令面板（可能在被懒加载的页面里）只投内存意图，真正的开关在
- * `AssistantPage`（新建智能体的**编辑页**，d.126 起不再弹窗）与
+ * 命令面板（可能在被懒加载的页面里）只投内存意图，真正的动作在
+ * `AssistantPage`（「新建会话」→ 直接开一段新会话）与
  * `NotificationCenter`（通知中心浮层）里。
- * 这两个用例锁住：**意图到达 → 视图打开 → 意图被清空**（幂等、不重复打开）。
+ * 这两个用例锁住：**意图到达 → 动作执行 → 意图被清空**（幂等、不重复执行）。
  */
-describe("命令面板意图消费 · 新建智能体", () => {
+describe("命令面板意图消费 · 新建会话", () => {
+  const conversation = {
+    id: "c9",
+    type: "agent",
+    agent: {
+      id: "system-assistant",
+      owner_id: null,
+      name: "和小鸣",
+      avatar: null,
+      description: "和鸣官方预设智能体",
+    },
+    unreadCount: 0,
+    lastMessageAt: null,
+  };
+
   beforeEach(() => {
     localStorage.clear();
     window.sessionStorage.clear();
-    useUiStore.setState({ page: "chat", paletteIntent: null });
-    // 名册/会话加载是网络操作，这里直接替换成空实现，避免测试打真实接口。
+    useUiStore.setState({
+      page: "chat",
+      paletteIntent: null,
+      activeConversationId: null,
+    });
+    // 会话加载是网络操作，这里直接替换成空实现，避免测试打真实接口。
     useChatStore.setState({
-      conversations: [],
-      agentsRoster: [],
+      conversations: [conversation] as never,
+      messages: {} as never,
+      workspaceReady: true,
+      workspaceError: "",
       loadWorkspace: vi.fn(async () => {}),
-      loadAgentsRoster: vi.fn(async () => {}),
-      openAgent: vi.fn(async (_agentId: string) => ""),
+      openAgent: vi.fn(async () => "c9"),
     });
   });
   afterEach(() => cleanup());
 
-  it("收到 agent-create 意图后打开新建智能体编辑页，并清空意图", async () => {
+  it("收到 new-session 意图后直接建一段 fresh 会话并打开，意图清空", async () => {
     render(<AssistantPage />);
-    expect(screen.queryByRole("heading", { name: "新建智能体" })).not.toBeInTheDocument();
+    expect(screen.queryByText("新建智能体")).toBeNull();
+    expect(useUiStore.getState().activeConversationId).toBeNull();
 
     act(() => {
-      useUiStore.getState().setPaletteIntent("agent-create");
+      useUiStore.getState().setPaletteIntent("new-session");
     });
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument(),
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
+        fresh: true,
+      }),
     );
-    // d.126：编辑智能体是页内视图，不再是模态弹窗
-    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+    // 单智能体产品：不再出现「新建智能体」编辑页/弹窗
+    expect(screen.queryByText("新建智能体")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "新建智能体" })).toBeNull();
     expect(useUiStore.getState().paletteIntent).toBeNull();
   });
 
-  it("意图被消费后不会再次打开（关掉编辑页后保持关闭）", async () => {
+  it("同一种意图连投两次，token 自增会各自消费一次（不会因 kind 相同被合并）", async () => {
     render(<AssistantPage />);
+
     act(() => {
-      useUiStore.getState().setPaletteIntent("agent-create");
+      useUiStore.getState().setPaletteIntent("new-session");
     });
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument(),
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledTimes(1),
     );
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+
+    // 用户回到空态后再从命令面板「新建会话」：应再建一段，而不是被「已经打开了」挡住
     act(() => {
-      screen.getByRole("button", { name: "取消" }).click();
+      useUiStore.setState({ activeConversationId: null });
+      useUiStore.getState().setPaletteIntent("new-session");
     });
     await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "新建智能体" })).not.toBeInTheDocument(),
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledTimes(2),
     );
+    expect(useUiStore.getState().paletteIntent).toBeNull();
   });
 });
 

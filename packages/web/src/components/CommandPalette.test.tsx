@@ -271,12 +271,12 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("新建智能体 → 投 agent-create 意图 + 切到智能体页", () => {
+  it("新建会话 → 投 new-session 意图 + 切到会话页", () => {
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.click(OPTION("新建智能体"));
+    fireEvent.click(OPTION("新建会话"));
     const s = useUiStore.getState();
     expect(s.page).toBe("chat");
-    expect(s.paletteIntent).toMatchObject({ kind: "agent-create" });
+    expect(s.paletteIntent).toMatchObject({ kind: "new-session" });
     expect(typeof s.paletteIntent?.token).toBe("number");
   });
 
@@ -314,14 +314,14 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     expect(await screen.findByRole("option", { name: "插件管理" })).toBeInTheDocument();
   });
 
-  it("连续两次「新智能体」意图的 token 不同（不会被合并成一次）", () => {
+  it("连续两次「新建会话」意图的 token 不同（不会被合并成一次）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     // 点过一次后该动作会同时出现在「最近使用」与「常用动作」两组里，取第一条即可
-    fireEvent.click(OPTION("新建智能体"));
+    fireEvent.click(OPTION("新建会话"));
     const first = useUiStore.getState().paletteIntent;
-    fireEvent.click(screen.getAllByRole("option", { name: "新建智能体" })[0]);
+    fireEvent.click(screen.getAllByRole("option", { name: "新建会话" })[0]);
     const second = useUiStore.getState().paletteIntent;
-    expect(second?.kind).toBe("agent-create");
+    expect(second?.kind).toBe("new-session");
     expect(second!.token).not.toBe(first!.token);
   });
 

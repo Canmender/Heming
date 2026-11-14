@@ -12,8 +12,7 @@ export type User = z.infer<typeof UserSchema>;
 /**
  * 智能体名册项。
  *
- * 位置说明（原本定义在文件末尾的 AgentBodySchema 之前，现移到此处）：
- * ConversationSchema 的 agent 分支要引用它，而 `const` 有 TDZ——
+ * 位置说明：ConversationSchema 的 agent 分支要引用它，而 `const` 有 TDZ——
  * 若 AgentSchema 定义在后面，模块初始化时构造 discriminatedUnion 会撞
  * "Cannot access 'AgentSchema' before initialization"。
  */
@@ -25,6 +24,27 @@ export const AgentSchema = z.object({
   description: z.string().max(500),
 });
 export type Agent = z.infer<typeof AgentSchema>;
+
+/**
+ * 唯一内置智能体的稳定 id。
+ *
+ * 产品形态（对齐 Codex / Claude Code）：全产品只有一个智能体，用户不能创建、
+ * 修改或删除；会话仍以「agent」形态存在（Conversation.agent / Message.senderType
+ * 沿用既有契约），但 agentId 恒等于本常量。
+ */
+export const SYSTEM_AGENT_ID = "system-assistant";
+
+/**
+ * 唯一内置智能体的元数据真源：服务端种子数据与前端展示共用，避免多处字面量漂移。
+ * owner_id 必须为 null（表示公共资源，不属于任何用户）。
+ */
+export const SYSTEM_AGENT: Agent = {
+  id: SYSTEM_AGENT_ID,
+  owner_id: null,
+  name: "和小鸣",
+  avatar: null,
+  description: "和鸣官方预设智能体",
+};
 
 export const MessagePayloadSchema = z.object({
   // 上限 20000：与 agent_finish.text 对齐（agent 回复经 finish 直接入库，两处不齐会「入库即违规」）
@@ -345,14 +365,15 @@ export const ConversationSchema = z.object({
 export type Conversation = z.infer<typeof ConversationSchema>;
 
 /**
- * 建智能体会话：agentId 指向名册项，owner 校验在服务端做（schema 只管形状）。
+ * 建会话：产品只有一个内置智能体（`SYSTEM_AGENT`），`agentId` 已无意义。
  *
- * - 缺省保持旧行为：同一用户 × 同一 agent 幂等复用（老客户端/旧链接不受影响）；
- * - `fresh: true` = 新建一段新会话（Claude Code 式「同一智能体多段对话」）；
+ * - `agentId` 可选，仅为兼容旧客户端/旧链接；服务端会静默归一为内置智能体；
+ * - 缺省保持旧行为：同一用户幂等复用（老客户端/旧链接不受影响）；
+ * - `fresh: true` = 新建一段新会话（Claude Code 式「多段对话」）；
  * - `title` 可选，创建时即可带标题（界面后续也会在首条消息后 PATCH）。
  */
 export const AgentConversationBodySchema = z.object({
-  agentId: z.string().min(1),
+  agentId: z.string().min(1).optional(),
   fresh: z.boolean().optional(),
   title: z.string().max(80).optional(),
 });
@@ -378,13 +399,6 @@ export const CreateFileBodySchema = z.object({
   contentBase64: z.string().max(4_000_000),
 });
 export type CreateFileBody = z.infer<typeof CreateFileBodySchema>;
-
-export const AgentBodySchema = z.object({
-  name: z.string().min(1).max(32),
-  avatar: z.string().max(600_000).nullable().optional(),
-  description: z.string().max(500).default(""),
-});
-export type AgentBody = z.infer<typeof AgentBodySchema>;
 
 // —— E2E Task 2：公钥分发与明文重加密契约（设计 §3.1/§7）——
 

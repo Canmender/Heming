@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { EmptyState } from "../ui/EmptyState.js";
@@ -6,17 +6,18 @@ import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
-import { Button } from "../../components/ui/Button.js";
-import { IconButton } from "../../components/ui/IconButton.js";
+import { Button } from "../ui/Button.js";
 
 /**
- * 对话左栏（d.126 阶段 B）：Claude Code 风格会话栏。
+ * 会话左栏（单智能体 · 会话模式，对齐 Codex / Claude Code）。
  *
- * 结构（对齐参考图）：
- * - 顶部动作行：「新建对话」+「搜索」；
- * - 会话按**智能体分组**（组标题 = 智能体名，组右侧 `＋` 直接开该智能体的新对话）；
- * - 组内按最近活跃排序，**一级信息是会话名**（不是智能体名——名字在组标题上）；
- * - 当前会话高亮（`aria-current`），有草稿的会话带「草稿」标识；
+ * 产品只剩一个内置智能体，所以这里**不再按智能体分组**：全部会话是一条扁平列表，
+ * 一级信息是**会话名**（不是智能体名）。
+ *
+ * 结构：
+ * - 顶部：「会话」+ 数量；动作行「新建会话」+「搜索」；
+ * - 列表按最近活跃排序；当前会话高亮（`aria-current`），有草稿的会话带「草稿」标识；
+ * - 搜索只匹配会话标题；
  * - 可折叠成头像窄栏，把横向空间让给对话；整个列表保持 Tab 可达。
  *
  * 会话名优先用服务端 `title`（d.128）；没有标题时由 `conversationTitle` 从已加载消息推导，
@@ -29,15 +30,13 @@ export interface ConversationRailProps {
   activeConversationId: string | null;
   /** 已加载消息（store.messages）：用于推导会话名前缀。 */
   messages: Record<string, Message[]>;
-  /** 正在打开的智能体 id（新建会话按钮的 busy 态）。 */
-  openingId?: string | null;
-  /** 打开会话失败的原因（显示在栏底，不挡列表）。 */
+  /** 正在新建会话（按钮 busy 态；调用方用同一个标志防重）。 */
+  opening?: boolean;
+  /** 新建/改名/加载更多失败的原因（显示在栏底，不挡列表）。 */
   error?: string;
   onOpen: (conversationId: string) => void;
-  /** 顶部「新建对话」：回到主区的智能体选择页（由用户挑智能体）。 */
+  /** 顶部「新建会话」：直接新建一段 fresh 会话（单智能体，无需再选人）。 */
   onNewConversation: () => void;
-  /** 组右侧 `＋`：直接新建与该智能体的一段新会话。 */
-  onNewForAgent: (agentId: string) => void;
   /** 会话改名（行内菜单）：服务端 PATCH 由调用方负责。 */
   onRename: (conversationId: string, title: string) => void | Promise<void>;
   /** 请求删除会话（调用方弹二次确认，rail 不直接删）。 */
@@ -54,46 +53,14 @@ function lastActivityOf(conv: Pick<Conversation, "lastMessageAt">): number {
   return Number.isFinite(at) ? at : 0;
 }
 
-interface ConversationGroup {
-  agentId: string;
-  agentName: string;
-  items: Conversation[];
-}
-
-/** 按智能体分组；组顺序 = 组内最近活跃时间（会话列表已按活跃倒序，首次出现即最活跃）。 */
-function groupByAgent(
-  conversations: Conversation[],
-  query: string,
-  messages: Record<string, Message[]>,
-): ConversationGroup[] {
-  const q = query.trim().toLowerCase();
-  const groups = new Map<string, ConversationGroup>();
-  for (const conv of conversations) {
-    const title = conversationTitle(conv, messages[conv.id]).toLowerCase();
-    const agentName = conv.agent.name.toLowerCase();
-    if (q && !title.includes(q) && !agentName.includes(q)) continue;
-    const existing = groups.get(conv.agent.id);
-    if (existing) existing.items.push(conv);
-    else {
-      groups.set(conv.agent.id, {
-        agentId: conv.agent.id,
-        agentName: conv.agent.name,
-        items: [conv],
-      });
-    }
-  }
-  return [...groups.values()];
-}
-
 export function ConversationRail({
   conversations,
   activeConversationId,
   messages,
-  openingId = null,
+  opening = false,
   error = "",
   onOpen,
   onNewConversation,
-  onNewForAgent,
   onRename,
   onDeleteRequest,
   hasMore = false,
@@ -124,23 +91,26 @@ export function ConversationRail({
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
+  const titleOf = useCallback(
+    (conv: Conversation): string => conversationTitle(conv, messages[conv.id]),
+    [messages],
+  );
   const sorted = useMemo(
     () => [...conversations].sort((a, b) => lastActivityOf(b) - lastActivityOf(a)),
     [conversations],
   );
-  const groups = useMemo(
-    () => groupByAgent(sorted, query, messages),
-    [sorted, query, messages],
-  );
+  /** 扁平列表 + 只按会话名过滤（单智能体：智能体名不再有区分度）。 */
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((conv) => titleOf(conv).toLowerCase().includes(q));
+  }, [sorted, query, titleOf]);
   const hasQuery = query.trim() !== "";
 
   const closeSearch = () => {
     setQuery("");
     setSearchOpen(false);
   };
-
-  const titleOf = (conv: Conversation): string =>
-    conversationTitle(conv, messages[conv.id]);
 
   /** d.128：会话行操作菜单 + 行内改名。 */
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -239,7 +209,7 @@ export function ConversationRail({
         <button
           type="button"
           title={draft ? `${title}（有草稿）` : title}
-          aria-label={`打开与 ${conv.agent.name} 的对话：${title}`}
+          aria-label={`打开会话：${title}`}
           aria-current={active ? "true" : undefined}
           onClick={() => onOpen(conv.id)}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
@@ -304,14 +274,15 @@ export function ConversationRail({
       return (
         <EmptyState
           className="px-2 py-6"
-          title="还没有对话"
+          title="还没有会话"
           actions={
             <Button
               type="button"
               onClick={onNewConversation}
+              busy={opening}
               size="sm" variant="primary" className="w-full"
             >
-              选择智能体
+              新建会话
             </Button>
           }
         />
@@ -320,7 +291,7 @@ export function ConversationRail({
     return (
       <EmptyState
         className="px-2 py-6"
-        title="没有匹配的对话"
+        title="没有匹配的会话"
         actions={
           <Button type="button" size="sm" variant="ghost" onClick={closeSearch}>
             清空搜索
@@ -336,8 +307,8 @@ export function ConversationRail({
         <header className="flex items-center justify-center border-b border-line-soft py-2">
           <button
             type="button"
-            aria-label="展开对话列表"
-            title="展开对话列表"
+            aria-label="展开会话列表"
+            title="展开会话列表"
             onClick={() => setCollapsed(false)}
             className="ui-hit flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
           >
@@ -353,7 +324,7 @@ export function ConversationRail({
                 key={conv.id}
                 type="button"
                 title={title}
-                aria-label={`打开与 ${conv.agent.name} 的对话：${title}`}
+                aria-label={`打开会话：${title}`}
                 aria-current={active ? "true" : undefined}
                 onClick={() => onOpen(conv.id)}
                 className={`mb-1 flex w-full justify-center rounded-lg p-1 transition-colors ${
@@ -370,10 +341,11 @@ export function ConversationRail({
         </div>
         <button
           type="button"
-          aria-label="新建对话"
-          title="新建对话"
+          aria-label="新建会话"
+          title="新建会话"
+          disabled={opening}
           onClick={onNewConversation}
-          className="ui-hit mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
+          className="ui-hit mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink disabled:opacity-50"
         >
           <PlusIcon width={14} height={14} />
         </button>
@@ -384,12 +356,13 @@ export function ConversationRail({
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r border-line-soft">
       <header className="flex items-center gap-2 border-b border-line-soft px-3 py-2.5">
-        <span className="ui-section-title min-w-0 truncate">对话</span>
+        {/* 二级标题：页头 h1 是「会话」，栏头用 h2 给读屏用户两级大纲（设计审计门槛）。 */}
+        <h2 className="ui-section-title min-w-0 truncate">会话列表</h2>
         <span className="ui-micro text-muted">{sorted.length}</span>
         <button
           type="button"
-          aria-label="收起对话列表"
-          title="收起对话列表"
+          aria-label="收起会话列表"
+          title="收起会话列表"
           onClick={() => setCollapsed(true)}
           className="ui-hit ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
         >
@@ -397,22 +370,23 @@ export function ConversationRail({
         </button>
       </header>
 
-      {/* 顶部动作：新建对话 / 搜索（对齐参考图 New / Search）。 */}
+      {/* 顶部动作：新建会话 / 搜索（对齐参考图 New / Search）。 */}
       <div className="flex items-center gap-1.5 border-b border-line-soft px-2 py-1.5">
         <Button
           type="button"
-          aria-label="新建对话"
-          title="新建对话：先选一个智能体"
+          aria-label="新建会话"
+          title="新建会话"
           onClick={onNewConversation}
+          busy={opening}
           size="sm" variant="ghost" className="min-w-0 flex-1 justify-start"
         >
           <PlusIcon width={14} height={14} />
-          <span className="truncate">新建对话</span>
+          <span className="truncate">新建会话</span>
         </Button>
         <button
           type="button"
           aria-label="搜索"
-          title={searchOpen ? "收起搜索" : "搜索对话"}
+          title={searchOpen ? "收起搜索" : "搜索会话"}
           aria-expanded={searchOpen}
           aria-controls="assistant-conversation-search"
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
@@ -431,7 +405,7 @@ export function ConversationRail({
           <input
             ref={searchRef}
             type="search"
-            aria-label="搜索对话"
+            aria-label="搜索会话"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -440,47 +414,16 @@ export function ConversationRail({
                 closeSearch();
               }
             }}
-            placeholder="搜索对话…"
+            placeholder="搜索会话…"
             className="w-full rounded-lg border border-line px-2 py-1 text-ui-sm outline-hidden focus:border-ink"
           />
         </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {groups.length === 0
-          ? renderEmpty()
-          : groups.map((group) => (
-              <section
-                key={group.agentId}
-                aria-label={`${group.agentName} 的对话`}
-                className="mb-1.5"
-              >
-                <div className="flex items-center gap-1 px-2 py-1">
-                  {/* 分组标题（B 轨 E6）：此前 ui-micro(11px/500) 比组内会话名(13px/ink) 更小更淡，
-                      读起来像元信息而不是「这一组是谁的对话」。现在按卡片分区标题的规格来：
-                      ui-caption 的 12px/500 + semibold + 正文色。 */}
-                  <span
-                    className="ui-caption min-w-0 flex-1 truncate font-semibold text-ink"
-                    title={group.agentName}
-                  >
-                    {group.agentName}
-                  </span>
-                  <span className="ui-caption text-muted">{group.items.length}</span>
-                  <IconButton
-                    label={`新建与 ${group.agentName} 的对话`}
-                    title={`新建与 ${group.agentName} 的对话`}
-                    disabled={openingId === group.agentId}
-                    onClick={() => onNewForAgent(group.agentId)}
-                    icon={<PlusIcon width={12} height={12} />}
-                  />
-                </div>
-                {group.items.map(renderRow)}
-              </section>
-            ))}
-        {hasQuery && groups.length > 0 ? (
-          <p className="ui-caption px-2 py-1">
-            {groups.reduce((n, g) => n + g.items.length, 0)} 条匹配
-          </p>
+        {visible.length === 0 ? renderEmpty() : visible.map(renderRow)}
+        {hasQuery && visible.length > 0 ? (
+          <p className="ui-caption px-2 py-1">{visible.length} 条匹配</p>
         ) : null}
         {hasMore && !hasQuery ? (
           <Button
@@ -489,7 +432,7 @@ export function ConversationRail({
             onClick={onLoadMore}
             size="sm" variant="ghost" className="mt-1 w-full"
           >
-            {loadingMore ? "加载中…" : "加载更多对话"}
+            {loadingMore ? "加载中…" : "加载更多会话"}
           </Button>
         ) : null}
       </div>
@@ -499,9 +442,7 @@ export function ConversationRail({
           {error}
         </p>
       )}
-      {/* d.142：原来是一句「智能体在本机运行：模型 Key、工具与记忆不出设备；
-          消息不进团队动向。」的灰字散文。隐私边界必留，但压成一条状态行——
-          前半句是环境复述（智能体页页头已有「本机运行」），后半句是决策相关的边界。 */}
+      {/* 隐私边界必留：压成一条状态行（页头已有「本机运行」）。 */}
       <p className="ui-caption border-t border-line-soft px-3 py-2">
         本机运行 · Key 与记忆不出设备
       </p>

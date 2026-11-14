@@ -9,7 +9,7 @@ import type { Page } from "../../store/ui.js";
  * 快捷键与 App 的映射一致」钉住（见 lib/palette/palette.test.ts）。
  *
  * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
- * 1 主页 / 2 团队 / 5 记忆 / 6 设置 / 8 智能体 / 0 插件。
+ * 1 主页 / 2 团队 / 5 记忆 / 6 设置 / 8 会话 / 0 插件。
  * 幕僚 / 信息中枢 / 自动化已迁到沙箱插件（页面入口由插件页装出来），
  * 模型路由页已删除——它们都不在页面目录里。
  */
@@ -26,7 +26,7 @@ export interface PalettePage {
 export const PALETTE_PAGES: PalettePage[] = [
   { page: "home", label: "主页", description: "统计、最近动向与今日概览", digit: "1" },
   { page: "team", label: "团队", description: "成员名册、动向流与团队看板", digit: "2" },
-  { page: "chat", label: "智能体", description: "与智能体对话，或新建/运行一个任务", digit: "8" },
+  { page: "chat", label: "会话", description: "与小鸣对话：会话列表、历史与新建会话", digit: "8" },
   {
     page: "plugins",
     label: "插件",

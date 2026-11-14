@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "../lib/hitl/policy.js";
-import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
+import type { HitlMode, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Button } from "../components/ui/Button.js";
@@ -178,18 +178,9 @@ export function HitlPolicyCard({
         </div>
       )}
 
-      <label className="mt-3 block text-ui-sm">
-        授权作用域
-        <select
-          aria-label="授权作用域"
-          value={policy.scope}
-          onChange={(e) => update({ scope: e.target.value as PolicyScope })}
-          className="mt-1 block ui-input"
-        >
-          <option value="global">所有智能体共用</option>
-          <option value="per-agent">按智能体分别授权</option>
-        </select>
-      </label>
+      <div className="mt-3 ui-caption">
+        授权作用域：产品只有一个内置智能体，规则与「本会话授权」都只对它生效。
+      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button
@@ -259,7 +250,7 @@ export function HitlPolicyCard({
                   {rule.resource === "*" ? "所有调用" : rule.resource}
                 </span>
                 <span className="shrink-0 text-ui-xs text-muted">
-                  {rule.agentName || rule.agentId ? rule.agentName || "指定智能体" : "全部智能体"}
+                  {rule.agentName || rule.agentId ? "内置智能体" : "全部会话（旧规则）"}
                 </span>
               </li>
             ))}
@@ -267,7 +258,7 @@ export function HitlPolicyCard({
         )}
         {rules.length > 0 && (
           <div className="mt-1 text-ui-xs text-muted">
-            拒绝规则优先于允许规则；记住的允许对危险操作不生效。新规则只对当前智能体生效。
+            拒绝规则优先于允许规则；记住的允许对危险操作不生效。新规则只对内置智能体生效。
           </div>
         )}
       </div>

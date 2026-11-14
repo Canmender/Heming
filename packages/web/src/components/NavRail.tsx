@@ -44,20 +44,20 @@ import { Kbd } from "./ui/Kbd.js";
  * 顺序可调时用户会把「设置」拖到中间，而 Alt+N 的号仍是旧的——顺序与编号两套真源；
  * 现在顺序写死、编号也写死，两者一一对应，轨上从上到下就是 1、2、8、0、5、6。
  *
- * **默认可视 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
+ * **默认可视 8 项**：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置。
  * 另外还有带页面的插件（信息中枢 / 自动化 / 工作流等）：它们默认不出现，
  * 装好且启用后才由 `withPluginNav()` 追加到**最下面**（d.119 用户口径：上面这 8 项
  * 从上到下的顺序原样不动，插件入口不许插在中间）。插件页不占数字快捷键。
  *
- * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 智能体、0 插件；
+ * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 会话、0 插件；
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={18} height={18} />, digit: "1" },
   // 团队：名册 + 动向；还承接原「团队看板」的看板视图
   { page: "team", label: "团队", icon: <TeamIcon width={18} height={18} />, digit: "2" },
-  // 智能体（本机运行）：承接原「通用智能体」的任务视图
-  { page: "chat", label: "智能体", icon: <AssistantIcon width={18} height={18} />, digit: "8" },
+  // 会话（本机运行）：唯一内置智能体的对话入口，像 Codex / Claude Code 一样只有会话
+  { page: "chat", label: "会话", icon: <AssistantIcon width={18} height={18} />, digit: "8" },
   // 插件（能力中枢）：插件包 + 技能 / 工具 / MCP / 组件
   { page: "plugins", label: "插件", icon: <PackageIcon width={18} height={18} />, digit: "0" },
   { page: "memory", label: "记忆", icon: <MemoryIcon width={18} height={18} />, digit: "5" },
@@ -157,7 +157,7 @@ export function NavRail({
   const pluginEntries = usePluginPageEntries();
   /*
    * 导航顺序**完全固定**（d.123 用户口径：从上到下永远是
-   * 主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+   * 主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
    *
    * 不再读取 `heming.navOrder.v1`：旧版允许拖拽排序，用户的存储里可能留着与固定顺序不同的
    * 旧排列（升级/换设备后表现为「顺序不对」），继续沿用会让「永远固定」落空。

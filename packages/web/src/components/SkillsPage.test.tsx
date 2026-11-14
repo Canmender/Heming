@@ -1,20 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 import { SkillsPage, SkillsView, categorizeSkill, SOURCE_LABEL, SKILL_TEMPLATES } from "./SkillsPage.js";
 import { SkillPool, SKILLS_KEY, BUILTIN_SKILLS, type StorageLike } from "../lib/skills/index.js";
 
 /**
  * 技能区 UI 用例：全部跑真实 lib/skills 的 SkillPool，只注入独立内存存储，
  * 用例之间零污染；分类映射走导出的纯函数 categorizeSkill。
+ * 产品只有唯一内置智能体，分配键固定为 SYSTEM_AGENT_ID。
  */
-
-// 技能按智能体分配：页面会拉名册，测试固定返回一个智能体。
-vi.mock("../lib/agentsApi.js", () => ({
-  listAgents: vi.fn(async () => [
-    { id: "a1", name: "和鸣助手" },
-    { id: "a2", name: "财报助手" },
-  ]),
-}));
 
 const T0 = new Date("2026-10-17T08:00:00.000Z").getTime();
 
@@ -56,12 +50,12 @@ function renderPage() {
   return render(<SkillsPage skills={pool} />);
 }
 
-/** 等名册到位（选中有智能体、内置技能默认已分配）后再断言。 */
+/** 渲染并等「技能」分组视图就绪（内置技能默认已分配）。 */
 async function renderReady() {
   const r = renderPage();
-  const select = (await screen.findByLabelText("选择智能体")) as HTMLSelectElement;
-  // 名册到位后 agentId 自动选中第一个智能体
-  await waitFor(() => expect(select.value).toBe("a1"));
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
+  );
   return r;
 }
 
@@ -73,7 +67,7 @@ describe("SkillsPage 技能区", () => {
   it("页签键盘可达：整组一个 Tab 停靠点，←/→ 切换视图并移动焦点", async () => {
     await renderReady();
     const list = screen.getByRole("tablist", { name: "技能视图" });
-    const groupsTab = within(list).getByRole("tab", { name: "按智能体" });
+    const groupsTab = within(list).getByRole("tab", { name: "已分配" });
     const poolTab = within(list).getByRole("tab", { name: "技能池" });
 
     expect(groupsTab).toHaveAttribute("tabindex", "0");
@@ -94,7 +88,7 @@ describe("SkillsPage 技能区", () => {
     await renderReady();
 
     expect(screen.getByRole("heading", { name: "技能区" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "技能池" })).toHaveAttribute("aria-selected", "false");
 
     // 首启种子 4 个内置技能
@@ -108,7 +102,7 @@ describe("SkillsPage 技能区", () => {
     }
     // 已选智能体：沉淀组空态是「该智能体还没有这类技能」
     expect(
-      within(group("沉淀技能")).getByText(/「和鸣助手」还没有这类技能/),
+      within(group("沉淀技能")).getByText(/「和小鸣」还没有这类技能/),
     ).toBeInTheDocument();
   });
 
@@ -191,7 +185,7 @@ describe("SkillsPage 技能区", () => {
   it("搜索框在页头，并且同样过滤分组视图", async () => {
     pool.importText(SKILL_MD);
     const imported = pool.list().find((s) => s.name === "财报速读")!;
-    pool.assign("a1", imported.id);
+    pool.assign(SYSTEM_AGENT_ID, imported.id);
     await renderReady();
 
     // 搜索框不属于任何分组卡（此前埋在「技能池」面板里）
@@ -256,7 +250,7 @@ describe("SkillsPage 技能区", () => {
       screen.queryByRole("button", { name: "沉淀 财报速读（沉淀）" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
     expect(within(group("沉淀技能")).getByText("1")).toBeInTheDocument();
   });
 
@@ -270,7 +264,7 @@ describe("SkillsPage 技能区", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("导入完成：新增 1 个，更新 0 个");
 
-    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
     // 导入的技能默认不分配：用分组头 ＋ 加进来
     expect(within(group("已装技能")).getByText("0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "为已装技能添加技能" }));
@@ -336,8 +330,8 @@ describe("SkillsPage 技能区", () => {
   });
 });
 
-describe("SkillsPage 按智能体分配技能", () => {
-  it("切换智能体后只显示该智能体已分配的技能", async () => {
+describe("SkillsPage 技能分配（唯一内置智能体）", () => {
+  it("给内置智能体添加的技能只在已分配视图出现，移除后计数归零", async () => {
     // 先建技能再渲染（store 非响应式，渲染后新增不会自动出现在列表里）
     pool.create({
       name: "私有技能",
@@ -349,29 +343,27 @@ describe("SkillsPage 按智能体分配技能", () => {
       version: "1.0.0",
     });
     await renderReady();
-    // 默认智能体 a1：内置 4 个
     expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length))).toBeInTheDocument();
 
-    // 给 a1 加一个自定义技能
+    // 内置智能体默认已分配内置技能；自定义技能目前为 0
+    expect(within(group("自定义技能")).getByText("0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "为自定义技能添加技能" }));
     fireEvent.click(screen.getByRole("button", { name: "添加 私有技能" }));
     expect(within(group("自定义技能")).getByText("1")).toBeInTheDocument();
+    const created = pool.list().find((skill) => skill.name === "私有技能");
+    expect(pool.assigned(SYSTEM_AGENT_ID)).toContain(created?.id);
 
-    // 切到 a2：内置仍是 4，自定义回到 0（分配是 per-agent 的）
-    fireEvent.change(screen.getByLabelText("选择智能体"), { target: { value: "a2" } });
+    // 取消分配后计数归零，技能定义仍留在池里
+    fireEvent.click(screen.getByRole("button", { name: "移除 私有技能" }));
     expect(within(group("自定义技能")).getByText("0")).toBeInTheDocument();
-    expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length))).toBeInTheDocument();
-
-    // 切回 a1：自定义 1 仍在
-    fireEvent.change(screen.getByLabelText("选择智能体"), { target: { value: "a1" } });
-    expect(within(group("自定义技能")).getByText("1")).toBeInTheDocument();
+    expect(pool.get(created!.id)).toBeDefined();
   });
 
   it("卡片上的「移除」取消分配，技能池里仍然保留该技能", async () => {
     await renderReady();
     fireEvent.click(screen.getByRole("button", { name: "移除 写作润色" }));
 
-    expect(pool.assigned("a1")).not.toContain("builtin-writing");
+    expect(pool.assigned(SYSTEM_AGENT_ID)).not.toContain("builtin-writing");
     // 池里还在
     expect(pool.get("builtin-writing")).toBeDefined();
     expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length - 1))).toBeInTheDocument();
@@ -447,16 +439,16 @@ describe("SkillsPage 新建技能（简化）", () => {
 
     expect(screen.queryByRole("dialog", { name: "新建技能" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已新建技能「周报润色」");
-    expect(screen.getByRole("status")).toHaveTextContent("和鸣助手");
+    expect(screen.getByRole("status")).toHaveTextContent("和小鸣");
 
     const created = pool.list().find((skill) => skill.name === "周报润色");
     expect(created).toBeDefined();
     expect(created?.source).toBe("user");
     expect(created?.instructions).toContain("润色周报");
     // 自动分配：否则「建好了却不会用于对话」是新手最容易踩的坑
-    expect(pool.assigned("a1")).toContain(created?.id);
+    expect(pool.assigned(SYSTEM_AGENT_ID)).toContain(created?.id);
 
-    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
     expect(
       within(group("自定义技能")).getByRole("group", { name: "技能卡 周报润色" }),
     ).toBeInTheDocument();
@@ -466,7 +458,7 @@ describe("SkillsPage 新建技能（简化）", () => {
     const onChanged = vi.fn();
     render(<SkillsPage skills={pool} onChanged={onChanged} />);
     await waitFor(() =>
-      expect((screen.getByLabelText("选择智能体") as HTMLSelectElement).value).toBe("a1"),
+      expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
     );
     fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
@@ -500,15 +492,15 @@ describe("SkillsPage 新建技能（简化）", () => {
     expect(screen.getByRole("dialog", { name: "新建技能" })).toBeInTheDocument();
   });
 
-  it("把「未分配的技能不会用于对话」写清楚（按智能体视图与技能池各一处）", async () => {
+  it("把「未分配的技能不会用于对话」写清楚（技能视图与技能池各一处）", async () => {
     await renderReady();
     expect(
-      screen.getByText(/只有已分配的技能才会用于「和鸣助手」的对话/),
+      screen.getByText(/技能启用并分配给「和小鸣」后即在对话里生效/),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     expect(
-      screen.getByText(/启用并分配给智能体后，技能才会在对话里生效/),
+      screen.getByText(/启用并分配给「和小鸣」后，技能才会在对话里生效/),
     ).toBeInTheDocument();
   });
 });
@@ -520,9 +512,10 @@ describe("SkillsView 嵌入视图", () => {
     // 嵌入后由宿主页提供唯一的页面标题
     expect(container.querySelector("h1")).toBeNull();
 
-    const select = (await screen.findByLabelText("选择智能体")) as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe("a1"));
-    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute(
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute(
       "aria-selected",
       "true",
     );

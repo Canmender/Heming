@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSqliteStore } from "./sqliteStore.js";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { openDb, initSchema, resolveDbPath } from "./db.js";
 
 // node:sqlite 与 db.ts 同法经 createRequire 原生加载（静态 import 会被 vite-node 剥前缀）
@@ -56,8 +57,7 @@ describe("sqlite 持久化专项", () => {
     const dbPath = newDbPath();
     const s1 = createSqliteStore(dbPath);
     const a = s1.createUser("alice", "hash-a", "爱丽丝");
-    const agent = s1.createAgent(a.id, { name: "助手", description: "" });
-    const conv = s1.createAgentConversation(a.id, agent.id);
+    const conv = s1.createAgentConversation(a.id, SYSTEM_AGENT_ID);
     s1.addMessage(conv.id, "user", a.id, { text: "重启后还在" });
     s1.close();
 
@@ -67,6 +67,43 @@ describe("sqlite 持久化专项", () => {
     expect(convs).toHaveLength(1);
     expect(convs[0]).toMatchObject({ type: "agent", unreadCount: 0 });
     expect(s2.listMessages(conv.id).map((m) => m.payload.text)).toEqual(["重启后还在"]);
+    s2.close();
+  });
+
+  it("启动迁移：旧自建智能体会话改挂 system-assistant、删 agent 行、消息保留且幂等", () => {
+    const dbPath = newDbPath();
+    // 预置「单智能体化之前」的库：用户 + 自建 agent + 挂在它下面的一对一会话 + 消息。
+    const legacy = openDb(dbPath);
+    legacy.exec(`
+      INSERT INTO users (id, username, password_hash, display_name) VALUES ('u1', 'alice', 'h', '爱丽丝');
+      INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
+        VALUES ('a-custom', 'u1', '我的助手', NULL, '自建', '你是我的助手');
+      INSERT INTO conversations (id, kind, name, created_by) VALUES ('c-legacy', 'agent', '旧会话', 'u1');
+      INSERT INTO conversation_members (conv_id, member_id) VALUES ('c-legacy', 'u1');
+      INSERT INTO conversation_agents (conv_id, agent_id) VALUES ('c-legacy', 'a-custom');
+      INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, created_at)
+        VALUES ('m1', 'c-legacy', 'user', 'u1', '{"text":"历史消息"}', '2026-10-01T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const s = createSqliteStore(dbPath);
+    expect(s.listAgents().map((a) => a.id)).toEqual([SYSTEM_AGENT_ID]);
+    expect(s.conversationAgentId("c-legacy")).toBe(SYSTEM_AGENT_ID);
+    expect(s.listConversations("u1").map((c) => c.id)).toEqual(["c-legacy"]);
+    expect(s.listMessages("c-legacy").map((m) => m.payload.text)).toEqual(["历史消息"]);
+    // 拿旧自建 id 建会话：归一为 system-assistant 并幂等命中迁移后的旧会话（不会新建出挂旧 id 的会话）
+    expect(s.createAgentConversation("u1", "a-custom").id).toBe("c-legacy");
+    // 幂等：再次显式迁移不改变任何结果
+    s.ensureSystemAgents();
+    expect(s.listAgents()).toHaveLength(1);
+    expect(s.conversationAgentId("c-legacy")).toBe(SYSTEM_AGENT_ID);
+    s.close();
+
+    // 重开（再次走构造迁移）仍不重复、不丢数据
+    const s2 = createSqliteStore(dbPath);
+    expect(s2.listAgents().map((a) => a.id)).toEqual([SYSTEM_AGENT_ID]);
+    expect(s2.conversationAgentId("c-legacy")).toBe(SYSTEM_AGENT_ID);
+    expect(s2.listMessages("c-legacy").map((m) => m.payload.text)).toEqual(["历史消息"]);
     s2.close();
   });
 
@@ -109,8 +146,7 @@ describe("sqlite 持久化专项", () => {
     expect(s.findUserById(a.id)!.displayName).toBe("新名");
     expect(() => s.updateProfile("nope", { displayName: "X" })).toThrow("user not found");
 
-    const agent = s.createAgent(a.id, { name: "助手", description: "" });
-    const conv = s.createAgentConversation(a.id, agent.id);
+    const conv = s.createAgentConversation(a.id, SYSTEM_AGENT_ID);
     s.addMessage(conv.id, "user", a.id, { text: "一" });
     s.addMessage(conv.id, "user", a.id, { text: "二" });
     s.addMessage(conv.id, "user", a.id, { text: "三" });

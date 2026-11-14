@@ -32,7 +32,7 @@ export function RecentConversations({
   /**
    * 首跑引导卡在场时隐藏空态占位（d.141）。
    *
-   * 首页首屏上，「开始使用 0/3」和「还没有对话 → 去智能体页」是同一个下一步：
+   * 首页首屏上，「开始使用 0/3」和「还没有对话 → 去会话页」是同一个下一步：
    * 两块并排劝同一件事，用户只会觉得首页在重复说话。引导卡负责劝，这里整块不出现；
    * 有会话时照常显示（列表本身就是「继续上次」，与引导不冲突）。
    */
@@ -66,7 +66,7 @@ export function RecentConversations({
       <div className="mb-2 flex items-center justify-between">
         <div className="text-ui-sm font-semibold text-muted">最近对话</div>
         <button type="button" className="ui-link ui-hit" onClick={() => setPage("chat")}>
-          全部智能体
+          全部会话
         </button>
       </div>
       {recent.length === 0 ? (
@@ -79,7 +79,7 @@ export function RecentConversations({
             size="sm" variant="ghost"
             onClick={() => setPage("chat")}
           >
-            去智能体页
+            去会话页
           </Button>
         </div>
       ) : (

@@ -491,10 +491,10 @@ describe("PluginsPage 导航合并", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
-    // 原技能区页的完整能力都在：智能体分配、技能池、搜索
+    // 原技能区页的完整能力都在：分配提示（固定内置智能体）、技能池、搜索
     expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
-    expect(screen.getByLabelText("选择智能体")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "按智能体" })).toBeInTheDocument();
+    expect(screen.getByText(/技能启用并分配给「和小鸣」后/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "已分配" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
     // 嵌入后不再有自己的页面标题
     expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();

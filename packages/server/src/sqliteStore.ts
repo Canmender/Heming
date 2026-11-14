@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import type {
   User,
   Message,
@@ -229,6 +230,43 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     ).map(rowToTask);
     return { team: rowToTeam(teamRow), members, plans, tasks };
   };
+
+  /**
+   * 幂等登记唯一内置智能体 + 旧数据迁移（单智能体产品；构造与 index.ts 启动各调一次）。
+   *  1) upsert 内置智能体行（owner_id 归 NULL；system_prompt 是部署侧内部字段）；
+   *  2) 旧版自建智能体会话改挂内置智能体：conversation_agents 主键 (conv_id, agent_id)，
+   *     直接 UPDATE 可能与既有 system 行撞主键，故先 INSERT OR IGNORE 目标行再删旧行；
+   *  3) 删除自建 agent 行（owner_id IS NOT NULL）——会话行、成员、消息全部保留。
+   * 迁移幂等：重复调用只会重复选中零行。
+   */
+  const ensureSystemAgentRows = (): void => {
+    const upsert = db.prepare(
+      `INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
+       VALUES (?, NULL, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET owner_id = NULL, name = excluded.name,
+         avatar = excluded.avatar, description = excluded.description,
+         system_prompt = excluded.system_prompt`,
+    );
+    for (const [id, meta] of Object.entries(SYSTEM_AGENTS)) {
+      upsert.run(id, meta.name, meta.avatar, meta.description, meta.systemPrompt);
+    }
+    // 迁移放在事务里：中途失败整体回滚，不留「旧 agent 已删、会话未改挂」的半截态。
+    db.exec("BEGIN");
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id)
+         SELECT conv_id, ? FROM conversation_agents WHERE agent_id <> ?`,
+      ).run(SYSTEM_AGENT_ID, SYSTEM_AGENT_ID);
+      db.prepare("DELETE FROM conversation_agents WHERE agent_id <> ?").run(SYSTEM_AGENT_ID);
+      db.prepare("DELETE FROM agents WHERE owner_id IS NOT NULL").run();
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  };
+  // 构造即完成单智能体化：直接 new store 的测试/调用方同样得到「名册恒一条」的不变量。
+  ensureSystemAgentRows();
 
   return {
     close() {
@@ -486,15 +524,14 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.prepare("UPDATE conversations SET title = ? WHERE id = ?").run(next || null, conversationId);
       return true;
     },
-    createAgentConversation(userId, agentId, options = {}) {
+    createAgentConversation(userId, _agentId, options = {}) {
       mustUser(userId);
+      // 单智能体产品：忽略传入 agentId（旧客户端可能仍传自建 id），一律挂唯一内置智能体；
+      // 构造时 ensureSystemAgentRows 已保证该行存在，此处不再做名册/属主校验。
       const row = db
         .prepare("SELECT id, owner_id, name, avatar, description FROM agents WHERE id = ?")
-        .get(agentId) as AgentRow | undefined;
+        .get(SYSTEM_AGENT_ID) as AgentRow | undefined;
       if (!row) throw new Error("agent not found");
-      // 与内存实现同口径：系统预设 agent（owner_id 为 null）谁都能私聊，
-      // 自建 agent 仅属主可开——否则能拿别人的 agent 当自己的聊天对象。
-      if (row.owner_id !== null && row.owner_id !== userId) throw new Error("not your agent");
       const agent = rowToAgent(row);
       // 幂等：同用户与同 agent 只留一个会话。conversation_agents 存「会话挂了哪些 agent」，
       // agent 一对一恰好只挂一个，据此反查即可，不必另建映射表。
@@ -507,79 +544,25 @@ export function createSqliteStore(dbPath: string): SqliteStore {
              JOIN conversation_agents ca ON ca.conv_id = c.id AND ca.agent_id = ?
              WHERE c.kind = 'agent'`,
           )
-          .get(userId, agentId) as { id: string } | undefined;
+          .get(userId, SYSTEM_AGENT_ID) as { id: string } | undefined;
         if (existing) return { id: existing.id, type: "agent", agent };
       }
       const id = randomUUID();
       db.prepare("INSERT INTO conversations (id, kind, title) VALUES (?, 'agent', ?)").run(id, title || null);
       db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)").run(id, userId);
-      db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
+      db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(
+        id,
+        SYSTEM_AGENT_ID,
+      );
       return { id, type: "agent", agent };
     },
     listAgents() {
+      // 单智能体产品：只读内置智能体那唯一一行。
       // 永不 SELECT system_prompt：系统提示词是部署侧内部字段，名册 API 契约不含它。
-      // 系统 agent 由 ensureSystemAgents upsert 落行，此处直接读表即自然出现。
-      const rows = db
-        .prepare("SELECT id, owner_id, name, avatar, description FROM agents")
-        .all() as {
-        id: string;
-        owner_id: string | null;
-        name: string;
-        avatar: string | null;
-        description: string;
-      }[];
-      return rows.map((r) => ({
-        id: r.id,
-        owner_id: r.owner_id,
-        name: r.name,
-        avatar: r.avatar,
-        description: r.description,
-      }));
-    },
-    createAgent(ownerId, body) {
-      mustUser(ownerId);
-      const id = randomUUID();
-      const avatar = body.avatar ?? null;
-      db.prepare("INSERT INTO agents (id, owner_id, name, avatar, description) VALUES (?, ?, ?, ?, ?)").run(
-        id,
-        ownerId,
-        body.name,
-        avatar,
-        body.description,
-      );
-      return { id, owner_id: ownerId, name: body.name, avatar, description: body.description };
-    },
-    updateAgent(id, ownerId, patch) {
-      const cur = db
+      const row = db
         .prepare("SELECT id, owner_id, name, avatar, description FROM agents WHERE id = ?")
-        .get(id) as
-        | { id: string; owner_id: string | null; name: string; avatar: string | null; description: string }
-        | undefined;
-      if (!cur) throw new Error("agent not found");
-      // 系统 agent（owner_id IS NULL）与非 owner 同拒：forbidden
-      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
-      const next: Agent = {
-        ...cur,
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-      };
-      db.prepare("UPDATE agents SET name = ?, avatar = ?, description = ? WHERE id = ?").run(
-        next.name,
-        next.avatar,
-        next.description,
-        id,
-      );
-      return next;
-    },
-    deleteAgent(id, ownerId) {
-      const cur = db.prepare("SELECT owner_id FROM agents WHERE id = ?").get(id) as
-        | { owner_id: string | null }
-        | undefined;
-      if (!cur) throw new Error("agent not found");
-      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
-      db.prepare("DELETE FROM conversation_agents WHERE agent_id = ?").run(id);
-      db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+        .get(SYSTEM_AGENT_ID) as AgentRow | undefined;
+      return row ? [rowToAgent(row)] : [];
     },
     // —— M4 共享文件（shared_files 表；行结构 ↔ SharedFileMeta 映射同 users 行的 rowTo* 口径）——
     addFile(meta, contentBase64) {
@@ -988,15 +971,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       return true;
     },
     ensureSystemAgents() {
-      const upsert = db.prepare(
-        `INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
-         VALUES (?, NULL, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-           description = excluded.description, system_prompt = excluded.system_prompt`,
-      );
-      for (const [id, meta] of Object.entries(SYSTEM_AGENTS)) {
-        upsert.run(id, meta.name, meta.avatar, meta.description, meta.systemPrompt);
-      }
+      // 幂等：登记唯一内置智能体 + 迁移旧自建智能体数据（构造时已跑过一次）。
+      ensureSystemAgentRows();
     },
   };
 }

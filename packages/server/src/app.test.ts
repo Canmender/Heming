@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { Conversation } from "@heming/shared";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
 
@@ -107,32 +108,27 @@ describe("auth + team API", () => {
     expect(again.status).toBe(400);
   });
 
-  it("建智能体一对一会话并幂等复用", async () => {
+  it("建智能体一对一会话并幂等复用（唯一内置智能体）", async () => {
     const a = await register(app, "alice");
-    const agent = await request(app)
-      .post("/api/agents")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "助手", description: "" });
-    expect(agent.status).toBe(201);
 
     const conv = await request(app)
       .post("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`)
-      .send({ agentId: agent.body.id });
+      .send({ agentId: SYSTEM_AGENT_ID });
     expect(conv.status).toBe(201);
     expect(conv.body.type).toBe("agent");
 
     const again = await request(app)
       .post("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`)
-      .send({ agentId: agent.body.id });
+      .send({ agentId: SYSTEM_AGENT_ID });
     expect(again.body.id).toBe(conv.body.id);
 
     const mine = await request(app)
       .get("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`);
     expect(mine.body).toHaveLength(1);
-    expect(mine.body[0].agent.name).toBe("助手");
+    expect(mine.body[0].agent.name).toBe("和小鸣");
 
     const msgs = await request(app)
       .get(`/api/conversations/${conv.body.id}/messages`)
@@ -141,20 +137,38 @@ describe("auth + team API", () => {
     expect(msgs.body).toEqual([]);
   });
 
+  it("旧客户端传遗留自建 agentId：归一为内置智能体，不报错", async () => {
+    const a = await register(app, "alicelegacy");
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ agentId: "legacy-custom-agent" });
+    expect(conv.status).toBe(201);
+    expect(conv.body.agent.id).toBe(SYSTEM_AGENT_ID);
+  });
+
+  it("单智能体契约：请求体不带 agentId 也建会话（落到内置智能体）", async () => {
+    const a = await register(app, "alicenoagent");
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ fresh: true });
+    expect(conv.status).toBe(201);
+    expect(conv.body.agent.id).toBe(SYSTEM_AGENT_ID);
+  });
+
   it("d.128：fresh 新建多段会话、PATCH 标题、非成员 403", async () => {
     const a = await register(app, "alicetwo");
     const auth = { Authorization: `Bearer ${a.token}` };
-    const agent = await request(app).post("/api/agents").set(auth).send({ name: "助手2", description: "" });
-    expect(agent.status).toBe(201);
 
     const first = await request(app)
       .post("/api/conversations")
       .set(auth)
-      .send({ agentId: agent.body.id, fresh: true });
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true });
     const second = await request(app)
       .post("/api/conversations")
       .set(auth)
-      .send({ agentId: agent.body.id, fresh: true, title: "第二段" });
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true, title: "第二段" });
     expect(second.status).toBe(201);
     expect(second.body.id).not.toBe(first.body.id);
     expect(second.body.title).toBe("第二段");
@@ -189,13 +203,12 @@ describe("auth + team API", () => {
   it("d.130：会话列表按 limit/offset 分页，不传 limit 返回全部", async () => {
     const a = await register(app, "alicepaging");
     const auth = { Authorization: `Bearer ${a.token}` };
-    const agent = await request(app).post("/api/agents").set(auth).send({ name: "分页助手", description: "" });
     const ids: string[] = [];
     for (let i = 0; i < 5; i += 1) {
       const conv = await request(app)
         .post("/api/conversations")
         .set(auth)
-        .send({ agentId: agent.body.id, fresh: true, title: `会话 ${i}` });
+        .send({ agentId: SYSTEM_AGENT_ID, fresh: true, title: `会话 ${i}` });
       ids.push(conv.body.id);
     }
 
@@ -216,11 +229,10 @@ describe("auth + team API", () => {
   it("d.128：DELETE 会话——成员 204、非成员 403、不存在 404", async () => {
     const a = await register(app, "alicethree");
     const auth = { Authorization: `Bearer ${a.token}` };
-    const agent = await request(app).post("/api/agents").set(auth).send({ name: "助手3", description: "" });
     const conv = await request(app)
       .post("/api/conversations")
       .set(auth)
-      .send({ agentId: agent.body.id, fresh: true });
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true });
     expect(conv.status).toBe(201);
 
     const bob = await register(app, "bobthree");
@@ -540,65 +552,28 @@ describe("agents api", () => {
     app = createApp(store, { allowRegister: true });
   });
 
-  it("注册用户可建/改/删自己的智能体，系统与他人 403", async () => {
+  it("GET 只返回唯一内置智能体，且永不暴露 system_prompt", async () => {
     const a = await register(app, "alice");
-    const b = await register(app, "bob");
-    // 播种系统 agent（同 sqlite ensureSystemAgents 口径），供「系统 403」断言
-    store.ensureSystemAgents();
-
-    const created = await request(app).post("/api/agents")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "架构师", description: "画图" });
-    expect(created.status).toBe(201);
-    expect(created.body.owner_id).toBe(a.user.id);
-    expect(created.body).not.toHaveProperty("system_prompt");
-
     const list = await request(app).get("/api/agents").set("Authorization", `Bearer ${a.token}`);
     expect(list.status).toBe(200);
-    expect(Array.isArray(list.body)).toBe(true);
+    expect(list.body).toHaveLength(1);
+    expect(list.body[0]).toMatchObject({ id: SYSTEM_AGENT_ID, name: "和小鸣", owner_id: null });
     // I6 红线：名册 API 永不暴露 system_prompt（GET 列表每一条都不得带该键）
-    expect(list.body.length).toBeGreaterThan(0);
     expect(list.body.some((x: Record<string, unknown>) => "system_prompt" in x)).toBe(false);
-
-    const upd = await request(app).put(`/api/agents/${created.body.id}`)
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ description: "改" });
-    expect(upd.status).toBe(200);
-    expect(upd.body.description).toBe("改");
-    // I6 红线：PUT 响应同样不含 system_prompt
-    expect(upd.body).not.toHaveProperty("system_prompt");
-
-    const notFound = await request(app).put("/api/agents/nope")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ description: "x" });
-    expect(notFound.status).toBe(404);
-
-    // 标题承诺的 403 分支：他人 PUT/DELETE + 系统 PUT（forbidden → 403 映射）
-    const otherUpd = await request(app).put(`/api/agents/${created.body.id}`)
-      .set("Authorization", `Bearer ${b.token}`)
-      .send({ description: "劫持" });
-    expect(otherUpd.status).toBe(403);
-    const sysUpd = await request(app).put("/api/agents/system-assistant")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "改名" });
-    expect(sysUpd.status).toBe(403);
-
-    const del = await request(app).delete(`/api/agents/${created.body.id}`)
-      .set("Authorization", `Bearer ${a.token}`);
-    expect(del.status).toBe(204);
-
-    const delNotFound = await request(app).delete("/api/agents/nope")
-      .set("Authorization", `Bearer ${a.token}`);
-    expect(delNotFound.status).toBe(404);
+    expect(store.listAgents()).toHaveLength(1);
   });
 
-  it("未鉴权 401；非法 body 400", async () => {
-    expect((await request(app).get("/api/agents")).status).toBe(401);
+  it("自建智能体 CRUD 路由已删除：POST/PUT/DELETE 一律 404；GET 未鉴权 401", async () => {
     const a = await register(app, "alice");
-    const bad = await request(app).post("/api/agents")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "" });
-    expect(bad.status).toBe(400);
+    const auth = { Authorization: `Bearer ${a.token}` };
+    expect(
+      (await request(app).post("/api/agents").set(auth).send({ name: "架构师", description: "画图" })).status,
+    ).toBe(404);
+    expect(
+      (await request(app).put(`/api/agents/${SYSTEM_AGENT_ID}`).set(auth).send({ name: "改名" })).status,
+    ).toBe(404);
+    expect((await request(app).delete(`/api/agents/${SYSTEM_AGENT_ID}`).set(auth)).status).toBe(404);
+    expect((await request(app).get("/api/agents")).status).toBe(401);
   });
 });
 
@@ -697,8 +672,7 @@ describe("PUT /api/messages/:id/reencrypt", () => {
     app = createApp(store, { allowRegister: true });
     a = await register(app, "alice");
     b = await register(app, "bob");
-    const agent = store.createAgent(a.user.id, { name: "助手", description: "" });
-    convId = store.createAgentConversation(a.user.id, agent.id).id;
+    convId = store.createAgentConversation(a.user.id, SYSTEM_AGENT_ID).id;
     // 带正文的明文行：重封后 GET 不得再见原文（fix round 1 Critical）
     msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }).id;
   });

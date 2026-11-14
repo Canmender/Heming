@@ -3,7 +3,7 @@ import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
-import type { SharedFileMeta } from "@heming/shared";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID, type SharedFileMeta } from "@heming/shared";
 // 常驻壳与登录页保持同步导入：它们是首帧就要画出来的东西（标题栏/导航轨/登录表单），
 // 拆成异步反而会让首屏先闪一块占位。下面所有**页面**都改成路由级懒加载。
 import { LoginPage } from "./components/LoginPage.js";
@@ -120,7 +120,7 @@ export function PageFallback() {
 
 /**
  * Alt+数字键目标页。导航固定 8 项，其中 6 个带数字键：
- * 1 主页、2 团队（承接原团队看板）、5 记忆、6 设置、8 智能体（承接原通用智能体）、
+ * 1 主页、2 团队（承接原团队看板）、5 记忆、6 设置、8 会话（单智能体的对话页）、
  * 0 插件。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
  * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
  *
@@ -679,22 +679,19 @@ function AppShell({
       if (!requestId) return;
       void (async () => {
         try {
-          // 智能体名册（chat store）按需加载：它牵 api/ws 一整条链，没必要为首屏付钱。
-          // llm store 走静态导入——staff loop 等壳内模块已经静态引用它，动态导入不会分包。
+          // 单智能体固定：名册只为拿内置智能体（服务端保证存在一个），拉不到就回落到本地常量。
           const { useChatStore } = await import("./store/chat.js");
           if (useChatStore.getState().agentsRoster.length === 0) {
             try {
               await useChatStore.getState().loadAgentsRoster();
             } catch {
-              /* 名册拉不到就给空列表：widget 侧会回落到「没有可用智能体」 */
+              /* 名册拉不到也不要让 widget 空着：下面回落到 SYSTEM_AGENT */
             }
           }
           const llm = useLlmStore.getState();
-          const prompts = llm.prompts;
-          const agents = useChatStore.getState().agentsRoster.map((agent) => {
-            const prompt = prompts[agent.id]?.trim();
-            return { id: agent.id, name: agent.name, ...(prompt ? { prompt } : {}) };
-          });
+          const prompt = llm.prompts[SYSTEM_AGENT_ID]?.trim();
+          const agent = useChatStore.getState().agentsRoster[0] ?? SYSTEM_AGENT;
+          const agents = [{ id: agent.id, name: agent.name, ...(prompt ? { prompt } : {}) }];
           bridge.replyChatConfig?.(requestId, {
             agents,
             binding: { agentId: null },
@@ -850,7 +847,7 @@ function AppShell({
       // 团队：真实成员名册 + 动向流（任务 / 日程摘要）；d.67 起承接「看板」视图
       <TeamPage />
     ) : currentPage === "chat" ? (
-      // 智能体（本机运行）：左侧智能体名册 + 右侧对话；d.67 起承接「任务」视图
+      // 会话（本机运行）：单智能体的会话列表 + 对话；d.67 起承接「任务」视图
       <AssistantPage />
     ) : currentPage === "model" ? (
       // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
@@ -873,8 +870,8 @@ function AppShell({
     );
 
   /**
-   * 共享文件面板只在智能体页出现（用户要求：文件管理只留在智能体对话页）。
-   * 其它页面不再常驻右栏，主内容获得完整宽度；窄窗入口也只在智能体页显示。
+   * 共享文件面板只在会话页出现（用户要求：文件管理只留在会话对话页）。
+   * 其它页面不再常驻右栏，主内容获得完整宽度；窄窗入口也只在会话页显示。
    */
   const showFilesPanel = currentPage === "chat";
 

@@ -340,11 +340,9 @@ describe("App 记忆区接线", () => {
     useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("page=memory 渲染记忆区（三分区 + 智能体选择器），不再落到占位页", async () => {
+  it("page=memory 渲染记忆区（三分区 + 内置智能体开关），不再落到占位页", async () => {
     setToken("t1");
-    mockFetch({
-      agents: [{ id: "a1", owner_id: "u1", name: "阿和", avatar: null, description: "" }],
-    });
+    mockFetch();
     useUiStore.setState({ page: "memory" });
 
     render(<App />);
@@ -353,7 +351,9 @@ describe("App 记忆区接线", () => {
     for (const label of ["智能体", "数据库", "个人知识库"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
-    expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
+    // 单内置智能体：不再有智能体选择器，开关表里只有「和小鸣」
+    expect(screen.queryByLabelText("选择智能体")).toBeNull();
+    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0);
     expect(screen.queryByText("占位页面")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "数据库" }));

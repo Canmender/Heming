@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { startServer } from "./index.js";
 import { issueToken, userIdFromToken } from "./auth.js";
 
@@ -12,8 +13,7 @@ describe("SQLite 持久化", () => {
     try {
       const ctx1 = await startServer(0, "127.0.0.1", dbPath);
       const a = ctx1.store.createUser("alice", "hash-x", "爱丽丝");
-      const agent = ctx1.store.createAgent(a.id, { name: "助手", description: "" });
-      const conv = ctx1.store.createAgentConversation(a.id, agent.id);
+      const conv = ctx1.store.createAgentConversation(a.id, SYSTEM_AGENT_ID);
       ctx1.store.addMessage(conv.id, "user", a.id, { text: "重启后我要还在" });
       await ctx1.close();
 

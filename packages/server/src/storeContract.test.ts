@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { createMemoryStore, type Store } from "./store.js";
 import { createSqliteStore } from "./sqliteStore.js";
 
@@ -33,41 +34,41 @@ for (const f of factories) {
       store.close?.();
     });
 
-    it("智能体名册 CRUD 与系统 agent 保护", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const b = store.createUser("bob", "h", "鲍勃");
-      const agent = store.createAgent(a.id, { name: "助理", description: "d" });
-      expect(store.listAgents().map((x) => x.id)).toContain(agent.id);
-      expect(store.updateAgent(agent.id, a.id, { name: "新名" }).name).toBe("新名");
-      expect(() => store.updateAgent(agent.id, b.id, { name: "x" })).toThrow("forbidden");
-      expect(() => store.deleteAgent(agent.id, b.id)).toThrow("forbidden");
-
+    it("名册恒为唯一内置智能体（创建/修改/删除能力已移除）", () => {
       store.ensureSystemAgents();
-      const sys = store.listAgents().find((x) => x.id === "system-assistant")!;
-      expect(sys.name).toBe("和小鸣");
-      expect(() => store.updateAgent(sys.id, a.id, { name: "x" })).toThrow("forbidden");
-      expect(() => store.deleteAgent(sys.id, a.id)).toThrow("forbidden");
+      const agents = store.listAgents();
+      expect(agents).toHaveLength(1);
+      expect(agents[0]).toMatchObject({
+        id: SYSTEM_AGENT_ID,
+        owner_id: null,
+        name: "和小鸣",
+        avatar: null,
+        description: "和鸣官方预设智能体",
+      });
+      // 名册是只读投影：再次读取内容恒等。
+      expect(store.listAgents()).toEqual(agents);
     });
 
-    it("createAgentConversation 幂等；自建仅属主，系统 agent 谁都能开", () => {
+    it("createAgentConversation 幂等；任意 agentId 归一为内置智能体", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      const agent = store.createAgent(a.id, { name: "私房", description: "" });
-      const c1 = store.createAgentConversation(a.id, agent.id);
-      expect(store.createAgentConversation(a.id, agent.id).id).toBe(c1.id);
-      expect(() => store.createAgentConversation(b.id, agent.id)).toThrow("not your agent");
+      const c1 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID);
+      expect(store.createAgentConversation(a.id, SYSTEM_AGENT_ID).id).toBe(c1.id);
+      expect(store.createAgentConversation(a.id, "legacy-agent").id).toBe(c1.id);
+      expect(store.conversationAgentId(c1.id)).toBe(SYSTEM_AGENT_ID);
 
-      store.ensureSystemAgents();
-      const sys = store.listAgents().find((x) => x.id === "system-assistant")!;
-      expect(() => store.createAgentConversation(b.id, sys.id)).not.toThrow();
+      // 旧版「自建 agent 仅属主可开」已不存在：任何用户任意 id 都开自己的唯一对话。
+      const bobConv = store.createAgentConversation(b.id, "legacy-agent");
+      expect(bobConv.id).not.toBe(c1.id);
+      expect(bobConv.agent.id).toBe(SYSTEM_AGENT_ID);
+      expect(() => store.createAgentConversation(b.id, "no-such-agent")).not.toThrow();
     });
 
     it("d.128：fresh 新建多段会话；标题可设可清；非成员不能改", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      const agent = store.createAgent(a.id, { name: "助理", description: "" });
-      const c1 = store.createAgentConversation(a.id, agent.id, { title: "第一段" });
-      const c2 = store.createAgentConversation(a.id, agent.id, { fresh: true, title: "第二段" });
+      const c1 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { title: "第一段" });
+      const c2 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true, title: "第二段" });
       expect(c2.id).not.toBe(c1.id);
 
       const withTitles = store.listConversations(a.id);
@@ -88,9 +89,8 @@ for (const f of factories) {
     it("deleteConversation：成员可删（消息一起删）、非成员 forbidden、不存在 not found", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      const agent = store.createAgent(a.id, { name: "助理", description: "" });
-      const c1 = store.createAgentConversation(a.id, agent.id);
-      const c2 = store.createAgentConversation(a.id, agent.id, { fresh: true });
+      const c1 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID);
+      const c2 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true });
       store.addMessage(c1.id, "user", a.id, { text: "这条消息应随会话删除" });
 
       expect(() => store.deleteConversation(c1.id, b.id)).toThrow("forbidden");
@@ -101,13 +101,11 @@ for (const f of factories) {
       expect(left.map((c) => c.id)).toEqual([c2.id]);
     });
 
-    it("agent 不存在报错；agent 被删后该会话从列表消失", () => {
+    it("agent 不存在/旧自建 id 一律归一 system-assistant", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
-      expect(() => store.createAgentConversation(a.id, "nope")).toThrow("agent not found");
-      const agent = store.createAgent(a.id, { name: "临时", description: "" });
-      store.createAgentConversation(a.id, agent.id);
-      store.deleteAgent(agent.id, a.id);
-      expect(store.listConversations(a.id)).toEqual([]);
+      const conv = store.createAgentConversation(a.id, "nope");
+      expect(store.conversationAgentId(conv.id)).toBe(SYSTEM_AGENT_ID);
+      expect(store.listConversations(a.id)).toHaveLength(1);
     });
 
     it("缺失会话边界一致：isMember false；listMessages 抛 conversation not found", () => {
@@ -128,8 +126,7 @@ for (const f of factories) {
     it("消息信封：e2e 落 cipher/chainKid/n 并回读；reencrypt 三态", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      const agent = store.createAgent(a.id, { name: "助手", description: "" });
-      const conv = store.createAgentConversation(a.id, agent.id);
+      const conv = store.createAgentConversation(a.id, SYSTEM_AGENT_ID);
       const e2e = store.addMessage(conv.id, "user", a.id, { text: "" }, {
         enc: "e2e",
         cipher: "Q2lwaGVy",

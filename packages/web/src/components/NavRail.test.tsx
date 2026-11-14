@@ -26,7 +26,7 @@ describe("NavRail 图标轨（A 方案）", () => {
       ["团队", "Alt+2"],
       ["记忆", "Alt+5"],
       ["设置", "Alt+6"],
-      ["智能体", "Alt+8"],
+      ["会话", "Alt+8"],
       ["插件", "Alt+0"],
     ] as const) {
       const btn = screen.getByRole("button", { name: label });
@@ -176,13 +176,13 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
     useUiStore.setState({ page: "home", navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("始终按固定顺序渲染 8 项：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
+  it("始终按固定顺序渲染 8 项：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
       .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
-    expect(labels).toEqual(["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]);
+      .filter((label) => ["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
+    expect(labels).toEqual(["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"]);
     // 数字键仍绑页本身
     expect(screen.getByRole("button", { name: "主页" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
@@ -202,9 +202,9 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
     const labels = screen
       .getAllByRole("button")
       .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
-    expect(labels).toEqual(["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]);
-    for (const name of ["团队", "插件", "智能体"]) {
+      .filter((label) => ["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
+    expect(labels).toEqual(["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"]);
+    for (const name of ["团队", "插件", "会话"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(`^${name}( |$)`) }).length).toBe(1);
     }
   });
@@ -396,9 +396,9 @@ describe("NavRail 分组（固定 8 项）", () => {
     useUiStore.setState({ page: "home", navOrder: [...NEW_DEFAULT] });
   });
 
-  const PAGE_LABELS = ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"];
+  const PAGE_LABELS = ["主页", "团队", "会话", "插件", "记忆", "知识库", "模型", "设置"];
 
-  it("默认顺序：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
+  it("默认顺序：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
@@ -455,8 +455,8 @@ describe("NavRail 二级视图飞出菜单（§4-F1）", () => {
       expect(btn).toHaveAttribute("aria-haspopup", "menu");
       expect(btn).toHaveAttribute("aria-expanded", "false");
     }
-    // 主页 / 智能体 / 知识库没有页内页签：不挂 popup，也不挂空菜单
-    for (const name of ["主页", "智能体", "知识库"]) {
+    // 主页 / 会话 / 知识库没有页内页签：不挂 popup，也不挂空菜单
+    for (const name of ["主页", "会话", "知识库"]) {
       expect(navButton(name)).not.toHaveAttribute("aria-haspopup");
     }
   });

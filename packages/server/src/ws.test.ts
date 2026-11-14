@@ -8,6 +8,7 @@ import type { Store } from "./store.js";
 import { startServer } from "./index.js";
 import { issueToken } from "./auth.js";
 import type { WsServerEvent } from "@heming/shared";
+import { SYSTEM_AGENT_ID } from "@heming/shared";
 
 let ctx: Awaited<ReturnType<typeof startServer>>;
 let store: Store;
@@ -111,9 +112,9 @@ beforeAll(async () => {
   bobId = bob.id;
   aliceToken = issueToken(store, aliceId);
   bobToken = issueToken(store, bobId);
-  const agent = store.createAgent(aliceId, { name: "助手", description: "" });
-  agentId = agent.id;
-  convId = store.createAgentConversation(aliceId, agent.id).id;
+  // 单智能体产品：会话的助手恒为内置智能体（数据层仍保留 agentId 校验口径）。
+  agentId = SYSTEM_AGENT_ID;
+  convId = store.createAgentConversation(aliceId, agentId).id;
 });
 
 afterAll(async () => {
