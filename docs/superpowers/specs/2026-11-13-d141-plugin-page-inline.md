@@ -184,3 +184,19 @@ type WidgetPageEventChannel = "settings" | "event" | "lifecycle" | "engine-event
 - 未能验证的部分：`pnpm --filter @heming/desktop start`（`electron .`）在本机会话的 **bash 执行器**里
   起 GUI 进程必崩（`EXIT=-2147483645 / 0x80000003`，`git stash` 到改动前同样崩，与本轮无关）；
   真机验收改由桌面 Shell 启动同一份代码完成（`.tmp/launch-heming.cmd` + 快捷方式）。
+
+### 9.1 后续补丁 d.141.3.79.11（2026-11-14）：沙箱委派
+
+iframe 内嵌落地后，真机逐页审计（自动化 / 信息中枢 / 建模室 / 剪辑室）确认四个页面插件全部已内嵌，
+但检查出**能力委派缺失**，导致插件自身功能静默失效：
+
+- `<a download>` 的导出在 `sandbox` 帧里被静默丢弃（信息中枢导出归档）。
+- `requestFullscreen` 受权限策略门控（剪辑室预览全屏）。
+- `navigator.clipboard.writeText` 在跨源帧里需宿主显式委派（信息中枢 / 建模室「复制」）。
+
+因此宿主 iframe 改为 `sandbox="allow-scripts allow-same-origin allow-downloads"`
++ `allow="fullscreen; clipboard-write"` + `allowFullScreen`。仍未给 `allow-popups` /
+`allow-top-navigation`：插件不能开窗、不能把宿主导航走；下载必须由用户手势触发并经系统「另存为」确认。
+真机验证：信息中枢帧内点击 blob 导出 → 出现原生另存为对话框（窗口标题 `blob:widget://heming.infohub/…`）；
+剪辑室帧内 `requestFullscreen()` → `document.fullscreenElement` 为真。剪贴板在无焦点帧里
+`NotAllowedError: Document is not focused` 属自动化环境限制（真实点击可用，插件另有 `execCommand` 兜底）。

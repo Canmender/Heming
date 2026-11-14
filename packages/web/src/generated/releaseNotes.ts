@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.141.3.79.11",
+    "date": "2026-11-14",
+    "title": "插件里的导出、全屏、复制能用了",
+    "bullets": [
+      "信息中枢导出归档、建模室导出模型时会正常弹出「另存为」，点了不再没反应。",
+      "剪辑室的预览可以全屏了；信息中枢、建模室的「复制」按钮能写入剪贴板。",
+      "插件页面仍然只是页面里的一块内容：不能自己开窗、不能跳去外部网页。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.141.3.78.11",
     "date": "2026-11-13",
     "title": "插件页面真的长在和鸣里了",

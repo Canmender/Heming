@@ -2,6 +2,26 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.141.3.79.11（2026-11-14）— 插件页面补齐导出/全屏/复制的沙箱委派
+
+用户反馈「所有的插件都有这样的问题，一一修复」。先逐页真机审计：自动化、信息中枢、建模室、剪辑室
+四个页面插件在 d.141.3.78.11 上**全部已内嵌**（`section[aria-label="插件页面"]` 里的
+`iframe[data-testid="plugin-page-frame"]`，12px 圆角卡片内，`webview` 数量 0，打开插件页不产生新窗口，
+CDP 只多一个 `type=iframe` 的 target）。审计同时发现：内嵌用的沙箱 iframe 少了三条能力委派，
+插件里对应的具体功能在真机上静默失效——这才是「插件不对劲」的剩余部分。
+
+- 导出下载：`<a download>` 在 `sandbox` 帧里会被静默丢弃（信息中枢导出归档点了没反应）。
+  iframe 的 `sandbox` 增加 `allow-downloads`，现在会正常触发系统「另存为」。
+- 预览全屏：`requestFullscreen` 是权限策略门控的（剪辑室预览全屏）。iframe 增加
+  `allow="fullscreen; clipboard-write"` 与 `allowFullScreen`。
+- 复制：`navigator.clipboard.writeText` 在跨源帧里需要宿主显式委派（信息中枢、建模室的「复制」）。
+  同一条 `allow` 里的 `clipboard-write` 覆盖。
+- 没有放宽的部分：仍然没有 `allow-popups` / `allow-top-navigation`（插件不能开窗、不能把整页带出去），
+  下载必须由用户手势触发并经系统「另存为」确认；页面帧仍然无 preload、无 node。
+- 真机验证：信息中枢页里点击 blob 导出 → 出现原生另存为对话框（标题 `blob:widget://heming.infohub/…`）；
+  剪辑室页里 `requestFullscreen()` → `document.fullscreenElement` 为真、帧尺寸铺满。
+- 门禁：`pnpm --filter @heming/web typecheck|test`、`pnpm --filter @heming/desktop typecheck|test` 全绿。
+
 ## d.141.3.78.11（2026-11-13）— 插件页面真正内嵌：改为 `widget://` iframe
 
 用户反馈：「插件内容是悬浮在和鸣上，他应该内嵌在其中」。根因不是样式，而是实现：bundle 插件页

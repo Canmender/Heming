@@ -226,7 +226,12 @@ describe("PluginBundlePage · 挂载与页头", () => {
     const frame = (await screen.findByTestId("plugin-page-frame")) as HTMLIFrameElement;
 
     expect(frame.src).toBe(OPENED_URL);
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin");
+    expect(frame.getAttribute("sandbox")).toBe(
+      "allow-scripts allow-same-origin allow-downloads",
+    );
+    // 跨源帧的下载/全屏/剪贴板都要宿主显式放行，否则插件的导出与预览全屏会静默失效
+    expect(frame.getAttribute("allow")).toBe("fullscreen; clipboard-write");
+    expect(frame.hasAttribute("allowfullscreen")).toBe(true);
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(frame.className).toContain("h-full");
     expect(frame.className).toContain("w-full");

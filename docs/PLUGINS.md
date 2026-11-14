@@ -705,9 +705,14 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 - 页面意图（d.139）：`pageOpen` 可带 `intent`（与首页卡 `actions[].intent` 同一套 token）。主进程校验格式后把
   `#intent=<token>` 拼到 `widget://<id>/<entry>` 再返回；hash 只存在于页面自己的地址里，宿主不理解语义——
   由插件页读 `location.hash` 自行解释（信息中枢据此选页签）。非法/缺失的 `intent` 不拼 hash，页面按默认状态启动。
-- 宿主侧：`<iframe sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer">`，页头在帧外，
+- 宿主侧：`<iframe sandbox="allow-scripts allow-same-origin allow-downloads" allow="fullscreen; clipboard-write"
+  allowFullScreen referrerPolicy="no-referrer">`，页头在帧外，
   加载/错误是帧上的覆盖层；CSP 用 `widgetCspHeaders(record.permissions)`，`frame-ancestors` 只放行主窗 origin
   （`app://heming` 或开发期 `http://localhost:5173`）；主窗 CSP 相应放开 `frame-src 'self' app: widget:`。
+- 三条沙箱委派各有明确用途（d.141.3.79）：`allow-downloads` 让 `<a download>` 的导出能触发系统「另存为」
+  （否则沙箱帧里被静默丢弃）；`allow="fullscreen"` 让预览全屏可用；`allow="clipboard-write"` 让
+  `navigator.clipboard.writeText` 的「复制」可用。**没有**给 `allow-popups` / `allow-top-navigation`：
+  插件仍然不能开窗口、不能把宿主页面导航走。下载需要用户手势，落地前必经系统确认。
 - 桥：插件 HTML 由 `widget://` 处理器注入 `/__heming_frame_bridge.js`（保留路径，插件产物抢不到），
   帧里得到 `window.__heming_widget`，但它是 **postMessage 代理**：`{__heming_frame:1, kind:"call"|"result"|"event"}`
   → 宿主 `message` 监听（校验 `event.origin` 与 `event.source`）→ 主窗 preload → 主进程。

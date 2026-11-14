@@ -173,6 +173,15 @@
 - **仍未动**：云端 web/server 未重新部署（`/api/*` 与线上前端仍是 11-12 的构建）；数据库/配置未变。
 - **另一会话的 UI/UX WIP 已隔离**：分支 `wip/uiux-2026-11-13`（`d0efe595`，54 处改动，版本自标 d.140.3.56.0）。**未完成**：`packages/web/src/App.tsx` 引用不存在的 `asideNotice`/`setAsideNotice`（10 处 TS2304，typecheck exit 2）、web **17 failed / 4349 passed**（App.boot 1、App.test 15、navPrefs 1）。**不能直接合入**，接续前先修这一处。
 
+### 0.7 插件页面补齐沙箱委派：导出 / 全屏 / 复制（2026-11-14，d.141.3.79.11）
+
+- **用户原话**：「所有的插件都有这样的问题，一一修复」。追问后选「其它插件（工作室/视频编辑/桌宠等）打开时仍是独立窗口 → 这些也要内嵌」。
+- **审计结论（真机，e2e-all 数据根）**：自动化 1.0.0 / 信息中枢 1.4.0 / 建模室 0.2.2 / 剪辑室 0.1.0 **四个页面插件全部已内嵌**（`section[aria-label="插件页面"]` → `iframe[data-testid="plugin-page-frame"]`，rect ≈ {x:21,y:116,w:1674,h:913}，`webview` 0，CDP 只多一个 `type=iframe` target，不产生新窗口；截图 `.tmp/shots/audit-0..3.png`）。侧栏/快捷键进入同样内嵌。→ 若用户仍看到「独立窗口」，那是**改动前的旧构建**（如 `D:/Heming/.tmp/installed-copy/和鸣.exe`，11-07 构建）在跑。
+- **审计挖出的真问题（本轮修）**：内嵌 iframe 的沙箱少了三条委派，插件自身功能静默失效——导出 `<a download>` 被丢弃（信息中枢）、`requestFullscreen` 被权限策略挡（剪辑室预览全屏）、`navigator.clipboard.writeText` 未被委派（信息中枢/建模室「复制」）。
+- **改法**：`PluginBundlePage.tsx` 的 iframe → `sandbox="allow-scripts allow-same-origin allow-downloads"` + `allow="fullscreen; clipboard-write"` + `allowFullScreen`。仍不给 `allow-popups` / `allow-top-navigation`：插件不能开窗、不能导航走宿主；下载需用户手势 + 系统「另存为」。
+- **真机验证**：信息中枢页里 blob 导出 → 出现原生另存为对话框（窗口标题 `blob:widget://heming.infohub/<uuid>`）；剪辑室页里 `requestFullscreen()` → `document.fullscreenElement` 为真（1707×1067 铺满）。剪贴板在无焦点帧里必然 `NotAllowedError: Document is not focused`（自动化环境限制，真实点击可用；插件另有 `execCommand("copy")` 兜底可用）。
+- **门禁**：web typecheck+test、desktop typecheck+test 全绿。
+
 ### 0.6 插件页面内嵌：原生视图 → iframe（2026-11-13，d.141.3.78.11）
 
 - **用户原话**：「我的视觉效果中，插件内容是悬浮在和鸣上，他应该内嵌在其中」。追问后确认指 bundle 插件页（信息中枢/自动化）：页面像一块外挂窗口浮在应用上。

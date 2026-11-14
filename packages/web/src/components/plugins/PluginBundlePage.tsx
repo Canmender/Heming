@@ -360,6 +360,10 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
            * 页面内容：`widget://` 独立 origin 的沙箱 iframe。
            * `allow-same-origin` 让页面能读自己的 localStorage / 用相对资源；
            * `allow-scripts` 是页面自身逻辑；不额外给 top-navigation/popup 等能力。
+           * `allow-downloads`：导出（信息中枢导出归档、建模室导出模型）走 `<a download>`，
+           * 沙箱里不给这条会被浏览器静默丢弃，下载不会开始。
+           * `allow="fullscreen; clipboard-write"`：预览全屏（剪辑室）与「复制」按钮
+           * （信息中枢/建模室）都是权限策略门控的，跨源帧必须由宿主显式委派。
            */
           <iframe
             key={frameKey}
@@ -368,7 +372,9 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
             title={frameTitle}
             data-testid="plugin-page-frame"
             className="h-full w-full border-0"
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts allow-same-origin allow-downloads"
+            allow="fullscreen; clipboard-write"
+            allowFullScreen
             referrerPolicy="no-referrer"
             onLoad={handleFrameLoad}
           />
