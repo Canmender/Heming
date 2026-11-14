@@ -2,6 +2,25 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.146.3.84.11（2026-11-14）— 标题带对齐 8pt：桌面注入的高度和前端 CSS 兜底值对上了
+
+审计 §4-B1 的「TitleBar 38px 空白带」查到底不是视觉误差，是**两处写死的高度没对齐**：
+Electron 主进程给 `titleBarOverlay.height = 38`，前端 `.desktop-titlebar` 的
+`env(titlebar-area-height, 40px)` 兜底写的是 40 —— 有 overlay 时按 38 走，没 overlay
+（浏览器预览、Linux 无 overlay）时按 40 走，两种环境差 2px，且都不在 8pt 网格上。
+
+**改动**
+- `packages/desktop/title-bar.js`：`TITLE_BAR_HEIGHT` 38 → **40**（8pt 网格）；注释写明它会
+  注入成 `env(titlebar-area-height)`、必须与 `packages/web/src/index.css` 的兜底值一致。
+- macOS：`trafficLightPosition.y` 12 → **14**。灯组约 12px 高，标题带抬到 40px 后
+  `(40 - 12) / 2 = 14` 才是垂直居中；原来 12 是按 38px 带的旧值。
+- `packages/desktop/title-bar.test.js`：断言 38 → 40、traffic light y 12 → 14；**新增一条跨包守卫**：
+  读 `packages/web/src/index.css`，把 `.desktop-titlebar` 里 `env(titlebar-area-height, Npx)`
+  的 N 和 `TITLE_BAR_HEIGHT` 比对，不相等即红。这类「两处写死同一个数」的漂移，靠人记不住。
+
+**验证**：`node --test packages/desktop/title-bar.test.js packages/desktop/main.test.js` → 45 例全过；
+`packages/desktop` 其余用例未受影响（本次只动常量与注释）。
+
 ## d.146.3.83.11（2026-11-14）— 导航轨能直接展开二级视图，门禁开始管「可访问名」
 
 审计 §4-F1 说「20 个视图只有 8 个导航入口」：团队 5、模型 4、插件 3、设置 5、记忆 3 这些页签，

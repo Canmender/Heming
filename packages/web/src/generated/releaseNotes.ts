@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.146.3.84.11",
+    "date": "2026-11-14",
+    "title": "窗口顶部那条边现在齐了",
+    "bullets": [
+      "窗口标题带的高度在桌面版与浏览器预览里统一成 40px（原来两种环境差 2px，顶部会多出一条细缝）。",
+      "macOS 的窗口按钮在新高度里垂直居中了。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.146.3.83.11",
     "date": "2026-11-14",
     "title": "导航栏能直接展开子页面",

@@ -811,6 +811,44 @@ Tab 离开菜单时焦点掉到 `body`。
 - 可访问名只覆盖「可点元素有没有名字」，没覆盖名字是否**有意义**（比如「删除」是删哪个对象）。
   后者要靠可访问名里带对象名（`删除分组 X`）这类约定，目前只在 ConfirmDialog 标题里做到。
 
+## 7.13 标题带 8pt 收口与跨包守卫（2026-11-14，版本 d.146.3.84.11）
+
+§4-B1 留了一条「外壳几何不在 8pt：标题带 38px」，当时判定为「需与桌面壳同步，本轮不动」。
+这轮把它查到底，结论比原报告写的更具体：**不是 2px 的审美偏差，是两处写死的高度根本没对齐。**
+
+### 一、根因
+
+| 位置 | 值 | 生效条件 |
+|---|---|---|
+| `packages/desktop/title-bar.js` `TITLE_BAR_HEIGHT` | 38 | Electron 下由 `titleBarOverlay.height` 注入成 CSS `env(titlebar-area-height)` |
+| `packages/web/src/index.css` `.desktop-titlebar` | `env(titlebar-area-height, 40px)` | 变量缺失时走兜底（浏览器预览 / Linux 无 overlay） |
+
+所以桌面版按 38 走、预览按 40 走，两种环境差 2px；而且 38 本身不在 8pt 网格上。
+用户看到的是「窗口顶部有一条 2px 的细缝」，不是「标题栏不够高」。
+
+### 二、改动
+
+- `TITLE_BAR_HEIGHT` 38 → **40**；注释写明它会注入成 `env(titlebar-area-height)`、
+  必须与前端 CSS 兜底值一致（把耦合关系写在改的人第一眼能看到的地方）。
+- macOS `trafficLightPosition.y` 12 → **14**：灯组约 12px 高，`(40 - 12) / 2 = 14` 才居中；
+  12 是按 38px 带的旧值，跟着改高度不改这个，灯会偏上 2px。
+- 新增**跨包守卫**（`packages/desktop/title-bar.test.js`）：读 web 的 `index.css`，
+  把 `.desktop-titlebar` 里的 `env(titlebar-area-height, Npx)` 的 N 与 `TITLE_BAR_HEIGHT` 比对，
+  不相等即红。这类「两个包各写死一个相同数字」的漂移，靠人记不住，只能靠测试盯。
+
+### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `node --test packages/desktop/title-bar.test.js packages/desktop/main.test.js` | 45 例全过（含新增跨包守卫） |
+| 影响面 | 只动常量与注释，无渲染逻辑变化 |
+
+### 四、仍未做
+
+- **真机观感未验证**：40px 是 8pt 网格上的合理值，但「标题带里的内容（拖拽区、
+  可能的窗口标题）是否垂直居中」要看真窗口。我没有图像输入，这条只能靠你在
+  Electron 版里看一眼窗顶确认。
+- Linux 无 `titleBarOverlay`，走前端兜底 40px；是否与各发行版窗口管理器协调，未测。
 ## 附录
 
 ### A. 证据索引
