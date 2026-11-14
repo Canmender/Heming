@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.145.3.83.11",
+    "date": "2026-11-14",
+    "title": "窗口拉窄也不会挤成一团",
+    "bullets": [
+      "把窗口拖窄到 1280 或 1024 宽，界面同样不出现横向挤压和错位。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.145.3.82.11",
     "date": "2026-11-14",
     "title": "二级页签里的字也更清楚、更好点了",

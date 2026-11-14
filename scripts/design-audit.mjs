@@ -25,6 +25,11 @@ import process from "node:process";
 // ---------- 参数 ----------
 const argv = process.argv.slice(2);
 const arg = (name, fallback = "") => {
+  // 同时认 `--name value` 与 `--name=value`：后者写起来更短，但早期只认前者，
+  // 于是 `--widths=760x900` 会静默落回默认视口列表——量测类脚本最怕这种静默兜底。
+  const prefix = `--${name}=`;
+  const inline = argv.find((a) => a.startsWith(prefix));
+  if (inline !== undefined) return inline.slice(prefix.length) || fallback;
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : fallback;
 };
@@ -52,6 +57,27 @@ const THRESHOLDS = {
   fontTiers: 7, // 单页字号档位上限（现网 5–7，收口目标 5）
   headingLevels: 2, // 至少两级标题（h1 + h2/h3，级别不限字号；字号由静态守卫管）
 };
+
+/*
+ * 视口：审计前几轮只量 1440×900，但「窄窗」是另一套布局（共享文件变抽屉、
+ * 侧栏让位、表格内部横向滚动），溢出与命中区都可能只在窄窗出现。
+ * 默认三个断点；--widths=1440x900,1280x800 可覆盖。
+ */
+const WIDTHS = arg("widths", "1440x900,1280x800,1024x768")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map((s) => {
+    const [w, h] = s.split("x").map(Number);
+    return { w, h };
+  })
+  .filter((v) => Number.isFinite(v.w) && Number.isFinite(v.h));
+
+if (WIDTHS.length === 0) {
+  // 参数写错时不要静默跑空：直接报错，免得「全绿」其实是没量。
+  console.error("[audit] --widths 解析为空，示例：--widths=1440x900,1280x800");
+  process.exit(2);
+}
 
 const PAGES = [
   ["主页", "home"],
@@ -474,7 +500,7 @@ async function run() {
   await cdp.send("Runtime.enable", {}, sid);
   await cdp.send(
     "Emulation.setDeviceMetricsOverride",
-    { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+    { width: WIDTHS[0].w, height: WIDTHS[0].h, deviceScaleFactor: 1, mobile: false },
     sid,
   );
 
@@ -520,22 +546,34 @@ async function run() {
     return ok;
   };
 
-  for (const [label, slug] of PAGES) {
-    await goPage(cdp, sid, label);
-    await auditView(slug, label);
-    if (SHOTS) await shoot(cdp, sid, path.join(SHOTS, `${slug}-${THEME}.png`));
-
-    let tabCount = 0;
-    try {
-      tabCount = await evalJs(cdp, sid, `document.querySelectorAll('main [role="tab"]').length`);
-    } catch {
-      tabCount = 0;
+  for (const vp of WIDTHS) {
+    const suffix = vp.w === WIDTHS[0].w ? "" : `@${vp.w}`;
+    if (vp.w !== WIDTHS[0].w) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: false },
+        sid,
+      );
+      await sleep(700); // 等媒体查询重排（抽屉/让位都在这一拍发生）
+      log(`[audit] 视口 ${vp.w}×${vp.h}`);
     }
-    // 0/1 个页签没有额外视图；第一个页签通常就是默认视图，从下标 1 开始点。
-    for (let i = 1; i < tabCount; i += 1) {
-      const tabLabel = await clickTab(i);
-      if (!tabLabel) continue;
-      await auditView(`${slug}~${tabLabel}`, `${label}·${tabLabel}`);
+    for (const [label, slug] of PAGES) {
+      await goPage(cdp, sid, label);
+      await auditView(slug + suffix, label);
+      if (SHOTS) await shoot(cdp, sid, path.join(SHOTS, `${slug}-${THEME}${suffix.replace("@", "-")}.png`));
+
+      let tabCount = 0;
+      try {
+        tabCount = await evalJs(cdp, sid, `document.querySelectorAll('main [role="tab"]').length`);
+      } catch {
+        tabCount = 0;
+      }
+      // 0/1 个页签没有额外视图；第一个页签通常就是默认视图，从下标 1 开始点。
+      for (let i = 1; i < tabCount; i += 1) {
+        const tabLabel = await clickTab(i);
+        if (!tabLabel) continue;
+        await auditView(`${slug}~${tabLabel}${suffix}`, `${label}·${tabLabel}${suffix}`);
+      }
     }
   }
 
