@@ -270,7 +270,7 @@ export function AgentFormPanel({
           className="border border-line"
         />
         {modal ? (
-          <h3 className="text-ui-base font-bold">{title}</h3>
+          <h3 className="ui-block-title">{title}</h3>
         ) : (
           <h2 className="ui-section-title">{title}</h2>
         )}
@@ -308,8 +308,9 @@ export function AgentFormPanel({
         </div>
       )}
 
-      {/* 基础：名称必填，头像与描述可选 */}
-      <div className="ui-caption mb-2 font-bold">基础信息</div>
+      {/* 分区标题：此前 ui-caption(12px/700) 比字段正文(13px) 还小还淡，
+          读起来像注释而不是分组（B 轨 E6）。正文同尺寸 + 600 + 正文色。 */}
+      <div className="ui-body-sm mb-2 font-semibold text-ink">基础信息</div>
 
       {systemAgent && (
         <p
@@ -341,7 +342,7 @@ export function AgentFormPanel({
           }}
         />
         {errorField === "name" && error && (
-          <span id="agent-name-error" role="alert" className="mt-1 block ui-caption text-[var(--danger)]">
+          <span id="agent-name-error" role="alert" className="mt-1 block ui-caption text-danger">
             {error}
           </span>
         )}
@@ -369,7 +370,7 @@ export function AgentFormPanel({
           )}
         </div>
         {fileError && (
-          <div role="alert" className="mt-1 ui-caption text-[var(--danger)]">
+          <div role="alert" className="mt-1 ui-caption text-danger">
             {fileError}
           </div>
         )}
@@ -454,7 +455,7 @@ export function AgentFormPanel({
       )}
 
       {error && errorField !== "name" && (
-        <div role="alert" className="mb-2 ui-caption text-[var(--danger)]">
+        <div role="alert" className="mb-2 ui-caption text-danger">
           {error}
         </div>
       )}
@@ -473,7 +474,7 @@ export function AgentFormPanel({
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={pending}
-            className="mr-auto rounded-lg border border-[var(--danger-line)] px-3 py-1.5 text-ui-md text-[var(--danger)] disabled:opacity-60"
+            className="mr-auto rounded-lg border border-danger-line px-3 py-1.5 text-ui-md text-danger disabled:opacity-60"
           >
             删除智能体
           </button>
@@ -519,7 +520,7 @@ export function AgentFormPanel({
   if (modal) {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-scrim"
         onMouseDown={(e) => {
           if (e.target === e.currentTarget && !pendingRef.current) onClose();
         }}

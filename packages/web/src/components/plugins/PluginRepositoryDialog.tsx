@@ -150,7 +150,7 @@ export function PluginRepositoryDialog({
           {error ? (
             <div className={`mb-3 ${ERROR_TEXT}`}>
               <p role="alert">{error}</p>
-              <button type="button" className="ui-link mt-1" onClick={() => void load()}>
+              <button type="button" className="ui-link mt-1 ui-hit" onClick={() => void load()}>
                 重试
               </button>
             </div>
@@ -173,7 +173,7 @@ export function PluginRepositoryDialog({
               {filtered.map((item) => (
                 <li key={item.key} className="ui-card flex flex-col gap-2 p-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-ui-md font-bold">{item.name}</span>
+                    <span className="text-ui-md font-semibold">{item.name}</span>
                     <span className={CHIP}>v{item.version}</span>
                     {item.installed ? <span className={CHIP}>已安装</span> : null}
                   </div>

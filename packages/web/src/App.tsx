@@ -217,7 +217,7 @@ function SharedFilesPanel({
           改动前三颗按钮都是 shrink-0、标题 whitespace-nowrap，aside 拖到最小宽（180）时
           一行放不下，按钮会被挤出面板右缘（被父级 overflow-hidden 裁掉、点不到）。
           现在按组换行：窄了就整组落到第二行，不靠写死宽度硬顶。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line-soft px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line-soft px-2 py-2">
         {/* d.62：表头用全站统一的 section 档（13/20/600） */}
         <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
         {usage && (
@@ -748,6 +748,25 @@ function AppShell({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   }, []);
+  /**
+   * 键盘调宽（2026-11-14 审计 D3）。
+   *
+   * 这个手柄一直只有指针入口：有 `role="separator"` 和 aria-valuenow，却没有 tabIndex，
+   * 键盘用户既到不了、也调不动——「有 ARIA 没入口」比完全不标更糟（读屏会念出一个
+   * 不可操作的分隔条）。补齐：Tab 可达、方向键 ±16px、Shift+方向键 ±64px（快速）、
+   * Home/End 到两端，并把 aria-valuetext 写成「320 像素」而不是裸数字。
+   */
+  const onResizeKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 64 : 16;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft") next = asideWidthRef.current - step;
+    else if (e.key === "ArrowRight") next = asideWidthRef.current + step;
+    else if (e.key === "Home") next = ASIDE_MIN;
+    else if (e.key === "End") next = ASIDE_MAX;
+    if (next === null) return;
+    e.preventDefault();
+    setAsideWidth(clampAsideWidth(next));
+  }, []);
   // 回调里读不到最新 state，用 ref 兜住当前宽度（与 RadarContacts 的 zoom 兜法一致）
   const asideWidthRef = useRef(asideWidth);
   asideWidthRef.current = asideWidth;
@@ -913,13 +932,16 @@ function AppShell({
           >
             <div
               role="separator"
+              tabIndex={0}
               aria-orientation="vertical"
               aria-label="调整目录栏宽度"
               aria-valuemin={ASIDE_MIN}
               aria-valuemax={ASIDE_MAX}
               aria-valuenow={asideWidth}
+              aria-valuetext={`${asideWidth} 像素`}
               onPointerDown={onResizeStart}
-              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-fast hover:bg-[var(--line-soft)] motion-reduce:transition-none"
+              onKeyDown={onResizeKeyDown}
+              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-fast hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink motion-reduce:transition-none"
             />
             <SharedFilesPanel
               files={files}
@@ -944,7 +966,7 @@ function AppShell({
             aria-label="关闭共享文件遮罩"
             data-testid="shared-files-backdrop"
             onClick={closeFilesDrawer}
-            className="absolute inset-0 cursor-default bg-[var(--scrim)]"
+            className="absolute inset-0 cursor-default bg-scrim"
           />
           <aside
             id="shared-files-drawer"

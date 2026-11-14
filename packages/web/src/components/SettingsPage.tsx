@@ -51,11 +51,11 @@ function InlineText({ text }: { text: string }) {
     <>
       {parseInline(text).map((seg, i) =>
         seg.kind === "bold" ? (
-          <strong key={i} className="font-bold text-ink">
+          <strong key={i} className="font-semibold text-ink">
             {seg.text}
           </strong>
         ) : seg.kind === "code" ? (
-          <code key={i} className="rounded-sm bg-[var(--subtle-2)] px-1 font-mono text-ui-xs">
+          <code key={i} className="rounded-sm bg-subtle-2 px-1 font-mono text-ui-xs">
             {seg.text}
           </code>
         ) : (
@@ -284,16 +284,15 @@ export function SettingsPage() {
                 </p>
               ) : (
                 <>
-                  <p role="status" className="ui-caption">
-                    找到 {results.length} 项，点击定位到卡片
-                  </p>
-                  <ul className="mt-2 flex flex-col gap-2">
+                  <ul className="flex flex-col">
                     {results.map((card) => (
                       <li key={card.id}>
+                        {/* 审计 F7：搜索结果原来手写一套圆角卡片行（每行一个边框，像五张小卡），
+                            与全站列表行不一致。改用 .ui-list-row：48px 行高、行内分隔、hover 走令牌。 */}
                         <button
                           type="button"
                           onClick={() => jumpToCard(card)}
-                          className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-[var(--surface)] px-3 py-2 text-left ui-body-sm hover:border-line hover:bg-[var(--subtle-2)] ${FOCUS_RING}`}
+                          className={`ui-list-row w-full text-left ui-body-sm ${FOCUS_RING}`}
                         >
                           <span className="min-w-0 flex-1 truncate">
                             {settingsCardById(card.id)?.title ?? card.title}
@@ -317,6 +316,10 @@ export function SettingsPage() {
             )}
             {tab === "model" && (
               <>
+                {/* 审计 F8：六张卡原来一路平铺，成本设置（Key / 上下文 / 后台模型）与
+                    安全设置（工具确认 / 文件可写根 / 存储水位）混在一列里，读完不知道
+                    「哪些是花钱的、哪些是本机的边界」。按三组分开，组标题统一 .ui-block-title。 */}
+                <h2 className="ui-block-title">模型与上下文</h2>
                 <div
                   data-settings-id="key-storage"
                   className={anchorClass(highlightId === "key-storage")}
@@ -335,23 +338,24 @@ export function SettingsPage() {
                 >
                   <BackgroundModelCard />
                 </div>
-                {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
+
+                <h2 className="ui-block-title mt-5">写操作边界</h2>
+                {/* 工具调用确认 / 文件编辑：一个管「智能体会做什么」，一个管「能改哪些文件」，
+                    两者一起构成本机的写操作边界。 */}
                 <div
                   data-settings-id="hitl-policy"
                   className={anchorClass(highlightId === "hitl-policy")}
                 >
                   <HitlPolicyCard />
                 </div>
-                {/* 文件编辑：可写根是「智能体能改哪些文件」的唯一开关，
-                    紧跟在工具调用确认之后——两者一起构成本机的写操作边界。 */}
                 <div
                   data-settings-id="file-edit"
                   className={anchorClass(highlightId === "file-edit")}
                 >
                   <FileEditCard />
                 </div>
-                {/* 本机存储水位：紧跟在安全设置之后——两者都是「本机的边界」，
-                    一条管「智能体会做什么」，一条管「本机还剩多少空间」。 */}
+
+                <h2 className="ui-block-title mt-5">本机存储</h2>
                 <div
                   data-settings-id="storage-usage"
                   className={anchorClass(highlightId === "storage-usage")}
@@ -372,7 +376,7 @@ export function SettingsPage() {
                   className={anchorClass(highlightId === "memory-vault")}
                 >
                   <section className="mt-3 ui-card p-4">
-                    <div className="text-ui-sm font-bold text-muted">知识库与记忆</div>
+                    <h2 className="ui-section-title">知识库与记忆</h2>
                     <p className="mt-1 ui-caption">
                       知识库参与记忆的开关、已纳入篇数与同步状态都在记忆页；这里只做入口，
                       两处共用同一个设置值，不做第二套开关。
@@ -399,7 +403,8 @@ export function SettingsPage() {
               </>
             )}
             {tab === "about" && <AboutSection highlightedId={highlightId} />}
-            <p className="pt-1 ui-caption">和鸣 {appVersionLabel()}</p>
+            {/* 审计 F8：原来每个分区底部都印一次「和鸣 d.x.y」，五个分区五份版本号，
+                「关于」里已有当前版本与更新记录。版本号只留在「关于」。 */}
           </>
         )}
         </div>
@@ -458,11 +463,12 @@ function ProfileSection() {
   return (
     <section className="max-w-full ui-card p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="ui-section-title">个人资料</div>
+        {/* 分区头：视觉是 14px 卡片组标题，语义要进大纲（读屏 + 审计门禁只认 h2）。 */}
+        <h2 className="ui-section-title">个人资料</h2>
       </div>
 
       <div className="mt-3 flex items-center gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-muted">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-subtle-3 text-muted">
           {avatar ? (
             <img src={avatar} alt="当前头像" className="h-full w-full object-cover" />
           ) : (
@@ -479,7 +485,7 @@ function ProfileSection() {
             onChange={onPickFile}
           />
         </label>
-        {fileError && <span className="ui-caption text-[var(--danger)]">{fileError}</span>}
+        {fileError && <span className="ui-caption text-danger">{fileError}</span>}
       </div>
 
       {avatar && (
@@ -490,7 +496,7 @@ function ProfileSection() {
             setAvatar(undefined);
             setSaved(false);
           }}
-          className="mt-2 rounded-lg border border-line px-3 py-1 text-ui-sm hover:bg-[var(--subtle-2)]"
+          className="mt-2 rounded-lg border border-line px-3 py-1 text-ui-sm hover:bg-subtle-2"
         >
           恢复默认头像
         </button>
@@ -765,10 +771,10 @@ function AppearanceSection() {
               setAccentError(null);
               setApplied(true);
             }}
-            className={`h-6 w-6 rounded-full border border-line ${
+            className={`ui-hit h-6 w-6 rounded-full border border-line ${
               // 选中环用 --ink + --surface 做 offset：写死 #1a1a1a/白 offset 在暗色下
               // 要么环看不见、要么套一圈白光。深色色点（墨黑）也靠 border-line 才不至于融进卡片。
-              accent === p.color ? "ring-2 ring-offset-2 ring-[var(--ink)] ring-offset-[var(--surface)]" : ""
+              accent === p.color ? "ring-2 ring-offset-2 ring-ink ring-offset-surface" : ""
             }`}
             style={{ backgroundColor: p.color }}
           />
@@ -800,7 +806,7 @@ function AppearanceSection() {
           恢复默认
         </Button>
       </div>
-      {accentError && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{accentError}</div>}
+      {accentError && <div role="alert" className="mt-2 ui-caption text-danger">{accentError}</div>}
     </section>
   );
 }
@@ -912,9 +918,9 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                 aria-expanded={open}
                 aria-label={`更新日志 ${entry.version}`}
                 onClick={() => setLogState((prev) => toggleLog(prev, entry.version, isCurrent))}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--subtle)]"
+                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-subtle"
               >
-                <span className="text-ui-sm font-bold">{entry.version}</span>
+                <span className="text-ui-sm font-semibold">{entry.version}</span>
                 {isCurrent && (
                   <span className="rounded-full border border-line px-1.5 text-ui-xs text-muted">
                     当前
@@ -933,7 +939,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                       <div className="mt-0.5 text-ui-sm font-medium">
                         <InlineText text={notes.title} />
                       </div>
-                      <ul className="mt-1.5 flex flex-col gap-1">
+                      <ul className="mt-2 flex flex-col gap-1">
                         {(notes.bullets.length > 0 ? notes.bullets : notes.paragraphs).map((line, i) => (
                           <li key={i} className="flex gap-1.5 text-ui-sm leading-relaxed">
                             <span className="text-muted">·</span>

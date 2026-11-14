@@ -210,11 +210,11 @@ export function EditorPane({
       </div>
 
       {/* 状态条：脏标记 + 保存入口；接的是 store 的真实 dirty/saving 状态 */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-line-soft px-3 py-1.5 text-ui-xs text-muted">
+      <div className="flex shrink-0 items-center gap-2 border-t border-line-soft px-3 py-1.5 ui-body-sm text-muted">
         <span aria-live="polite">
           {saving ? "保存中…" : dirty ? "有未保存的修改" : "已保存"}
         </span>
-        <span className="text-ui-xs">Ctrl+S 保存{" · "}Ctrl+F 搜索</span>
+        <span className="text-ui-sm">Ctrl+S 保存{" · "}Ctrl+F 搜索</span>
         <Button
           type="button"
           onClick={() => onSaveRef.current?.()}

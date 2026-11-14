@@ -111,7 +111,7 @@ export function KeyStorageCard() {
       aria-label="密钥存储"
       className="ui-card mt-3 p-4"
     >
-      <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
+      <div className="flex items-center gap-1.5 text-ui-sm font-semibold text-muted">
         <LockIcon className="text-muted" />
         密钥存储
       </div>

@@ -77,9 +77,9 @@ describe("BundlePluginCard", () => {
     fireEvent.click(screen.getByRole("button", { name: `卸载插件 ${RECORD.name}` }));
     expect(uninstall).not.toHaveBeenCalled();
     // 文案必须把「删什么」说全
-    expect(screen.getByText(/插件文件、模型与插件设置都会一并删除/)).toBeTruthy();
+    expect(screen.getByText(/卸载后不可恢复，插件文件、模型与设置会一并删除/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "确认卸载" }));
+    fireEvent.click(screen.getByRole("button", { name: "卸载" }));
     await waitFor(() =>
       expect(uninstall).toHaveBeenCalledWith({ id: RECORD.id, removeData: true }),
     );
@@ -96,7 +96,7 @@ describe("BundlePluginCard", () => {
     fireEvent.click(screen.getByRole("button", { name: `卸载插件 ${RECORD.name}` }));
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(uninstall).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "确认卸载" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "卸载" })).toBeNull();
   });
 
   it("停用：开关打到桥，提示保留文件与设置", async () => {
@@ -119,7 +119,7 @@ describe("BundlePluginCard", () => {
     render(<BundlePluginCard status={status()} record={RECORD} onNotify={onNotify} />);
 
     fireEvent.click(screen.getByRole("button", { name: `卸载插件 ${RECORD.name}` }));
-    fireEvent.click(screen.getByRole("button", { name: "确认卸载" }));
+    fireEvent.click(screen.getByRole("button", { name: "卸载" }));
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith("error", expect.stringContaining("卸载未完成")),
     );

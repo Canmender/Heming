@@ -115,7 +115,7 @@ export function NeedsAttention() {
     <section aria-label="需要你处理" className="ui-card overflow-hidden p-0">
       <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2">
         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--warn)" }} aria-hidden="true" />
-        <span className="text-ui-sm font-bold">需要你处理</span>
+        <span className="text-ui-sm font-semibold">需要你处理</span>
         <span className="ui-micro rounded-sm border border-line px-1">{rows.length}</span>
       </div>
       <ul>
@@ -124,7 +124,7 @@ export function NeedsAttention() {
             <button
               type="button"
               onClick={row.onOpen}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--subtle)] ${FOCUS_RING}`}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-subtle ${FOCUS_RING}`}
             >
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-ui-sm font-medium">{row.title}</span>

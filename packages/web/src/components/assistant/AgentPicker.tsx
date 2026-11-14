@@ -181,7 +181,7 @@ export function AgentPicker({
                             <span className="ui-body-sm block truncate font-medium">
                               {agent.name}
                             </span>
-                            <span className="ui-caption mt-0.5 line-clamp-2 block min-h-[34px] leading-[17px]">
+                            <span className="ui-caption mt-0.5 line-clamp-2 block min-h-[34px] leading-snug">
                               {busy
                                 ? "正在打开…"
                                 : agent.description ||
@@ -193,7 +193,7 @@ export function AgentPicker({
                         </button>
                         <div className="mt-2 flex items-center gap-2">
                           <span
-                            className={`ui-chip ${bound ? "" : "text-[var(--danger)]"}`}
+                            className={`ui-chip ${bound ? "" : "text-danger"}`}
                             title={
                               bound
                                 ? "该智能体已绑定模型"
@@ -208,7 +208,7 @@ export function AgentPicker({
                               aria-label={`编辑智能体：${agent.name}`}
                               title="编辑智能体"
                               onClick={() => onEdit(agent)}
-                              className="ui-micro rounded-sm px-1.5 py-0.5 text-muted opacity-70 hover:bg-[var(--subtle-3)] hover:text-ink hover:opacity-100 focus:opacity-100"
+                              className="ui-hit ui-micro shrink-0 rounded-sm px-1.5 py-0.5 text-muted opacity-70 hover:bg-subtle-3 hover:text-ink hover:opacity-100 focus:opacity-100"
                             >
                               编辑
                             </button>

@@ -31,7 +31,7 @@ export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
                 <button
                   type="button"
                   onClick={() => onPick(example.text)}
-                  className={`w-full rounded-lg border border-line bg-[var(--surface)] px-3 py-2 text-left ui-body-sm leading-5 text-[var(--body)] hover:border-[var(--line-strong)] hover:bg-[var(--subtle-2)] ${FOCUS_RING_TIGHT}`}
+                  className={`w-full rounded-lg border border-line bg-surface px-3 py-2 text-left ui-body-sm leading-5 text-body hover:border-line-strong hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
                 >
                   {example.text}
                 </button>

@@ -95,21 +95,21 @@ export function FileEditCard({
     return (
     <section aria-label="文件编辑" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="text-ui-sm font-bold text-muted">文件编辑</div>
+        <div className="ui-section-title">文件编辑</div>
       </div>
       <div className="mt-1 ui-caption">
         默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；至少一条可写根才会出现 `file_patch`。
       </div>
 
       {!fileBridge ? (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
           仅桌面端可用：浏览器里没有文件系统访问能力，因此不提供文件编辑工具。
         </div>
       ) : (
         <>
           <div className="mt-3">
             <div className="flex items-center justify-between">
-              <div className="text-ui-sm font-bold text-muted">
+              <div className="ui-body-sm font-semibold text-ink">
                 可写根{config.roots.length ? `（${config.roots.length}/${MAX_FILE_ROOTS}）` : ""}
               </div>
               {config.roots.length > 0 && (
@@ -117,7 +117,7 @@ export function FileEditCard({
               )}
             </div>
             {config.roots.length === 0 ? (
-              <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
+              <div className="mt-1 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
                 还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录（例如 Obsidian 库的某个子目录），不要选整个盘。
               </div>
             ) : (
@@ -127,7 +127,7 @@ export function FileEditCard({
                     key={root.path}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
                   >
-                    <span className="text-ui-sm font-bold">{root.name}</span>
+                    <span className="ui-body-sm font-semibold">{root.name}</span>
                     <span className="min-w-0 flex-1 truncate font-mono ui-caption" title={root.path}>
                       {root.path}
                     </span>
@@ -144,7 +144,7 @@ export function FileEditCard({
                       type="button"
                       aria-label={`删除根 ${root.name}`}
                       onClick={() => removeRoot(root.path)}
-                      className="rounded-lg border border-line px-2 py-0.5 text-ui-xs text-[var(--danger)] hover:bg-[var(--subtle-2)]"
+                      className="rounded-lg border border-line px-2 py-0.5 text-ui-xs text-danger hover:bg-subtle-2"
                     >
                       删除
                     </button>
@@ -193,7 +193,7 @@ export function FileEditCard({
             </Button>
           </div>
           {error && (
-            <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">
+            <div role="alert" className="mt-2 ui-caption text-danger">
               {error}
             </div>
           )}
@@ -220,7 +220,7 @@ export function FileEditCard({
           </label>
 
           <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="text-ui-xs font-bold text-muted">
+            <div className="ui-body-sm font-semibold text-ink">
               已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
             </div>
             {rules.length === 0 ? (
@@ -238,13 +238,13 @@ export function FileEditCard({
                     <span
                       className={`rounded-sm px-1 ${
                         rule.effect === "deny"
-                          ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                          : "bg-[var(--success-soft)] text-[var(--success)]"
+                          ? "bg-danger-soft text-danger"
+                          : "bg-success-soft text-success"
                       }`}
                     >
                       {rule.effect === "deny" ? "拒绝" : "允许"}
                     </span>
-                    <span className="font-mono text-[var(--body)]">{rule.tool}</span>
+                    <span className="font-mono text-body">{rule.tool}</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-muted" title={rule.resource}>
                       {rule.resource}
                     </span>

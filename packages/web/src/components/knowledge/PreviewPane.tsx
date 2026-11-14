@@ -72,10 +72,10 @@ function WikiChip({
       className={`mx-0.5 inline-flex max-w-full items-baseline gap-1 truncate rounded-sm border px-1 py-0 align-baseline text-ui-sm leading-5 transition-colors ${
         resolved
           ? anchorMiss
-            ? "border-dashed border-warn text-[var(--warn)] hover:bg-subtle-3"
-            : "border-line text-[var(--info)] hover:border-[var(--info)] hover:bg-subtle-3"
+            ? "border-dashed border-warn text-warn hover:bg-subtle-3"
+            : "border-line text-info hover:border-info hover:bg-subtle-3"
           : ambiguous
-            ? "border-dashed border-warn text-[var(--warn)] hover:bg-subtle-3"
+            ? "border-dashed border-warn text-warn hover:bg-subtle-3"
             : "border-dashed border-line-strong text-muted hover:border-ink hover:text-ink"
       }`}
     >
@@ -281,7 +281,7 @@ export function PreviewPane({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-[var(--info)] underline underline-offset-2 hover:text-[var(--info)]"
+            className="text-info underline underline-offset-2 hover:text-info"
           >
             {children}
           </a>
@@ -316,7 +316,7 @@ export function PreviewPane({
         <p className="my-2 first:mt-0 last:mb-0">{children}</p>
       ),
       h1: ({ children }: { children?: React.ReactNode }) => (
-        <h1 className="mb-2 mt-4 border-b border-line-soft pb-1 text-ui-lg font-semibold leading-[26px] text-ink first:mt-0">
+        <h1 className="mb-2 mt-4 border-b border-line-soft pb-1 text-ui-lg font-semibold leading-tight text-ink first:mt-0">
           {children}
         </h1>
       ),
@@ -401,7 +401,7 @@ export function PreviewPane({
   }
 
   return (
-    <div className={`markdown-body break-words text-ui-md leading-[1.75] text-ink ${className}`}>
+    <div className={`markdown-body break-words text-ui-md leading-reading text-ink ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath, remarkWikiLinks]}
         rehypePlugins={[rehypeKatex]}

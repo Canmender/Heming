@@ -77,16 +77,16 @@ function PluginHomeCardTile({
       <button
         type="button"
         onClick={open}
-        className={`flex flex-col gap-1.5 p-3 text-left transition-colors hover:bg-[var(--subtle)] ${FOCUS_RING} ${
+        className={`flex flex-col gap-1.5 p-3 text-left transition-colors hover:bg-subtle ${FOCUS_RING} ${
           hasActions ? "rounded-t-xl" : "rounded-xl"
         }`}
         aria-label={`打开 ${card.title}`}
       >
-        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
+        <div className="flex items-center gap-1.5 text-ui-sm font-semibold text-muted">
           <PluginPageIcon icon={card.icon} size={14} />
           <span className="truncate">{card.title}</span>
           {card.badge ? (
-            <span className="ml-auto shrink-0 rounded-full bg-[var(--subtle)] px-1.5 py-0.5 text-ui-xs font-semibold">
+            <span className="ml-auto shrink-0 rounded-full bg-subtle px-1.5 py-0.5 text-ui-xs font-semibold">
               {card.badge}
             </span>
           ) : null}
@@ -114,7 +114,7 @@ function PluginHomeCardTile({
               type="button"
               onClick={() => onAction(card, action)}
               // 沿用既有 ui-chip（h-5 / 11px / subtle 底）：小按钮行，不引入新配色。
-              className={`ui-chip transition-colors hover:bg-[var(--subtle-2)] hover:text-ink ${FOCUS_RING_TIGHT}`}
+              className={`ui-chip transition-colors hover:bg-subtle-2 hover:text-ink ${FOCUS_RING_TIGHT}`}
               aria-label={`${action.label}：${card.title}`}
             >
               {action.label}

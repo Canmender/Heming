@@ -118,13 +118,13 @@ export function LoginPage() {
             <div
               id="login-capslock"
               role="status"
-              className={capsLock ? "ui-caption text-[var(--warn)]" : "sr-only"}
+              className={capsLock ? "ui-caption text-warn" : "sr-only"}
             >
               {capsLock ? "大写锁定已开启" : ""}
             </div>
             {error && (
               // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
-              <div id="login-error" role="alert" className="ui-caption text-[var(--danger)]">
+              <div id="login-error" role="alert" className="ui-caption text-danger">
                 {error}
               </div>
             )}
@@ -143,7 +143,7 @@ export function LoginPage() {
 
       {/* 右：品牌手写字样（窄屏隐藏）。宽度随视口收敛，避免小窗口里溢出版心 */}
       <div className="hidden flex-1 items-center justify-center p-6 min-[900px]:flex">
-        <Wordmark className="h-auto w-[min(320px,26vw)] text-ink" />
+        <Wordmark className="h-auto w-[min(280px,20vw)] text-ink" />
       </div>
     </div>
   );

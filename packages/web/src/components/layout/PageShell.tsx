@@ -93,9 +93,14 @@ export function PageShell({
         ) : null}
       </header>
       {headerExtra ? <div className="shrink-0 border-b border-line-soft">{headerExtra}</div> : null}
+      {/* 2026-11-14 审计 B2：纵向滚 + 横向滚此前同开（overflow-y-auto overflow-x-auto）。
+          后果：任何一页稍微宽一点就出现**两条**滚动条，鼠标滚轮在底部横条上失效、
+          触控板横向手势会诡异地左右晃动整个页面。
+          改成「纵向可滚、横向由内容自己裁」：这里 `overflow-x-hidden`，
+          真正需要横滚的表格/代码块由各自容器 `overflow-x-auto` 承担（那些地方才有语义）。 */}
       {scroll ? (
         <div
-          className={`min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-auto ${padded ? "px-6 py-5 max-[1199px]:px-4" : ""}`}
+          className={`min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden ${padded ? "px-6 py-6 max-[1199px]:px-4" : ""}`}
         >
           <div className={`mx-auto w-full ${WIDTH_CLASS[width]} ${bodyClassName}`}>{children}</div>
         </div>

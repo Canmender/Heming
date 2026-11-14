@@ -96,14 +96,14 @@ function CodeBlock({
   const label = lang?.trim() || "text";
 
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)]">
+    <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-subtle-2">
       <div className="flex items-center justify-between border-b border-line-soft px-2 py-1">
         <span className="text-ui-xs font-medium text-muted">{label}</span>
         <button
           type="button"
           aria-label="复制代码"
           onClick={() => void copy()}
-          className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-[var(--body)]"
+          className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-subtle-3 hover:text-body"
         >
           {copied ? "已复制" : "复制"}
         </button>
@@ -115,7 +115,7 @@ function CodeBlock({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-2 font-mono text-ui-sm leading-relaxed text-[var(--body)]">
+        <pre className="overflow-x-auto p-2 font-mono text-ui-sm leading-relaxed text-body">
           <code>{code}</code>
         </pre>
       )}
@@ -126,7 +126,7 @@ function CodeBlock({
 /** 内联代码：浅底等宽，与正文区分但不喧宾夺主。 */
 function InlineCode({ children }: { children?: React.ReactNode }) {
   return (
-    <code className="rounded-sm bg-[var(--subtle-3)] px-1 py-[1px] font-mono text-[0.92em] text-[var(--danger)]">
+    <code className="rounded-sm bg-subtle-3 px-1 py-[1px] font-mono text-[0.92em] text-ink">
       {children}
     </code>
   );
@@ -217,7 +217,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-[var(--info)] underline underline-offset-2 hover:text-[var(--info)]"
+          className="text-info underline underline-offset-2 hover:text-info"
         >
           {children}
         </a>
@@ -226,9 +226,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       ul: ({ children }: any) => <ul className="my-1 list-disc pl-5">{children}</ul>,
       ol: ({ children }: any) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
       li: ({ children }: any) => <li className="my-0.5">{children}</li>,
-      h1: ({ children }: any) => <h1 className="mb-1 mt-2 text-ui-base font-bold">{children}</h1>,
-      h2: ({ children }: any) => <h2 className="mb-1 mt-2 text-ui-base font-bold">{children}</h2>,
-      h3: ({ children }: any) => <h3 className="mb-1 mt-2 text-ui-md font-bold">{children}</h3>,
+      h1: ({ children }: any) => <h1 className="mb-1 mt-2 text-ui-block font-semibold">{children}</h1>,
+      h2: ({ children }: any) => <h2 className="mb-1 mt-2 text-ui-base font-semibold">{children}</h2>,
+      h3: ({ children }: any) => <h3 className="mb-1 mt-2 text-ui-md font-semibold">{children}</h3>,
       blockquote: ({ children }: any) => (
         <blockquote className="my-1 border-l-2 border-line pl-2.5 text-muted">
           {children}
@@ -242,7 +242,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
         </div>
       ),
       th: ({ children }: any) => (
-        <th className="border border-line-soft bg-[var(--subtle-2)] px-1.5 py-1 text-left font-bold">
+        <th className="border border-line-soft bg-subtle-2 px-1.5 py-1 text-left font-semibold">
           {children}
         </th>
       ),

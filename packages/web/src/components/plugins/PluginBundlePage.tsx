@@ -11,8 +11,8 @@ import {
   type WidgetsBridge,
 } from "../../types/widgets.js";
 import { AlertIcon, PackageIcon, RefreshIcon } from "../icons.js";
+import { ErrorState } from "../ui/ErrorState.js";
 import { EmptyState } from "../ui/EmptyState.js";
-import { ERROR_TEXT, HINT } from "./shared.js";
 import {
   ERR_BRIDGE_MISSING,
   ERR_CALL_FAILED,
@@ -329,13 +329,13 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 正常态：页头（iframe 之外）+ 圆角卡片里的 iframe（加载/错误态叠在它上面） ──
   return (
     <section aria-label="插件页面" className="flex h-full min-h-0 flex-col gap-2 p-3">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-3 py-2">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-surface px-3 py-2">
         <span className="plugin-icon-tile h-7 w-7" aria-hidden="true">
           <PackageIcon width={14} height={14} />
         </span>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <h2 className="ui-section-title truncate">{page?.title || record?.name || pluginId}</h2>
+            <h2 className="ui-block-title truncate">{page?.title || record?.name || pluginId}</h2>
             <span className="ui-chip">插件</span>
             <span className="ui-micro ui-numeric">v{version}</span>
           </div>
@@ -354,7 +354,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         </div>
       </header>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)]">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-line-soft bg-surface">
         {frameSrc ? (
           /**
            * 页面内容：`widget://` 独立 origin 的沙箱 iframe。
@@ -387,39 +387,23 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         ) : null}
 
         {pageError ? (
-          <div
-            role="alert"
-            aria-label="插件页面错误"
-            className="absolute inset-0 flex items-center justify-center p-6"
-            style={{ backgroundColor: "var(--surface)" }}
-          >
-            <div className="flex max-w-[520px] flex-col items-center gap-2 text-center">
-              <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
-                <AlertIcon width={20} height={20} />
-              </span>
-              <p className="ui-section-title">插件页面没能显示出来</p>
-              <p className={ERROR_TEXT}>{pageError}</p>
-              <p className={HINT}>
-                页面由插件包自带的 HTML 渲染，包文件损坏、入口缺失或插件刚更新过都可能失败；
-                重新加载会按当前安装再打开一次。
-              </p>
-              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  onClick={retry}
-                  size="md" variant="primary"
-                >
-                  重新加载
-                </Button>
-                <Button
-                  type="button"
-                  onClick={openPluginDetails}
-                  size="md" variant="ghost"
-                >
-                  打开插件详情
-                </Button>
-              </div>
-            </div>
+          /* 审计 C6：原来是第四套手写的失败态（自定图标砖 + 内联 style 底色 + 两段小字），
+             与全站 ErrorState 不一致。改为复用 ui/ErrorState，只保留「盖住 iframe」的定位职责。 */
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 overflow-y-auto bg-surface p-6">
+            <ErrorState
+              className="w-full max-w-[520px]"
+              title="插件页面没能显示出来"
+              desc={`${pageError}。页面由插件包自带的 HTML 渲染：包文件损坏、入口缺失或插件刚更新过都可能失败，重新加载会按当前安装再打开一次。`}
+              onRetry={retry}
+              retryLabel="重新加载"
+            />
+            <Button
+              type="button"
+              onClick={openPluginDetails}
+              size="md" variant="ghost"
+            >
+              打开插件详情
+            </Button>
           </div>
         ) : null}
       </div>

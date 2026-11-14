@@ -7,6 +7,7 @@ import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
 import { Button } from "../../components/ui/Button.js";
+import { IconButton } from "../../components/ui/IconButton.js";
 
 /**
  * 对话左栏（d.126 阶段 B）：Claude Code 风格会话栏。
@@ -190,7 +191,7 @@ export function ConversationRail({
       return (
         <div
           key={conv.id}
-          className="mb-0.5 flex items-center gap-1 rounded-md bg-[var(--subtle-3)] px-2 py-1"
+          className="mb-0.5 flex items-center gap-1 rounded-md bg-subtle-3 px-2 py-1"
         >
           <input
             aria-label="会话名称"
@@ -232,7 +233,7 @@ export function ConversationRail({
       <div
         key={conv.id}
         className={`group relative mb-0.5 flex items-center rounded-md transition-colors ${
-          active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
+          active ? "bg-subtle-4" : "hover:bg-subtle-2"
         }`}
       >
         <button
@@ -261,7 +262,7 @@ export function ConversationRail({
           aria-haspopup="menu"
           aria-expanded={menuFor === conv.id}
           onClick={() => setMenuFor((cur) => (cur === conv.id ? null : conv.id))}
-          className={`mr-1 rounded-sm p-1 text-muted transition-opacity hover:bg-[var(--subtle-3)] hover:text-ink focus:opacity-100 ${
+          className={`mr-1 rounded-sm p-1 text-muted transition-opacity hover:bg-subtle-3 hover:text-ink focus:opacity-100 ${
             menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >
@@ -271,12 +272,12 @@ export function ConversationRail({
           <div
             role="menu"
             data-conv-menu
-            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-ui-sm ui-overlay-shadow"
+            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
           >
             <button
               type="button"
               role="menuitem"
-              className="block w-full rounded-sm px-2 py-1 text-left hover:bg-[var(--subtle-3)]"
+              className="block w-full rounded-sm px-2 py-1 text-left hover:bg-subtle-3"
               onClick={() => startRename(conv)}
             >
               重命名
@@ -284,7 +285,7 @@ export function ConversationRail({
             <button
               type="button"
               role="menuitem"
-              className="block w-full rounded-sm px-2 py-1 text-left text-[var(--danger)] hover:bg-[var(--subtle-3)]"
+              className="block w-full rounded-sm px-2 py-1 text-left text-danger hover:bg-subtle-3"
               onClick={() => {
                 setMenuFor(null);
                 onDeleteRequest(conv);
@@ -338,7 +339,7 @@ export function ConversationRail({
             aria-label="展开对话列表"
             title="展开对话列表"
             onClick={() => setCollapsed(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
+            className="ui-hit flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
           >
             <ChevronIcon width={14} height={14} aria-hidden="true" />
           </button>
@@ -356,7 +357,7 @@ export function ConversationRail({
                 aria-current={active ? "true" : undefined}
                 onClick={() => onOpen(conv.id)}
                 className={`mb-1 flex w-full justify-center rounded-lg p-1 transition-colors ${
-                  active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
+                  active ? "bg-subtle-4" : "hover:bg-subtle-2"
                 }`}
               >
                 <Avatar
@@ -372,7 +373,7 @@ export function ConversationRail({
           aria-label="新建对话"
           title="新建对话"
           onClick={onNewConversation}
-          className="mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
+          className="ui-hit mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
         >
           <PlusIcon width={14} height={14} />
         </button>
@@ -390,7 +391,7 @@ export function ConversationRail({
           aria-label="收起对话列表"
           title="收起对话列表"
           onClick={() => setCollapsed(true)}
-          className="ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
+          className="ui-hit ml-auto flex h-[24px] w-[20px] items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
         >
           <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
         </button>
@@ -415,10 +416,10 @@ export function ConversationRail({
           aria-expanded={searchOpen}
           aria-controls="assistant-conversation-search"
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+          className={`ui-hit flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
             searchOpen
-              ? "bg-[var(--subtle-4)] text-ink"
-              : "text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
+              ? "bg-subtle-4 text-ink"
+              : "text-muted hover:bg-subtle-4 hover:text-ink"
           }`}
         >
           <SearchIcon width={14} height={14} />
@@ -455,20 +456,23 @@ export function ConversationRail({
                 className="mb-1.5"
               >
                 <div className="flex items-center gap-1 px-2 py-1">
-                  <span className="ui-micro min-w-0 flex-1 truncate" title={group.agentName}>
+                  {/* 分组标题（B 轨 E6）：此前 ui-micro(11px/500) 比组内会话名(13px/ink) 更小更淡，
+                      读起来像元信息而不是「这一组是谁的对话」。现在按卡片分区标题的规格来：
+                      ui-caption 的 12px/500 + semibold + 正文色。 */}
+                  <span
+                    className="ui-caption min-w-0 flex-1 truncate font-semibold text-ink"
+                    title={group.agentName}
+                  >
                     {group.agentName}
                   </span>
-                  <span className="ui-micro text-muted">{group.items.length}</span>
-                  <button
-                    type="button"
-                    aria-label={`新建与 ${group.agentName} 的对话`}
+                  <span className="ui-caption text-muted">{group.items.length}</span>
+                  <IconButton
+                    label={`新建与 ${group.agentName} 的对话`}
                     title={`新建与 ${group.agentName} 的对话`}
                     disabled={openingId === group.agentId}
                     onClick={() => onNewForAgent(group.agentId)}
-                    className="flex h-5 w-5 items-center justify-center rounded-sm text-muted hover:bg-[var(--subtle-3)] hover:text-ink disabled:opacity-50"
-                  >
-                    <PlusIcon width={12} height={12} />
-                  </button>
+                    icon={<PlusIcon width={12} height={12} />}
+                  />
                 </div>
                 {group.items.map(renderRow)}
               </section>
@@ -491,7 +495,7 @@ export function ConversationRail({
       </div>
 
       {error && (
-        <p role="alert" className="border-t border-line-soft px-3 py-2 text-ui-xs text-[var(--danger)]">
+        <p role="alert" className="border-t border-line-soft px-3 py-2 ui-body-sm text-danger">
           {error}
         </p>
       )}

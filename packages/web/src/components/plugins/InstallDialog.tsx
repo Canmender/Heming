@@ -258,7 +258,7 @@ export function InstallDialog({
       onClose={onClose}
       closeLabel="关闭安装面板"
       bodyClassName="px-4 py-3"
-      footerClassName="flex flex-wrap items-center gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5"
+      footerClassName="flex flex-wrap items-center gap-2 border-t border-line-soft bg-subtle-2 px-4 py-2.5"
       footer={
         <>
           <span className="mr-auto ui-caption">
@@ -298,8 +298,8 @@ export function InstallDialog({
             onDrop={(event) => void onDropFile(event)}
             className={`mt-3 rounded-xl border border-dashed p-3 transition-colors ${
               dragging
-                ? "border-ink bg-[var(--subtle-2)]"
-                : "border-line-strong bg-[var(--subtle)]"
+                ? "border-ink bg-subtle-2"
+                : "border-line-strong bg-subtle"
             }`}
           >
             <div className="flex flex-wrap items-center gap-2">
@@ -337,7 +337,7 @@ export function InstallDialog({
                 value={text}
                 onChange={(e) => onTextChange(e.target.value)}
                 placeholder={`{\n  "schemaVersion": 3,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "permissions": { "network": [], "tools": "read", "files": [] },\n  "contributions": {\n    "skills": [ ... ],\n    "mcpServers": [ ... ],\n    "commands": [ ... ]\n  }\n}`}
-                className="mt-1 block min-h-[150px] w-full resize-y rounded-lg border border-line-strong bg-[var(--surface)] px-3 py-2 font-mono text-ui-xs text-ink outline-hidden focus:border-ink"
+                className="mt-1 block min-h-[150px] w-full resize-y rounded-lg border border-line-strong bg-surface px-3 py-2 font-mono ui-body-sm text-ink outline-hidden focus:border-ink"
               />
             </label>
             <p className="mt-1 ui-caption">只读取本地 JSON；不会上传，也不会执行其中的内容。</p>
@@ -363,17 +363,17 @@ export function InstallDialog({
           )}
 
           {preview && (
-            <div className="plugin-rise mt-3 overflow-hidden rounded-xl border border-line bg-[var(--surface)]">
-              <div className="flex flex-wrap items-start gap-3 border-b border-line-soft bg-[var(--subtle-2)] px-3 py-3">
+            <div className="plugin-rise mt-3 overflow-hidden rounded-xl border border-line bg-surface">
+              <div className="flex flex-wrap items-start gap-3 border-b border-line-soft bg-subtle-2 px-3 py-3">
                 <span
-                  className="plugin-icon-tile h-9 w-9 text-ui-md font-bold"
+                  className="plugin-icon-tile h-9 w-9 text-ui-md font-semibold"
                   aria-hidden="true"
                 >
                   {Array.from(preview.manifest.name)[0]?.toUpperCase() ?? "?"}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="ui-body-sm font-bold">{preview.manifest.name}</span>
+                    <span className="ui-body-sm font-semibold">{preview.manifest.name}</span>
                     <span className={CHIP}>v{preview.manifest.version}</span>
                     <span className={CHIP}>{updating ? "将覆盖更新" : "新插件"}</span>
                     <span className={CHIP}>schemaVersion {preview.manifest.schemaVersion}</span>
@@ -388,7 +388,7 @@ export function InstallDialog({
                 </p>
 
                 {/* 校验摘要：内容指纹 + 签名 + 发布者；只展示结论，不在此处二次判定 */}
-                <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2">
+                <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2">
                   <div className="flex items-start gap-2">
                     <span className="mt-0.5 shrink-0 text-muted" aria-hidden="true">
                       <ShieldIcon width={14} height={14} />
@@ -521,7 +521,7 @@ export function InstallDialog({
               )}
 
               {needsTrustConfirm && (
-                <div className="mt-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-2.5">
+                <div className="mt-3 rounded-lg border border-danger-line bg-danger-soft p-2.5">
                   <label className="flex items-start gap-2 ui-body-sm">
                     <input
                       type="checkbox"
@@ -545,7 +545,7 @@ export function InstallDialog({
               )}
 
               {(needsPublisherTrust || needsKeyAck) && (
-                <div className="mt-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-2.5">
+                <div className="mt-3 rounded-lg border border-danger-line bg-danger-soft p-2.5">
                   {needsPublisherTrust && manifest?.publisher && (
                     <label className="flex items-start gap-2 ui-body-sm">
                       <input

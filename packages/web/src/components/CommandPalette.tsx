@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TeamMember } from "@heming/shared";
 import { fetchTeam } from "../lib/api.js";
-import { useUiStore } from "../store/ui.js";
+import { useUiStore, type Page, type PageView } from "../store/ui.js";
 import {
   callInfohub,
   readInfohubConfig,
@@ -21,6 +21,7 @@ import { loadRecent, recordRecent, type RecentEntry } from "../lib/palette/recen
 import {
   buildEmptyGroups,
   flattenGroups,
+  GROUP_LABELS,
   searchPalette,
   type PaletteGroup,
   type PaletteItem,
@@ -40,11 +41,148 @@ import {
   TaskIcon,
 } from "./icons.js";
 import { useModalA11y } from "./useModalA11y.js";
+import { Kbd } from "./ui/Kbd.js";
 
 // 旧版导出保持不变：`searchAll`/`searchAllDetailed` 是纯函数、有独立用例覆盖，
 // 命令面板只是把「怎么展示」换成新版分组，检索口径原样复用。
 export { searchAll, searchAllDetailed } from "../lib/palette/search.js";
 export type { SearchOutcome, SearchResult } from "../lib/palette/search.js";
+
+/**
+ * 宿主页内部视图的二级入口（「插件 › 技能」这类目的地）。
+ *
+ * 为什么不并进 `PALETTE_PAGES`：那张表与导航轨 1:1（`palette.test` 钉住页面集合与
+ * Alt 数字），二级视图不属于导航页。检索命中时就地并进「页面跳转」组——视觉上仍算
+ * 「页面」这一类，不新开分组、不新增路由。
+ *
+ * 落点复用既有的一次性视图意图（`store/ui.ts` 的 `PageView` + `setPage(page, view)`，
+ * 宿主页 `consumePageView()` 取走即清）。视图入口不写「最近使用」：recent 只认
+ * 页面 / 设置 / 动作三类的可复原 id。
+ *
+ * 未覆盖的 8 个 Tab（团队 workspace/feed/agenda/usage、模型 models/agents/sources/run）
+ * 目前宿主页没有消费方。等 TeamPage / ModelPage 补一个 `useEffect` 消费通用意图
+ * `{ kind: "focus-tab", data: { page, tab } }`（形状见 `store/ui.ts` 的 `PaletteIntentData`）
+ * 之后，往这张表加条目、在 `execute` 里改成 `setPaletteIntent` 即可，面板其它部分不用动。
+ */
+interface PaletteViewEntry {
+  /** 目标宿主页。 */
+  page: Page;
+  /** 宿主页要落到的内部视图（`PageView`）；用 `tab` 表示的入口没有这一项。 */
+  view?: PageView;
+  /** 页内 Tab key（团队/模型）：走 `focus-tab` 意图，由宿主页 useEffect 消费。 */
+  tab?: string;
+  /** 「父级 › 子级」格式，与页面项同一列展示。 */
+  label: string;
+  description: string;
+  /** 同义词，只用于检索（如「技能/能力」「mcp/接口」）。 */
+  keywords: string[];
+}
+
+const PALETTE_VIEWS: PaletteViewEntry[] = [
+  {
+    page: "plugins",
+    view: "plugins",
+    label: "插件 › 插件",
+    description: "安装、删除或启停插件本体",
+    keywords: ["插件", "安装", "卸载", "模块", "plugin"],
+  },
+  {
+    page: "plugins",
+    view: "skills",
+    label: "插件 › 技能",
+    description: "技能池：装给智能体用的技能",
+    keywords: ["技能", "技能池", "能力", "skill"],
+  },
+  {
+    page: "plugins",
+    view: "interfaces",
+    label: "插件 › MCP",
+    description: "MCP 服务与接口接入",
+    keywords: ["mcp", "接口", "服务", "interface", "工具接入"],
+  },
+  {
+    page: "team",
+    view: "board",
+    label: "团队 › 看板",
+    description: "团队任务看板：按列看正在进行的活",
+    keywords: ["看板", "任务板", "board", "kanban"],
+  },
+  // 以下是「页内 Tab」入口（d.142）。团队页与模型页的 Tab 在组件内 state 里，
+  // 用 `focus-tab` 一次性意图投递，宿主页 useEffect 取走即清。
+  {
+    page: "team",
+    tab: "workspace",
+    label: "团队 › 工作台",
+    description: "成员名册、待办与团队共享设置",
+    keywords: ["团队", "工作台", "名册", "成员", "workspace"],
+  },
+  {
+    page: "team",
+    tab: "feed",
+    label: "团队 › 动向",
+    description: "最近的团队动态流",
+    keywords: ["团队", "动向", "动态", "feed", "activity"],
+  },
+  {
+    page: "team",
+    tab: "agenda",
+    label: "团队 › 团队日程",
+    description: "按天排的团队日程",
+    keywords: ["团队", "日程", "日历", "agenda", "calendar"],
+  },
+  {
+    page: "team",
+    tab: "usage",
+    label: "团队 › 用量",
+    description: "团队成员的用量排行与趋势",
+    keywords: ["团队", "用量", "统计", "usage", "排行"],
+  },
+  {
+    page: "model",
+    tab: "models",
+    label: "模型 › 模型",
+    description: "本机模型服务与路由分组",
+    keywords: ["模型", "服务", "路由", "models", "provider"],
+  },
+  {
+    page: "model",
+    tab: "agents",
+    label: "模型 › 智能体",
+    description: "每个智能体当前用的模型",
+    keywords: ["模型", "智能体", "agents", "agent"],
+  },
+  {
+    page: "model",
+    tab: "sources",
+    label: "模型 › 来源",
+    description: "接入本机 CLI 与服务来源",
+    keywords: ["模型", "来源", "source", "cli"],
+  },
+  {
+    page: "model",
+    tab: "run",
+    label: "模型 › 运行",
+    description: "最近的调用轨迹与耗时",
+    keywords: ["模型", "运行", "轨迹", "调用", "run", "trace"],
+  },
+];
+
+/** 视图入口的 id 前缀与页面项（`page:<id>`）区分，`execute` 靠它分辨落点。 */
+const viewItemId = (v: PaletteViewEntry) => `view:${v.page}:${v.view ?? v.tab}`;
+
+/** id → 视图定义：`execute` 用它决定是「切页」还是「切页 + 视图意图」。 */
+const VIEW_BY_ITEM_ID = new Map<string, PaletteViewEntry>(
+  PALETTE_VIEWS.map((v) => [viewItemId(v), v]),
+);
+
+/** 与 `lib/palette/search.ts` 的 `matches` 同口径：名称/描述/同义词任一包含即命中。 */
+function matchesView(v: PaletteViewEntry, q: string): boolean {
+  return (
+    v.label.toLowerCase().includes(q) ||
+    v.description.toLowerCase().includes(q) ||
+    v.keywords.some((k) => k.toLowerCase().includes(q))
+  );
+}
 
 /**
  * 命令面板（Ctrl/⌘+K）· v2（d.60）。
@@ -201,13 +339,53 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     void refreshWidgets();
   }, []);
 
-  const groups = useMemo<PaletteGroup[]>(
-    () =>
-      query.trim()
-        ? searchPalette(query, { members, archiveHits, local, commands, pages, vaultNotes })
-        : buildEmptyGroups(recent, pages),
-    [query, members, archiveHits, local, commands, recent, pages, vaultNotes],
-  );
+  /**
+   * 二级视图入口（F1）：**只在有检索词时**参与。
+   * 空查询保持原来三段（最近使用 → 页面跳转 → 常用动作），不拿 4 条二级入口稀释
+   * 一级页面——打开面板先看见「去哪儿」，二级目的地靠打字收敛。
+   */
+  const viewMatches = useMemo<PaletteItem[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return PALETTE_VIEWS.filter((v) => pages.some((p) => p.page === v.page) && matchesView(v, q)).map(
+      (v) => ({
+        kind: "page" as const,
+        id: viewItemId(v),
+        name: v.label,
+        detail: v.description,
+        page: v.page,
+      }),
+    );
+  }, [query, pages]);
+
+  const groups = useMemo<PaletteGroup[]>(() => {
+    const base = query.trim()
+      ? searchPalette(query, { members, archiveHits, local, commands, pages, vaultNotes })
+      : buildEmptyGroups(recent, pages);
+    if (!viewMatches.length) return base;
+    // 并进「页面跳转」组、排在页面项之后：同类结果相邻，键盘游标不用跨组跳。
+    let merged = false;
+    const mergedGroups = base.map((g) => {
+      if (g.id !== "page" || merged) return g;
+      merged = true;
+      return {
+        ...g,
+        items: [...g.items, ...viewMatches],
+        total: (g.total ?? g.items.length) + viewMatches.length,
+      };
+    });
+    // 页面项一条都没命中（例如只命中了二级视图）：补一个页面组，否则结果无处可放。
+    if (merged) return mergedGroups;
+    return [
+      {
+        id: "page" as const,
+        label: GROUP_LABELS.page,
+        items: viewMatches,
+        total: viewMatches.length,
+      },
+      ...mergedGroups,
+    ];
+  }, [query, members, archiveHits, local, commands, recent, pages, vaultNotes, viewMatches]);
   const items = useMemo(() => flattenGroups(groups), [groups]);
   const indexByKey = useMemo(() => {
     const map = new Map<string, number>();
@@ -290,12 +468,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const execute = (item: PaletteItem | undefined) => {
     if (!item) return;
     switch (item.kind) {
-      case "page":
-        if (item.page) {
-          setPage(item.page);
-          remember({ kind: "page", id: item.page });
+      case "page": {
+        if (!item.page) break;
+        const view = VIEW_BY_ITEM_ID.get(item.id);
+        if (view) {
+          // 二级视图：切页 + 一次性意图，宿主页挂载后消费即清。
+          // 不写最近使用（recent 的 id 复原只认页面/设置/动作，写进去下次会变成一级页面）。
+          if (view.tab) {
+            setPage(view.page);
+            setPaletteIntent("focus-tab", { page: view.page, tab: view.tab });
+          } else {
+            setPage(view.page, view.view);
+          }
+          break;
         }
+        setPage(item.page);
+        remember({ kind: "page", id: item.page });
         break;
+      }
       case "setting":
         if (item.tab) {
           openSettings(item.tab);
@@ -409,7 +599,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[12vh]"
       onMouseDown={onClose}
       role="presentation"
     >
@@ -421,7 +611,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
          * 用 `has-[:focus-visible]` 让环只在**键盘**聚焦时出现：鼠标打开面板不出环，
          * 与全站「鼠标不加噪音」的口径一致；也不再用 JS 状态跟踪焦点。
          */
-        className="w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-[0_12px_40px_rgba(0,0,0,0.18)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
+        className="w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-surface shadow-[0_12px_40px_rgba(0,0,0,0.18)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
         onMouseDown={(e) => e.stopPropagation()}
         // 键盘约定挂在面板容器上而不是输入框：焦点移到结果项后（Tab/方向键），
         // Esc 与上下选择仍然生效，不需要先把焦点移回输入框。
@@ -460,9 +650,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         >
           {groups.map((group) => (
             <div key={group.id} role="group" aria-label={group.label}>
-              <div className="px-3.5 pb-0.5 pt-1.5 text-ui-xs font-bold uppercase tracking-wider text-muted">
-                {group.label}
-              </div>
+              {/* 分组标题是「分区标题」而不是元信息：11px/700 + 大写 + 字距展开，比组内
+                  结果行（12px）更小更抢眼，读起来像徽标（B 轨 E6）。改 12px/600 正文色。 */}
+              <div className="ui-caption px-3.5 pb-0.5 pt-1.5 font-semibold">{group.label}</div>
               {group.items.map((item) => {
                 const index = indexByKey.get(itemKey(item)) ?? -1;
                 const selected = index === cursor;
@@ -480,7 +670,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     onMouseEnter={() => setCursor(index)}
                     onClick={() => execute(item)}
                     className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-ui-sm ${
-                      selected ? "bg-[var(--subtle-3)]" : ""
+                      selected ? "bg-subtle-3" : ""
                     }`}
                   >
                     {item.kind === "member" ? (
@@ -488,7 +678,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     ) : (
                       <span
                         aria-hidden="true"
-                        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[var(--subtle-3)] text-muted"
+                        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-subtle-3 text-muted"
                       >
                         {kindIcon(item.kind)}
                       </span>
@@ -498,9 +688,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                       <span className="block truncate text-ui-xs text-muted">{item.detail}</span>
                     </span>
                     {item.kind === "page" && shortcutLabel(item.digit) ? (
-                      <kbd className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
-                        {shortcutLabel(item.digit)}
-                      </kbd>
+                      <Kbd className="shrink-0">{shortcutLabel(item.digit)}</Kbd>
                     ) : item.kind === "member" ? (
                       <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                         团队
@@ -533,7 +721,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     换成更短的关键词试试；按 Esc 清空后，也可以用左侧导航去「记忆」「知识库」里逐条翻。
                   </p>
                   {archiveError ? (
-                    <p className="mt-1 text-ui-xs text-[var(--danger)]">
+                    <p className="mt-1 text-ui-xs text-danger">
                       本机归档检索失败：{archiveError}
                     </p>
                   ) : null}
@@ -545,7 +733,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             <div className="px-3.5 py-1 text-ui-xs text-muted">正在检索本机归档…</div>
           ) : null}
           {archiveError && hasResults ? (
-            <div className="px-3.5 py-1 text-ui-xs text-[var(--danger)]" role="status">
+            <div className="px-3.5 py-1 text-ui-xs text-danger" role="status">
               本机归档检索失败：{archiveError}（其余结果仍可打开）
             </div>
           ) : null}
@@ -557,19 +745,19 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* d.138：三段快捷键提示原本是三个裸 <span>，读屏会把它们连成
-            「↑↓ 选择Enter 打开Esc 关闭」；键名改用 <kbd>（与右侧 Alt+N 同一样式），
-            段间补分隔点，视觉与朗读都断得开。 */}
+            「↑↓ 选择Enter 打开Esc 关闭」；键名改用键帽基元 ui/Kbd（与右侧 Alt+N 同一样式，
+            B 轨 C2：全站键帽只有一份实现），段间补分隔点，视觉与朗读都断得开。 */}
         <div className="flex items-center gap-2 border-t border-line-soft px-3.5 py-1.5 text-ui-xs text-muted">
           <span className="inline-flex items-center gap-1">
-            <kbd className="rounded-sm border border-line px-1">↑↓</kbd> 选择
+            <Kbd>↑↓</Kbd> 选择
           </span>
           <span> · </span>
           <span className="inline-flex items-center gap-1">
-            <kbd className="rounded-sm border border-line px-1">Enter</kbd> 打开
+            <Kbd>Enter</Kbd> 打开
           </span>
           <span> · </span>
           <span className="inline-flex items-center gap-1">
-            <kbd className="rounded-sm border border-line px-1">Esc</kbd> 关闭
+            <Kbd>Esc</Kbd> 关闭
           </span>
           {!infohubRunning ? (
             // 归档能力的说明常驻在这里：未连接时也告诉用户「连上就能搜本机消息」，
@@ -592,7 +780,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
  * 语义交给 role=option 的 aria-label。
  */
 function kindIcon(kind: PaletteItem["kind"]) {
-  const p = { width: 13, height: 13 } as const;
+  // 图标尺寸走 2px 栅格（12/14/16/18/20/24）：13px 是旧值，落在栅格外。
+  const p = { width: 14, height: 14 } as const;
   switch (kind) {
     case "page":
       return <HomeIcon {...p} />;

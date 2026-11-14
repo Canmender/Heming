@@ -335,7 +335,13 @@ export type PaletteIntentKind =
   /** d.61：命令面板本机搜索 → 插件卡片定位。 */
   | "open-plugin"
   /** d.108：命令面板插件命令（target=settings）→ 设置页定位到某张卡。 */
-  | "focus-settings";
+  | "focus-settings"
+  /**
+   * d.142：命令面板「二级视图」入口 → 宿主页切到指定 Tab。
+   * 团队页与模型页的 Tab 是组件内 state（`useSessionTab` / `useState`），外部没有
+   * 触发点；`PageView` 只覆盖插件区的四个视图，所以这里补一个通用意图。
+   */
+  | "focus-tab";
 
 /** 意图携带的定位信息（只含 id/层级，不含正文）。 */
 export interface PaletteIntentData {
@@ -347,6 +353,10 @@ export interface PaletteIntentData {
   layer?: "working" | "episodic" | "semantic";
   /** focus-settings：设置卡 id（`SETTINGS_CARDS` 的 id）；设置页据此滚动+高亮。 */
   card?: string;
+  /** focus-tab：目标宿主页（目前只有 team / model 消费）。 */
+  page?: string;
+  /** focus-tab：页内 Tab key（团队 workspace/feed/board/agenda/usage；模型 models/agents/sources/run）。 */
+  tab?: string;
 }
 
 export interface PaletteIntent {

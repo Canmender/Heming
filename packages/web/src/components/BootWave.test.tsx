@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, waitFor } from "@testing-library/react";
-import { BootWave, easeOutCubic, revealMaskImage } from "./BootWave.js";
+import { render, act, waitFor, screen } from "@testing-library/react";
+import { BootWave, SKIP_AFTER_MS, easeOutCubic, revealMaskImage } from "./BootWave.js";
 import { WRITE_DRAW_MS, WRITE_TOTAL_MS } from "./WordmarkWrite.js";
 
 /** 与 splash-config.js 的 WAVE_MS / FALLBACK_MS 语义对齐的测试常量。 */
@@ -101,7 +101,8 @@ describe("BootWave", () => {
     expect(css).toContain("position: fixed");
     expect(css).toContain("inset: 0");
     // 白底 + 中心透明洞；洞沿有羽化带（内容随扩散渐显，不是硬边跳变）
-    expect(css).toContain("background: #ffffff");
+    // 2026-11-14 审计 D4：写死 #fff 会让暗色用户每次启动闪一屏白，改用主题底色（亮色仍是 #fff）
+    expect(css).toContain("background: var(--surface, #ffffff)");
     expect(css).toContain("mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%");
     expect(css).toContain("-webkit-mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%");
     expect(css).toContain(".boot-wave-front");
@@ -126,8 +127,8 @@ describe("BootWave", () => {
     );
     const css = document.querySelector(".boot-wave style")!.textContent!;
     expect(css).toContain("pointer-events: auto");
-    // 只有装饰用的波前光晕显式退出命中测试，遮罩本身仍吞事件
-    expect(css.match(/pointer-events: none/g)).toHaveLength(1);
+    // 退出命中测试的只有纯装饰：波前光晕 + 跳过提示；遮罩本身仍吞事件（点击=跳过，不穿透）
+    expect(css.match(/pointer-events: none/g)).toHaveLength(2);
     expect(css).toMatch(/\.boot-wave-front \{[^}]*pointer-events: none/);
     expect(overlay()!.nextSibling).toBeNull(); // 遮罩是最后一个节点 → 叠在最上层
     channel.fire();
@@ -268,25 +269,62 @@ describe("BootWave", () => {
   });
 
   // 回归：真实信号是 did-finish-load + 静默间隔后才到，远端慢时可远超 1s。
-  // 兜底必须足够宽，否则波纹会在 splash 还开着时就播完（用户只看到白屏）。
-  it("有信号通道但信号 7s 内不到：遮罩保持不透明，第 7s 才兜底开播", () => {
+  // 2026-11-14 审计 D4：等待期从「7s 兜底才开播」改成「3s 封顶直接揭开」——
+  // 用户不该为了看一段装饰动画干等 7 秒白屏。
+  it("有信号通道但信号不来：3s 封顶直接揭开，不再干等 7s", () => {
     useWaveFakeTimers();
     installSignalChannel(); // 通道存在，但测试从不 fire
     const onDone = vi.fn();
     render(<BootWave onDone={onDone} />);
 
     act(() => {
-      vi.advanceTimersByTime(FALLBACK_MS - 1);
+      vi.advanceTimersByTime(SKIP_AFTER_MS - 1);
     });
-    // 仍在等信号：白板完整，没有波纹，没有揭示
-    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(0);
+    // 仍在等信号：白板完整，没有揭示
     expect(revealValue()).toBe("");
     expect(onDone).not.toHaveBeenCalled();
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(3);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    // 封顶是「直接揭开」而不是「补播动画」：不再出现波纹
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(0);
+  });
+
+  it("点击遮罩即跳过（D4）：finish 只回调一次，且不穿透到主界面", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    const onDone = vi.fn();
+    const behindClick = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={behindClick} data-testid="behind">被遮住的主界面</button>
+        <BootWave onDone={onDone} />
+      </>,
+    );
+
+    const behind = screen.getByTestId("behind");
+    act(() => {
+      overlay()!.click(); // 遮罩的 onClick = handleSkip
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    // 遮罩吞掉事件：主界面按钮没有被点到
+    expect(behind).toBeTruthy();
+    expect(behindClick).not.toHaveBeenCalled();
+    channel.fire();
+  });
+
+  it("Esc 跳过（D4）：键盘用户不被开场动画扣住", () => {
+    useWaveFakeTimers();
+    installSignalChannel();
+    const onDone = vi.fn();
+    render(<BootWave onDone={onDone} />);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 
   it("信号到达时清掉兜底定时器，两者互斥不重复开播", () => {

@@ -29,9 +29,9 @@ const STATUS_LABEL: Record<TeamItemStatus, string> = {
 
 const STATUS_STYLE: Record<TeamItemStatus, string> = {
   todo: "border-line text-muted",
-  doing: "border-[var(--info-line)] bg-[var(--info-soft)] text-[var(--info)]",
-  done: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
-  blocked: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
+  doing: "border-info-line bg-info-soft text-info",
+  done: "border-success-line bg-success-soft text-success",
+  blocked: "border-warn-line bg-warn-soft text-warn",
 };
 
 /** 任务筛选：默认看未完成的（完成的多起来会淹掉真正要做的）。 */
@@ -190,7 +190,7 @@ export function TeamTaskPanel({
   return (
     <section aria-label="团队任务" className="ui-card p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="ui-section-title">任务</h2>
+        <h2 className="ui-block-title">任务</h2>
         <span className="ui-micro">{tasks.length}</span>
         <div className="ml-auto flex items-center gap-1" role="group" aria-label="任务筛选">
           {(
@@ -206,7 +206,7 @@ export function TeamTaskPanel({
               aria-pressed={filter === key}
               onClick={() => setFilter(key)}
               className={`rounded-md px-2 py-0.5 text-ui-xs ${
-                filter === key ? "bg-[var(--subtle-4)] text-ink" : "text-muted hover:bg-[var(--subtle-2)]"
+                filter === key ? "bg-subtle-4 text-ink" : "text-muted hover:bg-subtle-2"
               }`}
             >
               {label}
@@ -354,7 +354,7 @@ export function TeamTaskPanel({
                 <button
                   type="button"
                   aria-label={`删除任务 ${task.title}`}
-                  className="shrink-0 text-ui-xs text-muted hover:text-[var(--danger)]"
+                  className="shrink-0 text-ui-xs text-muted hover:text-danger"
                   onClick={() => setPendingDelete(task)}
                 >
                   删除
@@ -373,7 +373,7 @@ export function TeamTaskPanel({
                   <span>
                     截止 {fmtLocalDateTime(task.dueAt)}
                     {task.status !== "done" && isOverdue(task.dueAt) ? (
-                      <span className="ml-1 rounded-full border border-[var(--danger-line)] bg-[var(--danger-soft)] px-1.5 py-0.5 text-ui-xs text-[var(--danger)]">
+                      <span className="ml-1 rounded-full border border-danger-line bg-danger-soft px-1.5 py-0.5 text-ui-xs text-danger">
                         已逾期
                       </span>
                     ) : null}
@@ -407,7 +407,7 @@ export function TeamTaskPanel({
       )}
       {pendingDelete ? (
         <ConfirmDialog
-          title="删除任务"
+          title="删除任务？"
           onCancel={() => setPendingDelete(null)}
           initialFocusRef={cancelRef}
           footer={
@@ -430,7 +430,7 @@ export function TeamTaskPanel({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
+          <p className="ui-body-sm">
             删除任务「{pendingDelete.title}」？删除后不可恢复，负责人与截止时间等信息会一起消失。
             交付物文件仍保留在共享文件库。
           </p>

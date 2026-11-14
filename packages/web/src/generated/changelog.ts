@@ -12,6 +12,128 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.145.3.81.11",
+    "date": "2026-11-14",
+    "title": "行高收成一档，标题栏兜底走 8pt，代码不再是红色",
+    "bullets": [
+      "行高（审计 A5）：5 处手写 `leading-[17px]/[26px]/[14px]/[1.75]` 收回命名档——两行截断说明走`leading-snug`，预览 h1 与角标走 `leading-tight`，长文正文新增 `--leading-reading: 1.75`",
+      "标题栏（审计 B1 余量）：`.desktop-titlebar` 的 `env(titlebar-area-height, 38px)` 兜底值改 40px，浏览器/未开 overlay 时落在 8pt 网格上；Electron 下仍以主进程注入的变量为准（不手写死值）。",
+      "语义（审计 F10）：对话里 Markdown 的内联代码从 `text-danger`（红）改 `text-ink`——代码不是错误，红色留给真正的失败；知识库预览一直就是中性色，这次两边对齐。",
+      "`designScales.test.ts` 新增第 11 组守卫：禁 `leading-[…]` 字面量；并断言 `@theme` 里`--leading-reading: 1.75` 存在（token 被删时守卫会红，而不是静默退回默认行高）。"
+    ],
+    "paragraphs": [
+      "P2 余量里两件「小但会一直漂」的事：手写行高与外壳兜底值。",
+      "**做了什么**token（`leading-reading`）。手写像素行高的毛病是「跟着字号漂」：字号从 11 改到 12 以后，17px 这段就不再是原来那个密度，也没人回头改。",
+      "**防回退**",
+      "**验证**：`tsc --noEmit` 0 错误、web 全量 **4464 passed / 304 files**、`designScales` **12 组全绿**、`pnpm design:audit` 浅色 `EXIT=0` / 深色 `EXIT=0`（8 页 × 6 项，字号档 6/5/5/7/5/5/4/4）。"
+    ]
+  },
+  {
+    "version": "d.145.3.80.11",
+    "date": "2026-11-14",
+    "title": "语义色只走命名类：567 处 `[var(--…)]` 收口",
+    "bullets": [
+      "`tailwind.config.js` 补登 12 个此前只有变量的语义色：`success-soft/line/on`、`warn-soft/line`、`info-soft/line`、`danger-on`、`console-bg/ink`、`mark-bg/mark-ink`；另加一个间距 token",
+      "codemod 把 79 个文件里的 567 处颜色字面量换成命名类（`bg-surface` / `text-danger` /`border-warn-line` / `ring-offset-surface` …），12 处 `px-[var(--chat-gutter)]` 换成",
+      "只留下 1 处带兜底值的 `accent-[var(--accent,#2f5bd7)]`（`WidgetSettingsCard`，语义不同）。",
+      "`designScales.test.ts` 新增第 10 组守卫：已登记的语义色不许再写 `bg-/text-/border-[var(--…)]`字面量；守卫自带正则自检（正例必须命中、`chat-gutter` 必须不命中），避免转义写错后永远绿。"
+    ],
+    "paragraphs": [
+      "审计 C5 的账：颜色 token 有一部分只存在于 CSS 变量、没登记进 `tailwind.config.js`，ClassName 写不出来，于是全仓攒了 567 处 `bg-[var(--surface)]` / `text-[var(--danger)]`这类字面量——编译结果没错，但它绕过了类名排序、变体（`hover:`/`dark:`）与阅读者的理解，也让「换一个 token」变成全局搜索替换。",
+      "**做了什么**`chat-gutter`（对话区左右留白随「阅读宽度」变化）。`px-chat-gutter`。改写是「同一变量换个写法」，编译产物等价；改完浅色/深色门禁 8 页仍全绿。",
+      "**防回退**",
+      "**顺带修一处假红**：`App.test.tsx` 里「点绑定给出内联提示」用默认 1s 的 `findByRole`，全量并行（304 个文件抢 CPU）偶发超时；放宽到 4s，等的是同一个状态、断言未改。",
+      "**验证**：`tsc --noEmit` 0 错误、web 全量 **4462 passed / 304 files**、`vite build` 通过、`designScales` **10 组全绿**、`pnpm design:audit` 浅色/深色各 8 页全绿。"
+    ]
+  },
+  {
+    "version": "d.144.3.80.11",
+    "date": "2026-11-14",
+    "title": "设计门禁：把审计指标变成会红的检查",
+    "bullets": [
+      "自己起 `packages/server/dist` + vite dev + headless Chrome（Node ≥22 的原生 WebSocket，零新依赖），用真实登录路径进应用，逐页读 `main` 里的文本节点与可点元素的运行时数据，跑完自动清理子进程。",
+      "每页判 7 项：横向溢出、WCAG AA 不合格数、11px 正文（≤11px 且 >12 字）、有效命中区 <32×32（读 `::after` 伪元素，与重构时的口径一致）、emoji、字号档位、标题层级。任一越界退出码 1。",
+      "支持 `--base`（复用已在跑的前端）、`--theme dark`、`--json`、`--shots`；CI 里一条`pnpm design:audit` 即可。",
+      "6 个页面只有 h1、没有二级标题：`SettingsPage.tsx:467`「个人资料」、`MemoryPage.tsx` 的「短期记忆/记忆条目/复盘沉淀」、`TeamPage.tsx:896`「团队动向」、`ModelPage.tsx:572` 空态",
+      "`ModelPage.tsx:539` 12px 说明句对比度 4.02:1（--muted 落在 --subtle 上），改 `text-body` 后过 4.5。",
+      "`node scripts/design-audit.mjs` → 8 页 6 项指标全部通过（横向溢出 0、对比度不合格 0、11px 正文 0、命中区 <32 为 0、字号档 ≤7、每页 ≥2 级标题）。",
+      "`tsc --noEmit` 0 错误、web 全量 **4461 passed / 304 files**、`vite build` 通过。"
+    ],
+    "paragraphs": [
+      "按 [`docs/DESIGN-AUDIT-2026-11-14.md`](docs/DESIGN-AUDIT-2026-11-14.md) §7.4 的验收指标落地为可执行门禁 `node scripts/design-audit.mjs`（`pnpm design:audit`）。上一轮审计修掉的 S1 在两个月里又慢慢长回来，根因是口径只写在文档里、没有一条会失败的检查——本版补上运行时这一半。",
+      "**门禁脚本（新增 `scripts/design-audit.mjs`）**",
+      "**首次跑出来的两个真问题（已修）**「可用模型」+ 数据态六个卡片组、`KnowledgePage.tsx:786/891/1087` 三栏 `sr-only` 标题——原先都是 `<div>/<span class=\"ui-section-title\">`，视觉像标题但读屏拿不到大纲。",
+      "**验证**"
+    ]
+  },
+  {
+    "version": "d.143.3.80.11",
+    "date": "2026-11-14",
+    "title": "按审计报告重构（P2）：命中区、危险操作与附件待发态",
+    "bullets": [
+      "`.ui-hit` 重写：旧版固定 `inset:-7px -6px` 对 14×14 只到 26×28；新版按「至少 32px、至少铺满自身」取 max，任意小控件套上都够。`.ui-btn-sm`（28px 高）与 `.ui-link`（24px 高）补「只上下扩」的伪元素热区，",
+      "导航轨「?」文字改成 `KeyboardIcon`；分组改用 `sr-only` 组名 + `aria-describedby`（读屏能读出「工作台/能力/资料/系统」，56px 轨道不再为加标签变宽）；团队/插件/知识库/记忆/设置里 20 余处",
+      "侧栏拖宽手柄与审批弹窗等处的焦点环改读 `--focus-ring-*` 三个变量，基线规则与注入版共用一份真源。",
+      "12 处破坏性入口统一成 `ConfirmDialog`：「删除 X？」/「X 删除后不可恢复」/ danger「删除」/「取消」；例外保留语义差别（移除知识库用「移除」且明说不删磁盘、清空/清除用本动词、写配置仍「确认写入」）。",
+      "附件有了「待发态」：选文件/粘贴/拖拽/录音后先进待发列表（chip 可移除、可 Tab 到），点发送（或 Enter）才上传；失败保留可重试；切会话清空列表，迟到的失败回调不会把旧会话附件塞进新会话。",
+      "导航轨动效 `duration-[160ms]` 并入 120/180/280 三档（`NAV_MOTION_MS` 160→180）；门禁新增第 9 组「禁 arbitrary 毫秒」，这类写法能绕过按类名校验。",
+      "外壳几何向 8pt 靠：导航轨 `w-[54px]`→`w-14`(56px)、`PageShell` 纵向内边距 20→24px、横幅条12→16px、导航/引导/首页的半档间距改 4 的倍数（密集面板里的 6/10px 保留，见报告 §7.3 余量）。",
+      "20 个视图都能从面板直达：新增团队 5 个 + 模型 4 个页签入口，走新的 `focus-tab` 意图（`store/ui.ts` 加 kind 与 `page/tab` 数据，团队页/模型页各自消费后清除）；只在有检索词时出现，",
+      "登录页手写字样宽度 `min(320px,26vw)` → `min(280px,20vw)`；页面纵向内边距统一 24px。"
+    ],
+    "paragraphs": [
+      "按 [`docs/DESIGN-AUDIT-2026-11-14.md`](docs/DESIGN-AUDIT-2026-11-14.md) §7.3 的 P2 清单落地第一批。111 个文件、+3826/−2641；`tsc --noEmit` 0 错误、`vite build` 通过、web 全量 **4461 passed / 304 files**；运行时复测（真路径暗色，8 页）**有效命中区 <32px 归零**、WCAG AA 不合格仍为 0、11px 不再承载句子。",
+      "**可点与可达（D1/D2/G1–G5）**不横向扩，避免相邻按钮互相吃点击；对话框关闭按钮 24→32。小图标按钮补热区或补 `aria-label`。",
+      "**危险操作与文案（F4 语言统一）**",
+      "**对话与任务区（E1）**顺带修两处：纯附件消息不再因「未绑定模型」被发送按钮拦住；`restorePending()` 按会话校验回写。",
+      "**动效与间距口径**",
+      "**命令面板（F1 IA）**不污染空面板与最近使用。",
+      "**细节**",
+      "P2 仍未做：B1 剩余 8pt 外壳（标题带/顶栏）、B3 密集面板 226 处半档间距、C5 623 处 `[var(--…)]`改命名类、F1 其余 IA、G6 第三套小标题——数字与理由记在报告 §7.6。"
+    ]
+  },
+  {
+    "version": "d.142.3.80.11",
+    "date": "2026-11-14",
+    "title": "按审计报告重构：刻度、基元与四处伤人交互",
+    "bullets": [
+      "`.ui-micro` 11→12px（元信息档），新增 `.ui-block-title`（16px/600）与 `--text-ui-block`，把 16px从「一次性字号」登记进刻度；`.ui-segment` 12→13px。刻度注释改成「11 元信息 / 12 紧凑 /",
+      "主页第二级标题 11px→16px；`ui/Stat` 的统计数字 26px→22px（不再压过 22px 页标题）；首页与对话页的说明句 11px→13px。20 个视图的二级标题统一走 `.ui-block-title` / `.ui-section-title`。",
+      "新增 `ui/Kbd`（12 处手写 `<kbd>` 三种外观归一，组合键并列渲染）与 `ui/ListRow`（列表行 32/40/44/56四套收成 48/36 两档）。",
+      "分段控件只留 `.ui-segment-group` / `.ui-segment`：删掉 `.plugin-segment` 与主页「个人/团队/按日期」手拼的第三套；`font-bold` 141 处清零（口径 500/600）；`border-white` 改 `border-[var(--surface)]`。",
+      "`index.css` 写清面板底色规则（页面底 `--subtle` / 卡片 `--surface` / 浮层 `--panel`）；`tailwind.config.js` 补 `accent`/`accent-on`/`scrim`/`chart-*`/`avatar-*`，这些 token 此前只能写",
+      "审批弹窗：主按钮改成「允许选中（N）」，0 勾选时禁用；「本会话内允许所选」同理；「全部拒绝」独立成按钮。旧版默认全不勾却把「仅本次允许」当主按钮，点它等于全部拒绝，这是最容易让人放弃功能的",
+      "启动动画：可点击/Enter/Space/Esc 跳过；信号迟迟不来时 3s 封顶直接揭开（旧版干等 7s）；底色从写死 `#fff` 改成主题底色（暗色不再闪白）；启动音认 `heming.boot.sound.v1=off`。",
+      "`PageShell` 内容区只留纵向滚动（横向交给表格/代码块自己），侧栏拖宽手柄补 `tabIndex`、`aria-valuetext` 与方向键（±16，Shift ±64，Home/End 到端点）。",
+      "团队/模型/插件/知识库/记忆/设置：空态/失败态/骨架统一到 `ui/EmptyState`、`ui/ErrorState`、`ui/Skeleton`（骨架矩形 88px 与真实卡同构）；知识库页头 11 个控件收成 1 主 + 6 图标 + 3 次操作，",
+      "提示位改 2 行预算 + 「还有 N 条提示」折叠，warn（左竖条）与 error（图标+危险色）不再同形；流式气泡与落定同宽（不再 78%→全宽跳变）；复制按钮移出时间戳并支持 `focus-within`；",
+      "`designScales.test.ts` 新增四组守卫：`font-bold` 全仓 0 处、`<h2>` 不得用元信息字号、除 `ui/Kbd.tsx` 外禁手写 `<kbd>`、禁 `plugin-segment*`；并把 `--text-ui-block` 纳入 token 清单。"
+    ],
+    "paragraphs": [
+      "按 [`docs/DESIGN-AUDIT-2026-11-14.md`](docs/DESIGN-AUDIT-2026-11-14.md) 的 P0 + P1 落地（P2 暂缓）。90 个文件、+1645/−1094；`tsc --noEmit` 0 错误、`vite build` 通过、web 全量 **4453 passed / 304 files**；`designScales` 门禁从 3 组扩到 8 组并全绿。",
+      "**令牌与刻度（A 段）**13 正文 / 14 强调 / 16 区块标题 / 18 次级数字 / 22 页标题」，并明确「11px 不承载句子」。",
+      "**基元收口（C 段）**`[var(--…)]`。",
+      "**四处伤人交互（P0）**一处误导。",
+      "**页面结构（F 段）**`select` 去掉与 `.ui-input h-8` 冲突的 `h-7`；插件页「能力中枢」重写成一行统计（首屏省约 200px）；设置「高级」6 卡分三组；模型来源/搜索来源的删除从红色直删改成 `ConfirmDialog` 二次确认；图表轴标 9px→12px，热力图补范围说明。",
+      "**对话与任务区（E 段）**工具轨迹三层嵌套滚动改成外层单层 `max-h-[60vh]`，`break-all`→`break-words`；会话分组标题不再小于条目正文；重复的「与 X 的会话」删一处。",
+      "**门禁（P1-9）**",
+      "P2（附件待发态、外壳 8pt、命中区 ≥32、623 处 `[var(--…)]`、IA 收敛等）留在报告 §7.3，下一版继续。"
+    ]
+  },
+  {
+    "version": "d.141.3.80.11",
+    "date": "2026-11-14",
+    "title": "设计审计：五维法复核 d.141.3.79.11",
+    "bullets": [],
+    "paragraphs": [
+      "这一版**不改代码**，只落一份设计审计报告：[`docs/DESIGN-AUDIT-2026-11-14.md`](docs/DESIGN-AUDIT-2026-11-14.md)。",
+      "用 huashu-design 的「五维评审 + Keep/Fix/Quick Wins」复核当前版本，取证三层：静态源码 A/B/C三路（每条带 `file:line`）、CDP 运行时量测（20 个视图 × 亮/暗双主题，按文本节点统计字号、按祖先合成算对比度、按 `getBoundingClientRect` 量命中区）、真实用户路径（设置→外观→主题模式，而不是直接改 `data-theme`）。综合 **6.4 / 10**：哲学 7.3 / 层级 6.0 / 细节 6.0 / 功能 6.3 / 创新 6.3。",
+      "最该动的五件事：`text-ui-xs`（11px）承担正文（令牌用量 296/602，主页 65.4% 文本节点）、页内缺第二级标题（h2 11px 竟小于正文 14px、26px 数字压过 22px 页标题）、25 处命中区小于28×24 且团队页 4 个 14×14 图标按钮无 `aria-label`、对话区两处误操作风险（附件选完即发、审批弹窗默认点主按钮等于全部拒绝）、口径未收口（3 套分段控件 / 3 套 kbd / 4 套列表行 /141 处 `font-bold` / 外壳几何 54·38·20·28·10·14 不在 8pt 网格）。",
+      "报告里 42 条 Fix 按主题归并（A 字号与层级 / B 间距与几何 / C 组件口径 / D 可点与可达性 /E 对话与任务区 / F 页面结构与 IA / G 细节），每条给证据、为什么是问题、含数值的修复建议；另有三套设计方向（瑞士网格 / 原研哉式白 / Rams 式仪器面板，推荐「网格打底 + 白收敛 + 仪器面板局部」）与 P0/P1/P2 路线、可自动化的 9 项验收指标。审计脚本与 40+ 张截图留在`.tmp/design-audit-2026-11-14/`，`measure3.mjs` 可直接复跑。",
+      "审计方法上排除了两条假阳性，记在报告 §1.4：暗色输入框「白底」是强制写 `data-theme` 漏掉`colorScheme` 的测试假象；暗色主按钮亮底是 `DARK_DEFAULT_ACCENT` 的有意反转。"
+    ]
+  },
+  {
     "version": "d.141.3.79.11",
     "date": "2026-11-14",
     "title": "插件页面补齐导出/全屏/复制的沙箱委派",

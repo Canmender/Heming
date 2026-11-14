@@ -68,7 +68,7 @@ export function ContextSettingsCard() {
   return (
     <section className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="text-ui-sm font-bold text-muted">上下文预算</div>
+        <div className="text-ui-sm font-semibold text-muted">上下文预算</div>
       </div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行
@@ -140,7 +140,7 @@ export function ContextSettingsCard() {
         <div className="mt-2 ui-caption">
           当前预算 {shownBudget} / 模型上限 {windowLimit} token（{model?.model}，按窗口 60% 计）
           {windowLimit > 0 && settings.budgetTokens > windowLimit ? (
-            <span className="ml-1 text-[var(--warn)]">已超出上限，下面的选择会被收敛到上限</span>
+            <span className="ml-1 text-warn">已超出上限，下面的选择会被收敛到上限</span>
           ) : null}
         </div>
       ) : null}

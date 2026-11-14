@@ -46,7 +46,7 @@ export function TagPanel({ tags, activeTag = null, onSelectTag, title = "标签"
           <button
             type="button"
             onClick={() => onSelectTag(null)}
-            className="ui-link h-5 text-ui-xs"
+            className="ui-link h-5 ui-hit text-ui-xs"
             aria-label={`清除标签过滤：${activeTag}`}
           >
             清除过滤

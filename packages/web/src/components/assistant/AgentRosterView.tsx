@@ -192,7 +192,7 @@ export function AgentRosterView({
                             <span className="ui-body-sm block truncate font-medium">
                               {agent.name}
                             </span>
-                            <span className="ui-caption mt-0.5 line-clamp-2 block min-h-[34px] leading-[17px]">
+                            <span className="ui-caption mt-0.5 line-clamp-2 block min-h-[34px] leading-snug">
                               {busy
                                 ? "正在打开…"
                                 : agent.description ||
@@ -204,7 +204,7 @@ export function AgentRosterView({
                         </button>
                         <div className="mt-2 flex items-center gap-2">
                           <span
-                            className={`ui-chip ${bound ? "" : "text-[var(--danger)]"}`}
+                            className={`ui-chip ${bound ? "" : "text-danger"}`}
                             title={
                               bound
                                 ? "该智能体已绑定模型"

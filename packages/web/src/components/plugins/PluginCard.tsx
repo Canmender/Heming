@@ -69,7 +69,7 @@ export function PluginCard({
       <div className="flex items-start gap-3">
         <span
           aria-hidden="true"
-          className="plugin-icon-tile h-9 w-9 text-ui-md font-bold"
+          className="plugin-icon-tile h-9 w-9 text-ui-md font-semibold"
         >
           {initial}
         </span>
@@ -186,7 +186,7 @@ export function PluginCard({
             type="button"
             aria-label={`卸载插件 ${manifest.name}`}
             onClick={onRemove}
-            size="sm" variant="ghost" className="text-[var(--danger)]"
+            size="sm" variant="ghost" className="text-danger"
           >
             卸载
           </Button>

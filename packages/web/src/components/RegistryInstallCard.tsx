@@ -38,9 +38,9 @@ export interface RegistryInstallDialogProps {
 const RISK_LABEL = { low: "低风险", medium: "中风险", high: "高风险" } as const;
 
 const RISK_STYLE = {
-  low: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
-  medium: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
-  high: "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]",
+  low: "border-success-line bg-success-soft text-success",
+  medium: "border-warn-line bg-warn-soft text-warn",
+  high: "border-danger-line bg-danger-soft text-danger",
 } as const;
 
 export function RegistryInstallDialog({ requestId, preview, onDecide }: RegistryInstallDialogProps) {
@@ -74,7 +74,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         type="button"
         ref={cancelRef}
         onClick={() => finish({ approved: false })}
-        size="md" variant="ghost" className="text-[var(--danger)]"
+        size="md" variant="ghost" className="text-danger"
       >
         取消安装
       </Button>
@@ -108,7 +108,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         </div>
 
         <div className={`rounded-lg border px-3 py-2 text-ui-xs ${RISK_STYLE[preview.risk.level]}`}>
-          <div className="font-bold">
+          <div className="font-semibold">
             {RISK_LABEL[preview.risk.level]} · {preview.risk.message}
           </div>
           {preview.risk.detail && (
@@ -122,7 +122,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
 
         {hints.length > 0 && (
           <div className="rounded-lg border border-line px-3 py-2">
-            <div className="text-ui-xs font-bold text-muted">该服务需要以下请求头</div>
+            <div className="text-ui-xs font-semibold text-muted">该服务需要以下请求头</div>
             {hints.map((h) => (
               <label key={h.name} className="mt-2 block text-ui-xs text-muted">
                 {h.name}
@@ -146,7 +146,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         )}
 
         {error && (
-          <p role="alert" className="text-ui-xs text-[var(--danger)]">
+          <p role="alert" className="text-ui-xs text-danger">
             {error}
           </p>
         )}

@@ -63,14 +63,14 @@ export function RecentConversations({
     // d.138：h-full 让这张卡与左栏「团队动向」底边齐平——首页两栏此前顶对齐、
     // 右卡内容少时底边差出一截，看起来像布局没做完。
     <section aria-label="最近对话" className="ui-card h-full p-3">
-      <div className="mb-1.5 flex items-center justify-between">
-        <div className="text-ui-sm font-bold text-muted">最近对话</div>
-        <button type="button" className="ui-link" onClick={() => setPage("chat")}>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-ui-sm font-semibold text-muted">最近对话</div>
+        <button type="button" className="ui-link ui-hit" onClick={() => setPage("chat")}>
           全部智能体
         </button>
       </div>
       {recent.length === 0 ? (
-        <div className="flex flex-col items-start gap-1.5 py-1">
+        <div className="flex flex-col items-start gap-2 py-2">
           {/* 空态 = 标题 + 一个行动（d.142）：不再解释「智能体可以当同事用」——
               标题已经说清缺什么，按钮已经给出下一步。 */}
           <p className="ui-caption">还没有对话</p>
@@ -95,7 +95,7 @@ export function RecentConversations({
                 type="button"
                 aria-label={`继续与 ${conv.agent.name} 的对话：${title}`}
                 onClick={() => openConversation(conv.id)}
-                className={`flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--subtle-2)] ${FOCUS_RING}`}
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-subtle-2 ${FOCUS_RING}`}
               >
                 <Avatar
                   user={{ displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined }}
@@ -106,7 +106,7 @@ export function RecentConversations({
                   <span className="block truncate ui-caption">{meta}</span>
                 </span>
                 {conv.unreadCount > 0 ? (
-                  <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-ui-xs font-semibold text-[var(--danger-on)]">
+                  <span className="shrink-0 rounded-full bg-danger px-2 text-ui-xs font-semibold text-danger-on">
                     {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
                   </span>
                 ) : null}

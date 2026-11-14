@@ -84,7 +84,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
       // 点遮罩 = 关闭：与 Esc 同一口径。
       onClick={onClose}
     >
@@ -96,7 +96,7 @@ export function Dialog({
         // 点面板内部不冒泡到遮罩（否则点内容就等于关闭）。
         onClick={(event) => event.stopPropagation()}
         style={{ maxHeight: `${maxHeightVh}vh` }}
-        className={`flex flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] ui-overlay-shadow ${SIZE_CLASS[size]} ${className}`.trim()}
+        className={`flex flex-col overflow-hidden rounded-xl border border-line bg-surface ui-overlay-shadow ${SIZE_CLASS[size]} ${className}`.trim()}
       >
         {title ? (
           <div className="flex items-start gap-2.5 border-b border-line-soft px-4 py-3">
@@ -113,7 +113,7 @@ export function Dialog({
               type="button"
               aria-label={closeLabel}
               onClick={onClose}
-              className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+              className="ui-hit shrink-0 rounded-sm p-2 text-muted hover:bg-subtle-3 hover:text-ink"
             >
               <XIcon width={16} height={16} aria-hidden="true" />
             </button>

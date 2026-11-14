@@ -124,6 +124,17 @@ async function renderPage() {
 }
 
 describe("团队视图页签（③-1 roving tabindex）", () => {
+  it("命令面板的 focus-tab 意图把团队页切到指定页签，且消费即清（d.142）", async () => {
+    useUiStore.setState({
+      paletteIntent: { kind: "focus-tab", token: 7, data: { page: "team", tab: "usage" } },
+    });
+    render(<TeamPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "用量" })).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(useUiStore.getState().paletteIntent).toBeNull();
+  });
+
   it("整组一个 Tab 停靠点，←/→ 切换视图并联动 tabpanel", async () => {
     await renderPage();
     const list = screen.getByRole("tablist", { name: "团队视图" });
@@ -275,8 +286,8 @@ describe("团队用量：清除已上传记录", () => {
     // 有已上传数据 → 出现清除入口；点击先出确认框（不直接删）
     fireEvent.click(await screen.findByRole("button", { name: "清除我的用量" }));
     expect(clearMyTeamUsage).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: "清除我的用量" });
-    expect(within(dialog).getByText(/删除后你不再出现在/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "清除上传的用量？" });
+    expect(within(dialog).getByText(/清除后你不再出现在用量排行里/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
     await waitFor(() => expect(clearMyTeamUsage).toHaveBeenCalledTimes(1));

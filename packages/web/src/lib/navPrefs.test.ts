@@ -16,7 +16,7 @@ import {
 /**
  * 导航栏显示模式（d.68）：
  * - 纯函数：解析 / 坏值回落 / 落盘（不依赖 React 与 DOM）；
- * - 交互默认值守卫：热区 8px、退出延迟 300ms、动效 160ms（与规格、调研文档同口径）；
+ * - 交互默认值守卫：热区 8px、退出延迟 300ms、动效 180ms（并入 duration-base 三档）；
  * - 源码守卫：auto 浮层只动 transform/opacity（绝不改 width）；字体栈拉丁在前、不联网。
  */
 
@@ -101,10 +101,10 @@ describe("navPrefs · 存储读写", () => {
 });
 
 describe("navPrefs · 交互默认值（与规格 / 调研同口径）", () => {
-  it("热区 8px（窗口内边缘 8–12px 区间）、退出延迟 300ms、动效 160ms", () => {
+  it("热区 8px（窗口内边缘 8–12px 区间）、退出延迟 300ms、动效 180ms", () => {
     expect(NAV_HOTZONE_PX).toBe(8);
     expect(NAV_HIDE_DELAY_MS).toBe(300);
-    expect(NAV_MOTION_MS).toBe(160);
+    expect(NAV_MOTION_MS).toBe(180);
     expect(NAV_HIDE_DELAY_MS).toBeGreaterThanOrEqual(250);
     expect(NAV_MOTION_MS).toBeGreaterThanOrEqual(120);
     expect(NAV_MOTION_MS).toBeLessThanOrEqual(200);
@@ -114,7 +114,7 @@ describe("navPrefs · 交互默认值（与规格 / 调研同口径）", () => {
     const src = readFileSync("src/components/NavRail.tsx", "utf8");
     // 动效属性只允许 transform/opacity
     expect(src).toContain("transition-[transform,opacity]");
-    expect(src).toContain("duration-[160ms]");
+    expect(src).toContain("duration-base");
     expect(src).toContain("motion-reduce:transition-none");
     // 不能出现会触发 reflow 的写法（Tip 的 transition-all 只作用于浮签，不在此列）
     expect(src).not.toContain("transition-[width]");

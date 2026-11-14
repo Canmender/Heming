@@ -73,8 +73,8 @@ describe("确认卡 · file_patch 的行级 diff", () => {
 
   it("不给 file_patch 提供「本会话内允许此工具」（整工具授权不符合目录前缀口径）", () => {
     renderModal([patchCall()]);
-    expect(screen.queryByText("本会话内允许此工具")).toBeNull();
-    expect(screen.getByText("仅本次允许")).toBeTruthy();
+    expect(screen.queryByText(/本会话内允许/)).toBeNull();
+    expect(screen.getByRole("button", { name: /允许选中/ })).toBeTruthy();
   });
 
   it("预览加载中显示占位文案", () => {

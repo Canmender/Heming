@@ -176,12 +176,12 @@ export function SearchPanel({
                   <span className="truncate text-ui-sm font-medium text-ink">{hit.rel}</span>
                   <span className="shrink-0 text-ui-xs tabular-nums text-muted">第 {hit.line} 行</span>
                 </span>
-                <span className="line-clamp-2 text-ui-xs leading-[17px] text-muted">
+                <span className="line-clamp-2 text-ui-xs leading-snug text-muted">
                   {splitHighlight(hit.snippet, terms).map((part, partIndex) =>
                     part.hit ? (
                       <mark
                         key={partIndex}
-                        className="rounded-[2px] bg-[var(--mark-bg)] px-0.5 text-[var(--mark-ink)]"
+                        className="rounded-[2px] bg-mark-bg px-0.5 text-mark-ink"
                       >
                         {part.text}
                       </mark>

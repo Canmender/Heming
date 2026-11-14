@@ -635,7 +635,9 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
     render(<App />);
     await screen.findByRole("button", { name: "主页" });
     fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
-    const inlineAlert = await screen.findByRole("alert");
+    // 默认 1s 的 findBy 超时在全量并行跑（304 个文件抢 CPU）时偶发假红，
+    // 这里放宽到 4s：等的是同一个状态，不是改断言。
+    const inlineAlert = await screen.findByRole("alert", {}, { timeout: 4000 });
     expect(inlineAlert).toHaveTextContent("先打开一个会话，再绑定文件");
     expect(alertSpy).not.toHaveBeenCalled();
   });

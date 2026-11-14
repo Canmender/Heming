@@ -6,12 +6,14 @@ import { humanizeProviderError } from "../lib/llmFailure.js";
 import { toolNameLabel } from "../lib/toolName.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { CheckIcon, ChevronIcon } from "./icons.js";
+import { Button } from "./ui/Button.js";
 
 /**
  * 流式生成气泡（M3 Task 8）：消息列表尾部的打字机行。
  * - streaming：思考过程（如有）+ 工具调用轨迹 + 累积文本 + 光标「▌」；
  * - error：署名 + 已累积文本（partial）+ 失败原因 + 可选「重试」（本机流才有；他机流由 store 定时自清）。
- * 文本走 React 文本节点输出（天然转义），与消息气泡同款浅灰令牌样式。
+ * 文本走 React 文本节点输出（天然转义），与落定消息同款（无气泡底色、`px-0.5` 全宽）——
+ * 流式结束后文字不能横向跳位（B 轨 E4）。
  */
 export interface AgentStreamBubbleProps {
   name: string;
@@ -42,7 +44,7 @@ export function AgentStreamBubble({
 }: AgentStreamBubbleProps) {
   const streaming = status === "streaming";
   return (
-    <div className="mb-3 flex items-start gap-2">
+    <div className="mb-5 flex items-start gap-2">
       {/*
        * 粗粒度状态播报（③-2）：只报「开始/完成/失败」，**不含正文**——
        * 流式文本逐 token 变化，若放进 live region 会变成每 token 念一次。
@@ -51,10 +53,10 @@ export function AgentStreamBubble({
       <p className="sr-only" role="status" aria-live="polite">
         {streaming ? `${name} 正在生成回复` : errorMessage ? `${name} 生成失败` : `${name} 已生成回复`}
       </p>
-      <div className="max-w-[78%] rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-ui-md">
-        <div className="mb-0.5 flex items-center gap-2 text-ui-xs text-muted">
+      <div className="min-w-0 flex-1 px-0.5 text-ui-md leading-relaxed">
+        <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
           <span>{name}</span>
-          {streaming && <span className="text-muted">生成中…</span>}
+          {streaming && <span>生成中…</span>}
         </div>
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
@@ -76,18 +78,14 @@ export function AgentStreamBubble({
             ) : null}
             {/* 失败原因：把 `provider_error: HTTP 429 {json}` 翻成人话；原文留在 title 里排障用 */}
             {errorMessage ? (
-              <div className="mt-0.5 text-[var(--warn)]" title={errorMessage}>
+              <div className="mt-0.5 text-warn" title={errorMessage}>
                 {humanizeProviderError(errorMessage)}
               </div>
             ) : null}
             {onRetry ? (
-              <button
-                type="button"
-                className={`mt-1 rounded-sm border border-line px-2 py-0.5 text-ui-sm text-muted hover:bg-[var(--subtle-3)] ${FOCUS_RING_TIGHT}`}
-                onClick={onRetry}
-              >
+              <Button size="sm" variant="ghost" className="mt-1" onClick={onRetry}>
                 继续生成
-              </button>
+              </Button>
             ) : null}
           </>
         )}
@@ -106,7 +104,7 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
     if (!streaming) setOpen(false);
   }
   return (
-    <div className="mt-1 rounded-md border border-dashed border-line-soft bg-[var(--subtle-2)] px-2 py-1">
+    <div className="mt-1 rounded-md border border-dashed border-line-soft bg-subtle-2 px-2 py-1">
       <button
         type="button"
         aria-expanded={open}
@@ -127,7 +125,9 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
         {streaming && <span className="text-ui-xs text-muted">· 进行中</span>}
       </button>
       {open && (
-        <div className="mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-ui-sm italic leading-relaxed text-[var(--body)]">
+        // 不设内层 max-height（B 轨 E5）：轨迹区域整体只保留一层滚动，
+        // 嵌套滚动条在触控板上会「卡在里层」，用户滚不到消息列表。
+        <div className="mt-1 whitespace-pre-wrap break-words text-ui-sm italic leading-relaxed text-body">
           {text}
         </div>
       )}
@@ -145,7 +145,7 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
   const [open, setOpen] = useState(false);
   const summary = toolSummaryLabel(tools);
   return (
-    <div className="mt-1 rounded-md border border-dashed border-line-soft bg-[var(--subtle-2)] px-2 py-1">
+    <div className="mt-1 rounded-md border border-dashed border-line-soft bg-subtle-2 px-2 py-1">
       <button
         type="button"
         aria-expanded={open}
@@ -176,9 +176,11 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
 /** 工具调用轨迹：一行一个工具，展开看参数与结果。 */
 export function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
   return (
-    <div className="mt-1 flex flex-col gap-1">
+    // 单层滚动（B 轨 E5）：此前 参数/结果 各自 max-h（120/140px）叠加外层，出现三层嵌套滚动条。
+    // 现在只在这里限高，内层全部自然展开。
+    <div className="mt-1 flex max-h-[60vh] flex-col gap-1 overflow-y-auto pr-1">
       {tools.map((t) => (
-        <details key={t.id} className="rounded-md border border-line-soft bg-[var(--surface)] px-2 py-1">
+        <details key={t.id} className="rounded-md border border-line-soft bg-surface px-2 py-1">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-ui-xs">
             <StatusDot status={t.status} />
             <span className="font-mono text-ui-xs text-ink" title={t.name}>
@@ -186,22 +188,22 @@ export function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
             </span>
             <span className={`text-ui-xs ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
             {t.endedAt ? (
-              <span className="text-ui-xs text-muted">{Math.max(0, t.endedAt - t.startedAt)}ms</span>
+              <span className="text-ui-xs text-muted">{formatDuration(t.endedAt - t.startedAt)}</span>
             ) : null}
           </summary>
           <div className="mt-1 border-t border-line-soft pt-1">
             <div className="text-ui-xs text-muted">参数</div>
-            <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] px-1.5 py-1 font-mono text-ui-xs text-[var(--body)]">
+            <pre className="mt-0.5 whitespace-pre-wrap break-words rounded-sm bg-subtle-2 px-1.5 py-1 font-mono text-ui-xs text-body">
               {t.args || "{}"}
             </pre>
             {t.status !== "running" && (
               <>
                 <div className="mt-1 text-ui-xs text-muted">结果</div>
                 <pre
-                  className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${
+                  className={`mt-0.5 whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${
                     t.status === "error" || t.status === "denied"
-                      ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                      : "bg-[var(--subtle-2)] text-[var(--body)]"
+                      ? "bg-danger-soft text-danger"
+                      : "bg-subtle-2 text-body"
                   }`}
                 >
                   {t.result || "（无返回）"}
@@ -248,13 +250,13 @@ function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
           title={a.error}
           className={`max-w-[180px] truncate rounded-sm border px-1 py-0.5 ${
             a.ok
-              ? "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
-              : "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]"
+              ? "border-success-line bg-success-soft text-success"
+              : "border-warn-line bg-warn-soft text-warn"
           }`}
         >
           {a.profileLabel}
           {a.ok ? (
-            <CheckIcon width={12} height={12} className="inline-block align-[-1px] text-[var(--success)]" aria-hidden="true" />
+            <CheckIcon width={12} height={12} className="inline-block align-[-1px] text-success" aria-hidden="true" />
           ) : (
             ` · ${a.kind ?? "失败"}`
           )}
@@ -269,20 +271,30 @@ function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+/** 工具耗时人类化：120ms / 1.2s / 1m5s（此前一律裸毫秒，1 万毫秒读不出来）。 */
+function formatDuration(ms: number): string {
+  const v = Math.max(0, ms);
+  if (v < 1000) return `${v}ms`;
+  if (v < 60_000) return `${(v / 1000).toFixed(1)}s`;
+  const m = Math.floor(v / 60_000);
+  const s = Math.round((v % 60_000) / 1000);
+  return s > 0 ? `${m}m${s}s` : `${m}m`;
+}
+
 function StatusDot({ status }: { status: ToolTrace["status"] }) {
   const color =
     status === "running"
-      ? "bg-[var(--warn)]"
+      ? "bg-warn"
       : status === "ok"
-        ? "bg-[var(--success)]"
+        ? "bg-success"
         : status === "denied"
-          ? "bg-[var(--danger)]"
-          : "bg-[var(--danger)]";
+          ? "bg-danger"
+          : "bg-danger";
   return (
     <span
       aria-hidden="true"
       className={`inline-block h-[6px] w-[6px] shrink-0 rounded-full ${color}${
-        status === "running" ? " animate-pulse" : ""
+        status === "running" ? " animate-pulse motion-reduce:animate-none" : ""
       }`}
     />
   );
@@ -296,7 +308,7 @@ function statusLabel(status: ToolTrace["status"]): string {
 }
 
 function statusColor(status: ToolTrace["status"]): string {
-  if (status === "running") return "text-[var(--warn)]";
-  if (status === "ok") return "text-[var(--success)]";
-  return "text-[var(--danger)]";
+  if (status === "running") return "text-warn";
+  if (status === "ok") return "text-success";
+  return "text-danger";
 }

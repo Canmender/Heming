@@ -15,6 +15,8 @@ import {
   type UsageSummary,
 } from "../lib/magpieUsage.js";
 import { Button } from "../components/ui/Button.js";
+import { EmptyState } from "../components/ui/EmptyState.js";
+import { SkeletonBlock } from "../components/ui/Skeleton.js";
 
 /**
  * 用量（d.110）：模型服务自己记的账，做成和鸣自己的图。
@@ -56,7 +58,7 @@ function Avatar({ name }: { name: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-semibold text-white"
       style={{ backgroundColor: avatarColor(name) }}
     >
       {name.slice(0, 1).toUpperCase()}
@@ -116,7 +118,7 @@ export function ModelUsageView({
   return (
     <section aria-label="用量" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-ui-md font-bold">用量</div>
+        <h2 className="ui-block-title">用量</h2>
         <div className="flex flex-wrap items-center gap-1.5">
           <div role="group" aria-label="统计区间" className="ui-segment-group">
             {PERIODS.map((item) => (
@@ -152,19 +154,24 @@ export function ModelUsageView({
       )}
 
       {loading && !summary ? (
-        <div className="grid gap-3 sm:grid-cols-4" aria-label="读取用量">
+        <div
+          role="status"
+          aria-busy="true"
+          aria-label="正在读取用量"
+          className="grid gap-3 sm:grid-cols-4"
+        >
           {[0, 1, 2, 3].map((index) => (
-            <div key={index} className="h-[86px] animate-pulse rounded-xl bg-[var(--subtle-3)]" />
+            // 审计 B4：骨架与真实卡同构——SummaryCard 是 .ui-card + p-4，高约 88px。
+            <SkeletonBlock key={index} className="h-22 w-full rounded-xl" />
           ))}
         </div>
       ) : summary && summary.calls === 0 ? (
-        <div className="ui-card border-dashed px-6 py-10 text-center">
-          <span className="ui-icon-tile mx-auto mb-3">
-            <SparkIcon width={20} height={20} />
-          </span>
-          <div className="text-ui-base font-bold">这个时间段还没有调用</div>
-          <p className="mx-auto mt-1 max-w-[420px] ui-caption">先发一次对话，这里就有数据了。</p>
-        </div>
+        <EmptyState
+          framed
+          icon={<SparkIcon width={20} height={20} />}
+          title="这个时间段还没有调用"
+          desc="先发一次对话，这里就有数据了。"
+        />
       ) : (
         summary && (
           <>
@@ -194,7 +201,7 @@ export function ModelUsageView({
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-ui-md font-bold">{metric === "calls" ? "每天请求数" : "每天 Token"}</div>
+                <h3 className="ui-block-title">{metric === "calls" ? "每天请求数" : "每天 Token"}</h3>
                 <div role="group" aria-label="图表指标" className="ui-segment-group p-0.5">
                   {(["calls", "tokens"] as const).map((key) => (
                     <button
@@ -235,7 +242,7 @@ export function ModelUsageView({
                         <title>{`${bar.label}：${bar.value}`}</title>
                       </rect>
                       {bar.showLabel && (
-                        <text x={x + 7} y={138} textAnchor="middle" fontSize="9" fill="var(--chart-label)">
+                        <text x={x + 7} y={139} textAnchor="middle" fontSize="12" fill="var(--chart-label)">
                           {bar.label}
                         </text>
                       )}
@@ -243,11 +250,22 @@ export function ModelUsageView({
                   );
                 })}
               </svg>
+              {/* 审计 F9：原来柱高只能靠 hover 的 <title> 读，且轴标签 9px。
+                  补一行可见刻度说明：图表是定量的，读者不该先悬停才知道量级。 */}
+              <p className="mt-1 flex flex-wrap items-center justify-between gap-x-3 ui-micro">
+                <span>左起最早，右至今天</span>
+                <span>
+                  单日最高{" "}
+                  {metric === "calls"
+                    ? `${Math.max(0, ...bars.map((bar) => bar.value))} 次`
+                    : formatTokens(Math.max(0, ...bars.map((bar) => bar.value)))}
+                </span>
+              </p>
             </div>
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-ui-md font-bold">用在哪</div>
+                <h3 className="ui-block-title">用在哪</h3>
                 <div role="group" aria-label="拆分维度" className="ui-segment-group p-0.5">
                   {BREAKDOWNS.map((item) => (
                     <button
@@ -268,15 +286,15 @@ export function ModelUsageView({
                     <Avatar name={bucketLabel(row, breakdown)} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-ui-sm font-bold">{bucketLabel(row, breakdown)}</span>
+                        <span className="truncate text-ui-sm font-semibold">{bucketLabel(row, breakdown)}</span>
                         <span className="shrink-0 ui-caption">
                           {row.calls} 次 · {formatTokens(row.input + row.output)} tokens
                           {row.cost > 0 ? ` · ${formatCost(row.cost, row.unpriced)}` : ""}
                         </span>
                       </span>
-                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-[var(--subtle-3)]">
+                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-subtle-3">
                         <span
-                          className="block h-full rounded-full bg-[var(--heming-accent)]"
+                          className="block h-full rounded-full bg-accent"
                           style={{ width: `${Math.max(3, (row.calls / maxCalls) * 100)}%` }}
                         />
                       </span>
@@ -290,7 +308,7 @@ export function ModelUsageView({
             {requests && requests.rows.length > 0 && (
               <div className="overflow-x-auto ui-card p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-ui-md font-bold">最近请求</div>
+                  <h3 className="ui-block-title">最近请求</h3>
                   <span className="ui-caption">共 {requests.total} 条</span>
                 </div>
                 {/* d.141 P2「表格规范」：改用 .ui-table（表头/行距/hover/last-border 只在
@@ -346,8 +364,8 @@ function SummaryCard({
   return (
     <div className="ui-card p-4">
       <div className="text-ui-sm font-medium text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-num-md font-bold leading-none">{value}</div>
-      <div className={`mt-1.5 ${tone === "warn" ? "text-ui-xs text-[var(--warn)]" : "ui-caption"}`}>{hint}</div>
+      <div className="ui-numeric mt-2 text-num-md font-semibold leading-none">{value}</div>
+      <div className={`mt-2 ${tone === "warn" ? "ui-micro text-warn" : "ui-caption"}`}>{hint}</div>
     </div>
   );
 }

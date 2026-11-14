@@ -34,6 +34,7 @@ import { registerConversationAbort } from "../lib/runAbort.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
+import { formatBytes } from "../lib/export/conversation.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import { useTokenUsageStore } from "../store/tokenUsage.js";
@@ -86,7 +87,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon, AlertIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
@@ -125,6 +126,7 @@ import { ComposerHints } from "./ux/ComposerHints.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
 import { Button } from "../components/ui/Button.js";
+import { IconButton } from "../components/ui/IconButton.js";
 
 /**
  * 空消息列表的**稳定引用**。
@@ -316,6 +318,36 @@ function historyToolText(trace: ToolTrace): string {
 type SendNotice = { kind: "info" | "error"; text: string; retry?: () => void };
 
 /**
+ * 输入区提示位的一条（B 轨 E3）：此前「分叉降级 / 能力降级 / 发送提示 / 生成中」
+ * 各自占一行，最多能堆到 4–6 行、且 warn 三处同形同色分不出轻重。
+ * 现在统一成数据，由渲染处限高 2 行 + 「还有 N 条」展开。
+ */
+type NoticeTone = "error" | "warn" | "muted";
+type NoticeItem = {
+  key: string;
+  tone: NoticeTone;
+  text: string;
+  retry?: () => void;
+  action?: { label: string; onClick: () => void };
+};
+
+/** 提示位只展开两行：再多就把输入区顶得看不见消息。 */
+const NOTICE_VISIBLE_ROWS = 2;
+
+/**
+ * 待发附件（B 轨 E1）：选中文件后先入列表，用户可核对、移除、先写字再发。
+ * 此前四个入口（工具行 / 粘贴 / 拖拽 / 录音）都是「选中即上传即发送」，
+ * 选错文件无法取消，也做不出「先附图再补正文」的顺序。
+ */
+type PendingFile = { key: string; file: File };
+
+/** 一次最多带几个附件：每个附件是一条独立 file 消息，多了刷屏也拖慢串行上传。 */
+const MAX_PENDING_FILES = 5;
+
+/** 待发附件的 key 序号（只用于 React key 与移除定位，不进消息）。 */
+let pendingFileSeq = 0;
+
+/**
  * 附件气泡（图片缩略图 / 文件卡）：content 路由 authOnly，裸 src/href 会 401 →
  * 挂载时走鉴权 blob 拿 objectURL，卸载或换附件时 revoke（含「fetch 还没回来就已卸载」的
  * 竞态：取到即弃），防 objectURL 内存泄漏。加载失败（401/网络/解密失败）给可见占位，
@@ -368,7 +400,7 @@ function AttachmentPreview({
     return (
       <div
         role="alert"
-        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-ui-sm text-muted"
+        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1.5 text-ui-sm text-muted"
       >
         <FileIcon width={16} height={16} />
         <span className="min-w-0 truncate">{file.name}</span>
@@ -376,7 +408,7 @@ function AttachmentPreview({
         <button
           type="button"
           onClick={() => setReloadKey((k) => k + 1)}
-          className={`shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-ui-xs text-[var(--body)] hover:bg-[var(--subtle-2)] ${FOCUS_RING_TIGHT}`}
+          className={`shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-ui-xs text-body hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
         >
           重试
         </button>
@@ -421,7 +453,7 @@ function AttachmentPreview({
     <a
       href={url}
       download={file.name}
-      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-[var(--surface)] px-2 py-1.5 text-ui-sm hover:bg-[var(--subtle-2)]"
+      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1.5 text-ui-sm hover:bg-subtle-2"
     >
       <FileIcon width={16} height={16} />
       <span className="min-w-0 truncate">{file.name}</span>
@@ -476,7 +508,7 @@ function AudioBubble({
     };
   }, [fileId, fileKey, mime]);
 
-  if (err) return <div role="alert" className="mt-1 text-ui-xs text-[var(--danger)]">音频加载失败：{err}</div>;
+  if (err) return <div role="alert" className="mt-1 ui-body-sm text-danger">音频加载失败：{err}</div>;
   return url ? (
     <audio
       controls
@@ -619,7 +651,15 @@ export function ChatPage({
   /** 附件上传进行中（A8）：四个入口禁用 + 提示行占位；ref 兜底防同帧连点。 */
   const [uploading, setUploading] = useState(false);
   const uploadingRef = useRef(false);
+  /** 待发附件列表（E1）：选完不立即发送，可核对/移除，发送时随正文一起提交。 */
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  // 切会话即清：待发附件属于当前会话的输入上下文，跟到别的会话里发出去是错的
+  useEffect(() => {
+    setPendingFiles([]);
+  }, [convId]);
   const [exportOpen, setExportOpen] = useState(false);
+  /** 提示位「还有 N 条」的展开状态；提示数量变化时复位（见下方 effect）。 */
+  const [noticeExpanded, setNoticeExpanded] = useState(false);
   /**
    * 多选导出：勾出若干条，只导出这些。
    * 选择状态是本会话的临时视图状态（切会话即清），不落盘——
@@ -2324,12 +2364,12 @@ export function ChatPage({
     }
   };
 
-  /** A7：粘贴截图/文件 → 走 sendFile 同一套校验（6MB、类型、E2E 拦截）。 */
+  /** A7：粘贴截图/文件 → 进待发附件列表（E1），发送时才上传；校验（6MB、E2E）在列表入口。 */
   const onComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData?.files ?? []);
     if (files.length === 0) return; // 纯文本粘贴不拦
     e.preventDefault();
-    void sendFile(files[0]);
+    enqueueFiles(files);
   };
 
   /**
@@ -2434,13 +2474,19 @@ export function ChatPage({
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红
-    if (!draft.trim()) return;
+    // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红。
+    // 有待发附件时「空正文」是合法的（纯附件消息），不在这里拦。
+    if (!draft.trim() && pendingFiles.length === 0) return;
     // 生成中不再接受新消息（d.13x）：并发两条流会共用 turnToolCountRef / selfEdit 预算，
     // 第一条的「本轮工具次数」「自改预算」被第二条重置 —— 复盘判定与预算双双失真。
     // 想让模型接着做，用本轮的「继续」或在停止后再发。
     if (activeLocal.length > 0) {
       setSendNotice("正在生成中：先点停止，或等这一轮结束再发", "info");
+      return;
+    }
+    // 附件走独立通道：正文 + 第一个附件同发，其余各发一条 file 消息
+    if (pendingFiles.length > 0) {
+      await sendPendingFiles(draft, effectiveMentions);
       return;
     }
     const text = draft;
@@ -2505,51 +2551,72 @@ export function ChatPage({
   /** 附件上限：服务端 json 体上限 8MB，base64 膨胀约 4/3 → 6MB 留余量（超限给可见提示）。 */
   const MAX_UPLOAD = 6 * 1024 * 1024;
 
-  /** 工具行「图片/文件」入口：临时 file input（不入 DOM），选中即走 sendFile。 */
+  /** 工具行「图片/文件」入口：临时 file input（不入 DOM），选中即进待发列表（E1）。 */
   const pickFile = (accept: string | undefined) => {
     const input = document.createElement("input");
     input.type = "file";
+    input.multiple = true; // E1：可一次选多个，进列表后逐个核对/移除
     if (accept) input.accept = accept;
     input.onchange = () => {
-      const f = input.files?.[0];
-      if (!f) return;
-      void sendFile(f);
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      enqueueFiles(files);
     };
     input.click();
   };
 
-  /** 附件发送：先传共享库拿 meta，再封 file 信封经 WS 发（无正文时 text 空串，气泡只渲染附件段）。
-   *  **输入框里有正文就同发**：一条消息带 text + file，并当场触发 @ 到的智能体——
-   *  拆成两条会让刚上传的图片只落到历史里，等下一轮才进模型，这一轮的提问也就问给了空气。
-   *  无 subtle 在上传前拦截——不白跑一次上传（硬验收⑤：附件/语音全路径不降级）。 */
-  const sendFile = async (f: File) => {
-    // A8：上传中防重入（入口按钮已禁用，这里兜住粘贴/拖拽/快捷键同帧连发）
-    if (uploadingRef.current) return;
+  /**
+   * 把文件收进「待发附件」列表（E1）：四个入口（工具行 / 粘贴 / 拖拽 / 录音）共用。
+   * 只做本地校验（6MB、重复、数量上限），**不上传**——上传留到发送时，
+   * 这样用户移除或改主意不白跑一次加密上传、不占服务端配额。
+   */
+  const enqueueFiles = (files: File[]) => {
     if (!hasSubtle()) {
-      // 常驻横幅已说明原因（role=alert），这里不再叠第二条相同提示
+      // 常驻横幅已说明原因（role=alert），这里不叠第二条相同提示
       return;
     }
-    const handle = wsHandleRef.current;
-    if (!handle) {
-      setSendNotice("连接未就绪，消息未发送", "error");
-      return;
-    }
-    if (f.size > MAX_UPLOAD) {
-      setSendNotice("文件需小于 6MB", "error");
-      return;
-    }
-    const draftText = draft.trim();
-    // 同发前先把「@ 了没绑模型的智能体」拦在上传之前：上传要几秒，
-    // 传完才被 submitMessage 拦下等于白传一个占配额又发不出去的孤儿文件。
-    if (draftText) {
-      const unbound = effectiveMentions.find((m) => !resolveProfile(m.agentId));
-      if (unbound) {
-        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先到「模型」页绑定`, "error");
-        return;
+    const accepted: PendingFile[] = [];
+    for (const f of files) {
+      if (f.size > MAX_UPLOAD) {
+        setSendNotice(`文件需小于 6MB：${f.name}`, "error");
+        continue;
       }
+      const dup = [...pendingFiles, ...accepted].some(
+        (p) =>
+          p.file.name === f.name &&
+          p.file.size === f.size &&
+          p.file.lastModified === f.lastModified,
+      );
+      if (dup) continue;
+      if (pendingFiles.length + accepted.length >= MAX_PENDING_FILES) {
+        setSendNotice(`一次最多带 ${MAX_PENDING_FILES} 个附件`, "info");
+        break;
+      }
+      pendingFileSeq += 1;
+      accepted.push({ key: `pf-${pendingFileSeq}`, file: f });
     }
-    uploadingRef.current = true;
-    setUploading(true);
+    if (accepted.length > 0) setPendingFiles((prev) => [...prev, ...accepted]);
+  };
+
+  /** 从待发列表移除一个附件（不发送）；键盘可达的移除按钮在 chip 上。 */
+  const removePendingFile = (key: string) => {
+    setPendingFiles((prev) => prev.filter((p) => p.key !== key));
+  };
+
+  /**
+   * 上传一个待发附件并拼出 TurnAttachment（E1 的发送阶段）。
+   *
+   * 抽出来的原因：以前「上传 + 发送」焊在 sendFile 里，选中即发；现在上传发生在
+   * 用户按发送的那一刻，而发送有两条路（正文同发 / 纯附件各发一条），
+   * 只保留一次实现，错误文案与 6MB/能力/会话切换的收口才不会分叉。
+   */
+  const uploadAttachment = async (
+    f: File,
+    handle: WsHandle,
+  ): Promise<
+    | { ok: true; file: TurnAttachment; notice: string | null }
+    | { ok: false; error: string }
+  > => {
     try {
       // 解析不放"正在读取"这类提示：它通常几百毫秒就完，
       // 闪一下反而干扰；更要紧的是 status 那个位置要留给真正的错误
@@ -2568,8 +2635,8 @@ export function ChatPage({
       // await 后闭包已旧：切了会话或 socket 已换/已关则丢弃，防发错会话/向已关句柄静默发送
       const live = wsHandleRef.current;
       if (live !== handle || useUiStore.getState().activeConversationId !== convId) {
-        setSendNotice("已切换会话，文件未发送", "error");
-        return;
+        // 由调用方统一转成可见提示（这里不再自己 setSendNotice，避免两处文案分叉）
+        return { ok: false, error: "已切换会话，文件未发送" };
       }
       // 消息侧保留原名/原 mime/原大小（气泡按它路由与展示），fileKey 随消息进密文；
       // meta 是服务端密文形态（.enc 名 + octet-stream），仅取 id。
@@ -2591,28 +2658,97 @@ export function ChatPage({
             ? `已发送；内容较长，模型只读到前 ${doc.chars} 字`
             : null
           : `已发送；内容未能提取：${doc.error ?? "未知原因"}`;
-      if (draftText) {
-        // 同发：正文 + 附件进同一条 file 消息，走文本消息的全套拦截与触发路径
-        const result = await submitMessage(
-          draftText,
-          effectiveMentions,
-          undefined,
-          file,
-        );
-        if (!result.ok) {
-          // 附件场景不给「重试」：重放会再上传一次（A9 的取舍）
-          setSendNotice(result.error, "error");
-          return; // 草稿原样保留
-        }
-        resetComposer();
-        // resetComposer 已清 sendNotice；成功/能力提示要最后落（否则被清掉）
-        setSendNotice(notice);
+      return { ok: true, file, notice };
+    } catch (err) {
+      return { ok: false, error: `上传失败：${(err as Error).message}` };
+    }
+  };
+
+  /**
+   * 把没发出去的附件放回待发列表。
+   * 已经切到别的会话时不再放回：旧会话的附件飘进新会话的输入区，
+   * 用户会看见一张自己没选过、也不知道属于哪段对话的图（切会话本来就会清列表）。
+   */
+  const restorePending = (files: PendingFile[]) => {
+    if (useUiStore.getState().activeConversationId !== convId) return;
+    setPendingFiles(files);
+  };
+
+  /**
+   * 提交待发附件（E1）：正文 + 第一个附件合成同一条 file 消息（模型当轮就能读到），
+   * 其余附件各发一条 file 消息；串行，失败即停并**保留**没发出去的那几个。
+   *
+   * 为什么不改成「N 个附件合成一条」：消息协议里一条 file 消息只带一个 file，
+   * 服务端与历史渲染都按这个形状走；拆成 N 条是既有语义（拖入 3 个文件本来就发 3 条）。
+   */
+  const sendPendingFiles = async (
+    text: string,
+    mentions: { agentId: string; name: string }[],
+  ) => {
+    // A8：上传中防重入（按钮已禁用，这里兜住回车/粘贴同帧连发）
+    if (uploadingRef.current) return;
+    if (!hasSubtle()) {
+      // 常驻横幅已说明原因（role=alert）
+      return;
+    }
+    const handle = wsHandleRef.current;
+    if (!handle) {
+      setSendNotice("连接未就绪，消息未发送", "error");
+      return;
+    }
+    const wantsText = text.trim().length > 0;
+    // 同发前先把「@ 了没绑模型的智能体」拦在上传之前：上传要几秒，
+    // 传完才被 submitMessage 拦下等于白传一个占配额又发不出去的孤儿文件。
+    if (wantsText) {
+      const unbound = mentions.find((m) => !resolveProfile(m.agentId));
+      if (unbound) {
+        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先到「模型」页绑定`, "error");
         return;
       }
-      const ok = await sealAndSend({ kind: "file", text: "", file });
-      if (ok) setSendNotice(notice);
-    } catch (err) {
-      setSendNotice(`上传失败：${(err as Error).message}`, "error");
+    }
+    uploadingRef.current = true;
+    setUploading(true);
+    try {
+      const queue = [...pendingFiles];
+      if (wantsText) {
+        const head = queue.shift();
+        if (!head) return;
+        const up = await uploadAttachment(head.file, handle);
+        if (!up.ok) {
+          // 未发出：附件与草稿都留着，用户可改完再按一次发送
+          setSendNotice(up.error, "error");
+          return;
+        }
+        const result = await submitMessage(text, mentions, undefined, up.file);
+        if (!result.ok) {
+          setSendNotice(result.error, "error");
+          return;
+        }
+        restorePending(queue);
+        setDraft("");
+        cancelDraftSave();
+        clearDraft(convId);
+        // 成功/能力提示最后落（上面 clearDraft 不会动 sendNotice，但顺序更清楚）
+        setSendNotice(up.notice);
+      }
+      for (let i = 0; i < queue.length; i += 1) {
+        const p = queue[i];
+        const up = await uploadAttachment(p.file, handle);
+        if (!up.ok) {
+          restorePending(queue.slice(i));
+          setSendNotice(up.error, "error");
+          return;
+        }
+        const ok = await sealAndSend({ kind: "file", text: "", file: up.file });
+        if (!ok) {
+          restorePending(queue.slice(i));
+          setSendNotice("消息发送失败", "error");
+          return;
+        }
+        // 每成功一条就把剩下的写回列表：中途失败时列表正好剩没发的部分
+        restorePending(queue.slice(i + 1));
+        setSendNotice(up.notice);
+      }
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -2684,7 +2820,7 @@ export function ChatPage({
   /**
    * 开始录音（语音消息选项）：getUserMedia → MediaRecorder 录 webm。
    * 结束（自然停 / 60s 上限 / 手动停）统一在 onstop：停轨 → 时长判定（<1s 拒发）
-   * → 复用 sendFile（上传 + 纯附件消息，6MB 上限与失败提示一并继承）。
+   * → 进待发附件列表（E1：6MB 上限与失败提示一并继承，上传留到发送时）。
    */
   const startRecording = async () => {
     // 录音中 或 授权 await 挂起中都挡重入：voiceRecRef 要到 recorder.start() 后才有值，
@@ -2736,7 +2872,7 @@ export function ChatPage({
           `语音-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.webm`,
           { type: blob.type },
         );
-        void sendFile(f); // 既有上传 + 发 file 消息（MAX_UPLOAD 6MB 检查复用）
+        enqueueFiles([f]); // E1：录音也进待发列表，发送时才上传（与图片/文件/粘贴一致）
       };
       recorder.start();
       voiceRecRef.current = recorder;
@@ -2838,7 +2974,7 @@ export function ChatPage({
     }
   };
 
-  /** A7：拖拽拖入消息区 → 直接走 sendFile（同一套 6MB/类型/E2E 校验）。 */
+  /** A7 + E1：拖拽文件到消息区 → 进待发附件列表（校验同粘贴，不再拖入即发）。 */
   const onMessagesDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
   };
@@ -2846,9 +2982,7 @@ export function ChatPage({
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     e.preventDefault();
-    void (async () => {
-      for (const f of files) await sendFile(f); // 串行：上传状态与消息顺序都只走一个通道
-    })();
+    enqueueFiles(files);
   };
 
   // —— A5：整条消息复制（clipboard + execCommand 兜底，短暂「已复制」） ——
@@ -2888,18 +3022,46 @@ export function ChatPage({
     [],
   );
 
+  // 提示位（B 轨 E3）：把并列的四五条提示收成一个列表，渲染处只放前 2 条 +「还有 N 条」。
+  const notices = useMemo<NoticeItem[]>(() => {
+    const list: NoticeItem[] = [];
+    if (forkNotice) list.push({ key: "fork", tone: "warn", text: forkNotice });
+    if (toolsNotice) list.push({ key: "tools", tone: "warn", text: toolsNotice });
+    if (sendNotice) {
+      list.push({
+        key: "send",
+        tone: sendNotice.kind === "error" ? "error" : "warn",
+        text: sendNotice.text,
+        retry: sendNotice.retry,
+      });
+    }
+    if (activeLocal.length > 0) {
+      list.push({
+        key: "running",
+        tone: "muted",
+        text: `生成中：${activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}`,
+        action: { label: "停止生成", onClick: abortRuns },
+      });
+    }
+    return list;
+  }, [forkNotice, toolsNotice, sendNotice, activeLocal, nameOf, abortRuns]);
+  // 提示变少时自动收起，避免「展开」状态挂着一个已经不存在的列表。
+  useEffect(() => {
+    setNoticeExpanded(false);
+  }, [notices.length]);
+  const visibleNotices = noticeExpanded ? notices : notices.slice(0, NOTICE_VISIBLE_ROWS);
+  const hiddenNoticeCount = notices.length - visibleNotices.length;
+
   return (
     <div className="relative flex h-full flex-col">
-      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-[var(--chat-gutter)] py-3">
+      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-chat-gutter py-3">
         {!embedded && (
-          <button
-            type="button"
-            aria-label="返回"
-            className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)]"
+          <IconButton
+            label="返回"
+            className="-ml-1"
+            icon={<ChevronIcon width={16} height={16} className="rotate-180" />}
             onClick={leave}
-          >
-            <ChevronIcon width={16} height={16} className="rotate-180" />
-          </button>
+          />
         )}
         {/* d.126-C：对话界面不再展示头像（智能体身份由标题承载），消息流是纯转录 */}
         <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>
@@ -2908,10 +3070,10 @@ export function ChatPage({
             aria-hidden="true"
             className={`h-1.5 w-1.5 rounded-full ${
               connState === "open"
-                ? "bg-[var(--success)]"
+                ? "bg-success"
                 : connState === "closed"
-                  ? "bg-[var(--warn)]"
-                  : "bg-[var(--line-strong)]"
+                  ? "bg-warn"
+                  : "bg-line-strong"
             }`}
           />
           {/* 这里只描述「实时通道」状态，不要和「智能体能否对话（模型绑定）」混为一谈：
@@ -2919,29 +3081,25 @@ export function ChatPage({
           {connState === "open" ? "通道已连接" : connState === "closed" ? "通道断开" : "通道连接中…"}
         </span>
         {recovered && connState === "open" && (
-          <span role="status" className="text-ui-xs text-[var(--success)]">
+          <span role="status" className="text-ui-xs text-success">
             通道已恢复
           </span>
         )}
         {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
-        <button
-          type="button"
-          aria-label="搜索会话"
+        <IconButton
+          label="搜索会话"
+          className={`ml-auto${searchOpen ? " bg-subtle-3" : ""}`}
           aria-pressed={searchOpen}
-          className={`ml-auto rounded-lg p-1.5 hover:bg-[var(--subtle-3)]${searchOpen ? " bg-[var(--subtle-3)]" : ""}`}
+          icon={<SearchIcon width={18} height={18} />}
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-        >
-          <SearchIcon width={18} height={18} />
-        </button>
+        />
         {/* 多选导出：进入勾选态后，消息行左侧出复选框，header 下方出工具条。 */}
-        <button
-          type="button"
-          aria-label="选择消息导出"
+        <IconButton
+          label="选择消息导出"
           title="选择若干条消息单独导出"
           aria-pressed={selectMode}
-          className={`rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)]${
-            selectMode ? " bg-[var(--subtle-3)] text-ink" : ""
-          }`}
+          className={selectMode ? "bg-subtle-3 text-ink" : ""}
+          icon={<SelectIcon width={18} height={18} />}
           onClick={() => {
             if (selectMode) {
               exitSelectMode();
@@ -2950,32 +3108,27 @@ export function ChatPage({
               setSelectedIds([]);
             }
           }}
-        >
-          <SelectIcon width={18} height={18} />
-        </button>
+        />
         {/* 导出：只读本机已解密密文，生成 Markdown / JSON 下载（不经过服务端）。 */}
         <div ref={exportRef} className="relative">
-          <button
-            type="button"
-            aria-label="导出会话"
+          <IconButton
+            label="导出会话"
             title="导出整段会话（只含本机可解密的明文）"
             aria-haspopup="menu"
             aria-expanded={exportOpen}
-            className="rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)]"
+            icon={<DownloadIcon width={18} height={18} />}
             onClick={() => setExportOpen((v) => !v)}
-          >
-            <DownloadIcon width={18} height={18} />
-          </button>
+          />
           {exportOpen && (
             <div
               role="menu"
               aria-label="导出会话"
-              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 ui-overlay-shadow"
+              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-line-soft bg-surface p-1 ui-overlay-shadow"
             >
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
                 onClick={() => exportConversation("md")}
               >
                 导出 Markdown
@@ -2983,12 +3136,12 @@ export function ChatPage({
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
                 onClick={() => exportConversation("json")}
               >
                 导出 JSON
               </button>
-              <p className="px-2 pb-1 pt-0.5 text-ui-xs leading-4 text-muted">
+              <p className="px-2 pb-1 pt-0.5 ui-body-sm text-muted">
                 仅包含本机可解密的明文
               </p>
             </div>
@@ -2998,13 +3151,13 @@ export function ChatPage({
       {connState === "closed" && (
         <div
           role="status"
-          className="border-b border-[var(--warn-line)] bg-[var(--warn-soft)] px-[var(--chat-gutter)] py-1.5 text-ui-xs text-[var(--warn)]"
+          className="border-b border-warn-line bg-warn-soft px-chat-gutter py-1.5 ui-body-sm text-warn"
         >
           连接已断开，正在自动重连…消息会排队，恢复后自动补发
         </div>
       )}
       {searchOpen && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-[var(--subtle-2)] px-[var(--chat-gutter)] py-2">
+        <div className="flex items-center gap-2 border-b border-line-soft bg-subtle-2 px-chat-gutter py-2">
           <SearchIcon width={14} height={14} className="shrink-0 text-muted" />
           <input
             autoFocus
@@ -3026,97 +3179,81 @@ export function ChatPage({
             placeholder="在本会话中搜索…"
             className="min-w-0 flex-1 bg-transparent text-ui-sm outline-hidden placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
           />
-          <span className="shrink-0 text-ui-xs text-muted">
+          <span role="status" aria-live="polite" className="shrink-0 text-ui-xs text-muted">
             {searchQuery.trim()
               ? searchHits.length
                 ? `${(searchIndex >= 0 ? searchIndex : 0) + 1}/${searchHits.length}`
                 : "无匹配"
               : ""}
           </span>
-          <button
-            type="button"
-            aria-label="上一个匹配"
+          <IconButton
+            label="上一个匹配"
             disabled={searchHits.length === 0}
+            icon={<ChevronIcon width={14} height={14} className="-rotate-90" aria-hidden="true" />}
             onClick={() => goSearch(-1)}
-            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
-          >
-            <ChevronIcon width={14} height={14} className="-rotate-90" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="下一个匹配"
+          />
+          <IconButton
+            label="下一个匹配"
             disabled={searchHits.length === 0}
+            icon={<ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />}
             onClick={() => goSearch(1)}
-            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)] disabled:text-muted"
-          >
-            <ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="关闭搜索"
+          />
+          <IconButton
+            label="关闭搜索"
+            icon={<XIcon width={14} height={14} aria-hidden="true" />}
             onClick={closeSearch}
-            className="rounded-sm px-1.5 py-0.5 text-muted hover:bg-[var(--subtle-3)]"
-          >
-            <XIcon width={14} height={14} aria-hidden="true" />
-          </button>
+          />
         </div>
       )}
       {/* 多选导出工具条：与搜索条同层（header 下方一条），不常驻挤压消息区。 */}
       {selectMode && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-[var(--subtle-2)] px-[var(--chat-gutter)] py-2 text-ui-sm">
+        <div className="flex items-center gap-2 border-b border-line-soft bg-subtle-2 px-chat-gutter py-2 text-ui-sm">
           <span className="shrink-0 text-muted">已选 {selectedIds.length} 条</span>
-          <button
-            type="button"
-            onClick={selectAllVisible}
-            className="shrink-0 rounded-lg border border-line bg-[var(--surface)] px-2 py-1 hover:bg-[var(--subtle-3)]"
-          >
+          <Button size="sm" variant="ghost" className="shrink-0" onClick={selectAllVisible}>
             全选
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds([])}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0"
             disabled={selectedIds.length === 0}
-            className="shrink-0 rounded-lg border border-line bg-[var(--surface)] px-2 py-1 hover:bg-[var(--subtle-3)] disabled:opacity-40"
+            onClick={() => setSelectedIds([])}
           >
             清空
-          </button>
+          </Button>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => exportConversation("md", selectedIds)}
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={selectedIds.length === 0}
-              className="rounded-lg border border-line bg-[var(--surface)] px-2.5 py-1 hover:bg-[var(--subtle-3)] disabled:opacity-40"
+              onClick={() => exportConversation("md", selectedIds)}
             >
               导出所选 Markdown
-            </button>
-            <button
-              type="button"
-              onClick={() => exportConversation("json", selectedIds)}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={selectedIds.length === 0}
-              className="rounded-lg border border-line bg-[var(--surface)] px-2.5 py-1 hover:bg-[var(--subtle-3)] disabled:opacity-40"
+              onClick={() => exportConversation("json", selectedIds)}
             >
               导出所选 JSON
-            </button>
-            <button
-              type="button"
-              onClick={exitSelectMode}
-              className="rounded-lg px-2 py-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-            >
+            </Button>
+            <Button size="sm" variant="ghost" onClick={exitSelectMode}>
               退出选择
-            </button>
+            </Button>
           </div>
         </div>
       )}
-      {/* 消息区：px-8 给头像列留出外边距（头像不贴屏幕边），py-5 让首行不顶边。
-          上窄下宽的 py 差是刻意留的「呼吸位」——完全等距时第一条消息会顶着 header 底线，
-          视觉上像被切掉一截。 */}
+      {/* 消息区：左右用 --chat-gutter（24px，窄屏 12px）与 composer 同一条竖线——
+          d.126-C 删掉头像列后这里不再有额外内边距。py 上 24 / 下 20 的差是刻意留的
+          「呼吸位」——完全等距时第一条消息会顶着 header 底线，视觉上像被切掉一截。 */}
       <div
         ref={scrollRef}
         data-testid="message-list"
         onScroll={onMessageScroll}
         onDragOver={onMessagesDragOver}
         onDrop={onMessagesDrop}
-        className="flex-1 overflow-y-auto px-[var(--chat-gutter)] pb-5 pt-6"
+        className="flex-1 overflow-y-auto px-chat-gutter pb-5 pt-6"
       >
         {/* d.62：消息列 880 居中——宽屏下中文长行的可读宽度约 80 字；滚动容器保持在外层。 */}
         <div className="mx-auto w-full max-w-[880px]">
@@ -3145,7 +3282,7 @@ export function ChatPage({
             >
               {[0, 1, 2].map((i) => (
                 <div key={i} className={`flex ${i % 2 === 1 ? "justify-end" : ""}`}>
-                  <div className="h-9 w-[46%] animate-pulse rounded-xl bg-[var(--subtle-3)]" />
+                  <div className="h-9 w-[46%] animate-pulse rounded-xl bg-subtle-3" />
                 </div>
               ))}
             </div>
@@ -3196,7 +3333,7 @@ export function ChatPage({
                 title="本机没有这条消息对应的解密密钥：可能来自其他设备、本机缓存被清理过，或这条消息在生成时被中断。"
               >
                 本机解不开这条消息
-                <span className="ml-1 text-ui-xs">
+                <span className="ml-1">
                   （可能来自其他设备、本机缓存被清理，或消息在生成时被中断）
                 </span>
               </div>
@@ -3226,7 +3363,7 @@ export function ChatPage({
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
               {showSeparator ? (
                 <div className="mb-3 flex justify-center">
-                  <span className="rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
+                  <span className="rounded-full bg-subtle-3 px-2.5 py-0.5 text-ui-xs text-muted">
                     {formatDayClock(m.createdAt)}
                   </span>
                 </div>
@@ -3238,7 +3375,7 @@ export function ChatPage({
                 id={`msg-${m.id}`}
                 className={`group relative mb-5 flex items-start gap-2${
                   searchOpen && activeSearchId === m.id
-                    ? " rounded-lg bg-[var(--warn-soft)] ring-1 ring-[var(--warn-line)]"
+                    ? " rounded-lg bg-warn-soft ring-1 ring-warn-line"
                     : ""
                 }`}
               >
@@ -3253,7 +3390,7 @@ export function ChatPage({
                       aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
                       checked={selectedIds.includes(m.id)}
                       onChange={() => toggleSelected(m.id)}
-                      className="h-3.5 w-3.5 cursor-pointer accent-[var(--ink)]"
+                      className="h-3.5 w-3.5 cursor-pointer accent-ink"
                     />
                   </label>
                 )}
@@ -3265,7 +3402,7 @@ export function ChatPage({
                 >
                   {mine ? (
                     // 用户输入：一块提示（浅底 + 细边框），不占头像列、不挤右侧气泡
-                    <div className="rounded-lg border border-line bg-[var(--subtle-2)] px-3.5 py-2.5">
+                    <div className="rounded-lg border border-line bg-subtle-2 px-3.5 py-2.5">
                       <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
                         <span>我</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
@@ -3293,12 +3430,14 @@ export function ChatPage({
                     </div>
                   )}
                 </div>
-                {/* A5 整条复制：有文本才出（附件只有元信息，复制结果没意义） */}
+                {/* A5 整条复制：有文本才出（附件只有元信息，复制结果没意义）。
+                    用 opacity 而不是 hidden：hidden 会把按钮移出键盘 Tab 序，键盘用户永远复制不了；
+                    放在消息体右侧（self-end）而不是 absolute -top-2，避免 hover 时压住署名行的时间戳。 */}
                 {(m.payload.text?.length ?? 0) > 0 && (
                   <button
                     type="button"
                     aria-label="复制消息"
-                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-[var(--surface)] px-1.5 py-0.5 text-ui-xs text-muted hover:text-ink group-hover:block group-focus-within:block"
+                    className="ui-hit pointer-events-none shrink-0 self-end rounded-sm border border-line bg-surface px-1.5 py-0.5 text-ui-xs text-muted opacity-0 transition-opacity duration-fast hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
@@ -3330,7 +3469,7 @@ export function ChatPage({
         <button
           type="button"
           aria-label="滚动到最新消息"
-          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-[var(--surface)] px-3 py-1 text-ui-sm text-[var(--body)] ui-overlay-shadow hover:bg-[var(--subtle-2)]"
+          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-ui-sm text-body ui-overlay-shadow hover:bg-subtle-2"
           onClick={() => scrollToLatest()}
         >
           <ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />
@@ -3344,7 +3483,7 @@ export function ChatPage({
         {!subtleOk && (
           <p
             role="alert"
-            className="mx-6 mt-2 border-l-2 border-[var(--danger)] bg-[var(--danger-soft)] px-2 py-1.5 text-ui-sm text-[var(--danger)]"
+            className="mx-6 mt-2 border-l-2 border-danger bg-danger-soft px-2 py-1.5 text-ui-sm text-danger"
           >
             {NO_E2E_NOTICE}
           </p>
@@ -3364,127 +3503,151 @@ export function ChatPage({
             />
           </div>
         )}
-        {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
+        {/* 提示位（B 轨 E3）：录音/上传占住这一位（互斥），其余提示按列表渲染，
+            最多 2 行 +「还有 N 条」——此前四五条各占一行，能把输入区顶出可视区。 */}
         {recording ? (
-          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm">
+          <div className="flex items-center gap-3 px-chat-gutter pt-2 ui-body-sm">
             <span role="status">录音中…（最长 60 秒）</span>
-            <button
-              type="button"
-              aria-label="停止录音"
-              className="rounded-sm border border-line px-2 py-0.5 hover:bg-[var(--subtle-3)]"
-              onClick={stopRecording}
-            >
+            <Button size="sm" variant="ghost" aria-label="停止录音" onClick={stopRecording}>
               停止
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted"
               aria-label="取消录音"
-              className="rounded-sm border border-line px-2 py-0.5 text-muted hover:bg-[var(--subtle-3)]"
               onClick={cancelRecording}
             >
               取消
-            </button>
+            </Button>
           </div>
         ) : uploading ? (
           // A8：上传进行中占住提示位，四个入口已禁用
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-muted">
+          <p role="status" className="px-chat-gutter pt-2 ui-body-sm text-muted">
             上传中…（≤6MB）
           </p>
-        ) : sendNotice ? (
-          // A9：error 红色 role=alert（纯文本发送失败带「重试」）；info 3 秒自动消失
-          sendNotice.kind === "error" ? (
-            <div
-              role="alert"
-              className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--danger)]"
-            >
-              <span>{sendNotice.text}</span>
-              {sendNotice.retry ? (
-                <button
-                  type="button"
-                  className="shrink-0 rounded-sm border border-[var(--warn-line)] px-2 py-0.5 hover:bg-[var(--danger-soft)]"
-                  onClick={() => sendNotice.retry?.()}
+        ) : visibleNotices.length > 0 ? (
+          <div className="px-chat-gutter pt-2">
+            <div className="flex flex-col gap-1">
+              {visibleNotices.map((n) => (
+                <div
+                  key={n.key}
+                  role={n.tone === "error" ? "alert" : "status"}
+                  className={`flex items-center gap-2 border-l-2 pl-2 ui-body-sm ${
+                    n.tone === "error"
+                      ? "border-danger text-danger"
+                      : n.tone === "warn"
+                        ? "border-warn text-warn"
+                        : "border-line-soft text-muted"
+                  }`}
                 >
-                  重试
-                </button>
-              ) : null}
+                  {n.tone === "error" ? (
+                    <AlertIcon width={14} height={14} className="shrink-0" aria-hidden="true" />
+                  ) : null}
+                  <span className="min-w-0 flex-1 break-words">{n.text}</span>
+                  {n.retry ? (
+                    <Button size="sm" variant="ghost" className="shrink-0" onClick={n.retry}>
+                      重试
+                    </Button>
+                  ) : null}
+                  {n.action ? (
+                    <Button size="sm" variant="ghost" className="shrink-0" onClick={n.action.onClick}>
+                      {n.action.label}
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          ) : (
-            <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
-              {sendNotice.text}
-            </p>
-          )
-        ) : null}
-        {/* 分叉降级（d.56）：来源日志重建不出前缀，本次按普通重跑执行——整轮运行期间都显示 */}
-        {forkNotice && (
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
-            {forkNotice}
-          </p>
-        )}
-        {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
-        {toolsNotice && (
-          <p role="status" className="px-[var(--chat-gutter)] pt-2 text-ui-sm text-[var(--warn)]">
-            {toolsNotice}
-          </p>
-        )}
-        {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
-        {activeLocal.length > 0 && (
-          <div className="flex items-center gap-3 px-[var(--chat-gutter)] pt-2 text-ui-sm text-muted">
-            <span>生成中：{activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}</span>
-            <button
-              type="button"
-              className="rounded-sm border border-line px-2 py-0.5 hover:bg-[var(--subtle-3)]"
-              onClick={abortRuns}
-            >
-              {/* 与底部提示行「Esc 停止生成」用同一个词：按钮叫「中断」时用户对不上号 */}
-              停止生成
-            </button>
+            {notices.length > NOTICE_VISIBLE_ROWS ? (
+              <button
+                type="button"
+                className={`mt-1 ui-caption text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
+                onClick={() => setNoticeExpanded((v) => !v)}
+              >
+                {noticeExpanded ? "收起提示" : `还有 ${hiddenNoticeCount} 条提示`}
+              </button>
+            ) : null}
           </div>
-        )}
+        ) : null}
         {/* 工具行：表情 / 图片 / 文件（左上角） */}
-        <div className="flex items-center gap-1 px-[var(--chat-gutter)] pt-2">
-          <button
-            type="button"
-            aria-label="表情"
-            className={`rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)]${emojiOpen ? " bg-[var(--subtle-3)]" : ""}`}
+        <div className="flex items-center gap-1 px-chat-gutter pt-2">
+          <IconButton
+            label="表情"
+            className={emojiOpen ? "bg-subtle-3" : ""}
+            icon={<SmileIcon width={16} height={16} />}
             onClick={() => setEmojiOpen((v) => !v)}
-          >
-            <SmileIcon width={16} height={16} />
-          </button>
-          <button
-            type="button"
-            aria-label="图片"
+          />
+          <IconButton
+            label="图片"
             title="发送图片（≤6MB）"
             disabled={uploading}
-            className="rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)] disabled:cursor-not-allowed disabled:opacity-40"
+            icon={<ImageIcon width={16} height={16} />}
             onClick={() => pickFile("image/*")}
-          >
-            <ImageIcon width={16} height={16} />
-          </button>
-          <button
-            type="button"
-            aria-label="文件"
+          />
+          <IconButton
+            label="文件"
             title="发送文件（≤6MB）"
             disabled={uploading}
-            className="rounded-lg p-1.5 text-muted hover:bg-[var(--subtle-3)] disabled:cursor-not-allowed disabled:opacity-40"
+            icon={<FileIcon width={16} height={16} />}
             onClick={() => pickFile(undefined)}
-          >
-            <FileIcon width={16} height={16} />
-          </button>
+          />
         </div>
+        {/* 待发附件（E1）：选中后先堆在这里，可逐个移除；发送时随正文一起提交 */}
+        {pendingFiles.length > 0 ? (
+          <ul
+            aria-label="待发附件"
+            className="flex flex-wrap items-center gap-2 px-chat-gutter pt-2"
+          >
+            {pendingFiles.map((p) => (
+              <li
+                key={p.key}
+                className="flex max-w-full items-center gap-2 rounded-lg border border-line bg-subtle-2 py-1 pl-2 pr-1"
+              >
+                <FileIcon width={14} height={14} className="shrink-0 text-muted" aria-hidden="true" />
+                <span
+                  className="min-w-0 max-w-[220px] truncate text-ui-sm text-ink"
+                  title={p.file.name}
+                >
+                  {p.file.name}
+                </span>
+                <span className="shrink-0 text-ui-xs tabular-nums text-muted">
+                  {formatBytes(p.file.size)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`移除附件 ${p.file.name}`}
+                  title="移除附件"
+                  disabled={uploading}
+                  className={`ui-hit flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING_TIGHT}`}
+                  onClick={() => removePendingFile(p.key)}
+                >
+                  <XIcon width={12} height={12} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {/* 数量变化读屏播报：列表本身是 <ul>，焦点不动时读屏不会主动念。
+            只在有附件时渲染——空 role=status 会和「连接断开」等提示抢同一个角色查询。 */}
+        {pendingFiles.length > 0 ? (
+          <p role="status" className="sr-only">
+            待发附件 {pendingFiles.length} 个
+          </p>
+        ) : null}
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div
           role="separator"
           aria-label="调整输入栏高度"
           aria-orientation="horizontal"
-          className="group -mt-1 flex h-2 cursor-row-resize items-center justify-center"
+          className="group -mt-1.5 flex h-3 cursor-row-resize items-center justify-center"
           onPointerDown={onComposerDragStart}
           onPointerMove={onComposerDragMove}
           onPointerUp={onComposerDragEnd}
           onPointerCancel={onComposerDragEnd}
         >
-          <span className="h-[2px] w-10 rounded-full bg-[var(--line-soft)] transition-colors group-hover:bg-[var(--line-strong)]" />
+          <span className="h-[2px] w-10 rounded-full bg-line-soft transition-colors group-hover:bg-line-strong" />
         </div>
-        <div className="relative flex items-end gap-2 px-[var(--chat-gutter)] pb-3" style={{ height: composerHeight }}>
+        <div className="relative flex items-end gap-2 px-chat-gutter pb-3" style={{ height: composerHeight }}>
           {emojiOpen && (
             <EmojiPicker
               onPick={(e) => {
@@ -3511,10 +3674,10 @@ export function ChatPage({
           />
           {/* 语音双选项浮层：转文字（原 STT）/ 录音（MediaRecorder）；无该 API 时录音项禁用 */}
           {voiceMenu && (
-            <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-line-soft bg-[var(--surface)] p-1 ui-overlay-shadow">
+            <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-line-soft bg-surface p-1 ui-overlay-shadow">
               <button
                 type="button"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)]"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
                 onClick={() => {
                   setVoiceMenu(false);
                   toggleVoice();
@@ -3525,7 +3688,7 @@ export function ChatPage({
               <button
                 type="button"
                 disabled={!hasRecorder}
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-[var(--subtle-2)] disabled:text-muted disabled:hover:bg-transparent"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2 disabled:text-muted disabled:hover:bg-transparent"
                 onClick={() => {
                   setVoiceMenu(false);
                   void startRecording();
@@ -3534,7 +3697,7 @@ export function ChatPage({
                 语音消息（录音）
               </button>
               {!hasRecorder && (
-                <p className="px-2 pb-1 pt-0.5 text-ui-xs text-muted">当前环境不支持录音</p>
+                <p className="px-2 pb-1 pt-0.5 ui-body-sm text-muted">当前环境不支持录音</p>
               )}
             </div>
           )}
@@ -3543,18 +3706,27 @@ export function ChatPage({
             aria-label="语音输入"
             title="语音输入"
             disabled={uploading}
-            className={`rounded-lg border px-2.5 disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex h-8 items-center rounded-lg border px-2.5 disabled:cursor-not-allowed disabled:opacity-40 ${
               listening
-                ? "border-ink bg-ink text-white"
-                : "border-line text-muted hover:bg-[var(--subtle-3)]"
+                ? "border-ink bg-ink"
+                : "border-line text-muted hover:bg-subtle-3"
             }`}
             onClick={() => setVoiceMenu((v) => !v)}
           >
             <MicIcon width={16} height={16} />
           </button>
-          <button
+          <Button
             type="submit"
-            disabled={!draft.trim() || uploading || Boolean(unboundAgent) || activeLocal.length > 0}
+            variant="primary"
+            size="md"
+            disabled={
+              (!draft.trim() && pendingFiles.length === 0) ||
+              uploading ||
+              // 未绑定模型只拦「要正文回答」的发送：纯附件消息照旧进历史，
+              // 这条路径在 E1 之前就是通的（sendFile 从不查绑定），别在按钮上把它关掉。
+              (Boolean(unboundAgent) && draft.trim().length > 0) ||
+              activeLocal.length > 0
+            }
             title={
               activeLocal.length > 0
                 ? "正在生成中：先点停止，或等这一轮结束再发"
@@ -3562,19 +3734,14 @@ export function ChatPage({
                   ? unboundNoticeText(unboundAgent.name)
                   : "发送"
             }
-            className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             发送
-          </button>
+          </Button>
         </div>
-        {/* 底部说明 + 快捷键提示（UX-A）：常驻但弱化，不占提示位 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[var(--chat-gutter)] pb-2">
-          {conv && (
-            <span className="text-ui-xs text-muted">
-              与 <span className="font-medium text-[var(--body)]">{conv.agent.name}</span>{" "}
-              的对话 · 发送后自动交给智能体
-            </span>
-          )}
+        {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。
+            「与 X 的对话 · 发送后自动交给智能体」已删——页头（AssistantPage 状态条）
+            与对话标题已经说过同一件事，这里再写一遍是纯占位（B 轨 E6）。 */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-chat-gutter pb-2">
           <span className="ml-auto">
             <ComposerHints streaming={activeLocal.length > 0} />
           </span>

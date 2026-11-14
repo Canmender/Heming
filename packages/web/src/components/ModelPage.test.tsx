@@ -244,11 +244,16 @@ describe("ModelPage · 添加来源", () => {
     );
   });
 
-  it("已添加来源可删除", async () => {
+  it("已添加来源可删除：先确认再执行（不可恢复）", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("mock")).toBeInTheDocument();
+    // 审计 F4：行内删除不再是「点一下就删」的 danger 按钮，先出确认框。
+    fireEvent.click(screen.getByRole("button", { name: "删除来源 mock" }));
+    expect(calls).not.toContainEqual(["provider", "rm", "mock"]);
+    const dialog = screen.getByRole("dialog", { name: "删除来源？" });
+    expect(dialog.textContent).toContain("不可恢复");
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(calls).toContainEqual(["provider", "rm", "mock"]));
   });

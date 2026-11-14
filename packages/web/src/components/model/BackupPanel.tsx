@@ -111,7 +111,7 @@ export function BackupPanel() {
       {loading ? (
         <div className="space-y-2" aria-label="读取备份">
           {[0, 1].map((index) => (
-            <div key={index} className="h-12 animate-pulse rounded-xl bg-[var(--subtle-3)]" />
+            <div key={index} className="h-12 animate-pulse rounded-xl bg-subtle-3" />
           ))}
         </div>
       ) : files.length === 0 ? (
@@ -121,7 +121,7 @@ export function BackupPanel() {
           {files.map((file) => (
             <li key={file.path} className="flex flex-wrap items-center gap-2 py-2">
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-ui-sm font-bold">{file.name}</span>
+                <span className="block truncate text-ui-sm font-semibold">{file.name}</span>
                 <span className="block ui-caption">
                   {new Date(file.mtime).toLocaleString("zh-CN", { hour12: false })} ·{" "}
                   {formatSize(file.size)}
@@ -145,7 +145,7 @@ export function BackupPanel() {
           <div className="flex items-start gap-2">
             <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
             <div className="min-w-0">
-              <div className="text-ui-sm font-bold">确认恢复这个备份？</div>
+              <div className="text-ui-sm font-semibold">确认恢复这个备份？</div>
               <p className="mt-1 ui-caption break-all">{confirmRestore}</p>
               <p className="mt-1 ui-caption">恢复会覆盖当前的来源、账号与设置。系统会先保留一份自动备份。</p>
               <div className="mt-2 flex gap-2">

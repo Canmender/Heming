@@ -19,8 +19,8 @@ export const FOCUS_STYLE_ID = "heming-focus-visible";
 /** 焦点环的 CSS（单独导出便于测试与复用）。 */
 export const FOCUS_CSS = `
 :focus-visible {
-  outline: 2px solid var(--heming-accent, #1a1a1a);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring-color, var(--heming-accent, #1a1a1a));
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 /* 系统高对比模式：交还给系统色，别用自定义黑盖掉可见性 */
 @media (forced-colors: active) {

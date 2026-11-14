@@ -96,7 +96,7 @@ const chipCls = "ui-chip";
 const badgeCls = "ui-chip";
 const inputSmCls = "ui-input";
 const hintCls = "ui-caption";
-const errorCls = "ui-body-sm text-[var(--danger)]";
+const errorCls = "ui-body-sm text-danger";
 const okCls = "ui-body-sm text-muted";
 /** 技能内容的输入框：与「导入 SKILL.md」的 textarea 同款（既有样式，不新增档位）。 */
 const contentTextareaCls =
@@ -240,7 +240,7 @@ function SkillCreateDialog({
       }
     >
       <form id="skill-create-form" onSubmit={submit}>
-        <div className="mb-3 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2.5">
+        <div className="mb-3 rounded-lg border border-line-soft bg-subtle-2 p-2.5">
           <div className={hintCls}>从模板开始（可选）</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="技能模板">
             {SKILL_TEMPLATES.map((template) => (
@@ -441,14 +441,14 @@ function SkillDetailDrawer({
         type="button"
         aria-label="关闭技能详情"
         onClick={onClose}
-        className="absolute inset-0 bg-[var(--scrim)]"
+        className="absolute inset-0 bg-scrim"
       />
       <aside
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`技能详情 ${skill.name}`}
-        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-[var(--surface)] ui-overlay-shadow"
+        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-surface ui-overlay-shadow"
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
@@ -472,23 +472,23 @@ function SkillDetailDrawer({
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-ui-sm font-bold text-muted">描述</div>
-          <p className="mt-1 break-words text-ui-sm text-[var(--body)]">
+          <div className="text-ui-sm font-semibold text-muted">描述</div>
+          <p className="mt-1 break-words text-ui-sm text-body">
             {skill.description || "暂无描述"}
           </p>
 
-          <div className="mt-3 text-ui-sm font-bold text-muted">触发词</div>
+          <div className="mt-3 text-ui-sm font-semibold text-muted">触发词</div>
           <div className="mt-1">
             <TagList items={skill.triggers} empty="暂无触发词" />
           </div>
 
-          <div className="mt-3 text-ui-sm font-bold text-muted">标签</div>
+          <div className="mt-3 text-ui-sm font-semibold text-muted">标签</div>
           <div className="mt-1">
             <TagList items={skill.tags} empty="暂无标签" />
           </div>
 
-          <div className="mt-3 text-ui-sm font-bold text-muted">指令</div>
-          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[var(--subtle-2)] p-2 font-sans text-ui-xs leading-5 text-[var(--body)]">
+          <div className="mt-3 text-ui-sm font-semibold text-muted">指令</div>
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-subtle-2 p-2 font-sans text-ui-xs leading-5 text-body">
             {skill.instructions || "暂无指令"}
           </pre>
         </div>
@@ -503,7 +503,7 @@ function SkillDetailDrawer({
               onClick={onDelete}
               size="sm"
               variant="ghost"
-              className="ml-auto text-[var(--danger)]"
+              className="ml-auto text-danger"
             >
               删除
             </Button>
@@ -764,7 +764,7 @@ export function SkillsView({
         return (
           <section key={group.key} className={`${cardCls} mt-3`} role="region" aria-label={group.title}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-ui-sm font-bold text-muted">{group.title}</span>
+              <span className="text-ui-sm font-semibold text-muted">{group.title}</span>
               <span className={badgeCls}>{items.length}</span>
               <button
                 type="button"
@@ -775,7 +775,7 @@ export function SkillsView({
                   setMsg(null);
                   setAddFor(group.key);
                 }}
-                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-[var(--subtle-3)] disabled:opacity-40"
+                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-subtle-3 disabled:opacity-40"
               >
                 <PlusIcon width={12} height={12} />
               </button>
@@ -827,11 +827,11 @@ export function SkillsView({
                     key={skill.id}
                     role="group"
                     aria-label={`技能卡 ${skill.name}`}
-                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-fast hover:bg-[var(--subtle-2)]`}
+                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-fast hover:bg-subtle-2`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-ui-md font-bold">{skill.name}</div>
+                        <div className="truncate text-ui-md font-semibold">{skill.name}</div>
                         <div className={`mt-0.5 ${hintCls}`}>
                           {skill.source === "builtin" ? (
                             <SystemSourceChip systemName={systemName} />
@@ -890,7 +890,7 @@ export function SkillsView({
                           onClick={() => removeSkill(skill)}
                           size="sm"
                           variant="ghost"
-                          className="ml-auto text-[var(--danger)]"
+                          className="ml-auto text-danger"
                         >
                           删除
                         </Button>
@@ -1003,7 +1003,7 @@ export function SkillsView({
 
           <section className={`${cardCls} mt-3`}>
             <div className="flex items-center gap-2">
-              <span className="text-ui-sm font-bold text-muted">全部技能</span>
+              <span className="text-ui-sm font-semibold text-muted">全部技能</span>
               <span className={badgeCls}>{filtered.length}</span>
             </div>
 
@@ -1058,7 +1058,7 @@ export function SkillsView({
                             onChange={(next) => toggleEnabled(skill, next)}
                           />
                         </td>
-                        <td className="ui-numeric text-right text-[var(--body)]">
+                        <td className="ui-numeric text-right text-body">
                           {usages[skill.id]?.count ?? 0}
                         </td>
                         <td className="ui-caption">{formatAt(usages[skill.id]?.at)}</td>
@@ -1090,7 +1090,7 @@ export function SkillsView({
                                 type="button"
                                 aria-label={`池中删除 ${skill.name}`}
                                 onClick={() => removeSkill(skill)}
-                                size="sm" variant="ghost" className="text-[var(--danger)]"
+                                size="sm" variant="ghost" className="text-danger"
                               >
                                 删除
                               </Button>

@@ -282,7 +282,8 @@ export function HomePage() {
         {!workspaceReady && workspaceError && (
           <div role="alert" className="ui-alert ui-alert-danger flex flex-wrap items-center gap-2">
             <span className="min-w-0 flex-1">部分数据加载失败：{workspaceError}</span>
-            <Button type="button" size="sm" variant="ghost" onClick={retryWorkspace}>
+            {/* P2 可达性：`Button size="sm"` 高 28px，补 `.ui-hit` 撑到 32px（宽度已够） */}
+            <Button type="button" size="sm" variant="ghost" className="ui-hit" onClick={retryWorkspace}>
               重试
             </Button>
           </div>
@@ -306,7 +307,10 @@ export function HomePage() {
         aria-labelledby="home-status-heading"
         className="flex flex-col gap-3"
       >
-        <h2 id="home-status-heading" className="ui-micro px-1 font-bold">
+        {/* 区块标题（2026-11-14 审计 A-03）：此前用 `ui-micro`（11px）当 h2，
+            比正文 14px 还小，扫读时首页第二屏"没有标题"；改 `.ui-block-title`（16px/600），
+            与 22px 页标题保持 1.375 倍差，中间不再断档。 */}
+        <h2 id="home-status-heading" className="ui-block-title px-1">
           状态与动向
         </h2>
 
@@ -315,7 +319,7 @@ export function HomePage() {
             d.142：hint 只留「用户自己看不出来的东西」——待处理的未读构成、今日动向的失败原因；
             其余数字自解释（0 就是没有），「点开直接处理 / 本机运行 / 成员共享的任务与日程」
             这类复述句已删，让布局与数字自己说。 */}
-        <div data-testid="home-stats" className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
+        <div data-testid="home-stats" className="grid grid-cols-4 gap-3 max-[1199px]:grid-cols-2">
           <Stat
             label="待处理"
             value={pendingCount}
@@ -374,8 +378,8 @@ export function HomePage() {
         <span>服务：{cloud === "失败" ? "连接失败" : cloud}</span>
         {cloud === "失败" && (
           <>
-            <span className="text-muted">连不上本机服务，可能刚重启或网络中断</span>
-            <Button type="button" size="sm" variant="ghost" onClick={retryService}>
+            <span className="ui-body-sm text-muted">连不上本机服务，可能刚重启或网络中断</span>
+            <Button type="button" size="sm" variant="ghost" className="ui-hit" onClick={retryService}>
               重试
             </Button>
           </>
@@ -385,7 +389,9 @@ export function HomePage() {
           文件目录：{writeRootCount > 0 ? `已绑定 ${writeRootCount} 个` : "未绑定"}
         </span>
         <span> · </span>
-        <button type="button" className="ui-link" onClick={() => openSettings("about")}>
+        {/* P2 可达性：`.ui-link` 高 24px，低于 32px 最小命中区；`.ui-hit` 用伪元素把可点区
+            撑到 32×32，视觉不动（footer 是单行、左右间距 8px，不会吃掉相邻元素的点击）。 */}
+        <button type="button" className="ui-link ui-hit" onClick={() => openSettings("about")}>
           更新日志
         </button>
       </footer>

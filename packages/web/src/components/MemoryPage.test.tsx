@@ -279,7 +279,7 @@ describe("MemoryPage 短期记忆", () => {
     // 清空需二次确认：确认前不动数据
     expect(memory.working("c2")).toHaveLength(1);
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "清空短期记忆" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "清空短期记忆？" })).getByRole("button", {
         name: "清空",
       }),
     );
@@ -332,7 +332,7 @@ describe("MemoryPage 数据库记忆", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("保留天数需为 1–3650 之间的整数");
-    expect(alert.className).toContain("text-[var(--danger)]");
+    expect(alert.className).toContain("text-danger");
     expect(memory.getSettings().retentionDays).toBe(90);
   });
 
@@ -390,7 +390,7 @@ describe("MemoryPage 数据库记忆", () => {
     fireEvent.change(screen.getByLabelText("检索记忆"), { target: { value: "" } });
     fireEvent.click(within(semanticList()).getByRole("button", { name: "删除记忆 称呼" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "删除记忆" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "删除记忆？" })).getByRole("button", {
         name: "删除",
       }),
     );
@@ -401,7 +401,7 @@ describe("MemoryPage 数据库记忆", () => {
       within(episodicList()).getByRole("button", { name: /删除情景 用户：部署端口是多少/ }),
     );
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "删除情景记忆" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "删除情景记忆？" })).getByRole("button", {
         name: "删除",
       }),
     );
@@ -863,8 +863,8 @@ describe("MemoryPage 召回可观测性", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "清除记录" }));
-    const dialog = screen.getByRole("dialog", { name: "清除召回记录" });
-    expect(within(dialog).getByText(/清除全部 1 条召回记录？/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "清除召回记录？" });
+    expect(within(dialog).getByText(/清除全部 1 条召回记录/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
     expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
     expect(within(card).queryByText(/最近注入/)).not.toBeInTheDocument();
@@ -937,7 +937,7 @@ describe("MemoryPage 召回可观测性", () => {
     expect(logMap.has(USAGE_KEY)).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "清除记录" }));
-    const dialog = screen.getByRole("dialog", { name: "清除召回记录" });
+    const dialog = screen.getByRole("dialog", { name: "清除召回记录？" });
     expect(within(dialog).getByText(/个性化加权回到起点/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
     expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
@@ -959,7 +959,7 @@ describe("MemoryPage 召回可观测性", () => {
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "删除记忆 部署端口" }));
-    const dialog = screen.getByRole("dialog", { name: "删除记忆" });
+    const dialog = screen.getByRole("dialog", { name: "删除记忆？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
 
     const ledger = JSON.parse(logMap.get(USAGE_KEY) as string) as Record<string, unknown>;
@@ -1013,7 +1013,7 @@ describe("MemoryPage 召回可观测性", () => {
     expect(within(rows[0]).getByText(/累计注入 9 次 · 未被引用/)).toBeInTheDocument();
 
     fireEvent.click(within(rows[2]).getByRole("button", { name: /删除冷记忆 情景/ }));
-    const dialog = screen.getByRole("dialog", { name: "删除情景记忆" });
+    const dialog = screen.getByRole("dialog", { name: "删除情景记忆？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
 
     const after = JSON.parse(logMap.get(USAGE_KEY) as string) as Record<string, unknown>;

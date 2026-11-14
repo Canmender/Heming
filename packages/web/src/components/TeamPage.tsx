@@ -250,6 +250,20 @@ export function TeamPage() {
     if (view === "board") setTab("board");
   }, [pageView]);
 
+  // 命令面板的二级视图入口（d.142）：`{ kind: "focus-tab", data: { page: "team", tab } }`。
+  // 与上面的 pageView 分开：pageView 表达「进入哪个视图」，这条表达「面板点名了哪个 Tab」，
+  // 覆盖 workspace/feed/agenda/usage 四个没有 PageView 的页签。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-tab") return;
+    const { page, tab } = paletteIntent.data ?? {};
+    if (page !== "team" || !tab) return;
+    if (!(TEAM_TABS as readonly string[]).includes(tab)) return;
+    setTab(tab as TeamTab);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent, setTab]);
+
   const tasksOn = share.tasks;
   const agendaOn = share.agenda;
 
@@ -556,16 +570,17 @@ export function TeamPage() {
       }
       headerExtra={
         tab === "workspace" ? null : (
-        <div className="bg-[var(--subtle)] px-6 py-2">
-          {/* d.138：原来一进来就是一句 40 多字的合规说明 + 三个复选框挤在同一行，
-              任务被说明压住。改成「标题 + 开关」在前、说明降为一行注释。 */}
+        <div className="bg-subtle px-6 py-2 max-[1199px]:px-4">
+          {/* 审计 F3：原来是「三句同义说明 + 成员说明 + 状态 + 错误」最多五行 11px 小字，
+              把页头压成注释堆。现在是一行操作 + 一句 13px 说明（.ui-body-sm），
+              共享范围与撤回语义合并成一句，不再按分支重复三遍。 */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption font-medium text-ink">共享给团队</span>
             <div className="flex items-center gap-3" role="group" aria-label="共享内容">
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[var(--ink)]"
+                  className="h-3.5 w-3.5 accent-ink"
                   checked={share.tasks}
                   onChange={(e) => (e.target.checked ? updateShare({ tasks: true }) : turnOffShare("tasks"))}
                 />
@@ -574,7 +589,7 @@ export function TeamPage() {
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[var(--ink)]"
+                  className="h-3.5 w-3.5 accent-ink"
                   checked={share.agenda}
                   onChange={(e) => (e.target.checked ? updateShare({ agenda: true }) : turnOffShare("agenda"))}
                 />
@@ -583,7 +598,7 @@ export function TeamPage() {
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[var(--ink)]"
+                  className="h-3.5 w-3.5 accent-ink"
                   checked={share.usage}
                   onChange={(e) => (e.target.checked ? updateShare({ usage: true }) : turnOffShare("usage"))}
                 />
@@ -613,33 +628,19 @@ export function TeamPage() {
               清除共享记录
             </Button>
           </div>
-          {shareCount > 0 ? (
-            <p className="mt-1 ui-micro">
-              只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容。
-            </p>
-          ) : shareNotice ? (
-            // 刚关掉最后一项：此时「什么都没共享」与「关≠撤回」两句都成立，
-            // 先说清后者——用户以为关掉就把已上传的删了，才是真正的误解点。
-            <p className="mt-1 ui-micro">
-              只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容。
-            </p>
-          ) : (
-            <p className="mt-1 ui-micro">
-              只上报标题与状态摘要，不含对话、提示词与工具参数。当前未共享任何内容：团队看不到你的任务、日程或用量。
-            </p>
-          )}
+          {/* 一句说清「上报什么 / 关掉不等于撤回」，空团队时再补一句名册来源。 */}
+          <p className="mt-1 ui-body-sm text-muted">
+            只上报标题与状态摘要，不含对话与工具参数；关闭只停止上报，不撤回已上传的内容。
+            {shareCount === 0 ? " 当前未共享任何内容，团队看不到你的任务、日程或用量。" : null}
+            {members.length <= 1 ? " 团队是全站名册，新同事账号由管理员在服务端创建，登录后自动出现。" : null}
+          </p>
           {shareNotice && (
-            <p role="status" className="mt-1 ui-micro text-[var(--warn)]">
+            <p role="status" className="mt-1 ui-body-sm text-warn">
               {shareNotice}
             </p>
           )}
-          {members.length <= 1 && (
-            <p className="mt-1 ui-micro">
-              团队是全站名册；新同事账号由管理员在服务端创建，登录后自动出现。
-            </p>
-          )}
           {syncError && (
-            <p role="alert" className="mt-1 ui-micro text-[var(--danger)]">
+            <p role="alert" className="mt-1 ui-body-sm text-danger">
               共享同步失败：{syncError}
             </p>
           )}
@@ -660,11 +661,11 @@ export function TeamPage() {
                 aria-label="搜索团队成员"
                 className={`ui-input ${FOCUS_RING}`}
               />
-              <div className="mt-1.5 flex items-center justify-between text-ui-xs">
+              <div className="mt-2 flex items-center justify-between ui-micro">
                 <label className="flex items-center gap-1 text-muted">
                   <input
                     type="checkbox"
-                    className="h-3.5 w-3.5 accent-[var(--ink)]"
+                    className="h-3.5 w-3.5 accent-ink"
                     checked={onlineOnly}
                     onChange={(e) => setOnlineOnly(e.target.checked)}
                   />
@@ -673,7 +674,7 @@ export function TeamPage() {
                 {selectedId && (
                   <button
                     type="button"
-                    className="text-muted underline-offset-2 hover:underline"
+                    className={`-my-1 inline-flex h-8 items-center rounded-md px-1.5 text-muted hover:text-ink ${FOCUS_RING}`}
                     onClick={() => setSelectedId(null)}
                   >
                     查看全部动向
@@ -699,9 +700,18 @@ export function TeamPage() {
                 errorCompact
               >
                 {filteredMembers.length === 0 ? (
-                  <p className="p-2 ui-caption">
-                    {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
-                  </p>
+                  // 审计 F2：名册空态原来只有一句「还没有其他成员。」，既没有形状也没有下一步。
+                  <EmptyState
+                    compact
+                    align="start"
+                    className="mx-1.5"
+                    title={members.length === 0 ? "还没有其他成员" : "没有符合条件的成员"}
+                    desc={
+                      members.length === 0
+                        ? "团队是全站名册，新同事账号由管理员在服务端创建，登录后自动出现。"
+                        : "换个关键词，或关掉「仅看在线」。"
+                    }
+                  />
                 ) : (
                   filteredMembers.map((m) => {
                   const selected = m.user.id === selectedId;
@@ -710,14 +720,14 @@ export function TeamPage() {
                       key={m.user.id}
                       type="button"
                       onClick={() => setSelectedId(selected ? null : m.user.id)}
-                      className={`ui-list-row w-full text-left ${selected ? "bg-[var(--subtle-2)]" : ""}`}
+                      className={`ui-list-row w-full text-left ${selected ? "bg-subtle-2" : ""}`}
                     >
                       <span className="relative shrink-0">
                         <Avatar user={m.user} size={28} />
                         <span
                           aria-hidden="true"
-                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
-                            m.online ? "bg-[var(--success)]" : "bg-[var(--line-strong)]"
+                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface ${
+                            m.online ? "bg-success" : "bg-line-strong"
                           }`}
                         />
                       </span>
@@ -745,7 +755,7 @@ export function TeamPage() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           {tab !== "board" && tab !== "workspace" && selectedMember && (
-            <div className="border-b border-line-soft bg-[var(--surface)] px-6 py-2.5">
+            <div className="border-b border-line-soft bg-surface px-6 py-2.5">
               <div className="flex items-center gap-3">
                 <Avatar user={selectedMember.user} size={32} />
                 <div className="min-w-0">
@@ -791,7 +801,7 @@ export function TeamPage() {
                           <button
                             type="button"
                             onClick={() => focusActivityRow(a.id)}
-                            className="flex w-full items-baseline gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-[var(--subtle-2)]"
+                            className="flex w-full items-baseline gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-subtle-2"
                           >
                             <span className="shrink-0 ui-chip">{KIND_LABEL[a.kind]}</span>
                             <span className="min-w-0 flex-1 truncate text-ui-sm">{a.title}</span>
@@ -882,8 +892,12 @@ export function TeamPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {/* 动向列表要有一个真标题：页签只是导航，读屏与审计门禁认的是 h2。 */}
+            <h2 className="mb-2 ui-section-title">
+              {selectedMember ? `${selectedMember.user.displayName} 的动向` : "团队动向"}
+            </h2>
             {linkNotice && (
-              <p role="status" className="mb-2 rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-1.5 text-ui-xs leading-5 text-muted">
+              <p role="status" className="mb-2 rounded-lg border border-line-soft bg-subtle px-2.5 py-1.5 text-ui-xs leading-5 text-muted">
                 {linkNotice}
               </p>
             )}
@@ -919,7 +933,7 @@ export function TeamPage() {
                     key={a.id}
                     data-activity-id={a.id}
                     className={`ui-list-row items-start transition-colors ${
-                      highlightActivityId === a.id ? "bg-[var(--subtle-3)] ring-1 ring-[var(--line-strong)]" : ""
+                      highlightActivityId === a.id ? "bg-subtle-3 ring-1 ring-line-strong" : ""
                     }`}
                   >
                     {/* 行可点 = 选中该成员（与首页/看板一致）；button 保证键盘可达。 */}
@@ -978,7 +992,7 @@ export function TeamPage() {
 
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-              <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-ui-xs leading-5 text-muted">
+              <p className="rounded-lg border border-line-soft bg-subtle px-2.5 py-2 ui-body-sm text-muted">
                 团队日程只显示成员共享的日程标题与到期档位；不含日程正文与来源信息。
               </p>
               {!feedReady ? (
@@ -997,33 +1011,43 @@ export function TeamPage() {
                   errorClassName="mt-3"
                 />
               ) : agendaActivities.length === 0 ? (
-                <div className="py-10 text-center text-ui-sm leading-6 text-muted">
-                  {!infohubRunning ? (
-                    <>
-                      <p className="font-medium text-ink">还没有共享的日程</p>
-                      <p className="mt-1">
-                        连接「信息中枢」后才会出现（只含标题与到期时间）。
-                      </p>
+                // 审计 F2：这一处原来是手拼 py-10/居中/自定字号的第三个空态。
+                <EmptyState
+                  className="mt-3"
+                  title={
+                    !infohubRunning
+                      ? "还没有共享的日程"
+                      : !share.agenda
+                        ? "你还没有开启「日程摘要」共享"
+                        : "还没有临期日程"
+                  }
+                  desc={
+                    !infohubRunning
+                      ? "连接「信息中枢」后才会出现（只含标题与到期时间）。信息中枢只在本机运行，不会自动拉起。"
+                      : !share.agenda
+                        ? "开启后，你的日程摘要（标题 + 到期时间）会出现在团队日程里。"
+                        : "信息中枢同步出临期日程后会自动出现。"
+                  }
+                  actions={
+                    !infohubRunning ? (
                       <Button
                         type="button"
-                        size="sm" variant="primary" className="mt-3"
+                        size="sm" variant="primary"
                         onClick={() => setPage("infohub")}
                       >
                         去连接信息中枢
                       </Button>
-                      <p className="mt-2 ui-caption">信息中枢只在本机运行，不会自动拉起。</p>
-                    </>
-                  ) : !share.agenda ? (
-                    <>
-                      <p className="font-medium text-ink">你还没有开启「日程摘要」共享</p>
-                      <p className="mt-1">
-                        开启后，你的日程摘要（标题 + 到期时间）会出现在团队日程里。
-                      </p>
-                    </>
-                  ) : (
-                    <p>信息中枢同步出临期日程后会自动出现。</p>
-                  )}
-                </div>
+                    ) : !share.agenda ? (
+                      <Button
+                        type="button"
+                        size="sm" variant="primary"
+                        onClick={() => updateShare({ agenda: true })}
+                      >
+                        开启日程摘要共享
+                      </Button>
+                    ) : undefined
+                  }
+                />
               ) : (
                 <ul className="mt-2 space-y-1">
                   {agendaActivities.map((a) => (
@@ -1088,7 +1112,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="rounded-sm border border-[var(--danger-line)] px-2 py-1 text-ui-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                      className="rounded-sm border border-danger-line px-2 py-1 text-ui-xs text-danger hover:bg-danger-soft"
                     >
                       清除我的用量
                     </button>
@@ -1099,7 +1123,7 @@ export function TeamPage() {
               {!share.usage ? (
                 <section className="mt-3" aria-label="本机用量">
                   <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
-                  <p className="mt-1 text-ui-xs leading-5 text-muted">
+                  <p className="mt-1 ui-body-sm leading-5 text-muted">
                     「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
                     聚合摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
                   </p>
@@ -1129,7 +1153,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="mx-0.5 underline underline-offset-2 hover:text-[var(--danger)]"
+                      className="mx-0.5 underline underline-offset-2 hover:text-danger"
                     >
                       清除我的用量
                     </button>
@@ -1195,7 +1219,7 @@ export function TeamPage() {
                             <span className="w-5 shrink-0 tabular-nums text-muted">{i + 1}.</span>
                             <span
                               className={`min-w-0 truncate ${
-                                row.userId === me?.id ? "font-bold" : "font-medium"
+                                row.userId === me?.id ? "font-semibold" : "font-medium"
                               }`}
                             >
                               {/* 排行行可点 = 选中该成员并切到动向（与名册同一行为）。 */}
@@ -1236,7 +1260,7 @@ export function TeamPage() {
 
       {confirmClear && (
         <ConfirmDialog
-          title="清除我的共享记录"
+          title="清除共享记录？"
           onCancel={() => setConfirmClear(false)}
           footer={
             <>
@@ -1258,17 +1282,15 @@ export function TeamPage() {
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
-            会删除你已上传到团队动向的全部摘要；共享开关保持不变，之后的新动向仍会继续同步。
-            <br />
-            用量记录不在这里清除——请到「用量」页点「清除我的用量」。
+          <p className="ui-body-sm">
+            清除后，你已上传到团队动向的摘要会全部删除且不可恢复；共享开关不变，之后的新动向仍会继续同步。用量记录不在这里清除。
           </p>
         </ConfirmDialog>
       )}
 
       {confirmClearUsage && (
         <ConfirmDialog
-          title="清除我的用量"
+          title="清除上传的用量？"
           onCancel={() => setConfirmClearUsage(false)}
           footer={
             <>
@@ -1290,11 +1312,8 @@ export function TeamPage() {
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
-            会删除你已上传到团队的用量记录（自然日 / 模型 / 连接名 / token 数），删除后你不再出现在
-            用量排行里；共享开关保持不变，之后新产生的用量仍会继续同步。
-            <br />
-            清除不会删除本机的 token 用量记录（本机「我的用量」仍显示历史，只是不再上传）。
+          <p className="ui-body-sm">
+            清除后你不再出现在用量排行里，已上传的记录不可恢复；共享开关不变，之后的新用量仍会继续同步。本机的「我的用量」历史不受影响。
           </p>
         </ConfirmDialog>
       )}

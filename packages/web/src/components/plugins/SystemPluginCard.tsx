@@ -15,7 +15,7 @@ export function SystemPluginCard({ system }: { system: SystemPlugin }) {
     <section
       aria-label="系统能力"
       data-testid="system-plugin-card"
-      className="ui-card plugin-card mb-4 bg-[var(--panel)] p-4"
+      className="ui-card plugin-card mb-4 bg-panel p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">

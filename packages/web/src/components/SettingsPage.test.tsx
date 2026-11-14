@@ -46,8 +46,9 @@ describe("SettingsPage 个人资料", () => {
 
   it("渲染个人资料卡片：默认头像图标、昵称回填且 maxLength 64、上传与保存控件", () => {
     render(<SettingsPage />);
-    // 标签名与卡片标题同名，用 role 精确取卡片内的标题（避免匹配到标签按钮）
-    expect(screen.getByText("个人资料", { selector: "div" })).toBeInTheDocument();
+    // 标签名与卡片标题同名；标题现在是真正的 h2（大纲/门禁需要），用 heading role 精确取，
+    // 避免匹配到同一文案的分区页签按钮。
+    expect(screen.getByRole("heading", { name: "个人资料" })).toBeInTheDocument();
     const nameInput = screen.getByLabelText("昵称");
     expect(nameInput).toHaveValue("爱丽丝");
     expect(nameInput).toHaveAttribute("maxlength", "64");

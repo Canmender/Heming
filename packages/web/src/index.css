@@ -34,9 +34,10 @@
    * 共 13 个值上，同一层级的文字在不同页面能差 1–2px，是「看起来不齐」的主因
    * （见 docs/UIUX-AUDIT-2026-11-13.md D3）。
    *
-   * 收敛为两套刻度：
-   *   正文/界面：11（注脚/元信息）12（紧凑 UI）13（正文）14（强调正文）18（区块标题）22（页标题）
-   *   数字展示：18（次级统计）22（卡片统计）26（主统计）
+   * 收敛为两套刻度（d.141 + 2026-11-14 审计 A4：登记 16px 区块标题档）：
+   *   正文/界面：11（元信息，**不承载句子**）12（紧凑 UI）13（正文）14（强调正文）
+   *             16（区块标题）18（次级数字）22（页标题）
+   *   数字展示：18（次级统计）22（卡片统计）26（主统计，仅无页标题的数据视图）
    * 只声明 font-size、不声明 line-height：既有代码的 leading-* 与各处行高不改，
    * 保证「换类名不改观感」。9px/10px 一并升到 11px（Windows 缩放下 10px 已不可读）。
    */
@@ -44,11 +45,20 @@
   --text-ui-sm: 12px;
   --text-ui-md: 13px;
   --text-ui-base: 14px;
+  --text-ui-block: 16px;
   --text-ui-lg: 18px;
   --text-ui-xl: 22px;
   --text-num-sm: 18px;
   --text-num-md: 22px;
   --text-num-lg: 26px;
+
+  /*
+   * 行高：只登记一个「阅读行高」档（长文正文，Markdown 预览/笔记正文）。
+   * 界面里的 leading-tight/snug/normal 已够覆盖按钮、标题、表行；
+   * 长文 1.75 是阅读性取舍（1.6 以下中文密排会挤），所以给它一个名字，
+   * 不再散写 leading-[1.75]（2026-11-14 审计 A5：行高要收成可数的一档）。
+   */
+  --leading-reading: 1.75;
 
   /*
    * ── 动效刻度（d.141）──────────────────────────────────────────────
@@ -97,8 +107,8 @@
      禁脚本/首帧会整站没有焦点提示。这里补一份与注入版同参数的基线；
      带 outline-hidden 的控件仍由注入版压过（那一层不进 @layer）。 */
   :where(a, button, summary, input, select, textarea):focus-visible {
-    outline: 2px solid var(--heming-accent, #1a1a1a);
-    outline-offset: 2px;
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
   }
 }
 
@@ -127,6 +137,13 @@
  * （例如桌宠窗口可用自己的 data-theme 独立控制）。
  */
 :root {
+  /* 焦点环单一真源（P2-G4）：基线规则与运行时注入版都读这三个变量，避免两份参数各自漂移。
+     注入版（components/a11y/GlobalFocusRing.tsx）靠「未分层样式晚于 utilities 插入」压过
+     `outline-hidden`，这里只提供数值，不复制参数。 */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--heming-accent, #1a1a1a);
+
   --line: #e6e6e6;
   --line-soft: #ececec;
   --line-strong: #8c8c8c;
@@ -309,7 +326,10 @@
     background-color: var(--subtle-3);
   }
   .ui-segment {
-    @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[12px] leading-5 text-muted transition-colors;
+    /* 2026-11-14 审计 C1：与控件正文同档（13px），并作为全站唯一分段控件。 */
+    /* 高度 32（py-6px + 20 行高）：28px 低于 WCAG 2.5.8 的 24 下限不远、但离 32 命中区差一截，
+       而组内相邻只有 4px，不能靠伪元素扩区（会互相吃掉点击）——只能把本体撑到 32。 */
+    @apply inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] leading-5 text-muted transition-colors;
   }
   .ui-segment:hover {
     color: var(--ink);
@@ -425,7 +445,7 @@ samp {
  * 两处不手写死值而漂移。兜底值保证变量缺失（浏览器/未启用 overlay）时不塌陷。
  */
 .desktop-titlebar {
-  height: env(titlebar-area-height, 38px);
+  height: env(titlebar-area-height, 40px); /* 兜底走 8pt 网格（B1 余量，38→40） */
   margin-left: env(titlebar-area-x, 0px);
   width: env(titlebar-area-width, 100%);
   -webkit-app-region: drag;
@@ -540,6 +560,16 @@ samp {
   .ui-page-sub {
     @apply mt-0.5 text-[13px] leading-5 text-muted;
   }
+  /*
+   * 区块标题（2026-11-14 审计 A2/A4）：页内第二级标题。
+   *
+   * 之前这一级不存在——区块标题要么借用 `.ui-section-title`（14px，与卡片标题同大），
+   * 要么用 `.ui-micro`（11px，比正文还小），扫读时断档。16px/600 与页标题 22px 之间
+   * 保持 1.375 倍差，够拉开但不喧宾夺主。
+   */
+  .ui-block-title {
+    @apply text-[16px] font-semibold leading-6 text-ink;
+  }
   .ui-section-title {
     @apply text-[14px] font-semibold leading-[22px] text-ink;
   }
@@ -552,8 +582,16 @@ samp {
   .ui-caption {
     @apply text-[12px] leading-[18px] text-muted;
   }
+  /*
+   * 元信息（2026-11-14 审计 A1 第一步）：11 → 12px。
+   *
+   * 11px 在 Windows 125% 缩放下已经是「要凑近看」的尺寸，而它此前承载了全站
+   * 47%–65% 的文本节点、连说明句都写在 11px 里。这里只 +1px，回归风险最低；
+   * 真正的**句子**应走 `.ui-body-sm`（13px），11px 只留给时间戳/计数/键帽/表头/徽标。
+   * 下一步（P1）继续把 `text-ui-xs` 上承担正文语义的组合迁到 13px。
+   */
   .ui-micro {
-    @apply text-[11px] font-medium leading-4 text-muted;
+    @apply text-[12px] font-medium leading-5 text-muted;
   }
   .ui-numeric {
     @apply tabular-nums;
@@ -567,6 +605,11 @@ samp {
    *   暗色兼容层是按**类名**覆盖的（`[data-theme="dark"] .bg-white` / `.shadow-card`），
    *   `.ui-card` 的元素身上没有 `bg-white` 类，兼容层匹配不到——@apply 会把亮色值
    *   直接编译进 `.ui-card`，暗色下就变成「白卡片」。所以背景/阴影用变量与暗色覆盖。
+   */
+  /*
+   * 面板底色规则（2026-11-14 审计 C3，写死一句，不允许反用）：
+   *   页面底 = --subtle ／ 卡片 = --surface ／ 浮层 = --panel
+   * 同页混用三种底色是「这不是同一个应用」错觉的主要来源，改色前先确认自己在哪一层。
    */
   .ui-card {
     @apply rounded-xl border border-line-soft;
@@ -623,8 +666,20 @@ samp {
   .ui-btn {
     @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border text-[13px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
+  /* sm 的视觉高度仍是 28px（密集工具条用），但把可点高度撑到 32px：
+     只上下外扩、不横向扩，避免相邻按钮的热区互相吃掉（D1 收尾，d.142）。
+     28px 本身已过 WCAG 2.5.8 AA 的 24px 底线，这里只是补到自家 32px 口径。 */
   .ui-btn-sm {
-    @apply h-7 px-2.5 text-[12px];
+    @apply relative h-7 px-2.5 text-[12px];
+  }
+  .ui-btn-sm::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: max(100%, 2rem);
+    transform: translateY(-50%);
   }
   .ui-btn-md {
     @apply h-8 px-3;
@@ -663,7 +718,17 @@ samp {
      原来 px-1.5 py-0.5 只有 21px 高，比同页按钮矮一截、点击目标也偏小；
      统一成 24px 高的轻按钮，hover 用变量色（暗色不再闪白）。 */
   .ui-link {
-    @apply inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] leading-4 text-muted transition-colors;
+    @apply relative inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-ui-sm leading-4 text-muted transition-colors;
+  }
+  /* 24px 高的文字链接按钮：可点高度补到 32px（同样只上下扩）。 */
+  .ui-link::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: max(100%, 2rem);
+    transform: translateY(-50%);
   }
   .ui-link:hover {
     background-color: var(--subtle-2);
@@ -700,12 +765,21 @@ samp {
     background-color: var(--subtle);
   }
 
-  /* ── 列表行（名册/会话/插件/技能等） ── */
+  /* ── 列表行（名册/会话/插件/技能等） ──
+   *
+   * 2026-11-14 审计 C3：全站列表行原有 4 套（divide-y + py-2 手拼、min-h-[40px]、
+   * 表格行、纯文字行），行高 32/40/44/56 四种。这里只留两档：
+   *   normal 48px（有副标题/操作的行）  dense 36px（纯名册/设置项）
+   * 横向对齐统一 px-4，配合 .ui-table 的 px-3 与卡片 p-4 形成「行内 12/16」节奏。
+   */
   .ui-list-row {
-    @apply flex min-h-[40px] items-center gap-2 border-b border-line-soft px-3 py-2 transition-colors last:border-b-0;
+    @apply flex min-h-12 items-center gap-3 border-b border-line-soft px-4 text-[13px] leading-5 text-ink transition-colors last:border-b-0;
   }
   .ui-list-row:hover {
     background-color: var(--subtle);
+  }
+  .ui-list-row-dense {
+    @apply min-h-9 gap-2 px-3;
   }
 
   /* ── 空态 ── */
@@ -980,15 +1054,25 @@ samp {
 .rta-enter {
   animation: rta-enter 0.3s ease-out both;
 }
-/* d.140 R4 · 命中区基元：视觉尺寸不动，只把可点区撑到 ≥32px（审计 C-S2-18）。
-   用法：给 24–28px 的小图标按钮加 `.ui-hit`；行本身可点的地方不要加，避免互相吃掉点击。 */
+/* 命中区基元（d.140 R4，d.142 重写）：视觉尺寸不动，只把可点区撑到 ≥32px。
+ *
+ * 旧版用 `inset: -7px -6px` 固定外扩，14×14 的图标按钮只到 26×28，仍不达标；
+ * 新版按「至少 32px、至少铺满自身」取 max，任意小控件套上都够。
+ *
+ * 用法：给 24–28px 的小图标按钮 / 小于 32px 高的文字按钮加 `.ui-hit`。
+ * 不加的场合：整行可点的列表行、相邻间距 <8px 的控件组（伪元素会互相吃掉点击）。
+ * 注意父级不要 `overflow: hidden`，否则超出部分会被裁掉。 */
 .ui-hit {
   position: relative;
 }
 .ui-hit::after {
   content: "";
   position: absolute;
-  inset: -7px -6px;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 2rem);
+  height: max(100%, 2rem);
+  transform: translate(-50%, -50%);
 }
 
 /* 说明（d.124）：原来的 `.rta-hit`（列表行 hover 抬升 + 裸阴影）与 `.rta-segment`

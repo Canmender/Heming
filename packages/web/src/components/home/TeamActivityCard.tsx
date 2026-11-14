@@ -61,9 +61,9 @@ export function TeamActivityCard({
 
   return (
     <section aria-label="团队动向" className="ui-card p-3">
-      <div className="mb-1.5 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
-          <TeamIcon width={14} height={14} />
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-ui-sm font-semibold text-muted">
+          <TeamIcon width={16} height={16} />
           团队动向
         </div>
         <div className="flex items-center gap-2">
@@ -72,14 +72,14 @@ export function TeamActivityCard({
           ) : null}
           <button
             type="button"
-            className="ui-link"
+            className="ui-link ui-hit"
             onClick={onRefresh}
           >
             刷新
           </button>
           <button
             type="button"
-            className="ui-link"
+            className="ui-link ui-hit"
             onClick={onOpenTeam}
           >
             进入团队
@@ -88,20 +88,20 @@ export function TeamActivityCard({
       </div>
       {activities.length === 0 ? (
         !teamReady ? (
-          <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
+          <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-2">
             {[0, 1, 2].map((i) => (
               <SkeletonLine key={i} className="h-7 rounded-lg" />
             ))}
           </div>
         ) : teamError ? (
-          <div className="flex items-center justify-between gap-2 py-1.5 text-ui-sm">
+          <div className="flex items-center justify-between gap-2 py-2 text-ui-sm">
             <div role="alert" className="ui-alert ui-alert-danger min-w-0 flex-1 items-center">
               <span className="min-w-0 truncate">加载失败：{teamError}</span>
             </div>
             <button
               type="button"
               onClick={onRefresh}
-              className="ui-link border border-line"
+              className="ui-link border border-line ui-hit"
             >
               重试
             </button>
@@ -130,7 +130,7 @@ export function TeamActivityCard({
               type="button"
               // 点的是「谁的哪条动向」就落到那个人 + 高亮那一条（审计 P2-6 的完整一半）
               onClick={() => useUiStore.getState().focusTeamActivity(a.id, a.actorId)}
-              className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-fast hover:bg-[var(--subtle-2)]"
+              className="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-fast hover:bg-subtle-2"
             >
               <Avatar
                 user={{
@@ -140,13 +140,13 @@ export function TeamActivityCard({
                 size={28}
               />
               <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-1.5">
+                <span className="flex items-baseline gap-2">
                   <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                     {KIND_LABEL[a.kind]}
                   </span>
                   <span className="truncate text-ui-md font-medium">{a.title}</span>
                 </span>
-                <span className="block truncate text-ui-xs text-muted">
+                <span className="block truncate ui-caption">
                   {actor?.user.displayName ?? "成员"}
                   {a.detail ? ` · ${a.detail}` : ""}
                 </span>

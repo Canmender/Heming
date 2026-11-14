@@ -97,7 +97,7 @@ export function QuickOpen({ open, index, onClose, onOpen, recent = [], rank }: Q
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] pt-[14vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh]"
       onMouseDown={onClose}
       role="presentation"
     >

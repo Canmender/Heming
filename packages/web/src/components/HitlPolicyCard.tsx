@@ -109,14 +109,14 @@ export function HitlPolicyCard({
   return (
     <section aria-label="工具调用确认" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="text-ui-sm font-bold text-muted">工具调用确认</div>
+        <div className="text-ui-sm font-semibold text-muted">工具调用确认</div>
       </div>
       <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。
       </div>
 
       <fieldset className="mt-3">
-        <legend className="text-ui-sm font-bold text-muted">确认档位</legend>
+        <legend className="text-ui-sm font-semibold text-muted">确认档位</legend>
         <div className="mt-1.5 flex flex-col gap-1.5">
           <ModeRow
             mode="strict"
@@ -172,7 +172,7 @@ export function HitlPolicyCard({
       </label>
 
       {clampedNotice && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
           为避免危险操作被自动放行，这一项已调整为「写入」：危险操作现在都会先询问你
           （原先的「危险」档等同于不设边界，已移除）。
         </div>
@@ -206,7 +206,7 @@ export function HitlPolicyCard({
           <Button
             type="button"
             onClick={() => setConfirmClearRules(true)}
-            size="md" variant="ghost" className="text-[var(--danger)]"
+            size="md" variant="ghost" className="text-danger"
           >
             清空记住的规则
           </Button>
@@ -222,8 +222,8 @@ export function HitlPolicyCard({
       {sessionMsg && (
         <div
           role="status"
-          className={`mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-ui-xs ${
-            sessionMsg.kind === "ok" ? "text-[var(--success)]" : "text-muted"
+          className={`mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 text-ui-xs ${
+            sessionMsg.kind === "ok" ? "text-success" : "text-muted"
           }`}
         >
           {sessionMsg.text}
@@ -231,7 +231,7 @@ export function HitlPolicyCard({
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-ui-xs font-bold text-muted">
+        <div className="text-ui-xs font-semibold text-muted">
           记住的规则{rules.length ? `（${rules.length} 条）` : ""}
         </div>
         {rules.length === 0 ? (
@@ -248,13 +248,13 @@ export function HitlPolicyCard({
                 <span
                   className={`rounded-sm px-1 ${
                     rule.effect === "deny"
-                      ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                      : "bg-[var(--success-soft)] text-[var(--success)]"
+                      ? "bg-danger-soft text-danger"
+                      : "bg-success-soft text-success"
                   }`}
                 >
                   {rule.effect === "deny" ? "拒绝" : "允许"}
                 </span>
-                <span className="font-mono text-[var(--body)]">{rule.tool}</span>
+                <span className="font-mono text-body">{rule.tool}</span>
                 <span className="min-w-0 flex-1 truncate text-muted" title={rule.resource}>
                   {rule.resource === "*" ? "所有调用" : rule.resource}
                 </span>
@@ -273,7 +273,7 @@ export function HitlPolicyCard({
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-ui-xs font-bold text-muted">
+        <div className="text-ui-xs font-semibold text-muted">
           确认记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
@@ -379,7 +379,7 @@ function ModeRow({
         className="mt-0.5"
       />
       <span className="min-w-0">
-        <span className="block text-ui-sm font-bold">{title}</span>
+        <span className="block text-ui-sm font-semibold">{title}</span>
         <span className="block ui-caption">{desc}</span>
       </span>
       <span className="sr-only">{mode}</span>
@@ -395,13 +395,13 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
     <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs">
       <span className="text-muted">{time}</span>
       <span
-        className={`rounded-sm px-1 text-muted ${approved ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`}
+        className={`rounded-sm px-1 text-muted ${approved ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}
       >
         {approved ? "已允许" : "已拒绝"}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[var(--body)]">{entry.target}</span>
+      <span className="min-w-0 flex-1 truncate text-body">{entry.target}</span>
       {entry.rejected ? (
-        <span className="text-[var(--warn)]" title={entry.rejected}>
+        <span className="text-warn" title={entry.rejected}>
           {entry.rejected}
         </span>
       ) : null}

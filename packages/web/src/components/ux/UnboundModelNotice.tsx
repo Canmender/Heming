@@ -64,8 +64,8 @@ export function UnboundModelNotice({
   const canQuickBind = Boolean(onBind) && (connections?.length ?? 0) > 0;
   const base =
     variant === "card"
-      ? "rounded-lg border border-[var(--warn-line)] bg-[var(--warn-soft)] px-3 py-2 text-ui-sm leading-5 text-[var(--warn)]"
-      : "border-l-2 border-[var(--warn)] bg-[var(--warn-soft)] px-2 py-1.5 text-ui-sm leading-5 text-[var(--warn)]";
+      ? "rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-ui-sm leading-5 text-warn"
+      : "border-l-2 border-warn bg-warn-soft px-2 py-1.5 text-ui-sm leading-5 text-warn";
   return (
     <div
       id={id}
@@ -102,7 +102,7 @@ export function UnboundModelNotice({
         <button
           type="button"
           onClick={onGoSettings}
-          className={`shrink-0 rounded-sm border border-[var(--warn-line)] px-2 py-0.5 text-ui-xs text-[var(--warn)] hover:bg-[var(--warn-soft)] ${FOCUS_RING_TIGHT}`}
+          className={`shrink-0 rounded-sm border border-warn-line px-2 py-0.5 text-ui-xs text-warn hover:bg-warn-soft ${FOCUS_RING_TIGHT}`}
         >
           {canQuickBind ? "管理连接" : UNBOUND_ADD_SOURCE_LABEL}
         </button>

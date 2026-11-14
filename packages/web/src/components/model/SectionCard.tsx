@@ -31,7 +31,7 @@ export function SectionCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             {icon && <span className="shrink-0 text-muted">{icon}</span>}
-            <div className="text-ui-md font-bold">{title}</div>
+            <div className="text-ui-md font-semibold">{title}</div>
           </div>
           {description && <p className="mt-1 ui-caption">{description}</p>}
         </div>

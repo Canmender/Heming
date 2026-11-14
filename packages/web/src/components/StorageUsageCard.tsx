@@ -402,9 +402,9 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
     ratio >= DANGER_RATIO ? "danger" : ratio >= WARN_RATIO ? "warn" : "ok";
 
   const barColor =
-    level === "danger" ? "bg-[var(--danger)]" : level === "warn" ? "bg-[var(--warn)]" : "bg-muted";
+    level === "danger" ? "bg-danger" : level === "warn" ? "bg-warn" : "bg-muted";
   const statusColor =
-    level === "danger" ? "text-[var(--danger)]" : level === "warn" ? "text-[var(--warn)]" : "text-muted";
+    level === "danger" ? "text-danger" : level === "warn" ? "text-warn" : "text-muted";
   const statusText =
     level === "danger"
       ? "本机存储快满了。继续写入很可能失败，记忆权重、任务记录会悄悄回退或消失，请立刻清理。"
@@ -486,7 +486,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
   return (
     <section aria-label="本机存储" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <div className="flex items-center gap-1.5 text-ui-sm font-bold text-muted">
+        <div className="flex items-center gap-1.5 text-ui-sm font-semibold text-muted">
           <StorageIcon className="text-muted" />
           本机存储
         </div>
@@ -515,7 +515,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           aria-valuetext={`已用 ${formatExactBytes(usage.totalBytes)} 字节（${formatBytes(
             usage.totalBytes,
           )}），占配额 ${Math.round(percent)}%（配额 ${formatExactBytes(quota.bytes)} 字节）`}
-          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-3)]"
+          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-subtle-3"
         >
           <div
             className={`h-full rounded-full ${barColor}`}
@@ -530,7 +530,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
 
       {/* 明细：按字节数降序 */}
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-ui-xs font-bold text-muted">
+        <div className="text-ui-xs font-semibold text-muted">
           按模块{usage.keyCount ? `（${usage.keyCount} 个键）` : ""}
         </div>
         {usage.modules.length === 0 ? (
@@ -542,7 +542,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
                 key={m.name}
                 className="flex items-baseline justify-between gap-2 border-b border-line-soft pb-1 text-ui-xs last:border-b-0"
               >
-                <span className="min-w-0 truncate text-[var(--body)]">
+                <span className="min-w-0 truncate text-body">
                   {m.name}
                   <span className="ml-1 text-ui-xs text-muted">{m.keys} 键</span>
                 </span>
@@ -574,7 +574,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("cache");
           }}
-          size="md" variant="ghost" className="text-[var(--danger)]"
+          size="md" variant="ghost" className="text-danger"
         >
           清理消息缓存
         </Button>
@@ -584,7 +584,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("tasks");
           }}
-          size="md" variant="ghost" className="text-[var(--danger)]"
+          size="md" variant="ghost" className="text-danger"
         >
           清理任务记录
         </Button>

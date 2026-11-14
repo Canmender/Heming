@@ -543,16 +543,16 @@ export function PluginsPage({
       {msg && (
         <div
           role="status"
-          className={`plugin-rise mb-4 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${
+          className={`plugin-rise mb-4 flex items-start gap-2 rounded-xl border px-3 py-2 ${
             msg.kind === "error"
-              ? "border-[var(--danger-line)] bg-[var(--danger-soft)]"
-              : "border-line-soft bg-[var(--subtle-2)]"
+              ? "border-danger-line bg-danger-soft"
+              : "border-line-soft bg-subtle-2"
           }`}
         >
           <span
             aria-hidden="true"
             className={`mt-0.5 shrink-0 ${
-              msg.kind === "error" ? "text-[var(--danger)]" : "text-[var(--success)]"
+              msg.kind === "error" ? "text-danger" : "text-success"
             }`}
           >
             {msg.kind === "error" ? <AlertIcon width={14} height={14} /> : <CheckIcon width={14} height={14} />}
@@ -606,7 +606,7 @@ export function PluginsPage({
         {tab === "plugins" && (
           <>
             {/* 安装入口放在列表上方：插件包与官方页面插件都来自我们自己的服务器仓库。 */}
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-surface p-2.5">
               <Button
                 type="button"
                 onClick={() => setRepoDialogOpen(true)}
@@ -627,7 +627,7 @@ export function PluginsPage({
             {orphanTotal > 0 && (
               <div
                 role="status"
-                className="mb-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-3"
+                className="mb-3 rounded-lg border border-danger-line bg-danger-soft p-3"
                 aria-label="孤儿记录提示"
               >
                 <p className="ui-body-sm">

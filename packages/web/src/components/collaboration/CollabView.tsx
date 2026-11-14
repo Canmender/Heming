@@ -403,7 +403,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
           {insufficient ? (
             <section className="ui-card p-4" aria-label="协作准备">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line-soft bg-[var(--subtle-2)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line-soft bg-subtle-2">
                   <PlusIcon width={16} height={16} />
                 </span>
                 <div className="min-w-0">
@@ -469,7 +469,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 disabled={running}
                 rows={4}
                 placeholder="例如：调研本季度退款率上升的原因，产出改进方案并完成评审。"
-                className="mt-1 min-h-[88px] w-full resize-y rounded-md border border-line-strong bg-[var(--surface)] px-2.5 py-2 text-ui-md leading-5 text-ink outline-hidden transition-colors placeholder:text-[var(--placeholder)] focus:border-ink disabled:cursor-not-allowed disabled:bg-[var(--subtle)]"
+                className="mt-1 min-h-[88px] w-full resize-y rounded-md border border-line-strong bg-surface px-2.5 py-2 text-ui-md leading-5 text-ink outline-hidden transition-colors placeholder:text-placeholder focus:border-ink disabled:cursor-not-allowed disabled:bg-subtle"
               />
 
               <div className="mt-3 grid gap-3 md:grid-cols-[1fr_112px]">
@@ -494,8 +494,8 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                           onClick={() => setMode(m.key)}
                           className={`rounded-lg border px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                             active
-                              ? "border-ink bg-[var(--subtle-2)]"
-                              : "border-line-soft hover:bg-[var(--subtle)]"
+                              ? "border-ink bg-subtle-2"
+                              : "border-line-soft hover:bg-subtle"
                           }`}
                         >
                           <span className="ui-body-sm block font-medium">{m.label}</span>
@@ -538,7 +538,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                       <div
                         key={agent.id}
                         className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
-                          active ? "border-ink bg-[var(--subtle-2)]" : "border-line-soft"
+                          active ? "border-ink bg-subtle-2" : "border-line-soft"
                         } ${bound ? "" : "opacity-55"}`}
                       >
                         <input
@@ -547,7 +547,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                           checked={active}
                           disabled={!bound || running}
                           onChange={() => toggle(agent.id)}
-                          className="h-3.5 w-3.5 shrink-0 accent-[var(--heming-accent)]"
+                          className="h-3.5 w-3.5 shrink-0 accent-accent"
                         />
                         <Avatar
                           user={{ displayName: agent.name, avatar: agent.avatar ?? undefined }}
@@ -624,7 +624,7 @@ export function CollabView({ agents, onCreateAgent }: CollabViewProps) {
                 </span>
               </div>
               {copyState === "failed" ? (
-                <p className="ui-caption mt-1 text-[var(--danger)]" role="alert">
+                <p className="ui-caption mt-1 text-danger" role="alert">
                   剪贴板不可用，请手动选择文本复制。
                 </p>
               ) : null}

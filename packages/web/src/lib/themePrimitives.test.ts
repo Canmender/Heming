@@ -73,7 +73,10 @@ describe("字面量颜色工具类不得回流（d.141）", () => {
     (f) => !/\.test\.tsx?$/.test(f) && !/generated[\\/]/.test(f),
   );
 
-  it("源码里没有 text-/bg-/border-/ring-[#…] 这类字面量颜色类", () => {
+  // 这条守卫要递归读 src 下全部源文件；全量并行（304 个文件抢 CPU）时
+  // 默认 5s 会偶发超时（本会话复现一次、单跑不红）。放宽到 20s：它本来就是
+  // 一次全仓扫描，不是被测逻辑变慢了。
+  it("源码里没有 text-/bg-/border-/ring-[#…] 这类字面量颜色类", { timeout: 20000 }, () => {
     const offenders: string[] = [];
     for (const file of files) {
       const src = readFileSync(file, "utf8");

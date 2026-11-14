@@ -401,7 +401,9 @@ describe("PluginBundlePage · 错误态", () => {
     expect(within(alert).getByText(/页面入口不在包内/)).toBeTruthy();
 
     // 打开插件详情 → 插件区（可在那里启停/更新/卸载）
-    fireEvent.click(within(alert).getByRole("button", { name: "打开插件详情" }));
+    // 审计 C6 后：失败态改用 ui/ErrorState（role=alert 只包住图标+文案+重试），
+    // 「打开插件详情」是紧随其后的次级出口，所以在 alert 之外查。
+    fireEvent.click(screen.getByRole("button", { name: "打开插件详情" }));
     expect(useUiStore.getState().page).toBe("plugins");
 
     fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "重新加载" }));

@@ -206,7 +206,7 @@ export function RouteGroupsCard() {
     <section className="ui-card mt-3 p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-ui-sm font-bold text-muted">候选链</span>
+          <span className="text-ui-sm font-semibold text-muted">候选链</span>
           <span className="ui-caption">第一个答不了才走下一个</span>
         </div>
         {!open && (
@@ -291,7 +291,7 @@ export function RouteGroupsCard() {
       {rests.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-panel p-3">
           <div className="flex items-center justify-between">
-            <span className="text-ui-sm font-bold text-muted">休息中的候选</span>
+            <span className="text-ui-sm font-semibold text-muted">休息中的候选</span>
             <Button
               type="button"
               aria-label="刷新休息名单"
@@ -328,7 +328,7 @@ export function RouteGroupsCard() {
       {/* 逐候选账（d.48）：换候选换的是「谁在花钱」，所以按连接×模型分档列，而不是只给一个总数。 */}
       {usage.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-panel p-3">
-          <div className="text-ui-sm font-bold text-muted">本月逐候选用量</div>
+          <div className="text-ui-sm font-semibold text-muted">本月逐候选用量</div>
           <ul className="mt-1.5 space-y-1">
             {usage.map((u) => {
               return (
@@ -463,7 +463,7 @@ export function RouteGroupsCard() {
             <div className="mt-1 ui-caption">只有一个候选，等于不换人——再加一个才有备胎。</div>
           )}
 
-          {error && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{error}</div>}
+          {error && <div role="alert" className="mt-2 ui-caption text-danger">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
             <Button
               type="submit"

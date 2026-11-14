@@ -18,8 +18,10 @@ describe("GlobalFocusRing", () => {
     expect(style).not.toBeNull();
     const css = style!.textContent ?? "";
     expect(css).toContain(":focus-visible");
-    expect(css).toContain("outline: 2px solid");
-    expect(css).toContain("outline-offset: 2px");
+    // 参数改由 index.css 的三个 --focus-ring-* 变量提供（P2-G4 单一真源），
+    // 这里只断言「读的是变量、兜底值仍是 2px」，不再钉死字面量。
+    expect(css).toContain("var(--focus-ring-width, 2px) solid");
+    expect(css).toContain("var(--focus-ring-offset, 2px)");
     // 不能用 :focus——鼠标点击也会出环，是噪音
     expect(css).not.toMatch(/(^|[\s,{]):focus\s*\{/);
   });

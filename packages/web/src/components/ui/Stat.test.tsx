@@ -30,7 +30,7 @@ describe("Stat（统计卡基元）", () => {
     render(<Stat label="我的智能体" value={4} onOpen={onOpen} />);
     const card = screen.getByRole("button");
     expect(card.className).toContain("focus-visible:outline-2");
-    expect(card.className).toContain("hover:bg-[var(--subtle)]");
+    expect(card.className).toContain("hover:bg-subtle");
     fireEvent.click(card);
     expect(onOpen).toHaveBeenCalledTimes(1);
   });

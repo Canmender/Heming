@@ -34,7 +34,7 @@ export function Stat({ label, value, hint, onOpen, actionLabel, className = "" }
   const body = (
     <>
       <div className="ui-caption text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-num-lg font-bold leading-none">{value}</div>
+      <div className="ui-numeric mt-1.5 text-num-md font-semibold leading-none">{value}</div>
       {hint ? <div className="mt-1.5 ui-caption">{hint}</div> : null}
     </>
   );
@@ -46,7 +46,7 @@ export function Stat({ label, value, hint, onOpen, actionLabel, className = "" }
       type="button"
       onClick={onOpen}
       aria-label={actionLabel ?? `${label}：${value}`}
-      className={`ui-card p-4 text-left transition-colors hover:bg-[var(--subtle)] ${FOCUS_RING}${
+      className={`ui-card p-4 text-left transition-colors hover:bg-subtle ${FOCUS_RING}${
         className ? ` ${className}` : ""
       }`}
     >

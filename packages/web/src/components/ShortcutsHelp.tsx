@@ -1,5 +1,6 @@
 import { PALETTE_PAGES } from "../lib/palette/pages.js";
 import { Dialog } from "./ui/Dialog.js";
+import { Kbd } from "./ui/Kbd.js";
 
 /**
  * 快捷键帮助面板（d.61 · UX 第二轮 F 轨）。
@@ -12,7 +13,7 @@ import { Dialog } from "./ui/Dialog.js";
  * 用下面的静态表——它们同时出现在实现里，注释互相指向，改实现时记得改这里。
  */
 interface ShortcutRow {
-  /** 按键序列（每个元素渲染成一个 kbd，中间加 +）。 */
+  /** 按键序列（每个元素渲染成一个键帽，并列排布，中间不加「+」字）。 */
   keys: string[];
   label: string;
 }
@@ -34,28 +35,24 @@ const EDIT_ROWS: ShortcutRow[] = [
 
 /**
  * 导航组：从 `PALETTE_PAGES` 里取「有 Alt 数字」的页面。
- * 排序按数字键（1..8 在前，0 在后），方便用户按顺序找。
+ *
+ * 顺序**跟着导航轨走**（2026-11-14 审计 A-04）：此前这里按数字值排序，
+ * 面板上是 1、2、5、6、8、0，而轨上是 1、2、8、0、5、6——同一批快捷键两处顺序不同，
+ * 用户对不上号。`PALETTE_PAGES` 的数组顺序本来就是轨上顺序，直接用，不再二次排序。
  */
 function navRows(): ShortcutRow[] {
-  return PALETTE_PAGES.filter((p) => Boolean(p.digit))
-    .slice()
-    .sort((a, b) => {
-      const rank = (d?: string) => (d === "0" ? 99 : Number(d));
-      return rank(a.digit) - rank(b.digit);
-    })
-    .map((p) => ({ keys: ["Alt", String(p.digit)], label: p.label }));
+  return PALETTE_PAGES.filter((p) => Boolean(p.digit)).map((p) => ({
+    keys: ["Alt", String(p.digit)],
+    label: p.label,
+  }));
 }
 
+/** 键帽（2026-11-14 审计 C2）：全站唯一外观，写在 `ui/Kbd`；组合键并列渲染，不加「+」字。 */
 function KeyCaps({ keys }: { keys: string[] }) {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {keys.map((k, i) => (
-        <span key={`${k}-${i}`} className="flex items-center gap-1">
-          {i > 0 && <span className="text-ui-xs text-muted">+</span>}
-          <kbd className="rounded-sm border border-line px-1.5 py-0.5 text-ui-xs font-medium text-body">
-            {k}
-          </kbd>
-        </span>
+        <Kbd key={`${k}-${i}`}>{k}</Kbd>
       ))}
     </span>
   );
@@ -64,10 +61,10 @@ function KeyCaps({ keys }: { keys: string[] }) {
 function Group({ title, rows }: { title: string; rows: ShortcutRow[] }) {
   return (
     <section className="mb-4 last:mb-0">
-      <h3 className="mb-1.5 text-ui-xs font-bold uppercase tracking-wider text-muted">{title}</h3>
+      <h3 className="mb-2 text-ui-xs font-semibold uppercase tracking-wider text-muted">{title}</h3>
       <dl className="divide-y divide-line-soft">
         {rows.map((row) => (
-          <div key={`${title}-${row.label}`} className="flex items-center justify-between gap-3 py-1.5">
+          <div key={`${title}-${row.label}`} className="flex items-center justify-between gap-3 py-2">
             <dt className="min-w-0 truncate text-ui-sm text-ink">{row.label}</dt>
             <dd>
               <KeyCaps keys={row.keys} />
@@ -95,8 +92,8 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
       closeLabel="关闭快捷键"
       bodyClassName="px-4 py-3"
       footer={
-        <p className="mr-auto text-ui-xs text-muted">
-          输入框内不会触发「?」；随时可按 <kbd className="rounded-sm border border-line px-1">?</kbd> 再次打开。
+        <p className="mr-auto ui-body-sm text-muted">
+          输入框内不会触发「?」；随时可按 <Kbd>?</Kbd> 再次打开。
         </p>
       }
     >

@@ -239,7 +239,7 @@ function BlockSection({
 }) {
   return (
     <section aria-label={ariaLabel} className="ui-card p-4">
-      {title ? <h2 className="ui-section-title">{title}</h2> : null}
+      {title ? <h2 className="ui-block-title">{title}</h2> : null}
       <div className={title ? "mt-2" : ""}>{children}</div>
     </section>
   );
@@ -251,10 +251,10 @@ function StatsBlock({ block }: { block: Extract<PluginPageBlockV5, { type: "stat
       {block.items.map((item, index) => (
         <div
           key={`${item.label}:${index}`}
-          className="rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2"
+          className="rounded-lg border border-line-soft bg-subtle-2 px-3 py-2"
         >
           <dt className="ui-micro text-muted">{item.label}</dt>
-          <dd className="ui-numeric mt-0.5 text-ui-base font-bold">{item.value}</dd>
+          <dd className="ui-numeric mt-0.5 text-ui-base font-semibold">{item.value}</dd>
         </div>
       ))}
     </dl>
@@ -272,7 +272,7 @@ function TableBlock({ block }: { block: Extract<PluginPageBlockV5, { type: "tabl
               <th
                 key={`${column}:${index}`}
                 scope="col"
-                className="border border-line-soft bg-[var(--subtle-2)] px-2 py-1 text-left font-bold"
+                className="border border-line-soft bg-subtle-2 px-2 py-1 text-left font-semibold"
               >
                 {column}
               </th>

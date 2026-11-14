@@ -400,11 +400,11 @@ describe("ChatPage", () => {
     fireEvent.change(input, { target: { value: "发布" } });
 
     expect(await screen.findByText("1/2")).toBeInTheDocument();
-    expect(document.getElementById("msg-m1")?.className).toContain("ring-[var(--warn-line)]");
+    expect(document.getElementById("msg-m1")?.className).toContain("ring-warn-line");
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("2/2")).toBeInTheDocument();
-    expect(document.getElementById("msg-m3")?.className).toContain("ring-[var(--warn-line)]");
+    expect(document.getElementById("msg-m3")?.className).toContain("ring-warn-line");
 
     // 再按一次循环回第一条
     fireEvent.keyDown(input, { key: "Enter" });
@@ -498,7 +498,7 @@ describe("ChatPage", () => {
 
     // 扩窗后节点出现且被高亮
     expect(await screen.findByText("老消息 目标命中")).toBeInTheDocument();
-    expect(document.getElementById("msg-s5")?.className).toContain("ring-[var(--warn-line)]");
+    expect(document.getElementById("msg-s5")?.className).toContain("ring-warn-line");
   });
 
   it("切会话后窗口回到初始值（d.33）", async () => {
@@ -1525,6 +1525,11 @@ describe("ChatPage", () => {
     });
     captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
 
+    // d.142 E1：选图只进待发列表；正文仍在草稿里，点发送才合成同一条消息
+    expect(pendingFiles()).toHaveTextContent("cat.png");
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    clickSend();
+
     // ① 同发 = 一条消息同时带正文与附件（不是「正文一条 + 附件一条」两步）
     const plain = await lastSealed(send);
     expect(plain.kind).toBe("file");
@@ -1940,7 +1945,11 @@ describe("ChatPage", () => {
         expect(input.type).toBe("file");
         expect(input.accept).toBe(accept ?? "");
         Object.defineProperty(input, "files", { value: [file], configurable: true });
-        input.onchange?.call(input, new Event("change"));
+        // onchange 是直接调用的（不是 fireEvent），要自己包 act，否则 React 19 的
+        // 状态更新会拖到下一次 act 才 flush——E1 的「选中即入待发列表」断言会读到旧 DOM。
+        act(() => {
+          input.onchange?.call(input, new Event("change"));
+        });
         return input;
       },
     };
@@ -1960,6 +1969,20 @@ describe("ChatPage", () => {
     });
   }
 
+  /**
+   * d.142 E1 契约：选文件 / 粘贴 / 拖拽 / 录音只把附件放进「待发附件」列表，
+   * 点发送（或回车）才加密上传并产生 file 消息。
+   * 旧契约是「选中即上传即发送」——下面这几条用例原先按旧契约写，现已改到新契约。
+   */
+  function pendingFiles() {
+    return screen.getByRole("list", { name: "待发附件" });
+  }
+
+  /** 点输入区发送按钮：附件用例统一走这里，避免每条重复 getByRole。 */
+  function clickSend() {
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  }
+
   it("选中文件 → 密文上传共享库 → 发纯附件消息（file.key 随密文，POST 体非明文）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
@@ -1972,6 +1995,12 @@ describe("ChatPage", () => {
       undefined,
       new File(["HEMING-SECRET"], "a.txt", { type: "text/plain" }),
     );
+
+    // d.142 E1：选中只入列表，此时既没上传也没发送
+    expect(pendingFiles()).toHaveTextContent("a.txt");
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    clickSend();
 
     const plain = await lastSealed(send);
     // 消息侧保留原名/原 mime（气泡按它路由与展示），密钥 key 随明文进密文
@@ -2059,6 +2088,10 @@ describe("ChatPage", () => {
 
     captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
 
+    // d.142 E1：先入待发列表，点了发送才有「照常发送 + 当场提示」这一轮
+    expect(pendingFiles()).toHaveTextContent("cat.png");
+    clickSend();
+
     const status = await screen.findByText(/不支持图片输入/);
     expect(status).toHaveTextContent("绑定的模型不支持图片输入");
     expect(status).toHaveTextContent("和小鸣");
@@ -2105,6 +2138,10 @@ describe("ChatPage", () => {
     });
 
     captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    // d.142 E1：入列表 → 点发送 → 上传并发出（视觉模型不发「不支持图片」提示）
+    expect(pendingFiles()).toHaveTextContent("cat.png");
+    clickSend();
 
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })),
@@ -2212,9 +2249,12 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    clickSend();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("上传失败：too large");
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    // d.142 E1：失败不回吞附件——列表还留着，用户可就地重试或移除
+    expect(pendingFiles()).toHaveTextContent("a.txt");
   });
 
   it("上传悬停期间切会话：await 后丢弃不发送，提示「已切换会话，文件未发送」", async () => {
@@ -2238,6 +2278,8 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    expect(pendingFiles()).toHaveTextContent("a.txt");
+    clickSend(); // d.142 E1：点发送才开始上传，慢网络悬停出现在上传阶段
     act(() => {
       useUiStore.setState({ activeConversationId: "c2" }); // await 未返回前已切会话
     });
@@ -2262,6 +2304,8 @@ describe("ChatPage", () => {
     // 旧闭包的 convId/handle 都过期：不得把附件发进 B 会话
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("已切换会话，文件未发送");
+    // 切会话已清空列表，失败回写也不该把 c1 的附件塞进 c2 的输入区
+    expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument();
   });
 
   it("消费 pendingAttachment：切到目标会话后经 WS 发送 file 消息", async () => {
@@ -2425,6 +2469,9 @@ describe("ChatPage", () => {
 
       now += 2000; // 录满 2 秒（越过 <1s 拒发线）
       fireEvent.click(screen.getByLabelText("停止录音"));
+      // d.142 E1：停录只把音频放进待发列表，点发送才上传（录音不再停录即发）
+      await waitFor(() => expect(pendingFiles()).toHaveTextContent("语音-"));
+      clickSend();
       // 上传链含 FileReader 宏任务（jsdom setImmediate 两跳）：单次 act 冲不干净，waitFor 到 send 落定
       const plain = await lastSealed(send);
       // payload 保留录音原名/原 mime（AudioBubble 按 audio/* 路由），key 随密文；
@@ -2549,11 +2596,17 @@ describe("ChatPage", () => {
       });
       vi.useRealTimers();
       await act(async () => {});
+      // d.142 E1：60s 自动停录后同样先进待发列表，按发送才上传（不再自动发出）
+      expect(pendingFiles()).toHaveTextContent("语音-");
+      clickSend();
 
-      const ev = send.mock.calls
-        .map((c) => c[0] as Record<string, unknown>)
-        .find((e) => e.type === "send_message");
-      expect(ev).toBeDefined();
+      const ev = await waitFor(() => {
+        const found = send.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((e) => e.type === "send_message");
+        expect(found).toBeDefined();
+        return found!;
+      });
       expect(ev!.enc).toBe("e2e"); // 有界推进 + 切回真时钟后封发链已冲刷
       expect(decodePlain(ev!.cipher as string)).toMatchObject({
         kind: "file",
@@ -3508,7 +3561,7 @@ describe("ChatPage", () => {
     );
   });
 
-  it("A7 粘贴截图：走 sendFile 同一套上传与 file 消息发送", async () => {
+  it("A7 粘贴截图：进待发列表，点发送后走同一套上传与 file 消息发送", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     const fetchSpy = mockUploadFetch({
@@ -3528,6 +3581,11 @@ describe("ChatPage", () => {
       clipboardData: { files: [new File(["img"], "shot.png", { type: "image/png" })] },
     });
 
+    // d.142 E1 契约变化：粘贴的截图先入待发列表，不再粘贴即上传发送
+    expect(pendingFiles()).toHaveTextContent("shot.png");
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+    clickSend();
+
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({
       kind: "file",
@@ -3536,7 +3594,7 @@ describe("ChatPage", () => {
     expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(true);
   });
 
-  it("A7 拖拽文件到消息区：即上传并发送", async () => {
+  it("A7 拖拽文件到消息区：进待发列表，点发送后上传发出", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockUploadFetch({
@@ -3560,6 +3618,10 @@ describe("ChatPage", () => {
       },
     });
 
+    // d.142 E1 契约变化：拖进来的文件也只入待发列表，点发送才上传（拖拽不再即传即发）
+    expect(pendingFiles()).toHaveTextContent("拖入.txt");
+    clickSend();
+
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({ kind: "file", file: { id: "f-drop", name: "拖入.txt" } });
   });
@@ -3581,6 +3643,11 @@ describe("ChatPage", () => {
       target: { value: "一起传" },
     });
     captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    // d.142 E1：「上传中」态从点发送开始——选图本身不再上传
+    expect(pendingFiles()).toHaveTextContent("cat.png");
+    expect(screen.queryByText("上传中…（≤6MB）")).not.toBeInTheDocument();
+    clickSend();
 
     expect(await screen.findByText("上传中…（≤6MB）")).toBeInTheDocument();
     expect(screen.getByLabelText("图片")).toBeDisabled();
@@ -3609,6 +3676,75 @@ describe("ChatPage", () => {
       expect(screen.queryByText("上传中…（≤6MB）")).not.toBeInTheDocument(),
     );
     expect(screen.getByLabelText("图片")).not.toBeDisabled();
+    // 发送成功后待发列表清空（附件已随消息发出）
+    expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument();
+  });
+
+  it("E1 待发附件：chip 可移除（可 Tab 到），移除后不上传也不发送", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    render(<ChatPage />);
+    await act(async () => {});
+
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    expect(pendingFiles()).toHaveTextContent("a.txt");
+
+    // 移除按钮是普通 button（Tab 可达），aria-label 带文件名：读屏能分辨删的是哪一个
+    fireEvent.click(screen.getByRole("button", { name: "移除附件 a.txt" }));
+    expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument();
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  });
+
+  it("E1 待发附件：回车发送时附件一并发出，草稿与列表一起清空", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockUploadFetch({
+      id: "f-enter",
+      owner: "alice",
+      name: "a.txt",
+      mime: "text/plain",
+      size: 2,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant(); // 正文+附件同发要绑模型（纯附件消息不受此限）
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "看图" } });
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    expect(pendingFiles()).toHaveTextContent("a.txt");
+
+    // 回车走「requestSubmit → submit 事件 → 表单 onSubmit」这条路。
+    // jsdom 的 form.requestSubmit() 是 stub（只在 virtual console 打 not implemented，
+    // 派发的 submit 不冒泡到 React 的委托监听），所以这里先验键盘没被吞，再直接
+    // fireEvent.submit 打同一条表单提交路径——等价于真实浏览器里 requestSubmit 的结果。
+    const form = (input as HTMLTextAreaElement).form!;
+    fireEvent.keyDown(input, { key: "Enter" }); // Enter 发送、Shift+Enter 换行
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    fireEvent.submit(form);
+
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({ kind: "file", text: "看图", file: { id: "f-enter" } });
+    expect(input).toHaveValue("");
+    await waitFor(() =>
+      expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("E1 待发附件：切会话清空列表，不把旧会话的附件带过去", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    expect(pendingFiles()).toHaveTextContent("a.txt");
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+
+    expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument();
   });
 
   it("A9 文本发送失败：红色 alert + 「重试」；重试成功后清空草稿", async () => {
@@ -3917,7 +4053,7 @@ describe("ChatPage 工具轮可视化接线", () => {
       );
       // 放行：只有勾上的项才执行
       fireEvent.click(screen.getByLabelText("允许 echo-svc · echo"));
-      fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
+      fireEvent.click(screen.getByRole("button", { name: /允许选中/ }));
       await waitFor(() => expect(screen.getByText("完成")).toBeInTheDocument());
 
       // 工具结果与最终答案都出现（同一句文本，故用 getAllByText）

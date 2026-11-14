@@ -281,30 +281,27 @@ export function AssistantPage() {
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-soft px-4 ui-caption">
               <span className="min-w-0 truncate">与 {activeConv.agent.name} 的会话</span>
               <span
-                className={`ui-chip ${activeAgentBound ? "" : "text-[var(--danger)]"}`}
+                className={`ui-chip ${activeAgentBound ? "" : "text-danger"}`}
                 title={activeAgentBound ? undefined : "还没有绑定模型，发送会失败"}
               >
                 {activeAgentBound ? "模型已绑定" : "未绑定模型"}
               </span>
               <span className="ml-auto flex items-center gap-1">
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ui-hit"
                   onClick={() => {
                     const agent =
                       agentsRoster.find((a) => a.id === activeConv.agent.id) ?? activeConv.agent;
                     openAgentEditor(agent);
                   }}
-                  className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                 >
                   编辑智能体
-                </button>
-                <button
-                  type="button"
-                  onClick={backToPicker}
-                  className="rounded-sm px-1.5 py-0.5 text-ui-xs text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-                >
+                </Button>
+                <Button size="sm" variant="ghost" className="ui-hit" onClick={backToPicker}>
                   切换智能体
-                </button>
+                </Button>
               </span>
             </div>
             <div className="flex min-h-0 flex-1 flex-col">

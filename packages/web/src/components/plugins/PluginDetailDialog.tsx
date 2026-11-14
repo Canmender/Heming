@@ -361,7 +361,7 @@ function PackageDetailBody({
                           className="flex flex-wrap items-center gap-2 ui-caption"
                         >
                           <span className="font-mono ui-body-sm">{name}</span>
-                          <span className={`${CHIP} text-[var(--warn)]`}>未连接/未提供</span>
+                          <span className={`${CHIP} text-warn`}>未连接/未提供</span>
                           <Switch
                             label={`启用工具 ${name}`}
                             checked={false}
@@ -410,7 +410,7 @@ function PackageDetailBody({
           </section>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft bg-subtle-2 px-4 py-2.5">
           <Button type="button" onClick={onGoSkills} size="sm" variant="ghost">
             查看技能
           </Button>
@@ -424,7 +424,7 @@ function PackageDetailBody({
               查看 MCP 服务
             </Button>
           )}
-          <Button type="button" onClick={onRemove} size="sm" variant="ghost" className="text-[var(--danger)]">
+          <Button type="button" onClick={onRemove} size="sm" variant="ghost" className="text-danger">
             卸载插件
           </Button>
           <Button type="button" onClick={onClose} size="md" variant="ghost">

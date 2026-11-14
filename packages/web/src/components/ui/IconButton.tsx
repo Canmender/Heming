@@ -11,7 +11,7 @@ import { FOCUS_RING } from "../../lib/a11y/focus.js";
  *   · 图标没标 `aria-hidden`，装饰图形偶尔被当成内容。
  *
  * 这个基元把三件事一次做对，且把 `label` 设成**必填**：没有读屏名的图标按钮编译不过。
- * 视觉仍是既有 token（`text-muted` / `hover:bg-[var(--subtle-2)]` / `rounded-md`），
+ * 视觉仍是既有 token（`text-muted` / `hover:bg-subtle-2` / `rounded-md`），
  * 不引入新色值；尺寸固定 32×32（h-8 w-8），需要更大时由调用方传 `className` 覆盖
  * （Tailwind utility 在 @layer 里优先于组件类，覆盖有效）。
  */
@@ -36,7 +36,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={label}
       // title 只作鼠标悬停提示；名字来自 aria-label（title 在触屏与部分读屏上不可靠）。
       title={label}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-[var(--subtle-2)] hover:text-ink disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none ${FOCUS_RING}${className ? ` ${className}` : ""}`}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-subtle-2 hover:text-ink disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none ${FOCUS_RING}${className ? ` ${className}` : ""}`}
       {...rest}
     >
       <span aria-hidden="true" className="inline-flex items-center justify-center">

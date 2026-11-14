@@ -100,7 +100,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
           // 不能直接把 onDismiss 交给 onClick：React 会把事件对象当第一个参数传进去
           //（dismiss(now) 会把 Event 存成 dismissedAt，读回又回落 null → 关不掉）
           onClick={() => onDismiss()}
-          className={`ui-link ${FOCUS_RING_TIGHT}`}
+          className={`ui-link ui-hit ${FOCUS_RING_TIGHT}`}
         >
           不再显示
         </button>
@@ -116,33 +116,33 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
               aria-label={`${step.title}${step.done ? "（已完成）" : "（未完成）"}`}
               className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 ${
                 step.done
-                  ? "border-[var(--success-line)] bg-[var(--success-soft)]"
+                  ? "border-success-line bg-success-soft"
                   : index === nextIndex
-                    ? "border-[var(--line-strong)] bg-[var(--surface)]"
-                    : "border-line-soft bg-[var(--subtle-2)]"
+                    ? "border-line-strong bg-surface"
+                    : "border-line-soft bg-subtle-2"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-ui-xs font-bold ${
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-ui-xs font-semibold ${
                     step.done
-                      ? "border-[var(--success)] bg-[var(--success)] text-[var(--success-on)]"
-                      : "border-[var(--line-strong)] bg-[var(--surface)] text-[var(--body)]"
+                      ? "border-success bg-success text-success-on"
+                      : "border-line-strong bg-surface text-body"
                   }`}
                 >
                   {index + 1}
                 </span>
-                <span className="min-w-0 truncate text-ui-sm font-bold">{step.title}</span>
+                <span className="min-w-0 truncate text-ui-sm font-semibold">{step.title}</span>
                 {step.done && (
-                  <span className="ml-auto shrink-0 text-ui-xs font-medium text-[var(--success)]">
+                  <span className="ml-auto shrink-0 text-ui-xs font-medium text-success">
                     已完成
                   </span>
                 )}
               </div>
               {/* 已完成的步骤不该再读「在「智能体」页挑一个智能体，发第一句话」——
                   那是待办句式，勾了还这么写，等于让用户怀疑自己漏做了。 */}
-              <p className="text-ui-xs leading-4 text-muted">
+              <p className="ui-body-sm text-muted">
                 {step.done ? "这一步已经完成，不用再动。" : step.description}
               </p>
 
@@ -153,7 +153,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
                   onClick={() => toggleOpen(step.id)}
                   aria-expanded={open}
                   aria-controls={howToId}
-                  className={`self-start rounded-sm ui-micro text-muted underline decoration-[var(--line-strong)] underline-offset-2 hover:text-[var(--body)] ${FOCUS_RING_TIGHT}`}
+                  className={`-my-2 self-start rounded-sm py-2 ui-micro text-muted underline decoration-line-strong underline-offset-2 hover:text-body ${FOCUS_RING_TIGHT}`}
                 >
                   {open ? "收起做法" : "怎么做"}
                 </button>
@@ -161,7 +161,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
               {!step.done && open && (
                 <ol
                   id={howToId}
-                  className="flex list-decimal flex-col gap-0.5 pl-4 ui-micro leading-4 text-[var(--body)]"
+                  className="flex list-decimal flex-col gap-0.5 pl-4 ui-micro leading-4 text-body"
                 >
                   {ONBOARDING_HOW_TO[step.id].map((line) => (
                     <li key={line}>{line}</li>
@@ -177,7 +177,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
                   onClick={() => onGo(step.target)}
                   size="sm"
                   variant="ghost"
-                  className={`mt-auto self-start ${FOCUS_RING_TIGHT}`}
+                  className={`ui-hit mt-auto self-start ${FOCUS_RING_TIGHT}`}
                 >
                   {step.actionLabel}
                 </Button>

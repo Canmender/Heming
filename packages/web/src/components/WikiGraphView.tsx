@@ -238,10 +238,10 @@ export function WikiGraphView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 pb-2 text-ui-xs text-muted">
-        <span className="font-bold text-muted">图谱</span>
+        <span className="font-semibold text-muted">图谱</span>
         <span>{graph.nodes.length} 页 · {graph.edges.length} 条链接</span>
         {orphans > 0 && (
-          <span className="text-[var(--warn)]">{orphans} 个孤儿页（无任何链接）</span>
+          <span className="text-warn">{orphans} 个孤儿页（无任何链接）</span>
         )}
         <span className="ml-auto flex items-center gap-2.5">
           {showLegend
@@ -270,7 +270,7 @@ export function WikiGraphView({
         onPointerUp={onUp}
         onPointerCancel={onUp}
         onDoubleClick={reset}
-        className="relative min-h-[320px] flex-1 cursor-grab overflow-hidden rounded-xl border border-line-soft bg-[var(--subtle)] touch-none"
+        className="relative min-h-[320px] flex-1 cursor-grab overflow-hidden rounded-xl border border-line-soft bg-subtle touch-none"
         style={{ cursor: panning ? "grabbing" : undefined }}
       >
         <svg width={size.w} height={size.h} className="block">
@@ -349,12 +349,12 @@ export function WikiGraphView({
         </svg>
 
         {/* 缩放控件：−/百分比/＋ + 重置视图（双击复位保留为快捷手势） */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line-soft bg-[var(--surface)] px-1 py-0.5">
+        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line-soft bg-surface px-1 py-0.5">
           <button
             type="button"
             aria-label="缩小图谱"
             onClick={() => zoomBy(-ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-subtle-3 hover:text-ink"
           >
             −
           </button>
@@ -369,7 +369,7 @@ export function WikiGraphView({
             type="button"
             aria-label="放大图谱"
             onClick={() => zoomBy(ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="rounded-sm px-1.5 py-0.5 text-ui-sm text-muted transition-colors hover:bg-subtle-3 hover:text-ink"
           >
             ＋
           </button>
@@ -377,7 +377,7 @@ export function WikiGraphView({
             type="button"
             aria-label="重置视图"
             onClick={reset}
-            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-ui-xs text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-ui-xs text-muted transition-colors hover:bg-subtle-3 hover:text-ink"
           >
             重置
           </button>

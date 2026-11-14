@@ -68,11 +68,11 @@ export function OnlineCatalogPanel({
   return (
     <section
       aria-label="云端插件目录"
-      className="mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3"
+      className="mt-2 rounded-lg border border-line bg-subtle p-3"
     >
       <div className="flex items-center justify-between gap-2">
         <div>
-          <span className="text-ui-sm font-bold text-muted">云端插件目录</span>
+          <span className="text-ui-sm font-semibold text-muted">云端插件目录</span>
           <span className="ml-2 ui-caption">独立插件包：下载后仍走本机校验与安装预览</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -89,7 +89,7 @@ export function OnlineCatalogPanel({
 
       {!loading && error && (
         <div className="mt-2">
-          <p role="alert" className="ui-body-sm text-[var(--danger)]">
+          <p role="alert" className="ui-body-sm text-danger">
             {error}
           </p>
           <Button type="button" onClick={onRefresh} size="sm" variant="ghost" className="mt-1">
@@ -112,15 +112,15 @@ export function OnlineCatalogPanel({
               <li
                 key={key}
                 aria-label={`云端插件 ${entry.name}`}
-                className="rounded-lg border border-line bg-[var(--surface)] p-2.5"
+                className="rounded-lg border border-line bg-surface p-2.5"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-ui-sm font-bold">{entry.name}</span>
+                  <span className="text-ui-sm font-semibold">{entry.name}</span>
                   <span className={CHIP}>v{entry.version}</span>
                   <span
                     className={
                       state.tone === "update"
-                        ? "ui-caption text-[var(--warn)]"
+                        ? "ui-caption text-warn"
                         : "ui-caption"
                     }
                   >

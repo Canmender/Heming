@@ -11,6 +11,7 @@ import {
   ModelIcon,
   PinIcon,
   BookIcon,
+  KeyboardIcon,
 } from "./icons.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -19,15 +20,20 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
-import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
+import { NAV_GROUP_LABEL, navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { withPluginNav } from "../lib/pages/registry.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
 import { Button } from "../components/ui/Button.js";
+import { Kbd } from "./ui/Kbd.js";
 
 /**
- * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
- * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
+ * 导航项目录（**顺序即显示顺序**，见下方「固定顺序」说明）。
+ * digit 固定绑定页本身，所以将来若重排顺序，Alt+N 也不会跟着漂。
+ *
+ * 固定顺序（2026-11-14 审计 A-04 起）：不再读 `store.navOrder`。
+ * 顺序可调时用户会把「设置」拖到中间，而 Alt+N 的号仍是旧的——顺序与编号两套真源；
+ * 现在顺序写死、编号也写死，两者一一对应，轨上从上到下就是 1、2、8、0、5、6。
  *
  * **默认可视 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
  * 另外还有带页面的插件（信息中枢 / 自动化 / 工作流等）：它们默认不出现，
@@ -53,26 +59,32 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "settings", label: "设置", icon: <GearIcon width={18} height={18} />, digit: "6" },
 ];
 
-/** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
-/** 浮签：鼠标悬停或键盘聚焦时出现（焦点可见性，不再只服务鼠标用户）。 */
+/**
+ * 浮签：悬停黑色胶囊，淡入 + 轻微左移进入（120ms）；鼠标悬停或键盘聚焦时都出现
+ * （焦点可见性，不只服务鼠标用户）。
+ *
+ * 键帽（2026-11-14 审计 C2）：本文件手写的键帽元素换成 `ui/Kbd`，全站键帽只剩一套外观。
+ * 浮签是**反色**底（`bg-ink` 自带前景色 `--heming-on-accent`），所以不用 `text-white`
+ * （那是把亮暗两套主题的前景色写死成白，暗色主题下反而读不清），
+ * 键帽用 `[&>kbd]` 把描边/字色改成 `currentColor`，两套主题都自动跟随。
+ */
 function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-ui-xs font-medium text-white opacity-0 ui-overlay-shadow transition-all duration-fast motion-reduce:transition-none group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-2 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-ui-sm font-medium opacity-0 ui-overlay-shadow transition-all duration-fast motion-reduce:transition-none group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100 [&>kbd]:border-current [&>kbd]:text-current [&>kbd]:opacity-70"
     >
       <span>{label}</span>
-      {shortcut && (
-        <kbd className="rounded-sm border border-current px-1 text-ui-xs font-normal opacity-70">
-          {shortcut}
-        </kbd>
-      )}
+      {shortcut && <Kbd>{shortcut}</Kbd>}
     </span>
   );
 }
 
-/** 导航轨外形尺寸：与 d.67 的 A 方案一致（54px 常驻宽度）。 */
-const RAIL_WIDTH = "w-[54px]";
+/**
+ * 导航轨外形尺寸：56px 常驻宽度（2026-11-14 审计 A-11：原 54px 不在 8pt 栅格上，
+ * 32px 控件左右各 11px、四舍五入不成整数；56 让两侧各 12px，整列重心落在像素中点上）。
+ */
+const RAIL_WIDTH = "w-14";
 
 /**
  * 导航轨控件的统一命中区（d.141）：32×32、圆角 12。
@@ -82,7 +94,7 @@ const RAIL_WIDTH = "w-[54px]";
  * 悬停时整列看着在轻微「抖」；34 也超出控件高刻度（28 / 32）。
  * 命中区不到 32 的控件一律套 RAIL_CTRL，新增按钮别再写一次性 h-[…] w-[…]。
  */
-const RAIL_CTRL = "flex h-[32px] w-[32px] items-center justify-center rounded-lg";
+const RAIL_CTRL = "flex h-8 w-8 items-center justify-center rounded-lg";
 
 /**
  * 元素当前是否是「键盘可见焦点」。
@@ -100,10 +112,10 @@ function isFocusVisible(el: Element | null): boolean {
 }
 
 /**
- * 图标轨（A 方案）：约 54px 常驻左缘，无产品名文字。
+ * 图标轨（A 方案）：约 56px 常驻左缘，无产品名文字。
  *
  * d.68 起支持两种模式（见 `lib/navPrefs.ts`）：
- * - `pinned`（默认）：与之前完全一致，参与布局、占 54px；
+ * - `pinned`（默认）：与之前完全一致，参与布局、占 56px；
  * - `auto`：**脱离文档流**的浮层（absolute + 壳层行 relative），不挤压主内容；
  *   左缘 8px 热区（可聚焦 button）悬停/点击/Tab 展开，鼠标离开 400ms 收回，
  *   焦点仍在导航内不收回，Esc 收回并把焦点还回热区。
@@ -145,7 +157,7 @@ export function NavRail({
       .map((entry) => ({
         page: entry.pageId,
         label: entry.title,
-        icon: <PluginPageIcon icon={entry.icon} size={17} />,
+        icon: <PluginPageIcon icon={entry.icon} size={18} />,
       }));
     return [...ITEMS, ...pluginItems];
   }, [pluginEntries]);
@@ -260,12 +272,33 @@ export function NavRail({
   }, [auto, navOpen, closeNav]);
 
   /**
-   * 可见导航项（顺序跟 store 走、不可用的插件页撤下）。
-   * 抽成变量是为了让分隔线能看「上一项是谁」——内联 map 里拿不到过滤后的前一项。
+   * 可见导航项（固定顺序、不可用的插件页撤下）。
+   * 抽成变量是为了让分组能按「连续同组」切段——内联 map 里拿不到过滤后的前一项。
    */
   const visibleItems = navOrder
     .map((navPage) => items.find((it) => it.page === navPage))
     .filter((it): it is (typeof ITEMS)[number] => Boolean(it));
+
+  /**
+   * 中组逐项展开：带上「是否起新组」（决定要不要画细线、要不要放隐藏组名）。
+   * 插件页面一律算能力组、又固定追加在最末，所以末尾会再起一段能力组——与原来的分隔线
+   * 口径一致（系统→能力多一条线，位置稳定不跳动）。
+   * `groupLabelId` 以「本段首项」命名，同组内的按钮共用同一个描述目标。
+   */
+  let currentRunId = "";
+  const navRows = visibleItems.map((it, index) => {
+    const group = navGroupOf(it.page);
+    const prev = visibleItems[index - 1];
+    const runStart = !prev || navGroupOf(prev.page) !== group;
+    if (runStart) currentRunId = `nav-group-${it.page}`;
+    return {
+      it,
+      group,
+      runStart,
+      groupLabelId: currentRunId,
+      divider: needsGroupDivider(prev?.page ?? null, it.page),
+    };
+  });
 
   /** 导航轨内容：常显与浮层共用一份，避免两种模式的行为慢慢分叉。 */
   const railInner = (
@@ -279,7 +312,7 @@ export function NavRail({
             type="button"
             aria-label="全局搜索 Ctrl K"
             onClick={() => onOpenSearch?.()}
-            className={`${RAIL_CTRL} text-muted transition-colors duration-fast hover:bg-[var(--subtle-3)] hover:text-ink`}
+            className={`${RAIL_CTRL} text-muted transition-colors duration-fast hover:bg-subtle-3 hover:text-ink`}
           >
             <SearchIcon width={18} height={18} />
           </button>
@@ -293,31 +326,42 @@ export function NavRail({
             aria-label="快捷键帮助"
             title="快捷键"
             onClick={() => onOpenShortcuts?.()}
-            className={`${RAIL_CTRL} text-ui-md font-semibold text-muted transition-colors duration-fast hover:bg-[var(--subtle-3)] hover:text-ink`}
+            className={`${RAIL_CTRL} text-muted transition-colors duration-fast hover:bg-subtle-3 hover:text-ink`}
           >
-            ?
+            {/* P2-G1：「?」是文字冒充图标，字形随字体变、基线也不稳；键盘图标语义更直白 */}
+            <KeyboardIcon width={18} height={18} />
           </button>
           <Tip label="快捷键" shortcut="?" />
         </div>
       </div>
 
-      {/* 中组：导航页（宿主 8 页 + 已装插件的页面），垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
+      {/* 中组：导航页（宿主 8 页 + 已装插件的页面），垂直居中（组内间距 8px；组间一条细线）。
+          G2（2026-11-14 审计）：分组名「工作台 / 能力 / 资料 / 系统」在 56px 宽的图标轨上放不下——
+          中文横排要 3 个字宽、竖排要 40px 高，两种都得挤掉导航项或改轨道布局。所以**不做可见标签**，
+          改成「隐藏组名 + `aria-describedby`」：每组首项之前放一个 `sr-only` 的组名节点，
+          组内按钮都指向它，读屏读到按钮时补一句组名；视觉上仍只靠那条细线，轨道宽度不用动。
+          分组于是从「只有设计稿知道的隐式约定」变成可朗读、可断言的显式结构。 */}
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
-        {visibleItems.map((it, index) => {
+        {navRows.map(({ it, group, runStart, groupLabelId, divider }) => {
           const active = page === it.page;
-          const shortcut = it.digit ? `Alt${it.digit}` : "";
+          // 浮签里的键位写法与 `ShortcutsHelp` 面板一致：修饰键与键之间留空格
+          // （「Alt 1」而不是「Alt1」）。`aria-keyshortcuts` 仍按 ARIA 规范用「+」。
+          const shortcut = it.digit ? `Alt ${it.digit}` : "";
           // 显示名固定在本文件（含插件页标题，插件页也要能在这条轨上被点到）
           const label = it.label;
-          // 按「工作台 / 能力 / 资料 / 系统」分组画分隔线。
-          // 用可见相邻项算，所以不会出现空组或悬空线。
-          const divider = needsGroupDivider(visibleItems[index - 1]?.page ?? null, it.page);
           return (
             <Fragment key={it.page}>
-              {divider ? <div aria-hidden="true" className="h-px w-6 bg-[var(--line-soft)]" /> : null}
-              <div className="group relative" data-nav-group={navGroupOf(it.page)}>
+              {divider ? <div aria-hidden="true" className="h-px w-6 bg-line-soft" /> : null}
+              {runStart ? (
+                <span id={groupLabelId} className="sr-only">
+                  {NAV_GROUP_LABEL[group]}
+                </span>
+              ) : null}
+              <div className="group relative" data-nav-group={group}>
                 <button
                   type="button"
                   aria-label={label}
+                  aria-describedby={groupLabelId}
                   aria-keyshortcuts={it.digit ? `Alt+${it.digit}` : undefined}
                   aria-current={active ? "page" : undefined}
                   onClick={() => {
@@ -327,7 +371,7 @@ export function NavRail({
                     if (auto && !keyboardFocusRef.current) closeOverlay();
                   }}
                   className={`relative ${RAIL_CTRL} transition-colors duration-fast ${
-                    active ? "bg-ink text-white" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+                    active ? "bg-ink text-white" : "text-muted hover:bg-subtle-3 hover:text-ink"
                   }`}
                 >
                   {it.icon}
@@ -350,7 +394,7 @@ export function NavRail({
             title={pinned ? "自动隐藏导航栏（Ctrl+B）" : "固定导航栏常显（Ctrl+B）"}
             onClick={() => setNavMode(otherNavMode(navMode))}
             className={`${RAIL_CTRL} transition-colors duration-fast ${
-              pinned ? "text-[var(--body)] hover:bg-[var(--subtle-3)] hover:text-ink" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+              pinned ? "text-body hover:bg-subtle-3 hover:text-ink" : "text-muted hover:bg-subtle-3 hover:text-ink"
             }`}
           >
             <PinIcon width={16} height={16} />
@@ -364,12 +408,12 @@ export function NavRail({
             aria-label={`账户：${who} · 退出登录`}
             title="退出登录"
             onClick={() => setConfirmLogout(true)}
-            className="flex h-[32px] w-[32px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-ui-sm font-bold text-[var(--body)] transition-colors duration-fast hover:bg-[var(--subtle-4)]"
+            className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-subtle-3 text-ui-sm font-semibold text-body transition-colors duration-fast hover:bg-subtle-4"
           >
             {avatar ? (
               <img src={avatar} alt="" className="h-full w-full rounded-full object-cover" />
             ) : (
-              <UserIcon width={14} height={14} />
+              <UserIcon width={16} height={16} />
             )}
           </button>
           <Tip label={`${who} · 账户`} />
@@ -413,7 +457,7 @@ export function NavRail({
     return (
       <nav
         aria-label="主导航"
-        className={`flex ${RAIL_WIDTH} shrink-0 flex-col items-center border-r border-line-soft bg-[var(--subtle-2)] py-3`}
+        className={`flex ${RAIL_WIDTH} shrink-0 flex-col items-center border-r border-line-soft bg-subtle-2 py-3`}
       >
         {railInner}
       </nav>
@@ -465,7 +509,7 @@ export function NavRail({
           if (next && (navRef.current?.contains(next) || hotzoneRef.current?.contains(next))) return;
           scheduleHide();
         }}
-        className={`absolute inset-y-0 left-0 z-30 flex ${RAIL_WIDTH} flex-col items-center border-r border-line-soft bg-[var(--subtle-2)] py-3 ui-overlay-shadow transition-[transform,opacity] duration-[160ms] ease-out motion-reduce:transition-none ${
+        className={`absolute inset-y-0 left-0 z-30 flex ${RAIL_WIDTH} flex-col items-center border-r border-line-soft bg-subtle-2 py-3 ui-overlay-shadow transition-[transform,opacity] duration-base ease-out motion-reduce:transition-none ${
           navOpen ? "translate-x-0 opacity-100" : "pointer-events-none -translate-x-full opacity-0"
         }`}
       >

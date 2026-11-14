@@ -122,6 +122,19 @@ export function ToolApprovalModal({
     );
   };
 
+  /*
+   * 2026-11-14 审计 E2（⚠️ 误操作风险）：
+   *
+   * 旧版默认一项不勾、主按钮却写「仅本次允许」——0 项勾选时点它 = 全部拒绝，
+   * 用户以为放行了、实际被拒，唯一的解释是按钮上方那行 11px 灰字。现在：
+   *   · 主按钮文案带实时勾选数「允许选中（N）」，N=0 时**禁用**（禁用比拒绝更诚实：
+   *     它明确表示「现在这个动作还做不了」，而不是点下去变成一次拒绝）；
+   *   · 「本会话内允许所选」同样按所选生效，0 项时一并禁用；
+   *   · 拒绝按钮独立成「全部拒绝」，语义与 decision 一致（它确实拒绝全部）。
+   * 勾选数同时进被测文案，单测可以直接断言「默认 0 项 → 主按钮不可用」。
+   */
+  const checkedCount = calls.reduce((n, c) => (checked[c.id] ? n + 1 : n), 0);
+
   const footer = (
     <div className="flex w-full flex-col gap-1.5">
       {/*
@@ -129,22 +142,34 @@ export function ToolApprovalModal({
         写操作默认不勾、允许只放行勾选项——这条规则不说出来，用户会以为「点了允许却被拒绝」。
       */}
       {calls.length > 0 && (
-        <p className="text-ui-xs text-muted">先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。</p>
+        <p className="text-ui-sm text-body" role="status" aria-live="polite">
+          先勾选要放行的调用；没勾的会按拒绝处理。已勾选 {checkedCount} / {calls.length} 项。
+        </p>
       )}
       <div className="flex w-full flex-wrap items-center justify-end gap-2">
         {/* d.138 危险语义归位：此前「拒绝」是 md 红字（全页最显眼的按钮），
             「仅本次允许」反而是 sm 次级——安全动作看起来比放行更危险，主次是反的。
             现在两者同尺寸：放行是 primary，拒绝是 ghost（不再染红——拒绝不是破坏性操作）。 */}
         <Button ref={denyRef} variant="ghost" onClick={denyAll}>
-          拒绝
+          全部拒绝
         </Button>
         {!hasPatch && (
-          <Button variant="ghost" onClick={() => allowChecked("allow-session")}>
-            本会话内允许此工具
+          <Button
+            variant="ghost"
+            disabled={checkedCount === 0}
+            title={checkedCount === 0 ? "先勾选要放行的调用" : undefined}
+            onClick={() => allowChecked("allow-session")}
+          >
+            本会话内允许所选
           </Button>
         )}
-        <Button variant="primary" onClick={() => allowChecked("allow")}>
-          仅本次允许
+        <Button
+          variant="primary"
+          disabled={checkedCount === 0}
+          title={checkedCount === 0 ? "先勾选要放行的调用" : undefined}
+          onClick={() => allowChecked("allow")}
+        >
+          允许选中（{checkedCount}）
         </Button>
       </div>
     </div>
@@ -159,13 +184,13 @@ export function ToolApprovalModal({
     >
       <div className="flex flex-col gap-2">
         {conversationLabel && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5 ui-caption">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-subtle-2 px-2.5 py-1.5 ui-caption">
             <span className="min-w-0 flex-1">请求来自会话「{conversationLabel}」</span>
             {onOpenConversation && (
               <button
                 type="button"
                 onClick={onOpenConversation}
-                className="rounded-sm border border-line bg-[var(--surface)] px-2 py-0.5 text-ui-xs text-[var(--body)] hover:bg-[var(--subtle-2)]"
+                className="rounded-sm border border-line bg-surface px-2 py-0.5 text-ui-xs text-body hover:bg-subtle-2"
               >
                 回到该会话
               </button>
@@ -180,7 +205,7 @@ export function ToolApprovalModal({
             <div
               key={call.id}
               className={`rounded-lg border px-2.5 py-2 ${
-                call.risk === "danger" ? "border-[var(--danger-line)] bg-[var(--danger-soft)]" : "border-line"
+                call.risk === "danger" ? "border-danger-line bg-danger-soft" : "border-line"
               }`}
             >
               <div className="flex items-start gap-2">
@@ -201,10 +226,10 @@ export function ToolApprovalModal({
                     <span
                       className={`rounded-sm px-1 text-ui-xs ${
                         call.risk === "danger"
-                          ? "bg-[var(--danger)] text-[var(--danger-on)]"
+                          ? "bg-danger text-danger-on"
                           : call.risk === "write"
-                            ? "bg-[var(--warn-soft)] text-[var(--warn)]"
-                            : "bg-[var(--subtle-3)] text-muted"
+                            ? "bg-warn-soft text-warn"
+                            : "bg-subtle-3 text-muted"
                       }`}
                     >
                       {RISK_LABEL[call.risk]}
@@ -221,7 +246,7 @@ export function ToolApprovalModal({
                   {isPatch ? (
                     <FilePatchPreviewPanel argsJson={call.argsJson} previewer={patchPreviewer} />
                   ) : preview ? (
-                    <details className="mt-1 rounded-md border border-line-soft bg-[var(--surface)]">
+                    <details className="mt-1 rounded-md border border-line-soft bg-surface">
                       <summary
                         className="cursor-pointer px-2 py-1 text-ui-xs text-muted"
                         title={preview.path}
@@ -235,9 +260,9 @@ export function ToolApprovalModal({
                             key={i}
                             className={
                               line.kind === "add"
-                                ? "bg-[var(--success-soft)] text-[var(--success)]"
+                                ? "bg-success-soft text-success"
                                 : line.kind === "del"
-                                  ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                                  ? "bg-danger-soft text-danger"
                                   : "text-muted"
                             }
                           >
@@ -250,7 +275,7 @@ export function ToolApprovalModal({
                         )}
                       </pre>
                       {preview.kind === "delete" && (
-                        <div className="border-t border-line-soft px-2 py-1 text-ui-xs text-[var(--warn)]">
+                        <div className="border-t border-line-soft px-2 py-1 text-ui-xs text-warn">
                           删除不可撤销；这里只显示目标路径，不读取文件内容。
                         </div>
                       )}
@@ -307,7 +332,7 @@ export function ToolApprovalModal({
             </span>
           </label>
         ) : (
-          <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5 text-ui-xs text-muted">
+          <div className="mt-1 rounded-lg border border-line-soft bg-subtle-2 px-2.5 py-1.5 text-ui-xs text-muted">
             这次改动无法按目录记住（目标不在可写根内），本次不会落任何授权规则。
             想让某个目录以后都免问，请先到设置区「文件编辑」把它加成可写根。
           </div>
@@ -357,22 +382,22 @@ function FilePatchPreviewPanel({
   if (preview === null) return null;
   if (preview.error) {
     return (
-      <div className="mt-1 rounded-md border border-[var(--danger-line)] bg-[var(--danger-soft)] px-2 py-1 text-ui-xs text-[var(--danger)]">
+      <div className="mt-1 rounded-md border border-danger-line bg-danger-soft px-2 py-1 text-ui-xs text-danger">
         {preview.error}
       </div>
     );
   }
 
   return (
-    <details className="mt-1 rounded-md border border-line-soft bg-[var(--surface)]" open>
+    <details className="mt-1 rounded-md border border-line-soft bg-surface" open>
       <summary className="cursor-pointer px-2 py-1 text-ui-xs text-muted">
         查看变更（{preview.summary}）
       </summary>
       <div className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-ui-xs leading-4">
         {preview.files.map((file) => (
           <div key={file.rel} className="mb-1 last:mb-0">
-            <div className="text-[var(--body)]">
-              <span className="font-bold">{file.kind}</span> {file.rel}
+            <div className="text-body">
+              <span className="font-semibold">{file.kind}</span> {file.rel}
               {file.movedFrom ? `（由 ${file.movedFrom} 改名）` : ""}
               <span className="ml-1 text-muted">
                 +{file.added} −{file.removed}
@@ -383,9 +408,9 @@ function FilePatchPreviewPanel({
                 key={i}
                 className={
                   line.kind === "add"
-                    ? "bg-[var(--success-soft)] text-[var(--success)]"
+                    ? "bg-success-soft text-success"
                     : line.kind === "del"
-                      ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                      ? "bg-danger-soft text-danger"
                       : "text-muted"
                 }
               >

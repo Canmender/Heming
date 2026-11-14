@@ -185,7 +185,7 @@ function UnitRow({
       className="ui-card plugin-card p-4"
     >
       <div className="flex items-start gap-3">
-        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-bold">
+        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-semibold">
           {initial}
         </span>
         <div className="min-w-0 flex-1">
@@ -337,7 +337,7 @@ export function UnitListView({
 
   return (
     <div aria-label="已安装能力单元">
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-surface p-2.5">
         <div className="relative min-w-[200px] max-w-[320px] flex-1">
           <span
             aria-hidden="true"
@@ -358,7 +358,7 @@ export function UnitListView({
             <div
               role="group"
               aria-label="按来源筛选"
-              className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
+              className="ui-segment-group"
             >
               {sourceFilters.map((item) => (
                 <button
@@ -366,7 +366,7 @@ export function UnitListView({
                   type="button"
                   aria-pressed={source === item.key}
                   onClick={() => setSource(item.key)}
-                  className="plugin-segment"
+                  className="ui-segment"
                 >
                   {item.label}
                 </button>
@@ -375,7 +375,7 @@ export function UnitListView({
             <div
               role="group"
               aria-label="按状态筛选"
-              className="inline-flex items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
+              className="ui-segment-group"
             >
               {STATUS_FILTERS.map((item) => (
                 <button
@@ -383,7 +383,7 @@ export function UnitListView({
                   type="button"
                   aria-pressed={statusFilter === item.key}
                   onClick={() => setStatusFilter(item.key)}
-                  className="plugin-segment"
+                  className="ui-segment"
                 >
                   {item.label}
                 </button>

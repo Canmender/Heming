@@ -34,7 +34,7 @@ export function CollabTurnCard({
         <span className="ui-chip">{turn.role}</span>
         {turn.round > 0 ? <span className="ui-micro">第 {turn.round} 轮</span> : null}
         {turn.streaming ? (
-          <span className="ui-micro animate-pulse text-[var(--heming-accent)]">生成中…</span>
+          <span className="ui-micro animate-pulse text-accent">生成中…</span>
         ) : null}
         {turn.aborted ? <span className="ui-chip">已中止</span> : null}
         <span className="ui-micro ml-auto ui-numeric">{duration}</span>

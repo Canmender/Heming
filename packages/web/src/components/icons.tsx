@@ -1,12 +1,22 @@
 import type { SVGProps } from "react";
 
+/*
+ * P2-C7：描边宽度跟随尺寸。1.5 在 18px 上合适，落到 12/14px 只剩 0.75–0.875px，
+ * 中文字体旁会发虚；小尺寸收到 1.75 才保住线条的「实」。调用方显式传 strokeWidth
+ * 仍然优先（...props 在后）。
+ */
+const strokeFor = (width: SVGProps<SVGSVGElement>["width"]) => {
+  const px = typeof width === "number" ? width : Number(width ?? 18);
+  return Number.isFinite(px) && px <= 14 ? 1.75 : 1.5;
+};
+
 const base = (props: SVGProps<SVGSVGElement>) => ({
   width: 18,
   height: 18,
   viewBox: "0 0 24 24",
   fill: "none",
   stroke: "currentColor",
-  strokeWidth: 1.5,
+  strokeWidth: strokeFor(props.width),
   strokeLinecap: "round" as const,
   strokeLinejoin: "round" as const,
   ...props,
@@ -385,5 +395,20 @@ export const CalendarIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
     <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" />
+  </svg>
+);
+
+export const KeyboardIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M6.5 13h.01M17 13h.01M9 13.5h6" />
+  </svg>
+);
+
+export const HelpIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.5" />
+    <path d="M12 16.6h.01" />
   </svg>
 );

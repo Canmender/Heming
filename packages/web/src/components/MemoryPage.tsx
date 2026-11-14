@@ -90,7 +90,7 @@ const labelCls = "block ui-caption";
 const hintCls = "ui-caption";
 /** 召回记录默认只列最近 3 次，其余按需展开。 */
 const RECALL_RUNS_PREVIEW = 3;
-const errorCls = "ui-body-sm text-[var(--danger)]";
+const errorCls = "ui-body-sm text-danger";
 const okCls = "ui-body-sm text-muted";
 const badgeCls = "ui-chip";
 
@@ -384,7 +384,7 @@ function AddMemoryModal({
             onChange={(e) => setValue(e.target.value)}
           />
         </label>
-        <div className="mt-1 text-ui-xs text-muted">
+        <div className="mt-1 ui-body-sm text-muted">
           同一主题键再次保存会覆盖旧内容（记忆按智能体 + 主题去重）
         </div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
@@ -469,7 +469,7 @@ function KnowledgeModal({
             onChange={(e) => setTags(e.target.value)}
           />
         </label>
-        <div className="mt-1 text-ui-xs text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
+        <div className="mt-1 ui-body-sm text-muted">条目只存本机，智能体默认允许读取个人知识库</div>
         {error && <div role="alert" className="ui-alert ui-alert-danger mt-2">{error}</div>}
         <div className="mt-3 flex justify-end gap-2">
           <Button type="button" onClick={onClose} size="md" variant="ghost">
@@ -575,13 +575,13 @@ function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
         {title}（{lines.length}）
       </div>
       {lines.length === 0 ? (
-        <div className="mt-0.5 text-ui-xs text-muted">无命中</div>
+        <div className="mt-0.5 ui-caption text-muted">无命中</div>
       ) : (
         <ul className="mt-0.5 space-y-1">
           {lines.map((line, i) => (
-            <li key={i} className="break-words text-ui-xs text-[var(--body)]">
+            <li key={i} className="break-words ui-body-sm text-body">
               {line.text}
-              <span className="ml-1 text-ui-xs text-muted">
+              <span className="ml-1 whitespace-nowrap ui-caption text-muted">
                 {line.score !== undefined && `· 打分 ${line.score.toFixed(3)} `}
                 {line.boost !== undefined && `· 加权 ×${line.boost} `}
                 {line.injected
@@ -605,8 +605,8 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
     <li className="rounded-lg border border-line px-3 py-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="break-words text-ui-sm text-[var(--body)]">{clip(run.query, 60) || "（空提问）"}</div>
-          <div className="mt-0.5 text-ui-xs text-muted">
+          <div className="break-words ui-body-sm text-body">{clip(run.query, 60) || "（空提问）"}</div>
+          <div className="mt-0.5 ui-caption text-muted">
             {run.at.slice(0, 10)} {run.at.slice(11, 16)} · 召回 语义{run.recalled.semantic}/情景{run.recalled.episodic}/短期
             {run.recalled.working} → 注入 {run.injected.length} 条
             {run.dropped.length > 0 && ` · 未注入 ${run.dropped.length} 条`}
@@ -620,7 +620,7 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
       {expanded && (
         <div className="mt-2 space-y-1 border-t border-line-soft pt-2">
           {run.injected.map((item) => (
-            <div key={`${item.layer}-${item.id}`} className="break-words text-ui-xs text-[var(--body)]">
+            <div key={`${item.layer}-${item.id}`} className="break-words ui-body-sm text-body">
               <span className="text-muted">
                 {item.layer === "semantic" ? "语义" : item.layer === "episodic" ? "情景" : "短期"}
                 {item.score !== undefined && ` ${item.score.toFixed(3)}`}
@@ -631,7 +631,7 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
             </div>
           ))}
           {run.dropped.map((item) => (
-            <div key={`drop-${item.layer}-${item.id}`} className="flex items-baseline gap-1 break-words text-ui-xs text-muted">
+            <div key={`drop-${item.layer}-${item.id}`} className="flex items-baseline gap-1 break-words ui-body-sm text-muted">
               <XIcon
                 width={12}
                 height={12}
@@ -1109,7 +1109,7 @@ export function MemoryPage({
     <section aria-label="短期记忆" className={cardCls}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="ui-section-title">短期记忆</div>
+          <h2 className="ui-section-title">短期记忆</h2>
           <div className={`mt-1 ${hintCls}`}>
             会话级缓冲：当前会话最近若干轮上下文，约 2 小时未活动或满 40 轮后过期，仅存本机
           </div>
@@ -1146,7 +1146,7 @@ export function MemoryPage({
                   type="button"
                   aria-expanded={open}
                   onClick={() => toggleGroup(key)}
-                  className="flex min-w-0 items-center gap-1.5 text-left text-ui-sm font-bold"
+                  className="flex min-w-0 items-center gap-1.5 text-left text-ui-sm font-semibold"
                 >
                   <span aria-hidden="true" className="text-muted">
                     <ChevronIcon
@@ -1178,7 +1178,7 @@ export function MemoryPage({
                     <div
                       key={turn.id}
                       data-memory-id={turn.id}
-                      className={`rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-2 ${
+                      className={`rounded-lg border border-line-soft bg-subtle-2 px-2.5 py-2 ${
                         highlightMemoryId === turn.id ? "ring-2 ring-ink/25" : ""
                       }`}
                     >
@@ -1187,10 +1187,10 @@ export function MemoryPage({
                         {turn.partial && " · 中断"}
                         {!agentId && ` · ${agentName(turn.agentId)}`}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-body">
                         用户：{turn.userText}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-body">
                         助手：{turn.assistantText}
                       </div>
                     </div>
@@ -1277,7 +1277,7 @@ export function MemoryPage({
       </span>
       <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
       {vaultSync?.truncated ? (
-        <span role="status" className="text-ui-sm text-[var(--warn)]">
+        <span role="status" className="text-ui-sm text-warn">
           被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
         </span>
       ) : (
@@ -1326,7 +1326,7 @@ export function MemoryPage({
           {vaultEntries.slice(0, 5).map((entry) => (
             <li key={entry.id} className="flex items-start justify-between gap-2 py-2">
               <div className="min-w-0">
-                <div className="truncate text-ui-sm font-bold">{entry.key}</div>
+                <div className="truncate text-ui-sm font-semibold">{entry.key}</div>
                 <div className="mt-0.5 break-words text-ui-xs text-muted">{entry.value}</div>
               </div>
               <Button
@@ -1345,9 +1345,9 @@ export function MemoryPage({
         <div className={`mt-1 ${hintCls}`}>只列出最近 5 篇；完整清单见知识库页。</div>
       )}
       {vaultPreview && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2 text-ui-xs leading-5 text-[var(--body)]">
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 p-2 text-ui-xs leading-5 text-body">
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate font-bold">{vaultPreview.rel}</span>
+            <span className="min-w-0 truncate font-semibold">{vaultPreview.rel}</span>
             <Button type="button" onClick={() => setVaultPreview(null)} size="sm" variant="ghost">
               关闭预览
             </Button>
@@ -1381,7 +1381,7 @@ export function MemoryPage({
             </div>
             <div>
               <div className="text-ui-xs text-muted">总量</div>
-              <div className="mt-1 text-ui-sm font-bold">
+              <div className="mt-1 text-ui-sm font-semibold">
                 {totalEntries} 条 · {totalChars} 字符
               </div>
             </div>
@@ -1521,7 +1521,7 @@ export function MemoryPage({
             readOnly
             aria-label="手动复制记忆 JSON"
             value={manualCopy}
-            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-ui-xs"
+            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-subtle-2 p-2 text-ui-xs"
           />
         )}
         {importOpen && (
@@ -1530,7 +1530,7 @@ export function MemoryPage({
               导入记忆 JSON
               <textarea
                 aria-label="导入记忆 JSON"
-                className={`${inputCls} min-h-[96px] resize-y font-mono text-ui-xs`}
+                className={`${inputCls} min-h-[96px] resize-y font-mono ui-body-sm`}
                 value={importText}
                 placeholder="粘贴「导出」得到的 JSON；导入会整体替换本机记忆"
                 onChange={(e) => setImportText(e.target.value)}
@@ -1553,7 +1553,7 @@ export function MemoryPage({
 
       <section className={`${cardCls} mt-3`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="ui-section-title">记忆条目</div>
+          <h2 className="ui-section-title">记忆条目</h2>
           <input
             aria-label="检索记忆"
             value={query}
@@ -1633,16 +1633,16 @@ export function MemoryPage({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-ui-md font-bold">{entry.key}</span>
+                        <span className="truncate text-ui-md font-semibold">{entry.key}</span>
                         {entry.pinned && <span className={badgeCls}>置顶</span>}
                         {!agentId && (
                           <span className="text-ui-xs text-muted">{agentName(entry.agentId)}</span>
                         )}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-[var(--body)]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-ui-sm text-body">
                         {entry.value}
                       </div>
-                      <div className="mt-1 text-ui-xs text-muted">
+                      <div className="mt-1 ui-body-sm text-muted">
                         {SOURCE_LABEL[entry.source]}
                         {/* 手动添加的条目没有「置信度」可言：置信度是自动提取时的可信度，
                             人工录入再显示 0.60 只会让人怀疑内容本身（d.77）。 */}
@@ -1686,7 +1686,7 @@ export function MemoryPage({
                         type="button"
                         aria-label={`删除记忆 ${entry.key}`}
                         onClick={() => setPendingSemantic(entry)}
-                        size="sm" variant="ghost" className="text-[var(--danger)]"
+                        size="sm" variant="ghost" className="text-danger"
                       >
                         <TrashIcon width={14} height={14} />
                       </Button>
@@ -1721,7 +1721,7 @@ export function MemoryPage({
                     {entry.at.slice(0, 10)}
                     {!agentId && ` · ${agentName(entry.agentId)}`} · {entry.sourceTurns} 轮
                   </div>
-                  <div className="mt-0.5 break-words text-ui-sm text-[var(--body)]">{entry.summary}</div>
+                  <div className="mt-0.5 break-words text-ui-sm text-body">{entry.summary}</div>
                   {personalNote(usage[entry.id]) && (
                     <div className="mt-0.5 break-words text-ui-xs text-muted">
                       {personalNote(usage[entry.id])}
@@ -1732,7 +1732,7 @@ export function MemoryPage({
                   type="button"
                   aria-label={`删除情景 ${entry.summary.slice(0, 12)}`}
                   onClick={() => setPendingEpisodic(entry)}
-                  size="sm" variant="ghost" className="text-[var(--danger)]"
+                  size="sm" variant="ghost" className="text-danger"
                 >
                   <TrashIcon width={14} height={14} />
                 </Button>
@@ -1814,7 +1814,7 @@ export function MemoryPage({
                 readOnly
                 aria-label="将被注入的记忆段"
                 value={recall.text}
-                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-ui-xs"
+                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-subtle-2 p-2 ui-body-sm"
               />
             ) : (
               <div className={`mt-3 ${hintCls}`}>三层皆无命中：不会注入任何记忆段</div>
@@ -1888,8 +1888,8 @@ export function MemoryPage({
                 className="ui-list-row items-start justify-between"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-ui-sm font-bold">{row.title}</div>
-                  <div className="mt-0.5 break-words text-ui-sm text-[var(--body)]">{row.body}</div>
+                  <div className="truncate text-ui-sm font-semibold">{row.title}</div>
+                  <div className="mt-0.5 break-words text-ui-sm text-body">{row.body}</div>
                   <div className="mt-0.5 text-ui-xs text-muted">
                     {row.layer}
                     {!agentId && ` · ${agentName(row.agentId)}`}
@@ -1900,7 +1900,7 @@ export function MemoryPage({
                   type="button"
                   aria-label={`删除冷记忆 ${row.layer} ${row.title}`}
                   onClick={row.pending}
-                  size="sm" variant="ghost" className="text-[var(--danger)] shrink-0"
+                  size="sm" variant="ghost" className="text-danger shrink-0"
                 >
                   <TrashIcon width={14} height={14} />
                 </Button>
@@ -1912,7 +1912,7 @@ export function MemoryPage({
 
       {clearRunsOpen && (
         <ConfirmDialog
-          title="清除召回记录"
+          title="清除召回记录？"
           onCancel={() => setClearRunsOpen(false)}
           footer={
             <>
@@ -1941,16 +1941,15 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
-            清除全部 {runs.length} 条召回记录？记忆本身不受影响，只是看不到历史注入与引用轨迹了。
-            累计的注入/引用次数一并清零，个性化加权回到起点（下次召回从「谁都没被引用过」重新开始）。
+          <p className="ui-body-sm">
+            清除全部 {runs.length} 条召回记录后不可恢复（注入/引用次数一并清零，个性化加权回到起点）；记忆本身不受影响。
           </p>
         </ConfirmDialog>
       )}
 
       {pendingSemantic && (
         <ConfirmDialog
-          title="删除记忆"
+          title="删除记忆？"
           onCancel={() => setPendingSemantic(null)}
           footer={
             <>
@@ -1979,8 +1978,8 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
-            删除记忆「{pendingSemantic.key}」？删除后智能体不会再召回这条，操作不可撤销。
+          <p className="ui-body-sm">
+            记忆「{pendingSemantic.key}」删除后不可恢复，智能体不会再召回这条。
           </p>
           <p className="mt-1 break-words text-ui-sm text-muted">{pendingSemantic.value}</p>
         </ConfirmDialog>
@@ -1988,7 +1987,7 @@ export function MemoryPage({
 
       {pendingEpisodic && (
         <ConfirmDialog
-          title="删除情景记忆"
+          title="删除情景记忆？"
           onCancel={() => setPendingEpisodic(null)}
           footer={
             <>
@@ -2017,14 +2016,14 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">删除这条情景记忆？删除后不会参与召回。</p>
+          <p className="ui-body-sm">这条情景记忆删除后不可恢复，不会再参与召回。</p>
           <p className="mt-1 break-words text-ui-sm text-muted">{pendingEpisodic.summary}</p>
         </ConfirmDialog>
       )}
 
       {importConfirm && (
         <ConfirmDialog
-          title="导入记忆"
+          title="导入记忆？"
           onCancel={() => setImportConfirm(false)}
           footer={
             <>
@@ -2045,7 +2044,7 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
+          <p className="ui-body-sm">
             导入会整体替换本机三层记忆与设置，当前记忆不会保留。建议先导出备份，操作不可撤销。
           </p>
         </ConfirmDialog>
@@ -2123,7 +2122,7 @@ export function MemoryPage({
   const reviewCard = (
     <section aria-label="复盘沉淀" className={`${cardCls} mt-3`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="ui-section-title">复盘沉淀（任务结束后自评）</div>
+        <h2 className="ui-section-title">复盘沉淀（任务结束后自评）</h2>
         <Button
           type="button"
           aria-label="立即复盘一次"
@@ -2186,7 +2185,7 @@ export function MemoryPage({
               {capacity.used} / {capacity.limit} 字符
             </span>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-3)]">
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-subtle-3">
             <div
               className="h-full rounded-full bg-ink"
               style={{
@@ -2271,10 +2270,10 @@ export function MemoryPage({
                     </td>
                   </tr>
                   {pendingDbOff === agent.id && (
-                    <tr className="bg-[var(--subtle-2)]">
+                    <tr className="bg-subtle-2">
                       <td colSpan={4} className="px-2 py-2" >
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-ui-xs text-[var(--warn)]">
+                          <span className="ui-body-sm text-warn">
                             关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
                           </span>
                           <Button
@@ -2394,13 +2393,13 @@ export function MemoryPage({
           {vaultMsgRow}
         </div>
         {vaultSync?.truncated ? (
-          <div className="mt-2 text-ui-sm text-[var(--warn)]">
+          <div className="mt-2 text-ui-sm text-warn">
             被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
           </div>
         ) : null}
       </section>
       <details className={cardCls}>
-        <summary className="cursor-pointer select-none text-ui-md font-bold">
+        <summary className="cursor-pointer select-none text-ui-md font-semibold">
           旧版知识库（Wiki 视图，保留可用）
         </summary>
         <div className="mt-3">
@@ -2426,10 +2425,13 @@ export function MemoryPage({
   return (
     <PageShell
       scroll={false}
+      /* 审计 F6：整页原来是「PageShell width=full + 自己写 mx-auto max-w-[1200px]」两套容器，
+         设置页在 d.138 已经改回单一基线，这里跟齐：宽度交给 PageShell 的档位，不再手写居中列。 */
+      width="wide"
       title="记忆"
       actions={
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
-          <span>当前</span>
+          <span>智能体</span>
           <select
             aria-label="选择智能体"
             value={agentId}
@@ -2446,14 +2448,13 @@ export function MemoryPage({
         </label>
       }
       headerExtra={
-        <div className="px-6 pb-3 pt-3">
-          {/* R7：记忆区在 1600 宽屏下卡片会拉到 1256px，表格列被拉得很开；
-              与设置区同一做法，标签与内容收进 1200px 居中列，宽屏阅读更稳。 */}
+        <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
+          {/* 标签栏与内容同一条 1200 基线：PageShell 的 wide 档负责内容，这里只补页头内边距。 */}
           <div className="mx-auto w-full max-w-[1200px]">
           {rosterError && (
-            <div className="mb-2 flex items-center gap-2 text-ui-sm text-[var(--warn)]">
+            <div className="mb-2 flex items-center gap-2">
               {/* 加载失败是「失败」不是「空」：用 alert 断言式播报，并给可重试入口。 */}
-              <p role="alert" className="min-w-0 flex-1">
+              <p role="alert" className="ui-alert ui-alert-warn min-w-0 flex-1">
                 {rosterError}
               </p>
               <Button type="button" size="sm" variant="ghost" onClick={() => void loadRoster()}>
@@ -2496,9 +2497,8 @@ export function MemoryPage({
         role="tabpanel"
         id={`memory-${tab}-panel`}
         aria-labelledby={`memory-${tab}-tab`}
-        className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
+        className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4"
       >
-        <div className="mx-auto w-full max-w-[1200px]">
         {tab === "agents" && (
           <div className="flex flex-col gap-3">
             {shortPanel}
@@ -2508,12 +2508,11 @@ export function MemoryPage({
         )}
         {tab === "database" && databasePanel}
         {tab === "wiki" && wikiEntryPanel}
-        </div>
       </div>
 
       {clearTarget && (
         <ConfirmDialog
-          title="清空短期记忆"
+          title="清空短期记忆？"
           onCancel={() => setClearTarget(null)}
           footer={
             <>
@@ -2534,7 +2533,7 @@ export function MemoryPage({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
+          <p className="ui-body-sm">
             清空会话「{clearTarget.label}」的短期记忆？长期记忆与已发送的聊天记录不受影响，但这段短期上下文清空后无法恢复。
           </p>
         </ConfirmDialog>

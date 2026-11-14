@@ -49,15 +49,15 @@ export function UsageCard() {
     <section aria-label="Token 用量" className="ui-card p-3">
       {!monthHasRecords ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-ui-xs font-bold text-muted">Token 用量 · {monthKey}</span>
+          <span className="text-ui-sm font-semibold text-muted">Token 用量 · {monthKey}</span>
           {/* 分隔符写在文本节点里：两个 span 之间只有 gap，读屏会把「2026-11」和
               「本月还没有…」拼成「2026-11本月还没有…」。 */}
-          <span className="text-ui-xs text-muted">
+          <span className="ui-body-sm text-muted">
             {" · "}本月还没有调用记录
           </span>
           <button
             type="button"
-            className="ui-link ml-auto"
+            className="ui-link ml-auto ui-hit"
             onClick={() => setPage("model")}
           >
             去配置模型
@@ -66,8 +66,11 @@ export function UsageCard() {
       ) : (
         <>
           <div className="flex items-center">
-            <div className="text-ui-xs font-bold text-muted">Token 用量 · {monthKey}</div>
-            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-line bg-[var(--subtle)]">
+            <div className="text-ui-sm font-semibold text-muted">Token 用量 · {monthKey}</div>
+            {/* 视图切换（2026-11-14 审计 A-07）：此前是本文件手拼的第三套分段控件
+                （圆角 lg + 分隔竖线 + `bg-ink` 选中），与 `.ui-segment-group` 打架。
+                改用全站唯一的分段控件：胶囊底、选中项浮起，`aria-pressed` 保住语义。 */}
+            <div role="group" aria-label="Token 用量视图" className="ui-segment-group ml-auto">
               {(
                 [
                   ["me", "个人"],
@@ -78,13 +81,12 @@ export function UsageCard() {
                 <button
                   key={key}
                   type="button"
+                  aria-pressed={tab === key}
                   onClick={() => {
                     setTab(key);
                     if (key !== "date") setOpenDay(null);
                   }}
-                  className={`border-l border-line-soft px-2.5 py-1 text-ui-xs font-semibold first:border-l-0 ${
-                    tab === key ? "bg-ink text-white" : "text-muted"
-                  }`}
+                  className="ui-segment"
                 >
                   {label}
                 </button>
@@ -101,13 +103,13 @@ export function UsageCard() {
                     / {(quota / 1_000_000).toFixed(1)}M
                   </small>
                 </div>
-                <div className="text-ui-xs text-muted">本月已用 {pct}%</div>
-                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[var(--subtle-4)]">
+                <div className="ui-body-sm text-muted">本月已用 {pct}%</div>
+                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-subtle-4">
                   <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
                 </div>
                 {/* 未上报单独提示（灰字，不抢主数字）：null 不是 0，不能被总量悄悄吞掉 */}
                 {monthSummary.missing > 0 && (
-                  <div className="mt-1 text-ui-xs text-muted">{monthSummary.missing} 轮未上报</div>
+                  <div className="mt-1 ui-body-sm text-muted">{monthSummary.missing} 轮未上报</div>
                 )}
               </div>
               <div className="flex-1 border-l border-line-soft pl-4">
@@ -122,7 +124,7 @@ export function UsageCard() {
                     <div key={model} className="flex justify-between py-0.5 text-ui-xs">
                       <span>{model}</span>
                       <span>
-                        <b>{n}</b>{" "}
+                        <b className="font-semibold">{n}</b>{" "}
                         <span className="text-muted">
                           · {Math.round((n / monthSummary.total) * 100)}%
                         </span>
@@ -169,15 +171,15 @@ export function UsageCard() {
                         </td>
                       </tr>
                       {openDay === row.day ? (
-                        <tr className="bg-[var(--subtle)]">
-                          <td colSpan={3} className="py-1.5 pl-4">
+                        <tr className="bg-subtle">
+                          <td colSpan={3} className="py-2 pl-4">
                             {Object.keys(row.byModel).length === 0 ? (
                               <span className="text-muted">当天无调用记录</span>
                             ) : (
                               Object.entries(row.byModel).map(([model, n]) => (
                                 <div key={model} className="flex justify-between py-0.5 pr-4">
                                   <span>{model}</span>
-                                  <b>{n}</b>
+                                  <b className="font-semibold">{n}</b>
                                 </div>
                               ))
                             )}
@@ -195,8 +197,8 @@ export function UsageCard() {
               单独一张卡时它只是一条细带（标题 + 30 个方块），在宽屏上占了一整行却几乎没有内容；
               并进来后「本月汇总 / 按日明细 / 近 30 日」在同一张卡里读，也少一个卡片框。 */}
           <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="mb-1.5 flex items-center">
-              <div className="text-ui-xs font-bold text-muted">近 30 日用量</div>
+            <div className="mb-2 flex items-center">
+              <div className="text-ui-sm font-semibold text-muted">近 30 日用量</div>
               <div className="ml-auto flex items-center gap-1 text-ui-xs text-muted">
                 少
                 {["var(--heat-0)", "var(--heat-1)", "var(--heat-2)", "var(--heat-3)", "var(--heat-4)"].map((c) => (

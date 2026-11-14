@@ -54,7 +54,7 @@ export function BackgroundModelCard() {
         </div>
       ) : null}
       {stale ? (
-        <div className="mt-2 ui-caption text-[var(--warn)]">
+        <div className="mt-2 ui-caption text-warn">
           所选模型已不在当前目录，后台任务会当作「未设置」处理，请重新选择
         </div>
       ) : null}

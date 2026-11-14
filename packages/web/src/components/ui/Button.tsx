@@ -7,7 +7,7 @@ import { withFocusRing } from "../../lib/a11y/focus.js";
  * 现状是反过来的：`.ui-btn-*` 这套类早就收口了，但调用方仍各自拼字符串
  *（`className="ui-btn ui-btn-md ui-btn-primary"` 在仓里出现上百次），于是
  *   · 有人忘写 `ui-btn-md`，按钮变成 0 高度；
- *   · 有人给 danger 按钮补 `text-[var(--danger)]`，和 `.ui-btn-danger` 的
+ *   · 有人给 danger 按钮补 `text-danger`，和 `.ui-btn-danger` 的
  *     白字打架；
  *   · 尺寸/变体的组合没有类型约束，写错也编译得过。
  * 这一层只做三件事：把「变体 + 尺寸」变成 props、把 busy 统一成 disabled +

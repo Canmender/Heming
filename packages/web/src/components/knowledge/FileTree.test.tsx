@@ -135,7 +135,7 @@ describe("知识库文件树", () => {
     const { props } = setup();
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /hello\.md/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
-    expect(screen.getByRole("dialog", { name: "删除文件" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "删除文件？" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(props.onDelete).not.toHaveBeenCalled();
 

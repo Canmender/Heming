@@ -31,8 +31,12 @@ export const NAV_HOTZONE_PX = 8;
  *  300ms 取自桌面侧栏文献区间（300–400ms，见 docs/research/2026-11-03-d68-ux-solutions.md §2.4）。 */
 export const NAV_HIDE_DELAY_MS = 300;
 
-/** 展开/收起动效时长（毫秒）：160ms ease-out，与调研建议的桌面侧栏节奏一致。 */
-export const NAV_MOTION_MS = 160;
+/**
+ * 展开/收起动效时长（毫秒）：并入 --transition-duration-base（180ms）。
+ * 原为 160ms——160 不在 120/180/280 三档里，属于「为了这一处动效新开一个数」，
+ * 且与 `duration-base` 同时存在时无法判断哪个是真源（P2-A5 行高/动效同码多写的同类问题）。
+ */
+export const NAV_MOTION_MS = 180;
 
 /** 规整任意输入到 `NavMode`；未知值/非字符串一律回落 `pinned`。 */
 export function normalizeNavMode(raw: unknown): NavMode {

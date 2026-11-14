@@ -285,7 +285,7 @@ export function FileTree({
           aria-label="新建笔记（库根）"
           title="新建笔记（库根）"
           onClick={() => setPrompt({ kind: "new-note", dir: "", initial: "" })}
-          className="flex h-6 w-6 items-center justify-center rounded-sm text-muted hover:bg-subtle-3 hover:text-ink"
+          className="ui-hit flex h-6 w-6 items-center justify-center rounded-sm text-muted hover:bg-subtle-3 hover:text-ink"
         >
           <PlusIcon width={14} height={14} />
         </button>
@@ -384,7 +384,7 @@ export function FileTree({
 
       {confirmDelete ? (
         <ConfirmDialog
-          title="删除文件"
+          title="删除文件？"
           onCancel={() => setConfirmDelete(null)}
           footer={
             <>
@@ -406,9 +406,9 @@ export function FileTree({
           }
         >
           <p className="ui-body-sm">
-            确定删除 <span className="font-medium">{baseName(confirmDelete)}</span>？
+            文件 <span className="font-medium">{baseName(confirmDelete)}</span> 删除后不可恢复。
           </p>
-          <p className="ui-caption mt-1">只删除这一个文件，目录与其它文件不受影响；删除后不可撤销。</p>
+          <p className="ui-caption mt-1">只删除这一个文件，目录与其它文件不受影响。</p>
         </ConfirmDialog>
       ) : null}
     </div>

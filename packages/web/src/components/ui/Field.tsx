@@ -46,7 +46,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
         {...rest}
       />
       {error ? (
-        <p id={errorId} role="alert" className="ui-caption mt-1 text-[var(--danger)]">
+        <p id={errorId} role="alert" className="ui-caption mt-1 text-danger">
           {error}
         </p>
       ) : hint ? (

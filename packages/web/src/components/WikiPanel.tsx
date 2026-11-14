@@ -205,7 +205,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               aria-selected={view === v}
               onClick={() => setView(v)}
               className={`${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-ui-sm ${
-                view === v ? "bg-ink font-bold text-white" : "text-muted hover:bg-[var(--subtle-2)]"
+                view === v ? "bg-ink font-semibold text-white" : "text-muted hover:bg-subtle-2"
               }`}
             >
               {VIEW_LABEL[v]}
@@ -235,7 +235,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
       </div>
 
       {ephemeral && (
-        <div role="status" className="mb-2 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-ui-xs text-[var(--warn)]">
+        <div role="status" className="mb-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-ui-xs text-warn">
           浏览器临时模式：知识库只存在于当前页面，关掉就没了。桌面端会落成真实 markdown
           文件，可直接用 Obsidian 打开。
         </div>
@@ -246,7 +246,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
         </div>
       )}
       {msg && (
-        <div role="status" className={`mb-2 ui-caption ${msg.kind === "error" ? "text-[var(--danger)]" : "text-muted"}`}>
+        <div role="status" className={`mb-2 ui-caption ${msg.kind === "error" ? "text-danger" : "text-muted"}`}>
           {msg.text}
         </div>
       )}
@@ -392,4 +392,4 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
   );
 }
 const btnGhost =
-  "rounded-lg border border-line px-2 py-1 ui-caption hover:bg-[var(--subtle-2)]";
+  "rounded-lg border border-line px-2 py-1 ui-caption hover:bg-subtle-2";

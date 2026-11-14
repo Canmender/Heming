@@ -53,13 +53,14 @@ export function TokenHeatmap() {
   }
 
   return (
-    <div
-      className="flex items-center gap-[3px]"
-      role="group"
-      aria-label={summary}
-      data-testid="token-heatmap"
-      onKeyDown={onKeyDown}
-    >
+    <div>
+      <div
+        className="flex items-center gap-[3px]"
+        role="group"
+        aria-label={summary}
+        data-testid="token-heatmap"
+        onKeyDown={onKeyDown}
+      >
       {days.map((d, i) => {
         const level = heatLevel(d.total, max);
         // 当天只有未上报记录：标题说「未上报」，不拿「0 tokens」冒充真实用量。
@@ -88,6 +89,15 @@ export function TokenHeatmap() {
           />
         );
       })}
+      </div>
+      {/* 审计 F9：30 个方块原来没有日期锚点，读者无法判断「最左边是哪天」；
+          图例（少→多）在唯一使用处 UsageCard 里已有，这里只补时间轴与读法，不重复图例。 */}
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 ui-micro" aria-hidden="true">
+        <span>{days[0]?.day}</span>
+        <span aria-hidden="true">→</span>
+        <span>{days[days.length - 1]?.day}</span>
+        <span className="ml-auto">每格 1 天 · 颜色越深用量越多</span>
+      </div>
     </div>
   );
 }

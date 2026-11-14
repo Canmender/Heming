@@ -83,7 +83,7 @@ export function BundlePluginCard({
       className="ui-card plugin-card p-4"
     >
       <div className="flex items-start gap-3">
-        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-bold">
+        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-ui-md font-semibold">
           {initial}
         </span>
         <div className="min-w-0 flex-1">
@@ -133,7 +133,7 @@ export function BundlePluginCard({
           aria-label={`卸载插件 ${record.name}`}
           disabled={busy}
           onClick={() => setConfirming(true)}
-          size="sm" variant="ghost" className="text-[var(--danger)]"
+          size="sm" variant="ghost" className="text-danger"
         >
           卸载
         </Button>
@@ -141,7 +141,7 @@ export function BundlePluginCard({
 
       {confirming && (
         <ConfirmDialog
-          title="卸载插件"
+          title="卸载插件？"
           onCancel={() => setConfirming(false)}
           footer={
             <>
@@ -158,14 +158,13 @@ export function BundlePluginCard({
                 disabled={busy}
                 size="md" variant="danger"
               >
-                确认卸载
+                卸载
               </Button>
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
-            卸载插件「{record.name}」？它的插件文件、模型与插件设置都会一并删除，此操作不可恢复。
-            只想临时收起，改用左侧开关停用即可——停用会保留文件与设置。
+          <p className="ui-body-sm">
+            插件「{record.name}」卸载后不可恢复，插件文件、模型与设置会一并删除；只想临时收起请改用停用。
           </p>
         </ConfirmDialog>
       )}

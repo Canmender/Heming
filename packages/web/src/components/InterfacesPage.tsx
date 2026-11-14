@@ -315,7 +315,7 @@ export function InterfacesView({
     // 发现页是接口区的二级面板：嵌入后没有「整页可换」，改用覆盖层承载。
     // 这样既保住「返回接口区」这条退路，也不会在 Tab 内叠出第二个页面页头。
     return (
-      <div className="fixed inset-0 z-40 overflow-y-auto bg-[var(--surface)]">
+      <div className="fixed inset-0 z-40 overflow-y-auto bg-surface">
         <RegistryPage
           onBack={() => {
             setDiscover(false);
@@ -363,8 +363,8 @@ export function InterfacesView({
           role="status"
           className={`mb-4 rounded-lg border px-3 py-2 text-ui-sm ${
             msg.kind === "error"
-              ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
-              : "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
+              ? "border-danger-line bg-danger-soft text-danger"
+              : "border-success-line bg-success-soft text-success"
           }`}
         >
           {msg.text}
@@ -389,7 +389,7 @@ export function InterfacesView({
             {missingPresets.map((preset) => (
               <div key={preset.id} className="flex flex-wrap items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-ui-md font-bold">{preset.name}</div>
+                  <div className="text-ui-md font-semibold">{preset.name}</div>
                   <div className="mt-0.5 ui-caption">{preset.hint}</div>
                 </div>
                 <Button
@@ -454,7 +454,7 @@ export function InterfacesView({
                     size="sm" variant="ghost"
                   >
                     {p.name}
-                    {p.verified && <span className="ml-1 text-ui-xs text-[var(--success)]">已实测</span>}
+                    {p.verified && <span className="ml-1 text-ui-xs text-success">已实测</span>}
                   </Button>
                 ))}
                 {presetHint && <span className="text-ui-xs text-muted">{presetHint}</span>}
@@ -536,7 +536,7 @@ export function InterfacesView({
               取消
             </Button>
             {transport === "stdio" && (
-              <span className="text-ui-xs text-[var(--warn)]">
+              <span className="text-ui-xs text-warn">
                 {stdioReady
                   ? "会在本机启动这条命令，请确认来源可信"
                   : "当前环境不支持 stdio（需桌面端）；配置可先保存"}
@@ -547,7 +547,7 @@ export function InterfacesView({
       )}
 
       {servers.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-[var(--surface)] p-8 text-center text-ui-md text-muted">
+        <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center text-ui-md text-muted">
           还没有 MCP 服务
         </div>
       ) : (
@@ -579,7 +579,7 @@ export function InterfacesView({
                 className="ui-card p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-ui-md font-bold">{server.name}</span>
+                  <span className="text-ui-md font-semibold">{server.name}</span>
                   {(server.origin === "preset" || registry.isPreset(server.id)) && (
                     <SystemSourceChip systemName={systemName} />
                   )}
@@ -616,14 +616,14 @@ export function InterfacesView({
                   <span
                     className={`rounded-full px-2 py-0.5 text-ui-xs ${
                       state === "ready"
-                        ? "bg-[var(--success-soft)] text-[var(--success)]"
+                        ? "bg-success-soft text-success"
                         : state === "error"
-                          ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                          ? "bg-danger-soft text-danger"
                           : state === "stale"
-                            ? "bg-[var(--warn-soft)] text-[var(--warn)]"
+                            ? "bg-warn-soft text-warn"
                             : state === "connecting"
-                              ? "bg-[var(--warn-soft)] text-[var(--warn)]"
-                              : "bg-[var(--subtle-2)] text-muted"
+                              ? "bg-warn-soft text-warn"
+                              : "bg-subtle-2 text-muted"
                     }`}
                     title={state === "stale" ? registry.status(server.id)?.error ?? "最近一次连接失败" : undefined}
                   >
@@ -670,7 +670,7 @@ export function InterfacesView({
                       type="button"
                       aria-label={`删除 ${server.name}`}
                       onClick={() => removeServer(server)}
-                      size="sm" variant="ghost" className="text-[var(--danger)]"
+                      size="sm" variant="ghost" className="text-danger"
                     >
                       <TrashIcon width={12} height={12} />
                     </Button>
@@ -678,13 +678,13 @@ export function InterfacesView({
                 </div>
 
                 {server.transport === "stdio" && !stdioReady && (
-                  <p className="mt-2 text-ui-xs text-[var(--warn)]">
+                  <p className="mt-2 text-ui-xs text-warn">
                     stdio 服务只能在桌面端连接；当前是浏览器环境。
                   </p>
                 )}
 
                 {connError[server.id] && (
-                  <p role="alert" className="mt-2 text-ui-xs text-[var(--danger)]">
+                  <p role="alert" className="mt-2 text-ui-xs text-danger">
                     {connError[server.id]}
                   </p>
                 )}
@@ -750,7 +750,7 @@ export function InterfacesView({
                     </table>
 
                     {testFor && testFor.startsWith(`${server.id}::`) && (
-                      <div className="mt-3 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
+                      <div className="mt-3 rounded-lg border border-line bg-subtle-2 p-3">
                         <div className="ui-section-title">
                           测试 {testFor.split("::")[1]}
                         </div>
@@ -758,7 +758,7 @@ export function InterfacesView({
                           aria-label="测试参数"
                           value={testArgs}
                           onChange={(e) => setTestArgs(e.target.value)}
-                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-[var(--surface)] px-2 py-1.5 font-mono text-ui-xs outline-hidden focus:border-ink"
+                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 font-mono text-ui-xs outline-hidden focus:border-ink"
                         />
                         <div className="mt-2 flex items-center gap-2">
                           <Button
@@ -776,8 +776,8 @@ export function InterfacesView({
                             role="status"
                             className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 text-ui-xs ${
                               testResult.ok
-                                ? "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
-                                : "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
+                                ? "border-success-line bg-success-soft text-success"
+                                : "border-danger-line bg-danger-soft text-danger"
                             }`}
                           >
                             {testResult.text}

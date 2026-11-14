@@ -215,8 +215,8 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           role="status"
           className={`mt-3 rounded-lg border px-3 py-2 text-ui-sm ${
             msg.kind === "error"
-              ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
-              : "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
+              ? "border-danger-line bg-danger-soft text-danger"
+              : "border-success-line bg-success-soft text-success"
           }`}
         >
           {msg.text}
@@ -229,8 +229,8 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           role="alert"
           className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-ui-xs ${
             stale
-              ? "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]"
-              : "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
+              ? "border-warn-line bg-warn-soft text-warn"
+              : "border-danger-line bg-danger-soft text-danger"
           }`}
         >
           <span>
@@ -331,10 +331,10 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             <span
               className={`rounded-sm px-1 text-ui-xs ${
                 risk.level === "high"
-                  ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                  ? "bg-danger-soft text-danger"
                   : risk.level === "medium"
-                    ? "bg-[var(--warn-soft)] text-[var(--warn)]"
-                    : "bg-[var(--success-soft)] text-[var(--success)]"
+                    ? "bg-warn-soft text-warn"
+                    : "bg-success-soft text-success"
               }`}
               title={risk.message}
             >
@@ -356,7 +356,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             </span>
           )}
           {/* 装不了的原因要点开就看得见，不能只藏在按钮的 title 里（触屏与读屏都拿不到）。 */}
-          {option && !installable && <span className="text-[var(--warn)]">{blockReason}</span>}
+          {option && !installable && <span className="text-warn">{blockReason}</span>}
           {entry.repoSource && <span>仓库 {entry.repoSource}</span>}
         </div>
       </div>
@@ -408,7 +408,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
 function EntryIcon({ entry }: { entry: RegistryEntry }) {
   const [broken, setBroken] = useState(false);
   return (
-    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)] text-ui-md font-bold text-muted">
+    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-subtle-2 text-ui-md font-semibold text-muted">
       {entry.title.slice(0, 1).toUpperCase()}
       {entry.iconUrl && !broken && (
         <img

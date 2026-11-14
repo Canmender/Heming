@@ -190,20 +190,20 @@ function KeyDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="社区 Key"
-        className="w-[min(520px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
+        className="w-[min(520px,94vw)] rounded-xl border border-line bg-surface p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
-          <span className="text-ui-md font-bold">社区 Key（{source.name}）</span>
+          <span className="text-ui-md font-semibold">社区 Key（{source.name}）</span>
           <button
             type="button"
             aria-label="关闭社区 Key"
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)]"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-subtle-3"
             onClick={onClose}
           >
             <XIcon width={14} height={14} />
@@ -294,7 +294,7 @@ function KeyDialog({
 
         <div className="mt-3 flex items-center gap-2">
           {hasKey && (
-            <Button type="button" size="sm" variant="ghost" className="text-[var(--danger)]" onClick={clear}>
+            <Button type="button" size="sm" variant="ghost" className="text-danger" onClick={clear}>
               清除 Key
             </Button>
           )}
@@ -351,13 +351,13 @@ function HubDetailDialog({
   const detail = state.detail;
   const detailHomepage = safeExternalUrl(detail?.homepage);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`社区技能 ${skill.name}`}
-        className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-xl bg-[var(--surface)] shadow-xl"
+        className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-xl bg-surface shadow-xl"
       >
         <div className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
@@ -375,7 +375,7 @@ function HubDetailDialog({
           <button
             type="button"
             aria-label="关闭社区技能详情"
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)]"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-subtle-3"
             onClick={onClose}
           >
             <XIcon width={14} height={14} />
@@ -386,7 +386,7 @@ function HubDetailDialog({
           <p className="ui-body-sm text-muted">{detail?.description || skill.description || "暂无描述"}</p>
 
           <section aria-label="技能信息" className="mt-3 rounded-lg border border-line-soft p-3">
-            <h3 className="ui-body-sm font-bold">技能信息</h3>
+            <h3 className="ui-body-sm font-semibold">技能信息</h3>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 ui-caption">
               {(detail?.categories ?? skill.categories).map((item) => (
                 <span key={`cat:${item}`} className={CHIP}>
@@ -429,7 +429,7 @@ function HubDetailDialog({
           </section>
 
           <section aria-label="安全信息" className="mt-3 rounded-lg border border-line-soft p-3">
-            <h3 className="ui-body-sm font-bold">安全信息</h3>
+            <h3 className="ui-body-sm font-semibold">安全信息</h3>
             {state.loading ? (
               <p className={`mt-1 ${HINT}`}>正在读取安全信息…</p>
             ) : state.error ? (
@@ -499,20 +499,20 @@ function InstallPreviewDialog({
   useModalA11y(panelRef, onCancel, { active: true });
   const { parsed, target, download, sameName } = preview;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="安装社区技能"
-        className="w-[min(560px,94vw)] rounded-xl border border-line bg-[var(--surface)] p-4 ui-overlay-shadow"
+        className="w-[min(560px,94vw)] rounded-xl border border-line bg-surface p-4 ui-overlay-shadow"
       >
         <div className="flex items-center gap-2">
-          <span className="text-ui-md font-bold">安装社区技能</span>
+          <span className="text-ui-md font-semibold">安装社区技能</span>
           <button
             type="button"
             aria-label="关闭安装预览"
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)]"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-subtle-3"
             onClick={onCancel}
           >
             <XIcon width={14} height={14} />
@@ -603,20 +603,20 @@ function BulkUpdateDialog({
   const skipped = results.filter((item) => item.kind === "skipped").length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4" role="presentation">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="批量更新社区技能"
-        className="flex max-h-[86vh] w-[min(620px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-xl"
+        className="flex max-h-[86vh] w-[min(620px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
       >
         <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-          <span className="text-ui-md font-bold">批量更新社区技能</span>
+          <span className="text-ui-md font-semibold">批量更新社区技能</span>
           <button
             type="button"
             aria-label="关闭批量更新"
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-subtle-3 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={running}
             onClick={onClose}
           >
@@ -1114,7 +1114,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
 
   if (statusError) {
     return (
-      <section aria-label="技能社区" className="mt-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-3">
+      <section aria-label="技能社区" className="mt-3 rounded-lg border border-danger-line bg-danger-soft p-3">
         <p role="alert" className={ERROR_TEXT}>技能社区不可用：{statusError}</p>
         <button type="button" className="ui-link mt-1" onClick={() => setReloadStatusTick((n) => n + 1)}>
           重试
@@ -1145,9 +1145,9 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
 
   return (
     <section aria-label="技能社区" className="mt-3">
-      <div className="mb-2 rounded-lg border border-line bg-[var(--subtle-2)] p-2.5">
+      <div className="mb-2 rounded-lg border border-line bg-subtle-2 p-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="ui-body-sm font-bold">技能社区 · {source.name}</span>
+          <span className="ui-body-sm font-semibold">技能社区 · {source.name}</span>
           <span className={CHIP}>{status!.reachable ? "已连接" : "上游暂不可达"}</span>
           <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setKeyOpen(true)}>
             社区 Key
@@ -1163,7 +1163,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
       </div>
 
       {/* d.110：已装社区技能聚合 + 全部更新（只更新社区来源的同 id 技能） */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-[var(--surface)] p-2.5">
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-2.5">
         <span role="status" className="ui-body-sm">
           已装 {installedCommunity.length} 个社区技能 · {communityUpdates.length} 个可更新
         </span>
@@ -1236,7 +1236,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
       )}
 
       {list.error ? (
-        <div className="rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-3">
+        <div className="rounded-lg border border-danger-line bg-danger-soft p-3">
           <p role="alert" className={ERROR_TEXT}>社区技能列表加载失败：{list.error}</p>
           <button type="button" className="ui-link mt-1" onClick={() => setListRetryTick((n) => n + 1)}>
             重试
@@ -1272,7 +1272,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
               return (
                 <li key={item.id} className="ui-card flex min-w-0 flex-col gap-2 p-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate text-ui-md font-bold">{item.name}</span>
+                    <span className="truncate text-ui-md font-semibold">{item.name}</span>
                     <span className={CHIP}>v{item.version || "—"}</span>
                     {item.status === "official" && <span className={CHIP}>官方</span>}
                     {item.status === "trial" && <span className={CHIP}>试用</span>}

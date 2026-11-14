@@ -7,7 +7,7 @@ import type { PluginInstallPreview, PluginServerDiff } from "../../lib/plugins/i
 
 export const PLUGIN_CARD = "ui-card";
 export const HINT = "ui-caption";
-export const ERROR_TEXT = "ui-body-sm text-[var(--danger)]";
+export const ERROR_TEXT = "ui-body-sm text-danger";
 export const OK_TEXT = "ui-body-sm text-muted";
 export const CHIP = "ui-chip";
 
@@ -107,7 +107,7 @@ export function DiffLine({
   return (
     <div>
       <div className="text-ui-xs text-body">
-        <span className="font-bold">{label}</span>
+        <span className="font-semibold">{label}</span>
         {total === 0 ? (
           <span className="ml-1">无</span>
         ) : (

@@ -215,7 +215,7 @@ describe("知识库页 · 三栏装配", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开其它库" }));
     expect(store.pickVault).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /移除知识库 我的库/ }));
-    expect(screen.getByRole("dialog", { name: "移除知识库 我的库" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "移除知识库 我的库？" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "移除" }));
     expect(store.removeVault).toHaveBeenCalledWith("v1");
   });

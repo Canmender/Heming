@@ -78,7 +78,7 @@ export function SelfEditCard({
     <section aria-label="自我优化" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-ui-sm font-bold text-muted">自我优化</div>
+          <div className="text-ui-sm font-semibold text-muted">自我优化</div>
           <div className="mt-1 ui-caption">
             允许智能体按需修改自己的记忆、技能与 MCP 配置。改动即时生效，并记录在下方。
           </div>
@@ -105,10 +105,10 @@ export function SelfEditCard({
       </div>
 
       {!agentId && (
-        <div className="mt-2 text-ui-xs text-[var(--warn)]">先在上方选择一个智能体，才能配置它的自我优化。</div>
+        <div className="mt-2 text-ui-xs text-warn">先在上方选择一个智能体，才能配置它的自我优化。</div>
       )}
       {agentId && !enabled && (
-        <div className="mt-2 text-ui-xs text-[var(--warn)]">
+        <div className="mt-2 text-ui-xs text-warn">
           该智能体当前拿不到 self.* 工具，无法自行改动配置。
         </div>
       )}
@@ -147,11 +147,11 @@ export function SelfEditCard({
                 className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
               >
                 <span className="text-muted">{snap.at.slice(0, 16).replace("T", " ")}</span>
-                <span className="min-w-0 flex-1 truncate text-[var(--body)]">{snap.label}</span>
+                <span className="min-w-0 flex-1 truncate text-body">{snap.label}</span>
                 <button
                   type="button"
                   aria-label={`回滚 ${snap.label}`}
-                  className="rounded-sm border border-line px-1.5 py-0.5 text-[var(--body)] hover:bg-[var(--subtle-2)]"
+                  className="rounded-sm border border-line px-1.5 py-0.5 text-body hover:bg-subtle-2"
                   onClick={() => rollback(snap)}
                 >
                   回滚
@@ -163,7 +163,7 @@ export function SelfEditCard({
         {notice && (
           <div
             role="status"
-            className={`mt-1 text-ui-xs ${notice.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}
+            className={`mt-1 text-ui-xs ${notice.ok ? "text-success" : "text-warn"}`}
           >
             {notice.text}
           </div>
@@ -229,12 +229,12 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   return (
     <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs">
       <span className="text-muted">{time}</span>
-      <span className="rounded-sm bg-[var(--subtle-3)] px-1 text-muted">
+      <span className="rounded-sm bg-subtle-3 px-1 text-muted">
         {SCOPE_LABEL[entry.scope]}·{ACTION_LABEL[entry.action] ?? entry.action}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[var(--body)]">{entry.target}</span>
+      <span className="min-w-0 flex-1 truncate text-body">{entry.target}</span>
       {entry.rejected && (
-        <span className="text-[var(--warn)]" title={entry.rejected}>
+        <span className="text-warn" title={entry.rejected}>
           {entry.rejected}
         </span>
       )}

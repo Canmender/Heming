@@ -136,7 +136,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       className="ui-card max-w-[520px] p-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-ui-sm font-bold text-muted">软件更新</div>
+        <div className="text-ui-sm font-semibold text-muted">软件更新</div>
         <span className="ui-caption">当前 {currentVersion}</span>
       </div>
 
@@ -161,7 +161,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
 
       {hasUpdate && state?.available && (
         <div className="mt-2 rounded-lg border border-line-soft bg-subtle px-2.5 py-2 text-ui-sm">
-          可更新至 <span className="font-bold">{state.available.version}</span>
+          可更新至 <span className="font-semibold">{state.available.version}</span>
         </div>
       )}
 

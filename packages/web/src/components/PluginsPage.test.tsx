@@ -286,11 +286,11 @@ describe("PluginsPage 插件", () => {
     installNow();
 
     fireEvent.click(screen.getByRole("button", { name: "卸载插件 财务助手包" }));
-    const confirm = screen.getByRole("dialog", { name: "卸载插件" });
+    const confirm = screen.getByRole("dialog", { name: "卸载插件？" });
     expect(confirm).toHaveTextContent("2 个技能");
     fireEvent.click(within(confirm).getByRole("button", { name: "卸载" }));
 
-    expect(screen.queryByRole("dialog", { name: "卸载插件" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "卸载插件？" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "插件列表为空" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已卸载插件「财务助手包」");
     expect(store.list()).toEqual([]);
@@ -363,7 +363,7 @@ describe("PluginsPage 插件", () => {
     fireEvent.click(screen.getByRole("tab", { name: "插件" }));
     const cardAgain = screen.getByRole("region", { name: "插件 财务助手包" });
     fireEvent.click(within(cardAgain).getByRole("button", { name: "卸载插件 财务助手包" }));
-    const confirm = screen.getByRole("dialog", { name: "卸载插件" });
+    const confirm = screen.getByRole("dialog", { name: "卸载插件？" });
     expect(confirm).toHaveTextContent("1 台 MCP 服务");
   });
 
@@ -476,7 +476,7 @@ describe("PluginsPage 插件", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "卸载插件" }));
     expect(screen.queryByRole("dialog", { name: "插件详情 天气能力包" })).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "卸载插件" })).toHaveTextContent("1 台 MCP 服务");
+    expect(screen.getByRole("dialog", { name: "卸载插件？" })).toHaveTextContent("1 台 MCP 服务");
   });
 });
 

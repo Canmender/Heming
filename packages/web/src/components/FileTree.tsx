@@ -129,7 +129,7 @@ function SectionRows({
 
   return (
     <div className="mb-3">
-      <div className="px-2 pb-1 text-ui-xs font-bold uppercase tracking-wider text-muted">{title}</div>
+      <div className="px-2 pb-1 text-ui-xs font-semibold uppercase tracking-wider text-muted">{title}</div>
       {roots.length > 0 ? render(roots, 0) : <div className="px-2 text-ui-xs text-muted">（空）</div>}
     </div>
   );
@@ -142,7 +142,7 @@ export function FileTree({ items, localPaths, onSendToConversation, onPreview }:
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-panel px-4 py-6 text-center">
         <FolderIcon width={20} height={20} className="text-line-strong" />
-        <p className="text-ui-xs leading-relaxed text-muted">还没有文件。点上方「上传」或「绑定」，把文件放进来。</p>
+        <p className="ui-body-sm text-muted">还没有文件。点上方「上传」或「绑定」，把文件放进来。</p>
       </div>
     );
   }
@@ -156,7 +156,7 @@ export function FileTree({ items, localPaths, onSendToConversation, onPreview }:
         onPreview={onPreview}
       />
       <div className="mx-2 border-t border-line-soft" />
-      <div className="mb-1 mt-1 px-2 pb-0 text-ui-xs font-bold uppercase tracking-wider text-muted">
+      <div className="mb-1 mt-1 px-2 pb-0 text-ui-xs font-semibold uppercase tracking-wider text-muted">
         本地工作目录
       </div>
       {localPaths.length === 0 ? (

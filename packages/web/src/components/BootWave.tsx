@@ -22,6 +22,21 @@ const COMPLETE_SLACK_MS = 80;
 const FALLBACK_MS = 7000;
 
 /**
+ * 启动动画的硬上限（2026-11-14 审计 D4）。
+ *
+ * 旧版规格写的是「动画不可跳过、不响应点击/键盘」，理由是「动画期间点界面会点到还没挂载的
+ * 东西」。但代价是：splash 慢一点、主进程信号晚一点，用户就被一块白板钉住最多 7s，且
+ * 关不掉启动音。现在仍然不允许「穿透」到底下的界面（遮罩照旧吞掉指针事件、App 照旧 inert），
+ * 但**允许把动画本身跳过去**：任意点击 / Esc / Enter / 3s 封顶都等于 finish()，
+ * finish() 只是立刻揭开遮罩并回调 onDone，不会把点击传给主界面。
+ */
+/** 信号迟迟不来时的等待上限：超过就直接揭开，不补播动画（2026-11-14 审计 D4）。 */
+export const SKIP_AFTER_MS = 3000;
+
+/** 启动音的用户开关（localStorage，缺省开启）。设置页的可见开关见 P2 路线图。 */
+export const BOOT_SOUND_KEY = "heming.boot.sound.v1";
+
+/**
  * 波前羽化带（占半径百分比）：内容在这条带里由全白遮罩渐变到全透，
  * 于是主界面是「随扩散一起渐显」，而不是被硬边洞口一下子切出来。
  */
@@ -72,8 +87,9 @@ interface BootWaveProps {
 const STYLES = `
   .boot-wave {
     position: fixed; inset: 0; z-index: 9999;
-    /* 吞掉动画期间的所有指针事件（规格 §7：动画不可跳过，不响应点击/键盘）。
-       键盘由 App 在主界面容器上挂 inert 挡住。遮罩揭完即卸载，不残留拦截。 */
+    /* 指针事件仍由遮罩吞掉（不会点到底下还没挂载完的界面；App 也照旧 inert）。
+       区别是**点击现在等于跳过**（2026-11-14 审计 D4）：onClick 调 finish，不穿透。
+       遮罩揭完即卸载，不残留拦截。 */
     pointer-events: auto;
     cursor: default;
     overflow: hidden;
@@ -84,7 +100,9 @@ const STYLES = `
      --reveal 未写入时回落到 0% —— 即「信号到达前完全不透明」。 */
   .boot-wave-reveal {
     position: absolute; inset: 0;
-    background: #ffffff;
+    /* 遮罩底色跟随主题（2026-11-14 审计 D4）：写死 #fff 时，暗色用户每次启动都被
+       闪一屏纯白，比「没有启动动画」更刺眼。--surface 在亮色仍是 #fff，观感不变。 */
+    background: var(--surface, #ffffff);
     mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%, #000 22%));
     -webkit-mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%, #000 22%));
     mask-repeat: no-repeat;
@@ -118,7 +136,7 @@ const STYLES = `
   .boot-wave .ripple {
     position: absolute; left: 50%; top: 50%;
     width: 40px; height: 40px;
-    border: 1.5px solid #1a1a1a; border-radius: 50%;
+    border: 1.5px solid var(--ink, #1a1a1a); border-radius: 50%;
     opacity: 0;
     animation: boot-ripple-expand 1.3s ease-out forwards;
   }
@@ -128,6 +146,16 @@ const STYLES = `
   @keyframes boot-ripple-expand {
     0% { opacity: 0.6; transform: translate(-50%,-50%) scale(1); }
     100% { opacity: 0; transform: translate(-50%,-50%) scale(30); }
+  }
+  /* 跳过提示：只是「告诉你有这个出口」，不抢动画的视觉重心。 */
+  .boot-wave-skip-hint {
+    position: absolute; left: 0; right: 0; bottom: 24px;
+    text-align: center;
+    font-size: 12px; line-height: 18px;
+    color: var(--muted);
+    pointer-events: none;
+    opacity: var(--skip-hint-opacity, 0);
+    transition: opacity 280ms ease-out;
   }
 `;
 
@@ -160,6 +188,11 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
   const rafRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const fallbackRef = useRef<number | null>(null);
+  /** 3s 封顶与「跳过提示」的两个定时器（随卸载/换轮清空）。 */
+  const capRef = useRef<number | null>(null);
+  const hintRef = useRef<number | null>(null);
+  /** 跳过提示：延迟出现，避免一开始就跟手写段抢视觉重心。 */
+  const [hintVisible, setHintVisible] = useState(false);
   const startedRef = useRef(false); // rAF/回调里的即时判重（state 更新是异步的）
   const finishedRef = useRef(false);
   /**
@@ -188,6 +221,14 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
       window.clearTimeout(fallbackRef.current);
       fallbackRef.current = null;
     }
+    if (capRef.current !== null) {
+      window.clearTimeout(capRef.current);
+      capRef.current = null;
+    }
+    if (hintRef.current !== null) {
+      window.clearTimeout(hintRef.current);
+      hintRef.current = null;
+    }
   }, []);
 
   /** 收尾：停掉所有定时器并回调 onDone（rAF 与兜底定时器双触发，只有一次生效）。 */
@@ -206,9 +247,17 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
       window.clearTimeout(fallbackRef.current);
       fallbackRef.current = null;
     }
+    // 3s 封顶只约束「信号迟迟不来」的等待期；一旦开播，节奏交给 WAVE_MS + rAF，
+    // 否则晚到的信号（2s+）会让动画被半路掐断，看起来像卡了一下直接跳完。
+    if (capRef.current !== null) {
+      window.clearTimeout(capRef.current);
+      capRef.current = null;
+    }
     if (!soundPlayedRef.current) {
       soundPlayedRef.current = true;
-      playSound();
+      // 2026-11-14 审计 D4：启动音必须有出口。设置页的可见开关属 P2，
+      // 这里先认 localStorage（"off" 关闭）并跳过「减弱动态」用户——他们连动画都不要。
+      if (bootSoundEnabled()) playSound();
     }
     // 轮次 +1：波纹容器换 key → 重新挂载 → CSS 动画从 0 重播（StrictMode 重播时必需）
     setRunId((n) => n + 1);
@@ -253,6 +302,24 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
       return;
     }
 
+    /*
+     * 跳过入口（2026-11-14 审计 D4）：
+     * 1) 键盘：Esc / Enter / 空格——遮罩本身 aria-hidden，但 Esc 是所有「等待/开场」的
+     *    通用出口，键盘用户不该被一段装饰动画扣住；
+     * 2) 3s 封顶：splash 慢或信号迟到时自动 finish（旧版只有 7s 兜底，
+     *    且那 7s 是「信号永不到来」才触发，不解决「动画太长」）；
+     * 3) 提示延迟 600ms 出现：手写段/波纹已经立住之后再提示「可以跳过」。
+     */
+    hintRef.current = window.setTimeout(() => setHintVisible(true), 600);
+    capRef.current = window.setTimeout(finish, SKIP_AFTER_MS);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        finish();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+
     const heming = window.heming;
     if (typeof heming?.__onBootReady === "function") {
       heming.__onBootReady(() => startAnimation());
@@ -267,6 +334,7 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
     }
 
     return () => {
+      window.removeEventListener("keydown", onKeyDown);
       stopTimers();
       setWriting(false);
       /*
@@ -294,8 +362,11 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
     };
   }, [finish, startAnimation, stopTimers, writeFirst]);
 
+  /** 点击任意处 = 跳过（不穿透：遮罩仍在，只是立刻揭开并回调 onDone）。 */
+  const handleSkip = () => finish();
+
   return (
-    <div className="boot-wave" aria-hidden="true">
+    <div className="boot-wave" aria-hidden="true" onClick={handleSkip}>
       <style>{STYLES}</style>
       <div className="boot-wave-reveal" ref={revealRef}>
         <div className="boot-wave-front" />
@@ -318,8 +389,23 @@ export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center
           <div className="ripple" />
         </div>
       )}
+      <div
+        className="boot-wave-skip-hint"
+        style={{ ["--skip-hint-opacity" as string]: hintVisible ? "1" : "0" }}
+      >
+        点击任意处或按 Esc 跳过
+      </div>
     </div>
   );
+}
+
+/** 启动音是否开启：默认开；localStorage 记 "off" 则关（设置页开关见 P2）。 */
+function bootSoundEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(BOOT_SOUND_KEY) !== "off";
+  } catch {
+    return true;
+  }
 }
 
 /** Web Audio 合成声波音效（零外部资源）；音频不可用时静默。 */

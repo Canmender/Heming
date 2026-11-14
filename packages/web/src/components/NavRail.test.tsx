@@ -73,7 +73,7 @@ describe("NavRail 图标轨（A 方案）", () => {
   it("悬停浮签内容常驻 DOM（名称 + 快捷键徽标，opacity 0 → group-hover 淡入）", () => {
     render(<NavRail />);
     const name = screen.getByText("主页"); // 浮签里的名称文本，供测试查询
-    expect(screen.getByText("Alt1")).toBeInTheDocument(); // 快捷键徽标
+    expect(screen.getByText("Alt 1")).toBeInTheDocument(); // 快捷键徽标（与帮助面板同写法）
     const tip = name.parentElement as HTMLElement;
     expect(tip.className).toContain("opacity-0");
     expect(tip.className).toContain("group-hover:opacity-100");
@@ -121,9 +121,10 @@ describe("NavRail 图标轨（A 方案）", () => {
     render(<NavRail onOpenSearch={vi.fn()} onOpenShortcuts={onOpenShortcuts} />);
     const btn = screen.getByRole("button", { name: "快捷键帮助" });
     expect(btn).toHaveAttribute("title", "快捷键");
-    // 浮签：名称 + ? 徽标（按钮本身也写着 ?，所以这里用 getAllByText）
+    // 浮签：名称 + ? 徽标；按钮本体是键盘图标（P2-G1：不再用「?」文字冒充图标）
     expect(screen.getByText("快捷键")).toBeInTheDocument();
-    expect(screen.getAllByText("?").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("?").length).toBeGreaterThanOrEqual(1);
+    expect(btn.querySelector("svg")).not.toBeNull();
     fireEvent.click(btn);
     expect(onOpenShortcuts).toHaveBeenCalledTimes(1);
   });

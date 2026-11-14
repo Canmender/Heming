@@ -28,7 +28,7 @@ function inline(src: string, key: string): ReactNode[] {
       m[1] !== undefined ? (
         <strong key={`${key}.${n}`}>{m[1]}</strong>
       ) : (
-        <code key={`${key}.${n}`} className="rounded-sm bg-[var(--subtle-3)] px-1">
+        <code key={`${key}.${n}`} className="rounded-sm bg-subtle-3 px-1">
           {m[2]}
         </code>
       ),
@@ -60,7 +60,7 @@ export function MarkdownLite({ text }: { text: string }) {
       while (i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
       i += 1;
       out.push(
-        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded-sm bg-[var(--subtle-2)] p-2 text-ui-sm">{buf.join("\n")}</pre>,
+        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded-sm bg-subtle-2 p-2 text-ui-sm">{buf.join("\n")}</pre>,
       );
       continue;
     }
@@ -68,7 +68,7 @@ export function MarkdownLite({ text }: { text: string }) {
     if (h) {
       const Tag = `h${h[1].length + 1}` as "h2" | "h3" | "h4";
       out.push(
-        <Tag key={`h${out.length}`} className="mt-1 font-bold">{inline(h[2], `h${out.length}`)}</Tag>,
+        <Tag key={`h${out.length}`} className="mt-1 font-semibold">{inline(h[2], `h${out.length}`)}</Tag>,
       );
       i += 1;
       continue;
@@ -167,7 +167,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
     body = <MarkdownLite text={text} />;
   } else if (kind === "text") {
     body = (
-      <pre className="whitespace-pre-wrap break-all rounded-sm bg-[var(--subtle-2)] p-3 text-ui-sm">
+      <pre className="whitespace-pre-wrap break-all rounded-sm bg-subtle-2 p-3 text-ui-sm">
         {text}
       </pre>
     );

@@ -214,10 +214,10 @@ export function ModelTraceView() {
           <span
             aria-hidden="true"
             className={`inline-block h-2 w-2 rounded-full ${
-              paused ? "bg-[var(--line-strong)]" : "rta-live-dot bg-[var(--success)]"
+              paused ? "bg-line-strong" : "rta-live-dot bg-success"
             }`}
           />
-          <span className="text-ui-md font-bold">实时</span>
+          <span className="text-ui-md font-semibold">实时</span>
           <span className="ui-caption">
             {paused ? "已暂停" : "模型服务正在做的决定"}
             {snapshot ? ` · 最后读取 ${shortTime(snapshot.now)}` : ""}
@@ -254,7 +254,7 @@ export function ModelTraceView() {
             <span className="ui-icon-tile mb-1">
               <WorkflowIcon width={20} height={20} />
             </span>
-            <div className="text-ui-md font-bold">
+            <div className="text-ui-md font-semibold">
               {graph.rows.length === 0 ? "还没有请求经过" : "当前筛选下没有请求"}
             </div>
             <p className="max-w-[380px] ui-caption">
@@ -331,13 +331,13 @@ export function ModelTraceView() {
               >
                 <span className="flex items-center gap-2">
                   <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-semibold text-white"
                     style={{ backgroundColor: avatarColor(node.label) }}
                   >
                     {node.label.slice(0, 1).toUpperCase()}
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-ui-md font-bold">{node.label}</span>
+                    <span className="block truncate text-ui-md font-semibold">{node.label}</span>
                     <span className="block ui-caption">{agentCount(node.id)} 个请求</span>
                   </span>
                 </span>
@@ -349,17 +349,17 @@ export function ModelTraceView() {
               style={{ left: HUB_X, top: hubY - HUB_H / 2, width: HUB_W, height: HUB_H }}
             >
               <span className="relative flex h-8 w-8 items-center justify-center">
-                <span className="absolute inset-0 rounded-full bg-[var(--subtle-3)]" />
+                <span className="absolute inset-0 rounded-full bg-subtle-3" />
                 <span
                   aria-hidden="true"
                   className={`absolute inset-0 rounded-full border ${
-                    stats.live > 0 ? "rta-live-dot border-[var(--info)]" : "border-line"
+                    stats.live > 0 ? "rta-live-dot border-info" : "border-line"
                   }`}
                 />
-                <span className="relative text-ui-md font-bold">鸣</span>
+                <span className="relative text-ui-md font-semibold">鸣</span>
               </span>
-              <div className="mt-1 text-ui-base font-bold tracking-wide">和鸣</div>
-              <span className="mt-1 rounded-full bg-[var(--heming-accent)] px-2.5 py-0.5 text-ui-xs font-medium text-[var(--heming-on-accent)]">
+              <div className="mt-1 text-ui-base font-semibold tracking-wide">和鸣</div>
+              <span className="mt-1 rounded-full bg-accent px-2.5 py-0.5 text-ui-xs font-medium text-accent-on">
                 {stats.live > 0 ? "回答中" : "待命"}
               </span>
             </div>
@@ -392,19 +392,19 @@ export function ModelTraceView() {
                 >
                   <span className="flex items-center gap-2">
                     <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-bold text-white"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ui-xs font-semibold text-white"
                       style={{ backgroundColor: avatarColor(label) }}
                     >
                       {label.slice(0, 1).toUpperCase()}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="truncate text-ui-md font-bold">{label}</span>
+                        <span className="truncate text-ui-md font-semibold">{label}</span>
                         {model && <span className="truncate font-mono text-ui-xs text-muted">{model}</span>}
                       </span>
                       <span className="block ui-caption">{accountCount(node.id)} 个请求</span>
                     </span>
-                    <span className={`shrink-0 text-ui-xs ${active ? "text-[var(--info)]" : "text-muted"}`}>
+                    <span className={`shrink-0 text-ui-xs ${active ? "text-info" : "text-muted"}`}>
                       {active ? "回答中…" : visibleRows.some((row) => row.account === node.label) ? "已就绪" : "待命"}
                     </span>
                   </span>
@@ -428,7 +428,7 @@ export function ModelTraceView() {
               },
             ].map((item) => (
               <span key={item.label} className="text-right">
-                <span className="ui-numeric block text-num-md font-bold leading-none">{item.value}</span>
+                <span className="ui-numeric block text-num-md font-semibold leading-none">{item.value}</span>
                 <span className="block ui-caption">{item.label}</span>
               </span>
             ))}
@@ -439,7 +439,7 @@ export function ModelTraceView() {
       {candidates.length > 0 && (
         <div className="ui-card p-4">
           <div className="flex items-center justify-between">
-            <div className="text-ui-md font-bold">候选链</div>
+            <div className="text-ui-md font-semibold">候选链</div>
           </div>
           <ul className="mt-2 divide-y divide-line">
             {candidates.map((route) => (
@@ -448,7 +448,7 @@ export function ModelTraceView() {
                   {route.members.slice(0, 3).map((member) => (
                     <span
                       key={member.id}
-                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--surface)] text-ui-xs font-bold text-white"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-surface text-ui-xs font-semibold text-white"
                       style={{ backgroundColor: avatarColor(member.provider) }}
                       title={member.model}
                     >
@@ -457,12 +457,12 @@ export function ModelTraceView() {
                   ))}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-ui-md font-bold">{route.label}</span>
+                  <span className="block truncate text-ui-md font-semibold">{route.label}</span>
                   <span className="block truncate ui-caption">
                     {route.members.map((member) => member.model).join(" · ") || "还没有候选"}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
+                <span className="shrink-0 rounded-full bg-subtle-3 px-2.5 py-0.5 text-ui-xs text-muted">
                   {STRATEGY_LABELS[route.strategy ?? "order"] ?? route.strategy}
                 </span>
               </li>
@@ -473,7 +473,7 @@ export function ModelTraceView() {
 
       {graph.rows.length > 0 && (
         <div ref={listRef} className="ui-card p-4">
-          <div className="text-ui-md font-bold">最近请求是怎么走的</div>
+          <div className="text-ui-md font-semibold">最近请求是怎么走的</div>
           <ul className="mt-2 space-y-2">
             {[...visibleRows]
               .reverse()
@@ -482,14 +482,14 @@ export function ModelTraceView() {
                 <li key={route.id}>
                   <button
                     type="button"
-                    className="-mx-1 flex w-full items-start gap-2 rounded-lg px-1 py-1 text-left transition-colors hover:bg-[var(--subtle)]"
+                    className="-mx-1 flex w-full items-start gap-2 rounded-lg px-1 py-1 text-left transition-colors hover:bg-subtle"
                     onClick={() => setSelected(route.id)}
                     onMouseEnter={() => setHovered(route.id)}
                     onMouseLeave={() => setHovered(null)}
                   >
                     <span
                       aria-hidden="true"
-                      className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                      className="mt-2 h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: COLORS[state] }}
                     />
                     <span className="min-w-0">
@@ -513,9 +513,9 @@ export function ModelTraceView() {
       )}
 
       {selected && (
-        <div className="rounded-lg border border-line-soft bg-[var(--subtle)] p-3 text-ui-sm">
+        <div className="rounded-lg border border-line-soft bg-subtle p-3 text-ui-sm">
           <div className="flex items-center justify-between">
-            <div className="font-bold">请求详情</div>
+            <div className="font-semibold">请求详情</div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(null)}>
               关闭
             </Button>
@@ -530,7 +530,7 @@ export function ModelTraceView() {
               <span>状态：{seen.route.status ?? (seen.route.done ? "完成" : "进行中")}</span>
             </div>
           )}
-          {seen?.route.error && <div className="mt-1 text-[var(--danger)]">{seen.route.error}</div>}
+          {seen?.route.error && <div className="mt-1 text-danger">{seen.route.error}</div>}
         </div>
       )}
     </section>

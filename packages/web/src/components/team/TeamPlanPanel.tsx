@@ -27,9 +27,9 @@ export const NEXT_STATUS: Record<TeamItemStatus, TeamItemStatus> = {
 
 const STATUS_STYLE: Record<TeamItemStatus, string> = {
   todo: "border-line text-muted",
-  doing: "border-[var(--info-line)] bg-[var(--info-soft)] text-[var(--info)]",
-  done: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
-  blocked: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
+  doing: "border-info-line bg-info-soft text-info",
+  done: "border-success-line bg-success-soft text-success",
+  blocked: "border-warn-line bg-warn-soft text-warn",
 };
 
 /**
@@ -110,7 +110,7 @@ export function TeamPlanPanel({
   return (
     <section aria-label="团队方案" className="ui-card p-4">
       <div className="flex items-center gap-2">
-        <h2 className="ui-section-title">方案</h2>
+        <h2 className="ui-block-title">方案</h2>
         <span className="ui-micro">{plans.length}</span>
         <button
           type="button"
@@ -189,7 +189,7 @@ export function TeamPlanPanel({
               <button
                 type="button"
                 aria-label={`删除方案 ${plan.title}`}
-                className="shrink-0 text-ui-xs text-muted hover:text-[var(--danger)]"
+                className="shrink-0 text-ui-xs text-muted hover:text-danger"
                 onClick={() => setPendingDelete(plan)}
               >
                 删除
@@ -200,7 +200,7 @@ export function TeamPlanPanel({
       )}
       {pendingDelete ? (
         <ConfirmDialog
-          title="删除方案"
+          title="删除方案？"
           onCancel={() => setPendingDelete(null)}
           initialFocusRef={cancelRef}
           footer={
@@ -223,7 +223,7 @@ export function TeamPlanPanel({
             </>
           }
         >
-          <p className="text-ui-sm leading-6">
+          <p className="ui-body-sm">
             删除方案「{pendingDelete.title}」？方案本身删除后不可恢复；挂在它下面的任务会保留，但会解绑为「不挂方案」。
           </p>
         </ConfirmDialog>

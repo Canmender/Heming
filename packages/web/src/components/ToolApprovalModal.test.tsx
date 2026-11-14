@@ -25,7 +25,7 @@ describe("ToolApprovalModal", () => {
       <ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />,
     );
 
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "拒绝" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "全部拒绝" }));
   });
 
   it("列出待确认的调用：动作名 + 风险 + 参数摘要", () => {
@@ -49,7 +49,7 @@ describe("ToolApprovalModal", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall, dangerCall]} onDecide={onDecide} />);
 
     fireEvent.click(screen.getByLabelText("允许 写文件"));
-    fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
+    fireEvent.click(screen.getByRole("button", { name: /允许选中/ }));
 
     expect(onDecide).toHaveBeenCalledWith([
       { callId: "w1", decision: "allow" },
@@ -62,7 +62,7 @@ describe("ToolApprovalModal", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={onDecide} />);
 
     fireEvent.click(screen.getByLabelText("允许 写文件"));
-    fireEvent.click(screen.getByRole("button", { name: "本会话内允许此工具" }));
+    fireEvent.click(screen.getByRole("button", { name: "本会话内允许所选" }));
 
     expect(onDecide).toHaveBeenCalledWith([{ callId: "w1", decision: "allow-session" }]);
   });
@@ -71,7 +71,7 @@ describe("ToolApprovalModal", () => {
     const onDecide = vi.fn();
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall, dangerCall]} onDecide={onDecide} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    fireEvent.click(screen.getByRole("button", { name: "全部拒绝" }));
 
     expect(onDecide).toHaveBeenCalledWith([
       { callId: "w1", decision: "deny", reason: "用户拒绝" },
@@ -90,7 +90,7 @@ describe("ToolApprovalModal", () => {
 
     fireEvent.click(screen.getByLabelText("记住本次选择"));
     fireEvent.click(screen.getByLabelText("允许 写文件"));
-    fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
+    fireEvent.click(screen.getByRole("button", { name: /允许选中/ }));
 
     expect(onDecide).toHaveBeenCalledWith([
       { callId: "w1", decision: "allow", remember: true },
@@ -103,7 +103,7 @@ describe("ToolApprovalModal", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={onDecide} />);
 
     fireEvent.click(screen.getByLabelText("记住本次选择"));
-    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    fireEvent.click(screen.getByRole("button", { name: "全部拒绝" }));
 
     expect(onDecide).toHaveBeenCalledWith([
       { callId: "w1", decision: "deny", reason: "用户拒绝", remember: true },
@@ -152,11 +152,13 @@ describe("ToolApprovalModal", () => {
   it("焦点在弹窗内循环（Tab 不会跑出弹窗）", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
 
-    const deny = screen.getByRole("button", { name: "拒绝" });
+    const deny = screen.getByRole("button", { name: "全部拒绝" });
     expect(document.activeElement).toBe(deny);
 
-    // 从最后一个可聚焦元素（仅本次允许）按 Tab → 回到弹窗内的第一个可聚焦元素
-    const allow = screen.getByRole("button", { name: "仅本次允许" });
+    // 主按钮在 0 勾选时是 disabled（不可聚焦），先勾一项再看焦点环
+    fireEvent.click(screen.getByLabelText("允许 写文件"));
+    // 从最后一个可聚焦元素（允许选中）按 Tab → 回到弹窗内的第一个可聚焦元素
+    const allow = screen.getByRole("button", { name: /允许选中/ });
     allow.focus();
     fireEvent.keyDown(document, { key: "Tab" });
 
@@ -171,11 +173,12 @@ describe("ToolApprovalModal", () => {
   it("Shift+Tab 从第一个可聚焦元素 → 跳到最后一个（反向也在环内）", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
 
+    fireEvent.click(screen.getByLabelText("允许 写文件"));
     const close = screen.getByRole("button", { name: "关闭并拒绝" });
     close.focus();
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
 
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "仅本次允许" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /允许选中/ }));
   });
 
   it("写文件：折叠展示变更预览（增删数 + 路径）", () => {
@@ -232,6 +235,27 @@ describe("ToolApprovalModal · 勾选语义说清楚", () => {
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
     expect(screen.getByText(/先勾选要放行的调用/)).toBeInTheDocument();
     expect(screen.getByText(/没勾的会按拒绝处理/)).toBeInTheDocument();
+  });
+
+  it("0 项勾选时主按钮禁用（点主按钮不能变成「全部拒绝」）", () => {
+    render(
+      <ToolApprovalModal requestId="req-1" calls={[writeCall, dangerCall]} onDecide={vi.fn()} />,
+    );
+
+    const primary = screen.getByRole("button", { name: /允许选中/ });
+    expect(primary).toBeDisabled();
+    expect(screen.getByText(/已勾选 0 \/ 2 项/)).toBeInTheDocument();
+  });
+
+  it("勾选数实时出现在按钮与提示里（1/2 项）", () => {
+    render(
+      <ToolApprovalModal requestId="req-1" calls={[writeCall, dangerCall]} onDecide={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("允许 写文件"));
+
+    expect(screen.getByRole("button", { name: "允许选中（1）" })).toBeEnabled();
+    expect(screen.getByText(/已勾选 1 \/ 2 项/)).toBeInTheDocument();
   });
 
   it("MCP 工具名按「服务 · 工具」展示，不把内部双下划线原样暴露给用户", () => {

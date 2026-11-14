@@ -199,6 +199,35 @@ describe("命令面板 v2 · 检索", () => {
     expect(useUiStore.getState().settingsTab).toBe("appearance");
   });
 
+  it("二级视图入口：检索「技能」落到插件区并投递 skills 视图意图", () => {
+    const onClose = vi.fn();
+    render(<CommandPalette onClose={onClose} />);
+    fireEvent.change(searchBox(), { target: { value: "技能" } });
+    fireEvent.click(OPTION("插件 › 技能"));
+    expect(useUiStore.getState()).toMatchObject({ page: "plugins", pageView: "skills" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("页内 Tab 入口：检索「运行」投递 focus-tab 意图（模型 › 运行）", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "运行" } });
+    fireEvent.click(OPTION("模型 › 运行"));
+    expect(useUiStore.getState().page).toBe("model");
+    // 团队/模型的 Tab 是组件内 state，靠一次性意图投递，宿主页消费后清空
+    expect(useUiStore.getState().paletteIntent).toMatchObject({
+      kind: "focus-tab",
+      data: { page: "model", tab: "run" },
+    });
+    expect(useUiStore.getState().pageView).toBeNull();
+  });
+
+  it("二级视图入口只在有检索词时出现，空面板仍是一级页面 + 动作", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    expect(screen.queryByRole("option", { name: "团队 › 看板" })).not.toBeInTheDocument();
+    fireEvent.change(searchBox(), { target: { value: "看板" } });
+    expect(OPTION("团队 › 看板")).toBeInTheDocument();
+  });
+
   it("没有命中时给明确空态", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "zzzz-not-exist" } });

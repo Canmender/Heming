@@ -12,6 +12,8 @@ import {
 } from "../../lib/vault/standard.js";
 import { useUiStore } from "../../store/ui.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { IconButton } from "../ui/IconButton.js";
+import { Kbd } from "../ui/Kbd.js";
 import { PageShell } from "../layout/PageShell.js";
 import { hasOpenModal } from "../useModalA11y.js";
 import { BacklinkPane } from "./BacklinkPane.js";
@@ -644,9 +646,13 @@ function KnowledgePageShell({
       scroll={false}
       actions={
         <>
+          {/* 审计 F2（页头控件预算）：原来这里并排 11 个控件（9 个文字按钮 + 1 个下拉 + 1 个链接），
+              主操作「新建笔记」和「标准检查」「图谱」一样重。现在收敛成
+              「库下拉 + 1 个主操作 + 图标工具组」，图标按钮仍是 32×32、有 aria-label 与 title，
+              命中区没有变小，视觉重量交给主操作。 */}
           <select
             aria-label="切换知识库"
-            className="ui-input h-7 w-[168px] text-ui-sm"
+            className="ui-input w-[168px]"
             value={store.activeVaultId ?? ""}
             onChange={(e) => void store.setActiveVault(e.target.value)}
           >
@@ -656,6 +662,48 @@ function KnowledgePageShell({
               </option>
             ))}
           </select>
+          <Button
+            type="button"
+            size="sm" variant="primary"
+            onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
+          >
+            <PlusIcon width={14} height={14} />
+            新建笔记
+          </Button>
+          <span className="flex items-center gap-0.5">
+            <IconButton
+              label="打开今天的日记"
+              icon={<BookIcon width={16} height={16} />}
+              onClick={() => void openToday()}
+            />
+            <IconButton
+              label="快速切换笔记（Ctrl+O）"
+              icon={<SearchIcon width={16} height={16} />}
+              onClick={() => setQuickOpenOpen(true)}
+            />
+            <IconButton
+              label="标准检查"
+              icon={<CheckIcon width={16} height={16} />}
+              onClick={openStandardCheck}
+            />
+            <IconButton
+              label="图谱"
+              aria-pressed={graphOpen}
+              className={graphOpen ? "bg-subtle-2 text-ink" : undefined}
+              icon={<RouteIcon width={16} height={16} />}
+              onClick={() => setGraphOpen((prev) => !prev)}
+            />
+            <IconButton
+              label="知识库设置"
+              icon={<GearIcon width={16} height={16} />}
+              onClick={() => setSettingsOpen(true)}
+            />
+            <IconButton
+              label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
+              icon={<ChevronIcon width={16} height={16} className={rightOpen ? "rotate-180" : ""} />}
+              onClick={() => setRightOpen((prev) => !prev)}
+            />
+          </span>
           <Button
             type="button"
             size="sm" variant="ghost"
@@ -683,73 +731,6 @@ function KnowledgePageShell({
           ) : store.indexStatus === "ready" ? (
             <span className="ui-caption">{store.index ? store.index.pages.size : 0} 篇笔记</span>
           ) : null}
-
-          <span className="flex items-center gap-1">
-            {/* 第二轮入口：今天 / 新建 / 快速切换 / 设置（键盘路径 Ctrl+O 见下方监听） */}
-            <Button
-              type="button"
-              aria-label="打开今天的日记"
-              size="sm" variant="ghost"
-              onClick={() => void openToday()}
-            >
-              <BookIcon width={14} height={14} />
-              今天
-            </Button>
-            <Button
-              type="button"
-              size="sm" variant="primary"
-              onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
-            >
-              <PlusIcon width={14} height={14} />
-              新建笔记
-            </Button>
-            <Button
-              type="button"
-              title="快速切换笔记（Ctrl+O）"
-              onClick={() => setQuickOpenOpen(true)}
-              size="sm" variant="ghost"
-            >
-              <SearchIcon width={14} height={14} />
-              快速切换
-            </Button>
-            <Button
-              type="button"
-              title="按卡帕西 LLM Wiki 标准检查目录、根文件与页面 frontmatter"
-              onClick={openStandardCheck}
-              size="sm" variant="ghost"
-            >
-              <CheckIcon width={14} height={14} />
-              标准检查
-            </Button>
-            <Button
-              type="button"
-              aria-label="知识库设置"
-              size="sm" variant="ghost"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <GearIcon width={14} height={14} />
-              设置
-            </Button>
-            <Button
-              type="button"
-              aria-pressed={graphOpen}
-              size="sm" variant={graphOpen ? "primary" : "ghost"}
-              onClick={() => setGraphOpen((prev) => !prev)}
-            >
-              <RouteIcon width={14} height={14} />
-              图谱
-            </Button>
-            <Button
-              type="button"
-              aria-pressed={rightOpen}
-              size="sm" variant="ghost"
-              aria-label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
-              title={rightOpen ? "收起右栏" : "展开右栏"}
-              onClick={() => setRightOpen((prev) => !prev)}
-            >
-              <ChevronIcon width={14} height={14} className={rightOpen ? "rotate-180" : ""} />
-            </Button>
-          </span>
         </>
       }
     >
@@ -800,6 +781,9 @@ function KnowledgePageShell({
           data-testid="knowledge-left"
           className="flex w-[248px] shrink-0 flex-col border-r border-line-soft bg-panel"
         >
+          {/* 三栏各自的可见标签已经是页签/页头，再叠一个视觉标题只会重复；
+              用 sr-only 的 h2 把「这两栏是什么」交给读屏与大纲（审计门禁只认 h1/h2/h3）。 */}
+          <h2 className="sr-only">文件列表</h2>
           <div className="flex shrink-0 items-center gap-0.5 border-b border-line-soft px-1.5 py-1">
             {(["files", "search", "tags"] as LeftTab[]).map((tab) => (
               <button
@@ -807,7 +791,7 @@ function KnowledgePageShell({
                 type="button"
                 aria-pressed={leftTab === tab}
                 onClick={() => setLeftTab(tab)}
-                className={`flex-1 rounded-sm px-1.5 py-1 text-ui-xs transition-colors ${
+                className={`ui-hit flex-1 rounded-sm px-1.5 py-1 text-ui-sm transition-colors ${
                   leftTab === tab
                     ? "bg-subtle-3 font-medium text-ink"
                     : "text-muted hover:bg-subtle-2 hover:text-ink"
@@ -826,7 +810,7 @@ function KnowledgePageShell({
                     <span>标签 #{activeTag}</span>
                     <button
                       type="button"
-                      className="ui-link h-5"
+                      className="ui-link h-5 ui-hit"
                       onClick={() => setActiveTag(null)}
                     >
                       清除
@@ -904,6 +888,7 @@ function KnowledgePageShell({
 
         {/* ── 中栏 ── */}
         <main data-testid="knowledge-center" className="flex min-w-0 flex-1 flex-col">
+          <h2 className="sr-only">编辑器</h2>
           {/* 标签页 */}
           <div
             role="tablist"
@@ -967,7 +952,7 @@ function KnowledgePageShell({
                 </span>
                 {rawReadOnly ? (
                   <span className="ui-caption flex items-center gap-1 text-muted">
-                    <span className="rounded-sm bg-subtle-3 px-1.5 py-0.5 text-ui-xs text-ink">只读来源</span>
+                    <span className="rounded-sm bg-subtle-3 px-1.5 py-0.5 ui-body-sm text-ink">只读来源</span>
                     raw/ 是事实基准，编辑与保存已关闭
                   </span>
                 ) : (
@@ -1071,7 +1056,7 @@ function KnowledgePageShell({
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
                 写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
-                <kbd className="ml-1 rounded-sm border border-line px-1 text-ui-xs">Ctrl+O</kbd> 可以快速切换笔记。
+                <Kbd className="ml-1">Ctrl+O</Kbd> 可以快速切换笔记。
               </p>
               <div className="mt-1 flex items-center gap-2">
                 <Button
@@ -1099,6 +1084,7 @@ function KnowledgePageShell({
             data-testid="knowledge-right"
             className="flex w-[264px] shrink-0 flex-col border-l border-line-soft bg-panel"
           >
+            <h2 className="sr-only">笔记预览与反链</h2>
             {activeRel ? (
               <BacklinkPane
                 rel={activeRel}
@@ -1121,7 +1107,7 @@ function KnowledgePageShell({
       </div>
 
       {/* 状态栏：脏文件计数 + 快捷键提示 + 当前库根（默认库就是安装目录/数据根下的 wiki） */}
-      <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-ui-xs text-muted">
+      <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-ui-sm text-muted">
         {/* d.141（F-05）：浏览器临时模式没有文件桥，笔记只在内存里——此时页脚再说
             「全部已保存」与上方「刷新即丢」横幅自相矛盾，用户会信前者而关页丢笔记。 */}
         <span>
@@ -1187,7 +1173,7 @@ function KnowledgePageShell({
 
       {removeConfirm && activeMeta ? (
         <ConfirmDialog
-          title={`移除知识库 ${activeMeta.name}`}
+          title={`移除知识库 ${activeMeta.name}？`}
           onCancel={() => setRemoveConfirm(false)}
           footer={
             <>

@@ -224,14 +224,14 @@ describe("团队工作台（d.92）", () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     vi.mocked(deleteTeamPlan).mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole("button", { name: "删除方案 先把周报自动化" }));
-    let planDialog = await screen.findByRole("dialog", { name: "删除方案" });
+    let planDialog = await screen.findByRole("dialog", { name: "删除方案？" });
     expect(deleteTeamPlan).not.toHaveBeenCalled();
     fireEvent.click(within(planDialog).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除方案" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除方案？" })).toBeNull());
     expect(deleteTeamPlan).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "删除方案 先把周报自动化" }));
-    planDialog = await screen.findByRole("dialog", { name: "删除方案" });
+    planDialog = await screen.findByRole("dialog", { name: "删除方案？" });
     fireEvent.click(within(planDialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(deleteTeamPlan).toHaveBeenCalledTimes(1));
     expect(deleteTeamPlan).toHaveBeenCalledWith("t1", "p1");
@@ -290,14 +290,14 @@ describe("团队工作台（d.92）", () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     vi.mocked(deleteTeamTask).mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole("button", { name: "删除任务 产出本周周报初稿" }));
-    let taskDialog = await screen.findByRole("dialog", { name: "删除任务" });
+    let taskDialog = await screen.findByRole("dialog", { name: "删除任务？" });
     expect(deleteTeamTask).not.toHaveBeenCalled();
     fireEvent.click(within(taskDialog).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除任务" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除任务？" })).toBeNull());
     expect(deleteTeamTask).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "删除任务 产出本周周报初稿" }));
-    taskDialog = await screen.findByRole("dialog", { name: "删除任务" });
+    taskDialog = await screen.findByRole("dialog", { name: "删除任务？" });
     fireEvent.click(within(taskDialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(deleteTeamTask).toHaveBeenCalledTimes(1));
     expect(deleteTeamTask).toHaveBeenCalledWith("t1", "k1");
@@ -340,16 +340,16 @@ describe("团队工作台（d.92）", () => {
     const carolRemove = await screen.findByRole("button", { name: "移除成员 卡罗" });
     const confirmSpy = vi.spyOn(window, "confirm");
     fireEvent.click(carolRemove);
-    let removeDialog = await screen.findByRole("dialog", { name: "移除成员" });
+    let removeDialog = await screen.findByRole("dialog", { name: "移除成员？" });
     expect(within(removeDialog).getByText(/解绑为待认领/)).toBeInTheDocument();
     expect(within(removeDialog).getByRole("button", { name: "取消" })).toHaveFocus();
     expect(removeWorkspaceMember).not.toHaveBeenCalled();
     fireEvent.click(within(removeDialog).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除成员" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除成员？" })).toBeNull());
     expect(removeWorkspaceMember).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "移除成员 卡罗" }));
-    removeDialog = await screen.findByRole("dialog", { name: "移除成员" });
+    removeDialog = await screen.findByRole("dialog", { name: "移除成员？" });
     fireEvent.click(within(removeDialog).getByRole("button", { name: "移除" }));
     await waitFor(() => expect(removeWorkspaceMember).toHaveBeenCalledTimes(1));
     expect(removeWorkspaceMember).toHaveBeenCalledWith("t1", "u3");
@@ -432,16 +432,16 @@ describe("团队工作台（d.92）", () => {
     const confirmSpy = vi.spyOn(window, "confirm");
 
     fireEvent.click(screen.getByRole("button", { name: "删除团队" }));
-    let dialog = await screen.findByRole("dialog", { name: "删除团队" });
+    let dialog = await screen.findByRole("dialog", { name: "删除团队？" });
     // 初始焦点在「取消」：误按回车不会删掉团队。
     expect(within(dialog).getByRole("button", { name: "取消" })).toHaveFocus();
     expect(deleteWorkspaceTeam).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除团队" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除团队？" })).toBeNull());
     expect(deleteWorkspaceTeam).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "删除团队" }));
-    dialog = await screen.findByRole("dialog", { name: "删除团队" });
+    dialog = await screen.findByRole("dialog", { name: "删除团队？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(deleteWorkspaceTeam).toHaveBeenCalledTimes(1));
     expect(deleteWorkspaceTeam).toHaveBeenCalledWith("t1");

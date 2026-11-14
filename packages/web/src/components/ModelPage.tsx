@@ -9,15 +9,21 @@ import {
   ModelIcon,
   PlugIcon,
   RefreshIcon,
+  TrashIcon,
   WorkflowIcon,
 } from "./icons.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { ModelTraceView } from "./ModelTraceView.js";
 import { Button } from "./ui/Button.js";
+import { EmptyState } from "./ui/EmptyState.js";
+import { IconButton } from "./ui/IconButton.js";
+import { SkeletonCard } from "./ui/Skeleton.js";
 import { Stat } from "./ui/Stat.js";
 import { TextField } from "./ui/Field.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
 import { useLlmStore } from "../store/llm.js";
+import { useUiStore } from "../store/ui.js";
 import { ensureDesktopGateway } from "../lib/magpieHost.js";
 import {
   getMagpieCliBridge,
@@ -82,8 +88,8 @@ const SUBSCRIPTIONS = [
 
 /** 来源行的计划徽标：普通地址保持灰，Coding Plan 用蓝（不用红：它不是错误）。 */
 const PLAN_BADGE: Record<PlanKind, { label: string; className: string }> = {
-  normal: { label: "普通地址", className: "bg-[var(--subtle-3)] text-muted" },
-  coding: { label: "Coding Plan", className: "bg-[var(--info-soft)] text-[var(--info)]" },
+  normal: { label: "普通地址", className: "bg-subtle-3 text-muted" },
+  coding: { label: "Coding Plan", className: "bg-info-soft text-info" },
 };
 
 /**
@@ -167,7 +173,7 @@ function Avatar({ name }: { name: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ui-sm font-bold text-white"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ui-sm font-semibold text-white"
       style={{ backgroundColor: avatarColor(name) }}
     >
       {name.slice(0, 1).toUpperCase()}
@@ -181,6 +187,18 @@ export function ModelPage() {
 
   const cli = useMemo<MagpieCliBridge | null>(() => getMagpieCliBridge(), []);
   const [tab, setTab] = useState<TabKey>("models");
+
+  // 命令面板的二级视图入口（d.142）：见 store/ui.ts 的 `focus-tab`。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-tab") return;
+    const { page, tab: want } = paletteIntent.data ?? {};
+    if (page !== "model" || !want) return;
+    if (!TABS.some((t) => t.key === want)) return;
+    setTab(want as TabKey);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
   const [busy, setBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   /** 来源区的就地反馈：加完一个来源给一句话，用户还要继续加，所以不跳页。 */
@@ -193,9 +211,16 @@ export function ModelPage() {
     null,
   );
   /** 每行待应用的模型输入（按智能体展示名索引，不持久化）。 */
-  /** 待确认的破坏性 CLI 操作（d.140 R4）：删分组/删密钥都是一下就没的操作，
-   *  此前 onClick 直接执行、零确认。这里改成原地两步确认（与 agentConfirm 同一套就地提示习惯）。 */
-  const [dangerConfirm, setDangerConfirm] = useState<{ label: string; args: string[] } | null>(null);
+  /**
+   * 待确认的破坏性删除（审计 F4）：来源与搜索来源以前点一下就执行，而同一页的分组/密钥
+   * 删除却是两步确认——同一件不可恢复的事有两套语言。现在统一走 ConfirmDialog。
+   */
+  const [confirmDelete, setConfirmDelete] = useState<{
+    title: string;
+    desc: string;
+    confirmLabel: string;
+    action: () => void;
+  } | null>(null);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [modelQuery, setModelQuery] = useState("");
@@ -510,7 +535,8 @@ export function ModelPage() {
       {!cli && (
         <div role="status" className="ui-alert ui-alert-info mb-4">
           <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
-          <span>
+          {/* 12px 文本要求 ≥4.5:1，原先 --muted 在 --subtle 底上只有 4.02；这里用 --body 提到达标。 */}
+          <span className="text-body">
             浏览器端只能查看可用模型。添加来源、登录账号与路由维护请打开和鸣桌面端——模型能力运行在你的电脑上。
           </span>
         </div>
@@ -531,25 +557,31 @@ export function ModelPage() {
             )}
 
             {loading ? (
-              <div className="space-y-2" aria-label="读取模型">
-                {[0, 1, 2].map((index) => (
-                  <div key={index} className="h-14 animate-pulse rounded-2xl bg-[var(--subtle-3)]" />
+              <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">
+                {[0, 1].map((index) => (
+                  // 骨架与真实内容同形同尺寸：一块 ui-card（rounded-xl）里三行列表，
+                  // 不再是三条 h-14/rounded-2xl 的色块（审计 F2「骨架与内容形状不符」）。
+                  <SkeletonCard key={index} lines={3} />
                 ))}
               </div>
             ) : profiles.length === 0 ? (
-              <div className="ui-card border-dashed px-6 py-10 text-center">
-                <span className="ui-icon-tile mx-auto mb-3">
-                  <ModelIcon width={20} height={20} />
-                </span>
-                <div className="ui-section-title">还没有可用的模型</div>
-                <Button className="mt-4" onClick={() => setTab("sources")}>
-                  添加来源
-                </Button>
-              </div>
+              <>
+                {/* 浏览器端最常见的就是这一屏：整页只有 h1，读屏拿不到「可用模型」这一段的大纲，
+                    运行时审计也会判成「只有一级标题」。EmptyState 的标题是 <p>（基元不在这里改），
+                    所以补一个只给辅助技术的 h2——视觉上不重复，语义上这段有名字。 */}
+                <h2 className="sr-only">可用模型</h2>
+                <EmptyState
+                  icon={<ModelIcon width={20} height={20} />}
+                  title="还没有可用的模型"
+                  desc="加一个来源，它的模型会自动出现在这里。"
+                  action={<Button onClick={() => setTab("sources")}>添加来源</Button>}
+                  framed
+                />
+              </>
             ) : (
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="ui-section-title">可用模型</div>
+                  <h2 className="ui-section-title">可用模型</h2>
                   <TextField
                     label="搜索模型"
                     className="w-56"
@@ -562,16 +594,18 @@ export function ModelPage() {
                   {visibleModels.map((profile) => (
                     <li
                       key={profile.model}
-                      className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-[var(--subtle)]"
+                      /* 审计 F7：原来是手写的 rounded-lg + hover:bg-subtle 行，
+                         与名册/设置搜索的列表行不是一套。统一走 .ui-list-row。 */
+                      className="-mx-4 flex items-center gap-3 ui-list-row"
                     >
                       <Avatar name={providerOf(profile.model)} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ui-md font-bold" title={profile.model}>
+                        <span className="block truncate ui-body-sm font-semibold" title={profile.model}>
                           {profile.model}
                         </span>
                         <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-ui-xs text-muted">
+                      <span className="shrink-0 rounded-full border border-success-line bg-success-soft px-2.5 py-0.5 text-ui-xs font-medium text-success">
                         可用
                       </span>
                     </li>
@@ -582,7 +616,7 @@ export function ModelPage() {
             )}
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <TextField
                   label="属性模型 ID"
@@ -652,7 +686,7 @@ export function ModelPage() {
 
             <div className="ui-card p-4">
               <div className="flex items-center justify-between">
-                <div className="ui-section-title">本机智能体（{agents.length}）</div>
+                <h2 className="ui-section-title">本机智能体（{agents.length}）</h2>
                 <Button
                   type="button"
                   size="sm" variant="ghost"
@@ -668,7 +702,7 @@ export function ModelPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <Avatar name={agent.name} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ui-md font-bold">{agent.name}</span>
+                        <span className="block truncate text-ui-md font-semibold">{agent.name}</span>
                         <span className="block truncate ui-caption" title={agent.configPath}>
                           {agent.model}
                           {agent.detail ? ` · ${agent.detail}` : ""}
@@ -725,7 +759,7 @@ export function ModelPage() {
                   <div className="flex items-start gap-2">
                     <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-ui-sm font-bold">
+                      <div className="text-ui-sm font-semibold">
                         {agentConfirm.model === "default"
                           ? `恢复 ${agentConfirm.name} 原来的模型？`
                           : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
@@ -789,7 +823,7 @@ export function ModelPage() {
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <div className="ui-section-title">API Key 服务商</div>
+                <h2 className="ui-section-title">API Key 服务商</h2>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
               {!cli && (
@@ -810,7 +844,7 @@ export function ModelPage() {
                     aria-pressed={presetKey?.id === preset.id}
                     className={`ui-card ui-card-interactive px-3 py-2.5 text-left disabled:opacity-50 ${
                       presetKey?.id === preset.id
-                        ? "border-ink bg-[var(--info-soft)]"
+                        ? "border-ink bg-info-soft"
                         : ""
                     }`}
                     disabled={!cli}
@@ -821,7 +855,7 @@ export function ModelPage() {
                     <span className="flex items-center gap-2">
                       <Avatar name={preset.name} />
                       <span className="min-w-0">
-                        <span className="block truncate text-ui-md font-bold">{preset.name}</span>
+                        <span className="block truncate text-ui-md font-semibold">{preset.name}</span>
                         <span className="block truncate ui-caption">{preset.desc}</span>
                       </span>
                     </span>
@@ -831,9 +865,9 @@ export function ModelPage() {
               )}
 
               {presetKey && activePreset && activePlan && (
-                <div className="rta-enter mt-3 rounded-lg border border-line bg-[var(--subtle)] p-3">
+                <div className="rta-enter mt-3 rounded-lg border border-line bg-subtle p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2 text-ui-sm font-bold">
+                    <div className="flex flex-wrap items-center gap-2 text-ui-sm font-semibold">
                       添加 {activePreset.name}
                       <span
                         className={`rounded-full px-2 py-0.5 text-ui-xs ${PLAN_BADGE[activePlan.kind].className}`}
@@ -908,7 +942,7 @@ export function ModelPage() {
                       保存
                     </Button>
                   </div>
-                  <p className="mt-1.5 ui-caption">
+                  <p className="mt-2 ui-caption">
                     {activePlan.hint ?? "保存后会自动读取这个 Key 能用的模型。"}
                   </p>
                   {activePlan.kind === "coding" && (
@@ -928,7 +962,7 @@ export function ModelPage() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="ui-section-title">订阅账号</div>
+                  <h2 className="ui-section-title">订阅账号</h2>
                   <span className="ui-caption">多个账号自动分担</span>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -944,7 +978,7 @@ export function ModelPage() {
                     >
                       <Avatar name={item.label} />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-ui-md font-bold">{item.label}</span>
+                        <span className="block text-ui-md font-semibold">{item.label}</span>
                         <span className="block ui-caption">{item.desc}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-0.5 text-ui-xs text-muted">
@@ -959,7 +993,7 @@ export function ModelPage() {
                     <li key={`${row.agent}-${row.label}-${index}`} className="flex items-center gap-3 py-2">
                       <Avatar name={row.agent} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ui-md font-bold">{row.label}</span>
+                        <span className="block truncate text-ui-md font-semibold">{row.label}</span>
                         <span className="block ui-caption">{row.agent}</span>
                       </span>
                       <span className="shrink-0 ui-caption">{row.allowance ?? "额度未知"}</span>
@@ -973,18 +1007,18 @@ export function ModelPage() {
 
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="ui-section-title">其他地址</div>
+                  <h2 className="ui-section-title">其他地址</h2>
                   <span className="ui-caption">中转、局域网或自建接口</span>
                 </div>
                 {!custom.open ? (
                   <button
                     type="button"
-                    className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left transition-colors hover:bg-[var(--subtle)] disabled:opacity-50"
+                    className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left transition-colors hover:bg-subtle disabled:opacity-50"
                     disabled={!cli}
                     onClick={() => setCustom({ ...custom, open: true })}
                   >
                     <span className="min-w-0">
-                      <span className="block text-ui-md font-bold">其他 OpenAI 兼容地址</span>
+                      <span className="block text-ui-md font-semibold">其他 OpenAI 兼容地址</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-muted">
                       展开
@@ -1038,7 +1072,7 @@ export function ModelPage() {
                       onChange={(event) => setCustom({ ...custom, models: event.target.value })}
                     />
                     {customError && (
-                      <p role="alert" className="sm:col-span-2 ui-caption text-[var(--danger)]">
+                      <p role="alert" className="sm:col-span-2 ui-caption text-danger">
                         {customError}
                       </p>
                     )}
@@ -1066,24 +1100,24 @@ export function ModelPage() {
             )}
 
             <div className="ui-card p-4">
-              <div className="ui-section-title">已添加的来源（{providers.length}）</div>
+              <h2 className="ui-section-title">已添加的来源（{providers.length}）</h2>
               {!cli && (
                 <p className="mt-1 ui-caption">浏览器预览下只能查看：测试、换 Key 与删除来源请用桌面版。</p>
               )}
-              <ul className="mt-2 divide-y divide-line">
+              <ul className="mt-2">
                 {providers.map((row) => {
                   const info = showCache[row.id];
                   const badge =
                     showLoading === row.id
-                      ? { label: "读取地址…", className: "bg-[var(--subtle-3)] text-muted" }
+                      ? { label: "读取地址…", className: "bg-subtle-3 text-muted" }
                       : PLAN_BADGE[info?.plan ?? "normal"];
                   return (
-                    <li key={row.id} className="py-2">
-                      <div className="flex flex-wrap items-center gap-3">
+                    <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
+                      <div className="flex w-full flex-wrap items-center gap-3">
                         <Avatar name={row.kind} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
-                            <span className="truncate text-ui-md font-bold">{row.id}</span>
+                            <span className="truncate ui-body-sm font-semibold">{row.id}</span>
                             <span
                               className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${badge.className}`}
                             >
@@ -1113,19 +1147,25 @@ export function ModelPage() {
                         >
                           测试
                         </Button>
-                        <Button
-                          type="button"
-                          size="sm" variant="danger"
+                        <IconButton
+                          label={`删除来源 ${row.id}`}
                           disabled={!cli}
-                          onClick={() => void run("删除来源", ["provider", "rm", row.id], { refresh: true })}
-                        >
-                          删除
-                        </Button>
+                          icon={<TrashIcon width={16} height={16} />}
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: "删除来源？",
+                              desc: `来源「${row.id}」删除后不可恢复（地址、Key 与模型记录一并移除）。`,
+                              confirmLabel: "删除",
+                              action: () =>
+                                void run("删除来源", ["provider", "rm", row.id], { refresh: true }),
+                            })
+                          }
+                        />
                       </div>
                       {advancedProvider === row.id && (
-                        <div className="rta-enter mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3">
+                        <div className="rta-enter mt-2 rounded-lg border border-line bg-subtle p-3">
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <div className="text-ui-sm font-bold">{row.id} 的高级设置</div>
+                            <div className="text-ui-sm font-semibold">{row.id} 的高级设置</div>
                             {showCache[row.id]?.chat && (
                               <span
                                 className="max-w-full truncate font-mono text-ui-xs text-muted"
@@ -1138,7 +1178,7 @@ export function ModelPage() {
 
                           <div className="mt-3">
                             <div className="ui-micro">连接</div>
-                            <div className="mt-1.5 flex flex-wrap items-start gap-2">
+                            <div className="mt-2 flex flex-wrap items-start gap-2">
                               <TextField
                                 label="更新 Key"
                                 type="password"
@@ -1187,7 +1227,7 @@ export function ModelPage() {
 
                           <div className="mt-3">
                             <div className="ui-micro">模型</div>
-                            <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <TextField
                                 label="来源模型列表"
                                 placeholder="模型 id，逗号分隔（覆盖现有列表）"
@@ -1228,7 +1268,7 @@ export function ModelPage() {
                             </Button>
                           </div>
 
-                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-[var(--subtle)] px-3 py-2">
+                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               请求（请求头 / 耐心 / 错误处理）
                             </summary>
@@ -1317,7 +1357,7 @@ export function ModelPage() {
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
             <details className="ui-disclosure ui-card p-4 lg:col-span-2">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <TextField
                   label="分组名称"
@@ -1377,46 +1417,25 @@ export function ModelPage() {
                 >
                   详情
                 </Button>
-                {dangerConfirm?.args[1] === "rm" ? (
-                  <span className="flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm" variant="danger"
-                      onClick={() => {
-                        const pending = dangerConfirm;
-                        setDangerConfirm(null);
-                        void run(pending.label, pending.args);
-                      }}
-                    >
-                      确认删除
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm" variant="ghost"
-                      onClick={() => setDangerConfirm(null)}
-                    >
-                      取消
-                    </Button>
-                  </span>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm" variant="danger"
-                    disabled={!cli || !groupForm.target.trim()}
-                    onClick={() =>
-                      setDangerConfirm({
-                        label: "删除分组",
-                        args: ["group", "rm", groupForm.target.trim()],
-                      })
-                    }
-                  >
-                    删除
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  size="sm" variant="danger"
+                  disabled={!cli || !groupForm.target.trim()}
+                  onClick={() =>
+                    setConfirmDelete({
+                      title: "删除分组？",
+                      desc: `分组「${groupForm.target.trim()}」删除后不可恢复。`,
+                      confirmLabel: "删除",
+                      action: () => void run("删除分组", ["group", "rm", groupForm.target.trim()]),
+                    })
+                  }
+                >
+                  删除
+                </Button>
               </div>
 
               <div className="mt-3 border-t border-line pt-3">
-                <div className="text-ui-sm font-bold">规则（可选）：把某类请求先交给组里的指定模型</div>
+                <div className="text-ui-sm font-semibold">规则（可选）：把某类请求先交给组里的指定模型</div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
                   <TextField
                     label="规则分组"
@@ -1492,7 +1511,7 @@ export function ModelPage() {
             <BackupPanel />
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <label className="grid gap-1">
                   <span className="ui-caption">同步类型</span>
@@ -1538,7 +1557,7 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
                   查看库
@@ -1571,26 +1590,48 @@ export function ModelPage() {
                   onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
                 />
               </div>
-              <Button
-                type="button"
-                size="sm" variant="primary" className="mt-2"
-                disabled={!cli}
-                onClick={() => {
-                  if (searchForm.api.trim()) {
-                    void run("添加搜索来源", ["search", "add", searchForm.api.trim(), searchForm.key.trim()]);
-                  } else if (searchForm.target.trim()) {
-                    void run("删除搜索来源", ["search", "rm", searchForm.target.trim()]);
-                  } else {
-                    void run("搜索来源", ["search"]);
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {/* 以前是一个「执行」按钮按填了哪个字段猜动作：既藏了三种语义，也让删除和
+                    添加共用同一颗主按钮。拆成三个显式动作，删除单独走确认。 */}
+                <Button
+                  type="button"
+                  size="sm" variant="primary"
+                  disabled={!cli || !searchForm.api.trim()}
+                  onClick={() =>
+                    void run("添加搜索来源", ["search", "add", searchForm.api.trim(), searchForm.key.trim()])
                   }
-                }}
-              >
-                执行
-              </Button>
+                >
+                  添加来源
+                </Button>
+                <Button
+                  type="button"
+                  size="sm" variant="ghost"
+                  disabled={!cli}
+                  onClick={() => void run("搜索来源", ["search"])}
+                >
+                  查看已有
+                </Button>
+                <Button
+                  type="button"
+                  size="sm" variant="ghost"
+                  disabled={!cli || !searchForm.target.trim()}
+                  onClick={() => {
+                    const target = searchForm.target.trim();
+                    setConfirmDelete({
+                      title: "删除搜索来源？",
+                      desc: `搜索来源「${target}」删除后不可恢复（地址与 Key 一并移除）。`,
+                      confirmLabel: "删除",
+                      action: () => void run("删除搜索来源", ["search", "rm", target]),
+                    });
+                  }}
+                >
+                  删除来源
+                </Button>
+              </div>
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
               <p className="mt-1 ui-caption">
                 给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
               </p>
@@ -1645,47 +1686,27 @@ export function ModelPage() {
                 >
                   轮换
                 </Button>
-                {dangerConfirm?.args[1] === "remove" ? (
-                  <span className="flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm" variant="danger"
-                      onClick={() => {
-                        const pending = dangerConfirm;
-                        setDangerConfirm(null);
-                        void run(pending.label, pending.args);
-                      }}
-                    >
-                      确认删除
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm" variant="ghost"
-                      onClick={() => setDangerConfirm(null)}
-                    >
-                      取消
-                    </Button>
-                  </span>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm" variant="danger"
-                    disabled={!cli || !gatewayKeyForm.target.trim()}
-                    onClick={() =>
-                      setDangerConfirm({
-                        label: "删除密钥",
-                        args: ["gateway-key", "remove", gatewayKeyForm.target.trim()],
-                      })
-                    }
-                  >
-                    删除
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  size="sm" variant="danger"
+                  disabled={!cli || !gatewayKeyForm.target.trim()}
+                  onClick={() =>
+                    setConfirmDelete({
+                      title: "删除密钥？",
+                      desc: `密钥「${gatewayKeyForm.target.trim()}」删除后不可恢复。`,
+                      confirmLabel: "删除",
+                      action: () =>
+                        void run("删除密钥", ["gateway-key", "remove", gatewayKeyForm.target.trim()]),
+                    })
+                  }
+                >
+                  删除
+                </Button>
               </div>
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
               <p className="mt-1 ui-caption">
                 看各智能体最近的会话记录；启动器命令由模型服务提供（终端里 `claude-magpie` 之类），
                 只影响那一次会话，不改配置。
@@ -1711,7 +1732,7 @@ export function ModelPage() {
             </details>
 
             <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
               <div className="mt-2 flex flex-wrap items-start gap-2">
                 <TextField
                   label="命令"
@@ -1743,7 +1764,7 @@ export function ModelPage() {
                   取消
                 </Button>
               </div>
-              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[var(--console-bg)] p-3 text-ui-sm text-[var(--console-ink)]">
+              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-console-bg p-3 text-ui-sm text-console-ink">
                 {live || "（输出会出现在这里）"}
               </pre>
               <TextField
@@ -1765,13 +1786,44 @@ export function ModelPage() {
         )}
       </div>
 
+      {confirmDelete && (
+        <ConfirmDialog
+          title={confirmDelete.title}
+          onCancel={() => setConfirmDelete(null)}
+          footer={
+            <>
+              <Button
+                type="button"
+                size="md" variant="ghost" className="text-muted"
+                onClick={() => setConfirmDelete(null)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                size="md" variant="danger"
+                onClick={() => {
+                  const pending = confirmDelete;
+                  setConfirmDelete(null);
+                  pending.action();
+                }}
+              >
+                {confirmDelete.confirmLabel}
+              </Button>
+            </>
+          }
+        >
+          <p className="ui-body-sm text-muted">{confirmDelete.desc}</p>
+        </ConfirmDialog>
+      )}
+
       {output && (
         <div
           role={output.ok ? "status" : "alert"}
           className={`rta-enter mt-4 block ${output.ok ? "ui-alert ui-alert-info" : "ui-alert ui-alert-danger"}`}
         >
           <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-ui-sm font-bold">
+            <div className="flex items-center gap-2 text-ui-sm font-semibold">
               {output.ok ? (
                 <CheckIcon width={14} height={14} className="shrink-0" />
               ) : (
