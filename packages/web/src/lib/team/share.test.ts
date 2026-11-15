@@ -1,14 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { InfohubAgendaItem } from "../infohub/client.js";
 import type { TaskRecord } from "../tasks/store.js";
+import type { StorageLike } from "../memory/types.js";
 import type { UsageRecord } from "../../store/tokenUsage.js";
 import {
+  bindTeamShareUser,
   collectTeamActivities,
   collectTeamUsage,
   DEFAULT_TEAM_SHARE,
   normalizeTeamShareSettings,
+  readTeamShareOwner,
+  readTeamShareSettings,
   summarizeLocalUsage,
+  TASK_ACTIVITY_TITLE,
+  TEAM_SHARE_KEY,
   TEAM_UPLOAD_LIMIT,
+  useTeamShareStore,
   type TeamShareSettings,
 } from "./share.js";
 
@@ -46,7 +53,7 @@ function agenda(
   };
 }
 
-const ON: TeamShareSettings = { tasks: true, agenda: true, usage: true, usageClearedAt: null, lastSyncAt: null };
+const ON: TeamShareSettings = { tasks: true, agenda: true, usage: true, usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null };
 
 describe("团队共享设置", () => {
   it("默认全关（任务 / 日程 / 用量三类）", () => {
@@ -55,6 +62,7 @@ describe("团队共享设置", () => {
       agenda: false,
       usage: false,
       usageClearedAt: null,
+      activitiesClearedAt: null,
       lastSyncAt: null,
     });
     expect(normalizeTeamShareSettings(null)).toEqual(DEFAULT_TEAM_SHARE);
@@ -69,6 +77,7 @@ describe("团队共享设置", () => {
       agenda: true,
       usage: true,
       usageClearedAt: null,
+      activitiesClearedAt: null,
       lastSyncAt: 123,
     });
   });
@@ -267,5 +276,184 @@ describe("本机用量汇总（关闭共享时的展示）", () => {
     expect(summary.byDay).toHaveLength(7);
     expect(summary.byDay.at(-1)).toMatchObject({ date: "2026-11-02", tokens: 120 });
     expect(summary.byDay.some((d) => d.date === "2026-10-20")).toBe(false);
+  });
+});
+
+describe("团队摘要采集：隐私与临期口径（d.113）", () => {
+  const AT = NOW.getTime();
+
+  it("任务动向只用固定标题：提问首行（任务标题）不出本机", () => {
+    const items = collectTeamActivities(
+      ON,
+      { tasks: [task({ id: "t1", updatedAt: AT - 60_000 })], agenda: [] },
+      AT,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]!.title).toBe(TASK_ACTIVITY_TITLE);
+    // 旧实现把 task.title（= 提问首行裁剪）当标题上报，等于把提示词发给全站同事
+    const wire = JSON.stringify(items[0]);
+    expect(wire).not.toContain("不该上传的提示词");
+    expect(wire).not.toContain("任务 t1");
+  });
+
+  it("清除水位之后的任务改动才重新上传（否则清除后同一批数据会被同步回填）", () => {
+    const clearedAt = AT - 2 * 3_600_000;
+    const items = collectTeamActivities(
+      { ...ON, activitiesClearedAt: clearedAt },
+      {
+        tasks: [
+          task({ id: "old", updatedAt: AT - 3 * 3_600_000 }),
+          task({ id: "new", updatedAt: AT - 60_000 }),
+        ],
+        agenda: [],
+      },
+      AT,
+    );
+    expect(items.map((i) => i.sourceId.split(":")[1])).toEqual(["new"]);
+  });
+
+  it("清除水位对日程同样生效（msgTs 是 Unix 秒，秒/毫秒不能混用）", () => {
+    const clearedAt = AT - 2 * 3_600_000;
+    const items = collectTeamActivities(
+      { ...ON, activitiesClearedAt: clearedAt },
+      {
+        tasks: [],
+        agenda: [
+          // 3 小时前创建：水位之前，已清除，不该回填
+          agenda({ id: 1, dueTs: AT + 3_600_000, msgTs: Math.floor((AT - 3 * 3_600_000) / 1000) }),
+          // 1 分钟前创建：水位之后，正常上报
+          agenda({ id: 2, dueTs: AT + 3_600_000, msgTs: Math.floor((AT - 60_000) / 1000) }),
+        ],
+      },
+      AT,
+    );
+    expect(items.map((i) => i.sourceId)).toEqual(["agenda:2"]);
+  });
+
+  it("日程分三档：逾期 / 今天 / 24 小时内；更远的既不上报也不冒充「今天到期」", () => {
+    const items = collectTeamActivities(
+      { ...ON, tasks: false },
+      {
+        tasks: [],
+        agenda: [
+          agenda({ id: 1, dueTs: AT - 3_600_000 }), // 1 小时前
+          agenda({ id: 2, dueTs: AT + 3 * 3_600_000 }), // 今天 15:00
+          agenda({ id: 3, dueTs: AT + 20 * 3_600_000 }), // 明天 08:00
+          agenda({ id: 4, dueTs: AT + 72 * 3_600_000 }), // 三天后
+        ],
+      },
+      AT,
+    );
+    const byId = new Map(items.map((i) => [i.sourceId.split(":")[1], i]));
+    expect(byId.get("1")?.status).toBe("overdue");
+    expect(byId.get("2")?.status).toBe("today");
+    expect(byId.get("3")?.status).toBe("next24h");
+    expect(byId.has("4")).toBe(false);
+    expect(byId.get("1")?.detail).toBe("日程 · 已逾期");
+    expect(byId.get("3")?.detail).toBe("日程 · 24 小时内到期");
+  });
+
+  it("日程按急迫度排序：到期越近越前（旧实现按 dueTs 倒序，临期的被远期挤出 30 条）", () => {
+    // 35 条都在 24 小时内：i 越大越晚到期，只有前 30 条能上报
+    const agendaItems = Array.from({ length: 35 }, (_, i) =>
+      agenda({ id: i, dueTs: AT + (i + 1) * 30 * 60 * 1000 }),
+    );
+    const items = collectTeamActivities(
+      { ...ON, tasks: false },
+      { tasks: [], agenda: agendaItems },
+      AT,
+    );
+    expect(items).toHaveLength(30);
+    expect(items[0]!.sourceId).toBe("agenda:0");
+    expect(items.some((i) => i.sourceId === "agenda:34")).toBe(false);
+  });
+
+  it("未来日程不写成未来时刻（否则动向会把它排到「刚刚发生」的最上面）", () => {
+    const items = collectTeamActivities(
+      { ...ON, tasks: false },
+      { tasks: [], agenda: [agenda({ id: 1, dueTs: AT + 3 * 3_600_000 })] },
+      AT,
+    );
+    expect(items).toHaveLength(1);
+    expect(new Date(items[0]!.occurredAt).getTime()).toBeLessThanOrEqual(AT);
+  });
+
+  it("同一条日程换档（今天 → 已逾期）仍是同一个 sourceId，不会在团队页变两行（T2-07）", () => {
+    const dueTs = AT + 3 * 3_600_000;
+    const today = collectTeamActivities(
+      { ...ON, tasks: false },
+      { tasks: [], agenda: [agenda({ id: 7, dueTs })] },
+      AT,
+    );
+    // 两小时后（档位从 today 掉到 overdue）
+    const overdue = collectTeamActivities(
+      { ...ON, tasks: false },
+      { tasks: [], agenda: [agenda({ id: 7, dueTs })] },
+      AT + 4 * 3_600_000,
+    );
+
+    expect(today[0]!.status).toBe("today");
+    expect(overdue[0]!.status).toBe("overdue");
+    expect(overdue[0]!.sourceId).toBe(today[0]!.sourceId);
+    expect(today[0]!.sourceId).toBe("agenda:7");
+  });
+});
+
+describe("共享设置按账号隔离（隐私边界）", () => {
+  function fakeStorage(): StorageLike {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k) => (map.has(k) ? (map.get(k) as string) : null),
+      setItem: (k, v) => {
+        map.set(k, v);
+      },
+      removeItem: (k) => {
+        map.delete(k);
+      },
+    };
+  }
+
+  afterEach(() => {
+    // bindTeamShareUser 会改全局 store：不让绑定用例影响别的用例
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
+  });
+
+  it("旧版本没有归属键：认领现有设置，不清空（升级后开关不丢）", () => {
+    const storage = fakeStorage();
+    storage.setItem(TEAM_SHARE_KEY, JSON.stringify(ON));
+
+    bindTeamShareUser("u1", storage);
+
+    expect(readTeamShareOwner(storage)).toBe("u1");
+    expect(readTeamShareSettings(storage)).toEqual(ON);
+  });
+
+  it("同一账号再绑定是 no-op（不会把内存里的开关重置掉）", () => {
+    const storage = fakeStorage();
+    storage.setItem(TEAM_SHARE_KEY, JSON.stringify(ON));
+    bindTeamShareUser("u1", storage);
+    useTeamShareStore.setState({ settings: { ...ON } });
+
+    bindTeamShareUser("u1", storage);
+
+    expect(useTeamShareStore.getState().settings).toEqual(ON);
+  });
+
+  it("换账号：开关回默认全关、水位清空、内存 store 同步（不能继承上一个人的同意）", () => {
+    const storage = fakeStorage();
+    const mine: TeamShareSettings = {
+      ...ON,
+      usageClearedAt: 1_700_000_000_000,
+      activitiesClearedAt: 1_700_000_100_000,
+    };
+    storage.setItem(TEAM_SHARE_KEY, JSON.stringify(mine));
+    bindTeamShareUser("u1", storage);
+    useTeamShareStore.setState({ settings: { ...mine } });
+
+    bindTeamShareUser("u2", storage);
+
+    expect(readTeamShareOwner(storage)).toBe("u2");
+    expect(readTeamShareSettings(storage)).toEqual(DEFAULT_TEAM_SHARE);
+    expect(useTeamShareStore.getState().settings).toEqual(DEFAULT_TEAM_SHARE);
   });
 });

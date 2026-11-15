@@ -9,6 +9,7 @@ import {
   setOnUnauthorized,
 } from "../lib/api.js";
 import type { User } from "@heming/shared";
+import { bindTeamShareUser } from "../lib/team/share.js";
 interface AuthState {
   token: string | null;
   user: User | null;
@@ -87,6 +88,9 @@ export const useAuthStore = create<AuthState>((set) => {
       const user = await fetchMe();
       if (epoch !== restoreEpoch) return;
       retryAttempt = 0;
+      // 团队共享设置按账号隔离：换账号（或换浏览器 Profile 复用同一 localStorage）时，
+      // 上一个人的共享开关/水位不能继承——恢复会话的这一刻就绑定，早于任何页面挂载。
+      bindTeamShareUser(user.id);
       set({ user, token: getToken(), status: "authed", error: null, restoreError: null });
     } catch (e) {
       if (epoch !== restoreEpoch) return;
@@ -135,6 +139,8 @@ export const useAuthStore = create<AuthState>((set) => {
         const { token, user } = await apiLogin(username, password);
         setToken(token);
         retryAttempt = 0;
+        // 登录成功即绑定共享设置归属：早于 TeamPage/HomeTeamUsage 的任何上传。
+        bindTeamShareUser(user.id);
         set({ token, user, status: "authed" });
       } catch (e) {
         set({ status: "error", error: loginErrorMessage(e) });

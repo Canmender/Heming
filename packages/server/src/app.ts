@@ -18,6 +18,7 @@ import {
   CreateWorkspaceTeamBodySchema,
   UpdateWorkspaceTeamBodySchema,
   AddTeamMemberBodySchema,
+  TransferTeamOwnerBodySchema,
   CreateTeamPlanBodySchema,
   UpdateTeamPlanBodySchema,
   CreateTeamTaskBodySchema,
@@ -50,6 +51,24 @@ export function verifyPassword(password: string, stored: string): boolean {
 function userId(req: Request): string {
   return (req as Request & { userId: string }).userId;
 }
+
+/**
+ * 读一个「正整数才启用」的环境变量：未设置 / 空串 / 非数字 / 0 / 负数 / 小数 → null（不启用）。
+ * 用于动向保留期这类开关——todo 默认不设 = 行为零变化，写错成 "7天" 也不能意外开启。
+ */
+function parsePositiveIntEnv(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * 任务类动向的展示标题（只有这一个值）。
+ *
+ * 与 `packages/shared/src/schemas.ts` 的 `TASK_ACTIVITY_TITLES` 及 web 的
+ * `lib/team/labels.ts` 一字不差。读侧投影用它兜住**收紧前入库的历史行**（T2-02）。
+ */
+const TASK_ACTIVITY_TITLE = "任务";
 
 /** 环境变量开关：仅 "1" / "true"（大小写不敏感）为开，其余（含未设置）为关。 */
 export function envFlagEnabled(value: string | undefined): boolean {
@@ -407,9 +426,52 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json({ members, onlineCount: members.filter((m) => m.online).length });
   });
 
+  /**
+   * 动向写入护栏（此前写侧零护栏）。
+   *
+   * 动向是「主动推送」型写入，共享摘要每 60s 同步一次就可能发一批（≤50 条）：
+   * 失控的客户端循环会让全站动向被一个人刷屏。这里加两道闸：
+   * - 频控：每人 60s 内最多 120 次上报（正常使用远低于此，只挡失控循环）；
+   * - 存量上限：每人最多 500 条，超出 429 让用户显式清除，而不是静默丢新动向。
+   */
+  const ACTIVITY_RATE_WINDOW_MS = 60_000;
+  const ACTIVITY_RATE_MAX = 120;
+  const ACTIVITY_MAX_PER_ACTOR = 500;
+  const activityRate = new Map<string, number[]>();
+  const takeActivityRateToken = (actorId: string): boolean => {
+    const now = Date.now();
+    const recent = (activityRate.get(actorId) ?? []).filter((t) => now - t < ACTIVITY_RATE_WINDOW_MS);
+    if (recent.length >= ACTIVITY_RATE_MAX) {
+      activityRate.set(actorId, recent);
+      return false;
+    }
+    recent.push(now);
+    activityRate.set(actorId, recent);
+    return true;
+  };
+
+  /**
+   * 严格整型查询参数：只接受纯数字串。
+   *
+   * 之前用 Number.parseInt("5x") → 5、"abc" → NaN 回退默认值，
+   * 等于把非法输入当合法参数静默吃掉（分页/截断都受影响）。
+   */
+  const parseIntStrict = (raw: unknown): number | null => {
+    if (typeof raw !== "string" || !/^\d+$/.test(raw)) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
   app.get("/api/team/activities", authOnly, (req, res) => {
-    const rawLimit = Number.parseInt(String(req.query.limit ?? ""), 10);
-    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 50;
+    let limit = 50;
+    if (req.query.limit !== undefined) {
+      const parsedLimit = parseIntStrict(req.query.limit);
+      if (parsedLimit === null || parsedLimit < 1) {
+        res.status(400).json({ error: "limit 不合法" });
+        return;
+      }
+      limit = Math.min(100, parsedLimit);
+    }
     const before = typeof req.query.before === "string" ? req.query.before : undefined;
     const actorId = typeof req.query.actorId === "string" ? req.query.actorId : undefined;
     if (before !== undefined && !Number.isFinite(Date.parse(before))) {
@@ -427,7 +489,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       }
       beforeId = rawBeforeId.trim();
     }
-    res.json({ activities: store.listTeamActivities({ limit, before, beforeId, actorId }) });
+    // beforeId 必须配合 before：单传 beforeId 在旧实现里被静默忽略（返回第一页），
+    // 客户端以为翻到了下一页、实际是原地重读——显式 400 好过静默错位。
+    if (beforeId !== undefined && before === undefined) {
+      res.status(400).json({ error: "beforeId 需要配合 before 使用" });
+      return;
+    }
+    // T2-02：收紧写侧之前入库的 task 行，title 仍是用户提问首行（隐私红线残留）。
+    // db.ts 的迁移已清存量，这里再按 kind 强制投影一次兜底——旧库恢复、第三方导入、
+    // 迁移没跑到的新建库都不该让 API 吐出提示词。与 web `labels.ts` 的 activityTitle() 同口径。
+    const activities = store
+      .listTeamActivities({ limit, before, beforeId, actorId })
+      .map((a) => (a.kind === "task" ? { ...a, title: TASK_ACTIVITY_TITLE } : a));
+    res.json({ activities });
   });
 
   app.post("/api/team/activities", authOnly, (req, res) => {
@@ -436,17 +510,37 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
       return;
     }
+    if (!takeActivityRateToken(userId(req))) {
+      res.status(429).json({ error: "上报太频繁，请稍后再试" });
+      return;
+    }
+    if (store.countTeamActivities(userId(req)) >= ACTIVITY_MAX_PER_ACTOR) {
+      res.status(429).json({ error: "动向摘要已达上限，请先清除" });
+      return;
+    }
+    const actorId = userId(req);
+    // T2-03：清除水位。挡住的是「清除前就已经存在的事件」——另一台设备/清了 localStorage
+    // 的同一浏览器会用**相同 sourceId** 把它们原样重传，撤回会被无声撤销。
+    // 清除之后新完成的任务 occurredAt=now > 清除时刻，仍然可以正常上报（这是对的）。
+    const clearedAt = store.getTeamActivityClearedAt(actorId);
     let inserted = 0;
     let skipped = 0;
     for (const item of parsed.data.items) {
-      if (store.addTeamActivity(userId(req), item)) inserted += 1;
+      if (clearedAt !== null && Date.parse(item.occurredAt) <= clearedAt) {
+        skipped += 1;
+        continue;
+      }
+      if (store.addTeamActivity(actorId, item)) inserted += 1;
       else skipped += 1;
     }
     res.status(inserted > 0 ? 201 : 200).json({ inserted, skipped });
   });
 
   app.delete("/api/team/activities/mine", authOnly, (req, res) => {
-    store.clearTeamActivities(userId(req));
+    const actorId = userId(req);
+    store.clearTeamActivities(actorId);
+    // 与用量侧同构：删行之外还要落服务端水位，否则「清除」只在执行清除的那台设备成立。
+    store.setTeamActivityClearedAt(actorId, Date.now());
     res.status(204).end();
   });
 
@@ -464,10 +558,21 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
       return;
     }
-    for (const item of parsed.data.items) store.upsertTeamUsage(userId(req), item);
-    // `written` = 本次提交条数；`stored` = 服务端该批去重后的行数（重复上报不增长）。
-    const stored = new Set(parsed.data.items.map((it) => `${it.date}\0${it.model}`)).size;
-    res.status(200).json({ written: parsed.data.items.length, stored });
+    const actorId = userId(req);
+    // 清除水位过滤（P2-7）：清过之后旧日数据不许再传回来。
+    // `date` 是**客户端本地自然日**，服务端没有时区信息，只能用 UTC 日键做粗判：
+    // 严格小于「清除日」才丢，清除当天的聚合仍允许（客户端会按毫秒过滤，当天可能还有新用量）；
+    // 宁可多丢一天，也不能放过整段回流（多设备 / 清了 localStorage 的那台会原样重传 30 天）。
+    const clearedAt = store.getTeamUsageClearedAt(actorId);
+    const clearedDay = clearedAt === null ? null : dayKeyUtc(new Date(clearedAt));
+    const accepted =
+      clearedDay === null
+        ? parsed.data.items
+        : parsed.data.items.filter((item) => item.date >= clearedDay);
+    for (const item of accepted) store.upsertTeamUsage(actorId, item);
+    // `written` = 实际入批条数（被水位拦下的不算）；`stored` = 该批去重后的行数。
+    const stored = new Set(accepted.map((it) => `${it.date}\0${it.model}`)).size;
+    res.status(200).json({ written: accepted.length, stored });
   });
 
   /**
@@ -509,14 +614,21 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
    * 删除必须由用户显式发起，不能拿「关开关」暗示「已删除」。
    */
   app.delete("/api/team/usage/mine", authOnly, (req, res) => {
-    res.json({ deleted: store.clearTeamUsage(userId(req)) });
+    const actorId = userId(req);
+    const deleted = store.clearTeamUsage(actorId);
+    // 同步写服务端水位：客户端那份 `usageClearedAt` 只在 localStorage，换设备/清缓存就没了，
+    // 另一台设备下一轮轮询会把刚删掉的 30 天数据原样传回来，等于没删。POST 侧按它丢弃旧日条目。
+    store.setTeamUsageClearedAt(actorId, Date.now());
+    res.json({ deleted });
   });
 
   // —— d.92 团队工作台：用户自建团队 / 目标 / 方案 / 任务 ——
   //
   // 接口口径（智能体侧走同一套 REST，权限只在服务端判一处）：
   // - 非成员访问团队 → 一律 404「团队不存在」：返回 403 等于告诉对方「这个 id 存在」；
-  // - 成员但不是创建者做 owner-only 动作（改/删团队、加/移除成员）→ 403；
+  // - 成员但不是创建者做 owner-only 动作（改/删团队、加/移除成员、转让队长）→ 403；
+  // - 成员可以自己退出团队（POST /leave）——被误拉进来的人必须能自救；
+  // - owner 不能直接退出（409），先转让（POST /owner）或解散，团队不能无主；
   // - 方案与任务：团队成员都能写（任务可指派给成员、可挂到本团队的方案下）。
 
   app.get("/api/teams", authOnly, (req, res) => {
@@ -615,6 +727,54 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(result);
   });
 
+  // 自己退出团队（P1-4）。刻意不用 DELETE /members/:userId —— 会被「移除别人」那条路由吃掉，
+  // 而且语义是「我走」不是「owner 踢人」，单独一个动词更清楚。
+  app.post("/api/teams/:id/leave", authOnly, (req, res) => {
+    const result = store.leaveWorkspaceTeam(req.params.id, userId(req));
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "owner") {
+      res.status(409).json({ error: "队长请先转让团队再退出" });
+      return;
+    }
+    res.status(204).end();
+  });
+
+  // 转让队长（P1-4）：owner 换号/离职前必须能把团队交出去，否则团队永久僵尸
+  // （没有任何人能改名、加成员、删团队，也没人能移除这个 owner）。
+  app.post("/api/teams/:id/owner", authOnly, (req, res) => {
+    const parsed = TransferTeamOwnerBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    // 「转让给自己」是无意义动作：与其静默成功，不如明确告诉调用方。
+    if (parsed.data.userId === userId(req)) {
+      res.status(400).json({ error: "不能转让给自己" });
+      return;
+    }
+    const result = store.transferTeamOwnership(
+      req.params.id,
+      userId(req),
+      parsed.data.userId,
+    );
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队创建者可以转让团队" });
+      return;
+    }
+    if (result === "not_member") {
+      res.status(400).json({ error: "只能转让给团队成员" });
+      return;
+    }
+    res.json(result);
+  });
+
   app.post("/api/teams/:id/plans", authOnly, (req, res) => {
     const parsed = CreateTeamPlanBodySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -668,10 +828,24 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.status(204).end();
   });
 
+  /**
+   * 交付物必须指向共享文件库里的真实文件。
+   *
+   * 只存 id 不校验的后果：任务卡上「交付物」点开 404，而任务本身没有换附件的入口，
+   * 用户只能删任务重派。共享库是「全站登录可见」口径（GET /api/files），
+   * 所以这里只校验存在性、不校验属主。
+   */
+  const attachmentMissing = (fileId: string | null | undefined): boolean =>
+    typeof fileId === "string" && store.getFile(fileId) === null;
+
   app.post("/api/teams/:id/tasks", authOnly, (req, res) => {
     const parsed = CreateTeamTaskBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    if (attachmentMissing(parsed.data.attachmentFileId)) {
+      res.status(400).json({ error: "交付物文件不存在，请先在共享文件库上传" });
       return;
     }
     const result = store.createTeamTask(req.params.id, userId(req), parsed.data);
@@ -698,6 +872,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     const parsed = UpdateTeamTaskBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    if (attachmentMissing(parsed.data.attachmentFileId)) {
+      res.status(400).json({ error: "交付物文件不存在，请先在共享文件库上传" });
       return;
     }
     const result = store.updateTeamTask(
@@ -950,6 +1128,8 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     store.deleteFile(req.params.id);
+    // 文件删了但任务还指着它就是悬空引用：点开永远 404，用户也无处可修。
+    store.detachTeamAttachment(req.params.id);
     res.status(204).end();
   });
 
@@ -1014,6 +1194,76 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
     res.json(result.message);
   });
+
+  // 未匹配路由兜底：必须是 JSON（T2-12）。
+  // 以前落到 Express 默认 404 页（HTML `Cannot GET /api/xxx`），客户端 api() 用 JSON.parse
+  // 解析失败后只能给英文兜底 `http 404`，排障时分不清「路由写错」还是「服务没起」。
+  app.use((_req: Request, res: Response) => {
+    if (res.headersSent) return;
+    res.status(404).json({ error: "接口不存在" });
+  });
+
+  // 兜底错误处理：任何没被路由自己 catch 的异常都回中文 JSON。
+  // 以前一律 500：body-parser 的坏 JSON（err.status=400）与超大 body（413）被改写成
+  // 「服务器内部错误」，客户端/模型会以为是服务端故障。现在尊重 err.status，
+  // 4xx 且带中文 message 的原样透出；body-parser 的两类技术文案映射成中文。
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (res.headersSent) return;
+    const status =
+      typeof (err as { status?: unknown }).status === "number"
+        ? (err as { status: number }).status
+        : 500;
+    const type = (err as { type?: unknown }).type;
+    const bodyParserMessage =
+      type === "entity.parse.failed"
+        ? "请求体不是合法 JSON"
+        : type === "entity.too.large"
+          ? "请求体太大"
+          : null;
+    if (bodyParserMessage !== null) {
+      res.status(status).json({ error: bodyParserMessage });
+      return;
+    }
+    const errMessage = (err as { message?: unknown }).message;
+    if (
+      status >= 400 &&
+      status < 500 &&
+      typeof errMessage === "string" &&
+      errMessage.trim() !== ""
+    ) {
+      // 4xx 是调用方问题：依赖抛出的中文 message 原样透出，不记成服务端故障。
+      res.status(status).json({ error: errMessage });
+      return;
+    }
+    console.error("[api] unhandled error", err);
+    res.status(500).json({ error: "服务器内部错误" });
+  });
+
+  // 动向保留期（可选）：默认不设 HEMING_TEAM_ACTIVITY_RETENTION_DAYS = 永远保留（行为零变化）。
+  // 设成正整数才启用：启动先清一次（别让刚部署的实例等一小时），之后每小时按
+  // `occurredAt < now - N 天` 清一次。setInterval(...).unref() 必须：定时器不能挂住事件循环，
+  // 否则 vitest worker / 优雅退出的进程会一直等它。
+  const activityRetentionDays = parsePositiveIntEnv(process.env.HEMING_TEAM_ACTIVITY_RETENTION_DAYS);
+  if (activityRetentionDays !== null) {
+    const purgeExpiredActivities = (): void => {
+      const cutoff = new Date(
+        Date.now() - activityRetentionDays * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      try {
+        const removed = store.purgeTeamActivities(cutoff);
+        if (removed > 0) {
+          console.log(
+            `[team] 清理过期动向 ${removed} 条（保留 ${activityRetentionDays} 天）`,
+          );
+        }
+      } catch (err) {
+        // 后台维护动作：失败只记日志，不能让保活的服务因为清理失败崩掉。
+        console.error("[team] 清理过期动向失败", err);
+      }
+    };
+    purgeExpiredActivities();
+    setInterval(purgeExpiredActivities, 60 * 60 * 1000).unref();
+  }
 
   // d.54：语音/视频通话随人类 IM 一并删除，不再提供 ICE 配置接口。
   return app;

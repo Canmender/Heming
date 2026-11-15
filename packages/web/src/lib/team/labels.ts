@@ -35,3 +35,30 @@ export function activitySummaryLabel(
   }
   return "";
 }
+
+/** 任务类动向的标题占位词：与 `lib/team/share.ts` 的 `TASK_ACTIVITY_TITLE` 同一个词。 */
+const TASK_ACTIVITY_TITLE = "任务";
+
+/**
+ * 动向的**标题列**：任务类不回显 `title`，改用状态摘要。
+ *
+ * 为什么：任务动向的 `title` 历史上是「用户提问的第一行」（`tasks/store.ts` 的
+ * `taskTitle`），把提示词露给了全站同事。新版客户端不再上传它、服务端也把 task 的
+ * title 钉成固定占位词，但**历史行**还在库里——显示层按 kind 派生，旧行同样不会上屏。
+ * 其它 kind（日程等）的 title 是用户自己写的日程标题，正常显示。
+ */
+export function activityTitle(activity: Pick<TeamActivity, "kind" | "status" | "title">): string {
+  if (activity.kind === "task") return activitySummaryLabel(activity) || TASK_ACTIVITY_TITLE;
+  return activity.title;
+}
+
+/**
+ * 第二行的摘要：与标题重复时返回空串（任务类的标题本身就是状态摘要，
+ * 再画一行「任务 · 已完成」只是噪音）。
+ */
+export function activitySummaryLine(
+  activity: Pick<TeamActivity, "kind" | "status" | "title">,
+): string {
+  const summary = activitySummaryLabel(activity);
+  return summary && summary !== activityTitle(activity) ? summary : "";
+}

@@ -5,7 +5,7 @@ import { CalendarIcon, TaskIcon } from "./icons.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { AsyncBoundary } from "./ui/AsyncBoundary.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
-import { activitySummaryLabel } from "../lib/team/labels.js";
+import { activitySummaryLabel, activitySummaryLine, activityTitle } from "../lib/team/labels.js";
 
 /**
  * 团队看板（d.67 起并入团队页的「看板」Tab，d.109 起改为受控视图）。
@@ -51,7 +51,8 @@ function BoardCard({
   actor: string;
   onSelect: () => void;
 }) {
-  const summary = activitySummaryLabel(activity);
+  // 第二行摘要：任务类的标题本身就是状态摘要，重复时不再画第二行。
+  const summary = activitySummaryLine(activity);
   return (
     <button
       type="button"
@@ -60,7 +61,7 @@ function BoardCard({
     >
       <span className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-ui-sm font-medium text-ink">{activity.title}</span>
+          <span className="block truncate text-ui-sm font-medium text-ink">{activityTitle(activity)}</span>
           <span className="mt-0.5 block truncate text-ui-xs text-muted">{actor}</span>
         </span>
         <span className="shrink-0 text-ui-xs text-muted">{fmtTime(activity.occurredAt)}</span>
@@ -125,9 +126,10 @@ export function TeamBoardView({
       if (selectedId && a.actorId !== selectedId) return false;
       if (range === "today" && !sameLocalDay(a.occurredAt)) return false;
       if (!q) return true;
-      // 搜索只匹配标题与派生摘要（不回显 detail 自由文本）。
+      // 搜索只匹配**上屏的**标题与派生摘要（不回显 detail 自由文本）；任务类的标题
+      // 由 activityTitle 派生，直接搜 a.title 会去匹配一个用户根本看不到的旧字段。
       return (
-        a.title.toLowerCase().includes(q) ||
+        activityTitle(a).toLowerCase().includes(q) ||
         activitySummaryLabel(a).toLowerCase().includes(q)
       );
     });

@@ -6,7 +6,9 @@ import {
   deleteWorkspaceTeam,
   fetchWorkspaceTeam,
   fetchWorkspaceTeams,
+  leaveWorkspaceTeam,
   removeWorkspaceMember,
+  transferWorkspaceTeamOwner,
   updateWorkspaceTeam,
 } from "../../lib/api.js";
 import { useAuthStore } from "../../store/auth.js";
@@ -46,6 +48,11 @@ export function TeamWorkspace() {
   const [snapshot, setSnapshot] = useState<TeamWorkspaceSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  /**
+   * 首屏加载失败：必须和「真的一个团队都没有」区分开（W-06）。
+   * 只有 load() 失败才置位，切团队/写操作失败仍走页顶横幅（此时通常已有快照）。
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   /** 提示的消失计时器：统一由 flash 管，卸载时清掉。 */
@@ -56,6 +63,11 @@ export function TeamWorkspace() {
   /** 打开确认框时焦点落在「取消」：误按回车不会执行破坏性操作。 */
   const cancelDeleteTeamRef = useRef<HTMLButtonElement | null>(null);
   const cancelRemoveMemberRef = useRef<HTMLButtonElement | null>(null);
+  /** 待转让队长 / 待退出团队：同样只在确认框开着时有值，取消不发请求。 */
+  const [pendingTransferTo, setPendingTransferTo] = useState<WorkspaceTeamMember | null>(null);
+  const [confirmLeaveTeam, setConfirmLeaveTeam] = useState(false);
+  const cancelTransferRef = useRef<HTMLButtonElement | null>(null);
+  const cancelLeaveRef = useRef<HTMLButtonElement | null>(null);
 
   // 新建团队表单
   const [createOpen, setCreateOpen] = useState(false);
@@ -96,8 +108,17 @@ export function TeamWorkspace() {
     return data.teams;
   }, []);
 
+  /**
+   * 团队快照的请求序号：切团队时旧请求可能后到，晚到的响应不能盖掉新选中的团队
+   * （W-05：否则界面停在 A 的成员/任务上，用户以为自己在看 B）。
+   */
+  const teamSeq = useRef(0);
+
   const loadTeam = useCallback(async (id: string) => {
+    const seq = ++teamSeq.current;
     const data = await fetchWorkspaceTeam(id);
+    // 已经切走了：这次响应作废（也不要把 loading 关掉，交给最新那次请求收尾）。
+    if (seq !== teamSeq.current) return null;
     setSnapshot(data);
     return data;
   }, []);
@@ -105,6 +126,7 @@ export function TeamWorkspace() {
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setLoadFailed(false);
     try {
       const list = await refreshTeams();
       const target = list.find((t) => t.id === selectedId) ?? list[0];
@@ -116,6 +138,7 @@ export function TeamWorkspace() {
       }
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : "加载团队失败");
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -208,9 +231,25 @@ export function TeamWorkspace() {
     }
   };
 
+  /**
+   * 破坏性操作的目标团队：必须**同时**满足「左栏选中的是它」和「快照是它」。
+   *
+   * 只读 `snapshot.team.id` 不够：切团队是异步的，点开确认框后左栏可能已经切走，
+   * 而快照还停在旧团队上——那时确认删的就是用户眼前看不到的那个团队（W-05）。
+   */
+  const destructionTargetId = (): string => {
+    const id = selectedId && snapshot?.team.id === selectedId ? selectedId : "";
+    if (!id) {
+      setConfirmDeleteTeam(false);
+      setPendingRemoveMember(null);
+      setError("团队已切换，请重新确认");
+    }
+    return id;
+  };
+
   /** 删除团队（确认框已确认）：级联删方案与任务，落回列表里的下一个团队。 */
   const deleteTeamNow = async () => {
-    const id = snapshot?.team.id;
+    const id = destructionTargetId();
     if (!id || busy) return;
     setBusy(true);
     setError("");
@@ -230,14 +269,50 @@ export function TeamWorkspace() {
 
   /** 移除成员（确认框已确认）：服务端会把他的任务解绑为待认领。 */
   const removeMemberNow = async () => {
-    const id = snapshot?.team.id;
+    const id = destructionTargetId();
     const member = pendingRemoveMember;
     if (!id || !member || busy) return;
     await run(() => removeWorkspaceMember(id, member.user.id), "已移除成员");
     setPendingRemoveMember(null);
   };
 
+  /** 转让队长（确认框已确认）：转让后自己降为普通成员，只剩改任务/方案这些成员权限。 */
+  const transferOwnerNow = async () => {
+    const id = destructionTargetId();
+    const member = pendingTransferTo;
+    if (!id || !member || busy) return;
+    const ok = await run(
+      () => transferWorkspaceTeamOwner(id, member.user.id),
+      "队长已转让给 " + member.user.displayName,
+    );
+    if (ok) setPendingTransferTo(null);
+  };
+
+  /** 退出团队（确认框已确认）：退出的团队不再对我可见，落回列表里的下一个团队。 */
+  const leaveTeamNow = async () => {
+    const id = destructionTargetId();
+    if (!id || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await leaveWorkspaceTeam(id);
+      setConfirmLeaveTeam(false);
+      const list = await refreshTeams();
+      setSnapshot(null);
+      if (list[0]) await selectTeam(list[0].id);
+      else flash("已退出团队");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "退出团队失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const isOwner = Boolean(snapshot && me && snapshot.team.ownerId === me.id);
+  /** 我在这个团队里的成员身份：成员才有「退出团队」，owner 必须先转让。 */
+  const mine = snapshot && me ? snapshot.members.find((m) => m.user.id === me.id) : undefined;
+  /** 只有普通成员能自退：owner 走「转让队长」或「删除团队」。 */
+  const canLeave = Boolean(mine) && !isOwner;
 
   const onCreateTeam = async () => {
     const name = draftName.trim();
@@ -347,7 +422,7 @@ export function TeamWorkspace() {
       </aside>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
-        {error && (
+        {error && !(!snapshot && loadFailed) && (
           <p role="alert" className="mb-3 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-ui-sm text-danger">
             {error}
           </p>
@@ -363,19 +438,31 @@ export function TeamWorkspace() {
             正在加载团队…
           </p>
         ) : !snapshot ? (
-          <EmptyState
-            title="还没有团队"
-            desc="建一个团队，写下目标与方案，把任务派给成员；智能体也能通过工具帮你维护。"
-            actions={
-              <Button
-                type="button"
-                size="md" variant="primary"
-                onClick={() => setCreateOpen(true)}
-              >
-                新建团队
-              </Button>
-            }
-          />
+          loadFailed ? (
+            <EmptyState
+              title="团队加载失败"
+              desc={`${error || "网络请求没有成功"}。请检查网络后重试；已保存的团队数据不会丢失。`}
+              actions={
+                <Button type="button" size="md" variant="primary" onClick={() => void load()}>
+                  重试
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="还没有团队"
+              desc="建一个团队，写下目标与方案，把任务派给成员；智能体也能通过工具帮你维护。"
+              actions={
+                <Button
+                  type="button"
+                  size="md" variant="primary"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  新建团队
+                </Button>
+              }
+            />
+          )
         ) : (
           <div className="mx-auto flex w-full max-w-[1000px] flex-col gap-4">
             <section className="ui-card p-4" aria-label="团队概况">
@@ -473,14 +560,24 @@ export function TeamWorkspace() {
                       {m.user.displayName}
                       {m.role === "owner" ? " · 队长" : ""}
                       {isOwner && m.role !== "owner" && (
-                        <button
-                          type="button"
-                          aria-label={`移除成员 ${m.user.displayName}`}
-                          className="ml-1 text-muted hover:text-danger"
-                          onClick={() => setPendingRemoveMember(m)}
-                        >
-                          ×
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`转让队长给 ${m.user.displayName}`}
+                            className="ml-1.5 text-muted hover:text-accent"
+                            onClick={() => setPendingTransferTo(m)}
+                          >
+                            转让
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`移除成员 ${m.user.displayName}`}
+                            className="ml-1 text-muted hover:text-danger"
+                            onClick={() => setPendingRemoveMember(m)}
+                          >
+                            ×
+                          </button>
+                        </>
                       )}
                     </span>
                   ))}
@@ -514,6 +611,19 @@ export function TeamWorkspace() {
                     </Button>
                   </form>
                 )}
+                {canLeave && (
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      size="sm" variant="ghost"
+                      className="text-muted"
+                      disabled={busy}
+                      onClick={() => setConfirmLeaveTeam(true)}
+                    >
+                      退出团队
+                    </Button>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -522,7 +632,6 @@ export function TeamWorkspace() {
               plans={snapshot.plans}
               busy={busy}
               onChanged={(next) => setSnapshot(next)}
-              onError={setError}
             />
 
             <TeamTaskPanel
@@ -532,7 +641,6 @@ export function TeamWorkspace() {
               tasks={snapshot.tasks}
               busy={busy}
               onChanged={(next) => setSnapshot(next)}
-              onError={setError}
             />
           </div>
         )}
@@ -600,6 +708,72 @@ export function TeamWorkspace() {
         >
           <p className="ui-body-sm">
             移除成员「{pendingRemoveMember.user.displayName}」？移除后他的任务会解绑为待认领，需要重新指派。
+          </p>
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingTransferTo && snapshot ? (
+        <ConfirmDialog
+          title="转让队长？"
+          onCancel={() => setPendingTransferTo(null)}
+          initialFocusRef={cancelTransferRef}
+          footer={
+            <>
+              <Button
+                type="button"
+                ref={cancelTransferRef}
+                size="md" variant="ghost"
+                onClick={() => setPendingTransferTo(null)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                size="md" variant="primary"
+                disabled={busy}
+                onClick={() => void transferOwnerNow()}
+              >
+                转让
+              </Button>
+            </>
+          }
+        >
+          <p className="ui-body-sm">
+            把队长转让给「{pendingTransferTo.user.displayName}」？转让后你会变成普通成员：
+            只有新队长能改团队名称与目标、加人或移人、解散团队。
+          </p>
+        </ConfirmDialog>
+      ) : null}
+
+      {confirmLeaveTeam && snapshot ? (
+        <ConfirmDialog
+          title="退出团队？"
+          onCancel={() => setConfirmLeaveTeam(false)}
+          initialFocusRef={cancelLeaveRef}
+          footer={
+            <>
+              <Button
+                type="button"
+                ref={cancelLeaveRef}
+                size="md" variant="ghost"
+                onClick={() => setConfirmLeaveTeam(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                size="md" variant="danger"
+                disabled={busy}
+                onClick={() => void leaveTeamNow()}
+              >
+                退出
+              </Button>
+            </>
+          }
+        >
+          <p className="ui-body-sm">
+            退出「{snapshot.team.name}」？退出后这个团队对你不再可见，指给你的任务会解绑为待认领；
+            要重新加入需要队长再把你拉回来。
           </p>
         </ConfirmDialog>
       ) : null}

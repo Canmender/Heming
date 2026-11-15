@@ -101,4 +101,25 @@ describe("首页 Token 用量卡的「团队」页签", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(screen.getByText("鲍勃")).toBeInTheDocument());
   });
+
+  it("原始英文异常不透出，只给中文提示（T2-10）", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    vi.mocked(fetchTeamUsage).mockRejectedValueOnce(new Error("Failed to fetch"));
+    render(<HomeTeamUsage />);
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.getByText(/网络异常，请稍后重试/)).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+  });
+
+  it("排行被截断时说明总人数（T2-10：不把「前 100」当全部）", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    vi.mocked(fetchTeamUsage).mockResolvedValue(
+      usageResponse({ rankingTotal: 130, rankingTruncated: true }),
+    );
+    render(<HomeTeamUsage />);
+
+    await waitFor(() => expect(screen.getByText("鲍勃")).toBeInTheDocument());
+    expect(screen.getByText("共 130 人参与，这里只显示前 5 名。")).toBeInTheDocument();
+  });
 });

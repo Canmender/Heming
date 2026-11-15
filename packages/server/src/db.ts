@@ -95,6 +95,22 @@ export function initSchema(db: DatabaseSyncType): void {
       PRIMARY KEY (actor_id, date, model)
     );
     CREATE INDEX IF NOT EXISTS idx_team_usage_date ON team_usage(date);
+    -- ②-3 用量清除的服务端水位：记录「这个人最后一次清除本人用量」的时刻（毫秒）。
+    -- 客户端本地也有一份 usageClearedAt（多设备/清 localStorage 就没了），这份是服务端的权威粗判：
+    -- 清除之后另一台设备把旧日数据重新上传时，POST 会丢弃 date < 清除日 的条目，
+    -- 否则「清除」在另一台设备上等于没做（数据被原样传回，人又出现在排行里）。
+    CREATE TABLE IF NOT EXISTS team_usage_clears (
+      actor_id TEXT PRIMARY KEY,
+      cleared_at INTEGER NOT NULL
+    );
+    -- ②-3 动向清除的服务端水位（T2-03）：与 team_usage_clears 同构。
+    -- 「清除共享记录」以前只在执行清除的那台设备成立：本地 activitiesClearedAt 一丢
+    --（换设备/清缓存），下一次 sync 就用同样的 sourceId 把已撤回的摘要原样传回来。
+    -- 服务端记下清除时刻后，POST 丢弃 occurredAt <= cleared_at 的条目，撤回才对所有设备生效。
+    CREATE TABLE IF NOT EXISTS team_activity_clears (
+      actor_id TEXT PRIMARY KEY,
+      cleared_at INTEGER NOT NULL
+    );
   `);
   /*
    * d.92 团队工作台：用户自建团队 / 方案 / 任务（与上面的「全站单团队」两层东西）。
@@ -195,4 +211,10 @@ export function initSchema(db: DatabaseSyncType): void {
   if (!userCols.some((c) => c.name === "last_seen_at")) {
     db.exec("ALTER TABLE users ADD COLUMN last_seen_at TEXT");
   }
+
+  // T2-02：写侧直到 d.109 才把 task 动向的 title 钉成「任务」，**收紧前入库的历史行**
+  // 仍存着用户提问首行（≤60 字，配合 detail/occurredAt 能还原「谁什么时候问了什么」）。
+  // 这里一次性、幂等地清掉存量；读侧另有强制投影兜底（旧库恢复/第三方导入也能挡住）。
+  // 单条 UPDATE 自身原子，不需要事务。
+  db.exec("UPDATE team_activities SET title = '任务' WHERE kind = 'task' AND title <> '任务'");
 }

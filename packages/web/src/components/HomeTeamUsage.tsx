@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TeamUsageResponse } from "@heming/shared";
-import { fetchTeamUsage, uploadTeamUsage } from "../lib/api.js";
+import { ApiError, fetchTeamUsage, uploadTeamUsage } from "../lib/api.js";
 import { collectCurrentTeamUsage, useTeamShareStore } from "../lib/team/share.js";
 import { dayKeyOf } from "../store/tokenUsage.js";
 import { useAuthStore } from "../store/auth.js";
@@ -47,7 +47,9 @@ export function HomeTeamUsage() {
       setError("");
       setLastSync(Date.now());
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : "网络异常");
+      // T2-10：原来直接透出原始 message（英文 `Failed to fetch` 之类），首页读者看不懂；
+      // ApiError 自带中文文案，其它一律归到网络异常。
+      setError(err instanceof ApiError && err.message ? err.message : "网络异常，请稍后重试");
     } finally {
       setReady(true);
       setSyncing(false);
@@ -146,6 +148,12 @@ export function HomeTeamUsage() {
           ))}
         </ol>
       )}
+
+      {data?.rankingTruncated && data.rankingTotal ? (
+        <p className="mt-1 text-ui-xs text-muted">
+          共 {data.rankingTotal} 人参与，这里只显示前 {TOP_N} 名。
+        </p>
+      ) : null}
 
       {selfTotal > 0 ? (
         <div className="mt-1.5 border-t border-line-soft pt-1.5 text-ui-xs text-muted">

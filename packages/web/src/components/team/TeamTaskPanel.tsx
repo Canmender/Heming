@@ -59,7 +59,8 @@ export function TeamTaskPanel({
   tasks: TeamTask[];
   busy: boolean;
   onChanged: (snapshot: TeamWorkspaceSnapshot) => void;
-  onError: (message: string) => void;
+  /** 面板内的失败同时上报给页级错误条（WIP 里 TeamWorkspace 已经在传，这里补上类型与调用）。 */
+  onError?: (message: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -75,6 +76,42 @@ export function TeamTaskPanel({
   /** 打开确认框时焦点落在「取消」：误按回车不会执行破坏性操作。 */
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * 面板自己的错误：就地显示在任务卡片里，而不是只写到页顶（W-06）。
+   * 关闭按钮或下一次成功提交时清掉，避免一次失败长期挂在那里。
+   */
+  const [panelError, setPanelError] = useState("");
+  /** 创建任务的提交中标记：双击「发布任务」只允许发一次请求（W-04）。 */
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  /**
+   * 正在改状态/指派/交付物/删除的任务 id。
+   *
+   * 用 ref 做同步判定：两次点击可能发生在同一帧内（state 还没重渲染），
+   * 只靠 state 会让第二次点击仍按旧闭包再发一遍请求。state 只负责把按钮禁用掉。
+   */
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const pendingRef = useRef(new Set<string>());
+  /**
+   * 点击时从这里取「最新一次 props」里的任务，而不是渲染时捕获的旧对象：
+   * 45s 轮询/写操作刷新都可能已经把状态推到了下一档，用旧 prop 会把状态推错。
+   */
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
+  const isPending = (id: string) => pendingIds.includes(id);
+
+  const beginPending = (id: string) => {
+    if (pendingRef.current.has(id)) return false;
+    pendingRef.current.add(id);
+    setPendingIds([...pendingRef.current]);
+    return true;
+  };
+
+  const endPending = (id: string) => {
+    pendingRef.current.delete(id);
+    setPendingIds([...pendingRef.current]);
+  };
 
   const planName = useMemo(
     () => new Map(plans.map((p) => [p.id, p.title])),
@@ -102,14 +139,21 @@ export function TeamTaskPanel({
     setAttachment(null);
   };
 
+  /** 面板内的失败：既就地显示在任务卡片里，也上报给页级错误条。 */
+  const report = (message: string) => {
+    setPanelError(message);
+    onError?.(message);
+  };
+
   const onPickFile = async (file: File | null) => {
     if (!file) return;
     setUploading(true);
+    setPanelError("");
     try {
       const meta = await uploadFile(file);
       setAttachment(meta);
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "上传失败");
+      report(err instanceof Error && err.message ? err.message : "上传失败");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -119,9 +163,14 @@ export function TeamTaskPanel({
   const add = async () => {
     const clean = title.trim();
     if (!clean) {
-      onError("请填写任务标题");
+      report("请填写任务标题");
       return;
     }
+    // 服务端没有创建任务的幂等键：重复提交会真的多出一条任务（W-04）。
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setPanelError("");
     try {
       await createTeamTask(teamId, {
         title: clean,
@@ -135,48 +184,68 @@ export function TeamTaskPanel({
       setAdding(false);
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "创建任务失败");
+      report(err instanceof Error && err.message ? err.message : "创建任务失败");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
   const cycle = async (task: TeamTask) => {
+    if (!beginPending(task.id)) return;
+    setPanelError("");
     try {
-      await updateTeamTask(teamId, task.id, { status: NEXT_STATUS[task.status] });
+      // 用最新 props 里的状态算下一档；连点第二下在 pending 期间被忽略，只前进一档。
+      const latest = tasksRef.current.find((t) => t.id === task.id) ?? task;
+      await updateTeamTask(teamId, task.id, { status: NEXT_STATUS[latest.status] });
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "更新任务失败");
+      report(err instanceof Error && err.message ? err.message : "更新任务失败");
+    } finally {
+      endPending(task.id);
     }
   };
 
   const assign = async (task: TeamTask, nextAssignee: string) => {
+    if (!beginPending(task.id)) return;
+    setPanelError("");
     try {
       await updateTeamTask(teamId, task.id, { assigneeId: nextAssignee || null });
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "指派失败");
+      report(err instanceof Error && err.message ? err.message : "指派失败");
+    } finally {
+      endPending(task.id);
     }
   };
 
   const attach = async (task: TeamTask, file: File | null) => {
     if (!file) return;
+    if (!beginPending(task.id)) return;
     setUploading(true);
+    setPanelError("");
     try {
       const meta = await uploadFile(file);
       await updateTeamTask(teamId, task.id, { attachmentFileId: meta.id });
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "上传交付物失败");
+      report(err instanceof Error && err.message ? err.message : "上传交付物失败");
     } finally {
       setUploading(false);
+      endPending(task.id);
     }
   };
 
   const remove = async (task: TeamTask) => {
+    if (!beginPending(task.id)) return;
+    setPanelError("");
     try {
       await deleteTeamTask(teamId, task.id);
       await refresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "删除任务失败");
+      report(err instanceof Error ? err.message : "删除任务失败");
+    } finally {
+      endPending(task.id);
     }
   };
 
@@ -221,6 +290,22 @@ export function TeamTaskPanel({
           </button>
         </div>
       </div>
+
+      {panelError && (
+        <p
+          role="alert"
+          className="mt-2 flex items-start gap-2 rounded-lg border border-danger-line bg-danger-soft px-2.5 py-2 text-ui-sm text-danger"
+        >
+          <span className="min-w-0 flex-1 break-words">{panelError}</span>
+          <button
+            type="button"
+            className="shrink-0 text-ui-xs underline"
+            onClick={() => setPanelError("")}
+          >
+            关闭
+          </button>
+        </p>
+      )}
 
       {adding && (
         <form
@@ -309,8 +394,8 @@ export function TeamTaskPanel({
               <span className="ui-caption truncate">已选：{attachment.name}</span>
             )}
           </div>
-          <Button type="submit" size="sm" variant="primary" className="self-start" disabled={busy || uploading}>
-            发布任务
+          <Button type="submit" size="sm" variant="primary" className="self-start" disabled={busy || uploading || saving}>
+            {saving ? "发布中…" : "发布任务"}
           </Button>
         </form>
       )}
@@ -329,8 +414,11 @@ export function TeamTaskPanel({
                 <button
                   type="button"
                   onClick={() => void cycle(task)}
+                  disabled={isPending(task.id)}
                   title="点击切换状态"
-                  className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[task.status]}`}
+                  className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[task.status]} ${
+                    isPending(task.id) ? "opacity-60" : ""
+                  }`}
                 >
                   {STATUS_LABEL[task.status]}
                 </button>
@@ -340,6 +428,7 @@ export function TeamTaskPanel({
                   <select
                     aria-label={`任务负责人 ${task.title}`}
                     value={task.assigneeId ?? ""}
+                    disabled={isPending(task.id)}
                     onChange={(e) => void assign(task, e.target.value)}
                     className="ui-input w-auto py-0.5 text-ui-xs"
                   >
@@ -354,7 +443,8 @@ export function TeamTaskPanel({
                 <button
                   type="button"
                   aria-label={`删除任务 ${task.title}`}
-                  className="shrink-0 text-ui-xs text-muted hover:text-danger"
+                  className="shrink-0 text-ui-xs text-muted hover:text-danger disabled:opacity-60"
+                  disabled={isPending(task.id)}
                   onClick={() => setPendingDelete(task)}
                 >
                   删除
@@ -390,6 +480,7 @@ export function TeamTaskPanel({
                         type="file"
                         aria-label={`上传交付物 ${task.title}`}
                         className="hidden"
+                        disabled={isPending(task.id) || uploading}
                         onChange={(e) => void attach(task, e.target.files?.[0] ?? null)}
                       />
                     </label>

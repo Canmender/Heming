@@ -360,6 +360,7 @@ export function HomePage() {
         <TeamActivityCard
           activities={humanActivities}
           members={members}
+          onlineCount={onlineCount}
           teamReady={teamReady}
           teamError={teamError}
           lastTeamLoadAt={lastTeamLoadAt}

@@ -194,6 +194,13 @@ export interface Store {
   listFiles(): SharedFileMeta[];
   /** 删除文件；存在并删除成功 true，不存在 false。 */
   deleteFile(id: string): boolean;
+  /**
+   * 把团队任务的交付物引用摘成 NULL（删共享文件时调用），返回受影响任务数。
+   *
+   * 不摘就会留下指向已删文件的 `attachment_file_id`：任务卡上的「交付物」永远 404，
+   * 而任务本身没有「换附件」入口，用户只能删任务重派。
+   */
+  detachTeamAttachment(fileId: string): number;
   /** 某用户全部共享文件字节数（size 求和，配额用）。 */
   userFileBytes(ownerUsername: string): number;
   // —— d.54 团队系统：在线活跃与动向（单团队，全站用户即成员）——
@@ -220,6 +227,24 @@ export interface Store {
   }): TeamActivity[];
   /** 清空某位成员已上传的动向，返回删除条数。 */
   clearTeamActivities(actorId: string): number;
+  /** 某位成员已存的动向条数（写侧上限护栏用；不是分页查询）。 */
+  countTeamActivities(actorId: string): number;
+  /**
+   * 记录「本人最后一次清除动向」的时刻（毫秒），与 `setTeamUsageClearedAt` 同构。
+   *
+   * 客户端本地也有 `activitiesClearedAt`，但换设备/清 localStorage 就没了；
+   * 服务端这份是权威那份：POST 丢弃 `occurredAt <= 清除时刻` 的条目，撤回才对所有设备生效。
+   */
+  setTeamActivityClearedAt(actorId: string, at: number): void;
+  /** 动向清除水位；从未清除过返回 null（不是 0——0 会被当成「1970 年清过一次」）。 */
+  getTeamActivityClearedAt(actorId: string): number | null;
+  /**
+   * 删掉 `occurredAt` 严格小于 `before` 的动向，返回删除条数（保留期清理用）。
+   *
+   * `occurredAt` 入库前已归一成 UTC ISO 毫秒形态，所以字符串比较就是时间比较；
+   * 两实现同语义。默认不启用（只有设了 `HEMING_TEAM_ACTIVITY_RETENTION_DAYS` 才会被调用）。
+   */
+  purgeTeamActivities(before: string): number;
   // —— ②-3 团队用量：白名单摘要的服务端聚合 ——
   /**
    * 幂等写入一天的聚合用量：同一 `(actorId, date, model)` **覆盖更新**。
@@ -237,6 +262,16 @@ export interface Store {
    * 所以清除必须是一个显式动作（对称团队动向的 `clearTeamActivities`）。
    */
   clearTeamUsage(actorId: string): number;
+  /**
+   * 记录「该成员最后一次清除本人用量」的时刻（毫秒时间戳）。
+   *
+   * 为什么服务端也要存：客户端水位只在 localStorage（换设备 / 清缓存就没了），
+   * 另一台设备下一轮轮询会把 30 天数据原样传回来，等于没删。这份是权威粗判——
+   * 上传侧按 `date < dayKeyUtc(clearedAt)` 丢弃旧日条目（见 app.ts 的 POST 处理）。
+   */
+  setTeamUsageClearedAt(actorId: string, at: number): void;
+  /** 该成员最后一次清除时刻（毫秒）；从未清除过 → null。 */
+  getTeamUsageClearedAt(actorId: string): number | null;
   // —— d.92 团队工作台：用户自建团队 / 方案 / 任务（智能体接口预留，权限只在服务端判） ——
   //
   // 权限口径（app 层按此映射状态码，两个实现必须一致）：
@@ -269,6 +304,34 @@ export interface Store {
     actorId: string,
     targetUserId: string,
   ): TeamWorkspaceSnapshot | "forbidden" | "owner" | null;
+  /**
+   * 成员自己退出团队（本人操作，不经 owner 同意）。
+   *
+   * 为什么要有：被误拉进团队的人没有自救入口，只能求 owner 踢——owner 不在就永久留在别人团队里，
+   * 还会继续看到方案与任务。与 `removeWorkspaceMember` 的区别只是「谁发起」。
+   *
+   * - 非成员 / 团队不存在 → null（app 404「团队不存在」，口径同其它入口）
+   * - 调用者就是 owner → "owner"（app 409）：团队不能无主，先转让（transferTeamOwnership）或解散
+   * - 成功：删成员行 + 把指派给他的任务解绑为「待认领」+ 刷 updated_at，**同一事务**
+   *   （否则半截态 = 人已退出、任务还指着一个非成员，正是 removeWorkspaceMember 要避免的非法引用）
+   */
+  leaveWorkspaceTeam(teamId: string, userId: string): TeamWorkspaceSnapshot | "owner" | null;
+  /**
+   * 转让队长（仅当前 owner）。
+   *
+   * 为什么要有：owner 换号 / 离职后，团队没有任何人能做 owner-only 动作（改名、加成员、删团队），
+   * 也没人能移除 owner——团队永久僵尸。转让是唯一的交接口子。
+   *
+   * - 非成员 / 团队不存在 → null（app 404「团队不存在」）
+   * - 成员但不是 owner → "forbidden"（app 403）
+   * - 目标不是该团队成员 → "not_member"（app 400）——不能把团队交给外人
+   * - 成功：teams.owner_id 改目标 + 两人 role 互换（原 owner 降为 member）+ 刷 updated_at，同一事务
+   */
+  transferTeamOwnership(
+    teamId: string,
+    actorId: string,
+    targetUserId: string,
+  ): TeamWorkspaceSnapshot | "forbidden" | "not_member" | null;
   /** 新建方案项（成员可写）；plan 不存在 "not_found"。 */
   createTeamPlan(
     teamId: string,
@@ -353,6 +416,10 @@ export function createMemoryStore(): Store {
   const teamActivityKeys = new Set<string>();
   /** 团队用量：键 = `actorId\0date\0model`（与 sqlite 主键同口径），值只有白名单维度。 */
   const teamUsage = new Map<string, TeamUsageRow>();
+  /** 清除水位：actorId → 清除时刻（毫秒）。服务端权威那份，见 setTeamUsageClearedAt 注释。 */
+  const teamUsageClears = new Map<string, number>();
+  /** 动向清除水位：actorId → 清除时刻（毫秒），见 setTeamActivityClearedAt 注释。 */
+  const teamActivityClears = new Map<string, number>();
   // d.92 团队工作台：键与 sqlite 主键同口径（成员键 = `teamId` + NUL + `userId`）
   const teams = new Map<string, WorkspaceTeam>();
   const teamMembers = new Map<
@@ -396,7 +463,9 @@ export function createMemoryStore(): Store {
           // owner 排第一，其余按加入时间；同时刻用显示名兜底，保证两实现顺序一致
           (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1) ||
           (a.joinedAt < b.joinedAt ? -1 : a.joinedAt > b.joinedAt ? 1 : 0) ||
-          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN"),
+          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN") ||
+          // 显示名可以重名（用户自己填的）：再用 id 兜底，保证名册顺序稳定、两实现一致。
+          a.user.id.localeCompare(b.user.id),
       );
     const plans = [...teamPlans.values()]
       .filter((p) => p.teamId === teamId)
@@ -627,6 +696,19 @@ export function createMemoryStore(): Store {
     deleteFile(id) {
       return files.delete(id);
     },
+    detachTeamAttachment(fileId) {
+      let affected = 0;
+      for (const [id, task] of [...teamTasks.entries()]) {
+        if (task.attachmentFileId !== fileId) continue;
+        teamTasks.set(id, {
+          ...task,
+          attachmentFileId: null,
+          updatedAt: new Date().toISOString(),
+        });
+        affected += 1;
+      }
+      return affected;
+    },
     userFileBytes(ownerUsername) {
       let sum = 0;
       for (const f of files.values()) if (f.meta.owner === ownerUsername) sum += f.meta.size;
@@ -644,7 +726,23 @@ export function createMemoryStore(): Store {
     addTeamActivity(actorId, input) {
       mustUser(actorId);
       const key = `${actorId}\0${input.sourceId}`;
-      if (teamActivityKeys.has(key)) return false;
+      if (teamActivityKeys.has(key)) {
+        // 日程的档位是时间的函数（今天到期 → 已逾期），sourceId 稳定不代表内容不变：
+        // 幂等命中时刷新展示字段，否则团队页会永远停在首次上报的档位（W2-01）。
+        // 任务动向仍严格幂等（内容随 status 变化由新的 updatedAt 生成新 sourceId）。
+        if (input.kind === "agenda") {
+          const row = teamActivities.find(
+            (a) => a.actorId === actorId && a.sourceId === input.sourceId,
+          );
+          if (row) {
+            row.title = input.title;
+            if (input.detail !== undefined) row.detail = input.detail;
+            if (input.status !== undefined) row.status = input.status;
+            row.occurredAt = input.occurredAt;
+          }
+        }
+        return false;
+      }
       teamActivityKeys.add(key);
       teamActivities.push({
         id: randomUUID(),
@@ -687,6 +785,11 @@ export function createMemoryStore(): Store {
         );
       return rows.slice(0, limit).map((a) => ({ ...a }));
     },
+    countTeamActivities(actorId) {
+      let n = 0;
+      for (const a of teamActivities) if (a.actorId === actorId) n += 1;
+      return n;
+    },
     clearTeamActivities(actorId) {
       let removed = 0;
       for (let i = teamActivities.length - 1; i >= 0; i -= 1) {
@@ -696,6 +799,25 @@ export function createMemoryStore(): Store {
         removed += 1;
       }
       return removed;
+    },
+    purgeTeamActivities(before) {
+      let removed = 0;
+      for (let i = teamActivities.length - 1; i >= 0; i -= 1) {
+        const a = teamActivities[i];
+        if (a.occurredAt >= before) continue;
+        // 幂等键也要一起清：否则同一个 sourceId 之后再也写不进来（写侧会当成重复跳过）。
+        teamActivityKeys.delete(`${a.actorId}\0${a.sourceId}`);
+        teamActivities.splice(i, 1);
+        removed += 1;
+      }
+      return removed;
+    },
+    setTeamActivityClearedAt(actorId, at) {
+      mustUser(actorId);
+      teamActivityClears.set(actorId, at);
+    },
+    getTeamActivityClearedAt(actorId) {
+      return teamActivityClears.get(actorId) ?? null;
     },
     upsertTeamUsage(actorId, input) {
       mustUser(actorId);
@@ -727,6 +849,13 @@ export function createMemoryStore(): Store {
         removed += 1;
       }
       return removed;
+    },
+    setTeamUsageClearedAt(actorId, at) {
+      mustUser(actorId);
+      teamUsageClears.set(actorId, at);
+    },
+    getTeamUsageClearedAt(actorId) {
+      return teamUsageClears.get(actorId) ?? null;
     },
     listWorkspaceTeams(userId) {
       return [...teams.values()]
@@ -814,6 +943,39 @@ export function createMemoryStore(): Store {
         }
       }
       touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    leaveWorkspaceTeam(teamId, userId) {
+      const team = visibleTeam(teamId, userId);
+      if (!team) return null;
+      // 团队不能无主：owner 先转让或解散，不能自己走掉把团队变成孤儿。
+      if (team.ownerId === userId) return "owner";
+      teamMembers.delete(teamMemberKey(teamId, userId));
+      // 与 removeWorkspaceMember 同口径：人走了，指给他的任务解绑成「待认领」，
+      // 不在团队里留下「指给非成员」的非法引用。
+      for (const [id, task] of teamTasks) {
+        if (task.teamId === teamId && task.assigneeId === userId) {
+          teamTasks.set(id, { ...task, assigneeId: null, updatedAt: new Date().toISOString() });
+        }
+      }
+      touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    transferTeamOwnership(teamId, actorId, targetUserId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      const targetKey = teamMemberKey(teamId, targetUserId);
+      const target = teamMembers.get(targetKey);
+      if (!target) return "not_member";
+      const at = new Date().toISOString();
+      // 先降自己再升目标：transfer 给自己时同一个 key 两次写，最终仍是 owner（幂等无害，
+      // 但 app 层会先挡掉「不能转让给自己」）。
+      const ownerKey = teamMemberKey(teamId, actorId);
+      const ownerMember = teamMembers.get(ownerKey);
+      if (ownerMember) teamMembers.set(ownerKey, { ...ownerMember, role: "member" });
+      teamMembers.set(targetKey, { ...target, role: "owner" });
+      teams.set(teamId, { ...team, ownerId: targetUserId, updatedAt: at });
       return snapshotOf(teamId);
     },
     createTeamPlan(teamId, actorId, body) {

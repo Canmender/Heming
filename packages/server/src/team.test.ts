@@ -3,6 +3,7 @@ import request from "supertest";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
 import { presence } from "./presence.js";
+import { addDays, dayKeyUtc } from "./teamUsage.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -23,7 +24,8 @@ function auth(token: string) {
 function activity(overrides: Record<string, unknown> = {}) {
   return {
     kind: "task",
-    title: "整理课程表",
+    // 任务类 title 被钉死成固定占位词（隐私红线：任务标题派生自用户提问首行）
+    title: "任务",
     sourceId: "task:1",
     occurredAt: new Date().toISOString(),
     ...overrides,
@@ -99,14 +101,14 @@ describe("团队动向", () => {
     const again = await request(app)
       .post("/api/team/activities")
       .set(auth(token))
-      .send({ items: [activity({ title: "改过的标题" })] });
+      .send({ items: [activity({ detail: "任务 · 已完成", status: "done" })] });
     expect(again.status).toBe(200);
     expect(again.body).toEqual({ inserted: 0, skipped: 1 });
 
     const list = await request(app).get("/api/team/activities").set(auth(token));
     expect(list.status).toBe(200);
     expect(list.body.activities).toHaveLength(1);
-    expect(list.body.activities[0].title).toBe("整理课程表");
+    expect(list.body.activities[0].title).toBe("任务");
   });
 
   it("支持 before 游标与 actorId 过滤", async () => {
@@ -281,6 +283,108 @@ describe("团队动向", () => {
     ]);
   });
 
+  it("任务标题只能是固定占位词（隐私红线）：提问派生标题一律 400", async () => {
+    // 早期实现把 taskTitle(prompt)（提问首行）当 title 上报 → 提示词全站可见。
+    for (const title of ["整理课程表", "帮我写一封辞职邮件", "任务：正文"]) {
+      const res = await request(app)
+        .post("/api/team/activities")
+        .set(auth(token))
+        .send({ items: [activity({ title, sourceId: `task:${title}` })] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("只接受标题与状态摘要");
+    }
+
+    // 纯空白 title 也被拒（min(1) 之前能过）
+    const blank = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ title: "   ", sourceId: "task:blank" })] });
+    expect(blank.status).toBe(400);
+  });
+
+  it("occurredAt 必须在过去 400 天内且不能在未来（防永久置顶）", async () => {
+    const future = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ occurredAt: "9999-12-31T00:00:00.000Z", sourceId: "f" })] });
+    expect(future.status).toBe(400);
+    expect(future.body.error).toBe("发生时间不能在未来");
+
+    const far = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ occurredAt: "2000-01-01T00:00:00.000Z", sourceId: "old" })] });
+    expect(far.status).toBe(400);
+    expect(far.body.error).toBe("发生时间太久远");
+
+    // 5 分钟内的时钟漂移可以接受
+    const skew = new Date(Date.now() + 60_000).toISOString();
+    const ok = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ occurredAt: skew, sourceId: "skew" })] });
+    expect(ok.status).toBe(201);
+  });
+
+  it("查询参数严格：beforeId 必须配合 before、limit 只收纯数字", async () => {
+    const alone = await request(app)
+      .get("/api/team/activities")
+      .query({ beforeId: "abc" })
+      .set(auth(token));
+    expect(alone.status).toBe(400);
+    expect(alone.body.error).toBe("beforeId 需要配合 before 使用");
+
+    for (const limit of ["5x", "abc", "0", "-3"]) {
+      const res = await request(app)
+        .get("/api/team/activities")
+        .query({ limit })
+        .set(auth(token));
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("limit 不合法");
+    }
+
+    // 合法值照旧（>100 截到 100）
+    const big = await request(app)
+      .get("/api/team/activities")
+      .query({ limit: "500" })
+      .set(auth(token));
+    expect(big.status).toBe(200);
+  });
+
+  it("每人动向上限 500 条：超出 429，清除后可继续写", async () => {
+    const batch = (from: number) =>
+      Array.from({ length: 50 }, (_, i) => activity({ sourceId: `cap:${from + i}` }));
+    for (let round = 0; round < 10; round += 1) {
+      const res = await request(app)
+        .post("/api/team/activities")
+        .set(auth(token))
+        .send({ items: batch(round * 50) });
+      expect(res.status).toBe(201);
+    }
+
+    const over = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ sourceId: "cap:overflow" })] });
+    expect(over.status).toBe(429);
+    expect(over.body.error).toBe("动向摘要已达上限，请先清除");
+
+    // 清除是唯一出口：干净后能继续写（occurredAt 必须晚于清除水位，否则会被当成旧事件跳过）
+    expect((await request(app).delete("/api/team/activities/mine").set(auth(token))).status).toBe(204);
+    const after = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({
+            sourceId: "cap:again",
+            occurredAt: new Date(Date.now() + 1000).toISOString(),
+          }),
+        ],
+      });
+    expect(after.status).toBe(201);
+  });
+
   it("items 为空或字段越界返回 400", async () => {
     const empty = await request(app)
       .post("/api/team/activities")
@@ -323,6 +427,79 @@ describe("团队动向", () => {
     const all = await request(app).get("/api/team/activities").set(auth(token));
     expect(all.body.activities).toHaveLength(1);
     expect(all.body.activities[0].actorId).toBe(b.user.id);
+  });
+
+  it("旧库 task 动向带提问首行：读 API 强制投影成「任务」（T2-02）", async () => {
+    // 直接用 Store 写一条「收紧前」的旧行：POST 的白名单会挡住这种 title，
+    // 但真实老库里就有——这里模拟迁移之前的历史数据。
+    const memStore = createMemoryStore();
+    const oldApp = createApp(memStore, { allowRegister: true });
+    const a = await register(oldApp, "alice", "爱丽丝");
+    memStore.addTeamActivity(a.user.id, {
+      kind: "task",
+      title: "帮我把客户的身份证号整理成表格",
+      detail: "任务 · 已完成",
+      status: "done",
+      sourceId: "task:legacy:1",
+      occurredAt: "2026-11-01T00:00:00.000Z",
+    });
+
+    const res = await request(oldApp).get("/api/team/activities").set(auth(a.token));
+    expect(res.status).toBe(200);
+    expect(res.body.activities).toHaveLength(1);
+    // 读侧投影：与 web `labels.ts` 的 activityTitle() 同口径
+    expect(res.body.activities[0].title).toBe("任务");
+    // 只换 title，状态摘要等白名单字段照旧（别把整行抹平）
+    expect(res.body.activities[0]).toMatchObject({
+      kind: "task",
+      detail: "任务 · 已完成",
+      status: "done",
+    });
+    expect(JSON.stringify(res.body)).not.toContain("身份证号");
+  });
+
+  it("清除动向落服务端水位：同 sourceId 重传旧事件被跳过、新事件仍可传（T2-03）", async () => {
+    const occurredAt = "2026-11-01T00:00:00.000Z";
+    const items = ["a", "b", "c"].map((x) => activity({ sourceId: `task:${x}`, occurredAt }));
+    const first = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items });
+    expect(first.body).toEqual({ inserted: 3, skipped: 0 });
+
+    expect((await request(app).delete("/api/team/activities/mine").set(auth(token))).status).toBe(204);
+    expect((await request(app).get("/api/team/activities").set(auth(token))).body.activities).toEqual(
+      [],
+    );
+
+    // 换设备 / 清了 localStorage：本地 activitiesClearedAt 是 null，
+    // 同一条 sync 逻辑会用**相同的 sourceId** 把这批旧事件原样重传——水位要挡住。
+    const replay = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items });
+    expect(replay.status).toBe(200);
+    expect(replay.body).toEqual({ inserted: 0, skipped: 3 });
+    expect((await request(app).get("/api/team/activities").set(auth(token))).body.activities).toEqual(
+      [],
+    );
+
+    // 清除之后新完成的事件（occurredAt 晚于清除时刻）仍应上报成功
+    const fresh = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({ sourceId: "task:fresh", occurredAt: new Date(Date.now() + 1000).toISOString() }),
+        ],
+      });
+    expect(fresh.status).toBe(201);
+    expect(fresh.body).toEqual({ inserted: 1, skipped: 0 });
+    expect(
+      (await request(app).get("/api/team/activities").set(auth(token))).body.activities.map(
+        (x: { sourceId: string }) => x.sourceId,
+      ),
+    ).toEqual(["task:fresh"]);
   });
 });
 
@@ -428,8 +605,10 @@ describe("团队用量（②-3）", () => {
     for (const forbidden of ["不该上传", "prompt", '"text"', "args", "result", '"content"']) {
       expect(body).not.toContain(forbidden);
     }
-    // 响应字段就是契约里那几个
-    expect(Object.keys(res.body).sort()).toEqual(["from", "range", "ranking", "self", "to"].sort());
+    // 响应字段就是契约里那几个（rankingTotal/rankingTruncated 是可选字段，服务端现在会返回）
+    expect(Object.keys(res.body).sort()).toEqual(
+      ["from", "range", "ranking", "rankingTotal", "rankingTruncated", "self", "to"].sort(),
+    );
   });
 
   it("日期边界：range 决定 from/to；to 可指定本地今天；区间外不计", async () => {
@@ -495,5 +674,136 @@ describe("团队用量（②-3）", () => {
       .query({ range: "7d", to: TO })
       .set(auth(b.token));
     expect(bobView.body.self.total).toBe(900);
+  });
+
+  it("清除后服务端记住水位：换设备把旧日数据重传回来会被丢弃（P2-7）", async () => {
+    const today = dayKeyUtc(new Date());
+    const yesterday = addDays(today, -1);
+    const twoDaysAgo = addDays(today, -2);
+
+    // 清除前先有两天旧数据（清除时一起删掉）
+    expect((await post([usage({ date: twoDaysAgo }), usage({ date: yesterday })])).body).toEqual({
+      written: 2,
+      stored: 2,
+    });
+    expect((await request(app).delete("/api/team/usage/mine").set(auth(token))).body).toEqual({
+      deleted: 2,
+    });
+
+    // 另一台设备（或清了 localStorage 的那台）按本地账本把 30 天原样重传：
+    // 没有服务端水位时这些行会被重新写回去，等于「清了个寂寞」。
+    expect((await post([usage({ date: twoDaysAgo })])).body).toEqual({ written: 0, stored: 0 });
+    expect(
+      (
+        await post([
+          usage({ date: addDays(today, -10), model: "old-c" }),
+          usage({ date: twoDaysAgo, model: "old-d" }),
+        ])
+      ).body,
+    ).toEqual({ written: 0, stored: 0 });
+
+    // 水位是「严格小于清除日」：清除当天仍允许写入（客户端会按毫秒过滤，当天可能还有新用量）
+    expect((await post([usage({ date: today, model: "new" })])).body).toEqual({
+      written: 1,
+      stored: 1,
+    });
+
+    const res = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: today })
+      .set(auth(token));
+    expect(res.body.self.total).toBe(100);
+    expect(res.body.self.byModel.map((m: { model: string }) => m.model)).toEqual(["new"]);
+    expect(res.body.ranking).toHaveLength(1);
+  });
+});
+
+describe("动向时间口径（d.113）", () => {
+  let app: App;
+  let token: string;
+  beforeEach(async () => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    token = (await register(app, "alice", "爱丽丝")).token;
+  });
+  afterEach(() => presence.reset());
+
+  const post = (items: unknown[]) =>
+    request(app).post("/api/team/activities").set(auth(token)).send({ items });
+
+  it("occurredAt 归一成 UTC 毫秒形态：+08:00 写入也按同一时刻排序", async () => {
+    const res = await post([
+      activity({ sourceId: "t:1", occurredAt: "2026-11-01T08:00:00+08:00" }),
+    ]);
+    expect(res.status).toBe(201);
+
+    const list = await request(app).get("/api/team/activities").set(auth(token));
+    // 存客户端原文的话这里是 "2026-11-01T08:00:00+08:00"，游标字符串比较会把
+    // 同一时刻的 +08:00 写法当成「比 UTC 写法晚 8 小时」。
+    expect(list.body.activities[0].occurredAt).toBe("2026-11-01T00:00:00.000Z");
+  });
+
+  it("游标翻页在混合时区写法下不丢条也不重条", async () => {
+    const times = [
+      "2026-11-01T08:00:00+08:00",
+      "2026-11-01T00:01:00Z",
+      "2026-11-01T08:02:00+08:00",
+    ];
+    for (const [i, at] of times.entries()) {
+      expect((await post([activity({ sourceId: `t:${i}`, occurredAt: at })])).status).toBe(201);
+    }
+
+    const page1 = await request(app)
+      .get("/api/team/activities")
+      .query({ limit: 2 })
+      .set(auth(token));
+    expect(page1.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual([
+      "t:2",
+      "t:1",
+    ]);
+
+    const last = page1.body.activities[1] as { occurredAt: string; id: string };
+    const page2 = await request(app)
+      .get("/api/team/activities")
+      .query({ limit: 2, before: last.occurredAt, beforeId: last.id })
+      .set(auth(token));
+    expect(page2.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual(["t:0"]);
+  });
+});
+
+describe("错误契约（T2-12）", () => {
+  let app: App;
+
+  beforeEach(async () => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    await register(app, "alice", "爱丽丝");
+  });
+
+  afterEach(() => presence.reset());
+
+  it("坏 JSON body 返回 400 中文，而不是 500「服务器内部错误」", async () => {
+    const res = await request(app)
+      .post("/api/auth/login")
+      .set("Content-Type", "application/json")
+      .send('{"username": "alice", ');
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "请求体不是合法 JSON" });
+  });
+
+  it("超过 8mb 的请求体返回 413 中文", async () => {
+    const res = await request(app)
+      .post("/api/team/activities")
+      .set("Content-Type", "application/json")
+      .send({ items: [], pad: "x".repeat(9 * 1024 * 1024) });
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: "请求体太大" });
+  });
+
+  it("未匹配的 /api 路由返回 JSON 404，而不是 Express 默认 HTML", async () => {
+    const res = await request(app).get("/api/not-a-route");
+    expect(res.status).toBe(404);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.body).toEqual({ error: "接口不存在" });
   });
 });

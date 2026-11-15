@@ -6,6 +6,7 @@ import type { InfohubAgendaItem } from "../infohub/client.js";
 import { dayKeyOf, useTokenUsageStore, type UsageRecord } from "../../store/tokenUsage.js";
 import { createDefaultStorage, readJson, writeJson } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
+import { agendaBucket, type AgendaBucket } from "../agendaBucket.js";
 
 /**
  * 团队共享设置与本机摘要采集（设计 §7）。
@@ -16,6 +17,20 @@ import type { StorageLike } from "../memory/types.js";
  *   任务结果、日程证据与发送人一律不出本机；
  * - `sourceId` 由来源与更新时刻确定性生成，重复同步按幂等键跳过。
  *
+ * 注意「标题」这一栏对任务类不是自由度：本机任务标题就是用户那句提问的第一行
+ * （`tasks/store.ts` 的 `taskTitle`），所以任务动向只发固定占位词
+ * `TASK_ACTIVITY_TITLE`，服务端也把 task 的 title 钉成同一个值。
+ */
+
+/**
+ * 任务动向的标题：**固定占位词**，不得携带任何任务内容。
+ *
+ * 本站点原有实现直接发 `task.title`，而那个标题是从提示词首行裁出来的，
+ * 等于把用户的问题交给全站同事（违反 HANDOFF「提示词一律不出本机」）。
+ */
+export const TASK_ACTIVITY_TITLE = "任务";
+
+/**
  * 只采「真实成员自己的任务与日程」：智能体的工作留在「智能体」页
  * （幕僚简报、对话与工具轨迹都不进团队动向），团队页不出现智能体条目。
  */
@@ -43,6 +58,15 @@ export interface TeamShareSettings {
    * 同一个窗口的数据会原样传回去（等于没删）。水位之后产生的用量才允许再上传。
    */
   usageClearedAt: number | null;
+  /**
+   * 「清除我的共享记录」的**动向水位**（epoch ms，默认 null）。
+   *
+   * 动向和用量一样是从本机记录派生出来的：只删服务端行的话，下一次同步会把
+   * 同一批任务/日程按同一个 `sourceId` 原样传回去（服务端只剩 INSERT OR IGNORE），
+   * 用户会看到自己刚清掉的摘要在一分钟内复活，而确认框写的是「不可恢复」。
+   * 水位之后**改动过**的任务、之后**采集到**的日程才允许再上传。
+   */
+  activitiesClearedAt: number | null;
   lastSyncAt: number | null;
 }
 
@@ -51,8 +75,14 @@ export const DEFAULT_TEAM_SHARE: TeamShareSettings = {
   agenda: false,
   usage: false,
   usageClearedAt: null,
+  activitiesClearedAt: null,
   lastSyncAt: null,
 };
+
+/** 水位统一解析：正有限数 → 取整毫秒；其它（含 0/NaN/字符串）→ null。 */
+function normalizeWatermark(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
+}
 
 export function normalizeTeamShareSettings(raw: unknown): TeamShareSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_TEAM_SHARE };
@@ -61,10 +91,8 @@ export function normalizeTeamShareSettings(raw: unknown): TeamShareSettings {
     tasks: o.tasks === true,
     agenda: o.agenda === true,
     usage: o.usage === true,
-    usageClearedAt:
-      typeof o.usageClearedAt === "number" && Number.isFinite(o.usageClearedAt) && o.usageClearedAt > 0
-        ? Math.floor(o.usageClearedAt)
-        : null,
+    usageClearedAt: normalizeWatermark(o.usageClearedAt),
+    activitiesClearedAt: normalizeWatermark(o.activitiesClearedAt),
     lastSyncAt:
       typeof o.lastSyncAt === "number" && Number.isFinite(o.lastSyncAt) ? o.lastSyncAt : null,
   };
@@ -76,8 +104,53 @@ export function readTeamShareSettings(
   return readJson(storage, TEAM_SHARE_KEY, { ...DEFAULT_TEAM_SHARE }, normalizeTeamShareSettings);
 }
 
-function persistTeamShareSettings(settings: TeamShareSettings): void {
-  writeJson(createDefaultStorage(), TEAM_SHARE_KEY, settings, TEAM_SHARE_BYTE_LIMIT);
+function persistTeamShareSettings(
+  settings: TeamShareSettings,
+  storage: StorageLike = createDefaultStorage(),
+): void {
+  writeJson(storage, TEAM_SHARE_KEY, settings, TEAM_SHARE_BYTE_LIMIT);
+}
+
+/**
+ * 共享设置的「归属账号」键。
+ *
+ * 共享开关和清除水位都是**这个人的决定**，不是这台机器的：同一台电脑换账号登录时
+ * 如果沿用上一个人的设置，新账号会在从未同意的情况下把本机任务、日程、用量
+ * 上报给全站团队（等于绕过「默认全关」这条隐私红线）；上一个人的水位对新账号
+ * 也没有意义（会莫名吞掉新账号自己的摘要）。
+ */
+export const TEAM_SHARE_OWNER_KEY = "heming.team.share.owner.v1";
+
+export function readTeamShareOwner(storage: StorageLike = createDefaultStorage()): string | null {
+  return readJson<string | null>(storage, TEAM_SHARE_OWNER_KEY, null, (raw) =>
+    typeof raw === "string" && raw.length > 0 ? raw : null,
+  );
+}
+
+/**
+ * 把共享设置绑定到当前登录账号（`AppShell` 在登录成功 / 恢复会话后调用）。
+ *
+ * 三种情形：
+ * - 首次绑定（旧版本没有归属键）：**认领**现有设置而不是清空——老用户升级后开关不丢；
+ * - 同一账号：no-op（每次渲染都调用也不会写盘）；
+ * - 换账号：清回默认全关并落盘，水位一起清空，同时把内存里的 store 同步过来
+ *   （TeamPage / HomeTeamUsage 读的是 store，只改 localStorage 会等到刷新才生效）。
+ */
+export function bindTeamShareUser(
+  userId: string,
+  storage: StorageLike = createDefaultStorage(),
+): void {
+  if (!userId) return;
+  const owner = readTeamShareOwner(storage);
+  if (owner === userId) return;
+  if (owner === null) {
+    writeJson(storage, TEAM_SHARE_OWNER_KEY, userId);
+    return;
+  }
+  const settings = { ...DEFAULT_TEAM_SHARE };
+  persistTeamShareSettings(settings, storage);
+  writeJson(storage, TEAM_SHARE_OWNER_KEY, userId);
+  useTeamShareStore.setState({ settings });
 }
 
 interface TeamShareState {
@@ -86,6 +159,8 @@ interface TeamShareState {
   setLastSync: (at: number | null) => void;
   /** 「清除我的用量」成功后落水位：水位之前的用量不再重新上传。 */
   setUsageClearedAt: (at: number | null) => void;
+  /** 「清除我的共享记录」成功后落水位：水位之前的任务/日程摘要不再重新上传。 */
+  setActivitiesClearedAt: (at: number | null) => void;
 }
 
 export const useTeamShareStore = create<TeamShareState>((set, get) => ({
@@ -105,6 +180,11 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
     persistTeamShareSettings(settings);
     set({ settings });
   },
+  setActivitiesClearedAt: (at) => {
+    const settings = { ...get().settings, activitiesClearedAt: at };
+    persistTeamShareSettings(settings);
+    set({ settings });
+  },
 }));
 
 const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
@@ -114,11 +194,24 @@ const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   cancelled: "已中断",
 };
 
-const BUCKET_LABEL: Record<string, string> = {
+const BUCKET_LABEL: Record<AgendaBucket, string> = {
   overdue: "已逾期",
   today: "今天到期",
   "next24h": "24 小时内到期",
 };
+
+/** 采集排序用的档位优先级：逾期最急，其次今天，再次 24 小时内。 */
+const BUCKET_ORDER: Record<AgendaBucket, number> = { overdue: 0, today: 1, next24h: 2 };
+
+/**
+ * 日程的「采集时刻」（epoch ms）：信息中枢里的 `msgTs` 是 **Unix 秒**（`datetime.fromtimestamp`），
+ * 这里归一成毫秒好和清除水位比较；缺失/非法按 0（当作很久以前）。
+ */
+function agendaCreatedMs(item: InfohubAgendaItem): number {
+  const raw = Number(item.msgTs);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw > 1e12 ? raw : raw * 1000;
+}
 
 function iso(at: number): string {
   return new Date(at).toISOString();
@@ -133,9 +226,12 @@ export interface TeamShareSources {
 export function collectTeamActivities(
   settings: TeamShareSettings,
   sources: TeamShareSources,
+  now = Date.now(),
 ): TeamActivityInput[] {
   const out: TeamActivityInput[] = [];
   const seen = new Set<string>();
+  /** 清除水位：水位之前的任务改动 / 日程不采集，避免「清除」后被同一批数据填回来。 */
+  const clearedAt = settings.activitiesClearedAt ?? 0;
 
   const push = (item: TeamActivityInput) => {
     if (seen.has(item.sourceId)) return;
@@ -145,11 +241,13 @@ export function collectTeamActivities(
 
   if (settings.tasks) {
     for (const task of [...sources.tasks]
+      .filter((task) => clearedAt === 0 || task.updatedAt > clearedAt)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, PER_SOURCE_LIMIT.tasks)) {
       push({
         kind: "task",
-        title: task.title,
+        // 只发改动与状态：标题从提示词首行裁出来，不是可以共享的信息。
+        title: TASK_ACTIVITY_TITLE,
         detail: `任务 · ${TASK_STATUS_LABEL[task.status]}`,
         status: task.status,
         sourceId: `task:${task.id}:${task.updatedAt}`,
@@ -159,17 +257,34 @@ export function collectTeamActivities(
   }
 
   if (settings.agenda) {
-    for (const item of [...sources.agenda]
-      .sort((a, b) => b.dueTs - a.dueTs)
-      .slice(0, PER_SOURCE_LIMIT.agenda)) {
-      const bucket = item.dueTs < Date.now() ? "overdue" : "today";
+    // 只采「逾期 / 今天 / 24 小时内」：更远的日程不是摘要，传上去只会显示成
+    // 「今天到期」（B2 的根因是这里自己抄了一份两档判据，现在直接用 agendaBucket 真源）。
+    const live = sources.agenda
+      .filter((item) => clearedAt === 0 || agendaCreatedMs(item) > clearedAt)
+      .map((item) => ({ item, bucket: agendaBucket(item.dueTs, now) }))
+      .filter(
+        (entry): entry is { item: InfohubAgendaItem; bucket: AgendaBucket } => entry.bucket !== null,
+      );
+    // 逾期：最近逾期的在前（还来得及补）；今天/24 小时内：到期越近越前。
+    // 排序必须在 slice 之前：原实现按 dueTs 倒序 slice(30)，远期条目会把临期的挤掉。
+    live.sort(
+      (a, b) =>
+        BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket] ||
+        (a.bucket === "overdue" ? b.item.dueTs - a.item.dueTs : a.item.dueTs - b.item.dueTs),
+    );
+    for (const { item, bucket } of live.slice(0, PER_SOURCE_LIMIT.agenda)) {
       push({
         kind: "agenda",
         title: item.title,
-        detail: `日程 · ${BUCKET_LABEL[bucket] ?? bucket}`,
+        detail: `日程 · ${BUCKET_LABEL[bucket]}`,
         status: bucket,
-        sourceId: `agenda:${item.id}:${item.dueTs}:${bucket}`,
-        occurredAt: iso(item.dueTs),
+        // sourceId 只认日程本身：把档位/到期时间拼进去，会让「今天到期 → 已逾期」变成
+        // 一条新记录（同一条日程在团队页出现两行）。服务端按 (actor, sourceId) 幂等，
+        // 因此换档不重发；档位文案以首次上报时为准。
+        sourceId: `agenda:${item.id}`,
+        // 未来日程的到期时间不能当成「刚刚发生」的时刻，否则动向会把它排到最上面；
+        // 首次上报时刻即 now（行靠 sourceId 幂等，后续同步不会改变这一行）。
+        occurredAt: iso(Math.min(item.dueTs, now)),
       });
     }
   }

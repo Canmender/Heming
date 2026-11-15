@@ -35,6 +35,16 @@ export const MAX_HITL_RULES = 200;
 /** 资源通配：参数里没有可识别资源时，规则退化成「该工具的所有调用」。 */
 export const RULE_WILDCARD = "*";
 
+/**
+ * 团队工具（`team_*`）：参数里有明确的资源粒度（团队 id）。
+ *
+ * 团队写操作的通配 allow 等于「所有团队的所有写操作都放行」，与「没有全放行档」
+ * 的红线冲突，所以和文件工具一样**不接受**整工具放行（见 `rememberRule`）。
+ */
+function isTeamTool(tool: string): boolean {
+  return tool.startsWith("team_");
+}
+
 /** 策略默认值：受控（只读放行，写操作必问）。 */
 export const DEFAULT_HITL_POLICY: HitlPolicy = {
   mode: "guarded",
@@ -372,11 +382,13 @@ export class HitlPolicyStore {
      */
     const r = normalizeRuleResource(resource.trim() || RULE_WILDCARD).slice(0, 200);
     /*
-     * ★ 文件工具**不接受**「整个工具放行」（`*` 的 allow）。
-     * 它们天然是多文件写，只能按路径前缀授权；这条兜底与 `rememberDecision`
-     * 的分支一起挡住「某个调用方顺手传了 `*`」的情况。
+     * ★ 文件工具与团队工具**不接受**「整个工具放行」（`*` 的 allow）。
+     * 文件工具天然是多文件写，只能按路径前缀授权；团队工具的每次写操作都落在
+     * 某个团队上，通配 allow 等于跨团队越权，只能按团队 id 授权。这条兜底与
+     * `rememberDecision` 的分支一起挡住「某个调用方顺手传了 `*`」的情况
+     * （camelCase 参数曾导致 `ruleResource` 取不到团队 id 而返回 `*`）。
      */
-    if (effect === "allow" && r === RULE_WILDCARD && isFileEditTool(t)) return;
+    if (effect === "allow" && r === RULE_WILDCARD && (isFileEditTool(t) || isTeamTool(t))) return;
     const agentId = agent?.id.trim().slice(0, 200) || undefined;
     const next: HitlRule[] = [
       {
@@ -498,7 +510,17 @@ export class HitlPolicyStore {
     // 2. `danger` 不按规则放行（红线不变：按资源记住危险工具 = 永久放行口子）
     if (call.risk === "danger") return null;
 
-    const allows = rules.filter((r) => r.effect === "allow");
+    /*
+     * 团队工具：**不吃通配 allow**。
+     *
+     * 修复前落盘的存量规则可能是 `{tool:"team_plan_update", resource:"*"}`：
+     * 参数用 camelCase（或本就没有 title）时 `ruleResource` 返回 `*`，
+     * 于是一次「记住允许」= 该团队工具永久跨团队放行。新规则已不再这样落盘，
+     * 这里再挡一层，别让旧规则继续生效。
+     */
+    const allows = rules.filter(
+      (r) => r.effect === "allow" && !(isTeamTool(call.name) && r.resource === RULE_WILDCARD),
+    );
     /*
      * 3. 多目标写（file_patch）：**每个**目标都要被某条路径规则覆盖。
      *

@@ -59,6 +59,26 @@ function rowToAgent(r: AgentRow): Agent {
 export function createSqliteStore(dbPath: string): SqliteStore {
   const db: DatabaseSync = openDb(dbPath);
 
+  /**
+   * 显式事务：node:sqlite 没有 transaction 助手（同 deleteConversation 的写法）。
+   *
+   * 团队的多语句写（建团队+建 owner 成员、删团队级联、移除成员+解绑任务、删方案+解绑任务、
+   * 判重+加成员）中途失败会留下**看不见也删不掉**的半截态：团队行在、成员行没了 →
+   * visibleTeam/listWorkspaceTeams 都查不到它，但 DELETE 也 404，任何 API 都清不掉。
+   * db.ts 的建表注释本来就把「四个删除口在事务里清干净」写成契约。
+   */
+  function runTx<T>(fn: () => T): T {
+    db.exec("BEGIN");
+    try {
+      const out = fn();
+      db.exec("COMMIT");
+      return out;
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   /** messages 行 → Message（listMessages 与 reencrypt 回读共用，防映射口径漂移）。 */
   function rowToMessage(r: {
     id: string;
@@ -215,7 +235,9 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         (a, b) =>
           (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1) ||
           (a.joinedAt < b.joinedAt ? -1 : a.joinedAt > b.joinedAt ? 1 : 0) ||
-          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN"),
+          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN") ||
+          // 显示名可以重名（用户自己填的）：再用 id 兜底，保证名册顺序稳定、两实现一致。
+          a.user.id.localeCompare(b.user.id),
       );
     const plans = (
       db
@@ -644,6 +666,15 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     deleteFile(id) {
       return db.prepare("DELETE FROM shared_files WHERE id = ?").run(id).changes > 0;
     },
+    detachTeamAttachment(fileId) {
+      return Number(
+        db
+          .prepare(
+            "UPDATE team_tasks SET attachment_file_id = NULL, updated_at = ? WHERE attachment_file_id = ?",
+          )
+          .run(new Date().toISOString(), fileId).changes,
+      );
+    },
     userFileBytes(ownerUsername) {
       const row = db
         .prepare("SELECT COALESCE(SUM(size), 0) AS total FROM shared_files WHERE owner = ?")
@@ -688,6 +719,22 @@ export function createSqliteStore(dbPath: string): SqliteStore {
           input.occurredAt,
           now,
         );
+      if (res.changes === 0 && input.kind === "agenda") {
+        // 日程档位随时间的推移会变（今天到期 → 已逾期），sourceId 稳定但展示字段要跟着刷新，
+        // 否则 INSERT OR IGNORE 会把这一行永远冻结在首次上报时的档位（W2-01，内存 Store 同语义）。
+        db.prepare(
+          `UPDATE team_activities
+              SET title = ?, detail = ?, status = ?, occurred_at = ?
+            WHERE actor_id = ? AND source_id = ?`,
+        ).run(
+          input.title,
+          input.detail ?? null,
+          input.status ?? null,
+          input.occurredAt,
+          actorId,
+          input.sourceId,
+        );
+      }
       return res.changes > 0;
     },
     listTeamActivities(opts = {}) {
@@ -736,8 +783,33 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         createdAt: r.created_at,
       }));
     },
+    countTeamActivities(actorId) {
+      const row = db
+        .prepare("SELECT COUNT(*) AS n FROM team_activities WHERE actor_id = ?")
+        .get(actorId) as { n: number } | undefined;
+      return Number(row?.n ?? 0);
+    },
     clearTeamActivities(actorId) {
       return Number(db.prepare("DELETE FROM team_activities WHERE actor_id = ?").run(actorId).changes);
+    },
+    purgeTeamActivities(before) {
+      // occurred_at 入库前已归一成 UTC ISO 毫秒形态，字典序即时间序（与内存实现同口径）。
+      return Number(
+        db.prepare("DELETE FROM team_activities WHERE occurred_at < ?").run(before).changes,
+      );
+    },
+    setTeamActivityClearedAt(actorId, at) {
+      mustUser(actorId);
+      db.prepare(
+        `INSERT INTO team_activity_clears (actor_id, cleared_at) VALUES (?, ?)
+         ON CONFLICT(actor_id) DO UPDATE SET cleared_at = excluded.cleared_at`,
+      ).run(actorId, at);
+    },
+    getTeamActivityClearedAt(actorId) {
+      const row = db
+        .prepare("SELECT cleared_at FROM team_activity_clears WHERE actor_id = ?")
+        .get(actorId) as { cleared_at: number } | undefined;
+      return row === undefined ? null : Number(row.cleared_at);
     },
     upsertTeamUsage(actorId, input: TeamUsageInput) {
       mustUser(actorId);
@@ -797,6 +869,19 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     clearTeamUsage(actorId) {
       return Number(db.prepare("DELETE FROM team_usage WHERE actor_id = ?").run(actorId).changes);
     },
+    setTeamUsageClearedAt(actorId, at) {
+      mustUser(actorId);
+      db.prepare(
+        `INSERT INTO team_usage_clears (actor_id, cleared_at) VALUES (?, ?)
+         ON CONFLICT(actor_id) DO UPDATE SET cleared_at = excluded.cleared_at`,
+      ).run(actorId, at);
+    },
+    getTeamUsageClearedAt(actorId) {
+      const row = db
+        .prepare("SELECT cleared_at FROM team_usage_clears WHERE actor_id = ?")
+        .get(actorId) as { cleared_at: number } | undefined;
+      return row === undefined ? null : Number(row.cleared_at);
+    },
     listWorkspaceTeams(userId) {
       const rows = db
         .prepare(
@@ -812,13 +897,15 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     createWorkspaceTeam(ownerId, body) {
       const id = randomUUID();
       const at = new Date().toISOString();
-      db.prepare(
-        "INSERT INTO teams (id, name, goal, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(id, body.name, body.goal ?? "", ownerId, at, at);
-      db.prepare(
-        "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
-      ).run(id, ownerId, "owner", at);
-      return snapshotOf(id);
+      return runTx(() => {
+        db.prepare(
+          "INSERT INTO teams (id, name, goal, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(id, body.name, body.goal ?? "", ownerId, at, at);
+        db.prepare(
+          "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+        ).run(id, ownerId, "owner", at);
+        return snapshotOf(id);
+      });
     },
     updateWorkspaceTeam(teamId, actorId, body) {
       const team = visibleTeam(teamId, actorId);
@@ -836,12 +923,15 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const team = visibleTeam(teamId, actorId);
       if (!team) return null;
       if (team.ownerId !== actorId) return "forbidden";
-      // 显式级联：建表时没加外键（内存实现也无法表达），四个删除口要一起清干净
-      db.prepare("DELETE FROM team_tasks WHERE team_id = ?").run(teamId);
-      db.prepare("DELETE FROM team_plans WHERE team_id = ?").run(teamId);
-      db.prepare("DELETE FROM team_members WHERE team_id = ?").run(teamId);
-      db.prepare("DELETE FROM teams WHERE id = ?").run(teamId);
-      return true;
+      // 显式级联：建表时没加外键（内存实现也无法表达），四个删除口要一起清干净。
+      // 必须在事务里：断在删 teams 之前就会留下「有 team 行、没成员行」的孤儿团队。
+      return runTx(() => {
+        db.prepare("DELETE FROM team_tasks WHERE team_id = ?").run(teamId);
+        db.prepare("DELETE FROM team_plans WHERE team_id = ?").run(teamId);
+        db.prepare("DELETE FROM team_members WHERE team_id = ?").run(teamId);
+        db.prepare("DELETE FROM teams WHERE id = ?").run(teamId);
+        return true;
+      });
     },
     addWorkspaceMember(teamId, actorId, username) {
       const team = visibleTeam(teamId, actorId);
@@ -851,12 +941,23 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         | { id: string }
         | undefined;
       if (!target) return "user_not_found";
-      if (teamMemberRole(teamId, target.id)) return "already_member";
-      db.prepare(
-        "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
-      ).run(teamId, target.id, "member", new Date().toISOString());
-      touchTeam(teamId);
-      return snapshotOf(teamId);
+      // 先查后插之间有窗口（owner 双击 / 两个请求并发）：事务里再判一次，并把唯一约束
+      // 冲突翻译成 already_member —— 否则 Express 默认 500 HTML，和内存实现语义分叉。
+      try {
+        return runTx(() => {
+          if (teamMemberRole(teamId, target.id)) return "already_member" as const;
+          db.prepare(
+            "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+          ).run(teamId, target.id, "member", new Date().toISOString());
+          touchTeam(teamId);
+          return snapshotOf(teamId);
+        });
+      } catch (err) {
+        if (err instanceof Error && /UNIQUE|PRIMARY KEY|constraint/i.test(err.message)) {
+          return "already_member";
+        }
+        throw err;
+      }
     },
     removeWorkspaceMember(teamId, actorId, targetUserId) {
       const team = visibleTeam(teamId, actorId);
@@ -864,16 +965,59 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       if (team.ownerId !== actorId) return "forbidden";
       if (targetUserId === team.ownerId) return "owner";
       if (!teamMemberRole(teamId, targetUserId)) return null;
-      db.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").run(
-        teamId,
-        targetUserId,
-      );
-      // 被移出的人不该继续挂任务：指给他的任务解绑成「待认领」
-      db.prepare(
-        "UPDATE team_tasks SET assignee_id = NULL, updated_at = ? WHERE team_id = ? AND assignee_id = ?",
-      ).run(new Date().toISOString(), teamId, targetUserId);
-      touchTeam(teamId);
-      return snapshotOf(teamId);
+      // 两条语句必须同生共死：只删成员不解绑会留下「指给非成员」的非法引用。
+      return runTx(() => {
+        db.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").run(
+          teamId,
+          targetUserId,
+        );
+        // 被移出的人不该继续挂任务：指给他的任务解绑成「待认领」
+        db.prepare(
+          "UPDATE team_tasks SET assignee_id = NULL, updated_at = ? WHERE team_id = ? AND assignee_id = ?",
+        ).run(new Date().toISOString(), teamId, targetUserId);
+        touchTeam(teamId);
+        return snapshotOf(teamId);
+      });
+    },
+    leaveWorkspaceTeam(teamId, userId) {
+      const team = visibleTeam(teamId, userId);
+      if (!team) return null;
+      // 团队不能无主：owner 先转让或解散，不能自己走掉把团队变成孤儿。
+      if (team.ownerId === userId) return "owner";
+      // 两条语句必须同生共死：只删成员不解绑会留下「指给非成员」的非法引用。
+      return runTx(() => {
+        db.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").run(teamId, userId);
+        db.prepare(
+          "UPDATE team_tasks SET assignee_id = NULL, updated_at = ? WHERE team_id = ? AND assignee_id = ?",
+        ).run(new Date().toISOString(), teamId, userId);
+        touchTeam(teamId);
+        return snapshotOf(teamId);
+      });
+    },
+    transferTeamOwnership(teamId, actorId, targetUserId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      if (!teamMemberRole(teamId, targetUserId)) return "not_member";
+      // 三条语句必须同生共死：owner_id 改了但角色没换，会让「谁是队长」出现两个答案。
+      return runTx(() => {
+        const at = new Date().toISOString();
+        db.prepare("UPDATE teams SET owner_id = ?, updated_at = ? WHERE id = ?").run(
+          targetUserId,
+          at,
+          teamId,
+        );
+        // 先降自己再升目标：同一人时第二次写覆盖第一次，最终仍是 owner。
+        db.prepare("UPDATE team_members SET role = 'member' WHERE team_id = ? AND user_id = ?").run(
+          teamId,
+          actorId,
+        );
+        db.prepare("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND user_id = ?").run(
+          teamId,
+          targetUserId,
+        );
+        return snapshotOf(teamId);
+      });
     },
     createTeamPlan(teamId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
@@ -928,13 +1072,16 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         .prepare("SELECT team_id FROM team_plans WHERE id = ?")
         .get(planId) as { team_id: string } | undefined;
       if (!row || row.team_id !== teamId) return "not_found";
-      db.prepare("DELETE FROM team_plans WHERE id = ?").run(planId);
-      // 删方案不删任务：归属它的任务解绑成独立任务
-      db.prepare(
-        "UPDATE team_tasks SET plan_id = NULL, updated_at = ? WHERE team_id = ? AND plan_id = ?",
-      ).run(new Date().toISOString(), teamId, planId);
-      touchTeam(teamId);
-      return true;
+      // 删方案不删任务：归属它的任务解绑成独立任务；两条语句同生共死，
+      // 否则只删方案会留下 plan_id 指向不存在方案的悬空引用。
+      return runTx(() => {
+        db.prepare("DELETE FROM team_plans WHERE id = ?").run(planId);
+        db.prepare(
+          "UPDATE team_tasks SET plan_id = NULL, updated_at = ? WHERE team_id = ? AND plan_id = ?",
+        ).run(new Date().toISOString(), teamId, planId);
+        touchTeam(teamId);
+        return true;
+      });
     },
     createTeamTask(teamId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;

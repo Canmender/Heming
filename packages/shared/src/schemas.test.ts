@@ -276,15 +276,16 @@ describe("E2E 信封与流式", () => {
 
 describe("团队契约", () => {
   it("动向输入：kind 枚举、标题/来源限长、IS0 时间", () => {
-    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "t", sourceId: "s", occurredAt: iso }).success).toBe(true);
+    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "任务", sourceId: "s", occurredAt: iso }).success).toBe(true);
     expect(TeamActivityInputSchema.safeParse({ kind: "chat", title: "t", sourceId: "s", occurredAt: iso }).success).toBe(false);
     expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "x".repeat(201), sourceId: "s", occurredAt: iso }).success).toBe(false);
-    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "t", sourceId: "s", occurredAt: "nope" }).success).toBe(false);
-    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "t", sourceId: "s".repeat(201), occurredAt: iso }).success).toBe(false);
+    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "任务", sourceId: "s", occurredAt: "nope" }).success).toBe(false);
+    expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "任务", sourceId: "s".repeat(201), occurredAt: iso }).success).toBe(false);
   });
 
   it("动向输入：task/agenda 的 detail/status 只能是状态摘要（d.109 C1 写侧收紧）", () => {
-    const base = { title: "t", sourceId: "s", occurredAt: iso };
+    // 任务类 title 写侧被钉成固定摘要「任务」（防把用户提问首行当标题上报），日程类仍自由。
+    const base = { title: "任务", sourceId: "s", occurredAt: iso };
     // 合法摘要：与 share.ts 实际输出一字不差
     for (const [detail, status] of [
       ["任务 · 进行中", "running"],
@@ -317,6 +318,8 @@ describe("团队契约", () => {
     if (!badTaskStatus.success) {
       expect(badTaskStatus.error.issues[0]?.message).toBe("只接受标题与状态摘要");
     }
+    // 标题也钉死：自由文本（例如把用户提问首行当标题上报）一律拒绝
+    expect(TeamActivityInputSchema.safeParse({ ...base, kind: "task", title: "帮我整理周报" }).success).toBe(false);
     // 精确集合而不是正则：夹带后缀的「任务 · 进行中（正文）」也不放过
     expect(
       TeamActivityInputSchema.safeParse({ ...base, kind: "task", detail: "任务 · 进行中（正文）" }).success,
@@ -358,7 +361,7 @@ describe("团队契约", () => {
   });
 
   it("批量写入 1..50 条", () => {
-    const item = { kind: "task", title: "t", sourceId: "s", occurredAt: iso };
+    const item = { kind: "task", title: "任务", sourceId: "s", occurredAt: iso };
     expect(CreateTeamActivitiesBodySchema.safeParse({ items: [] }).success).toBe(false);
     expect(CreateTeamActivitiesBodySchema.safeParse({ items: [item] }).success).toBe(true);
     expect(CreateTeamActivitiesBodySchema.safeParse({ items: Array.from({ length: 51 }, () => item) }).success).toBe(false);

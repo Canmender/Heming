@@ -122,17 +122,19 @@ export function buildSelfUsage(
 }
 
 /**
- * 全站排行：每个成员一行聚合数。
+ * 全站排行最多返回多少行。
  *
- * 只给 `tokens / unreported / days` 与显示名——模型、连接名、逐日明细都不外露，
- * 即便对方在团队页看到排行，也反推不出「用什么模型、连的哪个 Key」。
+ * 超出时不再静默截断：响应同时给 `rankingTotal` / `rankingTruncated`，
+ * 让客户端能显示「前 100 名（共 N 人）」而不是让用户以为团队只有 100 人。
  */
-export function buildUsageRanking(
+export const USAGE_RANKING_LIMIT = 100;
+
+/** 区间内有数据（去重后）的成员聚合，排行与人数统计共用这一份口径。 */
+function aggregateUsageRankActors(
   rows: TeamUsageRow[],
   from: string,
   to: string,
-  names: Map<string, string>,
-): TeamUsageRankRow[] {
+): Map<string, { tokens: number; unreported: number; dates: Set<string> }> {
   const byActor = new Map<string, { tokens: number; unreported: number; dates: Set<string> }>();
   for (const row of rows) {
     if (!inRange(row, from, to)) continue;
@@ -142,6 +144,23 @@ export function buildUsageRanking(
     entry.dates.add(row.date);
     byActor.set(row.actorId, entry);
   }
+  return byActor;
+}
+
+/**
+ * 全站排行：每个成员一行聚合数。
+ *
+ * 只给 `tokens / unreported / days` 与显示名——模型、连接名、逐日明细都不外露，
+ * 即便对方在团队页看到排行，也反推不出「用什么模型、连的哪个 Key」。
+ * 超过 {@link USAGE_RANKING_LIMIT} 人时只返回前 N 行，调用方用 `countUsageRankingActors` 拿总人数。
+ */
+export function buildUsageRanking(
+  rows: TeamUsageRow[],
+  from: string,
+  to: string,
+  names: Map<string, string>,
+): TeamUsageRankRow[] {
+  const byActor = aggregateUsageRankActors(rows, from, to);
   return [...byActor.entries()]
     .map(([userId, entry]) => ({
       userId,
@@ -151,7 +170,12 @@ export function buildUsageRanking(
       days: entry.dates.size,
     }))
     .sort((a, b) => b.tokens - a.tokens || b.days - a.days || a.displayName.localeCompare(b.displayName))
-    .slice(0, 100);
+    .slice(0, USAGE_RANKING_LIMIT);
+}
+
+/** 区间内有数据的成员数（排行截断前的总人数）。 */
+export function countUsageRankingActors(rows: TeamUsageRow[], from: string, to: string): number {
+  return aggregateUsageRankActors(rows, from, to).size;
 }
 
 /** 汇总成 `GET /api/team/usage` 的响应体（本人明细 + 全站排行）。 */
@@ -167,11 +191,16 @@ export function summarizeTeamUsage(
 ): TeamUsageResponse {
   const { viewerId, range, from, to, names } = opts;
   const selfRows = rows.filter((row) => row.actorId === viewerId);
+  const ranking = buildUsageRanking(rows, from, to, names);
+  const rankingTotal = countUsageRankingActors(rows, from, to);
   return {
     range,
     from,
     to,
     self: buildSelfUsage(selfRows, from, to),
-    ranking: buildUsageRanking(rows, from, to, names),
+    ranking,
+    // 两个字段都可选：老服务端不返回，客户端按「未知」处理即可（不要当成 0 / false）。
+    rankingTotal,
+    rankingTruncated: rankingTotal > USAGE_RANKING_LIMIT,
   };
 }

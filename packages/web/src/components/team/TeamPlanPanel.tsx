@@ -49,7 +49,8 @@ export function TeamPlanPanel({
   plans: TeamPlanItem[];
   busy: boolean;
   onChanged: (snapshot: TeamWorkspaceSnapshot) => void;
-  onError: (message: string) => void;
+  /** 面板内的失败同时上报给页级错误条（上一轮 TeamWorkspace 已在传，这里补上类型与调用）。 */
+  onError?: (message: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
@@ -58,15 +59,57 @@ export function TeamPlanPanel({
   const [pendingDelete, setPendingDelete] = useState<TeamPlanItem | null>(null);
   /** 打开确认框时焦点落在「取消」：误按回车不会执行破坏性操作。 */
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * 面板自己的错误：就地显示在方案卡片里，而不是只写到页顶（W-06）。
+   * 关闭按钮或下一次成功提交时清掉，避免一次失败长期挂在那里。
+   */
+  const [panelError, setPanelError] = useState("");
+  /** 添加方案的提交中标记：双击「保存」只允许发一次请求（W-04）。 */
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  /**
+   * 正在切状态/删除的方案 id：ref 做同步判定（两次点击可能同帧发生），
+   * state 只负责禁用按钮，连点第二下不会再发请求、只前进一档。
+   */
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const pendingRef = useRef(new Set<string>());
+  /** 点击时取最新 props 里的方案，避免用闭包里的旧状态算下一档。 */
+  const plansRef = useRef(plans);
+  plansRef.current = plans;
+
+  const isPending = (id: string) => pendingIds.includes(id);
+
+  const beginPending = (id: string) => {
+    if (pendingRef.current.has(id)) return false;
+    pendingRef.current.add(id);
+    setPendingIds([...pendingRef.current]);
+    return true;
+  };
+
+  const endPending = (id: string) => {
+    pendingRef.current.delete(id);
+    setPendingIds([...pendingRef.current]);
+  };
 
   const refresh = async () => onChanged(await fetchWorkspaceTeam(teamId));
+
+  /** 面板内的失败：既就地显示在方案卡片里，也上报给页级错误条。 */
+  const report = (message: string) => {
+    setPanelError(message);
+    onError?.(message);
+  };
 
   const add = async () => {
     const clean = title.trim();
     if (!clean) {
-      onError("请填写方案标题");
+      report("请填写方案标题");
       return;
     }
+    // 服务端没有创建方案的幂等键：重复提交会真的多出一条方案（W-04）。
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setPanelError("");
     try {
       await createTeamPlan(teamId, {
         title: clean,
@@ -78,25 +121,38 @@ export function TeamPlanPanel({
       setAdding(false);
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "添加方案失败");
+      report(err instanceof Error && err.message ? err.message : "添加方案失败");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
   const cycle = async (plan: TeamPlanItem) => {
+    if (!beginPending(plan.id)) return;
+    setPanelError("");
     try {
-      await updateTeamPlan(teamId, plan.id, { status: NEXT_STATUS[plan.status] });
+      // 用最新 props 里的状态算下一档；pending 期间第二下点击被忽略。
+      const latest = plansRef.current.find((p) => p.id === plan.id) ?? plan;
+      await updateTeamPlan(teamId, plan.id, { status: NEXT_STATUS[latest.status] });
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "更新方案失败");
+      report(err instanceof Error && err.message ? err.message : "更新方案失败");
+    } finally {
+      endPending(plan.id);
     }
   };
 
   const remove = async (plan: TeamPlanItem) => {
+    if (!beginPending(plan.id)) return;
+    setPanelError("");
     try {
       await deleteTeamPlan(teamId, plan.id);
       await refresh();
     } catch (err) {
-      onError(err instanceof Error && err.message ? err.message : "删除方案失败");
+      report(err instanceof Error && err.message ? err.message : "删除方案失败");
+    } finally {
+      endPending(plan.id);
     }
   };
 
@@ -120,6 +176,22 @@ export function TeamPlanPanel({
           {adding ? "取消" : "添加方案"}
         </button>
       </div>
+
+      {panelError && (
+        <p
+          role="alert"
+          className="mt-2 flex items-start gap-2 rounded-lg border border-danger-line bg-danger-soft px-2.5 py-2 text-ui-sm text-danger"
+        >
+          <span className="min-w-0 flex-1 break-words">{panelError}</span>
+          <button
+            type="button"
+            className="shrink-0 text-ui-xs underline"
+            onClick={() => setPanelError("")}
+          >
+            关闭
+          </button>
+        </p>
+      )}
 
       {adding && (
         <form
@@ -147,9 +219,9 @@ export function TeamPlanPanel({
           <Button
             type="submit"
             size="sm" variant="primary" className="mt-2"
-            disabled={busy}
+            disabled={busy || saving}
           >
-            保存
+            {saving ? "保存中…" : "保存"}
           </Button>
         </form>
       )}
@@ -174,8 +246,11 @@ export function TeamPlanPanel({
                   <button
                     type="button"
                     onClick={() => void cycle(plan)}
+                    disabled={isPending(plan.id)}
                     title="点击切换状态"
-                    className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[plan.status]}`}
+                    className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[plan.status]} ${
+                      isPending(plan.id) ? "opacity-60" : ""
+                    }`}
                   >
                     {PLAN_STATUS_LABEL[plan.status]}
                   </button>
@@ -189,7 +264,8 @@ export function TeamPlanPanel({
               <button
                 type="button"
                 aria-label={`删除方案 ${plan.title}`}
-                className="shrink-0 text-ui-xs text-muted hover:text-danger"
+                className="shrink-0 text-ui-xs text-muted hover:text-danger disabled:opacity-60"
+                disabled={isPending(plan.id)}
                 onClick={() => setPendingDelete(plan)}
               >
                 删除

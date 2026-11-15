@@ -479,26 +479,57 @@ const IsoTimeSchema = z
   .refine((v) => Number.isFinite(Date.parse(v)), { message: "invalid timestamp" });
 
 /**
+ * 入库用的时间：校验 + 归一化成 toISOString()（毫秒 + Z）。
+ *
+ * 为什么必须归一化：动向/任务是按时间字符串做游标比较的（occurredAt >= before），
+ * 客户端可能写 2026-11-01T08:00:00Z、+08:00、带毫秒三种写法，字符串比较会错位 →
+ * 翻页时同一条重复出现或整条丢弃。存成一种写法后比较与展示才确定。
+ */
+const IsoTimeInputSchema = IsoTimeSchema.transform((v) => new Date(v).toISOString());
+
+/**
+ * 动向 occurredAt 的可接受区间：允许 5 分钟客户端时钟漂移，但拒绝「未来」。
+ *
+ * 之前只校验「可解析」，一条 `9999-12-31T…` 会永久置顶：动向流是 `occurredAt DESC` 游标分页，
+ * 置顶条永远在第一条，后面所有内容都翻不出来——一个人就能把全站动向流钉死。
+ * 过老的时间同样没意义（列表本身只展示最近 50 条）。
+ */
+const ACTIVITY_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const ACTIVITY_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
+
+/**
  * 客户端上报的动向摘要。
  *
  * 白名单字段是刻意的：正文、提示词、工具参数、任务结果、日程证据都不在契约里，
  * 服务端无从接收，客户端也无处夹带。
  *
- * ★ `detail` / `status` 不是自由文本：对 task/agenda 两类，它们只能是**标题与状态摘要**
- *（服务端白名单见下方 `TASK_ACTIVITY_*` / `AGENDA_ACTIVITY_*`）。这样「不含正文」的
- * 隐私承诺不再只靠客户端自觉——客户端即使想夹带也过不了闸。
+ * ★ `title` / `detail` / `status` 不是自由文本：对 task/agenda 两类，它们只能是
+ * **标题与状态摘要**（服务端白名单见下方 `TASK_ACTIVITY_*` / `AGENDA_ACTIVITY_*`）。
+ * 这样「不含正文」的隐私承诺不再只靠客户端自觉——客户端即使想夹带也过不了闸。
+ *
+ * 任务类的 `title` 尤其要钉死：本机任务标题是从**用户提问首行**裁出来的
+ * （`web/src/lib/tasks/store.ts` 的 `taskTitle`），早期实现直接把它上报，
+ * 等于把提示词交给全站同事。
  */
 const TeamActivityBaseSchema = z.object({
   kind: TeamActivityKindSchema,
-  title: z.string().min(1).max(200),
-  detail: z.string().max(500).optional(),
-  status: z.string().max(40).optional(),
+  // .trim() 之后再判长度：纯空白的 title 之前能过 min(1)，被当成「有标题」入库。
+  title: z.string().trim().min(1).max(200),
+  detail: z.string().trim().max(500).optional(),
+  status: z.string().trim().max(40).optional(),
   /** 客户端确定性幂等键：同一 actor 下重复上报只入一条。 */
   sourceId: z.string().min(1).max(200),
-  occurredAt: IsoTimeSchema,
+  occurredAt: IsoTimeInputSchema,
 });
 export type TeamActivityInput = z.infer<typeof TeamActivityBaseSchema>;
 
+/**
+ * 任务摘要的合法 title：只有这个固定占位词。
+ *
+ * 与 `web/src/lib/team/share.ts` 的 `TASK_ACTIVITY_TITLE` 一字不差；
+ * 精确集合而非正则，避免「任务：<正文>」这类夹带蒙混过关。
+ */
+const TASK_ACTIVITY_TITLES = new Set(["任务"]);
 /** 任务摘要的合法 detail（与 `lib/team/share.ts` 的 `TASK_STATUS_LABEL` 一字不差）。 */
 const TASK_ACTIVITY_DETAILS = new Set([
   "任务 · 进行中",
@@ -521,12 +552,15 @@ const AGENDA_ACTIVITY_STATUSES = new Set(["overdue", "today", "next24h"]);
 const ACTIVITY_SUMMARY_ONLY = "只接受标题与状态摘要";
 
 /**
- * 写侧动向输入：`kind` 为 task / agenda 时，`detail` 与 `status` 只能取状态摘要白名单
+ * 写侧动向输入：`kind` 为 task / agenda 时，`title` / `detail` / `status` 只能取状态摘要白名单
  * （用精确集合而不是正则——正则容易放过「任务 · 进行中（正文…）」这类夹带）。
  * 其他 kind（agent / staff / join）保持自由文本现状。
  */
 export const TeamActivityInputSchema = TeamActivityBaseSchema.superRefine((v, ctx) => {
   if (v.kind === "task") {
+    if (!TASK_ACTIVITY_TITLES.has(v.title)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: ACTIVITY_SUMMARY_ONLY });
+    }
     if (v.detail !== undefined && !TASK_ACTIVITY_DETAILS.has(v.detail)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["detail"], message: ACTIVITY_SUMMARY_ONLY });
     }
@@ -540,6 +574,14 @@ export const TeamActivityInputSchema = TeamActivityBaseSchema.superRefine((v, ct
     if (v.status !== undefined && !AGENDA_ACTIVITY_STATUSES.has(v.status)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: ACTIVITY_SUMMARY_ONLY });
     }
+  }
+
+  // occurredAt 必须在「过去 400 天 ~ 未来 5 分钟」之间：否则一条未来时间就能永久置顶。
+  const occurredMs = Date.parse(v.occurredAt);
+  if (occurredMs > Date.now() + ACTIVITY_FUTURE_SKEW_MS) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["occurredAt"], message: "发生时间不能在未来" });
+  } else if (occurredMs < Date.now() - ACTIVITY_MAX_AGE_MS) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["occurredAt"], message: "发生时间太久远" });
   }
 });
 
@@ -687,6 +729,14 @@ export const TeamUsageResponseSchema = z.object({
   to: z.string().min(1),
   self: TeamUsageSelfSchema,
   ranking: z.array(TeamUsageRankRowSchema),
+  /**
+   * 排行里（截断前）有数据的成员总数。
+   *
+   * **可选**：老服务端不返回，客户端不要把「缺失」当成 0——缺失 = 未知。
+   */
+  rankingTotal: z.number().int().nonnegative().optional(),
+  /** `ranking` 是否被服务端截断（当前上限 100 人）。可选，同上。 */
+  rankingTruncated: z.boolean().optional(),
 });
 export type TeamUsageResponse = z.infer<typeof TeamUsageResponseSchema>;
 
@@ -793,6 +843,18 @@ export const AddTeamMemberBodySchema = z.object({
 });
 export type AddTeamMemberBody = z.infer<typeof AddTeamMemberBodySchema>;
 
+/**
+ * 转让队长：目标用户 id（必须是该团队的现有成员）。
+ *
+ * 为什么需要：owner 换号/离职后，团队没有任何人能做 owner-only 动作（改名、加成员、删团队），
+ * 也没人能移除 owner——团队永久僵尸。指名目标而不是「按用户名」是有意的：
+ * 客户端从成员列表里选人，避免把 id 打错成另一个人。
+ */
+export const TransferTeamOwnerBodySchema = z.object({
+  userId: z.string().trim().min(1, "请选择要转让给的成员").max(64, "用户 id 过长"),
+});
+export type TransferTeamOwnerBody = z.infer<typeof TransferTeamOwnerBodySchema>;
+
 export const CreateTeamPlanBodySchema = z.object({
   title: z.string().trim().min(1, "请填写方案标题").max(120, "标题最多 120 字"),
   detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
@@ -822,7 +884,7 @@ export const CreateTeamTaskBodySchema = z.object({
   detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
   planId: z.string().trim().min(1).nullable().optional(),
   assigneeId: z.string().trim().min(1).nullable().optional(),
-  dueAt: IsoTimeSchema.nullable().optional(),
+  dueAt: IsoTimeInputSchema.nullable().optional(),
   /** 交付物（共享文件库里的文件 id）；与 PATCH 的 `attachmentFileId` 同口径。 */
   attachmentFileId: z.string().trim().min(1).nullable().optional(),
 });
@@ -835,7 +897,7 @@ export const UpdateTeamTaskBodySchema = z
     planId: z.string().trim().min(1).nullable().optional(),
     assigneeId: z.string().trim().min(1).nullable().optional(),
     status: TeamItemStatusSchema.optional(),
-    dueAt: IsoTimeSchema.nullable().optional(),
+    dueAt: IsoTimeInputSchema.nullable().optional(),
     attachmentFileId: z.string().trim().min(1).nullable().optional(),
   })
   .refine(

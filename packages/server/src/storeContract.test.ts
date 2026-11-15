@@ -228,6 +228,37 @@ for (const f of factories) {
       expect(() => store.addTeamActivity("nope", { ...base, sourceId: "x" })).toThrow("user not found");
     });
 
+    it("日程动向幂等命中时刷新档位（W2-01：sourceId 稳定但状态随时间变）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const first = {
+        kind: "agenda" as const,
+        title: "项目周会",
+        detail: "日程 · 今天到期",
+        status: "today",
+        sourceId: "agenda:7",
+        occurredAt: "2026-11-03T08:00:00.000Z",
+      };
+      expect(store.addTeamActivity(a.id, first)).toBe(true);
+      // 同一条日程晚些时候变成已逾期：不新增行，但档位与时间要刷新
+      expect(
+        store.addTeamActivity(a.id, {
+          ...first,
+          detail: "日程 · 已逾期",
+          status: "overdue",
+          occurredAt: "2026-11-03T12:00:00.000Z",
+        }),
+      ).toBe(false);
+
+      const rows = store.listTeamActivities();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        sourceId: "agenda:7",
+        detail: "日程 · 已逾期",
+        status: "overdue",
+        occurredAt: "2026-11-03T12:00:00.000Z",
+      });
+    });
+
     it("团队动向：同 occurredAt 按 id DESC 稳定排序，beforeId 组合游标不丢不重", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const at = "2026-11-03T08:00:00.000Z";
@@ -313,6 +344,58 @@ for (const f of factories) {
       const after = store.listTeamUsage({ from: "2026-11-01", to: "2026-11-02" });
       expect(after.map((r) => r.actorId)).toEqual([b.id]);
       expect(store.listTeamUsage({ from: "2026-11-02", to: "2026-11-02" })).toHaveLength(1);
+    });
+
+    it("团队用量清除水位：两实现同语义（无记录 null → 写入 → 同 actor 覆盖）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      expect(store.getTeamUsageClearedAt(a.id)).toBeNull();
+      store.setTeamUsageClearedAt(a.id, 1000);
+      expect(store.getTeamUsageClearedAt(a.id)).toBe(1000);
+      // 再清一次是覆盖水位（主键是 actor_id），不是追加、也不是取最大值以外的东西
+      store.setTeamUsageClearedAt(a.id, 2000);
+      expect(store.getTeamUsageClearedAt(a.id)).toBe(2000);
+      // 不存在的用户：与其它写入口径一致，抛 "user not found"（不是静默写入孤儿行）
+      expect(() => store.setTeamUsageClearedAt("nope", 1)).toThrow("user not found");
+    });
+
+    it("动向保留期：purgeTeamActivities 只删 occurredAt 严格早于 cut-off 的（两实现同语义）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const mk = (sourceId: string, occurredAt: string) => ({
+        kind: "task" as const,
+        title: "任务",
+        sourceId,
+        occurredAt,
+      });
+      expect(store.addTeamActivity(a.id, mk("t:old", "2026-10-01T00:00:00.000Z"))).toBe(true);
+      expect(store.addTeamActivity(a.id, mk("t:keep1", "2026-11-01T00:00:00.000Z"))).toBe(true);
+      expect(store.addTeamActivity(a.id, mk("t:keep2", "2026-11-02T00:00:00.000Z"))).toBe(true);
+
+      // 严格小于：正好等于 cut-off 的那条要保留（与动向游标 before 同口径）
+      expect(store.purgeTeamActivities("2026-11-01T00:00:00.000Z")).toBe(1);
+      expect(store.countTeamActivities(a.id)).toBe(2);
+      expect(
+        store
+          .listTeamActivities()
+          .map((x) => x.sourceId)
+          .sort(),
+      ).toEqual(["t:keep1", "t:keep2"]);
+      // 没有更老的条目时返回 0（定时清理幂等，不会每轮报错）
+      expect(store.purgeTeamActivities("2026-11-01T00:00:00.000Z")).toBe(0);
+
+      // 被清掉的幂等键必须一起释放，否则同一个 sourceId 以后永远写不进来
+      expect(store.addTeamActivity(a.id, mk("t:old", "2026-11-02T00:00:00.000Z"))).toBe(true);
+    });
+
+    it("动向清除水位：两实现同语义（无记录 null → 写入 → 同 actor 覆盖）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      expect(store.getTeamActivityClearedAt(a.id)).toBeNull();
+      store.setTeamActivityClearedAt(a.id, 1000);
+      expect(store.getTeamActivityClearedAt(a.id)).toBe(1000);
+      // 再清一次是覆盖水位（主键 actor_id），不是追加
+      store.setTeamActivityClearedAt(a.id, 2000);
+      expect(store.getTeamActivityClearedAt(a.id)).toBe(2000);
+      // 与其它写入口径一致：不存在的用户抛 "user not found"，不静默写孤儿行
+      expect(() => store.setTeamActivityClearedAt("nope", 1)).toThrow("user not found");
     });
 
     /* ───────────────────── d.92 团队工作台（两实现同契约） ───────────────────── */

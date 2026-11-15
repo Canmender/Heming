@@ -14,6 +14,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
+import { bindTeamShareUser } from "./lib/team/share.js";
 import { ensureDesktopGateway } from "./lib/magpieHost.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
@@ -345,6 +346,17 @@ function AppShell({
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  /**
+   * 团队共享设置按账号隔离（隐私边界）：同一台电脑换账号登录时，
+   * 上一个人的共享开关 / 清除水位不能继承给下一个人，否则新账号会在
+   * 从未同意的情况下把本机任务、日程、用量上报给全站团队。
+   * `bindTeamShareUser` 内部处理「首次绑定认领 / 同账号 no-op / 换账号清空」。
+   */
+  useEffect(() => {
+    if (!authUser) return;
+    bindTeamShareUser(authUser.id);
+  }, [authUser]);
 
   // 网络恢复时立刻再试一次，不必等退避到点
   useEffect(() => {

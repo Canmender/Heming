@@ -165,27 +165,39 @@ describe("HomePage", () => {
 
   it("团队动向：展示最近三条，点击行进入团队页", async () => {
     mockTeam(undefined, undefined, [
-      activity({ id: "a1", title: "整理周报" }),
+      activity({ id: "a1", title: "晨会纪要", kind: "agenda", status: "today" }),
       activity({ id: "a2", title: "写完接口" }),
-      activity({ id: "a3", title: "晨会纪要", kind: "agenda" }),
-      activity({ id: "a4", title: "第四条不该出现" }),
+      activity({ id: "a3", title: "周五交材料", kind: "agenda", status: "today" }),
+      activity({ id: "a4", title: "第四条不该出现", kind: "agenda", status: "today" }),
     ]);
     render(<HomePage />);
     await act(async () => {});
 
     expect(screen.getByText("团队动向")).toBeInTheDocument();
-    for (const title of ["整理周报", "写完接口", "晨会纪要"]) {
+    // 任务动向只上屏派生状态摘要（标题是提示词首行，不再共享）
+    expect(screen.getAllByText("任务").length).toBeGreaterThan(0);
+    expect(screen.queryByText("写完接口")).not.toBeInTheDocument();
+    for (const title of ["晨会纪要", "周五交材料"]) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
     expect(screen.queryByText("第四条不该出现")).not.toBeInTheDocument();
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("日程")).toBeInTheDocument();
+    expect(screen.getAllByText("日程").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByText("整理周报").closest("button")!);
+    fireEvent.click(screen.getByText("晨会纪要").closest("button")!);
     expect(useUiStore.getState().page).toBe("team");
     // 落到「谁的哪条动向」：成员 + 那一条 id（审计 P2-6：原来只 setPage）
     expect(useUiStore.getState().teamFocusUserId).toBe(bob.id);
     expect(useUiStore.getState().teamFocusActivityId).toBe("a1");
+  });
+
+  it("团队动向标题露出规模与在线人数（T2-09：onlineCount 不再只拉不显示）", async () => {
+    mockTeam(undefined, 1, []);
+    render(<HomePage />);
+    await act(async () => {});
+
+    const card = screen.getByRole("region", { name: "团队动向" });
+    expect(within(card).getByText("2 名成员 · 1 人在线")).toBeInTheDocument();
   });
 
   it("智能体 / 幕僚类旧动向不在团队卡露出（团队只放真实成员）", async () => {
@@ -211,7 +223,9 @@ describe("HomePage", () => {
     expect(screen.getAllByText("加载失败：网络中断").length).toBeGreaterThan(0);
     expect(screen.queryByText("还没有团队动向")).not.toBeInTheDocument();
 
-    mockTeam(undefined, undefined, [activity({ title: "重试后的动向" })]);
+    mockTeam(undefined, undefined, [
+      activity({ title: "重试后的动向", kind: "agenda", status: "today" }),
+    ]);
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await act(async () => {});
 

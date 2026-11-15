@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within, act } from "@testing-library/react";
-import type { TeamWorkspaceSnapshot } from "@heming/shared";
+import type { TeamPlanItem, TeamTask, TeamWorkspaceSnapshot } from "@heming/shared";
 import { TeamWorkspace } from "./TeamWorkspace.js";
 import {
   addWorkspaceMember,
@@ -12,7 +12,9 @@ import {
   deleteWorkspaceTeam,
   fetchWorkspaceTeam,
   fetchWorkspaceTeams,
+  leaveWorkspaceTeam,
   removeWorkspaceMember,
+  transferWorkspaceTeamOwner,
   updateTeamPlan,
   updateTeamTask,
   updateWorkspaceTeam,
@@ -30,6 +32,8 @@ vi.mock("../../lib/api.js", async (importOriginal) => {
     deleteWorkspaceTeam: vi.fn(),
     addWorkspaceMember: vi.fn(),
     removeWorkspaceMember: vi.fn(),
+    leaveWorkspaceTeam: vi.fn(),
+    transferWorkspaceTeamOwner: vi.fn(),
     createTeamPlan: vi.fn(),
     updateTeamPlan: vi.fn(),
     deleteTeamPlan: vi.fn(),
@@ -104,9 +108,12 @@ beforeEach(() => {
   vi.mocked(updateWorkspaceTeam).mockReset();
   vi.mocked(addWorkspaceMember).mockReset();
   vi.mocked(removeWorkspaceMember).mockReset();
+  vi.mocked(leaveWorkspaceTeam).mockReset();
+  vi.mocked(transferWorkspaceTeamOwner).mockReset();
   vi.mocked(createTeamPlan).mockReset();
   vi.mocked(updateTeamPlan).mockReset();
   vi.mocked(createTeamTask).mockReset();
+  vi.mocked(updateTeamTask).mockReset();
   vi.mocked(deleteWorkspaceTeam).mockReset();
   vi.mocked(deleteTeamPlan).mockReset();
   vi.mocked(deleteTeamTask).mockReset();
@@ -514,5 +521,209 @@ describe("团队工作台（d.92）", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * W-06：首屏加载失败必须显示错误态与「重试」，不能冒充「还没有团队」——
+   * 后者会让用户以为团队被删了，还引导他去新建一个。
+   */
+  it("首屏加载失败：显示错误态与「重试」，不冒充「还没有团队」", async () => {
+    vi.mocked(fetchWorkspaceTeams)
+      .mockRejectedValueOnce(new Error("网络异常"))
+      .mockResolvedValue({ teams: [team()] });
+
+    render(<TeamWorkspace />);
+    expect(await screen.findByText("团队加载失败")).toBeInTheDocument();
+    expect(screen.queryByText("还没有团队")).toBeNull();
+    // 首屏失败时错误只出现一次（错误态里），页顶不再重复一条横幅。
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/网络异常/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("heading", { name: "增长小组" })).toBeInTheDocument();
+    expect(fetchWorkspaceTeams).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * W-06：面板里的写操作失败就地显示在面板内。只写页顶横幅的话，
+   * 用户滚在任务/方案区根本看不到错误，会以为按钮没生效。
+   */
+  it("面板错误就地显示在面板内，不再只写页顶", async () => {
+    render(<TeamWorkspace />);
+    const planRegion = await screen.findByRole("region", { name: "团队方案" });
+    vi.mocked(createTeamPlan).mockRejectedValueOnce(new Error("方案标题过长"));
+
+    fireEvent.click(within(planRegion).getByRole("button", { name: "添加方案" }));
+    fireEvent.change(within(planRegion).getByLabelText("方案标题"), {
+      target: { value: "一个很长很长的方案标题" },
+    });
+    fireEvent.click(within(planRegion).getByRole("button", { name: "保存" }));
+
+    const alert = await within(planRegion).findByRole("alert");
+    expect(alert).toHaveTextContent("方案标题过长");
+    // 页顶不再重复同一条错误
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+
+    fireEvent.click(within(alert).getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(within(planRegion).queryByRole("alert")).toBeNull());
+  });
+
+  /** W-04：提交中禁用「发布任务」，双击只发一次创建请求。 */
+  it("双击「发布任务」只创建一条，提交中按钮禁用", async () => {
+    render(<TeamWorkspace />);
+    expect(await screen.findByText("产出本周周报初稿")).toBeInTheDocument();
+
+    let resolveCreate!: (task: TeamTask) => void;
+    vi.mocked(createTeamTask).mockImplementation(
+      () =>
+        new Promise<TeamTask>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "派任务" }));
+    fireEvent.change(screen.getByLabelText("任务标题"), { target: { value: "只应创建一次" } });
+    const submit = screen.getByRole("button", { name: "发布任务" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(createTeamTask).toHaveBeenCalledTimes(1));
+    expect(submit).toBeDisabled();
+
+    await act(async () => {
+      resolveCreate({ ...snapshot().tasks[0], id: "k9", title: "只应创建一次" });
+    });
+    // 创建成功后表单收起（按钮不再存在），且始终只发过一次请求。
+    await waitFor(() => expect(screen.queryByLabelText("任务标题")).toBeNull());
+    expect(createTeamTask).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * W-04：状态胶囊用最新快照推进。此前用渲染闭包里的旧 status 算下一档，
+   * 连点两次会从 todo 直接跳到 done。
+   */
+  it("连点状态胶囊只发一次更新、只前进一档", async () => {
+    render(<TeamWorkspace />);
+    expect(await screen.findByText("产出本周周报初稿")).toBeInTheDocument();
+
+    let resolveUpdate!: (task: TeamTask) => void;
+    vi.mocked(updateTeamTask).mockImplementation(
+      () =>
+        new Promise<TeamTask>((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+
+    const row = screen.getByText("产出本周周报初稿").closest("li") as HTMLElement;
+    const pill = within(row).getByRole("button", { name: "待开始" });
+    fireEvent.click(pill);
+    fireEvent.click(pill);
+
+    await waitFor(() => expect(updateTeamTask).toHaveBeenCalledTimes(1));
+    expect(updateTeamTask).toHaveBeenCalledWith("t1", "k1", { status: "doing" });
+    expect(pill).toBeDisabled();
+
+    await act(async () => {
+      resolveUpdate({ ...snapshot().tasks[0], status: "doing" });
+    });
+    const rowAfter = screen.getByText("产出本周周报初稿").closest("li") as HTMLElement;
+    await waitFor(() =>
+      expect(within(rowAfter).getByRole("button", { name: "待开始" })).not.toBeDisabled(),
+    );
+    expect(updateTeamTask).toHaveBeenCalledTimes(1);
+  });
+
+  /** W-04：方案「保存」提交中禁用，双击只创建一条。 */
+  it("双击方案「保存」只创建一条，提交中按钮禁用", async () => {
+    render(<TeamWorkspace />);
+    await screen.findByText("先把周报自动化");
+    const nextPlans = [
+      ...snapshot().plans,
+      { ...snapshot().plans[0], id: "p2", title: "只应创建一次", status: "todo" as const, orderIndex: 1 },
+    ];
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue(snapshot({ plans: nextPlans }));
+
+    let resolveCreate!: (plan: TeamPlanItem) => void;
+    vi.mocked(createTeamPlan).mockImplementation(
+      () =>
+        new Promise<TeamPlanItem>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加方案" }));
+    fireEvent.change(screen.getByLabelText("方案标题"), { target: { value: "只应创建一次" } });
+    const save = screen.getByRole("button", { name: "保存" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(createTeamPlan).toHaveBeenCalledTimes(1));
+    expect(save).toBeDisabled();
+
+    await act(async () => {
+      resolveCreate(nextPlans[1]);
+    });
+    expect(await screen.findByText("只应创建一次")).toBeInTheDocument();
+    expect(createTeamPlan).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("成员自退与队长转让（P1-4）", () => {
+  it("普通成员可以自己退出团队，确认后才发请求", async () => {
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
+      snapshot({
+        team: team({ ownerId: bob.id }),
+        members: [
+          { user: bob, role: "owner", joinedAt: iso },
+          { user: me, role: "member", joinedAt: iso },
+        ],
+      }),
+    );
+    vi.mocked(leaveWorkspaceTeam).mockResolvedValue(undefined);
+    // 首屏还能看到团队（否则会先落到空态，成员区不渲染）；退出后再拉列表为空。
+    vi.mocked(fetchWorkspaceTeams)
+      .mockResolvedValueOnce({ teams: [team()] })
+      .mockResolvedValue({ teams: [] });
+
+    render(<TeamWorkspace />);
+    const leave = await screen.findByRole("button", { name: "退出团队" });
+    fireEvent.click(leave);
+    // 打开确认框但还没点「退出」：不能已经发请求（取消 = 不发）。
+    expect(leaveWorkspaceTeam).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "退出" }));
+    await waitFor(() => expect(leaveWorkspaceTeam).toHaveBeenCalledWith("t1"));
+    // 退出后列表为空：落到「还没有团队」，而不是继续显示刚退出的团队。
+    expect(await screen.findByText("还没有团队")).toBeTruthy();
+  });
+
+  it("owner 没有「退出团队」按钮：团队不能无主，只能转让或解散", async () => {
+    render(<TeamWorkspace />);
+    await screen.findByRole("button", { name: "刷新团队数据" });
+    expect(screen.queryByRole("button", { name: "退出团队" })).toBeNull();
+  });
+
+  it("owner 把队长转让给成员：调用转让接口，之后角色互换", async () => {
+    const before = snapshot();
+    const after = snapshot({
+      team: team({ ownerId: bob.id }),
+      members: [
+        { user: bob, role: "owner", joinedAt: iso },
+        { user: me, role: "member", joinedAt: iso },
+      ],
+    });
+    vi.mocked(transferWorkspaceTeamOwner).mockResolvedValue(after);
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValueOnce(before).mockResolvedValue(after);
+
+    render(<TeamWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "转让队长给 鲍勃" }));
+    fireEvent.click(screen.getByRole("button", { name: "转让" }));
+
+    await waitFor(() =>
+      expect(transferWorkspaceTeamOwner).toHaveBeenCalledWith("t1", bob.id),
+    );
+    // 转让后自己降为成员：出现「退出团队」，且不再能转让给别人。
+    expect(await screen.findByRole("button", { name: "退出团队" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "转让队长给 鲍勃" })).toBeNull();
   });
 });

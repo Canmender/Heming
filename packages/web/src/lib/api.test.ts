@@ -726,4 +726,29 @@ describe("团队动向（/api/team/activities）", () => {
     expect(url.searchParams.get("before")).toBe("2026-11-02T08:00:00.000Z");
     expect(url.searchParams.get("beforeId")).toBe("act-9");
   });
+
+  it("可选 request：不传时行为不变，传了 signal 会真的取消在途请求（T2-11）", async () => {
+    // 不传：与老调用完全一致——请求正常完成；fetch 只带 api() 内部 controller 的 signal（未 abort）
+    await expect(fetchTeamActivities({ limit: 10 })).resolves.toBeDefined();
+    const plain = vi.mocked(globalThis.fetch).mock.calls.at(-1)![1] as RequestInit | undefined;
+    expect(plain?.signal).toBeInstanceOf(AbortSignal);
+    expect((plain?.signal as AbortSignal).aborted).toBe(false);
+
+    // 传 signal：api() 把它接到内部 AbortController 上；中断后映射成「操作已取消」
+    const ac = new AbortController();
+    vi.mocked(globalThis.fetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = (init as RequestInit).signal;
+          expect(signal).toBeInstanceOf(AbortSignal);
+          signal!.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+          queueMicrotask(() => ac.abort());
+        }),
+    );
+    await expect(
+      fetchTeamActivities({ limit: 10 }, { signal: ac.signal }),
+    ).rejects.toMatchObject({ status: 0, message: "操作已取消" });
+  });
 });

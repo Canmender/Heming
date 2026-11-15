@@ -259,6 +259,16 @@ describe("团队用量：默认关闭只看本人", () => {
     expect(await screen.findByText("还没有成员共享用量。")).toBeInTheDocument();
   });
 
+  it("排行被截断时说明总人数（P2-6：不再静默只给前 100）", async () => {
+    vi.mocked(fetchTeamUsage).mockResolvedValue(
+      usageResponse({ rankingTotal: 130, rankingTruncated: true }),
+    );
+    await renderPage();
+    fireEvent.click(screen.getByLabelText("用量排行"));
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    expect(await screen.findByText("共 130 人参与，仅显示前 2 名。")).toBeInTheDocument();
+  });
+
   it("区间切换会带 range 重新拉取", async () => {
     await renderPage();
     fireEvent.click(screen.getByLabelText("用量排行"));
@@ -332,17 +342,19 @@ describe("团队协作口径（d.88）", () => {
   it("关闭某一类共享：给一次性说明「关≠撤回」，原有动向仍然可见", async () => {
     useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, tasks: true } });
     vi.mocked(fetchTeamActivities).mockResolvedValue({
-      activities: [activity({ id: "a1", title: "整理周报", kind: "task" })],
+      activities: [activity({ id: "a1", title: "整理周报", kind: "task", status: "done" })],
     });
     await renderPage();
-    expect(await screen.findByText("整理周报")).toBeInTheDocument();
+    // 任务动向的标题列是派生状态摘要；提问派生的标题（历史遗留行）不再上屏
+    expect((await screen.findAllByText("任务 · 已完成")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("整理周报")).toBeNull();
 
     // 关掉「任务摘要」共享 → 说明关≠撤回
     fireEvent.click(screen.getByLabelText("任务摘要"));
     expect(await screen.findByText(/已停止上报任务摘要/)).toBeInTheDocument();
     expect(screen.getByText(/不撤回已上传的内容/)).toBeInTheDocument();
     // 已上传的动向仍显示（关闭只停未来上报）
-    expect(screen.getByText("整理周报")).toBeInTheDocument();
+    expect(screen.getAllByText("任务 · 已完成").length).toBeGreaterThan(0);
   });
 
   it("团队只有自己时，说明新同事账号从哪来", async () => {
@@ -369,6 +381,17 @@ describe("团队协作口径（d.88）", () => {
     expect(
       await screen.findByText(/你已经开启共享，但还没有可显示的摘要/),
     ).toBeInTheDocument();
+  });
+
+  it("只开用量排行时，动向空态仍提示去开启任务/日程共享（不误称已开启共享）", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "动向" }));
+    expect(
+      await screen.findByText(/成员开启「任务 \/ 日程摘要」共享后/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/你已经开启共享，但还没有可显示的摘要/)).toBeNull();
   });
 
   it("成员详情给出「近 N 天动向条数」与用量口径（未共享时说清）", async () => {
@@ -483,7 +506,7 @@ describe("团队页布局（d.62-B）", () => {
 
 /** d.67 导航合并：原「团队看板」独立页并成团队页的「看板」Tab。 */
 describe("团队页：看板 Tab（d.67 导航合并）", () => {
-  const boardTask = activity({ id: "b1", kind: "task", title: "整理会议纪要", detail: "按项目分组" });
+  const boardTask = activity({ id: "b1", kind: "task", title: "整理会议纪要", status: "done" });
   const boardAgenda = activity({ id: "b2", kind: "agenda", actorId: bob.id, title: "周五交材料" });
 
   it("Tab 栏有看板；切过去渲染两列卡片，页头仍只有一个 h1", async () => {
@@ -493,7 +516,9 @@ describe("团队页：看板 Tab（d.67 导航合并）", () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole("tab", { name: "看板" }));
-    expect(await screen.findByText("整理会议纪要")).toBeInTheDocument();
+    expect(await screen.findByText("任务 · 已完成")).toBeInTheDocument();
+    // 提示词派生的历史标题不进看板
+    expect(screen.queryByText("整理会议纪要")).toBeNull();
     expect(screen.getByText("周五交材料")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "看板" })).toHaveAttribute("aria-selected", "true");
     // d.109：看板复用宿主已加载的数据，切过去不再产生第二次 /api/team/activities 请求
@@ -605,6 +630,24 @@ describe("d.109 成员详情与条目可点", () => {
     fireEvent.click(await screen.findByRole("button", { name: /鲍勃发版/ }));
     expect(await screen.findByText("@bob")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /返回全部/ })).toBeInTheDocument();
+  });
+
+  it("排行被截断时，榜外成员显示「未进前 100」而不是「用量暂无」（T2-14）", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    vi.mocked(fetchTeamUsage).mockResolvedValue(
+      usageResponse({
+        ranking: [{ userId: me.id, displayName: "爱丽丝", tokens: 1234, unreported: 2, days: 1 }],
+        rankingTotal: 130,
+        rankingTruncated: true,
+      }),
+    );
+    await renderPage();
+    const roster = document.querySelector("aside") as HTMLElement;
+    fireEvent.click(within(roster).getByRole("button", { name: /鲍勃/ }));
+
+    expect(await screen.findByText(/@bob/)).toBeInTheDocument();
+    expect(screen.getByText(/用量未进前 100 名/)).toBeInTheDocument();
+    expect(screen.queryByText(/用量暂无/)).toBeNull();
   });
 
   it("点用量排行里的成员 = 选中他并切到动向", async () => {

@@ -342,16 +342,27 @@ describe("团队工作台 REST", () => {
     expect(del.status).toBe(204);
   });
 
-  it("创建任务支持交付物（d.109 A1）：带 attachmentFileId 落库并出现在团队快照里", async () => {
+  it("交付物必须指向共享文件库里真实存在的文件（d.109 A1 + 悬空引用修复）", async () => {
     const team = await createTeam(alice.token);
 
-    // 带交付物创建 → 201 原样返回 id（原先被 zod strip 静默丢成 null）
+    // 文件库上传：交付物只接受真实文件 id
+    const upload = await request(app)
+      .post("/api/files")
+      .set(auth(alice.token))
+      .send({
+        name: "交付物.txt",
+        mime: "text/plain",
+        contentBase64: Buffer.from("hi").toString("base64"),
+      });
+    expect(upload.status).toBe(201);
+    const fileId = upload.body.id as string;
+
     const created = await request(app)
       .post(`/api/teams/${team.team.id}/tasks`)
       .set(auth(alice.token))
-      .send({ title: "带交付物", attachmentFileId: "file-123" });
+      .send({ title: "带交付物", attachmentFileId: fileId });
     expect(created.status).toBe(201);
-    expect(created.body.attachmentFileId).toBe("file-123");
+    expect(created.body.attachmentFileId).toBe(fileId);
 
     // 快照（GET /api/teams/:id）能看到同一条任务带了交付物
     const snap = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
@@ -359,7 +370,30 @@ describe("团队工作台 REST", () => {
     const inSnap = (snap.body.tasks as Array<{ id: string; attachmentFileId: string | null }>).find(
       (t) => t.id === created.body.id,
     );
-    expect(inSnap?.attachmentFileId).toBe("file-123");
+    expect(inSnap?.attachmentFileId).toBe(fileId);
+
+    // 悬空 id → 400（历史行为是照单全收，任务卡点开永远 404）
+    const ghost = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "悬空交付物", attachmentFileId: "file-123" });
+    expect(ghost.status).toBe(400);
+    expect(ghost.body.error).toBe("交付物文件不存在，请先在共享文件库上传");
+
+    const ghostPatch = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${created.body.id}`)
+      .set(auth(alice.token))
+      .send({ attachmentFileId: "file-404" });
+    expect(ghostPatch.status).toBe(400);
+
+    // 删文件时必须把任务上的引用摘掉：否则任务卡「交付物」永久 404
+    const removed = await request(app).delete(`/api/files/${fileId}`).set(auth(alice.token));
+    expect(removed.status).toBe(204);
+    const snap2 = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
+    const after = (snap2.body.tasks as Array<{ id: string; attachmentFileId: string | null }>).find(
+      (t) => t.id === created.body.id,
+    );
+    expect(after?.attachmentFileId).toBeNull();
 
     // 不传 → null（无交付物的任务行为不变）
     const plain = await request(app)
@@ -404,5 +438,181 @@ describe("团队工作台 REST", () => {
     );
     expect((await request(app).get("/api/teams").set(auth(alice.token))).body.teams).toEqual([]);
     expect((await request(app).get("/api/teams").set(auth(bob.token))).body.teams).toEqual([]);
+  });
+
+  it("成员可以自己退出：退出后看不到团队、任务解绑成待认领、其它成员不受影响", async () => {
+    const team = await createTeam(alice.token);
+    await request(app)
+      .post(`/api/teams/${team.team.id}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+    const task = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "bob 的活", assigneeId: bob.user.id });
+    expect(task.status).toBe(201);
+
+    const leave = await request(app).post(`/api/teams/${team.team.id}/leave`).set(auth(bob.token));
+    expect(leave.status).toBe(204);
+
+    // 退出后与「非成员」完全同口径：GET 404、列表里也没有
+    const gone = await request(app).get(`/api/teams/${team.team.id}`).set(auth(bob.token));
+    expect(gone.status).toBe(404);
+    expect(gone.body).toEqual({ error: "团队不存在" });
+    expect((await request(app).get("/api/teams").set(auth(bob.token))).body.teams).toEqual([]);
+
+    // 团队还在，任务被解绑成「待认领」，不留指给非成员的非法引用
+    const snap = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
+    expect(snap.status).toBe(200);
+    expect(snap.body.members.map((m: { user: { username: string } }) => m.user.username)).toEqual([
+      "alice",
+    ]);
+    expect((snap.body.tasks as Array<{ assigneeId: string | null }>)[0]?.assigneeId).toBeNull();
+
+    // 再退一次：已经不是成员 → 404（幂等，不报 500）
+    expect(
+      (await request(app).post(`/api/teams/${team.team.id}/leave`).set(auth(bob.token))).status,
+    ).toBe(404);
+    // 非成员对不存在的团队也是 404
+    expect(
+      (await request(app).post(`/api/teams/ghost-team/leave`).set(auth(bob.token))).status,
+    ).toBe(404);
+  });
+
+  it("owner 不能直接退出：409 且仍是 owner（团队不能无主）", async () => {
+    const team = await createTeam(alice.token);
+    await request(app)
+      .post(`/api/teams/${team.team.id}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+
+    const leave = await request(app).post(`/api/teams/${team.team.id}/leave`).set(auth(alice.token));
+    expect(leave.status).toBe(409);
+    expect(leave.body.error).toBe("队长请先转让团队再退出");
+
+    const snap = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
+    expect(snap.status).toBe(200);
+    expect(snap.body.team.ownerId).toBe(alice.user.id);
+    expect(snap.body.members.map((m: { user: { username: string } }) => m.user.username)).toEqual([
+      "alice",
+      "bob",
+    ]);
+  });
+
+  it("转让队长：owner 变更 + 角色互换，原 owner 立刻失去 owner-only 权限", async () => {
+    const team = await createTeam(alice.token);
+    await request(app)
+      .post(`/api/teams/${team.team.id}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+
+    const transfer = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(alice.token))
+      .send({ userId: bob.user.id });
+    expect(transfer.status).toBe(200);
+    expect(transfer.body.team.ownerId).toBe(bob.user.id);
+    const roles = new Map(
+      (transfer.body.members as Array<{ role: string; user: { username: string } }>).map((m) => [
+        m.user.username,
+        m.role,
+      ]),
+    );
+    expect(roles.get("bob")).toBe("owner");
+    expect(roles.get("alice")).toBe("member");
+
+    // 原 owner 降级：改名/加人 → 403；新 owner 可以改名
+    expect(
+      (
+        await request(app)
+          .patch(`/api/teams/${team.team.id}`)
+          .set(auth(alice.token))
+          .send({ name: "改不了" })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app)
+          .post(`/api/teams/${team.team.id}/members`)
+          .set(auth(alice.token))
+          .send({ username: "carol" })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app)
+          .patch(`/api/teams/${team.team.id}`)
+          .set(auth(bob.token))
+          .send({ name: "bob 的课组" })
+      ).status,
+    ).toBe(200);
+
+    // 新 owner 不能退出（同样 409），但可以移出原 owner
+    expect(
+      (await request(app).post(`/api/teams/${team.team.id}/leave`).set(auth(bob.token))).status,
+    ).toBe(409);
+    expect(
+      (
+        await request(app)
+          .delete(`/api/teams/${team.team.id}/members/${alice.user.id}`)
+          .set(auth(bob.token))
+      ).status,
+    ).toBe(200);
+    expect(
+      (await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token))).status,
+    ).toBe(404);
+  });
+
+  it("转让队长：非成员 404 / 成员非 owner 403 / 目标非成员 400 / 转给自己 400", async () => {
+    const team = await createTeam(alice.token);
+    await request(app)
+      .post(`/api/teams/${team.team.id}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+
+    const ghost = await request(app)
+      .post("/api/teams/ghost-team/owner")
+      .set(auth(alice.token))
+      .send({ userId: bob.user.id });
+    expect(ghost.status).toBe(404);
+    expect(ghost.body).toEqual({ error: "团队不存在" });
+
+    // 非成员转让（目标选真成员 bob）：仍是「团队不存在」，不泄露团队存在性
+    const outsider = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(carol.token))
+      .send({ userId: bob.user.id });
+    expect(outsider.status).toBe(404);
+    expect(outsider.body).toEqual({ error: "团队不存在" });
+
+    // 成员但不是 owner：403（owner-only 动作）；目标选 owner 自己，避免撞上「不能转给自己」
+    const notOwner = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(bob.token))
+      .send({ userId: alice.user.id });
+    expect(notOwner.status).toBe(403);
+    expect(notOwner.body.error).toBe("只有团队创建者可以转让团队");
+
+    const notMember = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(alice.token))
+      .send({ userId: carol.user.id });
+    expect(notMember.status).toBe(400);
+    expect(notMember.body.error).toBe("只能转让给团队成员");
+
+    const self = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(alice.token))
+      .send({ userId: alice.user.id });
+    expect(self.status).toBe(400);
+    expect(self.body.error).toBe("不能转让给自己");
+
+    // 空 body / 空 userId 走 zod → 400 中文
+    const empty = await request(app)
+      .post(`/api/teams/${team.team.id}/owner`)
+      .set(auth(alice.token))
+      .send({ userId: "  " });
+    expect(empty.status).toBe(400);
+    expect(empty.body.error).toBe("请选择要转让给的成员");
   });
 });

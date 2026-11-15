@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { DEFAULT_HITL_POLICY, FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "./policy.js";
+import { DEFAULT_HITL_POLICY, FLOORS, HITL_KEY, HITL_RULES_KEY, HitlPolicyStore, type HitlPolicy } from "./policy.js";
 import type { HitlCall, HitlMode } from "./types.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
@@ -33,6 +33,19 @@ const dangerCall: HitlCall = {
   risk: "danger",
   displayName: "删文件",
 };
+
+/**
+ * 团队写工具调用（camelCase 参数 = 快照回传 / 模型照抄的写法）。
+ *
+ * 修复前 `ruleResource` 只认 `team_id`，camelCase 时返回 `*`，
+ * 「记住允许」于是落成通配 allow → 该工具跨团队永久放行（T2-01）。
+ */
+const teamCall = (teamId: string): HitlCall => ({
+  ...writeCall,
+  name: "team_plan_update",
+  displayName: "更新方案",
+  argsJson: JSON.stringify({ teamId, planId: "p1", title: "落地页" }),
+});
 
 describe("策略存储", () => {
   let storage: FakeStorage;
@@ -211,6 +224,34 @@ describe("记住的规则", () => {
   it("资源为 * 时匹配该工具的所有调用", () => {
     store.rememberRule(writeCall.name, "*", "allow");
     expect(store.ruleFor(withPath(writeCall, "任意/路径.md"))).toBe("allow");
+  });
+
+  it("团队工具按团队 id 记规则：记住 A 之后 B 仍要问", () => {
+    store.rememberRule("team_plan_update", "t1", "allow");
+    expect(store.ruleFor(teamCall("t1"))).toBe("allow");
+    // 另一个团队不能被同一条规则放行（修复前若资源退化成 * 就会）
+    expect(store.ruleFor(teamCall("t2"))).toBeNull();
+  });
+
+  it("团队工具不落通配 allow（* 等于所有团队全放行）", () => {
+    store.rememberRule("team_plan_update", "*", "allow");
+    expect(store.rules()).toHaveLength(0);
+    expect(store.ruleFor(teamCall("t1"))).toBeNull();
+    expect(store.ruleFor(teamCall("t2"))).toBeNull();
+    // 通配 deny 仍然允许（那是收紧，不是放宽）
+    store.rememberRule("team_plan_update", "*", "deny");
+    expect(store.ruleFor(teamCall("t1"))).toBe("deny");
+  });
+
+  it("旧存的团队工具通配 allow 不再生效（存量规则也挡住越权）", () => {
+    storage.setItem(
+      HITL_RULES_KEY,
+      JSON.stringify([
+        { tool: "team_plan_update", resource: "*", effect: "allow", at: "2026-01-01T00:00:00.000Z" },
+      ]),
+    );
+    expect(store.ruleFor(teamCall("t1"))).toBeNull();
+    expect(store.ruleFor(teamCall("t2"))).toBeNull();
   });
 
   it("deny 优先于 allow", () => {

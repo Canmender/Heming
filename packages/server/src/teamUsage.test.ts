@@ -142,6 +142,38 @@ describe("全站排行", () => {
     );
     expect(ranking[0]!.displayName).toBe("成员");
   });
+
+  it("截断透明化：rankingTotal 是去重人数，rankingTruncated 只在超过 100 人时为 true（P2-6）", () => {
+    const two = summarizeTeamUsage(
+      [
+        row({ actorId: "u1", date: "2026-11-02", tokens: 100 }),
+        row({ actorId: "u2", date: "2026-11-02", tokens: 900 }),
+        // 窗口外的成员不算进 total（口径与排行一致，不能一个按区间一个按全表）
+        row({ actorId: "u3", date: "2026-10-01", tokens: 5000 }),
+      ],
+      { viewerId: "u1", range: "7d", from: "2026-10-27", to: "2026-11-02", names: NAMES },
+    );
+    expect(two.ranking).toHaveLength(2);
+    expect(two.rankingTotal).toBe(2);
+    expect(two.rankingTruncated).toBe(false);
+
+    const many = Array.from({ length: 101 }, (_, i) =>
+      row({ actorId: `m${i}`, date: "2026-11-02", tokens: 101 - i }),
+    );
+    const big = summarizeTeamUsage(many, {
+      viewerId: "m0",
+      range: "7d",
+      from: "2026-10-27",
+      to: "2026-11-02",
+      names: NAMES,
+    });
+    expect(big.ranking).toHaveLength(100);
+    expect(big.rankingTotal).toBe(101);
+    expect(big.rankingTruncated).toBe(true);
+    // 截掉的只是尾巴：前 100 名照旧，人数照实报（客户端可显示「前 100 名 / 共 101 人」）
+    expect(big.ranking[0]!.userId).toBe("m0");
+    expect(big.ranking.at(-1)!.userId).toBe("m99");
+  });
 });
 
 describe("summarizeTeamUsage", () => {

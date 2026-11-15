@@ -5,6 +5,7 @@ import { EmptyState } from "../ui/EmptyState.js";
 import { SkeletonLine } from "../ui/Skeleton.js";
 import { TeamIcon } from "../icons.js";
 import { useUiStore } from "../../store/ui.js";
+import { activitySummaryLine, activityTitle } from "../../lib/team/labels.js";
 
 /**
  * 首页「团队动向」卡（d.141 从 HomePage 抽出的既有实现，行为未改）。
@@ -40,6 +41,8 @@ export interface TeamActivityCardProps {
   /** 只含真实成员的任务与日程（智能体侧旧数据不在首页露出）。 */
   activities: TeamActivity[];
   members: TeamMember[];
+  /** 当前在线人数（团队名册口径，用于卡片标题右侧的规模提示）。 */
+  onlineCount: number;
   /** 首次拉取是否已落地：false 时显示骨架，而不是「空态」。 */
   teamReady: boolean;
   teamError: string;
@@ -51,6 +54,7 @@ export interface TeamActivityCardProps {
 export function TeamActivityCard({
   activities,
   members,
+  onlineCount,
   teamReady,
   teamError,
   lastTeamLoadAt,
@@ -65,6 +69,12 @@ export function TeamActivityCard({
         <div className="flex items-center gap-2 text-ui-sm font-semibold text-muted">
           <TeamIcon width={16} height={16} />
           团队动向
+          {/* T2-09：首页此前只拉 onlineCount、不显示（spec §8 要求露出规模）。 */}
+          {teamReady && !teamError && members.length > 0 ? (
+            <span className="font-normal ui-micro">
+              {members.length} 名成员 · {onlineCount} 人在线
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {lastTeamLoadAt ? (
@@ -144,11 +154,11 @@ export function TeamActivityCard({
                   <span className="shrink-0 rounded-sm border border-line px-1 text-ui-xs text-muted">
                     {KIND_LABEL[a.kind]}
                   </span>
-                  <span className="truncate text-ui-md font-medium">{a.title}</span>
+                  <span className="truncate text-ui-md font-medium">{activityTitle(a)}</span>
                 </span>
                 <span className="block truncate ui-caption">
                   {actor?.user.displayName ?? "成员"}
-                  {a.detail ? ` · ${a.detail}` : ""}
+                  {activitySummaryLine(a) ? ` · ${activitySummaryLine(a)}` : ""}
                 </span>
               </span>
               <span className="shrink-0 text-ui-xs text-muted">{fmtTime(a.occurredAt)}</span>

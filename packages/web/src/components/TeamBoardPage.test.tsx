@@ -27,7 +27,7 @@ function activity(overrides: Partial<TeamActivity>): TeamActivity {
     id: "a1",
     actorId: "u1",
     kind: "task",
-    title: "整理会议纪要",
+    title: "任务",
     detail: "任务 · 进行中",
     status: "running",
     sourceId: "s1",
@@ -37,7 +37,14 @@ function activity(overrides: Partial<TeamActivity>): TeamActivity {
   };
 }
 
-const todayTask = activity({ id: "a1", kind: "task", title: "整理会议纪要" });
+const todayTask = activity({ id: "a1" });
+/** 历史遗留行：标题是提示词首行。新的显示层必须不再上屏（A1 隐私红线）。 */
+const legacyTask = activity({
+  id: "a5",
+  title: "整理会议纪要",
+  detail: "任务 · 已完成",
+  status: "done",
+});
 const todayAgenda = activity({
   id: "a2",
   kind: "agenda",
@@ -59,7 +66,7 @@ function renderBoard(over: Partial<TeamBoardViewProps> = {}) {
   const props: TeamBoardViewProps = {
     members: [alice, bob],
     onlineCount: 1,
-    activities: [todayTask, todayAgenda, yesterdayTask, agentActivity],
+    activities: [todayTask, todayAgenda, yesterdayTask, agentActivity, legacyTask],
     selectedId: null,
     onSelectMember: vi.fn(),
     ready: true,
@@ -75,13 +82,15 @@ describe("团队看板视图（受控，d.109）", () => {
   it("用宿主数据展示今日任务/日程，不收智能体动向，也不显示重复隐私 footer", () => {
     renderBoard();
 
-    expect(screen.getByText("整理会议纪要")).toBeInTheDocument();
+    // 任务卡片标题是派生状态摘要；提示词首行（历史遗留 title）不再上屏
+    expect(screen.getAllByText("任务 · 进行中").length).toBeGreaterThan(0);
+    expect(screen.queryByText("整理会议纪要")).not.toBeInTheDocument();
     expect(screen.getByText("周五交材料")).toBeInTheDocument();
     expect(screen.getAllByText("爱丽丝").length).toBeGreaterThan(0);
     expect(screen.getAllByText("鲍勃").length).toBeGreaterThan(0);
     expect(screen.getByText(/1 人在线/)).toBeInTheDocument();
     // 昨日任务默认不显示；智能体轨迹永远不会进来
-    expect(screen.queryByText("昨天的任务")).not.toBeInTheDocument();
+    expect(screen.queryByText("任务 · 失败")).not.toBeInTheDocument();
     expect(screen.queryByText("智能体轨迹")).not.toBeInTheDocument();
     // 两列结构还在
     expect(screen.getByRole("region", { name: "任务" })).toBeInTheDocument();
@@ -110,14 +119,14 @@ describe("团队看板视图（受控，d.109）", () => {
 
   it("点卡片 = 选中该成员（键盘可点）", () => {
     const props = renderBoard();
-    fireEvent.click(screen.getByRole("button", { name: /整理会议纪要/ }));
+    fireEvent.click(screen.getByRole("button", { name: /任务 · 进行中/ }));
     expect(props.onSelectMember).toHaveBeenCalledWith(alice.user.id);
   });
 
   it("筛选共用宿主选中的成员：只显示他的条目", () => {
     renderBoard({ selectedId: bob.user.id });
     expect(screen.getByText("周五交材料")).toBeInTheDocument();
-    expect(screen.queryByText("整理会议纪要")).not.toBeInTheDocument();
+    expect(screen.queryByText("任务 · 进行中")).not.toBeInTheDocument();
     expect(screen.getByText(/鲍勃 · 任务/)).toBeInTheDocument();
   });
 
@@ -157,9 +166,13 @@ describe("团队看板视图（受控，d.109）", () => {
     renderBoard({ activities: [sneaky] });
     expect(screen.getByText("任务 · 已完成")).toBeInTheDocument();
     expect(screen.queryByText(/不该显示的正文/)).toBeNull();
+    // 历史遗留的提问派生标题不再上屏
+    expect(screen.queryByText("某任务")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("搜索看板"), { target: { value: "已完成" } });
-    expect(screen.getByText("某任务")).toBeInTheDocument();
+    expect(screen.getByText("任务 · 已完成")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("搜索看板"), { target: { value: "无此关键词" } });
+    expect(screen.queryByText("任务 · 已完成")).toBeNull();
   });
 
   it("成员 chips 单行横向滚动（1100 窄窗不折行）", () => {

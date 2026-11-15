@@ -26,7 +26,7 @@ import {
   useTeamShareStore,
 } from "../lib/team/share.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
-import { activitySummaryLabel } from "../lib/team/labels.js";
+import { activitySummaryLabel, activitySummaryLine, activityTitle } from "../lib/team/labels.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
@@ -186,6 +186,14 @@ export function TeamPage() {
   // 用 ref 兜住当前值，回调只认 selectedId 这一个请求口径。
   const activitiesRef = useRef<TeamActivity[]>([]);
   activitiesRef.current = activities;
+  /**
+   * 动向请求序号（W-03）：切成员 / 切页签 / 定时刷新同时触发的请求会乱序返回，
+   * 旧响应若直接 setActivities，会把新成员的列表盖回上一个成员，甚至把「加载更早」
+   * 的条目混进去。每次请求自增，await 回来后只认最新那一次。
+   */
+  const feedSeq = useRef(0);
+  /** 用量请求序号（W2-05）：7d/30d 切换并发时只让最新一次落地，避免标题与数字错配。 */
+  const usageSeq = useRef(0);
 
   const loadRoster = useCallback(async () => {
     try {
@@ -202,6 +210,7 @@ export function TeamPage() {
 
   const loadFeed = useCallback(
     async (reset: boolean) => {
+      const seq = ++feedSeq.current;
       const cursor = activitiesRef.current;
       try {
         const data = await fetchTeamActivities({
@@ -213,6 +222,8 @@ export function TeamPage() {
             : {}),
           ...(selectedId ? { actorId: selectedId } : {}),
         });
+        // 晚到的旧响应直接丢掉：它属于上一个筛选口径。
+        if (seq !== feedSeq.current) return;
         setActivities((prev) => {
           if (reset) return data.activities;
           const known = new Set(prev.map((a) => a.id));
@@ -222,6 +233,7 @@ export function TeamPage() {
         setFeedError("");
         setFeedReady(true);
       } catch (err) {
+        if (seq !== feedSeq.current) return;
         setFeedError(err instanceof Error && err.message ? err.message : "网络异常");
         setFeedReady(true);
       }
@@ -328,6 +340,8 @@ export function TeamPage() {
   const syncUsage = useCallback(async () => {
     const current = useTeamShareStore.getState().settings;
     if (!current.usage) return;
+    // W2-05：7d/30d 切换时两次请求会并发，旧响应后到会把「近 30 天」的数字贴到「近 7 天」标题下。
+    const seq = ++usageSeq.current;
     setUsageSyncing(true);
     try {
       const items = collectCurrentTeamUsage(current);
@@ -336,15 +350,17 @@ export function TeamPage() {
         range: usageRange,
         to: dayKeyOf(new Date().toISOString()),
       });
+      if (seq !== usageSeq.current) return;
       setUsage(data);
       setUsageError("");
       setUsageReady(true);
       useTeamShareStore.getState().setLastSync(Date.now());
     } catch (err) {
+      if (seq !== usageSeq.current) return;
       setUsageError(err instanceof Error && err.message ? err.message : "网络异常");
       setUsageReady(true);
     } finally {
-      setUsageSyncing(false);
+      if (seq === usageSeq.current) setUsageSyncing(false);
     }
   }, [usageRange]);
 
@@ -416,6 +432,8 @@ export function TeamPage() {
       latest: recent[0] ?? null,
       recentThree: recent.slice(0, 3),
       rank,
+      // T2-14：排行超 100 人时服务端会截断，此人不在榜 ≠ 没有用量。
+      rankingTruncated: Boolean(usage?.rankingTruncated),
     };
   }, [selectedMember, humanActivities, usage]);
 
@@ -524,7 +542,9 @@ export function TeamPage() {
     setClearing(true);
     try {
       await clearMyTeamActivities();
-      useTeamShareStore.getState().setLastSync(null);
+      // 清除水位：只删服务端行不够——下一轮 sync 会把同一批任务/日程按同一 sourceId
+      // 原样传回去（服务端 INSERT OR IGNORE），用户会看到刚清掉的摘要一分钟内复活。
+      useTeamShareStore.getState().setActivitiesClearedAt(Date.now());
       setSyncError("");
       await loadFeed(true);
     } catch (err) {
@@ -797,7 +817,9 @@ export function TeamPage() {
                     {selectedMemberStats?.rank
                       ? ` · 用量 ${fmtTokens(selectedMemberStats.rank.tokens)}`
                       : share.usage
-                        ? " · 用量暂无"
+                        ? selectedMemberStats?.rankingTruncated
+                          ? " · 用量未进前 100 名"
+                          : " · 用量暂无"
                         : " · 用量未共享"}
                   </div>
                 </div>
@@ -826,7 +848,7 @@ export function TeamPage() {
                             className="flex w-full items-baseline gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-subtle-2"
                           >
                             <span className="shrink-0 ui-chip">{KIND_LABEL[a.kind]}</span>
-                            <span className="min-w-0 flex-1 truncate text-ui-sm">{a.title}</span>
+                            <span className="min-w-0 flex-1 truncate text-ui-sm">{activityTitle(a)}</span>
                             <time dateTime={a.occurredAt} className="shrink-0 ui-caption">
                               {fmtTime(a.occurredAt)}
                             </time>
@@ -918,7 +940,7 @@ export function TeamPage() {
                   compact
                   title="还没有可见的动向。"
                   desc={
-                    shareCount > 0
+                    share.tasks || share.agenda
                       ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
                       : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"
                   }
@@ -948,7 +970,7 @@ export function TeamPage() {
                           <span className="ui-chip">
                             {KIND_LABEL[a.kind]}
                           </span>
-                          <span className="truncate ui-body-sm">{a.title}</span>
+                          <span className="truncate ui-body-sm">{activityTitle(a)}</span>
                           <time
                             dateTime={a.occurredAt}
                             className="ml-auto shrink-0 ui-caption"
@@ -956,9 +978,9 @@ export function TeamPage() {
                             {fmtTime(a.occurredAt)}
                           </time>
                         </span>
-                        {activitySummaryLabel(a) && (
+                        {activitySummaryLine(a) && (
                           <span className="mt-0.5 block truncate ui-caption">
-                            {activitySummaryLabel(a)}
+                            {activitySummaryLine(a)}
                           </span>
                         )}
                       </span>
@@ -1065,7 +1087,7 @@ export function TeamPage() {
                           <span className="shrink-0 ui-body-sm font-medium">
                             {nameOf(a.actorId)}
                           </span>
-                          <span className="truncate ui-body-sm">{a.title}</span>
+                          <span className="truncate ui-body-sm">{activityTitle(a)}</span>
                           <time
                             dateTime={a.occurredAt}
                             className="ml-auto shrink-0 ui-caption"
@@ -1073,8 +1095,8 @@ export function TeamPage() {
                             {fmtTime(a.occurredAt)}
                           </time>
                         </div>
-                        {activitySummaryLabel(a) && (
-                          <p className="mt-0.5 truncate ui-caption">{activitySummaryLabel(a)}</p>
+                        {activitySummaryLine(a) && (
+                          <p className="mt-0.5 truncate ui-caption">{activitySummaryLine(a)}</p>
                         )}
                       </div>
                     </li>
@@ -1253,6 +1275,11 @@ export function TeamPage() {
                         ))}
                       </ol>
                     )}
+                    {usage.rankingTruncated && usage.rankingTotal ? (
+                      <p className="mt-1 ui-caption">
+                        共 {usage.rankingTotal} 人参与，仅显示前 {usage.ranking.length} 名。
+                      </p>
+                    ) : null}
                     <p className="mt-2 ui-micro">
                       排行只显示聚合数与显示名；模型名与连接名只在你自己的明细里。
                     </p>

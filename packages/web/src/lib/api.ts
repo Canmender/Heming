@@ -99,19 +99,87 @@ export function setOnUnauthorized(fn: (() => void) | null): void {
   onUnauthorized = fn;
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * `api()` 的可选请求控制。**默认一个都不传 = 与旧行为完全一致**（不中断、不超时），
+ * 所以其它调用方不需要改。
+ */
+export interface ApiRequestOptions {
+  /** 外部中断信号（用户点「中断」/组件卸载）：触发后立刻中止在途请求。 */
+  signal?: AbortSignal;
+  /** 超时毫秒（>0 生效）：超时后中止请求并抛「请求超时」。 */
+  timeoutMs?: number;
+}
+
+/** 因「调用方取消」失败时的 status（0 不是合法 HTTP 码，用来和网络/服务端错误区分）。 */
+export const API_CANCELLED_STATUS = 0;
+/** 因 `timeoutMs` 超时失败时的 status。 */
+export const API_TIMEOUT_STATUS = 408;
+/** 被中断时的统一文案：工具层据此回「用户已中断」，不把取消说成失败。 */
+export const API_CANCELLED_MESSAGE = "操作已取消";
+
+export function apiTimeoutMessage(timeoutMs: number): string {
+  return `请求超时（${Math.max(1, Math.round(timeoutMs / 1000))} 秒），请稍后重试`;
+}
+
+/** 这次失败是不是「调用方主动中断」：用于把取消和真失败分开提示。 */
+export function isApiAbort(e: unknown): boolean {
+  return e instanceof ApiError && e.status === API_CANCELLED_STATUS;
+}
+
+/** 这次失败是不是「超时」。 */
+export function isApiTimeout(e: unknown): boolean {
+  return e instanceof ApiError && e.status === API_TIMEOUT_STATUS;
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  options: ApiRequestOptions = {},
+): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   // 模块级 token 优先；为空时回退 localStorage（测试环境 setToken 未先行、模块加载早于写入的场景）
   const t = token ?? localStorage.getItem("heming.token");
   if (t) headers.set("Authorization", `Bearer ${t}`);
-  const res = await fetch(resolveUrl(path), { ...init, headers });
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) {
-    if (res.status === 401 && onUnauthorized) onUnauthorized();
-    throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+
+  // 中断与超时都在这一层收口：任一触发都走同一个 controller，fetch 抛出的 AbortError
+  // 在这里被翻译成可读的 ApiError（不把 DOMException / "signal is aborted" 丢给上层）。
+  const controller = new AbortController();
+  const linked = [options.signal, init.signal].filter((s): s is AbortSignal => Boolean(s));
+  const onAbort = () => controller.abort();
+  for (const s of linked) {
+    if (s.aborted) controller.abort();
+    else s.addEventListener("abort", onAbort, { once: true });
   }
-  return body as T;
+  let timedOut = false;
+  const timer =
+    options.timeoutMs !== undefined && options.timeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, options.timeoutMs)
+      : undefined;
+
+  try {
+    const res = await fetch(resolveUrl(path), { ...init, headers, signal: controller.signal });
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      if (res.status === 401 && onUnauthorized) onUnauthorized();
+      throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+    }
+    return body as T;
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    if (controller.signal.aborted) {
+      throw timedOut && options.timeoutMs !== undefined
+        ? new ApiError(API_TIMEOUT_STATUS, apiTimeoutMessage(options.timeoutMs))
+        : new ApiError(API_CANCELLED_STATUS, API_CANCELLED_MESSAGE);
+    }
+    throw e;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    for (const s of linked) s.removeEventListener("abort", onAbort);
+  }
 }
 
 type AuthResponse = { token: string; user: User };
@@ -184,7 +252,8 @@ export const fetchMessages = (convId: string) =>
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
 
 /** 团队名册：本实例全部注册用户 + 在线态 + 最近活跃。 */
-export const fetchTeam = () => api<TeamRoster>("/api/team");
+export const fetchTeam = (request?: ApiRequestOptions) =>
+  api<TeamRoster>("/api/team", {}, request);
 
 /**
  * 团队动向流：默认 50 条，按 `occurredAt DESC, id DESC` 倒序。
@@ -192,56 +261,68 @@ export const fetchTeam = () => api<TeamRoster>("/api/team");
  * 翻页游标是**组合游标**：`before` 取上一页最后一条的 `occurredAt`；同时间戳可能有多条，
  * 再带上它的 `id` 作 `beforeId`，否则同刻的剩余条目永远翻不到（老调用只传 `before` 仍可用）。
  */
-export const fetchTeamActivities = (opts: {
-  limit?: number;
-  before?: string;
-  beforeId?: string;
-  actorId?: string;
-} = {}) => {
+export const fetchTeamActivities = (
+  opts: {
+    limit?: number;
+    before?: string;
+    beforeId?: string;
+    actorId?: string;
+  } = {},
+  request?: ApiRequestOptions,
+) => {
   const q = new URLSearchParams();
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   if (opts.before) q.set("before", opts.before);
   if (opts.beforeId) q.set("beforeId", opts.beforeId);
   if (opts.actorId) q.set("actorId", opts.actorId);
   const suffix = q.toString() ? `?${q.toString()}` : "";
-  return api<TeamActivityList>(`/api/team/activities${suffix}`);
+  return api<TeamActivityList>(`/api/team/activities${suffix}`, {}, request);
 };
 
 /** 上报本机摘要（≤50 条/次，按 sourceId 幂等去重）。 */
-export const uploadTeamActivities = (items: TeamActivityInput[]) =>
-  api<TeamActivityWriteResult>("/api/team/activities", {
-    method: "POST",
-    body: JSON.stringify({ items }),
-  });
+export const uploadTeamActivities = (items: TeamActivityInput[], request?: ApiRequestOptions) =>
+  api<TeamActivityWriteResult>(
+    "/api/team/activities",
+    {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    },
+    request,
+  );
 
 /** 撤回本人已上传的全部动向。 */
-export const clearMyTeamActivities = () =>
-  api<void>("/api/team/activities/mine", { method: "DELETE" });
+export const clearMyTeamActivities = (request?: ApiRequestOptions) =>
+  api<void>("/api/team/activities/mine", { method: "DELETE" }, request);
 
 /**
  * 团队用量（②-3）：只上报白名单摘要（自然日/模型名/连接名/token 数/未上报轮数），
  * 按 `(actor, date, model)` 覆盖式幂等——重复同步同一份数据不会翻倍。
  */
-export const uploadTeamUsage = (items: TeamUsageInput[]) =>
-  api<TeamUsageWriteResult>("/api/team/usage", {
-    method: "POST",
-    body: JSON.stringify({ items }),
-  });
+export const uploadTeamUsage = (items: TeamUsageInput[], request?: ApiRequestOptions) =>
+  api<TeamUsageWriteResult>(
+    "/api/team/usage",
+    {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    },
+    request,
+  );
 
 /** 本人用量明细 + 全站排行；`to` 传本地今天（服务端不猜时区）。 */
 export const fetchTeamUsage = (
   opts: { range?: TeamUsageRange; to?: string } = {},
+  request?: ApiRequestOptions,
 ) => {
   const q = new URLSearchParams();
   if (opts.range) q.set("range", opts.range);
   if (opts.to) q.set("to", opts.to);
   const suffix = q.toString() ? `?${q.toString()}` : "";
-  return api<TeamUsageResponse>(`/api/team/usage${suffix}`);
+  return api<TeamUsageResponse>(`/api/team/usage${suffix}`, {}, request);
 };
 
 /** 删除本人已上传的全部用量行（关闭共享不删数据，删除必须是显式动作）。 */
-export const clearMyTeamUsage = () =>
-  api<TeamUsageClearResult>("/api/team/usage/mine", { method: "DELETE" });
+export const clearMyTeamUsage = (request?: ApiRequestOptions) =>
+  api<TeamUsageClearResult>("/api/team/usage/mine", { method: "DELETE" }, request);
 
 /* ══════════════════════════════════════════════════════════════════════
  * 团队工作台（d.92 · 用户自建团队）
@@ -253,74 +334,156 @@ export const clearMyTeamUsage = () =>
  * 与 UI 走同一套 REST 封装，错误口径一致（ApiError，中文 message 原样上抛）。
  */
 
+/**
+ * 下面这批 REST 封装都带一个**可选**的 `request`（中断信号 / 超时）：
+ * 智能体工具（teamTools.ts）传 `opts.signal` 后，用户点「中断」会真的收手；
+ * 其它调用方不传时行为与以前完全一致。
+ */
 /** 我加入/拥有的团队列表（不含方案与任务明细）。 */
-export const fetchWorkspaceTeams = () => api<WorkspaceTeamList>("/api/teams");
+export const fetchWorkspaceTeams = (request?: ApiRequestOptions) =>
+  api<WorkspaceTeamList>("/api/teams", {}, request);
 
 /** 新建团队；返回完整快照（含 owner 自己在 members 里）。 */
-export const createWorkspaceTeam = (body: CreateWorkspaceTeamBody) =>
-  api<TeamWorkspaceSnapshot>("/api/teams", { method: "POST", body: JSON.stringify(body) });
+export const createWorkspaceTeam = (body: CreateWorkspaceTeamBody, request?: ApiRequestOptions) =>
+  api<TeamWorkspaceSnapshot>("/api/teams", { method: "POST", body: JSON.stringify(body) }, request);
 
 /** 单个团队的完整工作台快照（team + members + plans + tasks）。 */
-export const fetchWorkspaceTeam = (id: string) =>
-  api<TeamWorkspaceSnapshot>(`/api/teams/${id}`);
+export const fetchWorkspaceTeam = (id: string, request?: ApiRequestOptions) =>
+  api<TeamWorkspaceSnapshot>(`/api/teams/${id}`, {}, request);
 
 /** 改团队名/目标；返回更新后的快照。 */
-export const updateWorkspaceTeam = (id: string, body: UpdateWorkspaceTeamBody) =>
-  api<TeamWorkspaceSnapshot>(`/api/teams/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
+export const updateWorkspaceTeam = (
+  id: string,
+  body: UpdateWorkspaceTeamBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamWorkspaceSnapshot>(
+    `/api/teams/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+    request,
+  );
 
 /** 解散团队（owner 才能删）；成功无响应体。 */
-export const deleteWorkspaceTeam = (id: string) =>
-  api<void>(`/api/teams/${id}`, { method: "DELETE" });
+export const deleteWorkspaceTeam = (id: string, request?: ApiRequestOptions) =>
+  api<void>(`/api/teams/${id}`, { method: "DELETE" }, request);
 
 /** 按用户名把已有用户拉进团队；返回更新后的快照。 */
-export const addWorkspaceMember = (id: string, username: string) =>
-  api<TeamWorkspaceSnapshot>(`/api/teams/${id}/members`, {
-    method: "POST",
-    body: JSON.stringify({ username }),
-  });
+export const addWorkspaceMember = (
+  id: string,
+  username: string,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamWorkspaceSnapshot>(
+    `/api/teams/${id}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    },
+    request,
+  );
 
 /** 把某个成员移出团队（owner 才能移）；返回更新后的快照。 */
-export const removeWorkspaceMember = (id: string, userId: string) =>
-  api<TeamWorkspaceSnapshot>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" });
+export const removeWorkspaceMember = (id: string, userId: string, request?: ApiRequestOptions) =>
+  api<TeamWorkspaceSnapshot>(
+    `/api/teams/${id}/members/${userId}`,
+    { method: "DELETE" },
+    request,
+  );
+
+/**
+ * 自己退出团队（成员自救；owner 不能直接退，服务端 409 要求先转让或解散）。
+ * 成功无响应体：退出后这个团队对本人就不可见了，要重新加入得队长再拉一次。
+ */
+export const leaveWorkspaceTeam = (id: string, request?: ApiRequestOptions) =>
+  api<void>(`/api/teams/${id}/leave`, { method: "POST" }, request);
+
+/** 把队长转让给团队里的某位成员（仅 owner）；返回更新后的快照。 */
+export const transferWorkspaceTeamOwner = (
+  id: string,
+  userId: string,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamWorkspaceSnapshot>(
+    `/api/teams/${id}/owner`,
+    {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    },
+    request,
+  );
 
 /** 新增方案项（团队的「怎么做」）。 */
-export const createTeamPlan = (teamId: string, body: CreateTeamPlanBody) =>
-  api<TeamPlanItem>(`/api/teams/${teamId}/plans`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+export const createTeamPlan = (
+  teamId: string,
+  body: CreateTeamPlanBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamPlanItem>(
+    `/api/teams/${teamId}/plans`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    request,
+  );
 
 /** 改方案项（标题/说明/状态/排序）。 */
-export const updateTeamPlan = (teamId: string, planId: string, body: UpdateTeamPlanBody) =>
-  api<TeamPlanItem>(`/api/teams/${teamId}/plans/${planId}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
+export const updateTeamPlan = (
+  teamId: string,
+  planId: string,
+  body: UpdateTeamPlanBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamPlanItem>(
+    `/api/teams/${teamId}/plans/${planId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+    request,
+  );
 
 /** 删方案项（归属该方案的任务由服务端决定如何处理）。 */
-export const deleteTeamPlan = (teamId: string, planId: string) =>
-  api<void>(`/api/teams/${teamId}/plans/${planId}`, { method: "DELETE" });
+export const deleteTeamPlan = (teamId: string, planId: string, request?: ApiRequestOptions) =>
+  api<void>(`/api/teams/${teamId}/plans/${planId}`, { method: "DELETE" }, request);
 
 /** 派任务（可挂在方案下、可指派给成员）。 */
-export const createTeamTask = (teamId: string, body: CreateTeamTaskBody) =>
-  api<TeamTask>(`/api/teams/${teamId}/tasks`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+export const createTeamTask = (
+  teamId: string,
+  body: CreateTeamTaskBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamTask>(
+    `/api/teams/${teamId}/tasks`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    request,
+  );
 
 /** 改任务（状态/负责人/标题/说明/截止时间/交付物）。 */
-export const updateTeamTask = (teamId: string, taskId: string, body: UpdateTeamTaskBody) =>
-  api<TeamTask>(`/api/teams/${teamId}/tasks/${taskId}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
+export const updateTeamTask = (
+  teamId: string,
+  taskId: string,
+  body: UpdateTeamTaskBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamTask>(
+    `/api/teams/${teamId}/tasks/${taskId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+    request,
+  );
 
 /** 删任务。 */
-export const deleteTeamTask = (teamId: string, taskId: string) =>
-  api<void>(`/api/teams/${teamId}/tasks/${taskId}`, { method: "DELETE" });
+export const deleteTeamTask = (teamId: string, taskId: string, request?: ApiRequestOptions) =>
+  api<void>(`/api/teams/${teamId}/tasks/${taskId}`, { method: "DELETE" }, request);
 
 /**
  * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：
