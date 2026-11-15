@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 单条用例的执行：准备沙箱 → 注入确定性依赖 → 真的跑 `runAgentMentions` → 收集观测。
  *
  * 关键取舍：**走真实编排层**（`runAgentMentions`）而不是直接调工具。
@@ -176,6 +176,7 @@ export async function runCase(testCase: EvalCase, options: RunCaseOptions): Prom
     dir,
     rollout,
     finals: finals.map((item) => item.text),
+    evidence: finals.flatMap((item) => (item.evidence ? [item.evidence] : [])),
     toolResults: toolOutcomes.map((item) => item.text),
     toolCalls: toolCalls.map((item) => ({ id: item.id, name: item.name })),
     toolOutcomes,

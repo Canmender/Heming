@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES } from "./agentStream.js";
+﻿import { describe, it, expect, vi } from "vitest";
+import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
@@ -2111,5 +2111,247 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     const result = items.find((it) => it.type === "tool_result");
     expect(result?.denied).toBe(true);
     expect(result?.ms).toBeUndefined();
+  });
+});
+
+
+/* ------------------------------------------------ P3-T16：失败归因分类 */
+
+describe("classifyTurnFailure（五抽屉 + 兜底）", () => {
+  it("用户主动中断不算失败（中断是人的决定，不是系统失败）", () => {
+    expect(classifyTurnFailure({ aborted: true })).toBeUndefined();
+    const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
+    expect(classifyTurnFailure({ error: abort })).toBeUndefined();
+  });
+
+  it("上下文塞不下：400/413 与超限特征词命中", () => {
+    expect(classifyTurnFailure({ error: new Error("400 context length exceeded") })).toBe(
+      "context_overflow",
+    );
+  });
+
+  it("模型拒答：只认供应商明确的安全/政策措辞", () => {
+    expect(classifyTurnFailure({ error: new Error("content_filter triggered") })).toBe(
+      "model_refusal",
+    );
+    expect(classifyTurnFailure({ error: new Error("模型拒答：内容政策不允许") })).toBe(
+      "model_refusal",
+    );
+  });
+
+  it("HITL 全拒：有拒绝且没有工具真的报错", () => {
+    expect(classifyTurnFailure({ error: new Error("boom"), denials: 2, toolFailures: 0 })).toBe(
+      "hitl_denied",
+    );
+    // 工具也报过错时归工具：拒绝只是过程，坏的工具才是根因。
+    expect(classifyTurnFailure({ error: new Error("boom"), denials: 2, toolFailures: 1 })).toBe(
+      "tool_error",
+    );
+  });
+
+  it("工具报错与上游兜底", () => {
+    expect(classifyTurnFailure({ error: new Error("boom"), toolFailures: 3 })).toBe("tool_error");
+    expect(classifyTurnFailure({ error: new Error("502 bad gateway") })).toBe("provider_error");
+    expect(classifyTurnFailure({ error: "socket hang up" })).toBe("provider_error");
+  });
+
+  it("成功收口只有 max_rounds 一类：回答出来了但任务被截断", () => {
+    expect(classifyTurnFailure({ maxRounds: true })).toBe("max_rounds");
+    expect(classifyTurnFailure({})).toBeUndefined();
+  });
+});
+
+describe("turn_end.failure（P3-T16：新失败必落一类）", () => {
+  const echoSpec = { type: "function", function: { name: "srv__echo" } };
+  const echoCall = [
+    { id: "call_1", type: "function" as const, function: { name: "srv__echo", arguments: "{}" } },
+  ];
+
+  it("工具轮打满：status ok 但仍写 max_rounds（面板据此看出「话没说完不是模型懒」）", async () => {
+    const items: { type: string; status?: string; failure?: string }[] = [];
+    // 永远要工具：第 MAX_TOOL_ROUNDS 轮会走「到上限先给结论」分支。
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        o.onToolCalls?.(echoCall);
+        o.onDelta("继续");
+        return "继续";
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [echoSpec as never],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const end = items.find((it) => it.type === "turn_end");
+    expect(end?.status).toBe("ok");
+    expect(end?.failure).toBe("max_rounds");
+  });
+
+  it("工具报错后上游挂掉：归 tool_error（不是笼统的 provider_error）", async () => {
+    const items: { type: string; failure?: string; status?: string }[] = [];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        round += 1;
+        if (round === 1) {
+          o.onToolCalls?.(echoCall);
+          return "";
+        }
+        throw new Error("502 bad gateway");
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [echoSpec as never],
+        execute: async () => ({ text: "工具坏了", ok: false }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const end = items.find((it) => it.type === "turn_end");
+    expect(end?.status).toBe("error");
+    expect(end?.failure).toBe("tool_error");
+  });
+
+  it("被 HITL 拒绝后上游挂掉：归 hitl_denied（别让工具背锅）", async () => {
+    const items: { type: string; failure?: string }[] = [];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        round += 1;
+        if (round === 1) {
+          o.onToolCalls?.([
+            {
+              id: "call_1",
+              type: "function" as const,
+              function: { name: "fs__write_file", arguments: '{"p":"a"}' },
+            },
+          ]);
+          return "";
+        }
+        throw new Error("500 internal");
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } } as never],
+        execute: async () => ({ text: "写好了", ok: true }),
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+          cause: "user" as const,
+        })),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const end = items.find((it) => it.type === "turn_end");
+    expect(end?.failure).toBe("hitl_denied");
+  });
+
+  it("成功回合不写 failure（正常完成不需要归因）", async () => {
+    const items: { type: string; failure?: string }[] = [];
+    const { deps } = makeDeps({ onRollout: (item) => items.push(item as never) });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const end = items.find((it) => it.type === "turn_end");
+    expect(end?.failure).toBeUndefined();
+  });
+});
+
+describe("assistant_final.evidence（P3-T15：完成即证据）", () => {
+  function twoRound(calls: unknown[]) {
+    const rounds = [
+      { text: "我先做一下", calls },
+      { text: "做完了", calls: [] as never[] },
+    ];
+    let round = 0;
+    return vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        if (r.text) o.onDelta(r.text);
+        return r.text;
+      },
+    );
+  }
+
+  const patchArgs = JSON.stringify({
+    patch: "*** Begin Patch\n*** Update File: notes/待办.md\n@@\n-旧\n+新\n*** End Patch",
+  });
+
+  it("成功的写调用进 assistant_final.evidence：文件、动作、输出摘要都有", async () => {
+    const items: { type: string; evidence?: { files: string[]; commands: string[]; outputDigest?: string } }[] = [];
+    const { deps } = makeDeps({
+      streamChat: twoRound([
+        { id: "call_1", type: "function", function: { name: "file_patch", arguments: patchArgs } },
+      ]) as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "file_patch" } } as never],
+        execute: async () => ({ text: "已写入磁盘：notes/待办.md", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const final = items.find((it) => it.type === "assistant_final");
+    expect(final?.evidence?.files).toEqual(["notes/待办.md"]);
+    expect(final?.evidence?.commands[0]).toContain("file_patch");
+    expect(final?.evidence?.outputDigest).toContain("已写入磁盘");
+  });
+
+  it("纯问答回合没有证据：不写空对象冒充「查过无副作用」", async () => {
+    const items: { type: string; evidence?: unknown }[] = [];
+    const { deps } = makeDeps({ onRollout: (item) => items.push(item as never) });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const final = items.find((it) => it.type === "assistant_final");
+    expect(final).toBeTruthy();
+    expect(final?.evidence).toBeUndefined();
+  });
+
+  it("失败的写调用不算证据：它什么都没证明", async () => {
+    const items: { type: string; evidence?: { files: string[] } }[] = [];
+    const { deps } = makeDeps({
+      streamChat: twoRound([
+        { id: "call_1", type: "function", function: { name: "file_patch", arguments: patchArgs } },
+      ]) as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "file_patch" } } as never],
+        execute: async () => ({ text: "锚点匹配失败（match-failed）", ok: false }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const final = items.find((it) => it.type === "assistant_final");
+    expect(final?.evidence).toBeUndefined();
   });
 });

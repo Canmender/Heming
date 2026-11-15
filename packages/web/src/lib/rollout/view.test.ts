@@ -8,6 +8,7 @@ import {
   relativeLabel,
   relativeOffsetMs,
   rolloutExportFileName,
+  failureCounts,
   streamUsageTotals,
   toolTimings,
 } from "./view.js";
@@ -201,5 +202,35 @@ describe("回合用量与工具耗时（v3）", () => {
     ]);
     // tool_call 只是模型的决策，没执行就没有耗时可言。
     expect(toolTimings([{ type: "tool_call", seq: 0, at: at(0), streamId: "s1", id: "t1", name: "x", args: "{}" }])).toEqual([]);
+  });
+});
+
+describe("失败归因计数（P3-T16：五抽屉 + 兜底）", () => {
+  it("按失败归因聚合，六个抽屉固定顺序、没出现的补 0", () => {
+    const items = [
+      { type: "turn_end", seq: 0, at: at(0), streamId: "s1", status: "error", failure: "tool_error" },
+      { type: "turn_end", seq: 1, at: at(1), streamId: "s1", status: "error", failure: "tool_error" },
+      { type: "turn_end", seq: 2, at: at(2), streamId: "s1", status: "ok", failure: "max_rounds" },
+    ] as RolloutItem[];
+    expect(failureCounts(items)).toEqual([
+      { failure: "context_overflow", count: 0 },
+      { failure: "tool_error", count: 2 },
+      { failure: "model_refusal", count: 0 },
+      { failure: "hitl_denied", count: 0 },
+      { failure: "max_rounds", count: 1 },
+      { failure: "provider_error", count: 0 },
+    ]);
+  });
+
+  it("v3 旧回合没有 failure：不计入任何抽屉（不能算成「没失败」也不要瞎猜）", () => {
+    const items = [
+      { type: "turn_end", seq: 0, at: at(0), streamId: "s1", status: "ok" },
+      { type: "turn_end", seq: 1, at: at(1), streamId: "s1", status: "aborted" },
+    ] as RolloutItem[];
+    expect(failureCounts(items).reduce((sum, row) => sum + row.count, 0)).toBe(0);
+  });
+
+  it("空日志也是六行 0：面板要能回答「这一类一次都没有」", () => {
+    expect(failureCounts([])).toHaveLength(6);
   });
 });

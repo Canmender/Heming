@@ -1,5 +1,5 @@
 import { turnCompletion, type PairToolCallsResult } from "./pair.js";
-import type { RolloutItem } from "./types.js";
+import type { RolloutItem, RolloutTurnFailure } from "./types.js";
 
 /**
  * 回放（replay）的**展示层纯逻辑**：相对时间、类型筛选、悬停配对、单回合导出。
@@ -212,4 +212,37 @@ export function toolTimings(items: readonly RolloutItem[]): RolloutToolTiming[] 
     });
   }
   return rows;
+}
+
+/** 「五抽屉」报表的一格：归因码 + 本段日志里出现的次数。 */
+export interface RolloutFailureCount {
+  failure: RolloutTurnFailure;
+  count: number;
+}
+
+/** 报表抽屉顺序：五个可归因类在前，兜底类最后（见 `RolloutTurnFailure` 的注释）。 */
+const FAILURE_ORDER: readonly RolloutTurnFailure[] = [
+  "context_overflow",
+  "tool_error",
+  "model_refusal",
+  "hitl_denied",
+  "max_rounds",
+  "provider_error",
+];
+
+/**
+ * 失败归因计数（v4 / P3-T16）：把 `turn_end.failure` 聚成「五抽屉 + 兜底」。
+ *
+ * - 只统计**写了归因**的回合：v3 及更早的旧日志没有这个字段，不能算成「没失败」；
+ * - 永远返回全部抽屉（count 可能为 0）：面板要能回答「这一类一次都没发生」，
+ *   缺行会被误读成「没统计」；
+ * - 顺序固定：报表里同一类的位置不随数据变化，方便按周对比截图。
+ */
+export function failureCounts(items: readonly RolloutItem[]): RolloutFailureCount[] {
+  const counts = new Map<RolloutTurnFailure, number>();
+  for (const item of items) {
+    if (item.type !== "turn_end" || !item.failure) continue;
+    counts.set(item.failure, (counts.get(item.failure) ?? 0) + 1);
+  }
+  return FAILURE_ORDER.map((failure) => ({ failure, count: counts.get(failure) ?? 0 }));
 }

@@ -1,4 +1,4 @@
-# 评测题集（evals）
+﻿# 评测题集（evals）
 
 本目录是「智能体能力调优」的**确定性评测**基线（执行计划 P0.2 / ADR-2）。目录约定：
 
@@ -84,6 +84,7 @@ graders:                     # 必填，见 §3；全部通过才算该用例通
 | `max_rounds` | `value: number` | 模型回合数 ≤ value |
 | `hitl` | `tool: string`、`expect: "denied"\|"allowed"` | 该调用最终有没有被执行：闸门放行且工具成功 = `allowed`；闸门拒绝或工具失败（含路径校验拒绝）= `denied` |
 | `no_side_effect` | `paths: string[]` | 这些路径（相对工作区，也可绝对路径）不存在或未被创建 |
+| `evidence` | `files?: string[]`、`evidence_commands?: string[]` | 这些文件/动作必须出现在这次运行所有 `assistant_final.evidence` 里（子串匹配、路径分隔符不敏感）；**没有任何证据直接判负**——只自称完成不算数（P3/T15） |
 | `llm_judge` | `rubric: string` | **仅夜间真实模型模式**使用；确定性模式记为 skipped（不算失败，也不占 pass@1） |
 
 `in` 的取值：`final` = 最后一条 assistant 文本；`tool_result` = 全部工具结果文本拼接；`any` = 两者拼接。

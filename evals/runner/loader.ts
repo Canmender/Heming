@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 用例装载：读 YAML → 结构校验 → 稳定排序。
  *
  * 校验原则：**宁可开局报错，也不要跑到一半才发现字段名写错**。
@@ -44,6 +44,7 @@ const GRADER_TYPES: GraderType[] = [
   "max_rounds",
   "hitl",
   "no_side_effect",
+  "evidence",
   "llm_judge",
 ];
 
@@ -140,6 +141,12 @@ function parseGraders(file: string, value: unknown): Grader[] {
     if (notContains) grader.not_contains = notContains;
     const tools = stringOrArray(file, `${at}.tools`, raw.tools);
     if (tools) grader.tools = tools;
+    const files = stringOrArray(file, `${at}.files`, raw.files);
+    if (files) grader.files = files;
+    // YAML 里写成 `commands:`，但 Grader 上已有 `commands` 之外的同义字段会与 tool_sequence
+    // 混淆；证据的动作断言用 `evidence_commands`，契约见 evals/README.md §3。
+    const evidenceCommands = stringOrArray(file, `${at}.evidence_commands`, raw.evidence_commands);
+    if (evidenceCommands) grader.evidence_commands = evidenceCommands;
     if (raw.pattern !== undefined) grader.pattern = requireString(file, `${at}.pattern`, raw.pattern);
     if (raw.path !== undefined) grader.path = requireString(file, `${at}.path`, raw.path);
     const paths = stringOrArray(file, `${at}.paths`, raw.paths);

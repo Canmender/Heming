@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   FORK_PREFIX_NOTICE,
   FORK_TRUNCATED_NOTICE,
@@ -117,7 +117,7 @@ describe("checkFork 前置条件", () => {
   });
 
   it("未来版本：拒绝且不猜结构", () => {
-    const check = checkFork(healthyTurn(), { targetSeq: 4, version: 4 });
+    const check = checkFork(healthyTurn(), { targetSeq: 4, version: 6 });
     expect(check.ok).toBe(false);
     expect(check.rejections.map((r) => r.code)).toContain("unknown_version");
   });

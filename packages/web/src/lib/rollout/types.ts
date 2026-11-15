@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 回合事件日志（rollout）的类型。
  *
  * 为什么要有它：任务区现在只存「目标/结果/步骤」的汇总（`localStorage`），
@@ -17,9 +17,11 @@
  * 日志格式版本：形状变了就 +1，读取端据此决定要不要迁移。
  *
  * v3（P0/T1）：`turn_end.usage` 记每回合 token（含前缀缓存读写），`tool_result.ms` 记工具耗时。
- * 两个字段都可选：v2 旧日志照常读（缺字段就是缺数据，不补默认业务值）。
+ * v4（P3/T16）：`turn_end.failure` 记失败归因（六类枚举，见 `RolloutTurnFailure`）。
+ * v5（P3/T15）：`assistant_final.evidence` 记完成证据（改过的文件、跑过的动作、输出摘要）。
+ * 这些字段都可选：旧日志照常读（缺字段就是缺数据，不补默认业务值）。
  */
-export const ROLLOUT_VERSION = 3;
+export const ROLLOUT_VERSION = 5;
 
 /** 所有 item 的公共字段：一回合内按 `seq` 严格递增。 */
 export interface RolloutItemBase {
@@ -89,6 +91,11 @@ export interface RolloutAssistantFinal extends RolloutItemBase {
   type: "assistant_final";
   streamId: string;
   text: string;
+  /**
+   * 完成证据（v5 / P3-T15）：本回合成功执行过的写/命令动作。没有可证据的动作时整块省略
+   * （空数组与「没证据」是一回事，存空数组反而会让「无证据」看起来像「查过没副作用」）。
+   */
+  evidence?: RolloutEvidence;
 }
 
 /**
@@ -111,6 +118,51 @@ export interface RolloutUsage {
   rounds: number;
 }
 
+/**
+ * 失败归因分类（v4 / P3-T16）。
+ *
+ * 为什么要有枚举而不是只留一段 `error` 文本：错误文本是给用户看的实现细节，
+ * 复盘要回答的是「这一轮到底卡在哪一类」——上下文塞不下、工具报错、模型拒答、
+ * HITL 拒绝、轮次打满。同一类的修法完全不同（调预算 / 改工具契约 / 换提示词 /
+ * 调闸门 / 改任务拆分），只有分类后才可能做趋势与占比。
+ *
+ * `provider_error` 不在计划 §14.2 的五个抽屉里：那五类都是**可归因**的失败，
+ * 而上游偶发 5xx/超时/密钥失效归不进任何一类。硬塞进五类会把统计弄脏，
+ * 所以单列一个兜底抽屉，并在报表里排在最后。
+ */
+export type RolloutTurnFailure =
+  | "context_overflow"
+  | "tool_error"
+  | "model_refusal"
+  | "hitl_denied"
+  | "max_rounds"
+  | "provider_error";
+
+/** 归因码全集（解析存储数据时用来判真假，与联合类型同源维护）。 */
+export const ROLLOUT_TURN_FAILURES = [
+  "context_overflow",
+  "tool_error",
+  "model_refusal",
+  "hitl_denied",
+  "max_rounds",
+  "provider_error",
+] as const;
+
+/**
+ * 「完成即证据」（v5 / P3-T15）：本回合实际发生过的动作事实。
+ *
+ * 模型说「已完成」是自述；工具调用与落盘结果是机器上的事实。两者都记下来，
+ * 「完成」才有据可查，而「只自称完成」在复盘/评测里能被判负。
+ */
+export interface RolloutEvidence {
+  /** 本回合真正写入/删除过的文件（根内相对或绝对路径，按首次出现去重）。 */
+  files: string[];
+  /** 本回合执行成功、会产生外部副作用的动作（工具名 + 关键参数摘要）。 */
+  commands: string[];
+  /** 成功结果的输出摘要（每条首行拼接后截断）。 */
+  outputDigest?: string;
+}
+
 /** 回合终态：每次 run 恰好一条。 */
 export interface RolloutTurnEnd extends RolloutItemBase {
   type: "turn_end";
@@ -119,6 +171,12 @@ export interface RolloutTurnEnd extends RolloutItemBase {
   error?: string;
   /** 本回合用量（v3）：一次都没拿到 usage 时整块省略。 */
   usage?: RolloutUsage;
+  /**
+   * 失败归因（v4 / P3-T16）：`status: "ok"` 也可能带它——轮次打满（max_rounds）
+   * 时回答是出来了，但任务被截断，属于「没按用户要的方式完成」。
+   * 用户主动中断（aborted）**不写**：那是人的决定，不是失败。
+   */
+  failure?: RolloutTurnFailure;
 }
 
 /** 分配式 Omit：直接对联合类型做 `Omit` 会把各分支的字段抹平，只剩公共键。 */

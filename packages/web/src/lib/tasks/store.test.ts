@@ -590,3 +590,99 @@ describe("重跑 / 分叉：保留原任务（d.56）", () => {
     expect(taskForkNotice(makeTask())).toBeNull();
   });
 });
+
+describe("完成证据（P3-T15）", () => {
+  it("settle 记下的证据能落盘读回，并在报告里单独成段", () => {
+    const id = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: "把待办改了",
+      now: 1000,
+    });
+    useTaskStore.getState().settle(id, {
+      status: "done",
+      result: "改好了",
+      evidence: {
+        files: ["notes/待办.md"],
+        commands: ["file_patch: notes/待办.md"],
+        outputDigest: "已写入磁盘：notes/待办.md",
+      },
+      now: 2000,
+    });
+
+    const task = useTaskStore.getState().tasks[0];
+    expect(task.evidence).toEqual({
+      files: ["notes/待办.md"],
+      commands: ["file_patch: notes/待办.md"],
+      outputDigest: "已写入磁盘：notes/待办.md",
+    });
+    const restored = readTasks(storage).find((t) => t.id === id);
+    expect(restored?.evidence?.files).toEqual(["notes/待办.md"]);
+
+    const report = buildTaskReport(restored!);
+    expect(report).toContain("## 完成证据");
+    expect(report).toContain("notes/待办.md");
+    expect(report).toContain("已写入磁盘");
+  });
+
+  it("没有证据的任务不写空对象（「没做过什么」不等于「查过没副作用」）", () => {
+    const id = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: "解释一下这个概念",
+      now: 1,
+    });
+    useTaskStore.getState().settle(id, { status: "done", result: "好的", now: 2 });
+    const task = useTaskStore.getState().tasks[0];
+    expect(task.evidence).toBeUndefined();
+    expect(buildTaskReport(task)).not.toContain("## 完成证据");
+  });
+
+  it("读盘时校验证据：坏形状丢掉证据、保住任务；超限截断", () => {
+    const storageWith = (evidence: unknown) => {
+      const store = new Map<string, string>();
+      store.set(
+        "heming.tasks.v1",
+        JSON.stringify([
+          {
+            id: "t1",
+            conversationId: "c1",
+            agentId: "a1",
+            agentName: "和小鸣",
+            prompt: "x",
+            status: "done",
+            createdAt: 1,
+            updatedAt: 2,
+            evidence,
+          },
+        ]),
+      );
+      return {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+        key: () => null,
+        length: store.size,
+      };
+    };
+
+    const bad = readTasks(storageWith("oops"));
+    expect(bad).toHaveLength(1);
+    expect(bad[0].evidence).toBeUndefined();
+    expect(readTasks(storageWith({ files: [], commands: [] }))[0].evidence).toBeUndefined();
+
+    const huge = readTasks(
+      storageWith({
+        files: Array.from({ length: 40 }, (_, i) => `f${i}.md`),
+        commands: ["x".repeat(500)],
+        outputDigest: "y".repeat(900),
+      }),
+    )[0];
+    expect(huge.evidence?.files).toHaveLength(20);
+    expect(huge.evidence?.commands[0].length).toBeLessThanOrEqual(200);
+    expect(huge.evidence?.outputDigest?.length).toBeLessThanOrEqual(400);
+  });
+});

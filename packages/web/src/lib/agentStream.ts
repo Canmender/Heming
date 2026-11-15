@@ -1,4 +1,4 @@
-import type { WsClientEvent } from "@heming/shared";
+﻿import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
 import {
   streamChat,
@@ -17,7 +17,8 @@ import { DEFAULT_TURN_CAPS, planTurnBudget } from "./agentContext/turnBudget.js"
 import { discoverTools, searchTools } from "./mcp/discovery.js";
 import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
-import type { RolloutInput, RolloutUsage } from "./rollout/types.js";
+import { buildTurnEvidence } from "./rollout/evidence.js";
+import type { RolloutEvidence, RolloutInput, RolloutTurnFailure, RolloutUsage } from "./rollout/types.js";
 import type { ToolFailure } from "./toolError.js";
 
 /**
@@ -91,6 +92,11 @@ export interface RunSettled {
   finalText?: string;
   /** 失败原因（status="error" 时有值）。 */
   error?: string;
+  /**
+   * 完成证据（P3/T15）：本回合成功执行过的写/命令动作。
+   * 只有成功且有可证据的动作时才带；任务区据此落盘，让「完成」可复核。
+   */
+  evidence?: RolloutEvidence;
 }
 
 /** 工具结果里附带的一条来源（如知识库页面、本机归档消息）。 */
@@ -447,6 +453,58 @@ function isContextOverflow(err: Error | null | undefined, aborted: boolean): boo
 }
 
 /**
+ * 模型拒答的特征词（P3/T16 归因用）。
+ *
+ * 只收「供应商明确说这是安全/政策拒绝」的说法：把这些归成 `model_refusal` 之后，
+ * 复盘才能看出「是提示词/内容合规问题」而不是「工具没调通」。
+ */
+const REFUSAL_RE = /content[_ ]?filter|content[_ ]?policy|moderation|refus|安全策略|内容政策|违规内容/i;
+
+/** 失败归因所需的事实（全部来自本回合已发生的动作，不猜）。 */
+export interface TurnFailureSignals {
+  /** 收口时的异常；成功收口传 undefined。 */
+  error?: Error | string | null;
+  /** 用户主动中断（含 AbortError）：中断不是失败，归因返回 undefined。 */
+  aborted?: boolean;
+  /** 本回合工具执行失败次数（被 HITL 拒绝的不算，那有单独一类）。 */
+  toolFailures?: number;
+  /** 本回合被 HITL 拒绝的调用次数。 */
+  denials?: number;
+  /** 是否撞上了工具轮次上限（`MAX_TOOL_ROUNDS`）。 */
+  maxRounds?: boolean;
+}
+
+/**
+ * 把一回合的失败落成**一类**（P3/T16）。
+ *
+ * 判序不是随意的，它决定了「同一现象归给谁」：
+ * 1. 中断优先——用户自己按了停，不能算系统失败；
+ * 2. 超限（400/413 + 特征词）优先于拒答：超限错误里也可能出现 policy 字样；
+ * 3. 拒答；
+ * 4. HITL 全拒（有拒绝、且没有任何工具真的报错）：这是人/闸门挡住的，不是工具坏；
+ * 5. 工具报错；
+ * 6. 剩下的上游异常进兜底抽屉 `provider_error`——硬塞进五类会把统计弄脏。
+ *
+ * 成功收口（无 error）只可能带 `max_rounds`：轮次打满时回答出来了，但任务被截断。
+ */
+export function classifyTurnFailure(signals: TurnFailureSignals): RolloutTurnFailure | undefined {
+  const aborted = signals.aborted === true;
+  const err = signals.error;
+  if (aborted || (err instanceof Error && err.name === "AbortError")) return undefined;
+  const denials = signals.denials ?? 0;
+  const toolFailures = signals.toolFailures ?? 0;
+  if (!err) return signals.maxRounds ? "max_rounds" : undefined;
+  if (isContextOverflow(err instanceof Error ? err : new Error(String(err)), aborted)) {
+    return "context_overflow";
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  if (REFUSAL_RE.test(message)) return "model_refusal";
+  if (denials > 0 && toolFailures === 0) return "hitl_denied";
+  if (toolFailures > 0) return "tool_error";
+  return "provider_error";
+}
+
+/**
  * 最后一次「问成功」的候选 = 真正答话的那个（d.48 记账归属）。
  *
  * 工具循环会留多条成功留痕，但都指向同一候选；换过候选时**最后一条**才是
@@ -632,7 +690,13 @@ export function runAgentMentions(
         };
         const profile = deps.getProfile(m.agentId);
         if (!profile) {
-          record({ type: "turn_end", streamId, status: "error", error: "未绑定 LLM 连接" });
+          record({
+            type: "turn_end",
+            streamId,
+            status: "error",
+            error: "未绑定 LLM 连接",
+            failure: "provider_error",
+          });
           settle({ status: "error", error: "未绑定 LLM 连接" });
           await sendError("provider_error", "未绑定 LLM 连接");
           return;
@@ -650,6 +714,7 @@ export function runAgentMentions(
             streamId,
             status: "error",
             error: (e as Error)?.message?.slice(0, 300) || "读取历史失败",
+            failure: "provider_error",
           });
           settle({ status: "error", error: (e as Error)?.message?.slice(0, 300) || "读取历史失败" });
           throw e;
@@ -737,6 +802,19 @@ export function runAgentMentions(
         let usageCacheWrite = 0;
         let usageCacheReadRounds = 0;
         let usageCacheWriteRounds = 0;
+        /**
+         * 失败归因计数（v4 / P3-T16）：本回合已发生的事实，收口时交给
+         * `classifyTurnFailure()`。跟着 attempt 一起重置——溢出重试的失败尝试
+         * 不该把它的工具错误算进最终这一轮。
+         */
+        let toolFailureCount = 0;
+        let deniedCount = 0;
+        let maxRoundsHit = false;
+        /**
+         * 完成证据的原料（v5 / P3-T15）：本回合成功执行过的调用 + 结果。
+         * 放在 attempt 作用域里重置：溢出重试的废尝试不该出现在「这次完成」的凭据里。
+         */
+        const evidencePairs: { call: { name: string; arguments: string }; text: string; ok: boolean }[] = [];
         /**
          * 候选链留痕（d.48）：绑路由组时每次问候选都留一条，用于①气泡里显示「换了谁」
          * ②失败收口时说清「都问过谁」（否则错误只说最后一个候选的状态码）。
@@ -1191,6 +1269,7 @@ export function runAgentMentions(
             // 到上限还在要工具：把已有文本给用户，并**说明**为什么停在这里。
             // 静默 return 是曾经的实现——用户只看到话没说完，不知道是被截断的。
             if (round >= MAX_TOOL_ROUNDS) {
+              maxRoundsHit = true;
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
               emitDelta(
                 `\n\n（本次已连续调用 ${MAX_TOOL_ROUNDS} 轮工具，达到上限，先给出当前结论。回复「继续」可以接着做。）`,
@@ -1399,6 +1478,20 @@ export function runAgentMentions(
             const results = settled.map(
               (r) => r ?? { text: "工具调用失败：执行层未返回结果（内部异常，可换一种方式重试）", ok: false },
             );
+            // 失败归因计数（P3/T16）：被拒（人/闸门挡住）与工具报错（工具坏了/参数错）
+            // 分开数——两者修法完全不同，混在一起会让报表没法指导动作。
+            calls.forEach((_call, i) => {
+              if (outcomes?.[i]?.kind === "deny") deniedCount += 1;
+              else if (!results[i]?.ok) toolFailureCount += 1;
+              const result = results[i];
+              if (result) {
+                evidencePairs.push({
+                  call: { name: calls[i].function.name, arguments: calls[i].function.arguments },
+                  text: result.text,
+                  ok: result.ok,
+                });
+              }
+            });
             // 按调用顺序收集来源（不按 Promise 完成顺序），脚注顺序才可复现。
             // 被拒/失败的结果不算「引用过」——它们根本没读到内容。
             for (const result of results) {
@@ -1544,13 +1637,25 @@ export function runAgentMentions(
           // 成功文本取本次尝试的全文（重试成功时不含首次尝试的失败文本）
           const text = local || acc;
           if (await sendFinish(text)) {
-            record({ type: "assistant_final", streamId, text });
+            const evidence = buildTurnEvidence(evidencePairs);
+            record({
+              type: "assistant_final",
+              streamId,
+              text,
+              ...(evidence ? { evidence } : {}),
+            });
             const turnTokens = turnUsage();
+            const turnFailure = classifyTurnFailure({
+              toolFailures: toolFailureCount,
+              denials: deniedCount,
+              maxRounds: maxRoundsHit,
+            });
             record({
               type: "turn_end",
               streamId,
               status: "ok",
               ...(turnTokens ? { usage: turnTokens } : {}),
+              ...(turnFailure ? { failure: turnFailure } : {}),
             });
             notifyTurnComplete(deps, m.agentId, userText, text, "ok");
             // 用量记账：成功收口前恰好一次；一次都没拿到就记 null（未上报）。
@@ -1576,7 +1681,7 @@ export function runAgentMentions(
             } catch {
               /* 记账失败不影响三事件上行 */
             }
-            settle({ status: "ok", finalText: text });
+            settle({ status: "ok", finalText: text, ...(evidence ? { evidence } : {}) });
           } else {
             settle({ status: "error", error: "端到端加密失败，回复未发送" });
             await sendError("bad_event", "端到端加密失败，回复未发送");
@@ -1611,12 +1716,20 @@ export function runAgentMentions(
           } finally {
             // 终态先于异常传播落定：sendError 抛错（发送链异常）时任务区也要收口。
             const turnTokens = turnUsage();
+            const turnFailure = classifyTurnFailure({
+              error: err,
+              aborted: abortedRun,
+              toolFailures: toolFailureCount,
+              denials: deniedCount,
+              maxRounds: maxRoundsHit,
+            });
             record({
               type: "turn_end",
               streamId,
               status: abortedRun ? "aborted" : "error",
               ...(abortedRun ? {} : { error: err.message.slice(0, 300) }),
               ...(turnTokens ? { usage: turnTokens } : {}),
+              ...(turnFailure ? { failure: turnFailure } : {}),
             });
             settle({
               status: abortedRun ? "aborted" : "error",

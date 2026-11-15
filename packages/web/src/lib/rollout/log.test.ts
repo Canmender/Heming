@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
 import { MAX_ITEMS_PER_STREAM, createRolloutLog } from "./log.js";
@@ -106,8 +106,8 @@ describe("rollout v2：seq 与版本兼容", () => {
     const { log, storage } = makeLog();
     log.append({ type: "turn_start", conversationId: "c1", streamId: "s1", agentId: "a1", userText: "hi" });
     const stored = JSON.parse(storage.getItem("heming.rollout.v1.s1") ?? "{}") as { version?: number };
-    expect(stored.version).toBe(3);
-    expect(log.readStream("s1")).toMatchObject({ version: 3, count: 1 });
+    expect(stored.version).toBe(5);
+    expect(log.readStream("s1")).toMatchObject({ version: 5, count: 1 });
   });
 
   it("v1 日志可读不可分叉：缺 seq 用数组下标补齐，版本仍是 1", () => {
@@ -283,5 +283,162 @@ describe("rollout v3：回合用量与工具耗时（P0-T1）", () => {
     expect((items[2] as { usage?: unknown }).usage).toBeUndefined();
     // 旧数据回放后仍能继续追加（升级不要求用户清日志）。
     expect(log.append({ type: "turn_end", streamId: "s1", status: "ok", usage: { rounds: 1 } })).toBe(true);
+  });
+});
+
+describe("rollout v4：失败归因（P3-T16）", () => {
+  it("turn_end.failure 原样往返：六类都认", () => {
+    const { log } = makeLog();
+    const codes = [
+      "context_overflow",
+      "tool_error",
+      "model_refusal",
+      "hitl_denied",
+      "max_rounds",
+      "provider_error",
+    ] as const;
+    codes.forEach((failure, i) => {
+      log.append({ type: "turn_end", streamId: `s${i}`, status: "ok", failure });
+    });
+    codes.forEach((failure, i) => {
+      expect(log.read(`s${i}`)[0]).toMatchObject({ type: "turn_end", failure });
+    });
+  });
+
+  it("成功回合不写 failure；中断回合也不写（中断不是失败）", () => {
+    const { log } = makeLog();
+    log.append({ type: "turn_end", streamId: "s1", status: "ok" });
+    log.append({ type: "turn_end", streamId: "s2", status: "aborted" });
+    expect((log.read("s1")[0] as { failure?: unknown }).failure).toBeUndefined();
+    expect((log.read("s2")[0] as { failure?: unknown }).failure).toBeUndefined();
+  });
+
+  it("坏归因码丢掉字段但不丢整条回合（旧版本/手改数据都可能是别的字符串）", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 4,
+        items: [
+          { type: "turn_end", seq: 0, at: fixedNow(), streamId: "s1", status: "error", failure: "boom" },
+          { type: "turn_end", seq: 1, at: fixedNow(), streamId: "s1", status: "error", failure: 42 },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const items = log.read("s1");
+    expect(items).toHaveLength(2);
+    expect(items.every((it) => (it as { failure?: unknown }).failure === undefined)).toBe(true);
+  });
+
+  it("v3 旧日志照常读：没有 failure 就是没记归因，不当成失败", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 3,
+        items: [
+          { type: "turn_end", seq: 0, at: fixedNow(), streamId: "s1", status: "ok", usage: { rounds: 2 } },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const end = log.read("s1")[0];
+    expect(end).toMatchObject({ type: "turn_end", status: "ok" });
+    expect((end as { failure?: unknown }).failure).toBeUndefined();
+  });
+});
+
+describe("rollout v5：完成证据（P3-T15）", () => {
+  it("assistant_final.evidence 原样往返：文件、命令、输出摘要", () => {
+    const { log } = makeLog();
+    log.append({
+      type: "assistant_final",
+      streamId: "s1",
+      text: "已改好",
+      evidence: {
+        files: ["notes/待办.md"],
+        commands: ["file_patch: notes/待办.md"],
+        outputDigest: "已写入磁盘：notes/待办.md",
+      },
+    });
+    expect(log.read("s1")[0]).toMatchObject({
+      type: "assistant_final",
+      evidence: {
+        files: ["notes/待办.md"],
+        commands: ["file_patch: notes/待办.md"],
+        outputDigest: "已写入磁盘：notes/待办.md",
+      },
+    });
+  });
+
+  it("没有证据时整块省略：空数组不等于「查过没副作用」", () => {
+    const { log } = makeLog();
+    log.append({ type: "assistant_final", streamId: "s1", text: "只是回答" });
+    expect((log.read("s1")[0] as { evidence?: unknown }).evidence).toBeUndefined();
+  });
+
+  it("坏证据丢掉字段、保住回合：用户仍能看到回答，不会因证据脏而丢整条", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 5,
+        items: [
+          { type: "assistant_final", seq: 0, at: fixedNow(), streamId: "s1", text: "已改好", evidence: "oops" },
+          { type: "assistant_final", seq: 1, at: fixedNow(), streamId: "s1", text: "已改好", evidence: { files: [], commands: [] } },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const items = log.read("s1");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ type: "assistant_final", text: "已改好" });
+    expect((items[0] as { evidence?: unknown }).evidence).toBeUndefined();
+    expect((items[1] as { evidence?: unknown }).evidence).toBeUndefined();
+  });
+
+  it("证据条目与文本有上限：手改数据撑不爆存储，也不会让面板渲染超长行", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 5,
+        items: [
+          {
+            type: "assistant_final",
+            seq: 0,
+            at: fixedNow(),
+            streamId: "s1",
+            text: "已改好",
+            evidence: {
+              files: Array.from({ length: 40 }, (_, i) => `f${i}.md`),
+              commands: ["x".repeat(500)],
+              outputDigest: "y".repeat(900),
+            },
+          },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const evidence = (log.read("s1")[0] as { evidence: { files: string[]; commands: string[]; outputDigest: string } })
+      .evidence;
+    expect(evidence.files).toHaveLength(20);
+    expect(evidence.commands[0]).toHaveLength(300);
+    expect(evidence.outputDigest).toHaveLength(500);
+  });
+
+  it("v4 旧日志照常读：没有 evidence 就是没记证据", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 4,
+        items: [{ type: "assistant_final", seq: 0, at: fixedNow(), streamId: "s1", text: "已改好" }],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    expect(log.read("s1")[0]).toMatchObject({ type: "assistant_final", text: "已改好" });
+    expect((log.read("s1")[0] as { evidence?: unknown }).evidence).toBeUndefined();
   });
 });

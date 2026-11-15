@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { humanizeProviderError } from "../llmFailure.js";
 import type { ToolSource } from "../agentStream.js";
 import type { DenyCause } from "../hitl/types.js";
+import type { RolloutEvidence } from "../rollout/types.js";
 import { FORK_PREFIX_NOTICE, FORK_TRUNCATED_NOTICE } from "../rollout/fork.js";
 import {
   createDefaultStorage,
@@ -94,6 +95,13 @@ export interface TaskRecord {
   result?: string;
   /** 失败原因（失败时有值）。 */
   error?: string;
+  /**
+   * 完成证据（P3/T15）：本任务成功执行过的写/命令动作。
+   *
+   * 只记有证据的回合：纯问答任务没有这个字段（不是「查过没副作用」，是「没做过什么」）。
+   * 上限与 rollout 一致（各 20 条、每条 200 字），任务区存储有字节上限，证据不能撑爆它。
+   */
+  evidence?: RolloutEvidence;
   steps: TaskStep[];
 }
 
@@ -136,6 +144,37 @@ function clip(text: string, max: number): string {
 /** 压成一行（报告/列表展示用）。 */
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** 证据条目上限：与 rollout 同一口径，任务区字节有上限，证据只是摘要不能撑爆存储。 */
+const MAX_EVIDENCE_ENTRIES = 20;
+const MAX_EVIDENCE_CHARS = 200;
+const MAX_EVIDENCE_DIGEST = 400;
+
+/** 写盘前压一遍证据（超限截断；files/commands 皆空则整块丢掉）。 */
+function clipEvidence(evidence: RolloutEvidence): RolloutEvidence | undefined {
+  const files = evidence.files.slice(0, MAX_EVIDENCE_ENTRIES).map((f) => clip(f, MAX_EVIDENCE_CHARS));
+  const commands = evidence.commands.slice(0, MAX_EVIDENCE_ENTRIES).map((c) => clip(c, MAX_EVIDENCE_CHARS));
+  const outputDigest = evidence.outputDigest
+    ? clip(evidence.outputDigest, MAX_EVIDENCE_DIGEST)
+    : undefined;
+  if (files.length === 0 && commands.length === 0) return undefined;
+  return { files, commands, ...(outputDigest ? { outputDigest } : {}) };
+}
+
+/** 读盘时校验证据（手改数据/旧版本都可能给别的形状，坏条目丢掉、别丢整条任务）。 */
+function pickEvidence(raw: unknown): RolloutEvidence | null {
+  if (!isPlainObject(raw)) return null;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
+  const files = strings(raw.files);
+  const commands = strings(raw.commands);
+  if (files.length === 0 && commands.length === 0) return null;
+  return clipEvidence({
+    files,
+    commands,
+    ...(typeof raw.outputDigest === "string" && raw.outputDigest ? { outputDigest: raw.outputDigest } : {}),
+  }) ?? null;
 }
 
 /** 任务标题：首个非空行，压平空白后截断。 */
@@ -311,6 +350,22 @@ export function buildTaskReport(task: TaskRecord): string {
     }
   }
 
+  // 完成证据（P3/T15）：报告里必须有「改了什么、跑了什么」，否则「已完成」只是一句自述。
+  if (task.evidence) {
+    lines.push("", "## 完成证据", "");
+    if (task.evidence.files.length) {
+      lines.push(`- 改过的文件（${task.evidence.files.length}）：`, "");
+      for (const file of task.evidence.files) lines.push(`  - ${oneLine(file)}`);
+    }
+    if (task.evidence.commands.length) {
+      lines.push(`- 执行的动作（${task.evidence.commands.length}）：`, "");
+      for (const command of task.evidence.commands) lines.push(`  - ${oneLine(command)}`);
+    }
+    if (task.evidence.outputDigest) {
+      lines.push("", `- 输出摘要：${oneLine(task.evidence.outputDigest)}`);
+    }
+  }
+
   lines.push("", "---", "由和鸣通用智能体本机生成，仅保存在当前设备。");
   return lines.join("\n");
 }
@@ -341,6 +396,7 @@ export function buildTaskJson(task: TaskRecord): string {
       ...(task.forkedFrom === undefined ? {} : { forkedFrom: task.forkedFrom }),
       ...(task.result === undefined ? {} : { result: task.result }),
       ...(task.error === undefined ? {} : { error: task.error }),
+      ...(task.evidence === undefined ? {} : { evidence: task.evidence }),
       steps: task.steps.map((step) => ({
         id: step.id,
         name: step.name,
@@ -557,6 +613,7 @@ function pickTask(raw: unknown): TaskRecord | null {
     ...(pickForkedFrom(raw.forkedFrom) ? { forkedFrom: pickForkedFrom(raw.forkedFrom)! } : {}),
     ...(typeof raw.result === "string" ? { result: raw.result } : {}),
     ...(typeof raw.error === "string" ? { error: raw.error } : {}),
+    ...(pickEvidence(raw.evidence) ? { evidence: pickEvidence(raw.evidence)! } : {}),
     steps: Array.isArray(raw.steps)
       ? raw.steps.map(pickStep).filter((s): s is TaskStep => s !== null)
       : [],
@@ -632,6 +689,8 @@ interface TaskState {
       status: Exclude<TaskStatus, "running">;
       result?: string;
       error?: string;
+      /** 完成证据（P3/T15）：任务区据此在报告里给出「改了什么/跑了什么」。 */
+      evidence?: RolloutEvidence;
       now?: number;
     },
   ) => void;
@@ -793,7 +852,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     return id;
   },
 
-  settle: (taskId, { status, result, error, now = Date.now() }) => {
+  settle: (taskId, { status, result, error, evidence, now = Date.now() }) => {
     set({
       tasks: persist(
         patchTask(get().tasks, taskId, (task) => {
@@ -813,6 +872,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             endedAt: now,
             ...(result === undefined ? {} : { result: clip(result, MAX_RESULT_CHARS) }),
             ...(error === undefined ? {} : { error: clip(error, 600) }),
+            ...(evidence === undefined ? {} : { evidence: clipEvidence(evidence) }),
           };
         }),
       ),

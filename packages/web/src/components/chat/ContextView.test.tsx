@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+﻿import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
 import { useChatStore } from "../../store/chat.js";
 import { useTokenUsageStore } from "../../store/tokenUsage.js";
+import { RecallLog } from "../../lib/memory/recallLog.js";
+import { rolloutLog } from "../../lib/rollout/index.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
 import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
 
@@ -166,5 +168,183 @@ describe("ContextView · 本会话消耗（P0-T2）", () => {
     render(<ContextView conversationId="c1" />);
     expect(screen.getByText("这个会话还没有可归因的用量记录。")).toBeInTheDocument();
     expect(screen.getByTestId("conversation-tokens")).toHaveTextContent("0 tokens");
+  });
+});
+
+describe("ContextView · 失败归因（P3-T16）", () => {
+  const rec = (tokens: number | null, extra: Record<string, unknown> = {}) => ({
+    model: "m1",
+    tokens,
+    at: "2026-11-15T01:00:00.000Z",
+    ...extra,
+  });
+
+  beforeEach(() => {
+    rolloutLog.clear();
+  });
+
+  it("按「五抽屉 + 兜底」聚合本会话回合的 failure：只显示出现过的抽屉", () => {
+    const turn = (streamId: string, failure?: "tool_error" | "max_rounds") => {
+      rolloutLog.append({
+        type: "turn_start",
+        conversationId: "c1",
+        streamId,
+        agentId: "a1",
+        userText: "hi",
+      });
+      rolloutLog.append({
+        type: "turn_end",
+        streamId,
+        status: failure === "max_rounds" ? "ok" : failure ? "error" : "ok",
+        ...(failure ? { failure } : {}),
+      });
+    };
+    turn("s1", "tool_error");
+    turn("s2", "tool_error");
+    turn("s3", "max_rounds");
+    turn("s4"); // 正常完成：不进任何抽屉
+
+    useTokenUsageStore.setState({
+      records: [
+        rec(10, { conversationId: "c1", streamId: "s1" }),
+        rec(10, { conversationId: "c1", streamId: "s2" }),
+        rec(10, { conversationId: "c1", streamId: "s3" }),
+        rec(10, { conversationId: "c1", streamId: "s4" }),
+      ] as never,
+    });
+
+    render(<ContextView conversationId="c1" />);
+    const list = screen.getByRole("list", { name: "失败归因" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(screen.getByTestId("failure-count-tool_error")).toHaveTextContent("2 次");
+    expect(screen.getByTestId("failure-count-max_rounds")).toHaveTextContent("1 次");
+    expect(within(list).getByText("工具报错")).toBeInTheDocument();
+    expect(within(list).getByText("轮次打满")).toBeInTheDocument();
+  });
+
+  it("一次归因都没有时整块省略：不拿一张全 0 的表冒充报表", () => {
+    rolloutLog.append({
+      type: "turn_start",
+      conversationId: "c1",
+      streamId: "s1",
+      agentId: "a1",
+      userText: "hi",
+    });
+    rolloutLog.append({ type: "turn_end", streamId: "s1", status: "ok" });
+    useTokenUsageStore.setState({
+      records: [rec(10, { conversationId: "c1", streamId: "s1" })] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    expect(screen.queryByRole("list", { name: "失败归因" })).toBeNull();
+    expect(screen.queryByText("失败归因")).toBeNull();
+  });
+});
+
+describe("ContextView · 完成证据（P3-T15）", () => {
+  // 日志是模块级单例：不清就会把上一个用例的证据带进来（"没有证据"那条正是要防这个）。
+  beforeEach(() => {
+    rolloutLog.clear();
+  });
+
+  const rec = (tokens: number | null, extra: Record<string, unknown> = {}) => ({
+    model: "m1",
+    tokens,
+    at: 1,
+    profileId: "p1",
+    ...extra,
+  });
+
+  it("有证据的回合显示「改了几个文件 / 执行了几个动作」", () => {
+    rolloutLog.append({
+      type: "turn_start",
+      conversationId: "c1",
+      streamId: "s1",
+      agentId: "a1",
+      userText: "把待办改了",
+    });
+    rolloutLog.append({
+      type: "assistant_final",
+      streamId: "s1",
+      text: "改好了",
+      evidence: {
+        files: ["notes/待办.md", "notes/日志.md"],
+        commands: ["file_patch: notes/待办.md、notes/日志.md"],
+      },
+    });
+    useTokenUsageStore.setState({
+      records: [rec(100, { conversationId: "c1", streamId: "s1" })] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    const turns = screen.getByRole("list", { name: "回合消耗明细" });
+    const row = within(turns).getAllByRole("listitem")[0];
+    expect(row).toHaveTextContent("改了 2 个文件");
+    expect(row).toHaveTextContent("执行 1 个动作");
+  });
+
+  it("没有证据就不显示证据字样：宁可不说，也不暗示「查过无副作用」", () => {
+    rolloutLog.append({
+      type: "turn_start",
+      conversationId: "c1",
+      streamId: "s1",
+      agentId: "a1",
+      userText: "解释概念",
+    });
+    rolloutLog.append({ type: "assistant_final", streamId: "s1", text: "好的" });
+    useTokenUsageStore.setState({
+      records: [rec(100, { conversationId: "c1", streamId: "s1" })] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    const turns = screen.getByRole("list", { name: "回合消耗明细" });
+    const row = within(turns).getAllByRole("listitem")[0];
+    expect(row).not.toHaveTextContent("改了");
+    expect(row).not.toHaveTextContent("个动作");
+  });
+});
+
+describe("ContextView · 记忆注入（P3-T17）", () => {
+  // 召回日志也在 localStorage 里：不清就会把上个用例的档案带进来。
+  beforeEach(() => {
+    new RecallLog().clear();
+  });
+
+  const recallInput = (conversationId: string) => ({
+    agentId: "a1",
+    conversationId,
+    query: "上次发布用的哪个窗口？",
+    recalled: { semantic: 2, episodic: 1, working: 0 },
+    injected: [
+      { id: "s1", layer: "semantic" as const, content: "发布窗口：每周四 20:00", truncated: false },
+    ],
+    dropped: [
+      { id: "s2", layer: "semantic" as const, reason: "budget" as const, content: "旧窗口：周三" },
+    ],
+    used: ["s1"],
+  });
+
+  it("列出最近一次注入：注入条目、被裁条目与原因、疑似引用", () => {
+    new RecallLog().record(recallInput("c1"));
+    render(<ContextView conversationId="c1" />);
+    const list = screen.getByRole("list", { name: "记忆注入" });
+    expect(within(list).getByText("上次发布用的哪个窗口？")).toBeInTheDocument();
+    expect(within(list).getByText(/召回 3 条 · 注入 1 条 · 裁掉 1 条 · 疑似引用 1 条/)).toBeInTheDocument();
+    const injected = screen.getByRole("list", { name: "注入条目" });
+    expect(within(injected).getByText(/发布窗口：每周四 20:00/)).toBeInTheDocument();
+    const dropped = screen.getByRole("list", { name: "被裁条目" });
+    expect(within(dropped).getByText(/旧窗口：周三/)).toBeInTheDocument();
+    expect(within(dropped).getByText(/预算不够/)).toBeInTheDocument();
+  });
+
+  it("只显示本会话的档案：别的会话的注入不混进来", () => {
+    new RecallLog().record(recallInput("c2"));
+    render(<ContextView conversationId="c1" />);
+    expect(screen.queryByRole("list", { name: "记忆注入" })).toBeNull();
+    expect(screen.queryByText("上次发布用的哪个窗口？")).toBeNull();
+  });
+
+  it("没有召回档案时整块省略：编不出解释就不假装能解释", () => {
+    render(<ContextView conversationId="c1" />);
+    expect(screen.queryByRole("list", { name: "记忆注入" })).toBeNull();
+    expect(screen.queryByText("记忆注入")).toBeNull();
   });
 });

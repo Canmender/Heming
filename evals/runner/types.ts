@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 评测 runner 的输入契约（与 `evals/README.md` 一一对应）。
  *
  * 这里只做**结构**，不做语义校验——校验在 `loader.ts` 里集中做，
@@ -60,6 +60,7 @@ export type GraderType =
   | "max_rounds"
   | "hitl"
   | "no_side_effect"
+  | "evidence"
   | "llm_judge";
 
 /** grader 的并集（按 `type` 取用对应字段；未用到的字段忽略）。 */
@@ -85,6 +86,13 @@ export interface Grader {
   expect?: "allowed" | "denied";
   /** llm_judge 的评分要点（仅 --real 生效）。 */
   rubric?: string;
+  /**
+   * evidence 的期望：`files` / `commands` 里的每一条都必须出现在
+   * `assistant_final.evidence` 里（子串匹配，路径分隔符不敏感）。
+   * 用途：让「只自称完成、没有证据」的回合判负（P3/T15 验收）。
+   */
+  files?: string[];
+  evidence_commands?: string[];
 }
 
 export interface EvalCase {
@@ -128,6 +136,13 @@ export interface CaseObservation {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** 本次用例耗时（毫秒）。 */
   durationMs: number;
+  /** 全部 assistant_final 的完成证据（P3/T15；没有证据就是空数组）。 */
+  evidence: {
+    files: string[];
+    commands: string[];
+    outputDigest?: string;
+  }[];
+}
 }
 
 /** rollout 记录的最小形状（runner 只关心这几类）。 */
@@ -135,5 +150,10 @@ export type RolloutRecord =
   | { type: "turn_start"; streamId: string; userText: string }
   | { type: "tool_call"; streamId: string; id: string; name: string; args: string }
   | { type: "tool_result"; streamId: string; id: string; name: string; ok: boolean; denied?: boolean; text: string }
-  | { type: "assistant_final"; streamId: string; text: string }
+  | {
+      type: "assistant_final";
+      streamId: string;
+      text: string;
+      evidence?: { files: string[]; commands: string[]; outputDigest?: string };
+    }
   | { type: "turn_end"; streamId: string; status: string };

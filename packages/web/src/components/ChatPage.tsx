@@ -1833,6 +1833,8 @@ export function ChatPage({
           status,
           ...(result.finalText === undefined ? {} : { result: result.finalText }),
           ...(result.error === undefined ? {} : { error: result.error }),
+          // 完成即证据（P3/T15）：任务卡与报告据此显示「改了什么/跑了什么」。
+          ...(result.evidence === undefined ? {} : { evidence: result.evidence }),
         });
         notifyTaskSettled(taskId, status, result.error ?? result.finalText ?? "");
       },

@@ -25,6 +25,11 @@ function textOf(obs: CaseObservation, where: Grader["in"]): string {
   return finals;
 }
 
+/** 路径比较用：统一成 `/`、小写（Windows 大小写不敏感，证据里的路径可能带盘符或反斜杠）。 */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
+
 /** 数组化（grader 的 value/contains 允许单串）。 */
 function asList(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
@@ -160,6 +165,33 @@ async function gradeOne(grader: Grader, testCase: EvalCase, obs: CaseObservation
         }
       }
       return pass(`${paths.length} 条路径都没有被创建`);
+    }
+
+    case "evidence": {
+      // 完成即证据（P3/T15）：只认 assistant_final.evidence 里真实记下的文件/动作。
+      // 没有证据 ≠ 通过：一个只会说「已完成」却没有任何写/命令记录的回合必须判负，
+      // 否则「证据」就退化成又一句模型自述。
+      const wantFiles = grader.files ?? [];
+      const wantCommands = grader.evidence_commands ?? [];
+      if (wantFiles.length === 0 && wantCommands.length === 0) {
+        return fail("evidence 必须给 files 或 evidence_commands");
+      }
+      const entries = obs.evidence ?? [];
+      if (entries.length === 0) {
+        return fail("回合没有任何完成证据（assistant_final.evidence 为空）：只自称完成不算数");
+      }
+      const files = entries.flatMap((e) => e.files).map(normalizePath);
+      const commands = entries.flatMap((e) => e.commands);
+      const missingFiles = wantFiles.filter((p) => !files.some((f) => f.includes(normalizePath(p))));
+      const missingCommands = wantCommands.filter((p) => !commands.some((c) => c.includes(p)));
+      if (missingFiles.length > 0 || missingCommands.length > 0) {
+        const parts: string[] = [];
+        if (missingFiles.length) parts.push(`缺文件证据：${missingFiles.join("、")}`);
+        if (missingCommands.length) parts.push(`缺动作证据：${missingCommands.join("、")}`);
+        parts.push(`实际证据：文件 ${files.join("、") || "（无）"}；动作 ${commands.join("、") || "（无）"}`);
+        return fail(parts.join("；"));
+      }
+      return pass(`证据齐全：${wantFiles.length} 个文件、${wantCommands.length} 个动作`);
     }
 
     case "llm_judge":

@@ -1,13 +1,16 @@
-import { createDefaultStorage, isPlainObject, readJson, writeJson } from "../memory/storage.js";
+﻿import { createDefaultStorage, isPlainObject, readJson, writeJson } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
 import {
   ROLLOUT_ITEM_TYPES,
+  ROLLOUT_TURN_FAILURES,
   ROLLOUT_VERSION,
   type RolloutInput,
   type RolloutItem,
   type RolloutItemType,
   type RolloutStreamView,
   type RolloutSummary,
+  type RolloutEvidence,
+  type RolloutTurnFailure,
   type RolloutUsage,
 } from "./types.js";
 
@@ -112,6 +115,42 @@ function knownType(value: unknown): RolloutItemType | null {
  * 单个字段坏了只丢那个字段（例如 input 缺失但 output 有值仍保留 output）：
  * 用量是审计用的旁证，宁可少一条也不要编一条。
  */
+function pickFailure(raw: unknown): RolloutTurnFailure | null {
+  return typeof raw === "string" && (ROLLOUT_TURN_FAILURES as readonly string[]).includes(raw)
+    ? (raw as RolloutTurnFailure)
+    : null;
+}
+
+/** 证据条目上限：证据是摘要，不是第二份日志（手改数据也不能把存储撑爆）。 */
+const MAX_EVIDENCE_ENTRIES = 20;
+const MAX_EVIDENCE_CHARS = 300;
+const MAX_DIGEST_CHARS = 500;
+
+/**
+ * 解析完成证据（v5 / P3-T15）。
+ *
+ * 逐条校验而不是整体信任：证据会显示给用户复核，混进一个对象/数字会让面板
+ * 渲染出 `[object Object]`；坏条目丢掉，其余照常保留——一条坏路径不该让整回合没证据。
+ */
+function pickEvidence(raw: unknown): RolloutEvidence | null {
+  if (!isPlainObject(raw)) return null;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value
+          .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+          .slice(0, MAX_EVIDENCE_ENTRIES)
+          .map((v) => v.slice(0, MAX_EVIDENCE_CHARS))
+      : [];
+  const files = strings(raw.files);
+  const commands = strings(raw.commands);
+  const outputDigest =
+    typeof raw.outputDigest === "string" && raw.outputDigest
+      ? raw.outputDigest.slice(0, MAX_DIGEST_CHARS)
+      : undefined;
+  if (files.length === 0 && commands.length === 0) return null;
+  return { files, commands, ...(outputDigest ? { outputDigest } : {}) };
+}
+
 function pickUsage(raw: unknown): RolloutUsage | null {
   if (!isPlainObject(raw)) return null;
   const rounds =
@@ -196,12 +235,22 @@ function pickItem(raw: unknown, index: number): RolloutItem | null {
           ? { ms: Math.floor(raw.ms) }
           : {}),
       };
-    case "assistant_final":
-      return { type, seq, at, streamId, text: asString(raw.text) };
+    case "assistant_final": {
+      const evidence = pickEvidence(raw.evidence);
+      return {
+        type,
+        seq,
+        at,
+        streamId,
+        text: asString(raw.text),
+        ...(evidence ? { evidence } : {}),
+      };
+    }
     case "turn_end": {
       const status = raw.status;
       if (status !== "ok" && status !== "aborted" && status !== "error") return null;
       const usage = pickUsage(raw.usage);
+      const failure = pickFailure(raw.failure);
       return {
         type,
         seq,
@@ -210,6 +259,7 @@ function pickItem(raw: unknown, index: number): RolloutItem | null {
         status,
         ...(typeof raw.error === "string" && raw.error ? { error: raw.error } : {}),
         ...(usage ? { usage } : {}),
+        ...(failure ? { failure } : {}),
       };
     }
     default:

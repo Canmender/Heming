@@ -7,8 +7,11 @@ import {
   type UsageRecord,
 } from "../../store/tokenUsage.js";
 import { rolloutLog } from "../../lib/rollout/index.js";
-import { streamUsageTotals, toolTimings } from "../../lib/rollout/view.js";
+import { failureCounts, streamUsageTotals, toolTimings } from "../../lib/rollout/view.js";
+import type { RolloutTurnFailure } from "../../lib/rollout/types.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
+import { RecallLog } from "../../lib/memory/recallLog.js";
+import { RECALL_DROP_LABELS, explainRecalls, recallLayerLabel } from "../../lib/memory/explain.js";
 import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
 
 /** 一个回合（stream）的用量 + 工具耗时（数据来自记账 + 回放日志，两处都是本机真实数据）。 */
@@ -22,6 +25,9 @@ interface TurnUsageRow {
   /** 工具调用耗时合计与次数（被拒调用不计耗时）。 */
   toolMs?: number;
   toolCount: number;
+  /** 完成证据（P3-T15）：本回合成功的写入文件数与动作数；没有证据就是 undefined。 */
+  evidenceFiles?: number;
+  evidenceCommands?: number;
 }
 
 const MAX_TURN_ROWS = 5;
@@ -67,6 +73,11 @@ function turnRowsOf(records: UsageRecord[]): TurnUsageRow[] {
       }
       const timings = toolTimings(items);
       row.toolCount = timings.length;
+      const evidence = items.find((it) => it.type === "assistant_final")?.evidence;
+      if (evidence) {
+        if (evidence.files.length > 0) row.evidenceFiles = evidence.files.length;
+        if (evidence.commands.length > 0) row.evidenceCommands = evidence.commands.length;
+      }
       const totalMs = timings.reduce((sum, t) => sum + (t.ms ?? 0), 0);
       if (totalMs > 0) row.toolMs = totalMs;
     }
@@ -82,6 +93,19 @@ function formatTokens(n: number): string {
 function formatMs(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
+
+/**
+ * 失败归因的人话标签（P3-T16）。键与 `RolloutTurnFailure` 同源：
+ * 少一个键就编译不过，不会出现「报表里有一类没名字」。
+ */
+const FAILURE_LABELS: Record<RolloutTurnFailure, string> = {
+  context_overflow: "上下文超限",
+  tool_error: "工具报错",
+  model_refusal: "模型拒答",
+  hitl_denied: "HITL 拒绝",
+  max_rounds: "轮次打满",
+  provider_error: "上游异常",
+};
 
 /**
  * 「上下文」页签（T32）：本会话的上下文预算用量。
@@ -113,8 +137,45 @@ export function ContextView({ conversationId }: { conversationId: string | null 
   // 本会话的**真实消耗**（P0-T2）：只认显式带 conversationId 的记账，归不到的不算进来。
   const usage = useMemo(() => {
     const conv = recordsForConversation(records, conversationId ?? "");
-    return { totals: totalsOf(conv), turns: turnRowsOf(conv) };
+    return { totals: totalsOf(conv), turns: turnRowsOf(conv), streams: conv };
   }, [records, conversationId]);
+
+  /**
+   * 失败归因（P3-T16）：只看本会话记账里出现过的那几条回合日志。
+   *
+   * 为什么以记账为入口而不是遍历全部日志：日志最多 20 条回合，但没有「会话 → 回合」
+   * 索引；记账是唯一显式知道归属的地方，用它筛出来的集合与「本会话消耗」完全一致，
+   * 两张表不会一个说 5 条一个说 3 条。
+   */
+  const failures = useMemo(() => {
+    const items = [];
+    const seen = new Set<string>();
+    for (const r of usage.streams) {
+      if (!r.streamId || seen.has(r.streamId)) continue;
+      seen.add(r.streamId);
+      try {
+        items.push(...rolloutLog.read(r.streamId));
+      } catch {
+        /* 日志读不出来不影响报表口径：这一回合就当没归因 */
+      }
+    }
+    return failureCounts(items);
+  }, [usage.streams]);
+  const failureTotal = failures.reduce((sum, row) => sum + row.count, 0);
+
+  /**
+   * 注入可解释（P3/T17）：读召回日志，只挑本会话的最近几次。
+   *
+   * 日志是旁路诊断数据（写失败一律静默），读失败就当没有——不能因为一次读不到
+   * 让整个「上下文」页签崩掉；宁可少一块解释，也不影响预算与用量这些主信息。
+   */
+  const recalls = useMemo(() => {
+    try {
+      return explainRecalls(new RecallLog().list(), conversationId ?? "");
+    } catch {
+      return [];
+    }
+  }, [conversationId]);
 
   return (
     <section aria-label="上下文" data-view-panel="context">
@@ -188,6 +249,9 @@ export function ContextView({ conversationId }: { conversationId: string | null 
                 {/* 前缀缓存：报了就显示，没报就不显示（旧日志/供应商不拆）。 */}
                 {turn.cacheRead !== undefined ? ` · 缓存读 ${formatTokens(turn.cacheRead)}` : ""}
                 {turn.toolMs !== undefined ? ` · 工具 ${formatMs(turn.toolMs)}` : ""}
+                {/* 完成证据（P3-T15）：有证据才显示——「没证据」不等于「查过没副作用」。 */}
+                {turn.evidenceFiles !== undefined ? ` · 改了 ${turn.evidenceFiles} 个文件` : ""}
+                {turn.evidenceCommands !== undefined ? ` · 执行 ${turn.evidenceCommands} 个动作` : ""}
               </span>
             </li>
           ))}
@@ -195,6 +259,77 @@ export function ContextView({ conversationId }: { conversationId: string | null 
       ) : (
         <p className="mt-3 text-ui-sm text-muted">这个会话还没有可归因的用量记录。</p>
       )}
+      {/* 失败归因（P3-T16）：日志里有归因才出这块——没有数据时整块省略，
+          而不是给一张全 0 的表假装在做报表。 */}
+      {failureTotal > 0 ? (
+        <>
+          <h4 className="ui-section-title mb-2 mt-5">失败归因</h4>
+          <ul aria-label="失败归因" className="list-none space-y-1.5 p-0">
+            {failures
+              .filter((row) => row.count > 0)
+              .map((row) => (
+                <li
+                  key={row.failure}
+                  className="flex items-baseline justify-between gap-3 text-ui-sm"
+                >
+                  <span className="text-muted">{FAILURE_LABELS[row.failure]}</span>
+                  <span
+                    className="shrink-0 tabular-nums text-ink"
+                    data-testid={`failure-count-${row.failure}`}
+                  >
+                    {row.count} 次
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </>
+      ) : null}
+      {/* 注入可解释（P3/T17）：最近几次「注入了哪几条、哪些被裁、为什么」。
+          召回日志里没有本会话的档案就整块省略：编不出解释，就不假装能解释。 */}
+      {recalls.length > 0 ? (
+        <>
+          <h4 className="ui-section-title mb-2 mt-5">记忆注入</h4>
+          <ul aria-label="记忆注入" className="list-none space-y-2 p-0">
+            {recalls.map((run) => {
+              const recalledTotal =
+                run.recalled.semantic + run.recalled.episodic + run.recalled.working;
+              return (
+                <li key={run.id} className="rounded-md border border-line-soft px-2 py-1.5 text-ui-sm">
+                  <p className="truncate text-ink" title={run.query}>
+                    {run.query || "（空提问）"}
+                  </p>
+                  <p className="text-muted">
+                    召回 {recalledTotal} 条 · 注入 {run.injected.length} 条
+                    {run.dropped.length > 0 ? ` · 裁掉 ${run.dropped.length} 条` : ""}
+                    {run.used.length > 0 ? ` · 疑似引用 ${run.used.length} 条` : ""}
+                  </p>
+                  {run.injected.length > 0 ? (
+                    <ul aria-label="注入条目" className="mt-1 list-none space-y-0.5 p-0 pl-3">
+                      {run.injected.map((item) => (
+                        <li key={item.id} className="text-muted">
+                          [{recallLayerLabel(item.layer)}] {item.content}
+                          {item.truncated ? "（已截断）" : ""}
+                          {item.score !== undefined ? ` · 分 ${item.score.toFixed(2)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {run.dropped.length > 0 ? (
+                    <ul aria-label="被裁条目" className="mt-1 list-none space-y-0.5 p-0 pl-3">
+                      {run.dropped.map((drop) => (
+                        <li key={drop.id} className="text-muted">
+                          [{recallLayerLabel(drop.layer)}] {drop.content ?? drop.id} ·{" "}
+                          {RECALL_DROP_LABELS[drop.reason]}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
     </section>
   );
 }
