@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FileFsBridge, FileReadResponse, FileWriteOp } from "./bridge.js";
 import type { FileRoot } from "./paths.js";
 import { MAX_FILE_BYTES } from "./limits.js";
-import { buildFileToolBridge, buildFileToolBridgeIfAvailable } from "./tools.js";
+import { FILE_TOOLS, buildFileToolBridge, buildFileToolBridgeIfAvailable } from "./tools.js";
 
 const ROOT: FileRoot = { name: "库", path: "D:/库", mode: "write" };
 const READ_ROOT: FileRoot = { name: "参考", path: "D:/参考", mode: "read" };
@@ -94,6 +94,27 @@ describe("工具可见性（产品决策：桌面桥 + 至少一条可写根）"
     expect(names).toEqual(["file_patch", "file_read"]);
     expect(bridge!.meta?.("file_patch")?.risk).toBe("write");
     expect(bridge!.meta?.("file_read")?.risk).toBe("read");
+  });
+});
+
+describe("工具说明体积（P2-T14：schema 也是每轮输入）", () => {
+  /** 上限 = P2-T14 瘦身后的实测值 + 一点余量；写胖了就会变红。 */
+  const SCHEMA_BUDGET_CHARS = 830;
+
+  it("两个工具的 schema 合计不超过预算（否则每轮输入都会变贵）", () => {
+    const spec = FILE_TOOLS.map((tool) => ({
+      type: "function",
+      function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+    }));
+    const chars = JSON.stringify(spec).length;
+    expect(chars, `当前 ${chars} 字符`).toBeLessThanOrEqual(SCHEMA_BUDGET_CHARS);
+  });
+
+  it("瘦身不删格式约定：补丁语法关键字都还在", () => {
+    const patch = FILE_TOOLS.find((t) => t.name === "file_patch")!;
+    for (const token of ["*** Begin Patch", "*** Add File", "*** Update File", "*** Delete File", "@@", "*** End Patch"]) {
+      expect(patch.description).toContain(token);
+    }
   });
 });
 

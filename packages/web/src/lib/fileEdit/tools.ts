@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 智能体侧的文件编辑工具：`file_patch`（写）与 `file_read`（读）。
  *
  * 为什么两个工具而不是 `read/write/delete` 三个（规格 §2）：
@@ -44,21 +44,27 @@ export interface FileToolSpec {
 
 const prop = (description: string) => ({ type: "string" as const, description });
 
-/** 工具清单。`file_patch` 是写、`file_read` 是读，风险由 `meta` 声明给 HITL/编排层。 */
+/**
+ * 工具清单。`file_patch` 是写、`file_read` 是读，风险由 `meta` 声明给 HITL/编排层。
+ *
+ * ★ 说明文字按「schema 也是每轮输入」来写（P2-T14）：每请求都带工具清单，
+ * 描述里的每个字都按 token 计费，也会占据前缀缓存的头部。所以只保留
+ * **模型必须照做的格式约定**，把解释性长句砍掉（格式行一个都不能省）。
+ * `tools.test.ts` 有体积上限，防止以后又悄悄写胖。
+ */
 export const FILE_TOOLS: FileToolSpec[] = [
   {
     name: "file_patch",
     riskHint: "write",
     description:
-      "用上下文锚点补丁修改用户本机文件（可一次改多个文件）。改之前先用 file_read 读原文，锚点行必须与原文一致。" +
-      "格式：*** Begin Patch / *** Add File: 相对路径 / *** Update File: 相对路径（可跟 *** Move to: 新路径）/ *** Delete File: 相对路径 / @@ 上下文 / 以及 " +
-      "空格(上下文)、-(删除)、+(新增) 前缀的行 / *** End Patch。" +
-      "路径必须是用户配置的可写根内的相对路径；任一锚点匹配失败则整份补丁不写盘。",
+      "锚点补丁改本机文件（可一次多个）。格式：*** Begin Patch / *** Add File: 相对路径 / " +
+      "*** Update File: 相对路径（可加 *** Move to: 新路径）/ *** Delete File: 相对路径 / @@ 上下文 / " +
+      "行前缀：空格=上下文、-=删、+=增 / *** End Patch。路径须根内相对；锚点不匹配则整份不写盘。",
     parameters: {
       type: "object",
       properties: {
-        patch: prop("整份补丁文本，必须以 *** Begin Patch 开始、*** End Patch 结束。"),
-        root: prop("可选：用哪个已配置的根（根名，如 obsidian）。缺省用第一个可写根。"),
+        patch: prop("*** Begin Patch … *** End Patch 全文。"),
+        root: prop("可选：根名。"),
       },
       required: ["patch"],
     },
@@ -66,16 +72,14 @@ export const FILE_TOOLS: FileToolSpec[] = [
   {
     name: "file_read",
     riskHint: "read",
-    description:
-      "读取用户本机某个文本文件的一段内容（带行号区间），用于生成补丁前确认原文、或补丁失败后重新读原文。" +
-      "路径必须是已配置根内的相对路径。二进制文件与大文件会被拒绝。",
+    description: "读本机文本文件一段（带行号），用于改前确认原文或补丁失败后重读。路径须在根内。",
     parameters: {
       type: "object",
       properties: {
-        path: prop("根内的相对路径，如 notes/a.md。"),
-        root: prop("可选：用哪个已配置的根（根名）。缺省用第一个根。"),
-        offset: { type: "number", description: "从第几行开始读（1 起，缺省 1）。" },
-        limit: { type: "number", description: `最多读几行（缺省 ${READ_MAX_LINES}，上限 ${READ_MAX_LINES}）。` },
+        path: prop("根内相对路径。"),
+        root: prop("可选：根名。"),
+        offset: { type: "number", description: "起始行。" },
+        limit: { type: "number", description: `行数，≤${READ_MAX_LINES}。` },
       },
       required: ["path"],
     },
