@@ -13,8 +13,20 @@ import { useUiStore } from "../store/ui.js";
  * 失败时抛错，由调用方转成各自位置的提示文案（侧栏栏底 / 页面空态）。
  */
 export async function startNewConversation(): Promise<void> {
+  await startNewConversationIn(null);
+}
+
+/**
+ * 新建一段 fresh 会话并打开，落在指定工作区（`null` = 未分组）。
+ *
+ * 侧栏组头的「+」用它把新对话直接建在某个文件夹下；工作区只是归属标签，
+ * 不会因此让会话拿到本机文件读写能力。
+ */
+export async function startNewConversationIn(workspace: string | null): Promise<void> {
   // fresh：每段对话彼此独立保存，绝不复用上一段（Claude Code 式多段对话）。
-  const convId = await useChatStore.getState().openAgent(SYSTEM_AGENT_ID, { fresh: true });
+  const convId = await useChatStore
+    .getState()
+    .openAgent(SYSTEM_AGENT_ID, { fresh: true, ...(workspace ? { workspace } : {}) });
   const ui = useUiStore.getState();
   if (ui.page !== "chat") ui.setPage("chat");
   ui.openConversation(convId);

@@ -12,6 +12,35 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.91.11",
+    "date": "2026-11-15",
+    "title": "左侧栏变成工作区：会话按本机文件夹分组",
+    "bullets": [
+      "`components/assistant/ConversationRail.tsx`：栏头 `<h2>工作区</h2>` + 搜索 / 新建工作区图标；会话按组缩进、时间靠右；组头 = 文件夹图标 + 文件夹名 + 折叠箭头（悬停出「+」），点组头折叠该组；「未分组」是隐式组，永远排在最后。",
+      "分组抽到 `lib/workspace/group.ts`（`groupConversations(conversations, workspaces)`）：组来源 = 会话里出现过的路径 ∪ 工作区清单（清单里的空组也显示，刚选的文件夹不会「消失」）；会话里有、清单里没有的路径也成组（目录被手工删掉 / 别的设备加的，不能把会话吞掉）；组间排序：有会话的组在前（刚建的空工作区不占前排），同档按最近活跃降序、再并列按名称；组内按最近活跃降序；`workspaceLabel` 同时认 Windows 反斜杠与 POSIX 斜杠，末尾分隔符忽略。",
+      "新建与挪动：「新建工作区」打开共用弹窗 `components/assistant/WorkspaceDialog.tsx`（路径输入框 `aria-label=\"工作区文件夹路径\"`；桌面端另有「选择文件夹…」按钮走 `window.heming.pickDirectory`，浏览器端无桌面桥时只手填绝对路径）；会话「⋯ → 移动到工作区…」用同一个弹窗、多一个「移出工作区（未分组）」出口；组头「+」在该文件夹下直接开新对话（`lib/newConversation.ts` 的 `startNewConversationIn(workspace)`）；「新对话」落点 = 当前活动会话所在工作区 → 刚新建的工作区 → 未分组。",
+      "状态与接口封装：`store/chat.ts` 新增 `workspaces` / `workspaceReady` / `workspaceError` 与 `loadWorkspaces` / `addWorkspace` / `removeWorkspace` / `moveConversation`，首帧 `loadWorkspace` 并行拉会话与工作区；`lib/api.ts` 增 `fetchWorkspaces` / `addWorkspace` / `removeWorkspace` / `updateConversationWorkspace`。",
+      "`packages/server/src/db.ts`：新增 `workspaces(user_id, path, created_at, updated_at, PRIMARY KEY (user_id, path))` 表；`conversations` 幂等补 `workspace TEXT` 列（照 `PRAGMA table_info` 老模式，旧库启动即自动迁移，无需手工改库）；NULL / 空 = 未分组。",
+      "`packages/server/src/app.ts`：`GET /api/workspaces`（当前用户清单）、`POST /api/workspaces`（同路径幂等 upsert，返回 201）、`DELETE /api/workspaces?path=…`（204；仍有会话挂在该路径 → 409 `workspace in use`，会话不跟着删，调用方先让用户挪走）、`PATCH /api/conversations/:id/workspace`（body `{workspace: string|null}`，非成员 403、会话不存在 404）。",
+      "`packages/shared/src/schemas.ts`：`WorkspaceSchema`（path 1–1024 字符）、`ConversationSchema.workspace`、建会话可选 `workspace`、`UpdateConversationWorkspaceBodySchema`、`AddWorkspaceBodySchema`；注释明写「工作区 ≠ 文件权限」。",
+      "`main.js`：新增 `secureIpc.handle(\"app:pickDirectory\")`，`dialog.showOpenDialog` + `openDirectory` / `createDirectory`，只回绝对路径；取消或异常一律 `null`，界面按「没选」处理、不弹错。",
+      "`preload.js`：暴露 `window.heming.pickDirectory(title)`。它只回渲染层一个路径字符串：不读目录内容、不写文件；渲染层拿它给会话分组，不会因此获得任何文件读写能力。",
+      "**验证（d.147.4.91.11，工作树实跑，全 exit 0）**",
+      "— `pnpm typecheck`：6 个项目全 Done；`pnpm build`、`pnpm plugin:check`（6/6 + pet-widget 1/1 + examples 5/5）通过。",
+      "— `packages/web`：`vitest run` **303 files / 4379 tests passed**。",
+      "— 其余包：`server` 15 files / **284 tests**（原 271，新增工作区 API 与 store 契约 9 条）、`shared` 8 / 119、`desktop` **856 pass / 0 fail**（新增 `pickDirectory` 3 条）。",
+      "— `node scripts/design-audit.mjs` 浅色与 `--theme dark` 各 **57 条（19 个视图 × 3 个断点）**，`failures: []`：横向溢出 / 对比度 / 11px 正文 / 命中区 < 32 / 无名字可点全为 0。",
+      "— 视觉证据（`.tmp/shots-workspace2`）：`rail-groups-1440.png`（文件夹分组、会话缩进、未分组最后）、`rail-collapsed-1440.png`（组头 `aria-expanded=false` 且组内会话消失）、`rail-new-workspace-1440.png`（弹窗路径输入；浏览器端无「选择文件夹…」）、`rail-groups-dark-1440.png`、`rail-groups-1024.png`（`docOverflowX=0`、`bodyOverflowX=0`）。",
+      "— 未真机复验：桌面端（Electron）原生选目录弹窗的实际观感与取消路径；≤1024 窄窗下分组列表长列表滚动。"
+    ],
+    "paragraphs": [
+      "左栏从一列「会话列表」改成「工作区」面板：会话按本机真实文件夹分组，对齐 DeepSeek 客户端那种「按文件夹找对话」的习惯。工作区只是会话的归属标签——用户在本机选一个绝对路径，本轮没有给智能体开放任何文件读写，路径也不参与工具调用的权限判断。升级前的老会话全部落在「未分组」，一条不丢。",
+      "**左栏（packages/web）**",
+      "**数据面与接口（packages/server、packages/shared）**",
+      "**桌面（packages/desktop）**"
+    ]
+  },
+  {
     "version": "d.147.4.90.11",
     "date": "2026-11-15",
     "title": "输入框改成单框：工具收进「+」，模型名回到动作行",

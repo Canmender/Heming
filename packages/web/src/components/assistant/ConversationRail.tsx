@@ -1,33 +1,53 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { Conversation, Message } from "@heming/shared";
+import type { Conversation, Message, Workspace } from "@heming/shared";
 import { EmptyState } from "../ui/EmptyState.js";
-import { MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
+import { ChevronIcon, FolderIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
 import { Button } from "../ui/Button.js";
+import {
+  groupConversations,
+  UNGROUPED_ID,
+  type WorkspaceGroup,
+} from "../../lib/workspace/group.js";
+import { WorkspaceDialog, type WorkspaceDialogMode } from "./WorkspaceDialog.js";
 
 /**
  * 会话左栏（单智能体 · 会话模式，对齐 Codex / Claude Code）。
  *
- * 产品只剩一个内置智能体，所以这里**不再按智能体分组**：全部会话是一条扁平列表，
- * 一级信息是**会话名**（不是智能体名）。
+ * 产品只剩一个内置智能体，所以这里**不按智能体分组**；一级信息是**工作区**
+ * （本机一个文件夹），二级信息是**会话名**（d.147.4.91.11）。
  *
  * 结构：
- * - 顶部：「会话」+ 数量；动作行「新建会话」+「搜索」；
- * - 列表按最近活跃排序；当前会话高亮（`aria-current`），有草稿的会话带「草稿」标识；
- * - 搜索只匹配会话标题；
+ * - 顶部：「工作区」+ 搜索 / 新建工作区两个图标；下面整行「新对话」主按钮；
+ * - 列表按工作区分组（`groupConversations`）：组头 = 文件夹图标 + 名称 + 会话数 +
+ *   折叠 chevron，组头右侧 hover 出「+」直接在该组新建；会话行左缩进 20px；
+ * - 当前会话高亮（`aria-current`），含活动会话的组头浅底；有草稿的会话带「草稿」；
+ * - 搜索只匹配会话名，命中时忽略折叠状态（`aria-expanded` 与实际渲染一致）；
  * - 常驻不可折叠（d.147.4.89）：折叠会把会话入口藏起来，而侧栏同时承担导航；
  * - 栏顶与栏底各留一个插槽（主导航 / 设置 + 账户），由 `Sidebar` 组装。
  *
  * 会话名优先用服务端 `title`（d.128）；没有标题时由 `conversationTitle` 从已加载消息推导，
- * 未加载消息的会话回落为最后活跃时间。悬停行尾「更多」可改名/删除（删除由调用方二次确认）。
+ * 未加载消息的会话回落为最后活跃时间。悬停行尾「更多」可改名/移动/删除
+ *（删除由调用方二次确认，移动走 `WorkspaceDialog`）。
  */
+
+/** 一次工作区弹窗的打开参数：`new` 新建工作区，`move` 移动某段会话。 */
+interface RailDialogState {
+  mode: WorkspaceDialogMode;
+  /** move 模式：要移动的会话。 */
+  conversationId?: string;
+  /** move 模式：会话当前工作区（回填输入框）。 */
+  initialPath?: string;
+}
 
 export interface ConversationRailProps {
   /** 全量会话（组件内会重新按最近活跃排序，不依赖调用方顺序）。 */
   conversations: Conversation[];
+  /** 左栏工作区清单（store.workspaces）：分组来源；清单里的空工作区也会成组。 */
+  workspaces: Workspace[];
   activeConversationId: string | null;
   /** 已加载消息（store.messages）：用于推导会话名前缀。 */
   messages: Record<string, Message[]>;
@@ -36,12 +56,23 @@ export interface ConversationRailProps {
   /** 新建/改名/加载更多失败的原因（显示在栏底，不挡列表）。 */
   error?: string;
   onOpen: (conversationId: string) => void;
-  /** 顶部「新建会话」：直接新建一段 fresh 会话（单智能体，无需再选人）。 */
-  onNewConversation: () => void;
+  /**
+   * 新建一段 fresh 会话并落到指定工作区（`null` = 未分组）。
+   *
+   * 主按钮用「当前活动会话所在工作区 → 刚新建的工作区 → 未分组」；
+   * 组头「+」用该组的路径。真正的建会话动作由调用方（Sidebar）执行。
+   */
+  onNewConversation: (workspace: string | null) => void;
   /** 会话改名（行内菜单）：服务端 PATCH 由调用方负责。 */
   onRename: (conversationId: string, title: string) => void | Promise<void>;
   /** 请求删除会话（调用方弹二次确认，rail 不直接删）。 */
   onDeleteRequest: (conv: Conversation) => void;
+  /** 把会话挪到工作区（`null` = 移出工作区/未分组）；失败抛错，rail 转 `onError`。 */
+  onMoveConversation: (conversationId: string, workspace: string | null) => Promise<void>;
+  /** 新建一个工作区（同路径幂等）；失败抛错，rail 转 `onError`。 */
+  onAddWorkspace: (path: string) => Promise<void>;
+  /** 工作区相关动作失败的原因（交调用方显示在栏底错误区，不挡列表）。 */
+  onError?: (message: string) => void;
   /** 还有下一页会话（服务端 limit 分页）；搜索时不显示。 */
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -68,8 +99,14 @@ function lastActivityOf(conv: Pick<Conversation, "lastMessageAt">): number {
   return Number.isFinite(at) ? at : 0;
 }
 
+/** 错误对象 → 可读原因（空串表示服务端没给细节）。 */
+function reasonOf(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : "";
+}
+
 export function ConversationRail({
   conversations,
+  workspaces,
   activeConversationId,
   messages,
   opening = false,
@@ -78,6 +115,9 @@ export function ConversationRail({
   onNewConversation,
   onRename,
   onDeleteRequest,
+  onMoveConversation,
+  onAddWorkspace,
+  onError,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
@@ -103,13 +143,46 @@ export function ConversationRail({
     () => [...conversations].sort((a, b) => lastActivityOf(b) - lastActivityOf(a)),
     [conversations],
   );
-  /** 扁平列表 + 只按会话名过滤（单智能体：智能体名不再有区分度）。 */
+  /** 扁平列表 + 只按会话名过滤（单智能体：工作区/智能体名都不参与搜索）。 */
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sorted;
     return sorted.filter((conv) => titleOf(conv).toLowerCase().includes(q));
   }, [sorted, query, titleOf]);
   const hasQuery = query.trim() !== "";
+
+  /** 组 → 会话（未分组永远最后；清单里的空组也显示）。 */
+  const groups = useMemo(() => groupConversations(visible, workspaces), [visible, workspaces]);
+
+  /** 折叠状态按「组 id」记：`UNGROUPED_ID` 表示未分组组，不会与真实路径冲突。 */
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(() => new Set());
+  const toggleGroup = useCallback((groupId: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
+
+  /** 含活动会话的组 id（高亮用；不受搜索过滤影响，避免搜索时高亮消失）。 */
+  const activeGroupId = useMemo(() => {
+    const active = conversations.find((conv) => conv.id === activeConversationId);
+    if (!active) return null;
+    return active.workspace?.trim() || UNGROUPED_ID;
+  }, [conversations, activeConversationId]);
+
+  /**
+   * 栏头新建工作区后，把它记成「新对话」的落点：用户刚选完文件夹，
+   * 下一个新对话理应建在这里（不自动建会话——避免点错就多出一段空对话）。
+   */
+  const [preferredWorkspace, setPreferredWorkspace] = useState<string | null>(null);
+  const activeWorkspace = useMemo(() => {
+    const active = conversations.find((conv) => conv.id === activeConversationId);
+    return active?.workspace?.trim() || null;
+  }, [conversations, activeConversationId]);
+  /** 新对话落点：活动会话的工作区 → 刚新建的工作区 → 未分组。 */
+  const newConversationWorkspace = activeWorkspace ?? preferredWorkspace;
 
   const closeSearch = () => {
     setQuery("");
@@ -120,6 +193,10 @@ export function ConversationRail({
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  /** 工作区弹窗（新建 / 移动共用一套壳）。 */
+  const [dialog, setDialog] = useState<RailDialogState | null>(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
 
   // 点菜单外关闭（回退焦点不抢：菜单只是轻量操作壳）
   useEffect(() => {
@@ -155,7 +232,50 @@ export function ConversationRail({
     }
   };
 
-  /** 会话行：一级信息 = 会话名，右侧时间；悬停/聚焦出「更多」操作（改名/删除）。 */
+  /** 栏头「新建工作区」：打开 new 模式弹窗，不选目录也可以取消。 */
+  const openNewWorkspaceDialog = () => {
+    setMenuFor(null);
+    setDialog({ mode: "new" });
+  };
+
+  /** 会话 ⋯ →「移动到工作区…」：回填会话当前工作区，方便原地确认。 */
+  const openMoveDialog = (conv: Conversation) => {
+    setMenuFor(null);
+    setDialog({
+      mode: "move",
+      conversationId: conv.id,
+      initialPath: conv.workspace?.trim() ?? "",
+    });
+  };
+
+  /** 取消弹窗：提交中不响应（避免把在途请求的结果丢在半路）。 */
+  const cancelDialog = () => {
+    if (!dialogBusy) setDialog(null);
+  };
+
+  /** 确认弹窗：新建工作区 / 移动会话。失败交给 `onError`（栏底错误区）。 */
+  const confirmDialog = async (path: string | null) => {
+    if (!dialog || dialogBusy) return;
+    setDialogBusy(true);
+    try {
+      if (dialog.mode === "new") {
+        if (!path) return;
+        await onAddWorkspace(path);
+        setPreferredWorkspace(path);
+      } else if (dialog.conversationId) {
+        await onMoveConversation(dialog.conversationId, path);
+      }
+      setDialog(null);
+    } catch (err) {
+      const reason = reasonOf(err);
+      const what = dialog.mode === "new" ? "新建工作区失败" : "移动会话失败";
+      onError?.(reason ? `${what}：${reason}` : what);
+    } finally {
+      setDialogBusy(false);
+    }
+  };
+
+  /** 会话行：一级信息 = 会话名，右侧时间；悬停/聚焦出「更多」操作（改名/移动/删除）。 */
   const renderRow = (conv: Conversation) => {
     const active = conv.id === activeConversationId;
     const title = titleOf(conv);
@@ -165,7 +285,7 @@ export function ConversationRail({
       return (
         <div
           key={conv.id}
-          className="mb-0.5 flex items-center gap-1 rounded-lg bg-subtle-3 px-2 py-1"
+          className="mb-0.5 ml-5 flex items-center gap-1 rounded-lg bg-subtle-3 px-2 py-1"
         >
           <input
             aria-label="会话名称"
@@ -206,7 +326,7 @@ export function ConversationRail({
     return (
       <div
         key={conv.id}
-        className={`group relative mb-0.5 flex items-center rounded-lg transition-colors ${
+        className={`group relative mb-0.5 ml-5 flex items-center rounded-lg transition-colors ${
           active ? "bg-subtle-3" : "hover:bg-subtle-2"
         }`}
       >
@@ -248,7 +368,7 @@ export function ConversationRail({
           <div
             role="menu"
             data-conv-menu
-            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
+            className="absolute right-1 top-full z-30 mt-1 w-40 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
           >
             <button
               type="button"
@@ -257,6 +377,15 @@ export function ConversationRail({
               onClick={() => startRename(conv)}
             >
               重命名
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-conv-menu-move
+              className="block w-full rounded-sm px-2 py-1 text-left hover:bg-subtle-3"
+              onClick={() => openMoveDialog(conv)}
+            >
+              移动到工作区…
             </button>
             <button
               type="button"
@@ -275,6 +404,64 @@ export function ConversationRail({
     );
   };
 
+  /**
+   * 一个工作区组：组头（可折叠）+ 会话行。
+   *
+   * 折叠状态只记在组件里（本机 UI 偏好，不进服务端）：`aria-expanded` 由
+   * 「是否搜索」与折叠集合共同决定——搜索命中时强制展开，两者始终一致。
+   */
+  const renderGroup = (group: WorkspaceGroup) => {
+    const groupId = group.path ?? UNGROUPED_ID;
+    const expanded = hasQuery || !collapsedPaths.has(groupId);
+    const active = activeGroupId === groupId;
+    return (
+      <div key={groupId} className="mb-0.5">
+        <div
+          className={`group flex items-center rounded-lg transition-colors ${
+            active ? "bg-subtle-2" : "hover:bg-subtle-2"
+          }`}
+        >
+          <button
+            type="button"
+            aria-label={`工作区：${group.name}`}
+            aria-expanded={expanded}
+            data-workspace-group={groupId}
+            onClick={() => toggleGroup(groupId)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left"
+          >
+            <FolderIcon width={14} height={14} aria-hidden="true" className="shrink-0 text-muted" />
+            <span className={`min-w-0 flex-1 truncate text-ui-sm ${active ? "text-ink" : "text-body"}`}>
+              {group.name}
+            </span>
+            <ChevronIcon
+              width={12}
+              height={12}
+              aria-hidden="true"
+              className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${
+                expanded ? "rotate-90" : ""
+              }`}
+            />
+          </button>
+          <button
+            type="button"
+            aria-label={`在 ${group.name} 新建对话`}
+            title={`在 ${group.name} 新建对话`}
+            data-workspace-add={groupId}
+            onClick={() => onNewConversation(group.path)}
+            className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-subtle-3 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+          >
+            <PlusIcon width={12} height={12} aria-hidden="true" />
+          </button>
+        </div>
+        {expanded ? (
+          <div data-workspace-group-body={groupId} className="mt-0.5">
+            {group.conversations.map(renderRow)}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderEmpty = () => {
     if (sorted.length === 0) {
       return (
@@ -284,7 +471,7 @@ export function ConversationRail({
           actions={
             <Button
               type="button"
-              onClick={onNewConversation}
+              onClick={() => onNewConversation(null)}
               busy={opening}
               size="sm" variant="primary" className="w-full"
             >
@@ -307,17 +494,56 @@ export function ConversationRail({
     );
   };
 
+  /** 无会话且无工作区 → 纯空态；否则始终渲染组（刚建的空工作区不能凭空消失）。 */
+  const showEmptyState = (sorted.length === 0 && workspaces.length === 0) || (hasQuery && visible.length === 0);
+
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-line-soft bg-subtle">
       {/* 栏顶：常驻主导航（由 Sidebar 组装；插件页接在知识库之后）。 */}
       {topNav}
 
-      <header className="flex items-center gap-2 px-3 pb-1 pt-2">
-        {/* 栏头只留「会话列表」+ 数量：产品名已经在顶栏的手写标志里，
-            这里再排一行「和鸣」等于同一句话说两遍，还挤掉了会话本身的位置。
-            折叠按钮也已退场（d.147.4.89）：侧栏常驻，不再有「收起」这条路径。 */}
-        <h2 className="min-w-0 flex-1 truncate text-ui-sm font-medium text-muted">会话列表</h2>
-        <span className="ui-micro text-muted">{sorted.length}</span>
+      <header className="flex items-center gap-1 px-3 pb-1 pt-2">
+        {/* 栏头只有「工作区」+ 两个图标：文件夹分组是本栏的一级结构，
+            产品名已经在顶栏的手写标志里，这里不再复读（d.147.4.89 的纪律）。 */}
+        <h2 className="min-w-0 flex-1 truncate text-ui-sm font-medium text-muted">工作区</h2>
+        <button
+          type="button"
+          aria-label="搜索会话"
+          title={searchOpen ? "收起搜索" : "搜索会话"}
+          aria-expanded={searchOpen}
+          aria-controls="assistant-conversation-search"
+          data-testid="rail-search-toggle"
+          onClick={() => {
+            if (searchOpen) {
+              closeSearch();
+            } else {
+              setSearchOpen(true);
+              searchRef.current?.focus();
+            }
+          }}
+          className="ui-hit flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-subtle-2 hover:text-ink"
+        >
+          <SearchIcon width={14} height={14} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="新建工作区"
+          title="新建工作区"
+          data-testid="rail-new-workspace"
+          onClick={openNewWorkspaceDialog}
+          className="ui-hit flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-subtle-2 hover:text-ink"
+        >
+          {/* 图标集里没有 FolderPlusIcon（不改 icons.tsx），用一个 9px 的「+」叠在
+              文件夹右下角，视觉上就是「文件夹 + 加号」。 */}
+          <span className="relative inline-flex" aria-hidden="true">
+            <FolderIcon width={16} height={16} />
+            <PlusIcon
+              width={12}
+              height={12}
+              className="absolute -bottom-1 -right-1 rounded-full bg-subtle"
+            />
+          </span>
+        </button>
       </header>
 
       {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。 */}
@@ -326,7 +552,7 @@ export function ConversationRail({
           type="button"
           aria-label="新建会话"
           title="新建会话"
-          onClick={onNewConversation}
+          onClick={() => onNewConversation(newConversationWorkspace)}
           busy={opening}
           size="md"
           variant="primary"
@@ -337,51 +563,35 @@ export function ConversationRail({
         </Button>
       </div>
 
-      {/* 常驻轻量搜索：放大镜在输入框内左侧；「搜索」按钮与「搜索会话」输入框都保留（无障碍/测试同源）。 */}
-      <div id="assistant-conversation-search" className="relative mx-2 mb-1">
-        <button
-          type="button"
-          aria-label="搜索"
-          title={searchOpen ? "收起搜索" : "搜索会话"}
-          aria-expanded={searchOpen}
-          aria-controls="assistant-conversation-search"
-          onClick={() => {
-            if (searchOpen) {
-              closeSearch();
-            } else {
-              setSearchOpen(true);
-              searchRef.current?.focus();
-            }
-          }}
-          className="ui-hit absolute left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted transition-colors hover:text-ink"
-        >
-          <SearchIcon width={14} height={14} aria-hidden="true" />
-        </button>
-        <input
-          ref={searchRef}
-          type="search"
-          aria-label="搜索会话"
-          value={query}
-          onChange={(e) => {
-            setSearchOpen(true);
-            setQuery(e.target.value);
-          }}
-          onFocus={() => setSearchOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              closeSearch();
-            }
-          }}
-          placeholder="搜索会话…"
-          className={`h-8 w-full rounded-lg border bg-transparent pl-8 pr-2 text-ui-sm outline-hidden transition-colors placeholder:text-placeholder ${
-            searchOpen ? "border-line-strong bg-surface" : "border-transparent hover:border-line"
-          }`}
-        />
+      {/* 搜索：默认收起，点栏头放大镜才展开（对齐参考图的图标式入口，不占一行）。
+          `#assistant-conversation-search` 容器常驻，`aria-controls` 永远指向存在的节点。 */}
+      <div id="assistant-conversation-search" className="relative mx-2">
+        {searchOpen ? (
+          <>
+            <span className="pointer-events-none absolute left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-muted">
+              <SearchIcon width={14} height={14} aria-hidden="true" />
+            </span>
+            <input
+              ref={searchRef}
+              type="search"
+              aria-label="搜索会话"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  closeSearch();
+                }
+              }}
+              placeholder="搜索会话…"
+              className="mb-1 h-8 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-2 text-ui-sm outline-hidden transition-colors placeholder:text-placeholder"
+            />
+          </>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-        {visible.length === 0 ? renderEmpty() : visible.map(renderRow)}
+        {showEmptyState ? renderEmpty() : groups.map(renderGroup)}
         {hasQuery && visible.length > 0 ? (
           <p className="ui-caption px-2 py-1">{visible.length} 条匹配</p>
         ) : null}
@@ -406,6 +616,17 @@ export function ConversationRail({
           记忆不出设备」的隐私声明——按用户要求去掉正文，位置让给身份与设置。 */}
       {footer ? (
         <div className="shrink-0 border-t border-line-soft p-1.5">{footer}</div>
+      ) : null}
+
+      {dialog ? (
+        <WorkspaceDialog
+          open
+          mode={dialog.mode}
+          initialPath={dialog.initialPath}
+          busy={dialogBusy}
+          onCancel={cancelDialog}
+          onConfirm={(path) => void confirmDialog(path)}
+        />
       ) : null}
     </aside>
   );

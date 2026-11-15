@@ -9,6 +9,7 @@ import type {
   SharedFileMeta,
   MessageEnvelope,
   E2eDeviceKeys,
+  Workspace,
   TeamActivity,
   TeamActivityInput,
   TeamUsageInput,
@@ -457,11 +458,11 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     listConversations(userId) {
       const convs = db
         .prepare(
-          `SELECT c.id, c.title FROM conversations c
+          `SELECT c.id, c.title, c.workspace FROM conversations c
            JOIN conversation_members m ON m.conv_id = c.id
            WHERE m.member_id = ? AND c.kind = 'agent'`,
         )
-        .all(userId) as { id: string; title: string | null }[];
+        .all(userId) as { id: string; title: string | null; workspace: string | null }[];
       const lastMessageAtOf = (convId: string): string | null => {
         const row = db
           .prepare("SELECT created_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1")
@@ -485,6 +486,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
             type: "agent",
             agent: rowToAgent(agent),
             ...(c.title ? { title: c.title } : {}),
+            ...(c.workspace ? { workspace: c.workspace } : {}),
             // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
             unreadCount: 0,
             lastMessageAt: lastMessageAtOf(c.id),
@@ -524,6 +526,51 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.prepare("UPDATE conversations SET title = ? WHERE id = ?").run(next || null, conversationId);
       return true;
     },
+    updateConversationWorkspace(conversationId, userId, workspace) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const member = db
+        .prepare("SELECT 1 FROM conversation_members WHERE conv_id = ? AND member_id = ?")
+        .get(conversationId, userId);
+      if (!member) return false;
+      const next = (workspace ?? "").trim().slice(0, 1024);
+      db.prepare("UPDATE conversations SET workspace = ? WHERE id = ?").run(next || null, conversationId);
+      return true;
+    },
+    listWorkspaces(userId) {
+      mustUser(userId);
+      const rows = db
+        .prepare(
+          // 同一毫秒加的多个工作区要有确定顺序（否则每次刷新列表会跳）：updated_at 并列时按 path。
+          "SELECT path, updated_at FROM workspaces WHERE user_id = ? ORDER BY updated_at DESC, path ASC",
+        )
+        .all(userId) as { path: string; updated_at: string }[];
+      return rows.map((r) => ({ path: r.path, updatedAt: r.updated_at }));
+    },
+    addWorkspace(userId, path) {
+      mustUser(userId);
+      const next = path.trim().slice(0, 1024);
+      if (!next) throw new Error("invalid path");
+      const now = new Date().toISOString();
+      // 同一路径幂等：已存在只刷新 updated_at，不报错、不改 created_at。
+      db.prepare(
+        `INSERT INTO workspaces (user_id, path, created_at, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id, path) DO UPDATE SET updated_at = excluded.updated_at`,
+      ).run(userId, next, now, now);
+      return { path: next, updatedAt: now };
+    },
+    removeWorkspace(userId, path) {
+      mustUser(userId);
+      const next = path.trim().slice(0, 1024);
+      const inUse = db
+        .prepare(
+          `SELECT 1 FROM conversations c JOIN conversation_members m ON m.conv_id = c.id
+           WHERE m.member_id = ? AND c.workspace = ? LIMIT 1`,
+        )
+        .get(userId, next);
+      if (inUse) throw new Error("workspace in use");
+      db.prepare("DELETE FROM workspaces WHERE user_id = ? AND path = ?").run(userId, next);
+    },
     createAgentConversation(userId, _agentId, options = {}) {
       mustUser(userId);
       // 单智能体产品：忽略传入 agentId（旧客户端可能仍传自建 id），一律挂唯一内置智能体；
@@ -536,6 +583,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       // 幂等：同用户与同 agent 只留一个会话。conversation_agents 存「会话挂了哪些 agent」，
       // agent 一对一恰好只挂一个，据此反查即可，不必另建映射表。
       const title = (options.title ?? "").trim().slice(0, 80);
+      const workspace = (options.workspace ?? "").trim().slice(0, 1024);
       if (!options.fresh) {
         const existing = db
           .prepare(
@@ -548,7 +596,11 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         if (existing) return { id: existing.id, type: "agent", agent };
       }
       const id = randomUUID();
-      db.prepare("INSERT INTO conversations (id, kind, title) VALUES (?, 'agent', ?)").run(id, title || null);
+      db.prepare("INSERT INTO conversations (id, kind, title, workspace) VALUES (?, 'agent', ?, ?)").run(
+        id,
+        title || null,
+        workspace || null,
+      );
       db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)").run(id, userId);
       db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(
         id,

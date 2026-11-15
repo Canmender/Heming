@@ -478,3 +478,71 @@ for (const f of factories) {
     });
   });
 }
+
+for (const f of factories) {
+  describe(`Store 工作区（d.147.4.91.11）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("加工作区幂等；清单按 updated_at 倒序", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const first = store.addWorkspace(a.id, "D:/项目/和鸣");
+      expect(first.path).toBe("D:/项目/和鸣");
+      store.addWorkspace(a.id, "D:/项目/和鸣");
+      store.addWorkspace(a.id, "D:/另一个");
+      const list = store.listWorkspaces(a.id);
+      expect(list.map((w) => w.path)).toEqual(["D:/另一个", "D:/项目/和鸣"]);
+      // 工作区是每用户自己的视图：别人看不到
+      const b = store.createUser("bob", "h", "鲍勃");
+      expect(store.listWorkspaces(b.id)).toEqual([]);
+    });
+
+    it("建会话带 workspace；listConversations 带回该字段（未分组不带）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const withWs = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, {
+        fresh: true,
+        workspace: "D:/项目/和鸣",
+      });
+      const plain = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true });
+      const byId = new Map(store.listConversations(a.id).map((c) => [c.id, c]));
+      expect(byId.get(withWs.id)?.workspace).toBe("D:/项目/和鸣");
+      expect(byId.get(plain.id)?.workspace).toBeUndefined();
+    });
+
+    it("updateConversationWorkspace 可挪可清；非成员 false、不存在抛错", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const conv = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true });
+      expect(store.updateConversationWorkspace(conv.id, a.id, "D:/x")).toBe(true);
+      expect(store.listConversations(a.id)[0].workspace).toBe("D:/x");
+      // 非成员不能改（也不该泄露会话存在与否之外的任何信息）
+      expect(store.updateConversationWorkspace(conv.id, b.id, "D:/y")).toBe(false);
+      expect(store.listConversations(a.id)[0].workspace).toBe("D:/x");
+      expect(() => store.updateConversationWorkspace("no-such-id", a.id, "D:/y")).toThrow(
+        "conversation not found",
+      );
+      // 空串等价于未分组
+      expect(store.updateConversationWorkspace(conv.id, a.id, "")).toBe(true);
+      expect(store.listConversations(a.id)[0].workspace).toBeUndefined();
+    });
+
+    it("删工作区：有会话挂着时抛 workspace in use；挪走后可删", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      store.addWorkspace(a.id, "D:/项目/和鸣");
+      const conv = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, {
+        fresh: true,
+        workspace: "D:/项目/和鸣",
+      });
+      expect(() => store.removeWorkspace(a.id, "D:/项目/和鸣")).toThrow("workspace in use");
+      store.updateConversationWorkspace(conv.id, a.id, null);
+      store.removeWorkspace(a.id, "D:/项目/和鸣");
+      expect(store.listWorkspaces(a.id)).toEqual([]);
+    });
+  });
+}

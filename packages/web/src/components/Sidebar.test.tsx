@@ -102,9 +102,13 @@ beforeEach(() => {
     messages: messages as never,
     workspaceReady: true,
     workspaceError: "",
+    workspaces: [],
     conversationsHasMore: false,
     conversationsLoadingMore: false,
     loadWorkspace: vi.fn(async () => undefined),
+    loadWorkspaces: vi.fn(async () => undefined),
+    addWorkspace: vi.fn(async () => undefined),
+    moveConversation: vi.fn(async () => undefined),
     loadMoreConversations: vi.fn(async () => undefined),
     // 新建会话的返回值：会话已预先放进 conversations（模拟 store 建完并刷新后的状态）。
     openAgent: vi.fn(async () => "c9"),
@@ -119,10 +123,10 @@ afterEach(() => {
 });
 
 describe("Sidebar · 常驻结构", () => {
-  it("会话列表头 + 新建会话入口 + 扁平会话行", () => {
+  it("工作区头 + 新建会话入口 + 扁平会话行", () => {
     render(<Sidebar />);
 
-    expect(screen.getByRole("heading", { level: 2, name: "会话列表" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "工作区" })).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "新建会话" }).length,
     ).toBeGreaterThanOrEqual(1);
@@ -142,6 +146,21 @@ describe("Sidebar · 常驻结构", () => {
     expect(
       screen.getByRole("button", { name: "打开会话：调研一下竞品定价" }),
     ).not.toHaveAttribute("aria-current");
+  });
+
+  it("挂载时同时拉会话与工作区清单，工作区清单进 rail 分组", async () => {
+    useChatStore.setState({
+      conversations: [{ ...conv1, workspace: "D:/项目/和鸣" }] as never,
+      workspaces: [{ path: "D:/项目/和鸣", updatedAt: "2026-11-09T03:00:00.000Z" }] as never,
+    });
+    render(<Sidebar />);
+
+    await waitFor(() => expect(useChatStore.getState().loadWorkspaces).toHaveBeenCalledTimes(1));
+    expect(useChatStore.getState().loadWorkspace).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "工作区：和鸣" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("点另一条会话就地切换", () => {
@@ -258,8 +277,8 @@ describe("Sidebar · 搜索与分页", () => {
   it("搜索只匹配会话名，不匹配消息正文", () => {
     useChatStore.setState({ conversations: [conv1, convTitled] as never });
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-    const search = screen.getByLabelText("搜索会话");
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    const search = screen.getByRole("searchbox", { name: "搜索会话" });
 
     // c3 的 title 是「竞品调研」，消息正文却是会议纪要：搜正文不应命中 c3
     fireEvent.change(search, { target: { value: "会议纪要" } });
@@ -277,8 +296,8 @@ describe("Sidebar · 搜索与分页", () => {
 
   it("无匹配时给空态，「清空搜索」恢复列表", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "zzz" } });
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索会话" }), { target: { value: "zzz" } });
 
     expect(screen.getByText("没有匹配的会话")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
@@ -302,14 +321,14 @@ describe("Sidebar · 搜索与分页", () => {
 /**
  * d.147.4.88：身份从顶栏搬进侧栏左下角。
  *
- * 栏头只留「会话列表」（产品名在顶栏手写标志里），栏底原来的隐私文案换成账户入口。
+ * 栏头只留「工作区」（产品名在顶栏手写标志里），栏底原来的隐私文案换成账户入口。
  * d.147.4.89 起折叠被彻底删除（没有 60px 收起态），账户行始终是「头像 + 名字」整行。
  */
 describe("Sidebar · 栏头与账户入口", () => {
-  it("栏头只有一行「会话列表」：不再复读「和鸣」，也没有隐私文案", () => {
+  it("栏头只有一行「工作区」：不再复读「和鸣」，也没有隐私文案", () => {
     render(<Sidebar />);
     const aside = screen
-      .getByRole("heading", { level: 2, name: "会话列表" })
+      .getByRole("heading", { level: 2, name: "工作区" })
       .closest("aside") as HTMLElement;
 
     expect(aside).not.toBeNull();
@@ -345,10 +364,10 @@ describe("Sidebar · 栏头与账户入口", () => {
   it("折叠已彻底删除：没有收起/展开按钮，栏宽固定为展开态", () => {
     render(<Sidebar />);
 
-    expect(screen.queryByRole("button", { name: "收起会话列表" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "展开会话列表" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "收起工作区" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开工作区" })).toBeNull();
     const aside = screen
-      .getByRole("heading", { level: 2, name: "会话列表" })
+      .getByRole("heading", { level: 2, name: "工作区" })
       .closest("aside") as HTMLElement;
     expect(aside.className).toContain("w-[268px]");
   });
@@ -361,7 +380,7 @@ function sideNav(): HTMLElement {
 
 function asideOfSidebar(): HTMLElement {
   return screen
-    .getByRole("heading", { level: 2, name: "会话列表" })
+    .getByRole("heading", { level: 2, name: "工作区" })
     .closest("aside") as HTMLElement;
 }
 
@@ -372,14 +391,14 @@ function navLabels(): string[] {
 }
 
 describe("Sidebar · 侧栏导航", () => {
-  it("导航顺序固定：插件 → 团队 → 模型 → 知识库；位于 aside 顶部（会话列表之前）", () => {
+  it("导航顺序固定：插件 → 团队 → 模型 → 知识库；位于 aside 顶部（工作区之前）", () => {
     render(<Sidebar />);
 
     expect(navLabels()).toEqual(["插件", "团队", "模型", "知识库"]);
     const aside = asideOfSidebar();
     const nav = within(aside).getByRole("navigation", { name: "主导航" });
-    // 导航在栏头「会话列表」之前（DOM 顺序 = 视觉顺序）
-    const heading = within(aside).getByRole("heading", { level: 2, name: "会话列表" });
+    // 导航在栏头「工作区」之前（DOM 顺序 = 视觉顺序）
+    const heading = within(aside).getByRole("heading", { level: 2, name: "工作区" });
     expect(
       nav.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

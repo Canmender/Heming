@@ -156,6 +156,8 @@ const TRUSTED_CHANNELS = [
   "mcp:stdio:cancel",
   "mcp:stdio:stop",
   "runtime:probe",
+  // 工作区选目录（d.147.4.91.11）：只回绝对路径给渲染层做会话分组，不读目录、不写文件。
+  "app:pickDirectory",
   // web 模块体系（d.131）已下线：模块页/模块包全部改由插件体系承担，
   // 这里不再保留 modules:web-list / modules:install / modules:remove 三条主窗通道。
   "update:check",
@@ -1190,6 +1192,22 @@ if (!gotLock) {
   // 必须在 createWindow() 之前注册：preload 顶层就会 sendSync 取一次。
   ipcMain.on("app:version", (event) => {
     event.returnValue = appVersion();
+  });
+
+  // 选一个本机文件夹当「工作区」（d.147.4.91.11）：只回传绝对路径给渲染层做分组，
+  // 不读目录内容、不写任何文件。取消/异常一律 null，让界面按「没选」处理。
+  secureIpc.handle("app:pickDirectory", async (_event, title) => {
+    try {
+      const options = {
+        title: typeof title === "string" && title ? title : "选择工作区文件夹",
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+      if (result.canceled || !result.filePaths || !result.filePaths[0]) return null;
+      return result.filePaths[0];
+    } catch {
+      return null;
+    }
   });
 
   // —— 本机运行时探测（d.25 本地包安装）——

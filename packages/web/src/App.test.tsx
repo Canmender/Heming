@@ -375,7 +375,7 @@ describe("App 导航快捷键与隐藏态", () => {
 
     expect(useUiStore.getState().page).toBe("chat");
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "会话列表" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "工作区" })).toBeInTheDocument();
     // 导航常驻在侧栏里（切到会话页也不消失）
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
   });

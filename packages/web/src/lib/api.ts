@@ -3,6 +3,7 @@ import type {
   SharedFileMeta,
   Message,
   Conversation,
+  Workspace,
   E2eKeysResponse,
   PutE2eKeysBody,
   ReencryptBody,
@@ -143,11 +144,29 @@ export const fetchConversations = (options: { limit?: number; offset?: number } 
  */
 export const createAgentConversation = (
   agentId: string,
-  options: { fresh?: boolean; title?: string } = {},
+  options: { fresh?: boolean; title?: string; workspace?: string } = {},
 ) =>
   api<Conversation>("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ agentId, ...options }),
+  });
+
+/** 左栏工作区清单（本机文件夹路径；「未分组」是隐式组，不在清单里）。 */
+export const fetchWorkspaces = () => api<Workspace[]>("/api/workspaces");
+
+/** 加工作区（同一路径幂等，服务端只刷新 updated_at）。 */
+export const addWorkspace = (path: string) =>
+  api<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ path }) });
+
+/** 删工作区：还有会话挂在它下面时服务端回 409（调用方先让用户挪走）。 */
+export const removeWorkspace = (path: string) =>
+  api<void>(`/api/workspaces?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+
+/** 把会话挪到别的 工作区（null/空串 = 未分组）；返回更新后的会话。 */
+export const updateConversationWorkspace = (convId: string, workspace: string | null) =>
+  api<Conversation>(`/api/conversations/${encodeURIComponent(convId)}/workspace`, {
+    method: "PATCH",
+    body: JSON.stringify({ workspace }),
   });
 
 /** 删除整段会话（消息一并删，服务端 204 无响应体）。 */

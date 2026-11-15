@@ -506,3 +506,20 @@ test("__heming_infohub.onEvent 订阅可取消，非函数回调不注册", () =
   });
   assert.equal((listeners.get("infohub:event") || new Set()).size, 0);
 });
+
+// ── 工作区选目录（d.147.4.91.11）：只回传绝对路径，不读目录 ──
+
+test("pickDirectory 走 app:pickDirectory 通道并回传路径", async () => {
+  const invoked = [];
+  const heming = loadExposed({}, { invoked, invokeResults: { "app:pickDirectory": () => "D:/项目/和鸣" } }).heming;
+  assert.equal(typeof heming.pickDirectory, "function");
+  const result = await heming.pickDirectory("选择工作区");
+  assert.equal(result, "D:/项目/和鸣");
+  assert.deepEqual(invoked.at(-1), ["app:pickDirectory", "选择工作区"]);
+});
+
+test("pickDirectory 用户取消时原样回传 null（不报错）", async () => {
+  // 取消路径由主进程的 handler 归一到 null；这里 mock 掉的正是那个返回值。
+  const heming = loadExposed({}, { invokeResults: { "app:pickDirectory": () => null } }).heming;
+  assert.equal(await heming.pickDirectory(), null);
+});

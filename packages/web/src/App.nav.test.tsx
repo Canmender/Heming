@@ -5,7 +5,7 @@
  *   1. 已登录壳里 nav[aria-label="主导航"] 常驻在会话侧栏里，没有界面级折叠；
  *   2. header[data-testid="topbar"] 存在；顶栏不再有「打开页面菜单」；侧栏导航点「设置」切页；
  *      且无 sessionStorage 时默认页是会话（chat）；
- *   3. Sidebar 常驻：aria-label「新建会话」+ h2「会话列表」，点「新对话」进入会话页；
+ *   3. Sidebar 常驻：aria-label「新建会话」+ h2「工作区」，点「新对话」进入会话页；
  *   4. 浏览器（无 window.heming）TopBar 也渲染且类含 h-10；桌面根节点类含 desktop-titlebar；
  *   5. Ctrl/⌘+B 不再生效、不写 heming.nav.mode.v1；Alt+8 仍切会话。
  */
@@ -140,7 +140,7 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
     expect(screen.queryByRole("menu", { name: "页面菜单" })).toBeNull();
 
     const aside = screen
-      .getByRole("heading", { level: 2, name: "会话列表" })
+      .getByRole("heading", { level: 2, name: "工作区" })
       .closest("aside") as HTMLElement;
     const nav = within(aside).getByRole("navigation", { name: "主导航" });
     // 固定顺序：插件 → 团队 → 模型 → 知识库（插件页排在知识库之后，本用例未装插件）
@@ -173,20 +173,20 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
     expect(screen.queryByRole("button", { name: "打开页面菜单" })).toBeNull();
   });
 
-  it("会话侧栏常驻：h2「会话列表」+「新建会话」；点「新对话」进入会话页", async () => {
+  it("会话侧栏常驻：h2「工作区」+「新建会话」；点「新对话」进入会话页", async () => {
     useUiStore.setState({ page: "home" });
     render(<App />);
 
     await screen.findByTestId("topbar");
     // 空会话列表时 rail 顶部与空态各有一个「新建会话」，所以用 getAllByRole。
-    expect(screen.getByRole("heading", { level: 2, name: "会话列表" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "工作区" })).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "新建会话" }).length,
     ).toBeGreaterThanOrEqual(1);
 
     // 页面上有两个「新对话」（侧栏 primary 按钮 + 主页空态引导按钮）：点击范围收进侧栏。
     const rail = screen
-      .getByRole("heading", { level: 2, name: "会话列表" })
+      .getByRole("heading", { level: 2, name: "工作区" })
       .closest("aside") as HTMLElement;
     expect(rail).not.toBeNull();
     // 侧栏里也有两个同名入口（rail 顶部 + 空态），取第一个即可。

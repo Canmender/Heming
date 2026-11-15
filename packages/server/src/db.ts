@@ -39,6 +39,12 @@ export function initSchema(db: DatabaseSyncType): void {
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT, created_by TEXT
     );
+    -- 工作区：用户手工加进左栏的本机文件夹，只做会话分组用（d.147.4.91.11）。
+    CREATE TABLE IF NOT EXISTS workspaces (
+      user_id TEXT NOT NULL, path TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, path)
+    );
     CREATE TABLE IF NOT EXISTS conversation_members (
       conv_id TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (conv_id, member_id)
     );
@@ -167,6 +173,10 @@ export function initSchema(db: DatabaseSyncType): void {
   const convCols = db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
   if (!convCols.some((c) => c.name === "title")) {
     db.exec("ALTER TABLE conversations ADD COLUMN title TEXT");
+  }
+  // d.147.4.91.11：会话归属的工作区路径（= 本机文件夹，仅用于左栏分组；NULL = 未分组）。
+  if (!convCols.some((c) => c.name === "workspace")) {
+    db.exec("ALTER TABLE conversations ADD COLUMN workspace TEXT");
   }
 
   // 归档：**按成员存**而不是按会话存。

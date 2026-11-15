@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.147.4.90.11`
-- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.90.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 当前版本：`d.147.4.91.11`
+- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.91.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
 - 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
@@ -146,6 +146,23 @@
   菜单四项 表情 / 图片（≤6MB）/ 文件（≤6MB）/ 语音输入；1024 断点开进度栏后 textarea 394、`composerRight 720 < panelLeft 744`、
   `docOverflowX = 0`。审计脚本 `goPage` 顺带补了「等 BootWave 开机动画退场」，避免抓到 splash 造成 `headingLevels = 0` 假红。
 - 未真机复验项照旧：① 桌面端（Electron）标题栏拖拽与 ≤1024 窄窗的实际观感；② 右侧进度栏拖拽调宽在真实指针设备上的手感（自动化只覆盖 pointer 事件与键盘 / 持久化）。
+
+**后续修订（d.147.4.91.11）**
+- 左栏从「会话列表」改成「工作区」面板（`packages/web/src/components/assistant/ConversationRail.tsx`）：栏头 `<h2>工作区</h2>` + 搜索 / 新建工作区图标；组头 = 文件夹图标 + 文件夹名 + 折叠箭头（悬停出「+」，点组头折叠）；会话行缩进、时间靠右；「未分组」是隐式组，永远最后。
+- 分组规则独立成 `packages/web/src/lib/workspace/group.ts` 的 `groupConversations(conversations, workspaces)`：组来源 = 会话里出现过的路径 ∪ 工作区清单（清单里的空组也显示）；会话里有、清单里没有的路径也成组（目录被删 / 别的设备加的，不吞会话）；组间排序 = 有会话的组优先 → 最近活跃降序 → 名称；组内按最近活跃降序；`workspaceLabel()` 同时认 `\` 与 `/`（末尾分隔符忽略）；`UNGROUPED_ID = "__none__"` 供折叠状态 / aria 使用。
+- 新建与挪动：栏头「新建工作区」与组头「+」/ 会话「⋯ → 移动到工作区…」共用 `packages/web/src/components/assistant/WorkspaceDialog.tsx`（路径输入 `aria-label="工作区文件夹路径"`；桌面端多一个「选择文件夹…」按钮走 `window.heming.pickDirectory`，浏览器端无桌面桥时只手填；移动模式多「移出工作区（未分组）」）；组头「+」→ `lib/newConversation.ts` 的 `startNewConversationIn(path)`；「新对话」落点 = 活动会话所在工作区 → 刚新建的工作区 → 未分组。
+- 折叠与搜索：折叠状态只存在组件里（本机 UI 偏好，不进服务端），组头 `aria-label={`工作区：${name}`}` + `aria-expanded`，搜索命中时强制展开、`aria-expanded` 与实际渲染一致；搜索输入默认收起（点栏头放大镜展开，`#assistant-conversation-search` 容器常驻供 `aria-controls` 指向），只匹配会话名（工作区名 / 智能体名不参与）。
+- 状态：`packages/web/src/store/chat.ts` 新增 `workspaces` / `workspaceReady` / `workspaceError` 与 `loadWorkspaces` / `addWorkspace` / `removeWorkspace` / `moveConversation`；首帧 `loadWorkspace` 并行拉会话清单与工作区清单，失败只记 `workspaceError` 不挡会话列表。
+- 数据面（`packages/server/src/db.ts`）：新增 `workspaces(user_id, path, created_at, updated_at, PRIMARY KEY (user_id, path))` 表；`conversations` 幂等补 `workspace TEXT` 列（照 `PRAGMA table_info` 老模式，旧库启动自动迁移，无需手工改库）；NULL / 空 = 未分组。
+- 路由（`packages/server/src/app.ts`）：`GET /api/workspaces`；`POST /api/workspaces`（同路径幂等 upsert，201）；`DELETE /api/workspaces?path=…`（204；仍有会话挂在该路径 → 409 `workspace in use`，会话不跟着删）；`PATCH /api/conversations/:id/workspace`（body `{workspace: string|null}`，非成员 403、不存在 404）。共享契约在 `packages/shared/src/schemas.ts`（`WorkspaceSchema`、`ConversationSchema.workspace`、建会话可选 `workspace`、两个 Body schema，path 1–1024 字符）。
+- 桌面 IPC（`packages/desktop/main.js` + `preload.js`）：`secureIpc.handle("app:pickDirectory")` 用 `dialog.showOpenDialog`（`openDirectory` / `createDirectory`）选目录，只回绝对路径；取消 / 异常一律 `null`，界面按「没选」处理。preload 只暴露 `window.heming.pickDirectory(title)`：**只回路径、不读目录内容、不写文件**。
+- 边界：**工作区 ≠ 文件权限**——路径只做左栏分组归属，不参与任何工具权限判断；本轮没有给智能体开放本机文件读写。新建工作区、把会话挪进某个文件夹，都不会让智能体获得该目录的读写能力。
+- **验证（d.147.4.91.11，工作树实跑，全 exit 0）**
+  - `pnpm typecheck` 6 项目 Done；`pnpm build`、`pnpm plugin:check`（6/6 + pet-widget 1/1 + examples 5/5）通过。
+  - `packages/web` **303 files / 4379 tests**；`server` 15 / 284；`shared` 8 / 119；`desktop` 856 pass / 0 fail。
+  - `design:audit` 浅色与深色各 **57 条 `failures: []`**（19 视图 × 3 断点；横向溢出 / 对比度 / 11px 正文 / 命中区 < 32 / 无名字可点全 0）。
+  - 截图见 `.tmp/shots-workspace2/{rail-groups-1440,rail-collapsed-1440,rail-new-workspace-1440,rail-groups-dark-1440,rail-groups-1024}.png`；1024 下 `docOverflowX=0`。
+  - **未真机复验**：Electron 原生选目录弹窗的观感与取消路径；≤1024 窄窗下长分组列表的滚动。
 
 ## 0-历史. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
 

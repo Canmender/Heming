@@ -725,3 +725,119 @@ describe("PUT /api/messages/:id/reencrypt", () => {
   });
 });
 
+
+describe("工作区 API（d.147.4.91.11）", () => {
+  let app: ReturnType<typeof createApp>;
+  beforeEach(() => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("POST 建工作区是幂等 upsert；GET 按 updated_at 倒序", async () => {
+    const a = await register(app, "alice");
+    const one = await request(app)
+      .post("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ path: "D:/项目/和鸣" });
+    expect(one.status).toBe(201);
+    expect(one.body.path).toBe("D:/项目/和鸣");
+    // 同路径再来一次不报错、不重复
+    const again = await request(app)
+      .post("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ path: "D:/项目/和鸣" });
+    expect(again.status).toBe(201);
+    await request(app)
+      .post("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ path: "D:/另一个" });
+    const list = await request(app)
+      .get("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(list.status).toBe(200);
+    expect(list.body.map((w: { path: string }) => w.path).sort()).toEqual([
+      "D:/另一个",
+      "D:/项目/和鸣",
+    ]);
+  });
+
+  it("建会话可直接带 workspace；PATCH 挪到别的 工作区 / null 归未分组", async () => {
+    const a = await register(app, "alice");
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true, workspace: "D:/项目/和鸣" });
+    expect(conv.status).toBe(201);
+    expect(conv.body.workspace).toBe("D:/项目/和鸣");
+
+    const moved = await request(app)
+      .patch(`/api/conversations/${conv.body.id}/workspace`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ workspace: "D:/另一个" });
+    expect(moved.status).toBe(200);
+    expect(moved.body.workspace).toBe("D:/另一个");
+
+    const cleared = await request(app)
+      .patch(`/api/conversations/${conv.body.id}/workspace`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ workspace: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.workspace).toBeUndefined();
+  });
+
+  it("非成员挪会话 → 403；不存在的会话 → 404", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob");
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true });
+    const forbidden = await request(app)
+      .patch(`/api/conversations/${conv.body.id}/workspace`)
+      .set("Authorization", `Bearer ${b.token}`)
+      .send({ workspace: "D:/x" });
+    expect(forbidden.status).toBe(403);
+    const missing = await request(app)
+      .patch("/api/conversations/no-such-id/workspace")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ workspace: "D:/x" });
+    expect(missing.status).toBe(403);
+  });
+
+  it("删工作区：仍有会话挂着 → 409；挪走后 → 204", async () => {
+    const a = await register(app, "alice");
+    await request(app)
+      .post("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ path: "D:/项目/和鸣" });
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ agentId: SYSTEM_AGENT_ID, fresh: true, workspace: "D:/项目/和鸣" });
+    const blocked = await request(app)
+      .delete("/api/workspaces")
+      .query({ path: "D:/项目/和鸣" })
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("workspace in use");
+
+    await request(app)
+      .patch(`/api/conversations/${conv.body.id}/workspace`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ workspace: null });
+    const ok = await request(app)
+      .delete("/api/workspaces")
+      .query({ path: "D:/项目/和鸣" })
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(ok.status).toBe(204);
+  });
+
+  it("未登录 → 401；body 非法（空 path）→ 400", async () => {
+    expect((await request(app).get("/api/workspaces")).status).toBe(401);
+    const a = await register(app, "alice");
+    const bad = await request(app)
+      .post("/api/workspaces")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ path: "" });
+    expect(bad.status).toBe(400);
+  });
+});

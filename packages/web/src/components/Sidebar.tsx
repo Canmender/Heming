@@ -3,7 +3,7 @@ import type { Conversation } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { clearDraft } from "../lib/drafts.js";
-import { startNewConversation } from "../lib/newConversation.js";
+import { startNewConversationIn } from "../lib/newConversation.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { conversationTitle } from "./assistant/conversationTitle.js";
 import { AccountMenu } from "./AccountMenu.js";
@@ -11,6 +11,19 @@ import { SidebarNav, sidebarRowClass } from "./SidebarNav.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { GearIcon } from "./icons.js";
 import { Button } from "./ui/Button.js";
+
+/**
+ * 当前活动会话所在工作区（`null` = 未分组/无活动会话）。
+ *
+ * 命令面板「新建会话」没有工作区上下文，用这个把新会话落到用户正在看的那个
+ * 文件夹里——和栏头「新对话」按钮的落点规则一致。读 `getState()` 而不是订阅：
+ * 只在事件触发的那一刻需要一次快照，订阅会让侧栏跟着 workspace 变化重渲染。
+ */
+function activeWorkspaceOf(): string | null {
+  const state = useChatStore.getState();
+  const active = state.conversations.find((conv) => conv.id === useUiStore.getState().activeConversationId);
+  return active?.workspace?.trim() || null;
+}
 
 /**
  * 常驻会话侧栏（应用外壳的一部分，所有页面都在左侧）。
@@ -21,11 +34,19 @@ import { Button } from "./ui/Button.js";
  * 失败提示与二次确认），不新增第二套状态。
  *
  * 会话从服务端取：侧栏挂载即拉一次，不依赖用户先去某个页面。
+ *
+ * d.147.4.91.11：会话按**工作区**（本机文件夹）分组，工作区清单与首帧会话**并列**
+ * 拉取——分组是列表的一级结构，晚一拍到会让整栏先闪一下「未分组」。
  */
 export function Sidebar() {
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages);
+  /** 左栏工作区清单（分组来源；拉不到时 store 退化成「未分组」一组）。 */
+  const workspaces = useChatStore((s) => s.workspaces);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
+  const loadWorkspaces = useChatStore((s) => s.loadWorkspaces);
+  const addWorkspace = useChatStore((s) => s.addWorkspace);
+  const moveConversation = useChatStore((s) => s.moveConversation);
   const openConversation = useUiStore((s) => s.openConversation);
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
@@ -46,26 +67,40 @@ export function Sidebar() {
   /** 待确认删除的会话：rail 只发请求，二次确认统一放在侧栏做。 */
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
 
-  // 首帧失败由 store 记录（workspaceError，仅首帧写），会话页负责提示 + 重试；
-  // 这里故意不弹错误——侧栏在每一页都在，后台刷新失败不该每页都喊一次。
+  // 首帧并行拉两件事：本地工作区路径（首帧要显示）+ 工作区清单（分组）。
+  // 清单失败在 store 里静默退化成空数组（只剩「未分组」组），不打扰用户；
+  // 路径失败由 store 记录（workspaceError），会话页负责提示 + 重试——侧栏在
+  // 每一页都在，后台刷新失败不该每页都喊一次。
   useEffect(() => {
     void loadWorkspace().catch(() => {
       /* 错误已由 store 记录，这里不重复处理 */
     });
-  }, [loadWorkspace]);
+    void loadWorkspaces();
+  }, [loadWorkspace, loadWorkspaces]);
 
-  const startNew = useCallback(async () => {
-    if (opening) return;
-    setOpening(true);
-    setError("");
-    try {
-      await startNewConversation();
-    } catch (err) {
-      setError(err instanceof Error && err.message ? `新建会话失败：${err.message}` : "新建会话失败");
-    } finally {
-      setOpening(false);
-    }
-  }, [opening]);
+  /**
+   * 新建一段 fresh 会话，落到指定工作区（`null` = 未分组）。
+   *
+   * 顺序（切页 → 打开会话）由 `startNewConversationIn` 保证，这里只管
+   * 防重、清理旧错误与失败提示；rail 的栏头按钮与组头「+」都走这一个入口。
+   */
+  const startNew = useCallback(
+    async (workspace: string | null) => {
+      if (opening) return;
+      setOpening(true);
+      setError("");
+      try {
+        await startNewConversationIn(workspace);
+      } catch (err) {
+        setError(
+          err instanceof Error && err.message ? `新建会话失败：${err.message}` : "新建会话失败",
+        );
+      } finally {
+        setOpening(false);
+      }
+    },
+    [opening],
+  );
 
   // 命令面板「新建会话」意图的消费点：侧栏常驻，所以任意页面点都能立刻建。
   // token 变化即触发（同一种意图连点两次也各自消费）；正有一段在新建时先不消费，
@@ -74,7 +109,7 @@ export function Sidebar() {
     if (paletteIntent?.kind !== "new-session") return;
     if (opening) return;
     consumePaletteIntent();
-    void startNew();
+    void startNew(activeWorkspaceOf());
   }, [paletteIntent, consumePaletteIntent, startNew, opening]);
 
   /** 会话改名：失败时把原因放进栏底错误区（rail 保留输入供重试）。 */
@@ -110,14 +145,18 @@ export function Sidebar() {
     <>
       <ConversationRail
         conversations={conversations}
+        workspaces={workspaces}
         activeConversationId={activeConversationId}
         messages={messages}
         opening={opening}
         error={error}
         onOpen={openConversation}
-        onNewConversation={() => void startNew()}
+        onNewConversation={(workspace) => void startNew(workspace)}
         onRename={(id, title) => renameConversationTitle(id, title)}
         onDeleteRequest={(conv) => setDeleteTarget(conv)}
+        onMoveConversation={moveConversation}
+        onAddWorkspace={addWorkspace}
+        onError={setError}
         hasMore={conversationsHasMore}
         loadingMore={conversationsLoadingMore}
         onLoadMore={() => {

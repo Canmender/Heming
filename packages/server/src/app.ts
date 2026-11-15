@@ -7,6 +7,8 @@ import {
   UpdateProfileBodySchema,
   AgentConversationBodySchema,
   UpdateConversationBodySchema,
+  UpdateConversationWorkspaceBodySchema,
+  AddWorkspaceBodySchema,
   CreateFileBodySchema,
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
@@ -776,6 +778,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
         {
           fresh: parsed.data.fresh,
           title: parsed.data.title,
+          workspace: parsed.data.workspace,
         },
       );
       const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
@@ -798,6 +801,66 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
     if (!store.updateConversationTitle(req.params.id, userId(req), parsed.data.title)) {
       res.status(404).json({ error: "conversation not found" });
+      return;
+    }
+    const row = store.listConversations(userId(req)).find((c) => c.id === req.params.id);
+    if (!row) {
+      res.status(404).json({ error: "conversation not found" });
+      return;
+    }
+    res.json(row);
+  });
+
+  // d.147.4.91.11：左栏工作区（本机文件夹，只做会话分组，不授予文件读写）。
+  app.get("/api/workspaces", authOnly, (req, res) => {
+    res.json(store.listWorkspaces(userId(req)));
+  });
+
+  app.post("/api/workspaces", authOnly, (req, res) => {
+    const parsed = AddWorkspaceBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    try {
+      // 同一路径幂等：已存在就刷新 updated_at，前端不必先查再建。
+      res.status(201).json(store.addWorkspace(userId(req), parsed.data.path));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // 删工作区不删会话：还有会话挂在它下面时拒绝（409），调用方先让用户挪走或确认整组移出。
+  app.delete("/api/workspaces", authOnly, (req, res) => {
+    const path = typeof req.query.path === "string" ? req.query.path : "";
+    if (!path) {
+      res.status(400).json({ error: "path required" });
+      return;
+    }
+    try {
+      store.removeWorkspace(userId(req), path);
+      res.status(204).end();
+    } catch (e) {
+      const msg = (e as Error).message;
+      res.status(msg === "workspace in use" ? 409 : 400).json({ error: msg });
+    }
+  });
+
+  // 把会话挪到工作区（null/空串 = 未分组）。成员之外一律 403。
+  app.patch("/api/conversations/:id/workspace", authOnly, (req, res) => {
+    const parsed = UpdateConversationWorkspaceBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    try {
+      store.updateConversationWorkspace(req.params.id, userId(req), parsed.data.workspace);
+    } catch (e) {
+      res.status(404).json({ error: (e as Error).message });
       return;
     }
     const row = store.listConversations(userId(req)).find((c) => c.id === req.params.id);

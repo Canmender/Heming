@@ -33,7 +33,13 @@ contextBridge.exposeInMainWorld("heming", {
   __startBootWave: () => {
     bootStarted = true;
     if (typeof bootCallback === "function") bootCallback();
-  }
+  },
+  /**
+   * 选一个本机文件夹当「工作区」（d.147.4.91.11）。
+   * 只返回绝对路径：渲染层拿它给会话分组，**不因此获得任何文件读写权限**。
+   * 用户取消或原生对话框失败时返回 null（渲染层按「没选」处理，不弹错）。
+   */
+  pickDirectory: (title) => ipcRenderer.invoke("app:pickDirectory", title)
   // harness 桥接 API 在 M（二期）扩展
 });
 

@@ -968,3 +968,115 @@ describe("streamOwner 有回收窗口（不随会话长度单调上涨）", () =
     expect(useChatStore.getState().streamOwner["s10"]).toBe(true);
   });
 });
+
+describe("chat store · 工作区（d.147.4.91.11）", () => {
+  const wsList = [{ path: "D:/项目/和鸣", updatedAt: "2026-11-15T00:00:00.000Z" }];
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const convOf = (id: string, workspace?: string) => ({
+    id,
+    type: "agent",
+    agent: { id: "a1", owner_id: null, name: "和鸣", avatar: null, description: "" },
+    unreadCount: 0,
+    lastMessageAt: null,
+    ...(workspace ? { workspace } : {}),
+  });
+
+  beforeEach(() => {
+    useChatStore.setState({ workspaces: [], conversations: [] });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("loadWorkspaces 成功时写入清单", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(wsList));
+    await useChatStore.getState().loadWorkspaces();
+    expect(spy).toHaveBeenCalledWith("/api/workspaces", expect.anything());
+    expect(useChatStore.getState().workspaces).toEqual(wsList);
+  });
+
+  it("loadWorkspaces 失败静默：不抛错，清单保持空", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
+    await expect(useChatStore.getState().loadWorkspaces()).resolves.toBeUndefined();
+    expect(useChatStore.getState().workspaces).toEqual([]);
+  });
+
+  it("moveConversation：PATCH 后就地更新这一条，不整表刷新", async () => {
+    useChatStore.setState({ conversations: [convOf("c1"), convOf("c2", "D:/old")] as never });
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(convOf("c1", "D:/项目/和鸣")));
+    await useChatStore.getState().moveConversation("c1", "D:/项目/和鸣");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(
+      "/api/conversations/c1/workspace",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ workspace: "D:/项目/和鸣" }) }),
+    );
+    const [first, second] = useChatStore.getState().conversations;
+    expect(first.workspace).toBe("D:/项目/和鸣");
+    expect(second.workspace).toBe("D:/old");
+  });
+
+  it("moveConversation 到未分组：workspace 清空", async () => {
+    useChatStore.setState({ conversations: [convOf("c1", "D:/项目/和鸣")] as never });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(convOf("c1")));
+    await useChatStore.getState().moveConversation("c1", null);
+    expect(useChatStore.getState().conversations[0].workspace).toBeUndefined();
+  });
+
+  it("addWorkspace 成功：POST 后刷新清单", async () => {
+    let posted = false;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if ((init as RequestInit | undefined)?.method === "POST") {
+        posted = true;
+        return json(wsList[0]);
+      }
+      return json(posted ? wsList : []);
+    });
+    await useChatStore.getState().addWorkspace("D:/项目/和鸣");
+    expect(spy).toHaveBeenCalledWith("/api/workspaces", expect.objectContaining({ method: "POST" }));
+    expect(useChatStore.getState().workspaces).toEqual(wsList);
+  });
+
+  it("addWorkspace 失败：抛出，但清单仍刷新一次", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if ((init as RequestInit | undefined)?.method === "POST") return json({ error: "落库失败" }, 500);
+      return json(wsList);
+    });
+    await expect(useChatStore.getState().addWorkspace("D:/项目/和鸣")).rejects.toThrow("落库失败");
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().workspaces).toEqual(wsList);
+  });
+
+  it("removeWorkspace：DELETE 后刷新清单", async () => {
+    useChatStore.setState({ workspaces: wsList });
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) =>
+      (init as RequestInit | undefined)?.method === "DELETE" ? json(undefined) : json([]),
+    );
+    await useChatStore.getState().removeWorkspace("D:/项目/和鸣");
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/workspaces?path="),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(useChatStore.getState().workspaces).toEqual([]);
+  });
+
+  it("openAgent 把 workspace 透传给建会话接口", async () => {
+    const conv = convOf("c9", "D:/项目/和鸣");
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return method === "POST" ? json(conv) : json([]);
+    });
+    const id = await useChatStore
+      .getState()
+      .openAgent("system-assistant", { fresh: true, workspace: "D:/项目/和鸣" });
+    expect(id).toBe("c9");
+    const post = spy.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(post).toBeDefined();
+    expect(JSON.parse(String((post![1] as RequestInit).body))).toEqual({
+      agentId: "system-assistant",
+      fresh: true,
+      workspace: "D:/项目/和鸣",
+    });
+  });
+});

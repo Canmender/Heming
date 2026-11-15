@@ -8,6 +8,7 @@ import type {
   SharedFileMeta,
   MessageEnvelope,
   E2eDeviceKeys,
+  Workspace,
   TeamActivity,
   TeamActivityInput,
   TeamUsageInput,
@@ -122,11 +123,30 @@ export interface Store {
   createAgentConversation(
     userId: string,
     agentId: string,
-    options?: { fresh?: boolean; title?: string },
+    options?: { fresh?: boolean; title?: string; workspace?: string },
   ): { id: string; type: "agent"; agent: Agent };
   listConversations(userId: string): Conversation[];
   /** 改会话标题（空串 = 清除）；调用者需先确认成员身份。返回是否落库。 */
   updateConversationTitle(conversationId: string, userId: string, title: string): boolean;
+  /**
+   * 把会话挪到工作区（d.147.4.91.11）：`null`/空串 = 未分组。
+   * 只改归属，不校验路径是否真实存在（目录可能已被删/移走，那是本机的事）。
+   * 调用者需先确认成员身份；非成员返回 false，不存在抛 conversation not found。
+   */
+  updateConversationWorkspace(
+    conversationId: string,
+    userId: string,
+    workspace: string | null,
+  ): boolean;
+  /** 左栏工作区清单（不含「未分组」，那是隐式组）；按 updated_at 倒序。 */
+  listWorkspaces(userId: string): Workspace[];
+  /** 加工作区（同路径幂等，只刷新 updated_at）。 */
+  addWorkspace(userId: string, path: string): Workspace;
+  /**
+   * 删工作区（不删会话）：还有会话挂在该路径下 → 抛 `workspace in use`。
+   * 删后会话仍留在左栏，只是重新落回「未分组」——调用方无需逐条搬迁。
+   */
+  removeWorkspace(userId: string, path: string): void;
   /** 删除整段会话（消息一并删）；非成员 forbidden、不存在 conversation not found。 */
   deleteConversation(conversationId: string, userId: string): void;
   isMember(conversationId: string, userId: string): boolean;
@@ -311,9 +331,13 @@ export function createMemoryStore(): Store {
       agentPeerId?: string;
       /** d.128：会话标题（空 = 未命名，界面按首条消息/时间兜底）。 */
       title?: string;
+      /** d.147.4.91.11：归属的工作区路径（本机文件夹；空 = 未分组）。 */
+      workspace?: string;
     }
   >();
   const messages = new Map<string, Message[]>();
+  /** 左栏工作区清单：userId → (path → updatedAt)。 */
+  const workspaces = new Map<string, Map<string, string>>();
   // 智能体名册（closure 级，随 store 实例隔离——与 users/conversations 同层）。
   // 单智能体产品：构造即登记唯一内置智能体（与 sqlite 启动时 ensureSystemAgents 同口径），
   // 保证任何时候 listAgents / createAgentConversation 都有且只有「和小鸣」。
@@ -434,6 +458,7 @@ export function createMemoryStore(): Store {
       // 旧行为（fresh 缺省）：同一用户 × 唯一智能体幂等复用；`fresh: true` 则每次新开一段
       // （Claude Code 式「同一智能体多段对话」；老客户端/旧链接不受影响）。
       const title = (options.title ?? "").trim().slice(0, 80);
+      const workspace = (options.workspace ?? "").trim().slice(0, 1024);
       if (!options.fresh) {
         const found = [...conversations].find(
           ([, c]) =>
@@ -447,6 +472,7 @@ export function createMemoryStore(): Store {
         kind: "agent",
         agentPeerId: SYSTEM_AGENT_ID,
         ...(title ? { title } : {}),
+        ...(workspace ? { workspace } : {}),
       });
       messages.set(id, []);
       return { id, type: "agent", agent };
@@ -464,6 +490,7 @@ export function createMemoryStore(): Store {
             type: "agent",
             agent,
             ...(conv.title ? { title: conv.title } : {}),
+            ...(conv.workspace ? { workspace: conv.workspace } : {}),
             // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
             unreadCount: 0,
             lastMessageAt: messages.get(id)?.at(-1)?.createdAt ?? null,
@@ -478,6 +505,41 @@ export function createMemoryStore(): Store {
       if (next) conv.title = next;
       else delete conv.title;
       return true;
+    },
+    updateConversationWorkspace(conversationId, userId, workspace) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      if (!conv.members.includes(userId)) return false;
+      const next = (workspace ?? "").trim().slice(0, 1024);
+      if (next) conv.workspace = next;
+      else delete conv.workspace;
+      return true;
+    },
+    listWorkspaces(userId) {
+      mustUser(userId);
+      return [...(workspaces.get(userId) ?? new Map<string, string>())]
+        .map(([path, updatedAt]) => ({ path, updatedAt }))
+        // 同一毫秒加的多个工作区要有确定顺序，否则列表每次刷新会跳：并列时按路径排。
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.path.localeCompare(b.path));
+    },
+    addWorkspace(userId, path) {
+      mustUser(userId);
+      const next = path.trim().slice(0, 1024);
+      if (!next) throw new Error("invalid path");
+      const now = new Date().toISOString();
+      const list = workspaces.get(userId) ?? new Map<string, string>();
+      list.set(next, now);
+      workspaces.set(userId, list);
+      return { path: next, updatedAt: now };
+    },
+    removeWorkspace(userId, path) {
+      mustUser(userId);
+      const next = path.trim().slice(0, 1024);
+      const inUse = [...conversations.values()].some(
+        (c) => c.members.includes(userId) && c.workspace === next,
+      );
+      if (inUse) throw new Error("workspace in use");
+      workspaces.get(userId)?.delete(next);
     },
     deleteConversation(conversationId, userId) {
       const conv = conversations.get(conversationId);

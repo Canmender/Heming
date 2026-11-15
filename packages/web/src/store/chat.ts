@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, Conversation, Message, WsServerEvent } from "@heming/shared";
+import type { Agent, Conversation, Message, Workspace, WsServerEvent } from "@heming/shared";
 import {
   fetchConversations,
   createAgentConversation,
@@ -7,6 +7,10 @@ import {
   reencryptMessage,
   updateConversationTitle,
   deleteConversation as deleteConversationApi,
+  fetchWorkspaces,
+  addWorkspace as addWorkspaceApi,
+  removeWorkspace as removeWorkspaceApi,
+  updateConversationWorkspace,
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 import type { RouteAttempt } from "../lib/llmClient.js";
@@ -351,6 +355,8 @@ const STREAM_OWNER_TTL_MS = 120_000;
 
 interface ChatState {
   conversations: Conversation[];
+  /** 左栏工作区清单（本机文件夹；「未分组」是隐式组，不在清单里）。 */
+  workspaces: Workspace[];
   messages: Record<string, Message[]>;
   /** 名册全量（GET /api/agents；智能体页列表与编辑弹窗取 owner/description 用）。 */
   agentsRoster: Agent[];
@@ -382,11 +388,22 @@ interface ChatState {
   /** 首帧失败原因（服务端/网络错误原文）；成功一次后清空。后台刷新失败不写这里。 */
   workspaceError: string | null;
   loadWorkspace: () => Promise<void>;
+  /** 拉左栏工作区清单（失败不抛：工作区是分组装饰，拉不到就退化成「未分组」一组）。 */
+  loadWorkspaces: () => Promise<void>;
+  /** 加一个工作区（同路径幂等）；成功后刷新清单，失败抛错由调用方提示。 */
+  addWorkspace: (path: string) => Promise<void>;
+  /** 删工作区（还有会话挂在下面时服务端 409，抛错由调用方提示）。 */
+  removeWorkspace: (path: string) => Promise<void>;
+  /** 把会话挪到工作区（null = 未分组）；成功后就地更新该会话，不整表刷新。 */
+  moveConversation: (convId: string, workspace: string | null) => Promise<void>;
   /** 翻下一页会话（按最近活跃序；没有更多/正在加载时是 no-op）。 */
   loadMoreConversations: () => Promise<void>;
   /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
   /** 打开/新建与某智能体的会话。fresh=true 时新建一段（同一智能体多段对话）。 */
-  openAgent: (agentId: string, options?: { fresh?: boolean; title?: string }) => Promise<string>;
+  openAgent: (
+    agentId: string,
+    options?: { fresh?: boolean; title?: string; workspace?: string },
+  ) => Promise<string>;
   /** 改会话标题（空串 = 清除）；成功后同步本地会话列表，失败抛错由调用方决定是否提示。 */
   renameConversation: (convId: string, title: string) => Promise<void>;
   /** 删除整段会话（服务端删除消息；本地同步移除会话与缓存消息）。 */
@@ -548,6 +565,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   plainById: {},
   pendingE2e: {},
   workspaceReady: false,
+  workspaces: [],
   conversationsHasMore: false,
   conversationsLoadingMore: false,
   workspaceError: null,
@@ -572,8 +590,37 @@ export const useChatStore = create<ChatState>((set, get) => {
       throw err;
     }
   },
-  async loadMoreConversations() {
-    const { conversations, conversationsHasMore, conversationsLoadingMore } = get();
+  async loadWorkspaces() {
+    try {
+      set({ workspaces: await fetchWorkspaces() });
+    } catch {
+      // 工作区只是分组装饰：拉不到就把所有会话显示成一组，不打断主流程。
+      set({ workspaces: [] });
+    }
+  },
+  async addWorkspace(path) {
+    try {
+      await addWorkspaceApi(path);
+    } finally {
+      // 幂等 upsert：成功与否都刷新一次，让「同路径已存在」也回到一致状态。
+      await get().loadWorkspaces();
+    }
+  },
+  async removeWorkspace(path) {
+    await removeWorkspaceApi(path);
+    await get().loadWorkspaces();
+  },
+  async moveConversation(convId, workspace) {
+    const updated = await updateConversationWorkspace(convId, workspace);
+    set({
+      conversations: get().conversations.map((c) =>
+        c.id === convId
+          ? { ...c, ...(updated.workspace ? { workspace: updated.workspace } : { workspace: undefined }) }
+          : c,
+      ),
+    });
+  },
+  async loadMoreConversations() {    const { conversations, conversationsHasMore, conversationsLoadingMore } = get();
     if (!conversationsHasMore || conversationsLoadingMore) return;
     set({ conversationsLoadingMore: true });
     try {

@@ -361,8 +361,22 @@ export const ConversationSchema = z.object({
   title: z.string().max(80).optional(),
   /** 最后一条消息时间（ISO）；无消息为 null。 */
   lastMessageAt: z.string().nullable().optional(),
+  /**
+   * 归属的工作区 = 本机一个文件夹的绝对路径。
+   *
+   * 只用来在左栏按文件夹分组（d.147.4.91.11），**不代表给智能体开放了文件读写**：
+   * 路径不参与任何工具调用的权限判断。缺省/空 = 「未分组」。
+   */
+  workspace: z.string().max(1024).optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
+
+/** 工作区 = 本机一个文件夹（绝对路径）。用户自己加进列表的，用于给会话归类。 */
+export const WorkspaceSchema = z.object({
+  path: z.string().min(1).max(1024),
+  updatedAt: z.string(),
+});
+export type Workspace = z.infer<typeof WorkspaceSchema>;
 
 /**
  * 建会话：产品只有一个内置智能体（`SYSTEM_AGENT`），`agentId` 已无意义。
@@ -370,17 +384,29 @@ export type Conversation = z.infer<typeof ConversationSchema>;
  * - `agentId` 可选，仅为兼容旧客户端/旧链接；服务端会静默归一为内置智能体；
  * - 缺省保持旧行为：同一用户幂等复用（老客户端/旧链接不受影响）；
  * - `fresh: true` = 新建一段新会话（Claude Code 式「多段对话」）；
- * - `title` 可选，创建时即可带标题（界面后续也会在首条消息后 PATCH）。
+ * - `title` 可选，创建时即可带标题（界面后续也会在首条消息后 PATCH）；
+ * - `workspace` 可选：建在本机哪个文件夹工作区下（缺省 = 未分组）。
  */
 export const AgentConversationBodySchema = z.object({
   agentId: z.string().min(1).optional(),
   fresh: z.boolean().optional(),
   title: z.string().max(80).optional(),
+  workspace: z.string().max(1024).optional(),
 });
 
 /** 改会话标题（PATCH /api/conversations/:id）：空串 = 清除标题。 */
 export const UpdateConversationBodySchema = z.object({
   title: z.string().max(80),
+});
+
+/** 把会话挪到另一个工作区（PATCH /api/conversations/:id/workspace）：null 或空串 = 未分组。 */
+export const UpdateConversationWorkspaceBodySchema = z.object({
+  workspace: z.string().max(1024).nullable(),
+});
+
+/** 新增工作区（POST /api/workspaces）：同一路径幂等复用，只刷新 updated_at。 */
+export const AddWorkspaceBodySchema = z.object({
+  path: z.string().min(1).max(1024),
 });
 
 export const SharedFileMetaSchema = z.object({

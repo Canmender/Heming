@@ -573,3 +573,11 @@ test("main.js：只带页面的 bundle（无浮窗）origin 也允许用本机�
   assert.ok(fn, "未找到 isWidgetOriginAllowed");
   assert.ok(fn[0].includes("!record.widget && !record.page"), "没有浮窗但有页面的记录不能被当成不可渲染");
 });
+
+// ── 工作区选目录（d.147.4.91.11）──
+
+test("app:pickDirectory 经 secureIpc 注册，只在取消/异常时回 null", () => {
+  assert.ok(mainCode.includes('secureIpc.handle("app:pickDirectory"'), "必须经来源守卫注册");
+  assert.ok(mainCode.includes('"openDirectory"'), "必须弹目录选择器而不是文件");
+  assert.ok(mainCode.includes("result.canceled"), "取消要显式判掉");
+});
