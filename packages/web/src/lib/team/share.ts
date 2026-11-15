@@ -12,7 +12,8 @@ import { agendaBucket, type AgendaBucket } from "../agendaBucket.js";
  * 团队共享设置与本机摘要采集（设计 §7）。
  *
  * 三条边界：
- * - 默认对**同队成员**共享白名单摘要（任务 / 日程 / 用量三类，可逐类关闭）；
+ * - 对**同队成员**共享白名单摘要（任务 / 日程 / 用量三类，全部共享，没有逐类开关——
+ *   隐私边界只有「哪些字段能出本机」这一层，不把「共享与否」变成每个人都要维护的状态）；
  *   名册、动向、用量排行都只在同队成员之间可见（服务端按队收口）；
  * - 只上报白名单字段（标题/状态/时间），正文、提示词、工具参数、
  *   任务结果、日程证据与发送人一律不出本机；
@@ -44,16 +45,17 @@ export const TEAM_UPLOAD_LIMIT = 50;
 const PER_SOURCE_LIMIT = { tasks: 20, agenda: 30 } as const;
 
 /**
- * 共享开关：任务 / 日程 / 用量三类（②-3 新增 `usage`）。
- * **默认全开**：加入团队即默认与同队成员共享这三类白名单摘要，可逐类手动关闭；
- * 提示词、对话正文与工具参数始终不出本机。
- * 旧版本存过的 `staff` 字段读回时直接丢弃——团队页只保留真实成员的动向。
+ * 共享设置只剩「清除水位 + 最后同步时间」（d.153）。
+ *
+ * 曾经有 `tasks` / `agenda` / `usage` 三个开关，团队页顶上还有一行复选框。现在共享是
+ * **默认行为**：加入团队就共享三类白名单摘要，没有逐类开关。理由：
+ * - 用户要的是「团队里能看到彼此在做什么」，而不是维护三四个开关的状态；
+ * - 开关制造的假安全感不成立——关掉只停未来上传，已上传的摘要仍在团队里，
+ *   真正的撤回动作是「清除共享记录 / 清除我的用量」，那才是要给的按钮；
+ * - 隐私边界由**字段白名单**保证（提示词、对话正文、工具参数一律不出本机），
+ *   与「是否共享」无关，所以少一层开关不会扩大暴露面。
  */
 export interface TeamShareSettings {
-  tasks: boolean;
-  agenda: boolean;
-  /** 用量排行共享：关闭时**不上传、不采集**，团队页只显示本人本机统计。 */
-  usage: boolean;
   /**
    * 「清除我的用量」的时间水位（epoch ms，默认 null）。
    *
@@ -74,22 +76,11 @@ export interface TeamShareSettings {
 }
 
 export const DEFAULT_TEAM_SHARE: TeamShareSettings = {
-  tasks: true,
-  agenda: true,
-  usage: true,
   usageClearedAt: null,
   activitiesClearedAt: null,
   lastSyncAt: null,
 };
 
-/**
- * 开关字段读取：缺失（旧版本没有这个字段）时回落到当前默认值，
- * 显式存成 `true` 才算开；其它脏值一律按关处理（不因为坏数据擅自共享）。
- */
-function readShareFlag(raw: unknown, fallback: boolean): boolean {
-  if (raw === undefined) return fallback;
-  return raw === true;
-}
 
 /** 水位统一解析：正有限数 → 取整毫秒；其它（含 0/NaN/字符串）→ null。 */
 function normalizeWatermark(raw: unknown): number | null {
@@ -100,9 +91,6 @@ export function normalizeTeamShareSettings(raw: unknown): TeamShareSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_TEAM_SHARE };
   const o = raw as Record<string, unknown>;
   return {
-    tasks: readShareFlag(o.tasks, DEFAULT_TEAM_SHARE.tasks),
-    agenda: readShareFlag(o.agenda, DEFAULT_TEAM_SHARE.agenda),
-    usage: readShareFlag(o.usage, DEFAULT_TEAM_SHARE.usage),
     usageClearedAt: normalizeWatermark(o.usageClearedAt),
     activitiesClearedAt: normalizeWatermark(o.activitiesClearedAt),
     lastSyncAt:
@@ -166,7 +154,6 @@ export function bindTeamShareUser(
 
 interface TeamShareState {
   settings: TeamShareSettings;
-  update: (patch: Partial<Pick<TeamShareSettings, "tasks" | "agenda" | "usage">>) => void;
   setLastSync: (at: number | null) => void;
   /** 「清除我的用量」成功后落水位：水位之前的用量不再重新上传。 */
   setUsageClearedAt: (at: number | null) => void;
@@ -176,11 +163,6 @@ interface TeamShareState {
 
 export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   settings: readTeamShareSettings(),
-  update: (patch) => {
-    const settings = { ...get().settings, ...patch };
-    persistTeamShareSettings(settings);
-    set({ settings });
-  },
   setLastSync: (at) => {
     const settings = { ...get().settings, lastSyncAt: at };
     persistTeamShareSettings(settings);
@@ -233,7 +215,7 @@ export interface TeamShareSources {
   agenda: InfohubAgendaItem[];
 }
 
-/** 从本机两类来源采集摘要；关闭的来源不采集。返回按发生时间倒序的 ≤50 条。 */
+/** 从本机两类来源采集摘要（全部共享，无开关）。返回按发生时间倒序的 ≤50 条。 */
 export function collectTeamActivities(
   settings: TeamShareSettings,
   sources: TeamShareSources,
@@ -250,61 +232,56 @@ export function collectTeamActivities(
     out.push(item);
   };
 
-  if (settings.tasks) {
-    for (const task of [...sources.tasks]
-      .filter((task) => clearedAt === 0 || task.updatedAt > clearedAt)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, PER_SOURCE_LIMIT.tasks)) {
-      push({
-        kind: "task",
-        // 只发改动与状态：标题从提示词首行裁出来，不是可以共享的信息。
-        title: TASK_ACTIVITY_TITLE,
-        detail: `任务 · ${TASK_STATUS_LABEL[task.status]}`,
-        status: task.status,
-        sourceId: `task:${task.id}:${task.updatedAt}`,
-        occurredAt: iso(task.updatedAt),
-      });
-    }
+  for (const task of [...sources.tasks]
+    .filter((task) => clearedAt === 0 || task.updatedAt > clearedAt)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, PER_SOURCE_LIMIT.tasks)) {
+    push({
+      kind: "task",
+      // 只发改动与状态：标题从提示词首行裁出来，不是可以共享的信息。
+      title: TASK_ACTIVITY_TITLE,
+      detail: `任务 · ${TASK_STATUS_LABEL[task.status]}`,
+      status: task.status,
+      sourceId: `task:${task.id}:${task.updatedAt}`,
+      occurredAt: iso(task.updatedAt),
+    });
   }
 
-  if (settings.agenda) {
-    // 只采「逾期 / 今天 / 24 小时内」：更远的日程不是摘要，传上去只会显示成
-    // 「今天到期」（B2 的根因是这里自己抄了一份两档判据，现在直接用 agendaBucket 真源）。
-    const live = sources.agenda
-      .filter((item) => clearedAt === 0 || agendaCreatedMs(item) > clearedAt)
-      .map((item) => ({ item, bucket: agendaBucket(item.dueTs, now) }))
-      .filter(
-        (entry): entry is { item: InfohubAgendaItem; bucket: AgendaBucket } => entry.bucket !== null,
-      );
-    // 逾期：最近逾期的在前（还来得及补）；今天/24 小时内：到期越近越前。
-    // 排序必须在 slice 之前：原实现按 dueTs 倒序 slice(30)，远期条目会把临期的挤掉。
-    live.sort(
-      (a, b) =>
-        BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket] ||
-        (a.bucket === "overdue" ? b.item.dueTs - a.item.dueTs : a.item.dueTs - b.item.dueTs),
+  // 只采「逾期 / 今天 / 24 小时内」：更远的日程不是摘要，传上去只会显示成
+  // 「今天到期」（B2 的根因是这里自己抄了一份两档判据，现在直接用 agendaBucket 真源）。
+  const live = sources.agenda
+    .filter((item) => clearedAt === 0 || agendaCreatedMs(item) > clearedAt)
+    .map((item) => ({ item, bucket: agendaBucket(item.dueTs, now) }))
+    .filter(
+      (entry): entry is { item: InfohubAgendaItem; bucket: AgendaBucket } => entry.bucket !== null,
     );
-    for (const { item, bucket } of live.slice(0, PER_SOURCE_LIMIT.agenda)) {
-      push({
-        kind: "agenda",
-        title: item.title,
-        detail: `日程 · ${BUCKET_LABEL[bucket]}`,
-        status: bucket,
-        // sourceId 只认日程本身：把档位/到期时间拼进去，会让「今天到期 → 已逾期」变成
-        // 一条新记录（同一条日程在团队页出现两行）。服务端按 (actor, sourceId) 幂等，
-        // 因此换档不重发；档位文案以首次上报时为准。
-        sourceId: `agenda:${item.id}`,
-        // 未来日程的到期时间不能当成「刚刚发生」的时刻，否则动向会把它排到最上面；
-        // 首次上报时刻即 now（行靠 sourceId 幂等，后续同步不会改变这一行）。
-        occurredAt: iso(Math.min(item.dueTs, now)),
-      });
-    }
+  // 逾期：最近逾期的在前（还来得及补）；今天/24 小时内：到期越近越前。
+  // 排序必须在 slice 之前：原实现按 dueTs 倒序 slice(30)，远期条目会把临期的挤掉。
+  live.sort(
+    (a, b) =>
+      BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket] ||
+      (a.bucket === "overdue" ? b.item.dueTs - a.item.dueTs : a.item.dueTs - b.item.dueTs),
+  );
+  for (const { item, bucket } of live.slice(0, PER_SOURCE_LIMIT.agenda)) {
+    push({
+      kind: "agenda",
+      title: item.title,
+      detail: `日程 · ${BUCKET_LABEL[bucket]}`,
+      status: bucket,
+      // sourceId 只认日程本身：把档位/到期时间拼进去，会让「今天到期 → 已逾期」变成
+      // 一条新记录（同一条日程在团队页出现两行）。服务端按 (actor, sourceId) 幂等，
+      // 因此换档不重发；档位文案以首次上报时为准。
+      sourceId: `agenda:${item.id}`,
+      // 未来日程的到期时间不能当成「刚刚发生」的时刻，否则动向会把它排到最上面；
+      // 首次上报时刻即 now（行靠 sourceId 幂等，后续同步不会改变这一行）。
+      occurredAt: iso(Math.min(item.dueTs, now)),
+    });
   }
 
   return out
     .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0))
     .slice(0, TEAM_UPLOAD_LIMIT);
 }
-
 /** 从当前 store 快照采集（团队页同步用）。 */
 export function collectCurrentTeamActivities(settings: TeamShareSettings): TeamActivityInput[] {
   return collectTeamActivities(settings, {
@@ -327,8 +304,7 @@ const MAX_USAGE_CONNECTIONS = 5;
  *
  * 隐私口径（与团队动向同一条红线）：
  * - 只取 `UsageRecord` 里的白名单字段——模型名、token 数、是否未上报、连接名快照；
- * - **绝不**带提示词、对话正文、工具参数、任务结果或文件信息（这些字段本机记录里也没有）；
- * - 关闭 `usage` 开关时返回空数组：不采集、不上传。
+ * - **绝不**带提示词、对话正文、工具参数、任务结果或文件信息（这些字段本机记录里也没有）。
  *
  * `tokens: null` 的语义沿用 d.32：该日该模型**一次都没上报**，与「真的用了 0」区分开。
  */
@@ -337,7 +313,6 @@ export function collectTeamUsage(
   records: UsageRecord[],
   now: Date = new Date(),
 ): TeamUsageInput[] {
-  if (!settings.usage) return [];
   // 本地时区的「30 天前 00:00」：用本地日历算，避免 UTC 偏移把某一天切掉半个。
   const fromMs = new Date(
     now.getFullYear(),
@@ -407,7 +382,7 @@ export interface LocalUsageSummary {
 }
 
 /**
- * 仅供**本机**展示的用量汇总（关闭共享时用）：与上传无关，不产生任何请求。
+ * 仅供**本机**展示的用量汇总（与团队排行并列展示「我自己花了多少」）：不产生任何请求。
  *
  * 与服务端 `self` 的口径一致：`tokens: null` 计入「未上报轮数」，不进合计。
  */

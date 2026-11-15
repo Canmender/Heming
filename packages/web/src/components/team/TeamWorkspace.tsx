@@ -13,6 +13,7 @@ import {
 } from "../../lib/api.js";
 import { useAuthStore } from "../../store/auth.js";
 import { useSessionStringValue } from "../../lib/sessionState.js";
+import { TEAM_SELECTION_KEY } from "../../lib/team/selection.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { TeamPlanPanel } from "./TeamPlanPanel.js";
 import { TeamTaskPanel } from "./TeamTaskPanel.js";
@@ -28,7 +29,8 @@ import { Button } from "../../components/ui/Button.js";
  * 权限判定只在服务端一处（是否成员 / 是否 owner），前端只做展示与提示。
  */
 
-const SELECTED_TEAM_KEY = "heming.team.selected.v1";
+/** 当前团队的会话级记忆：与团队页页头共用同一个 key（见 `lib/team/selection.ts`）。 */
+const SELECTED_TEAM_KEY = TEAM_SELECTION_KEY;
 
 /**
  * 工作台静默轮询间隔：队友改了任务/方案，不用切 Tab 也能在 45s 内看到。
@@ -41,10 +43,34 @@ const WORKSPACE_POLL_MS = 45_000;
 /** 一次性提示（notice）的展示时长。 */
 const NOTICE_MS = 3000;
 
-export function TeamWorkspace() {
+export interface TeamWorkspaceProps {
+  /**
+   * 受控的当前团队（d.153）：团队页在页头放了「团队切换」，工作台必须跟着同一个选择走，
+   * 否则页头显示 A、工作台内容却是 B。不传时退回本组件自己的会话级记忆（旧用法）。
+   */
+  teamId?: string | null;
+  /** 工作台内部切团队（左栏列表 / 新建 / 删除后落到下一个）时通知宿主。 */
+  onTeamChange?: (teamId: string) => void;
+  /** 团队列表变化时上报（宿主的切换器要用同一份数据，避免两处各拉一次且口径不同）。 */
+  onTeamsLoaded?: (teams: WorkspaceTeam[]) => void;
+}
+
+export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorkspaceProps = {}) {
   const me = useAuthStore((s) => s.user);
   const [teams, setTeams] = useState<WorkspaceTeam[]>([]);
-  const [selectedId, setSelectedId] = useSessionStringValue(SELECTED_TEAM_KEY);
+  const [localId, setLocalId] = useSessionStringValue(SELECTED_TEAM_KEY);
+  /** 受控优先：页头切换后所有视图一起走，内部选择只在宿主没接管时生效。 */
+  const selectedId = teamId || localId;
+  /** 外部（页头）切换进来的 id：只认「真的变了」的那一次，避免内部点击后重复拉快照。 */
+  const externalIdRef = useRef(teamId ?? "");
+  const setSelectedId = useCallback(
+    (id: string) => {
+      externalIdRef.current = id;
+      setLocalId(id);
+      onTeamChange?.(id);
+    },
+    [setLocalId, onTeamChange],
+  );
   const [snapshot, setSnapshot] = useState<TeamWorkspaceSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -105,8 +131,9 @@ export function TeamWorkspace() {
   const refreshTeams = useCallback(async () => {
     const data = await fetchWorkspaceTeams();
     setTeams(data.teams);
+    onTeamsLoaded?.(data.teams);
     return data.teams;
-  }, []);
+  }, [onTeamsLoaded]);
 
   /**
    * 团队快照的请求序号：切团队时旧请求可能后到，晚到的响应不能盖掉新选中的团队
@@ -143,6 +170,15 @@ export function TeamWorkspace() {
       setLoading(false);
     }
   }, [refreshTeams, loadTeam, selectedId, setSelectedId]);
+
+  // 页头切换团队：宿主的 id 变了才拉一次快照（内部点击已由 setSelectedId 同步 ref）。
+  useEffect(() => {
+    const next = teamId ?? "";
+    if (!next || next === externalIdRef.current) return;
+    externalIdRef.current = next;
+    void selectTeam(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamId]);
 
   useEffect(() => {
     void load();

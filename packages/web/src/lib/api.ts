@@ -251,9 +251,21 @@ export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
 
-/** 团队名册：本实例全部注册用户 + 在线态 + 最近活跃。 */
-export const fetchTeam = (request?: ApiRequestOptions) =>
-  api<TeamRoster>("/api/team", {}, request);
+/**
+ * 团队名册：同队成员 + 在线态 + 最近活跃。
+ *
+ * `teamId` 给了就**只看这个团队**（一个人可以同时在多个团队里，团队页用页头切换）；
+ * 不给则是「我所在的全部团队」成员的并集——旧调用方与首页卡片保持原口径。
+ */
+export const fetchTeam = (
+  opts: { teamId?: string } = {},
+  request?: ApiRequestOptions,
+) => {
+  const q = new URLSearchParams();
+  if (opts.teamId) q.set("teamId", opts.teamId);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return api<TeamRoster>(`/api/team${suffix}`, {}, request);
+};
 
 /**
  * 团队动向流：默认 50 条，按 `occurredAt DESC, id DESC` 倒序。
@@ -267,11 +279,14 @@ export const fetchTeamActivities = (
     before?: string;
     beforeId?: string;
     actorId?: string;
+    /** 只看这个团队的动向；不给则是全部同队成员的并集。 */
+    teamId?: string;
   } = {},
   request?: ApiRequestOptions,
 ) => {
   const q = new URLSearchParams();
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+  if (opts.teamId) q.set("teamId", opts.teamId);
   if (opts.before) q.set("before", opts.before);
   if (opts.beforeId) q.set("beforeId", opts.beforeId);
   if (opts.actorId) q.set("actorId", opts.actorId);
@@ -310,12 +325,14 @@ export const uploadTeamUsage = (items: TeamUsageInput[], request?: ApiRequestOpt
 
 /** 本人用量明细 + 同队成员排行（没有团队时只有自己）；`to` 传本地今天（服务端不猜时区）。 */
 export const fetchTeamUsage = (
-  opts: { range?: TeamUsageRange; to?: string } = {},
+  opts: { range?: TeamUsageRange; to?: string; teamId?: string } = {},
   request?: ApiRequestOptions,
 ) => {
   const q = new URLSearchParams();
   if (opts.range) q.set("range", opts.range);
   if (opts.to) q.set("to", opts.to);
+  // 排行按团队收口：一个人可能同时在多个团队里，不传则是并集（首页卡片）。
+  if (opts.teamId) q.set("teamId", opts.teamId);
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return api<TeamUsageResponse>(`/api/team/usage${suffix}`, {}, request);
 };

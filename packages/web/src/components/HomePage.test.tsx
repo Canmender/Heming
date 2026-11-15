@@ -355,18 +355,19 @@ describe("HomePage", () => {
     );
   });
 
-  it("Token 用量卡「团队」页签：手动关闭用量共享后给开启入口，不拉排行", async () => {
+  it("Token 用量卡「团队」页签：没有「未共享」空态，旧开关也不再拦同步（d.153）", async () => {
     useTokenUsageStore.getState().record("claude-sonnet-5", 700, now.toISOString());
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: false } });
+    useTeamShareStore.setState({
+      settings: { usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null, usage: false } as never,
+    });
     render(<HomePage />);
     await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "团队" }));
-    expect(screen.getByText(/「用量」共享未开启/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "去团队页开启" })).toBeInTheDocument();
-    // 关闭后这一页不采集、不上传、不请求排行
-    expect(vi.mocked(fetchTeamUsage)).not.toHaveBeenCalled();
-    expect(vi.mocked(uploadTeamUsage)).not.toHaveBeenCalled();
+    // 旧开关被忽略：这一页照常同步并拉排行，不再有「去开启」出口
+    await waitFor(() => expect(vi.mocked(fetchTeamUsage)).toHaveBeenCalled());
+    expect(screen.queryByText(/共享未开启/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "去团队页开启" })).toBeNull();
   });
 
   it("页脚：服务状态 + 文件目录 + 更新日志入口（系统状态不再占一整卡）", async () => {

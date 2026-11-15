@@ -53,50 +53,43 @@ function agenda(
   };
 }
 
-const ON: TeamShareSettings = { tasks: true, agenda: true, usage: true, usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null };
+const ON: TeamShareSettings = { usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null };
 
-describe("团队共享设置", () => {
-  it("默认全开（任务 / 日程 / 用量三类对同队成员共享）", () => {
+describe("团队共享设置（d.153：全部共享，没有逐类开关）", () => {
+  it("默认设置只有三个水位字段，没有任何共享开关", () => {
     expect(DEFAULT_TEAM_SHARE).toEqual({
-      tasks: true,
-      agenda: true,
-      usage: true,
       usageClearedAt: null,
       activitiesClearedAt: null,
       lastSyncAt: null,
     });
     expect(normalizeTeamShareSettings(null)).toEqual(DEFAULT_TEAM_SHARE);
-    // 旧配置里没有 usage 字段：读回跟随新的默认（开），而不是被旧口径钉死
-    expect(normalizeTeamShareSettings({ tasks: true })).toMatchObject({ usage: true });
-    // 用户显式关掉的类别必须保留
+    // 旧版本存过的共享开关不再有意义：读回时丢弃，不会残留成隐性限制
     expect(
       normalizeTeamShareSettings({ tasks: false, agenda: false, usage: false }),
-    ).toEqual({ ...DEFAULT_TEAM_SHARE, tasks: false, agenda: false, usage: false });
+    ).toEqual(DEFAULT_TEAM_SHARE);
   });
 
-  it("旧版本存过的 staff 字段读回时丢弃", () => {
+  it("旧版本存过的 staff 字段与开关读回时都丢弃", () => {
     const raw = { tasks: true, staff: true, agenda: true, usage: true, lastSyncAt: 123 };
     expect(normalizeTeamShareSettings(raw)).toEqual({
-      tasks: true,
-      agenda: true,
-      usage: true,
       usageClearedAt: null,
       activitiesClearedAt: null,
       lastSyncAt: 123,
     });
   });
 
-  it("坏字段按关处理，缺字段回落默认（全开）", () => {
-    expect(normalizeTeamShareSettings({ tasks: "yes", agenda: 1, lastSyncAt: "x" })).toMatchObject({
-      tasks: false,
-      agenda: false,
-      usage: true,
+  it("坏水位字段归 null，合法时间戳保留", () => {
+    const stamp = 1_767_000_000_000;
+    expect(normalizeTeamShareSettings({ usageClearedAt: -5, activitiesClearedAt: stamp })).toEqual({
+      usageClearedAt: null,
+      activitiesClearedAt: stamp,
       lastSyncAt: null,
     });
-    expect(normalizeTeamShareSettings({ usageClearedAt: -5 })).toMatchObject({ usageClearedAt: null });
+    expect(
+      normalizeTeamShareSettings({ usageClearedAt: "x" as unknown as number }),
+    ).toMatchObject({ usageClearedAt: null });
   });
 });
-
 describe("团队摘要采集", () => {
   it("只采真实成员的任务与日程，不产生智能体类条目", () => {
     const items = collectTeamActivities(ON, {
@@ -106,13 +99,13 @@ describe("团队摘要采集", () => {
     expect(items.map((i) => i.kind).sort()).toEqual(["agenda", "task"]);
   });
 
-  it("手动关闭的来源不采集", () => {
-    const items = collectTeamActivities(
-      { ...DEFAULT_TEAM_SHARE, tasks: false },
-      { tasks: [task({ id: "t1", updatedAt: 1_000 })], agenda: [agenda({ id: 1, dueTs: 2_000 })] },
-    );
-    expect(items).toHaveLength(1);
-    expect(items[0]!.kind).toBe("agenda");
+  it("旧配置里的「关闭」不再拦采集（共享是默认行为，历史开关只被忽略）", () => {
+    const legacy = { ...DEFAULT_TEAM_SHARE, tasks: false } as unknown as TeamShareSettings;
+    const items = collectTeamActivities(legacy, {
+      tasks: [task({ id: "t1", updatedAt: 1_000 })],
+      agenda: [agenda({ id: 1, dueTs: 2_000 })],
+    });
+    expect(items.map((i) => i.kind).sort()).toEqual(["agenda", "task"]);
   });
 
   it("只上报白名单字段，提示词 / 日程原文 / 发送人不出本机", () => {
@@ -169,15 +162,14 @@ function usage(at: Date, over: Partial<UsageRecord> = {}): UsageRecord {
 }
 
 describe("团队用量采集（②-3）", () => {
-  it("关闭用量后不采集（关闭时不上传、不采集是隐私红线）", () => {
-    expect(
-      collectTeamUsage({ ...DEFAULT_TEAM_SHARE, usage: false }, [usage(NOW)], NOW),
-    ).toEqual([]);
+  it("旧配置里的 usage:false 也不再拦采集（共享是默认行为）", () => {
+    const legacy = { ...DEFAULT_TEAM_SHARE, usage: false } as unknown as TeamShareSettings;
+    expect(collectTeamUsage(legacy, [usage(NOW)], NOW)).toHaveLength(1);
   });
 
   it("只上报白名单字段：日期/模型/连接名/token/未上报轮数", () => {
     const items = collectTeamUsage(
-      { ...DEFAULT_TEAM_SHARE, usage: true },
+      DEFAULT_TEAM_SHARE,
       [usage(NOW, { profileLabel: "我的主连接" })],
       NOW,
     );
@@ -198,7 +190,7 @@ describe("团队用量采集（②-3）", () => {
 
   it("按「本地自然日 × 模型」聚合；未上报单独计数且不进合计", () => {
     const items = collectTeamUsage(
-      { ...DEFAULT_TEAM_SHARE, usage: true },
+      DEFAULT_TEAM_SHARE,
       [
         usage(NOW, { tokens: 100 }),
         usage(NOW, { tokens: 200 }),
@@ -215,7 +207,7 @@ describe("团队用量采集（②-3）", () => {
 
   it("全部未上报的日期模型格给 tokens:null（未上报 ≠ 0）", () => {
     const items = collectTeamUsage(
-      { ...DEFAULT_TEAM_SHARE, usage: true },
+      DEFAULT_TEAM_SHARE,
       [usage(NOW, { tokens: null })],
       NOW,
     );
@@ -228,7 +220,7 @@ describe("团队用量采集（②-3）", () => {
       records.push(usage(new Date(2026, 10, 2 - i, 9, 0, 0), { model: `m${i}` }));
     }
     records.push(usage(new Date(2026, 8, 1, 9, 0, 0), { model: "太旧" })); // 两个月前：窗口外
-    const items = collectTeamUsage({ ...DEFAULT_TEAM_SHARE, usage: true }, records, NOW);
+    const items = collectTeamUsage(DEFAULT_TEAM_SHARE, records, NOW);
     expect(items.length).toBeLessThanOrEqual(50);
     expect(items.some((i) => i.model === "太旧")).toBe(false);
     expect(items[0]!.date).toBe("2026-11-02");
@@ -236,7 +228,7 @@ describe("团队用量采集（②-3）", () => {
 
   it("连接名去重且最多 5 个（服务端 schema 上限）", () => {
     const items = collectTeamUsage(
-      { ...DEFAULT_TEAM_SHARE, usage: true },
+      DEFAULT_TEAM_SHARE,
       [
         usage(NOW, { profileLabel: "A" }),
         usage(NOW, { profileLabel: "A" }),
@@ -259,7 +251,7 @@ describe("团队用量采集（②-3）", () => {
     ];
     const clearedAt = NOW.getTime() - 2 * 3_600_000;
     const items = collectTeamUsage(
-      { ...DEFAULT_TEAM_SHARE, usage: true, usageClearedAt: clearedAt },
+      { ...DEFAULT_TEAM_SHARE, usageClearedAt: clearedAt },
       records,
       NOW,
     );
@@ -269,7 +261,7 @@ describe("团队用量采集（②-3）", () => {
   });
 });
 
-describe("本机用量汇总（关闭共享时的展示）", () => {
+describe("本机用量汇总（团队页并列展示用）", () => {
   it("口径与服务端 self 一致：未上报不进合计，逐日铺满", () => {
     const summary = summarizeLocalUsage(
       [usage(NOW, { tokens: 120 }), usage(NOW, { tokens: null }), usage(new Date(2026, 9, 20, 9, 0, 0))],
@@ -341,7 +333,7 @@ describe("团队摘要采集：隐私与临期口径（d.113）", () => {
 
   it("日程分三档：逾期 / 今天 / 24 小时内；更远的既不上报也不冒充「今天到期」", () => {
     const items = collectTeamActivities(
-      { ...ON, tasks: false },
+      ON,
       {
         tasks: [],
         agenda: [
@@ -368,7 +360,7 @@ describe("团队摘要采集：隐私与临期口径（d.113）", () => {
       agenda({ id: i, dueTs: AT + (i + 1) * 30 * 60 * 1000 }),
     );
     const items = collectTeamActivities(
-      { ...ON, tasks: false },
+      ON,
       { tasks: [], agenda: agendaItems },
       AT,
     );
@@ -379,7 +371,7 @@ describe("团队摘要采集：隐私与临期口径（d.113）", () => {
 
   it("未来日程不写成未来时刻（否则动向会把它排到「刚刚发生」的最上面）", () => {
     const items = collectTeamActivities(
-      { ...ON, tasks: false },
+      ON,
       { tasks: [], agenda: [agenda({ id: 1, dueTs: AT + 3 * 3_600_000 })] },
       AT,
     );
@@ -390,13 +382,13 @@ describe("团队摘要采集：隐私与临期口径（d.113）", () => {
   it("同一条日程换档（今天 → 已逾期）仍是同一个 sourceId，不会在团队页变两行（T2-07）", () => {
     const dueTs = AT + 3 * 3_600_000;
     const today = collectTeamActivities(
-      { ...ON, tasks: false },
+      ON,
       { tasks: [], agenda: [agenda({ id: 7, dueTs })] },
       AT,
     );
     // 两小时后（档位从 today 掉到 overdue）
     const overdue = collectTeamActivities(
-      { ...ON, tasks: false },
+      ON,
       { tasks: [], agenda: [agenda({ id: 7, dueTs })] },
       AT + 4 * 3_600_000,
     );

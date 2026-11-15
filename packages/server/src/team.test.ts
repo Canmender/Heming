@@ -919,6 +919,153 @@ describe("可见范围收口：只在同队成员之间（d.54 口径变更）",
   });
 });
 
+describe("多团队：按 ?teamId= 只看当前团队（d.152 团队页）", () => {
+  let app: App;
+  let a: { token: string; user: { id: string; username: string } };
+  let b: { token: string; user: { id: string; username: string } };
+  let c: { token: string; user: { id: string; username: string } };
+  let d: { token: string; user: { id: string; username: string } };
+  let teamAB: string;
+  let teamAC: string;
+
+  // A 同时在「甲队」(B) 与「乙队」(C) 里；D 不在任何团队。
+  // 这是本次改造的核心场景：同一个人属于多个团队时，页面必须能只看其中一个。
+  beforeEach(async () => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    a = await register(app, "alice", "爱丽丝");
+    b = await register(app, "bob", "鲍勃");
+    c = await register(app, "carol", "卡罗尔");
+    d = await register(app, "dave", "戴夫");
+    teamAB = await makeTeam(app, a.token, "甲队", ["bob"]);
+    teamAC = await makeTeam(app, a.token, "乙队", ["carol"]);
+  });
+  afterEach(() => presence.reset());
+
+  const rosterIds = async (token: string, teamId?: string) => {
+    const req = request(app).get("/api/team");
+    if (teamId !== undefined) req.query({ teamId });
+    const res = await req.set(auth(token));
+    expect(res.status).toBe(200);
+    return (res.body.members as { user: { id: string } }[])
+      .map((m) => m.user.id)
+      .sort();
+  };
+
+  it("名册：带 teamId 只列该团队成员；不带则仍为所有同队成员并集", async () => {
+    expect(await rosterIds(a.token, teamAB)).toEqual([a.user.id, b.user.id].sort());
+    expect(await rosterIds(a.token, teamAC)).toEqual([a.user.id, c.user.id].sort());
+    // 不带 teamId 保持旧口径（页面切换前的默认请求、旧客户端都不破）
+    expect(await rosterIds(a.token)).toEqual([a.user.id, b.user.id, c.user.id].sort());
+    // B 只看得到甲队
+    expect(await rosterIds(b.token, teamAB)).toEqual([a.user.id, b.user.id].sort());
+  });
+
+  it("动向：只回当前团队成员发的摘要", async () => {
+    const post = (token: string, sourceId: string) =>
+      request(app)
+        .post("/api/team/activities")
+        .set(auth(token))
+        .send({ items: [activity({ sourceId })] });
+    expect((await post(a.token, "task:a")).status).toBe(201);
+    expect((await post(b.token, "task:b")).status).toBe(201);
+    expect((await post(c.token, "task:c")).status).toBe(201);
+    expect((await post(d.token, "task:d")).status).toBe(201);
+
+    const feed = async (teamId: string) => {
+      const res = await request(app)
+        .get("/api/team/activities")
+        .query({ teamId })
+        .set(auth(a.token));
+      expect(res.status).toBe(200);
+      return (res.body.activities as { sourceId: string }[]).map((x) => x.sourceId).sort();
+    };
+    expect(await feed(teamAB)).toEqual(["task:a", "task:b"]);
+    expect(await feed(teamAC)).toEqual(["task:a", "task:c"]);
+  });
+
+  it("用量：排行只含当前团队成员（且不泄漏其它团队的显示名）", async () => {
+    const to = dayKeyUtc(new Date());
+    const usage = (tokens: number) => ({
+      date: to,
+      model: "gpt-x",
+      tokens,
+      unreported: 0,
+      connections: [] as string[],
+    });
+    for (const [token, tokens] of [
+      [a.token, 10],
+      [b.token, 900],
+      [c.token, 5000],
+    ] as const) {
+      const res = await request(app)
+        .post("/api/team/usage")
+        .set(auth(token))
+        .send({ items: [usage(tokens)] });
+      expect(res.status).toBe(200);
+    }
+
+    const view = async (teamId: string) => {
+      const res = await request(app)
+        .get("/api/team/usage")
+        .query({ range: "7d", to, teamId })
+        .set(auth(a.token));
+      expect(res.status).toBe(200);
+      return res.body as { ranking: { displayName: string }[]; rankingTotal: number };
+    };
+    const ab = await view(teamAB);
+    expect(ab.ranking.map((r) => r.displayName)).toEqual(["鲍勃", "爱丽丝"]);
+    expect(ab.rankingTotal).toBe(2);
+    expect(JSON.stringify(ab)).not.toContain("卡罗尔");
+    expect(JSON.stringify(ab)).not.toContain("5000");
+
+    const ac = await view(teamAC);
+    expect(ac.ranking.map((r) => r.displayName)).toEqual(["卡罗尔", "爱丽丝"]);
+    expect(JSON.stringify(ac)).not.toContain("鲍勃");
+    expect(JSON.stringify(ac)).not.toContain("900");
+  });
+
+  it("不是该团队成员 / 团队不存在 → 404（不区分两种情况，不泄漏存在性）", async () => {
+    // C 不在甲队
+    const outsider = await request(app)
+      .get("/api/team")
+      .query({ teamId: teamAB })
+      .set(auth(c.token));
+    expect(outsider.status).toBe(404);
+    expect(outsider.body).toEqual({ error: "团队不存在" });
+
+    // 不存在的 id 与「别人的团队」返回完全一样的响应
+    const missing = await request(app)
+      .get("/api/team")
+      .query({ teamId: "team-does-not-exist" })
+      .set(auth(a.token));
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual(outsider.body);
+
+    // 动向与用量同名册口径
+    for (const path of ["/api/team/activities", "/api/team/usage"]) {
+      const res = await request(app).get(path).query({ teamId: teamAB }).set(auth(c.token));
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "团队不存在" });
+    }
+  });
+
+  it("空 teamId 或非字符串参数按「未指定」处理（不 404）", async () => {
+    const empty = await request(app).get("/api/team").query({ teamId: "" }).set(auth(a.token));
+    expect(empty.status).toBe(200);
+    expect(
+      (empty.body.members as { user: { id: string } }[]).map((m) => m.user.id).sort(),
+    ).toEqual([a.user.id, b.user.id, c.user.id].sort());
+
+    // 数组形式（?teamId=a&teamId=b）是 Express 的 string[]，按未指定处理，不 500
+    const repeated = await request(app)
+      .get("/api/team")
+      .query({ teamId: [teamAB, teamAC] })
+      .set(auth(a.token));
+    expect(repeated.status).toBe(200);
+  });
+});
+
 describe("错误契约（T2-12）", () => {
   let app: App;
 

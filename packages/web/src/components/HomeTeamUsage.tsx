@@ -15,15 +15,14 @@ const TOP_N = 5;
 /**
  * 首页「Token 用量」卡片的「团队」页签：近 30 天团队用量排行（前 5 名 + 我的合计）。
  *
- * 边界与团队页一致：
- * - 关闭「用量」共享时不采集、不上传、不请求；只给一句说明与开启入口，不拿旧数据冒充。
+ * 边界与团队页一致（d.153 起共享是默认行为，没有逐类开关）：
+ * - 每次打开都按团队页同一套白名单摘要同步一次，再拉排行；失败只报中文错误，不拿旧数据冒充。
  * - 排行只显示**显示名 + 聚合 token 数**，模型名、连接名、对话内容都不露；
  *   服务端契约本身也只返回这两列（见 `TeamUsageRankRowSchema`）。
  * - 打开页签时先按团队页同一套白名单摘要同步一次（服务端 `(actor,date,model)` 幂等），
  *   否则用户没先去团队页时这里永远是空榜。
  */
 export function HomeTeamUsage() {
-  const share = useTeamShareStore((s) => s.settings);
   const setLastSync = useTeamShareStore((s) => s.setLastSync);
   const me = useAuthStore((s) => s.user);
   const setPage = useUiStore((s) => s.setPage);
@@ -31,8 +30,6 @@ export function HomeTeamUsage() {
   const [ready, setReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-
-  const usageOn = share.usage;
 
   const sync = useCallback(async () => {
     setSyncing(true);
@@ -57,31 +54,8 @@ export function HomeTeamUsage() {
   }, [setLastSync]);
 
   useEffect(() => {
-    if (!usageOn) {
-      setData(null);
-      setReady(true);
-      return;
-    }
     void sync();
-  }, [usageOn, sync]);
-
-  if (!usageOn) {
-    return (
-      <div className="mt-2">
-        <p className="text-ui-xs leading-5 text-muted">
-          「用量」共享未开启：不上传、不采集，也看不到团队排行。开启后只同步近 30
-          天的 token 数、模型名与连接名。
-        </p>
-        <Button
-          type="button"
-          size="sm" variant="ghost" className="mt-2"
-          onClick={() => setPage("team")}
-        >
-          去团队页开启
-        </Button>
-      </div>
-    );
-  }
+  }, [sync]);
 
   if (!ready) {
     return (

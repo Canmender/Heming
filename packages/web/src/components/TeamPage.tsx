@@ -9,6 +9,7 @@ import type {
   TeamMember,
   TeamUsageRange,
   TeamUsageResponse,
+  WorkspaceTeam,
 } from "@heming/shared";
 import {
   clearMyTeamActivities,
@@ -16,20 +17,21 @@ import {
   fetchTeam,
   fetchTeamActivities,
   fetchTeamUsage,
+  fetchWorkspaceTeams,
   uploadTeamActivities,
   uploadTeamUsage,
 } from "../lib/api.js";
 import {
   collectCurrentTeamActivities,
   collectCurrentTeamUsage,
-  summarizeLocalUsage,
   useTeamShareStore,
 } from "../lib/team/share.js";
+import { useSelectedTeamId } from "../lib/team/selection.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { activitySummaryLabel, activitySummaryLine, activityTitle } from "../lib/team/labels.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
-import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
+import { dayKeyOf } from "../store/tokenUsage.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PageTabs } from "./layout/PageTabs.js";
@@ -138,7 +140,12 @@ export function TeamPage() {
   const pageView = useUiStore((s) => s.pageView);
   const setPage = useUiStore((s) => s.setPage);
   const share = useTeamShareStore((s) => s.settings);
-  const updateShare = useTeamShareStore((s) => s.update);
+  /**
+   * 当前团队（d.153）：一个人可以同时在多个团队里，页头切换后整页只看这一个团队。
+   * 会话级记忆与工作台左栏共用一个 key，两处不会各选一个。
+   */
+  const [teams, setTeams] = useState<WorkspaceTeam[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useSelectedTeamId();
 
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
@@ -173,13 +180,21 @@ export function TeamPage() {
   const teamTabPrefix = useId();
   const teamTabPanelId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-panel`;
   const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
+  /**
+   * 生效的当前团队：记忆里的 id 可能已退出/已解散，回落到列表第一个。
+   * 为空表示「一个团队都没有」——此时请求走服务端旧口径（我所在全部团队的并集），
+   * 页头也不显示切换器（无处可切）。
+   */
+  const activeTeamId = useMemo(() => {
+    if (selectedTeamId && teams.some((t) => t.id === selectedTeamId)) return selectedTeamId;
+    return teams[0]?.id ?? "";
+  }, [selectedTeamId, teams]);
   const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
   const [usageReady, setUsageReady] = useState(false);
   const [usageError, setUsageError] = useState("");
   const [usageSyncing, setUsageSyncing] = useState(false);
   const [confirmClearUsage, setConfirmClearUsage] = useState(false);
   const [clearingUsage, setClearingUsage] = useState(false);
-  const usageRecords = useTokenUsageStore((s) => s.records);
   /** 信息中枢是否在本机运行：团队日程空态要区分「未连接」与「没有摘要」。 */
   const infohubRunning = useInfohubStore((s) => s.running);
   // 翻页游标要读「当下最新的列表」，但列表进 loadFeed 依赖会让定时刷新反复重建：
@@ -195,9 +210,37 @@ export function TeamPage() {
   /** 用量请求序号（W2-05）：7d/30d 切换并发时只让最新一次落地，避免标题与数字错配。 */
   const usageSeq = useRef(0);
 
+  /** 拉「我加入/拥有的团队」列表：页头切换器与工作台共用这份数据。 */
+  const loadTeams = useCallback(async () => {
+    try {
+      const data = await fetchWorkspaceTeams();
+      setTeams(data.teams);
+    } catch {
+      // 切换器是增强：列表拿不到时不挡名册与动向（服务端仍按「我所在全部团队」并集返回）。
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTeams();
+  }, [loadTeams]);
+
+  // 记忆里的 teamId 失效（退出/解散/第一次进入）时，把它改成回落后的那个，
+  // 否则工作台左栏会高亮一个不存在的项。
+  useEffect(() => {
+    if (activeTeamId && activeTeamId !== selectedTeamId) setSelectedTeamId(activeTeamId);
+  }, [activeTeamId, selectedTeamId, setSelectedTeamId]);
+
+  // 切团队：选中成员、分页游标、筛选都属于上一个团队的口径，必须清掉。
+  useEffect(() => {
+    setSelectedId(null);
+    setActivities([]);
+    setHasMore(true);
+    setFilter("all");
+  }, [activeTeamId]);
+
   const loadRoster = useCallback(async () => {
     try {
-      const data = await fetchTeam();
+      const data = await fetchTeam(activeTeamId ? { teamId: activeTeamId } : {});
       setMembers(data.members);
       setOnlineCount(data.onlineCount);
       setRosterError("");
@@ -206,7 +249,8 @@ export function TeamPage() {
       setRosterError(err instanceof Error && err.message ? err.message : "网络异常");
       setRosterReady(true);
     }
-  }, []);
+    // 当前团队变了就重拉：名册是「这个团队有谁」，不是「我所有团队有谁」的并集。
+  }, [activeTeamId]);
 
   const loadFeed = useCallback(
     async (reset: boolean) => {
@@ -215,6 +259,7 @@ export function TeamPage() {
       try {
         const data = await fetchTeamActivities({
           limit: PAGE_SIZE,
+          ...(activeTeamId ? { teamId: activeTeamId } : {}),
           // 游标必须带 id：只按 occurredAt 严格小于翻页，会漏掉与游标同一时刻的剩余条目
           // （d.109 A2）。beforeId 是可选的新参数，旧服务端会忽略它、行为退回旧口径。
           ...(!reset && cursor.length
@@ -238,8 +283,8 @@ export function TeamPage() {
         setFeedReady(true);
       }
     },
-    // 只有选中成员决定请求口径；翻页游标走 activitiesRef，避免每次加载重建回调
-    [selectedId],
+    // 选中成员 + 当前团队决定请求口径；翻页游标走 activitiesRef，避免每次加载重建回调
+    [selectedId, activeTeamId],
   );
 
   useEffect(() => {
@@ -283,13 +328,10 @@ export function TeamPage() {
     consumePaletteIntent();
   }, [paletteIntent, consumePaletteIntent, setTab]);
 
-  const tasksOn = share.tasks;
-  const agendaOn = share.agenda;
-
   /** 采集并上报本机摘要（幂等：重复同步只在服务端跳过）。 */
   const sync = useCallback(async () => {
+    // 共享没有开关了（d.153）：采集与上传就是默认行为，隐私边界靠字段白名单。
     const current = useTeamShareStore.getState().settings;
-    if (!current.tasks && !current.agenda) return;
     const items = collectCurrentTeamActivities(current);
     if (items.length === 0) return;
     try {
@@ -303,7 +345,6 @@ export function TeamPage() {
   }, [loadFeed]);
 
   useEffect(() => {
-    if (!tasksOn && !agendaOn) return;
     void sync();
     const timer = window.setInterval(() => void sync(), FEED_POLL_MS);
     const onFocus = () => {
@@ -316,7 +357,7 @@ export function TeamPage() {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [tasksOn, agendaOn, sync, loadRoster, loadFeed]);
+  }, [sync, loadRoster, loadFeed]);
 
   const selectedMember = useMemo(
     () => members.find((m) => m.user.id === selectedId) ?? null,
@@ -326,20 +367,10 @@ export function TeamPage() {
   /* ------------------------------------------------------- ②-3 用量与团队日程 */
 
   const rangeDays = usageRange === "7d" ? 7 : 30;
-  /** 本机用量（关闭共享时展示；纯本地计算，不产生任何请求）。 */
-  const localUsage = useMemo(
-    () => summarizeLocalUsage(usageRecords, rangeDays),
-    [usageRecords, rangeDays],
-  );
 
-  /**
-   * 用量同步：**只有开启 `usage` 共享才采集 + 上传 + 拉排行**。
-   *
-   * 关闭时直接返回：不上传、不采集——这是隐私红线，不是省流量的优化。
-   */
+  /** 用量同步：采集本机白名单摘要 → 上传 → 拉当前团队的排行。 */
   const syncUsage = useCallback(async () => {
     const current = useTeamShareStore.getState().settings;
-    if (!current.usage) return;
     // W2-05：7d/30d 切换时两次请求会并发，旧响应后到会把「近 30 天」的数字贴到「近 7 天」标题下。
     const seq = ++usageSeq.current;
     setUsageSyncing(true);
@@ -349,6 +380,7 @@ export function TeamPage() {
       const data = await fetchTeamUsage({
         range: usageRange,
         to: dayKeyOf(new Date().toISOString()),
+        ...(activeTeamId ? { teamId: activeTeamId } : {}),
       });
       if (seq !== usageSeq.current) return;
       setUsage(data);
@@ -362,23 +394,17 @@ export function TeamPage() {
     } finally {
       if (seq === usageSeq.current) setUsageSyncing(false);
     }
-  }, [usageRange]);
+    // 团队变了要重新拉这个团队的排行；请求序号保证切 7d/30d 与切团队时不会被旧响应覆盖。
+  }, [usageRange, activeTeamId]);
 
   useEffect(() => {
-    if (!share.usage) {
-      // 关闭共享：清空服务端返回的排行（不留在内存里），也不发任何用量请求。
-      setUsage(null);
-      setUsageReady(true);
-      return;
-    }
     void syncUsage();
-  }, [share.usage, syncUsage]);
+  }, [syncUsage]);
 
   useEffect(() => {
-    if (!share.usage) return;
     const timer = window.setInterval(() => void syncUsage(), FEED_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [share.usage, syncUsage]);
+  }, [syncUsage]);
 
   /**
    * 清除本人已上传的用量（显式动作，不随「关共享」自动发生）。
@@ -394,8 +420,8 @@ export function TeamPage() {
       setUsage(null);
       setUsageReady(true);
       setUsageError("");
-      // 仍开着共享时重拉一次：排行里应当已经没有自己
-      if (useTeamShareStore.getState().settings.usage) await syncUsage();
+      // 重拉一次：排行里应当已经没有自己
+      await syncUsage();
     } catch (err) {
       setUsageError(err instanceof Error && err.message ? err.message : "网络异常");
     } finally {
@@ -555,26 +581,10 @@ export function TeamPage() {
     }
   };
 
-  const shareCount = [share.tasks, share.agenda, share.usage].filter(Boolean).length;
-
-  /**
-   * 关闭某一类共享时的一次性说明（d.88）：关闭只停止未来上报，**不撤回已上传的摘要**——
-   * 原来这条口径只有「用量」页签写了，任务/日程关掉后摘要还留在团队里、没有任何提示。
-   */
-  const [shareNotice, setShareNotice] = useState("");
-  const turnOffShare = (kind: "tasks" | "agenda" | "usage") => {
-    if (kind === "tasks") updateShare({ tasks: false });
-    else if (kind === "agenda") updateShare({ agenda: false });
-    else updateShare({ usage: false });
-    const label = kind === "tasks" ? "任务摘要" : kind === "agenda" ? "日程摘要" : "用量排行";
-    setShareNotice(
-      // 撤回路径必须如实：清理按钮只清团队动向，用量有独立的「清除我的用量」。
-      kind === "usage"
-        ? "已停止上报用量排行；已上传的记录仍在团队排行里，可在「用量」页点「清除我的用量」撤回。"
-        : `已停止上报${label}；之前上传的内容仍留在团队里，可用「清除共享记录」撤回。`,
-    );
-    window.setTimeout(() => setShareNotice(""), 6000);
-  };
+  /** 工作台把团队列表回传上来：宿主的切换器与左栏列表共用一份数据。 */
+  const handleTeamsLoaded = useCallback((list: WorkspaceTeam[]) => {
+    setTeams(list);
+  }, []);
 
   return (
     <PageShell
@@ -582,18 +592,26 @@ export function TeamPage() {
       title="团队"
       subtitle="与你在同一团队的同事"
       actions={
-        <span
-          className="ui-chip"
-          title={`已共享：${[
-            share.tasks ? "任务摘要" : "",
-            share.agenda ? "日程摘要" : "",
-            share.usage ? "用量排行" : "",
-          ]
-            .filter(Boolean)
-            .join("、") || "尚未共享任何内容"}`}
-        >
-          共享 {shareCount}/3
-        </span>
+        // 页头切换团队（d.153）：一个人可以同时在多个团队里，切到哪个团队，
+        // 名册 / 动向 / 看板 / 团队日程 / 用量 / 工作台都只看那一个。
+        // 没有团队时不渲染选择器——无处可切，页面正文会给出建队引导。
+        teams.length > 0 ? (
+          <label className="flex items-center gap-2">
+            <span className="ui-caption text-muted">团队</span>
+            <select
+              aria-label="切换团队"
+              className="ui-input h-8 max-w-[220px] py-0"
+              value={activeTeamId}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+            >
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null
       }
       // 一级页签走 PageShell.tabs + PageTabs：紧贴页头、通栏，与模型页/插件页同一位置。
       // 此前它挂在右栏 <main> 里，被 300px 名册挤到右边，且「工作台」视图下整条消失（切不出去）。
@@ -613,56 +631,26 @@ export function TeamPage() {
       headerExtra={
         tab === "workspace" ? null : (
         <div className="bg-subtle px-6 py-2 max-[1199px]:px-4">
-          {/* 审计 F3：原来是「三句同义说明 + 成员说明 + 状态 + 错误」最多五行 11px 小字，
-              把页头压成注释堆。现在是一行操作 + 一句 13px 说明（.ui-body-sm），
-              共享范围与撤回语义合并成一句，不再按分支重复三遍。 */}
+          {/* 共享没有逐类开关了（d.153）：第一行留给「共享了什么 / 怎么撤回 / 上次同步」，
+              第二行说明撤回语义。原来顶格的三类复选框与「共享 N/3」徽标会让人以为
+              「不共享」是一条可选路径，实际上共享是团队的默认行为。 */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <span className="ui-caption font-medium text-ink">共享给团队</span>
-            <div className="flex items-center gap-3" role="group" aria-label="共享内容">
-              <label className="flex items-center gap-1 ui-caption">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-ink"
-                  checked={share.tasks}
-                  onChange={(e) => (e.target.checked ? updateShare({ tasks: true }) : turnOffShare("tasks"))}
-                />
-                任务摘要
-              </label>
-              <label className="flex items-center gap-1 ui-caption">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-ink"
-                  checked={share.agenda}
-                  onChange={(e) => (e.target.checked ? updateShare({ agenda: true }) : turnOffShare("agenda"))}
-                />
-                日程摘要
-              </label>
-              <label className="flex items-center gap-1 ui-caption">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-ink"
-                  checked={share.usage}
-                  onChange={(e) => (e.target.checked ? updateShare({ usage: true }) : turnOffShare("usage"))}
-                />
-                用量排行
-              </label>
-            </div>
-            {/* 一项都没开时不会同步，显示「尚未同步」会让人以为出了故障 */}
-            {shareCount > 0 && (
-              <span className="ui-caption">
-                {share.lastSyncAt
-                  ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
-                  : "正在首次同步…"}
-              </span>
-            )}
+            <span className="ui-caption font-medium text-ink">
+              与同队成员共享任务 / 日程摘要与用量
+            </span>
+            <span className="ui-caption">
+              {share.lastSyncAt
+                ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
+                : "正在首次同步…"}
+            </span>
             <Button
               type="button"
-              // 从未共享过（也没同步过）时没有可清除的记录：不用一个点了没反应的按钮骗人
-              disabled={shareCount === 0 && !share.lastSyncAt}
+              // 从未同步过时没有可清除的记录：不用一个点了没反应的按钮骗人
+              disabled={!share.lastSyncAt}
               title={
-                shareCount === 0 && !share.lastSyncAt
-                  ? "还没有可清除的共享记录"
-                  : "删除你已上传到团队动向的全部摘要（用量记录请在「用量」页单独清除）"
+                share.lastSyncAt
+                  ? "删除你已上传到团队动向的全部摘要（用量记录请在「用量」页单独清除）"
+                  : "还没有可清除的共享记录"
               }
               size="sm" variant="ghost" className="ml-auto text-muted disabled:opacity-40"
               onClick={() => setConfirmClear(true)}
@@ -670,20 +658,14 @@ export function TeamPage() {
               清除共享记录
             </Button>
           </div>
-          {/* 一句说清「默认共享什么 / 关掉不等于撤回 / 什么永远不出本机」。 */}
+          {/* 一句说清「共享是默认的 / 撤回要手动 / 什么永远不出本机」。 */}
           <p className="mt-1 ui-body-sm text-muted">
-            默认与团队成员共享任务 / 日程摘要与你的用量；关闭只停止后续上传，已上传的内容需要手动清除。
+            加入团队即共享这三类白名单摘要，没有逐类开关；已上传的内容不会随任何开关消失，需要手动清除。
             提示词与对话正文始终不出本机。
-            {shareCount === 0 ? " 当前未共享任何内容，团队看不到你的任务、日程或用量。" : null}
             {members.length <= 1
               ? " 你还没加入团队。到「工作台」新建团队或让队长把你拉进来后，队友会出现在这里。"
               : null}
           </p>
-          {shareNotice && (
-            <p role="status" className="mt-1 ui-body-sm text-warn">
-              {shareNotice}
-            </p>
-          )}
           {syncError && (
             <p role="alert" className="mt-1 ui-body-sm text-danger">
               共享同步失败：{syncError}
@@ -691,8 +673,7 @@ export function TeamPage() {
           )}
         </div>
         )
-      }
-    >
+      }    >
       <div className="flex min-h-0 flex-1">
         {/* 看板自带成员筛选条与两列卡片，再叠一栏名册会把两列挤窄；
             其余视图（动向/日程/用量）仍用名册 + 右栏的结构。 */}
@@ -819,11 +800,9 @@ export function TeamPage() {
                       : ""}
                     {selectedMemberStats?.rank
                       ? ` · 用量 ${fmtTokens(selectedMemberStats.rank.tokens)}`
-                      : share.usage
-                        ? selectedMemberStats?.rankingTruncated
-                          ? " · 用量未进前 100 名"
-                          : " · 用量暂无"
-                        : " · 用量未共享"}
+                      : selectedMemberStats?.rankingTruncated
+                        ? " · 用量未进前 100 名"
+                        : " · 用量暂无"}
                   </div>
                 </div>
                 <Button
@@ -873,7 +852,14 @@ export function TeamPage() {
             aria-labelledby={`${teamTabPrefix}-team-${tab}-tab`}
             className="flex min-h-0 flex-1 flex-col"
           >
-          {tab === "workspace" && <TeamWorkspace />}
+          {/* 工作台受控：页头切了团队，左栏列表与内容跟着走，两处不会各选一个。 */}
+          {tab === "workspace" && (
+            <TeamWorkspace
+              teamId={activeTeamId}
+              onTeamChange={setSelectedTeamId}
+              onTeamsLoaded={handleTeamsLoaded}
+            />
+          )}
 
           {/* 看板：d.67 从独立页并进来的视图；d.109 起改为受控视图——数据、名册、
               选中成员都由本页提供，不再自己取数/轮询，两套成员筛选天然互通。 */}
@@ -942,11 +928,7 @@ export function TeamPage() {
                 <EmptyState
                   compact
                   title="还没有可见的动向。"
-                  desc={
-                    share.tasks || share.agenda
-                      ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
-                      : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"
-                  }
+                  desc="成员产生任务或日程后，摘要会自动同步过来；你自己的摘要也在其中。"
                 />
               ) : (
                 <ul className="space-y-1">
@@ -1039,19 +1021,11 @@ export function TeamPage() {
                 // 审计 F2：这一处原来是手拼 py-10/居中/自定字号的第三个空态。
                 <EmptyState
                   className="mt-3"
-                  title={
-                    !infohubRunning
-                      ? "还没有共享的日程"
-                      : !share.agenda
-                        ? "你还没有开启「日程摘要」共享"
-                        : "还没有临期日程"
-                  }
+                  title={!infohubRunning ? "还没有共享的日程" : "还没有临期日程"}
                   desc={
                     !infohubRunning
                       ? "连接「信息中枢」后才会出现（只含标题与到期时间）。信息中枢只在本机运行，不会自动拉起。"
-                      : !share.agenda
-                        ? "开启后，你的日程摘要（标题 + 到期时间）会出现在团队日程里。"
-                        : "信息中枢同步出临期日程后会自动出现。"
+                      : "信息中枢同步出临期日程后会自动出现。"
                   }
                   actions={
                     !infohubRunning ? (
@@ -1061,14 +1035,6 @@ export function TeamPage() {
                         onClick={() => setPage("infohub")}
                       >
                         去连接信息中枢
-                      </Button>
-                    ) : !share.agenda ? (
-                      <Button
-                        type="button"
-                        size="sm" variant="primary"
-                        onClick={() => updateShare({ agenda: true })}
-                      >
-                        开启日程摘要共享
                       </Button>
                     ) : undefined
                   }
@@ -1128,19 +1094,17 @@ export function TeamPage() {
                       {r === "7d" ? "近 7 天" : "近 30 天"}
                     </Button>
                   ))}
-                  {share.usage && (
-                    <Button
-                      type="button"
-                      disabled={usageSyncing}
-                      onClick={() => void syncUsage()}
-                      size="sm" variant="ghost" className="text-muted"
-                    >
-                      {usageSyncing ? "同步中…" : "刷新"}
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    disabled={usageSyncing}
+                    onClick={() => void syncUsage()}
+                    size="sm" variant="ghost" className="text-muted"
+                  >
+                    {usageSyncing ? "同步中…" : "刷新"}
+                  </Button>
                   {/* P2 可达性：危险操作、纯描边胶囊只有 20px 高；撑到 32px 命中区
                       （二次确认由 ConfirmDialog 兜底，这里只改可点面积）。 */}
-                  {share.usage && hasUploadedUsage && (
+                  {hasUploadedUsage && (
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
@@ -1152,47 +1116,7 @@ export function TeamPage() {
                 </div>
               </div>
 
-              {!share.usage ? (
-                <section className="mt-3" aria-label="本机用量">
-                  <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
-                  <p className="mt-1 ui-body-sm leading-5 text-muted">
-                    「用量」共享未开启：不上传、不采集，团队排行也不会显示。开启后会同步近 30 天的
-                    聚合摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-baseline gap-4 text-ui-sm">
-                    <span>
-                      近 {rangeDays} 天合计{" "}
-                      <b className="tabular-nums">{fmtTokens(localUsage.total)}</b>
-                    </span>
-                    <span className="ui-caption">未上报 {localUsage.unreported} 轮</span>
-                  </div>
-                  <ul className="mt-2 space-y-1 text-ui-xs leading-5">
-                    {localUsage.byModel.map((m) => (
-                      <li key={m.model} className="flex items-baseline gap-2">
-                        <span className="truncate font-medium">{m.model}</span>
-                        <span className="ml-auto shrink-0 tabular-nums">{fmtTokens(m.tokens)}</span>
-                        {m.connections.length > 0 && (
-                          <span className="shrink-0 text-muted">{m.connections.join("、")}</span>
-                        )}
-                      </li>
-                    ))}
-                    {localUsage.byModel.length === 0 && (
-                      <li className="text-muted">近 {rangeDays} 天还没有用量记录。</li>
-                    )}
-                  </ul>
-                  <p className="mt-2 ui-micro">
-                    已停止上传；如需删除已上传记录，点
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClearUsage(true)}
-                      className="ui-hit mx-0.5 underline underline-offset-2 hover:text-danger"
-                    >
-                      清除我的用量
-                    </button>
-                    （不会自动删除，避免误伤）。
-                  </p>
-                </section>
-              ) : !usageReady ? (
+              {!usageReady ? (
                 <AsyncBoundary
                   status="loading"
                   loadingLabel="正在加载团队用量"
@@ -1235,7 +1159,7 @@ export function TeamPage() {
                         </li>
                       ))}
                       {usage.self.byModel.length === 0 && (
-                        <li className="text-muted">这个区间还没有已同步的用量。</li>
+                        <li className="text-muted">本区间还没有同步用量。</li>
                       )}
                     </ul>
                   </section>

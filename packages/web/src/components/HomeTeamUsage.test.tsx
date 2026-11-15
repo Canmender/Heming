@@ -51,17 +51,15 @@ beforeEach(() => {
 });
 
 describe("首页 Token 用量卡的「团队」页签", () => {
-  it("手动关闭共享：不采集不上传不请求，只给说明与开启入口", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: false } });
+  it("不再有「未共享」空态：即使本地还留着旧的 usage:false，也照常同步与拉排行（d.153）", async () => {
+    useTeamShareStore.setState({
+      settings: { usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null, usage: false } as never,
+    });
     render(<HomeTeamUsage />);
-    expect(screen.getByText(/「用量」共享未开启/)).toBeInTheDocument();
-    expect(fetchTeamUsage).not.toHaveBeenCalled();
-    expect(uploadTeamUsage).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "去团队页开启" }));
-    expect(useUiStore.getState().page).toBe("team");
+    await waitFor(() => expect(screen.getByText("鲍勃")).toBeInTheDocument());
+    expect(screen.queryByText(/共享未开启/)).toBeNull();
+    expect(fetchTeamUsage).toHaveBeenCalledTimes(1);
   });
-
   it("默认全开（同队成员）：先同步白名单摘要再拉排行，前 5 名只显示名与 token 数", async () => {
     render(<HomeTeamUsage />);
 
@@ -82,7 +80,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
   });
 
   it("排行为空：说明去哪儿同步，不显示假名次", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
     vi.mocked(fetchTeamUsage).mockResolvedValue(usageResponse({ ranking: [] }));
     render(<HomeTeamUsage />);
 
@@ -91,7 +89,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
   });
 
   it("拉取失败：可见报错并可重试", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
     vi.mocked(fetchTeamUsage).mockRejectedValueOnce(new Error("网络异常"));
     render(<HomeTeamUsage />);
 
@@ -103,7 +101,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
   });
 
   it("原始英文异常不透出，只给中文提示（T2-10）", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
     vi.mocked(fetchTeamUsage).mockRejectedValueOnce(new Error("Failed to fetch"));
     render(<HomeTeamUsage />);
 
@@ -113,7 +111,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
   });
 
   it("排行被截断时说明总人数（T2-10：不把「前 100」当全部）", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
     vi.mocked(fetchTeamUsage).mockResolvedValue(
       usageResponse({ rankingTotal: 130, rankingTruncated: true }),
     );

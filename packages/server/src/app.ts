@@ -410,11 +410,41 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   // 口径变更（用户反馈）：以前是「全站一个团队」，没建团队的人也能看到所有注册用户。
   // 现在可见集合 = 自己 + 与自己至少同属一个工作台团队的人（`listTeamCollaborators`）。
 
+  /**
+   * 把「同队可见」再收口到**某一个团队**（多团队支持）。
+   *
+   * 一个人可以同时属于多个团队；请求带 `teamId` 时，页面只应看到这个团队的人与摘要。
+   * - 返回 `null`：不是该团队成员 / 团队不存在 —— 调用方按 404 处理（不泄露团队是否存在）；
+   * - 否则返回该团队全部成员的用户 id（含自己）。
+   * 不带 `teamId` 时调用方沿用旧口径（所有同队成员的并集），保证旧客户端不破。
+   */
+  const teamScopeIds = (viewerId: string, teamId: string): string[] | null => {
+    const snapshot = store.getWorkspaceTeam(teamId, viewerId);
+    if (!snapshot) return null;
+    return snapshot.members.map((m) => m.user.id);
+  };
+
+  /** 读 `?teamId=`：缺失 / 空串 / 非字符串都按「未指定」处理。 */
+  const queryTeamId = (req: Request): string => {
+    const raw = req.query.teamId;
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+
   app.get("/api/team", authOnly, (req, res) => {
-    const members = store.listTeamCollaborators(userId(req)).map((m) => ({
-      ...m,
-      online: presence.isOnline(m.user.id),
-    }));
+    const teamId = queryTeamId(req);
+    const scope = teamId ? teamScopeIds(userId(req), teamId) : null;
+    if (teamId && scope === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    const members = store
+      .listTeamCollaborators(userId(req))
+      // 多团队：带了 teamId 就只留这个团队的人；不带 = 所有同队成员的并集（旧口径）。
+      .filter((m) => (scope ? scope.includes(m.user.id) : true))
+      .map((m) => ({
+        ...m,
+        online: presence.isOnline(m.user.id),
+      }));
     // 在线优先 → 最近活跃倒序 → 显示名；null 活跃时间排最后。
     members.sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1;
@@ -497,10 +527,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "beforeId 需要配合 before 使用" });
       return;
     }
-    // 可见范围：同队成员。actorId 若指定了不可见的人，直接给空列表——
+    // 可见范围：同队成员；带 `?teamId=` 时再收口到该团队（多团队）。
+    // actorId 若指定了不可见的人，直接给空列表——
     // 不返回 404/403，否则等于告诉对方「这个 user id 存在」。
+    const teamId = queryTeamId(req);
+    const scope = teamId ? teamScopeIds(userId(req), teamId) : null;
+    if (teamId && scope === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
     const collaborators = store.listTeamCollaborators(userId(req));
-    const visibleActorIds = collaborators.map((m) => m.user.id);
+    const visibleActorIds = collaborators
+      .map((m) => m.user.id)
+      .filter((id) => (scope ? scope.includes(id) : true));
     if (actorId !== undefined && !visibleActorIds.includes(actorId)) {
       res.json({ activities: [] });
       return;
@@ -605,7 +644,16 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     const bounds = usageRangeBounds(parsedRange.data, rawTo ?? dayKeyUtc());
-    const collaborators = store.listTeamCollaborators(userId(req));
+    // 多团队：带 `?teamId=` 时排行只含该团队成员（不是成员 → 404，口径同名册）。
+    const teamId = queryTeamId(req);
+    const scope = teamId ? teamScopeIds(userId(req), teamId) : null;
+    if (teamId && scope === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    const collaborators = store
+      .listTeamCollaborators(userId(req))
+      .filter((m) => (scope ? scope.includes(m.user.id) : true));
     const rows = store.listTeamUsage({ ...bounds, actorIds: collaborators.map((m) => m.user.id) });
     const names = new Map(collaborators.map((m) => [m.user.id, m.user.displayName]));
     res.json(
@@ -1001,7 +1049,8 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(row);
   });
 
-  // d.147.4.91.11：左栏工作区（本机文件夹，只做会话分组，不授予文件读写）。
+  // d.147.4.91.11：左栏工作区（本机文件夹）。分组只存路径；d.153.4.96.11 起这个路径
+  // 在渲染层同时被当作该会话智能体的可写根（服务端仍只做分组，不做任何读写）。
   app.get("/api/workspaces", authOnly, (req, res) => {
     res.json(store.listWorkspaces(userId(req)));
   });
