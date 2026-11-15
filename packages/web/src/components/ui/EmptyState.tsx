@@ -24,6 +24,13 @@ export interface EmptyStateProps {
   icon?: ReactNode;
   /** 主标题（一句话说清「现在没有什么」）。 */
   title: ReactNode;
+  /**
+   * 标题元素（默认 `p`）。
+   *
+   * 整页空态时标题其实就是这一页的二级标题，用 `h2` 才能让读屏/设计审计看到
+   * 「h1 页标题 + h2 空态标题」这两级；卡片内空态保持 `p`，不要往文档大纲里塞噪音。
+   */
+  titleAs?: "p" | "h2" | "h3";
   /** 补充说明（怎么产生内容 / 为什么空），可选。 */
   desc?: ReactNode;
   /** 操作区（主按钮/次按钮），可选。 */
@@ -46,6 +53,7 @@ export interface EmptyStateProps {
 export function EmptyState({
   icon,
   title,
+  titleAs = "p",
   desc,
   actions,
   action,
@@ -64,6 +72,7 @@ export function EmptyState({
     .filter(Boolean)
     .join(" ");
   const actionSlot = actions ?? action;
+  const TitleTag = titleAs;
   return (
     <div className={classes}>
       {icon ? (
@@ -71,7 +80,7 @@ export function EmptyState({
           {icon}
         </div>
       ) : null}
-      <p className="ui-empty-title">{title}</p>
+      <TitleTag className="ui-empty-title">{title}</TitleTag>
       {desc ? <p className="ui-empty-desc">{desc}</p> : null}
       {actionSlot ? <div className="ui-empty-actions">{actionSlot}</div> : null}
     </div>

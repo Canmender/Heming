@@ -1,10 +1,5 @@
 import { create } from "zustand";
 import type { PluginPageId } from "../lib/pages/ids.js";
-import {
-  persistNavMode,
-  readStoredNavMode,
-  type NavMode,
-} from "../lib/navPrefs.js";
 
 /**
  * 导航页（固定 8 项：主页 / 团队 / 会话 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
@@ -14,7 +9,7 @@ import {
  * 字符串。它们不再有对应页面——`resolvePage` 会折叠到现在的插件页（信息中枢 /
  * 自动化由沙箱 bundle 插件提供，幕僚与工作流入口已下线），保证旧入口不白屏。
  *
- * 会话页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
+ * 会话页沿用内部名 `chat`（会话链路的既有锚点），显示名见 `lib/palette/pages.ts` 的页面目录。
  */
 export type Page =
   | "home"
@@ -60,109 +55,6 @@ export type PageId = Page | LegacyPage;
  */
 export type PageView = "board" | "tasks" | "skills" | "interfaces" | "plugins" | "chat";
 
-/** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
-export type NavPage = Page;
-
-/**
- * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置）。
- * 快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。
- *
- * 记忆页已删除（d.146.5，记忆默认全开、无界面），原来的第 5 项换成「协作」，
- * 数字键 5 随之归协作页；`memory` 字符串仍可解析旧链接，但不再进导航。
- *
- * 幕僚 / 信息中枢 / 自动化 / 工作流这些旧页面的历史顺序仍认在 `LEGACY_DEFAULT_NAV_ORDERS`
- * 里：老用户存过这些默认值，必须能识别并迁到当前 8 项，否则会被当成「自定义顺序」。
- * 已装插件页面不写进本数组，由 `lib/pages/registry.ts` 的 `withPluginNav()` 追加到末尾。
- * 模型路由页已由 magpie 路由组取代、彻底删除，`Page` 类型仍保留这些字符串，
- * 供旧链接、通知跳转使用。
- *
- * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/会话/协作）→ 能力（插件 + 已装插件页）→
- * 资料（知识库/模型）→ 系统（设置）。
- */
-export const DEFAULT_NAV_ORDER: NavPage[] = [
-  "home",
-  "team",
-  "chat",
-  "collab",
-  "plugins",
-  "vault",
-  "model",
-  "settings",
-];
-
-/**
- * d.72 之前的默认顺序。
- *
- * 用户没动过顺序时，localStorage 里存的就是这一份；重排默认值后要把它迁移成新顺序，
- * 否则「重排列导航栏」对老用户完全不生效（看起来像功能没做）。用户自定义过的顺序
- * 一律原样保留——那是他亲手排的，不该被升级覆盖。
- */
-const LEGACY_DEFAULT_NAV_ORDER: NavPage[] = [
-  "home",
-  "team",
-  "chat",
-  "staff",
-  "infohub",
-  "automations",
-  "plugins",
-  "memory",
-  "settings",
-];
-
-/**
- * d.100–d.112 期间的默认顺序（10 个宿主页）。
- *
- * 这一段期间没动过顺序的用户，localStorage 里存的正是这一份；d.114 新增「知识库」后
- * 必须把它也认成「旧默认」，否则这些用户会在末尾多出一个知识库入口（normalize 的补项
- * 规则，视觉上落到设置区之后），看起来像导航顺序坏了。
- */
-const LEGACY_DEFAULT_NAV_ORDER_MODEL: NavPage[] = [
-  "home",
-  "chat",
-  "team",
-  "staff",
-  "infohub",
-  "automations",
-  "modelroute",
-  "model",
-  "plugins",
-  "memory",
-  "settings",
-];
-
-/**
- * d.114–d.115 期间的默认顺序（12 个宿主页，含幕僚/信息中枢/自动化/模型路由）。
- *
- * 导航收口成固定 8 项后，这一段期间没动过顺序的用户必须也迁到新默认；否则
- * 他们的存储里会留下 4 个已不进导航的页面，`normalizeNavOrder` 会把它们丢掉，
- * 而「已丢弃」与「用户自定义」无法区分——所以要在迁移判定里显式认成旧默认。
- */
-const LEGACY_DEFAULT_NAV_ORDER_MODULES: NavPage[] = [
-  "home",
-  "chat",
-  "team",
-  "staff",
-  "infohub",
-  "automations",
-  "modelroute",
-  "model",
-  "vault",
-  "plugins",
-  "memory",
-  "settings",
-];
-
-/** 所有历史默认顺序：命中任意一份都跟随当前默认（用户亲手排过的不在此列）。 */
-const LEGACY_DEFAULT_NAV_ORDERS: NavPage[][] = [
-  LEGACY_DEFAULT_NAV_ORDER,
-  LEGACY_DEFAULT_NAV_ORDER_MODEL,
-  LEGACY_DEFAULT_NAV_ORDER_MODULES,
-];
-
-function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
-  return a.length === b.length && a.every((page, i) => page === b[i]);
-}
-
 /** 旧页面 id → 宿主页 + 视图的折叠表。新增合并页时只改这里与 `Page`。 */
 const LEGACY_ROUTES: Record<LegacyPage, { page: Page; view: PageView }> = {
   workspace: { page: "team", view: "board" },
@@ -205,51 +97,6 @@ export function resolvePage(page: PageId, view?: PageView | null): { page: Page;
     return { page: route.page, view: view ?? route.view };
   }
   return { page: LEGACY_MODULE_ROUTES[page] ?? page, view: view ?? null };
-}
-
-/** 导航顺序本地存储键。 */
-export const NAV_ORDER_KEY = "heming.navOrder.v1";
-
-/**
- * 规整读回的顺序：只保留已知页、去重、缺项补在末尾——
- * 旧版本加过新页面时不会因为存储里缺它而整个顺序失效。
- *
- * 并入宿主页的旧项（workspace/tasks/skills/interfaces）按 `resolvePage` 折叠成宿主页；
- * 折叠后与已出现的宿主页重复就丢掉，所以老用户的导航顺序能平滑迁移。
- */
-export function normalizeNavOrder(raw: unknown): NavPage[] {
-  const seen: NavPage[] = [];
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      if (typeof item !== "string") continue;
-      if (!(DEFAULT_NAV_ORDER as string[]).includes(item) && !isLegacyPage(item)) continue;
-      const { page } = resolvePage(item as PageId);
-      if (!seen.includes(page)) seen.push(page);
-    }
-  }
-  for (const page of DEFAULT_NAV_ORDER) if (!seen.includes(page)) seen.push(page);
-  return seen;
-}
-
-/** 读存储里的导航顺序；缺失/损坏 → 默认顺序。 */
-export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): NavPage[] {
-  if (!storage) return [...DEFAULT_NAV_ORDER];
-  try {
-    const raw = storage.getItem(NAV_ORDER_KEY);
-    if (!raw) return [...DEFAULT_NAV_ORDER];
-    const parsed = JSON.parse(raw) as unknown;
-    const order = normalizeNavOrder(parsed);
-    // 没动过顺序的老用户：跟随新版默认顺序（见 LEGACY_DEFAULT_NAV_ORDER 注释）。
-    // 判据用**存储里的原始数组**而不是 normalize 之后的结果：normalize 会把新页补在末尾，
-    // 拿补完的结果去比旧默认永远不相等——d.84 新增「模型路由」时正是这样漏掉的。
-    const stored = Array.isArray(parsed) ? parsed : null;
-    const followsLegacyDefault =
-      stored !== null &&
-      LEGACY_DEFAULT_NAV_ORDERS.some((legacy) => sameOrder(stored as NavPage[], legacy));
-    return followsLegacyDefault ? [...DEFAULT_NAV_ORDER] : order;
-  } catch {
-    return [...DEFAULT_NAV_ORDER];
-  }
 }
 
 /**
@@ -376,33 +223,6 @@ interface UiState {
    * 只由 `setPage(page, view)` / 旧页面名折叠写入；页面用 `consumePageView` 取走。
    */
   pageView: PageView | null;
-  /** 左侧导航显示顺序（用户可自定义；持久化）。 */
-  navOrder: NavPage[];
-  /**
-   * 导航轨显示模式（d.68）：`pinned` 常显（默认）/ `auto` 自动隐藏。
-   * 持久化到 `heming.nav.mode.v1`，解析与坏值回落见 `lib/navPrefs.ts`。
-   */
-  navMode: NavMode;
-  /**
-   * `auto` 模式下浮层导航是否展开（**临时态**，不落盘）。
-   * 与 `navMode` 分开：收起浮层 ≠ 放弃自动隐藏模式，下次悬停/快捷键仍可呼出。
-   */
-  navOpen: boolean;
-  /** 设为某档模式；切档时收起浮层（避免「pin 了却还挂着浮层」的半展开态）。 */
-  setNavMode: (mode: NavMode) => void;
-  /** 固定 ↔ 自动 切换（pin 按钮用）。 */
-  toggleNavMode: () => void;
-  /** 展开浮层导航（auto 模式；pinned 下无副作用）。 */
-  openNav: () => void;
-  /** 收起浮层导航。 */
-  closeNav: () => void;
-  /**
-   * 快捷键 Ctrl/⌘+B 的「切换显隐」：
-   * - pinned：切到 auto（导航隐藏，主内容变宽）；
-   * - auto：展开/收起浮层（呼出/收回）。
-   * 想重新常显用导航轨底部 pin 按钮或设置区「导航栏」卡。
-   */
-  toggleNav: () => void;
   /** 当前打开的助手会话（null=助手页显示选择列表）。 */
   activeConversationId: string | null;
   /** 右栏「发送到会话」待投递单槽（null=无）。切页时清空；ChatPage 命中目标会话即消费。 */
@@ -519,21 +339,6 @@ interface UiState {
   sendFileToConversation: (conversationId: string, file: PendingAttachment["file"]) => void;
   /** 消费待投递槽（发出即清空）。 */
   consumePendingAttachment: () => void;
-  /** 设置完整导航顺序（自动去重补项并落盘）。 */
-  setNavOrder: (order: NavPage[]) => void;
-  /** 上移/下移一项（dir=-1 上移，+1 下移）；到顶/到底为 no-op。 */
-  moveNav: (page: NavPage, dir: -1 | 1) => void;
-  /** 恢复默认导航顺序。 */
-  resetNavOrder: () => void;
-}
-
-/** 导航顺序写盘；存不下（隐私模式）时只在本次会话生效。 */
-function persistNavOrder(order: NavPage[]): void {
-  try {
-    window.localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(order));
-  } catch {
-    /* 忽略 */
-  }
 }
 
 /**
@@ -544,41 +349,6 @@ let paletteIntentToken = 0;
 
 /** 知识库动作意图的自增序号：日记/新建连点两次也要各消费一次。 */
 let vaultIntentToken = 0;
-
-/** 取 localStorage；SSR / 隐私模式禁用时返回 null（调用方各自回落默认值）。 */
-function uiStorage(): Pick<Storage, "getItem" | "setItem"> | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 启动时把「迁移后的导航顺序」落盘（d.72）。
- *
- * 读盘本身保持纯函数（测试里注入的假 storage 只有 getItem）；这里只在真机上
- * 发现存储值与归一结果不一致时写回——典型场景是把 d.72 之前的默认顺序升级成
- * 新默认，避免以后每次启动都重新迁移一遍。用户自定义顺序归一后内容不变，不会写。
- */
-function persistMigratedNavOrder(next: NavPage[]): void {
-  const storage = uiStorage();
-  if (!storage) return;
-  try {
-    const raw = storage.getItem(NAV_ORDER_KEY);
-    if (!raw || raw === JSON.stringify(next)) return;
-    storage.setItem(NAV_ORDER_KEY, JSON.stringify(next));
-  } catch {
-    /* 隐私模式/配额满：内存态已生效，不因落盘失败影响启动 */
-  }
-}
-
-const INITIAL_NAV_ORDER = (() => {
-  const order = readStoredNavOrder(uiStorage());
-  persistMigratedNavOrder(order);
-  return order;
-})();
 
 /* ══════════════════════════════════════════════════════════════════════
  * 刷新恢复（d.79）：当前页与已选会话落 sessionStorage
@@ -605,8 +375,32 @@ function viewStorage(): Pick<Storage, "getItem" | "setItem"> | null {
   try {
     return window.sessionStorage;
   } catch {
-    return null; // 隐私模式/禁用存储：只在本次内存里导航，刷新回主页
+    return null; // 隐私模式/禁用存储：只在本次内存里导航，刷新回默认页
   }
+}
+
+/**
+ * 刷新恢复允许的固定宿主页集合。
+ *
+ * 为什么在这里放一份窄集合而不是 import `lib/palette/pages.ts`：那份目录反向 import 了
+ * 本文件的 `Page` 类型，值 import 会把「页面清单」和「导航状态」绑成环；存盘校验只需要
+ * 「这是不是一个已知宿主页」，值必须与 `PALETTE_PAGES` 的 page 集合一致（由测试钉住）。
+ * 插件页（`plugin:<id>`）由注册表投影，不在这份固定集合里，单独按前缀放行。
+ */
+const SESSION_PAGE_IDS: ReadonlySet<string> = new Set<string>([
+  "home",
+  "team",
+  "chat",
+  "plugins",
+  "collab",
+  "vault",
+  "model",
+  "settings",
+]);
+
+/** 存盘页是否可恢复：固定宿主页，或 `plugin:` 前缀的插件页。 */
+function isSessionPageId(value: string): boolean {
+  return SESSION_PAGE_IDS.has(value) || value.startsWith("plugin:");
 }
 
 /** 读刷新前的页面与会话；缺失/脏值/未知页一律回落 null（不猜）。 */
@@ -621,7 +415,7 @@ export function readSessionView(
     if (!parsed || typeof parsed !== "object") return null;
     const record = parsed as { page?: unknown; activeConversationId?: unknown };
     if (typeof record.page !== "string") return null;
-    if (!(DEFAULT_NAV_ORDER as string[]).includes(record.page)) return null;
+    if (!isSessionPageId(record.page)) return null;
     return {
       page: record.page as Page,
       activeConversationId:
@@ -642,20 +436,18 @@ export function writeSessionView(
   try {
     storage.setItem(SESSION_VIEW_KEY, JSON.stringify(view));
   } catch {
-    /* 配额满/隐私模式：内存态已生效，刷新回主页不是错误 */
+    /* 配额满/隐私模式：内存态已生效，刷新回默认页不是错误 */
   }
 }
 
 const INITIAL_SESSION_VIEW = readSessionView();
 
 export const useUiStore = create<UiState>((set, get) => ({
-  page: INITIAL_SESSION_VIEW?.page ?? "home",
+  // 默认落在会话页：外壳重构成「会话 + 内容」布局后，打开应用就该能直接开始聊。
+  page: INITIAL_SESSION_VIEW?.page ?? "chat",
   pageView: null,
   automationTab: null,
   workflowFocusId: null,
-  navOrder: INITIAL_NAV_ORDER,
-  navMode: readStoredNavMode(uiStorage()),
-  navOpen: false,
   activeConversationId: INITIAL_SESSION_VIEW?.activeConversationId ?? null,
   pendingAttachment: null,
   taskDraft: null,
@@ -908,53 +700,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   sendFileToConversation: (conversationId, file) =>
     set({ pendingAttachment: { conversationId, file } }),
   consumePendingAttachment: () => set({ pendingAttachment: null }),
-  setNavOrder: (order) => {
-    const next = normalizeNavOrder(order);
-    set({ navOrder: next });
-    persistNavOrder(next);
-  },
-  moveNav: (page, dir) => {
-    const current = get().navOrder;
-    const from = current.indexOf(page);
-    if (from < 0) return;
-    const to = from + dir;
-    if (to < 0 || to >= current.length) return; // 边界：到顶/到底不动
-    const next = [...current];
-    next.splice(from, 1);
-    next.splice(to, 0, page);
-    set({ navOrder: next });
-    persistNavOrder(next);
-  },
-  resetNavOrder: () => {
-    set({ navOrder: [...DEFAULT_NAV_ORDER] });
-    persistNavOrder([...DEFAULT_NAV_ORDER]);
-  },
-  setNavMode: (mode) => {
-    const next = mode === "auto" ? "auto" : "pinned";
-    // 切档一律收起浮层：pin 之后还挂着一层浮层，看起来像「没生效」。
-    set({ navMode: next, navOpen: false });
-    persistNavMode(next);
-  },
-  toggleNavMode: () => {
-    get().setNavMode(get().navMode === "pinned" ? "auto" : "pinned");
-  },
-  openNav: () => {
-    if (get().navMode !== "auto") return;
-    set({ navOpen: true });
-  },
-  closeNav: () => {
-    if (!get().navOpen) return;
-    set({ navOpen: false });
-  },
-  toggleNav: () => {
-    const { navMode, navOpen } = get();
-    // pinned：Ctrl+B 的含义是「藏起来」——切到自动隐藏模式；再按一次呼出浮层。
-    if (navMode === "pinned") {
-      get().setNavMode("auto");
-      return;
-    }
-    set({ navOpen: !navOpen });
-  },
 }));
 
 /**
@@ -962,7 +707,7 @@ export const useUiStore = create<UiState>((set, get) => ({
  *
  * 放在 store 外部订阅而不是每个 setter 里：`setPage` / `openConversation` / `leaveConversation` /
  * 各页的「回主页」有十来个入口，散着写必然漏一个；订阅只认「改完之后的状态」，天然收口。
- * 只比较这两个字段，避免 `navOpen` 之类的瞬时状态把写盘次数放大。
+ * 只比较这两个字段，避免页内瞬态（浮层、草稿等）把写盘次数放大。
  */
 let persistedSessionView: string | null = null;
 useUiStore.subscribe((state) => {

@@ -11,8 +11,8 @@ import { setToken, fetchMe, ApiError } from "./lib/api.js";
 // 组件自身的揭示行为见 components/BootWave.test.tsx。
 vi.mock("./lib/appPresence.js", () => ({ useAppPresence: () => undefined }));
 vi.mock("./components/LoginPage.js", () => ({ LoginPage: () => <div>LoginPage</div> }));
-vi.mock("./components/NavRail.js", () => ({
-  NavRail: () => <div>NavRail</div>,
+vi.mock("./components/TopBar.js", () => ({
+  TopBar: () => <div>TopBar</div>,
 }));
 vi.mock("./components/HomePage.js", () => ({ HomePage: () => <div>HomePage</div> }));
 vi.mock("./components/TeamBoardPage.js", () => ({ TeamBoardPage: () => <div>TeamBoardPage</div> }));
@@ -101,7 +101,7 @@ describe("App 启动动画集成", () => {
 
     await act(async () => { bootDoneFns[0]?.(); });
     // 遮罩一撤就是主界面，中间没有任何「加载中…」
-    expect(screen.getByText("NavRail")).toBeTruthy();
+    expect(screen.getByText("TopBar")).toBeTruthy();
     expect(screen.queryByText("加载中…")).toBeNull();
     expect(screen.queryByText("BootWave")).toBeNull();
   });

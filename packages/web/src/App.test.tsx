@@ -105,19 +105,16 @@ describe("App 认证门禁", () => {
     expect(screen.queryByText("已登录")).not.toBeInTheDocument();
   });
 
-  it("有 token 且 fetchMe 成功：restore 后渲染三栏壳", async () => {
+  it("有 token 且 fetchMe 成功：restore 后渲染顶栏壳", async () => {
     setToken("t1");
     const fetchMock = mockFetch();
 
     render(<App />);
 
-    // 导航 A 方案：壳以图标轨呈现（原「已登录」状态页脚已随展开文字栏移除，改查导航按钮）
-    expect(await screen.findByRole("button", { name: "主页" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(screen.getAllByText("主页").length).toBeGreaterThan(0); // 浮签名称文本
-    expect(screen.getByRole("navigation", { name: "主导航" }).textContent).not.toMatch(
-      /和鸣|Heming/,
-    ); // 导航区不显示产品名
+    // 新外壳：顶栏常驻 + 常驻会话侧栏，原左侧图标导航轨已删除
+    expect(await screen.findByTestId("topbar")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar").textContent).toContain("和鸣"); // 顶栏左侧品牌
     expect(screen.queryByText("登录你的账号")).not.toBeInTheDocument();
 
     // v7 主页挂载后还会发起 /api/health 探测与工作区数据加载，硬计数改为按 URL 断言
@@ -367,7 +364,7 @@ describe("App 导航快捷键与隐藏态", () => {
     setToken("t1");
     mockFetch();
     render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
 
     fireEvent.keyDown(window, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("team");
@@ -398,17 +395,17 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(window, { key: "3", metaKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
-    // 导航轨常驻：Ctrl+\ 不再折叠导航，主导航始终在
+    // 顶栏常驻：Ctrl+\ 不再折叠任何东西
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
-    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "主页" })).toBeInTheDocument();
+    expect(screen.getByTestId("topbar")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
   });
 
   it("焦点在输入框 / 未登录时，Alt+数字 不切页", async () => {
     setToken("t1");
     mockFetch();
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
 
     // 焦点在文本输入（右栏上传按钮无 input，用导航区外的窗口内 input 模拟）
     const probe = document.createElement("input");
@@ -453,7 +450,7 @@ describe("App 导航快捷键与隐藏态", () => {
     });
     vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
     render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
 
     fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
     await screen.findByLabelText("关闭预览");
@@ -476,7 +473,7 @@ describe("App 导航快捷键与隐藏态", () => {
     setToken("t1");
     mockFetch();
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
 
     const probe = document.createElement("input");
     container.appendChild(probe);
@@ -486,13 +483,13 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(probe, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
-    // 导航常驻：Ctrl+\ 不再折叠，主导航仍在
+    // 顶栏常驻：Ctrl+\ 不再折叠任何东西
     fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
-    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByTestId("topbar")).toBeInTheDocument();
     probe.remove();
   });
 
-  it("导航轨搜索按钮打开命令面板；焦点在结果按钮上按 Esc 也能关闭", async () => {
+  it("顶栏「打开命令面板」按钮打开命令面板；焦点在结果按钮上按 Esc 也能关闭", async () => {
     setToken("t1");
     mockFetch({
       team: {
@@ -507,9 +504,9 @@ describe("App 导航快捷键与隐藏态", () => {
       },
     });
     render(<App />);
-    await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
+    await screen.findByRole("button", { name: "打开命令面板" });
 
-    fireEvent.click(screen.getByRole("button", { name: "全局搜索 Ctrl K" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开命令面板" }));
     const dialog = await screen.findByRole("dialog", { name: "命令面板" });
     fireEvent.change(within(dialog).getByLabelText("搜索页面、动作与成员"), {
       target: { value: "张三" },
@@ -531,7 +528,7 @@ describe("App 导航快捷键与隐藏态", () => {
     }));
     mockFetch({ team: { members, onlineCount: 0 } });
     render(<App />);
-    await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
+    await screen.findByRole("button", { name: "打开命令面板" });
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const dialog = await screen.findByRole("dialog", { name: "命令面板" });
@@ -543,11 +540,11 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(within(dialog).getAllByRole("option", { name: /^候选/ })).toHaveLength(8);
   });
 
-  it("进入会话后左侧导航仍常驻（不再收起、不再有呼出条）", async () => {
+  it("进入会话后顶栏与会话侧栏仍常驻（不再收起、不再有呼出条）", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
 
     // jsdom 未实现 scrollIntoView（ChatPage 滚到底部用），进入会话前补个空实现
     Element.prototype.scrollIntoView = vi.fn();
@@ -556,8 +553,9 @@ describe("App 导航快捷键与隐藏态", () => {
     });
 
     expect(useUiStore.getState().page).toBe("chat");
-    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "呼出导航" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "会话列表" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
   });
 });
 
@@ -575,15 +573,15 @@ describe("App 桌面窗口标题栏", () => {
     delete (window as unknown as { heming?: unknown }).heming;
   });
 
-  it("桌面端（window.heming 存在）：主壳顶部渲染拖拽带", async () => {
+  it("桌面端（window.heming 存在）：顶栏带 desktop-titlebar 拖拽区", async () => {
     setToken("t1");
     mockFetch();
     (window as unknown as { heming: unknown }).heming = { platform: "win32" };
 
-    const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    render(<App />);
+    const topbar = await screen.findByTestId("topbar");
 
-    expect(container.querySelector(".desktop-titlebar")).not.toBeNull();
+    expect(topbar.className).toContain("desktop-titlebar");
   });
 
   it("桌面端：登录页顶部渲染拖拽带", () => {
@@ -595,14 +593,16 @@ describe("App 桌面窗口标题栏", () => {
     expect(container.querySelector(".desktop-titlebar")).not.toBeNull();
   });
 
-  it("浏览器端（无 window.heming）：不渲染拖拽带，布局与原先一致", async () => {
+  it("浏览器端（无 window.heming）：顶栏仍渲染（h-10），但不带拖拽区", async () => {
     setToken("t1");
     mockFetch();
 
-    const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    render(<App />);
+    const topbar = await screen.findByTestId("topbar");
 
-    expect(container.querySelector(".desktop-titlebar")).toBeNull();
+    expect(topbar).toBeInTheDocument();
+    expect(topbar.className).toContain("h-10");
+    expect(document.querySelector(".desktop-titlebar")).toBeNull();
   });
 });
 
@@ -618,7 +618,7 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
 
   it("目录栏头部有「绑定」与「上传」两个入口", async () => {
     render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
     expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "上传" })).toBeInTheDocument();
   });
@@ -630,7 +630,7 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
     // 用例才只验它自己声明的那条路径——先前靠上一个用例的残留状态，才会偶发红。
     useUiStore.setState({ page: "chat", activeConversationId: null });
     render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
     fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
     // 智能体页上可能已有别的失败提示（role=alert），所以按文案定位这条通知，
     // 再确认它落在了一个 alert 里——等的是同一个状态，不是改断言。
@@ -641,7 +641,7 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
 
   it("拖动手柄可改变目录栏宽度并落盘", async () => {
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
     const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
     const aside = container.querySelector('aside[aria-label="共享文件"]') as HTMLElement;
 
@@ -766,14 +766,14 @@ describe("App 窄窗响应式：共享文件改抽屉", () => {
   it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，且不再有共享文件入口", async () => {
     useUiStore.setState({ page: "settings" });
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页" });
+    await screen.findByTestId("topbar");
     // d.76：文件管理只在智能体页，其它页连入口都不出现
     expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
 
     const main = container.querySelector("main");
     expect(main?.className).toContain("min-w-0");
     expect(main?.className).toContain("overflow-hidden");
-    // aside 列不存在，唯一横向占位是导航轨 + 主列
-    expect(container.querySelectorAll("aside").length).toBe(0);
+    // 共享文件 aside 不存在（常驻会话侧栏是另一条 aside，不算在文件栏里）
+    expect(container.querySelectorAll('aside[aria-label="共享文件"]').length).toBe(0);
   });
 });

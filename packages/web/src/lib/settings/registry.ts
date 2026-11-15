@@ -1,7 +1,7 @@
 /**
  * 设置页「卡片级」元数据（UX-E · V2）。
  *
- * 为什么需要它：设置区有 5 个分组、十几张卡，靠翻找不到。搜索要能跨分组命中
+ * 为什么需要它：设置区有 4 个分组、十来张卡，靠翻找不到。搜索要能跨分组命中
  * **卡片**（不是分组）：这里登记每张卡的 id / 标题 / 关键词 / 所属分区，
  * 设置页渲染时给卡片根节点挂 `data-settings-id`，搜索命中后据此切分组 + 滚动 + 高亮。
  *
@@ -9,14 +9,13 @@
  * `registry.test.ts` 有源码守卫：两边 id 集合必须完全一致（不多不少，防死项）。
  */
 
-export type SettingsSectionId = "profile" | "model" | "appearance" | "navigation" | "about";
+export type SettingsSectionId = "profile" | "model" | "appearance" | "about";
 
 /** 分区显示名：与 SettingsPage 的标签文字保持一致（搜索也匹配分区名）。 */
 export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   profile: "个人资料",
   model: "高级",
   appearance: "外观",
-  navigation: "导航",
   about: "关于",
 };
 
@@ -91,53 +90,13 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     keywords: ["主题", "主题色", "页面颜色", "颜色", "配色", "accent", "色板", "自定义颜色", "恢复默认"],
     section: "appearance",
   },
-  {
-    id: "nav-mode",
-    title: "导航栏",
-    keywords: [
-      "导航",
-      "导航栏",
-      "侧栏",
-      "侧边栏",
-      "自动隐藏",
-      "显示",
-      "隐藏",
-      "固定",
-      "常显",
-      "pin",
-      "ctrl+b",
-      "显示方式",
-    ],
-    section: "appearance",
-  },
   // d.136：原先这里注册的「桌面小组件」卡已撤掉——设置 → 外观区不再有那张卡，
   // 窗口设置（显示/缩放/穿透/重置位置/插件 settings.fields）挪进了插件区「插件详情」。
   // 这里不能只删锚点却留着元数据：卡片搜索会命中一个不存在的卡，点了没有任何反应。
-  {
-    id: "nav-order",
-    title: "导航顺序",
-    keywords: ["导航", "顺序", "侧栏", "排序", "上移", "下移", "恢复默认", "alt"],
-    section: "navigation",
-  },
-  {
-    // d.146.5：记忆页已删除，记忆默认全开（后台运行、无界面）。这张卡只解释口径，
-    // 并把用户送到知识库页；真正的设置值仍只有 MemorySettings.vaultMemory 一个。
-    id: "memory-vault",
-    title: "知识库与记忆",
-    keywords: [
-      "知识库",
-      "vault",
-      "记忆",
-      "双向绑定",
-      "同步",
-      "纳入",
-      "笔记",
-      "markdown",
-      "obsidian",
-      "wiki",
-    ],
-    section: "navigation",
-  },
+  //
+  // d.147（极简外壳）：导航轨删除后，页面入口只剩顶栏「页面」菜单与命令面板，
+  // 「导航顺序」「导航栏」「知识库与记忆」三张卡随之撤掉（分区「导航」也一并消失）。
+  // 同一原则：卡没了元数据必须删，否则搜「导航」会命中一个点不过去的死项。
   {
     id: "update",
     title: "软件更新",

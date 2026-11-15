@@ -3,20 +3,19 @@ import type { Page } from "../../store/ui.js";
 /**
  * 命令面板 · 页面跳转目录（固定 8 个导航页）。
  *
- * 为什么单独放一份而不是从 NavRail 里 import：NavRail 的 ITEMS 里带 JSX 图标，
- * 且没有导出；命令面板需要的是「名字 + 一句描述 + Alt 快捷键」这类纯数据。
- * 代价是两处可能漂移，所以用一个测试把「页面集合与 store 的 DEFAULT_NAV_ORDER 一致、
- * 快捷键与 App 的映射一致」钉住（见 lib/palette/palette.test.ts）。
+ * 为什么单独放一份：顶栏「页面」菜单、命令面板、快捷键帮助三处都要「名字 + 一句描述 +
+ * Alt 快捷键」这类纯数据，插件页再从注册表追加；把它们收在本表，避免三处文案各写一遍。
+ * 代价是可能与 store / App 的映射漂移，所以用测试把「页面集合、默认页、快捷键」钉住
+ * （见 lib/palette/palette.test.ts）。
  *
- * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
+ * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES` 保持一致（三处 UI 都读本表的 `digit`）：
  * 1 主页 / 2 团队 / 5 协作 / 6 设置 / 8 会话 / 0 插件。记忆页已删除（默认全开、无界面），
- * 数字键 5 交给「协作」页。
- * 幕僚 / 信息中枢 / 自动化已迁到沙箱插件（页面入口由插件页装出来），
+ * 数字键 5 交给「协作」页。幕僚 / 信息中枢 / 自动化已迁到沙箱插件（页面入口由插件页装出来），
  * 模型路由页已删除——它们都不在页面目录里。
  */
 export interface PalettePage {
   page: Page;
-  /** 导航轨上的显示名（与 NavRail 一致）。 */
+  /** 页面菜单 / 命令面板里的显示名（也用于快捷键帮助的导航组）。 */
   label: string;
   /** 一句话说清这页能干什么，供检索与副标题用。 */
   description: string;
@@ -53,7 +52,7 @@ export const PALETTE_PAGES: PalettePage[] = [
   {
     page: "settings",
     label: "设置",
-    description: "个人资料、模型、外观、导航与关于",
+    description: "个人资料、模型、外观与关于",
     digit: "6",
   },
 ];

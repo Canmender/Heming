@@ -9,12 +9,9 @@ import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
-import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
-import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
-import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
+import { useUiStore } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { setThemeMode, watchThemeMode } from "../lib/theme.js";
-import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import {
   CHANGELOG,
@@ -34,7 +31,6 @@ import {
 import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
-import { NAV_GROUP_LABEL, navGroupOf } from "../lib/navGroups.js";
 import { Button } from "../components/ui/Button.js";
 
 /**
@@ -66,24 +62,6 @@ function InlineText({ text }: { text: string }) {
   );
 }
 
-/** 导航页中文名（排序卡片与校验共用，与 NavRail 的 aria-label 保持一致）。 */
-const NAV_LABELS: Record<NavPage, string> = {
-  home: "主页",
-  team: "团队",
-  chat: "会话",
-  collab: "协作",
-  staff: "幕僚",
-  infohub: "信息中枢",
-  automations: "自动化",
-  workflows: "工作流",
-  model: "模型",
-  modelroute: "模型路由",
-  plugins: "插件",
-  memory: "记忆",
-  vault: "知识库",
-  settings: "设置",
-};
-
 /**
  * 应用版本：桌面端由 preload 注入 5 段版本（d.特性.破坏性.修订.构建）。
  *
@@ -102,7 +80,6 @@ const SETTINGS_TABS = [
   { id: "profile", label: "个人资料" },
   { id: "model", label: "高级" },
   { id: "appearance", label: "外观" },
-  { id: "navigation", label: "导航" },
   { id: "about", label: "关于" },
 ] as const;
 
@@ -140,7 +117,9 @@ export function SettingsPage() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const results = matchSettingsCards(query);
+  // 只保留仍存在分组页签的卡片：设置区的「导航」页签已随导航轨一起删掉，
+  // 注册表里指向旧分组的死卡（导航顺序/知识库与记忆）不该再出现在结果里。
+  const results = matchSettingsCards(query).filter((card) => isSettingsTabId(card.section));
 
   // 外部请求直达某个分组（桌宠未配置模型时点「去设置」）：消费后立刻清空，
   // 否则下次手动进设置页会被这个残留值拽回同一个分组。
@@ -195,6 +174,8 @@ export function SettingsPage() {
 
   /** 跳到某张卡片：清空查询、切分组、把滚动/高亮交给上面的 effect。 */
   const jumpToCard = useCallback((card: SettingsCardMeta) => {
+    // 分组页签是白名单：注册表里指向已删除分组的卡片（见上）直接忽略，不切到不存在的页签。
+    if (!isSettingsTabId(card.section)) return;
     setQuery("");
     setTab(card.section);
     setFocusTarget(card.id);
@@ -376,36 +357,6 @@ export function SettingsPage() {
               </>
             )}
             {tab === "appearance" && <AppearanceTab highlightedId={highlightId} />}
-            {tab === "navigation" && (
-              <>
-                <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
-                  <NavigationSection />
-                </div>
-                {/* d.146.5 记忆页已删除：记忆默认全开、全部后台运行，这里只解释口径并给知识库入口。 */}
-                <div
-                  data-settings-id="memory-vault"
-                  className={anchorClass(highlightId === "memory-vault")}
-                >
-                  <section className="mt-3 ui-card p-4">
-                    <h2 className="ui-section-title">知识库与记忆</h2>
-                    <p className="mt-1 ui-caption">
-                      记忆默认全开：短期/长期/个人知识库都由内置智能体在后台自动运行，没有独立界面，
-                      也没有开关页。知识库笔记的纳入与同步在知识库页。
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm" variant="ghost"
-                        // 知识库页由并行的界面任务接入 Page 联合（d.114 已合入 `"vault"`）。
-                        onClick={() => useUiStore.getState().setPage("vault")}
-                      >
-                        打开知识库
-                      </Button>
-                    </div>
-                  </section>
-                </div>
-              </>
-            )}
             {tab === "about" && <AboutSection highlightedId={highlightId} />}
             {/* 审计 F8：原来每个分区底部都印一次「和鸣 d.x.y」，五个分区五份版本号，
                 「关于」里已有当前版本与更新记录。版本号只留在「关于」。 */}
@@ -540,10 +491,10 @@ function ProfileSection() {
 }
 
 /**
- * 外观分组（d.68 顺序）：主题模式 → 主题色 → 导航栏 → 恢复默认外观。
+ * 外观分组（d.68 顺序）：主题模式 → 主题色 → 恢复默认外观。
  *
- * 为什么顺序要改：主题模式决定「亮/暗」，是最粗的一层；主题色只改填充强调色；
- * 导航栏是局部外观偏好。从粗到细看下来，用户不用来回跳。
+ * 为什么顺序要改：主题模式决定「亮/暗」，是最粗的一层；主题色只改填充强调色。
+ * 从粗到细看下来，用户不用来回跳。
  *
  * 桌面小组件的窗口设置在 d.136 挪到了插件区「插件详情」：用户反馈外观区不该出现
  * 「桌面小组件」卡——窗口的显示/缩放/穿透属于某个插件自己的行为，跟插件放一起才找得到。
@@ -551,7 +502,7 @@ function ProfileSection() {
  * 各卡片外层用 flex-col gap-3 统一 12px 间距：anchorClass 只管高亮描边、不自带边距，
  * 早先直接平铺会让卡片上下贴死（用户反馈「卡片之间没有间距」）。
  *
- * 「恢复默认外观」用既有 ConfirmDialog 二次确认：它一次改三处（主题模式/主题色/导航），
+ * 「恢复默认外观」用既有 ConfirmDialog 二次确认：它一次改两处（主题模式/主题色），
  * 误点的代价比单张卡片的「恢复默认」大，值得多问一句。
  */
 function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
@@ -564,7 +515,6 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
     resetAccent(); // 主题色 → 默认墨色
     setThemeMode("system"); // 主题模式 → 跟随系统
     watchThemeMode({ accent: useThemeStore.getState().accent }); // 立即应用（摘旧挂新系统监听）
-    useUiStore.getState().setNavMode(DEFAULT_NAV_MODE); // 导航 → 固定常显
     setThemeModeKey((k) => k + 1);
     setConfirmReset(false);
   };
@@ -581,15 +531,11 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
       >
         <AppearanceSection />
       </div>
-      {/* d.68：导航栏显示方式（常显 / 自动隐藏），与导航轨底部 pin 按钮同源 */}
-      <div data-settings-id="nav-mode" className={anchorClass(highlightedId === "nav-mode")}>
-        <NavModeSection />
-      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line-soft bg-subtle px-4 py-3">
         <div className="min-w-0">
           <div className="ui-body-sm font-medium">恢复默认外观</div>
-          <div className="ui-caption">主题模式跟随系统、主题色墨黑、导航栏常显</div>
+          <div className="ui-caption">主题模式跟随系统、主题色墨黑</div>
         </div>
         <Button
           type="button"
@@ -624,89 +570,11 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
           }
         >
           <p className="ui-body">
-            将把主题模式改为「跟随系统」、主题色恢复墨黑、导航栏恢复常显。其它设置不受影响。
+            将把主题模式改为「跟随系统」、主题色恢复墨黑。其它设置不受影响。
           </p>
         </ConfirmDialog>
       )}
     </div>
-  );
-}
-
-/** 导航栏显示方式的两档（文案与 lib/navPrefs 的语义一一对应）。 */
-const NAV_MODE_OPTIONS: { id: NavMode; label: string; hint: string }[] = [
-  { id: "pinned", label: "固定常显", hint: "导航栏一直显示（默认，推荐）" },
-  { id: "auto", label: "自动隐藏", hint: "左缘悬停或 Ctrl+B 呼出，Esc 收回" },
-];
-
-/**
- * 导航栏卡（d.68）：两档 radio + 一句话说明 + 恢复默认。
- *
- * 与导航轨底部的 pin 按钮读写同一个 store（`useUiStore.navMode`），
- * 所以「在导航轨上 pin 过」再进设置页，选中项就是对的——不存在两份偏好。
- */
-function NavModeSection() {
-  const navMode = useUiStore((s) => s.navMode);
-  const setNavMode = useUiStore((s) => s.setNavMode);
-
-  // 单选组键盘语义：←/↑ 上一档，→/↓ 下一档（与主题模式卡一致）
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const index = NAV_MODE_OPTIONS.findIndex((m) => m.id === navMode);
-    let next = index;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown")
-      next = (index + 1) % NAV_MODE_OPTIONS.length;
-    else if (event.key === "ArrowLeft" || event.key === "ArrowUp")
-      next = (index - 1 + NAV_MODE_OPTIONS.length) % NAV_MODE_OPTIONS.length;
-    else return;
-    event.preventDefault();
-    setNavMode(NAV_MODE_OPTIONS[next].id);
-  };
-
-  return (
-    <section aria-label="导航栏" className="max-w-full ui-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <h2 className="ui-section-title">导航栏</h2>
-        </div>
-        <Button
-          type="button"
-          aria-label="恢复默认导航栏模式"
-          onClick={() => setNavMode(DEFAULT_NAV_MODE)}
-          size="md" variant="ghost"
-        >
-          恢复默认
-        </Button>
-      </div>
-      <div className="mt-1 ui-caption">
-        自动隐藏时导航不占内容宽度：鼠标移到窗口左缘或按 Ctrl+B 呼出；移开 0.3 秒后自动收回，Esc 立即收回。
-      </div>
-      <div
-        role="radiogroup"
-        aria-label="导航栏显示方式"
-        className="mt-2 grid gap-2 sm:grid-cols-2"
-        onKeyDown={onKeyDown}
-      >
-        {NAV_MODE_OPTIONS.map((item) => {
-          const checked = navMode === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              aria-label={`导航栏 ${item.label}`}
-              tabIndex={checked ? 0 : -1}
-              onClick={() => setNavMode(item.id)}
-              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                checked ? "border-ink bg-subtle-2" : "border-line bg-surface hover:bg-subtle"
-              }`}
-            >
-              <span className="block ui-body-sm">{item.label}</span>
-              <span className="mt-0.5 block ui-caption">{item.hint}</span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -811,63 +679,6 @@ function AppearanceSection() {
         </Button>
       </div>
       {accentError && <div role="alert" className="mt-2 ui-caption text-danger">{accentError}</div>}
-    </section>
-  );
-}
-
-/** 导航分组：左侧导航顺序**固定**（d.123 用户口径），这里只展示，不再提供排序操作。 */
-function NavigationSection() {
-  // 导航固定 8 项；带页面的插件由同一份注册表投影追加在末尾（与 NavRail 同源）。
-  const navOrder = [...DEFAULT_NAV_ORDER];
-  /**
-   * d.124：已装插件页面（声明式 + 界面插件）追加在 8 项之后。
-   *
-   * 读的是导航轨/路由同一份注册表投影 `usePluginPageEntries()`，不在设置页里
-   * 再判一遍「有没有页面、能不能进」——那会变成第四套口径。
-   */
-  const pluginPages = usePluginPageEntries().filter((entry) => entry.available);
-
-  return (
-    <section
-      aria-label="导航顺序"
-      className="max-w-full ui-card p-4"
-    >
-      <div className="ui-section-title">导航顺序</div>
-      <div className="mt-1 ui-caption">
-        导航固定 8 项、顺序不可调整（数字快捷键仍对应原来的页面：Alt+1 / 2 / 5 / 6 / 8 / 0）。
-        带页面的插件（信息中枢、自动化等）会自动追加在最下面，不改变上面 8 项的顺序；
-        停用或卸载后入口随之消失。
-      </div>
-      <ol className="mt-2 flex flex-col gap-1">
-        {navOrder.map((page, index) => (
-          <li
-            key={page}
-            className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
-          >
-            <span className="w-[18px] ui-caption">{index + 1}</span>
-            <span className="flex-1 text-ui-sm">{NAV_LABELS[page]}</span>
-            {index >= DEFAULT_NAV_ORDER.length ? (
-              <span className="ui-micro shrink-0 text-muted">已装插件 · 固定末位</span>
-            ) : (
-              <span className="ui-micro shrink-0 text-muted">{NAV_GROUP_LABEL[navGroupOf(page)]}</span>
-            )}
-          </li>
-        ))}
-        {pluginPages.map((entry, index) => (
-          <li
-            key={entry.pageId}
-            className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
-          >
-            <span className="w-[18px] ui-caption">{DEFAULT_NAV_ORDER.length + index + 1}</span>
-            <PluginPageIcon icon={entry.icon} size={14} />
-            <span className="flex-1 text-ui-sm">{entry.title}</span>
-            <span className="ui-micro shrink-0 text-muted">插件页面 · 固定末位</span>
-          </li>
-        ))}
-      </ol>
-      {pluginPages.length === 0 ? (
-        <p className="mt-2 ui-caption">当前没有已安装的插件页面；到「插件」页安装后会自动出现在导航最下面。</p>
-      ) : null}
     </section>
   );
 }

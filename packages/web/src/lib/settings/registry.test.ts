@@ -15,11 +15,11 @@ import {
  *   （新增卡片只加一行；少了是漏挂锚点，多了是死项）。
  */
 
-const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "navigation", "about"]);
+const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "about"]);
 
 describe("registry 完整性", () => {
-  it("14 张卡（d.136 撤掉「桌面小组件」卡）、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(14);
+  it("11 张卡（d.136 撤「桌面小组件」、d.147 撤三张导航卡）、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(11);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {
@@ -37,7 +37,6 @@ describe("registry 完整性", () => {
     expect(SETTINGS_SECTION_LABELS.profile).toBe("个人资料");
     expect(SETTINGS_SECTION_LABELS.model).toBe("高级");
     expect(SETTINGS_SECTION_LABELS.appearance).toBe("外观");
-    expect(SETTINGS_SECTION_LABELS.navigation).toBe("导航");
     expect(SETTINGS_SECTION_LABELS.about).toBe("关于");
   });
 
@@ -45,9 +44,13 @@ describe("registry 完整性", () => {
     expect(settingsCardById("hitl-policy")?.title).toBe("工具调用确认");
     expect(settingsCardById("nope")).toBeUndefined();
     expect(sectionLabelOf("appearance")).toBe("外观");
-    expect(settingsCardLabel(settingsCardById("nav-mode")!)).toBe("导航栏 · 外观");
+    expect(settingsCardLabel(settingsCardById("accent-color")!)).toBe("主题色 · 外观");
     // d.136：卡片挪进插件详情后不能再留元数据，否则搜到了也点不过去
     expect(settingsCardById("widgets")).toBeUndefined();
+    // d.147：导航轨删除后，三张导航卡（含其外观区锚点）同步撤掉
+    expect(settingsCardById("nav-mode")).toBeUndefined();
+    expect(settingsCardById("nav-order")).toBeUndefined();
+    expect(settingsCardById("memory-vault")).toBeUndefined();
   });
 });
 
@@ -71,7 +74,7 @@ describe("matchSettingsCards（跨分区匹配）", () => {
 
   it("分区名也参与匹配：搜「外观」命中该分区全部卡片（渲染顺序）", () => {
     const ids = matchSettingsCards("外观").map((c) => c.id);
-    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode"]);
+    expect(ids).toEqual(["theme-mode", "accent-color"]);
   });
 
   it("大小写不敏感、空格分词为 AND：搜「key 存储」→ 密钥存储", () => {

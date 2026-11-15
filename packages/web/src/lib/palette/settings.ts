@@ -1,9 +1,12 @@
 /**
- * 命令面板 · 设置分区目录（5 个）。
+ * 命令面板 · 设置分区目录（4 个）。
  *
  * `tab` 必须与 `SettingsPage` 的分区 id 一致（profile / model / appearance /
- * navigation / about）——命令面板通过 `useUiStore.openSettings(tab)` 直达，
- * 对不上就会落到默认的「个人资料」。`settings.test.ts` 会钉住这 5 个 id 与顺序。
+ * about）——命令面板通过 `useUiStore.openSettings(tab)` 直达，
+ * 对不上就会落到默认的「个人资料」。`settings.test.ts` 会钉住这 4 个 id 与顺序。
+ *
+ * 为什么没有「导航」分区：左侧导航轨已删，页面入口收进命令面板与顶栏「页面」菜单，
+ * 不再有导航顺序/显隐可调；侧边栏宽度也不再进设置。留一个空分区只会让人白点一次。
  */
 export interface PaletteSettingSection {
   /** 与 SettingsPage 的分区 id 一致。 */
@@ -32,16 +35,8 @@ export const PALETTE_SETTINGS: PaletteSettingSection[] = [
   {
     tab: "appearance",
     label: "外观",
-    description: "主题模式、主题色、导航栏与界面观感",
-    // d.68：外观页新增「导航栏」卡（常显/自动隐藏），把同义说法登记进来，
-    // 用户在命令面板搜「导航栏」「自动隐藏」「Ctrl+B」都能落到外观页。
-    keywords: ["主题", "主题色", "颜色", "字号", "深浅", "导航栏", "自动隐藏", "侧边栏", "ctrl+b"],
-  },
-  {
-    tab: "navigation",
-    label: "导航",
-    description: "导航顺序与显示项",
-    keywords: ["导航顺序", "排序", "显示", "侧栏"],
+    description: "主题模式、主题色与界面观感",
+    keywords: ["主题", "主题色", "颜色", "字号", "深浅"],
   },
   {
     tab: "about",

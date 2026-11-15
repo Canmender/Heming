@@ -453,6 +453,15 @@ samp {
   -webkit-app-region: drag;
 }
 
+/*
+ * 顶栏交互区（页面菜单/图标按钮/账户）：拖拽带上的按钮必须显式退出拖拽区，
+ * 否则 `-webkit-app-region: drag` 会吞掉点击，按钮点不动。做成类而不是逐按钮内联样式：
+ * 顶栏结构以后再变，只要动作容器还带这个类就不会漏。
+ */
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 
 /*
  * 主题色（设置区可改）：既有界面 60+ 处用 bg-ink / text-ink，

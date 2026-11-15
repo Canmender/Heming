@@ -1,11 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { SettingsPage, SETTINGS_HIGHLIGHT_MS, appVersionLabel } from "./SettingsPage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
-import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
+import { useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
-import { pluginStore } from "../lib/plugins/index.js";
 import { CHANGELOG, stripInline } from "../lib/changelog.js";
 import { RELEASE_NOTES } from "../generated/releaseNotes.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
@@ -18,9 +17,9 @@ const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 /**
  * 切到设置区的某个分组标签。
  * 设置区已改为上侧横向标签页、一次只渲染一个分组，
- * 所以测「外观/导航/关于/高级」里的东西前必须先切过去。
+ * 所以测「个人资料/外观/关于/高级」里的东西前必须先切过去。
  */
-function goTab(name: "个人资料" | "高级" | "外观" | "导航" | "关于"): void {
+function goTab(name: "个人资料" | "高级" | "外观" | "关于"): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 
@@ -362,84 +361,6 @@ describe("设置区 · 页面颜色", () => {
   });
 });
 
-describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
-  });
-
-  it("按固定顺序展示 8 项，不再提供上移/下移/恢复默认按钮", () => {
-    render(<SettingsPage />);
-    goTab("导航");
-    const region = screen.getByRole("region", { name: "导航顺序" });
-    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
-    const expected = ["主页", "团队", "会话", "协作", "插件", "知识库", "模型", "设置"];
-    expect(labels).toHaveLength(8);
-    for (const [index, name] of expected.entries()) expect(labels[index]).toContain(name);
-    expect(screen.queryByRole("button", { name: /^上移 / })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^下移 / })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "恢复默认导航顺序" })).not.toBeInTheDocument();
-    expect(region.textContent).toContain("顺序不可调整");
-  });
-
-  it("存储里残留自定义顺序时，展示的仍是固定 8 项（旧的拖拽排序不再生效）", () => {
-    useUiStore.getState().setNavOrder(["settings", "memory", "home", "team", "plugins"] as never);
-    render(<SettingsPage />);
-    goTab("导航");
-    const region = screen.getByRole("region", { name: "导航顺序" });
-    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
-    expect(labels[0]).toContain("主页");
-    expect(labels[7]).toContain("设置");
-  });
-});
-
-describe("设置区 · 导航顺序（含已装插件页面，d.124）", () => {
-  /** 最小 v5 声明式插件：只声明一个页面，用来验证导航说明卡的「已装插件页面」一段。 */
-  const pageManifest = {
-    schemaVersion: 5,
-    id: "acme.collector",
-    name: "采集桥",
-    version: "1.0.0",
-    engines: { heming: "d.100" },
-    permissions: { network: [], tools: "read", files: [] },
-    contributions: {
-      page: {
-        title: "采集桥",
-        icon: "activity",
-        summary: "本机采集服务状态与用法",
-        blocks: [{ type: "markdown", text: "本机采集服务状态。" }],
-      },
-      skills: [{ name: "整理采集结果", instructions: "把采集结果整理成列表。" }],
-    },
-  };
-
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
-  });
-
-  afterEach(() => {
-    // 先卸载再摘记录：store 的通知落到已挂载组件上会触发 act 警告
-    cleanup();
-    // 全局插件存储是单例：用例装进去的页面必须摘掉，避免影响其它用例的导航说明
-    pluginStore.remove("acme.collector");
-  });
-
-  it("在 8 项导航之后追加已装插件页面，只读展示且标明固定末位", () => {
-    pluginStore.install(JSON.stringify(pageManifest));
-    render(<SettingsPage />);
-    goTab("导航");
-
-    const region = screen.getByRole("region", { name: "导航顺序" });
-    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
-    expect(labels).toHaveLength(9);
-    expect(labels[7]).toContain("设置");
-    expect(labels[8]).toContain("采集桥");
-    expect(labels[8]).toContain("插件页面 · 固定末位");
-    expect(region.textContent).toContain("带页面的插件（信息中枢、自动化等）会自动追加在最下面");
-  });
-});
-
 describe("设置区 · 头像恢复默认", () => {
   it("有头像时显示恢复按钮，点击后清空待保存的头像", () => {
     useAuthStore.setState({
@@ -569,12 +490,12 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
   it("输入后直接回车打开第一项（不用把鼠标挪到结果上）", () => {
     render(<SettingsPage />);
     const input = screen.getByLabelText("搜索设置项");
-    fireEvent.change(input, { target: { value: "导航" } });
+    fireEvent.change(input, { target: { value: "主题模式" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
     expect(input).toHaveValue("");
-    expect(document.querySelector('[data-settings-id="nav-mode"]')).not.toBeNull();
+    expect(document.querySelector('[data-settings-id="theme-mode"]')).not.toBeNull();
   });
 
   it("点结果：切到对应分区、滚动到卡片、高亮 2 秒后消失", async () => {
@@ -614,14 +535,14 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     act(() => {
-      useUiStore.getState().setPaletteIntent("focus-settings", { card: "nav-mode" });
+      useUiStore.getState().setPaletteIntent("focus-settings", { card: "accent-color" });
     });
     await act(async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
 
     expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
-    const anchor = document.querySelector<HTMLElement>('[data-settings-id="nav-mode"]')!;
+    const anchor = document.querySelector<HTMLElement>('[data-settings-id="accent-color"]')!;
     expect(anchor.className).toContain("outline-ink");
     expect(scrollSpy).toHaveBeenCalled();
     // 一次性意图：消费后清空，不把设置页钉在这张卡上
@@ -656,40 +577,36 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     fireEvent.click(screen.getByRole("button", { name: /主题色/ }));
     expect(screen.queryByRole("region", { name: "设置搜索结果" })).toBeNull();
 
-    fireEvent.change(input, { target: { value: "导航" } });
-    expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent("导航顺序");
+    fireEvent.change(input, { target: { value: "主题色" } });
+    expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent("主题色");
   });
 });
 
 /**
- * d.68 外观页新增「导航栏」卡：
- * - 顺序 主题模式 → 主题色 → 导航栏（d.136 起「桌面小组件」卡挪到插件详情，外观区不再有它）；
- * - 两档 radio 与导航轨底部 pin 按钮同源（useUiStore.navMode）；
- * - 「恢复默认外观」二次确认后一次改三处（主题模式/主题色/导航模式）。
+ * 外观页（精简外壳后删掉「导航栏」卡）：
+ * - 顺序 主题模式 → 主题色（d.136 起「桌面小组件」卡挪到插件详情，外观区不再有它）；
+ * - 「恢复默认外观」二次确认后一起复位主题模式/主题色。
  */
-describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
+describe("设置区 · 外观与恢复默认外观", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.removeAttribute("style");
     document.documentElement.removeAttribute("data-theme");
     useThemeStore.setState({ accent: "#1a1a1a" });
-    useUiStore.setState({ navMode: "pinned", navOpen: false });
     setThemeMode("system");
   });
 
-  it("外观页顺序：主题模式 → 主题色 → 导航栏，且不再出现桌面小组件卡", () => {
+  it("外观页顺序：主题模式 → 主题色，且不再出现桌面小组件/导航栏卡", () => {
     const { container } = render(<SettingsPage />);
     goTab("外观");
     const ids = Array.from(container.querySelectorAll<HTMLElement>("[data-settings-id]")).map(
       (el) => el.dataset.settingsId,
     );
-    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode"]);
+    expect(ids).toEqual(["theme-mode", "accent-color"]);
     // d.136：桌面小组件的窗口设置挪到了插件区「插件详情」，外观区不该再有这张卡
     expect(container.querySelector('[data-settings-id="widgets"]')).toBeNull();
+    expect(container.querySelector('[data-settings-id="nav-mode"]')).toBeNull();
     expect(container.textContent).not.toContain("桌面小组件");
-    // 卡片标题与锚点都在
-    expect(screen.getByText("导航栏")).toBeInTheDocument();
-    expect(container.querySelector('[data-settings-id="nav-mode"]')).not.toBeNull();
   });
 
   it("外观卡片之间有统一间距（用户反馈卡片贴死）", () => {
@@ -701,45 +618,11 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
     expect(wrap).not.toBeNull();
     expect(wrap!.className).toContain("flex-col");
     expect(wrap!.className).toContain("gap-3");
-    expect(wrap!.querySelectorAll(":scope > [data-settings-id]").length).toBe(3);
+    expect(wrap!.querySelectorAll(":scope > [data-settings-id]").length).toBe(2);
   });
 
-  it("导航栏卡：默认选中「固定常显」；点「自动隐藏」写 store 并落盘", () => {
-    render(<SettingsPage />);
-    goTab("外观");
-
-    const pinned = screen.getByRole("radio", { name: "导航栏 固定常显" });
-    expect(pinned).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "导航栏 自动隐藏" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "导航栏 自动隐藏" }));
-    expect(useUiStore.getState().navMode).toBe("auto");
-    expect(localStorage.getItem("heming.nav.mode.v1")).toBe("auto");
-    expect(screen.getByRole("radio", { name: "导航栏 自动隐藏" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    // 自动隐藏说明里写清呼出方式（用户不需要再猜）
-    expect(screen.getByText(/左缘或按 Ctrl\+B 呼出/)).toBeInTheDocument();
-  });
-
-  it("「恢复默认」（卡内）把导航栏改回常显，不影响主题色", () => {
+  it("「恢复默认外观」二次确认：取消不动，确认后主题模式/主题色一起复位", () => {
     useThemeStore.getState().setAccent("#2f5bd7");
-    useUiStore.setState({ navMode: "auto" });
-    render(<SettingsPage />);
-    goTab("外观");
-
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认导航栏模式" }));
-    expect(useUiStore.getState().navMode).toBe("pinned");
-    expect(useThemeStore.getState().accent).toBe("#2f5bd7");
-  });
-
-  it("「恢复默认外观」二次确认：取消不动，确认后主题模式/主题色/导航一起复位", () => {
-    useThemeStore.getState().setAccent("#2f5bd7");
-    useUiStore.setState({ navMode: "auto" });
     setThemeMode("dark");
 
     render(<SettingsPage />);
@@ -750,10 +633,9 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
     const dialog = screen.getByRole("dialog", { name: "恢复默认外观" });
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(useThemeStore.getState().accent).toBe("#2f5bd7");
-    expect(useUiStore.getState().navMode).toBe("auto");
     expect(getThemeMode()).toBe("dark");
 
-    // 确认：三处一起复位
+    // 确认：主题模式/主题色一起复位
     fireEvent.click(screen.getByRole("button", { name: "恢复默认外观" }));
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "恢复默认外观" })).getByRole("button", {
@@ -761,7 +643,6 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
       }),
     );
     expect(useThemeStore.getState().accent).toBe("#1a1a1a");
-    expect(useUiStore.getState().navMode).toBe("pinned");
     expect(getThemeMode()).toBe("system");
     // 主题模式卡跟着重置（key 重挂载后选中项回到「跟随系统」）
     expect(screen.getByRole("radio", { name: "主题模式 跟随系统" })).toHaveAttribute(

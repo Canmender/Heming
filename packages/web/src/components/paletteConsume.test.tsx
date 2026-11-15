@@ -1,22 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
-import { AssistantPage } from "./AssistantPage.js";
+import { Sidebar } from "./Sidebar.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useNotificationStore } from "../store/notifications.js";
 
 // 只验「命令面板意图到达后，消费端会执行对应动作并清空意图」这条接线，
-// 不在这里跑完整对话链路：把 ChatPage 与会话加载都按掉。
-vi.mock("./ChatPage.js", () => ({
-  ChatPage: () => <div data-testid="chat-embed" />,
-}));
+// 不在这里跑完整对话链路：会话加载换成空实现。
 
 /**
  * 命令面板意图消费点（d.60；d.150 起会话页只有一个内置智能体）。
  *
  * 命令面板（可能在被懒加载的页面里）只投内存意图，真正的动作在
- * `AssistantPage`（「新建会话」→ 直接开一段新会话）与
+ * `Sidebar`（「新建会话」→ 直接开一段新会话；导航轨删除后侧栏常驻，所以消费点搬到了这里）与
  * `NotificationCenter`（通知中心浮层）里。
  * 这两个用例锁住：**意图到达 → 动作执行 → 意图被清空**（幂等、不重复执行）。
  */
@@ -56,7 +53,7 @@ describe("命令面板意图消费 · 新建会话", () => {
   afterEach(() => cleanup());
 
   it("收到 new-session 意图后直接建一段 fresh 会话并打开，意图清空", async () => {
-    render(<AssistantPage />);
+    render(<Sidebar />);
     expect(screen.queryByText("新建智能体")).toBeNull();
     expect(useUiStore.getState().activeConversationId).toBeNull();
 
@@ -77,7 +74,7 @@ describe("命令面板意图消费 · 新建会话", () => {
   });
 
   it("同一种意图连投两次，token 自增会各自消费一次（不会因 kind 相同被合并）", async () => {
-    render(<AssistantPage />);
+    render(<Sidebar />);
 
     act(() => {
       useUiStore.getState().setPaletteIntent("new-session");

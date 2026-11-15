@@ -4,10 +4,11 @@ import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
 import { SYSTEM_AGENT, SYSTEM_AGENT_ID, type SharedFileMeta } from "@heming/shared";
-// 常驻壳与登录页保持同步导入：它们是首帧就要画出来的东西（标题栏/导航轨/登录表单），
+// 常驻壳与登录页保持同步导入：它们是首帧就要画出来的东西（顶栏/登录表单），
 // 拆成异步反而会让首屏先闪一块占位。下面所有**页面**都改成路由级懒加载。
 import { LoginPage } from "./components/LoginPage.js";
-import { NavRail } from "./components/NavRail.js";
+import { TopBar } from "./components/TopBar.js";
+import { Sidebar } from "./components/Sidebar.js";
 import { FileTree } from "./components/FileTree.js";
 import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import { TitleBar } from "./components/TitleBar.js";
@@ -26,7 +27,6 @@ import { PluginPageHost } from "./components/plugins/PluginPageHost.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
-import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
 import { Button } from "./components/ui/Button.js";
 import { PAGE_WIDTH_CLASS } from "./components/layout/PageShell.js";
 
@@ -124,15 +124,15 @@ export function PageFallback() {
 }
 
 /**
- * Alt+数字键目标页。导航固定 8 项，其中 6 个带数字键：
+ * Alt+数字键目标页。页面入口现在只有命令面板与顶栏「页面」菜单两处，
+ * 数字键口径与 `lib/palette/pages.ts` 的 `PALETTE_PAGES.digit` 严格对应
+ * （命令面板/快捷键帮助直接读那份正表，这里只是键盘监听用的映射）。
  * 1 主页、2 团队（承接原团队看板）、5 协作（和鸣 + 本机智能体）、6 设置、
  * 8 会话（单智能体的对话页）、0 插件。记忆页已删除（记忆默认全开、无界面），
- * 第 5 位与数字键 5 交给协作页。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
+ * 原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
  * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
- *
- * 这里的键位必须与 NavRail 的 `digit` 严格对应（那边是快捷键提示的唯一来源）。
  */
-const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
+export const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
   "1": "home",
   "2": "team",
   "5": "collab",
@@ -607,8 +607,6 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
-  const navMode = useUiStore((s) => s.navMode);
 
   // d.124：插件页面入口（导航轨、设置区导航说明、路由守卫读同一份注册表投影）。
   const pluginPageEntries = usePluginPageEntries();
@@ -796,20 +794,6 @@ function AppShell({
         setPage(shortcutPage);
         return;
       }
-      if (e.metaKey || e.ctrlKey) {
-        // Ctrl/⌘+B：切换导航显隐（d.68）——
-        // pinned 下切到 auto（导航收起、主内容变宽）；auto 下呼出/收回左缘浮层。
-        // 输入框内不响应：浏览器里 Ctrl+B 是「加粗」，用户可能真在编辑文本。
-        // 有模态弹窗时只吞键不动导航：与 Alt+N、Ctrl+K 同一套纪律。
-        if (!e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
-          if (inText) return;
-          e.preventDefault();
-          if (hasOpenModal()) return;
-          useUiStore.getState().toggleNav();
-          return;
-        }
-      }
-      if (!e.metaKey && !e.ctrlKey) return;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -883,17 +867,12 @@ function AppShell({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface">
-      {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
-      <TitleBar />
-      {/* relative 是导航轨 auto 模式的定位基准：浮层用 absolute 贴在本行内，
-          既不占布局宽度，也不会盖住上面的自定义标题栏。
-          paddingLeft 只在 auto 下出现：热区是 8px，这一条空档保证热区不压到内容最左侧
-          （助手页/团队页的列表行是整行按钮，左边缘就是可点区）。 */}
-      <div
-        className="relative flex min-h-0 flex-1 overflow-hidden"
-        style={navMode === "auto" ? { paddingLeft: NAV_HOTZONE_PX } : undefined}
-      >
-        <NavRail onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
+      {/* 顶栏是唯一常驻的全局控件条：品牌位兼作桌面拖拽区，右侧是页面菜单/命令面板/
+          快捷键帮助/通知/账户。旧的桌面标题栏与导航轨都被它取代。 */}
+      <TopBar onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* 会话侧栏常驻：所有页面左侧都保持会话入口（导航轨删除后的主要导航面）。 */}
+        <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。
               宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。

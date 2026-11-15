@@ -204,7 +204,7 @@ function startWeb() {
     env: {
       ...process.env,
       // vite 的 /api 代理默认指 8787（vite.config.ts:32）；server 换端口时必须显式覆盖，
-      // 否则登录页报「服务器暂时不可用」，量测会卡在导航轨上超时。
+      // 否则登录页报「服务器暂时不可用」，量测会卡在顶栏上超时。
       HEMING_DEV_API: `http://127.0.0.1:${SERVER_PORT}`,
     },
     stdio: flag("verbose") ? "inherit" : "ignore",
@@ -423,7 +423,7 @@ async function ensureLogin(cdp, sid, base) {
     cdp,
     sid,
     `(() => {
-      if (document.querySelector('nav[aria-label="主导航"]')) return 'logged';
+      if (document.querySelector('[data-testid="topbar"]')) return 'logged';
       const inputs = [...document.querySelectorAll('input')];
       return inputs.length >= 2 ? 'login-form' : 'blank';
     })()`,
@@ -448,25 +448,37 @@ async function ensureLogin(cdp, sid, base) {
       return "clicked";
     })()`,
   );
-  // 登录成功后还有一次启动波光（≤3s）和首屏渲染：必须等导航轨挂载，否则切页会失败。
-  await waitFor(cdp, sid, `!!document.querySelector('nav[aria-label="主导航"]')`, 30000, "导航轨");
+  // 登录成功后还有一次启动波光（≤3s）和首屏渲染：必须等顶栏挂载，否则切页会失败。
+  await waitFor(cdp, sid, `!!document.querySelector('[data-testid="topbar"]')`, 30000, "顶栏");
   await sleep(900);
 }
 
 async function goPage(cdp, sid, label) {
+  // 新外壳没有左侧导航轨：页面入口收进顶栏的「页面」菜单。先点开菜单，再按页面名点菜单项。
+  const opened = await evalJs(
+    cdp,
+    sid,
+    `(() => {
+      const trigger = document.querySelector('button[aria-label="打开页面菜单"]');
+      if (!trigger) return false;
+      trigger.click();
+      return true;
+    })()`,
+  );
+  if (!opened) throw new Error(`页面菜单按钮不存在：${label}`);
+  // 菜单是受控浮层，点开后要等 React 下一拍挂上 [role=menu]，否则查不到菜单项。
+  await waitFor(cdp, sid, `!!document.querySelector('[role="menu"]')`, 8000, "页面菜单");
   const clicked = await evalJs(
     cdp,
     sid,
     `(() => {
-      const nav = document.querySelector('nav[aria-label="主导航"]');
-      if (!nav) return false;
-      const btn = [...nav.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)});
-      if (!btn) return false;
-      btn.click();
+      const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.innerText.trim() === ${JSON.stringify(label)});
+      if (!item) return false;
+      item.click();
       return true;
     })()`,
   );
-  if (!clicked) throw new Error(`导航项不存在：${label}`);
+  if (!clicked) throw new Error(`页面菜单项不存在：${label}`);
   await waitFor(cdp, sid, `(() => { const m = document.querySelector('main'); return !!m && m.innerText.trim().length > 10; })()`, 15000, label);
   await sleep(500);
 }

@@ -521,15 +521,17 @@ function AudioBubble({
 }
 
 /**
- * @param embedded 任务区嵌入态：隐藏「返回工作区」按钮（返回会切页并卸载
- *   ChatPage，等于中断正在跑的任务）；其余行为与聊天页完全一致。
+ * 极简对话页。
+ *
+ * d.147 外壳重构后它只被 `AssistantPage` 以「整页」形态挂载：顶部一条细栏里
+ * 是返回（清空当前会话）与对话标题（h2，喂给读屏与设计审计的第二级标题），
+ * 右侧是通道状态与导出入口。
  */
 export function ChatPage({
-  embedded = false,
   // 待确认超时可注入：生产用 60 分钟，测试用它把「超时 → 拒绝 + 留痕」跑到，
   // 不必依赖 fake timers（那会与流式/等待逻辑互相打架）。
   hitlTimeoutMs = HITL_APPROVAL_TIMEOUT_MS,
-}: { embedded?: boolean; hitlTimeoutMs?: number } = {}) {
+}: { hitlTimeoutMs?: number } = {}) {
   const convId = useUiStore((s) => s.activeConversationId)!;
   const leave = useUiStore((s) => s.leaveConversation);
   const taskDraft = useUiStore((s) => s.taskDraft);
@@ -3055,17 +3057,16 @@ export function ChatPage({
   return (
     <div className="relative flex h-full flex-col">
       <header className="relative flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-chat-gutter">
-        {!embedded && (
-          <IconButton
-            label="返回"
-            className="-ml-1"
-            icon={<ChevronIcon width={16} height={16} className="rotate-180" />}
-            onClick={leave}
-          />
-        )}
+        <IconButton
+          label="返回"
+          className="-ml-1"
+          icon={<ChevronIcon width={16} height={16} className="rotate-180" />}
+          onClick={leave}
+        />
         {/* 极简顶栏：标题小字 + 通道状态 + 右侧 ghost 图标（无厚边框、无头像）。
-            embedded（会话页内嵌）时标题由页面顶部元信息条承载，这里不再重复智能体名。 */}
-        {!embedded && <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>}
+            h2 而不是 span：整页只剩 h1（sr-only「会话」）时文档大纲会断档，
+            读屏和设计审计都需要「页标题 → 会话标题」这两级。 */}
+        <h2 className="ui-section-title min-w-0 truncate">{headerTitle}</h2>
         <span className="flex items-center gap-1.5 text-ui-xs text-muted">
           <span
             aria-hidden="true"

@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.86.11",
+    "date": "2026-11-15",
+    "title": "极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航",
+    "bullets": [
+      "新增 `components/TopBar.tsx`：40px 顶栏（桌面端 `desktop-titlebar` 拖拽带、浏览器 `h-10`，未登录空态也渲染），左侧品牌「和鸣」；右侧 `data-testid=\"topbar-actions\"` 内依次为页面菜单、命令面板（Ctrl+K）、快捷键帮助、",
+      "新增 `components/PageMenu.tsx`：触发按钮 `aria-label=\"打开页面菜单\"`，菜单 `role=\"menu\"`、菜单项`role=\"menuitem\"`（innerText 恰好等于页面名、当前页 `aria-current=\"page\"`，Esc/点外部关闭）；",
+      "新增 `components/Sidebar.tsx`：所有页面常驻复用 `ConversationRail`（新建/改名/删除/分页/错误区与旧会话页一致）；`AssistantPage.tsx` 改瘦成纯内容（`sr-only` 标题 + 首载失败重试 + 有会话时 `ChatPage` + 无会话空态）。",
+      "`App.tsx`：去掉 `NavRail`、已登录分支的 `TitleBar`、`navMode/navOpen/navOrder`、热区 `paddingLeft` 与 `Ctrl+B`；`SHORTCUT_PAGES`（`Alt+1/2/5/6/8/0`）保留。",
+      "`store/ui.ts`：`page` 默认值 `\"home\"` → `\"chat\"`；存储页合法性校验改按 `PALETTE_PAGES` 页面集合 + `plugin:` 前缀。",
+      "删除 `components/NavRail.tsx`、`lib/navPrefs.ts`、`lib/navViews.ts`、`lib/navGroups.ts`；`store/ui.ts` 去掉nav 状态与 `DEFAULT_NAV_ORDER`/`NAV_ORDER_KEY` 及落盘恢复。",
+      "设置页删除「导航」页签、导航模式卡、导航顺序卡与「恢复默认外观」里的导航复位，相关 icon/import 一并删除。",
+      "`lib/palette/pages.ts`：文案里的「导航轨」改成「顶部页面菜单」，页面集合与 `digit` 不变。",
+      "`scripts/design-audit.mjs`：`goPage` 改为「点 `button[aria-label=\"打开页面菜单\"]` → 等 `[role=\"menu\"]` →点 innerText 恰好等于页面名的 `[role=\"menuitem\"]`」，失败信息 `页面菜单项不存在：${label}`；",
+      "`README.md` 更新外壳说明；`docs/HANDOFF.md` 新增本轮小节；`node scripts/build-changelog.mjs` 重新生成`packages/web/src/generated/changelog.ts`；版本 `d.147.4.85.11` → `d.147.4.86.11`（根/desktop/web/server/shared 一致）。"
+    ],
+    "paragraphs": [
+      "外壳收成「顶栏 + 常驻会话侧栏 + 内容区」，对齐截图里那类智能体应用：左侧图标导航轨整体移除，页面入口只留顶栏的「页面」菜单与命令面板（Ctrl+K），打开应用默认进「会话」页。本轮是纯前端外壳重构（修订位 85 → 86），没有接口/数据格式不兼容；`heming.session.view.v1` 里存过的页面仍优先恢复。",
+      "**外壳（packages/web）**通知中心、账户菜单（设置 / 退出登录二次确认）。页面清单唯一真源是 `PALETTE_PAGES` + `usePluginPageEntries()` 里可用的插件页。",
+      "**导航状态与设置项简化**",
+      "**设计审计脚本**登录后的启动等待从 `nav[aria-label=\"主导航\"]` 改为 `[data-testid=\"topbar\"]`。门槛、视口与其余逻辑未动。",
+      "**文档与版本**",
+      "**验证**：`node --check scripts/design-audit.mjs` 通过；`pnpm typecheck` exit 0；web 300 files / 4339 tests、server 271、shared 119、desktop 853 全通过；`pnpm build`、`pnpm plugin:check` 通过；`pnpm design:audit`浅色与 `--theme dark` 各跑 57 条页面×断点，0 阈值违规（截图 `.tmp/shots`）。明细见 `docs/HANDOFF.md`。"
+    ]
+  },
+  {
     "version": "d.147.4.85.11",
     "date": "2026-11-14",
     "title": "会话界面复刻 ChatGPT / Claude，记忆页退场，协作独立成页",

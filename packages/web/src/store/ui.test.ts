@@ -1,15 +1,20 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   useUiStore,
-  DEFAULT_NAV_ORDER,
-  normalizeNavOrder,
-  readStoredNavOrder,
   readSessionView,
   writeSessionView,
   resolvePage,
   SESSION_VIEW_KEY,
 } from "./ui.js";
-import { NAV_MODE_KEY } from "../lib/navPrefs.js";
+
+/**
+ * 精简外壳：导航轨已删，默认落地页是会话。
+ * 这条必须是本文件第一个用例——模块初始化只发生一次，之后任何 setState 都会污染它。
+ */
+it("默认页：模块初始 page 是 chat（没有 sessionStorage 时直接进会话）", () => {
+  expect(useUiStore.getState().page).toBe("chat");
+  expect(useUiStore.getState().activeConversationId).toBeNull();
+});
 
 describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
@@ -19,11 +24,7 @@ describe("ui store 页面与会话状态", () => {
     });
   });
 
-  it("默认主页", () => {
-    expect(useUiStore.getState().page).toBe("home");
-  });
-
-  it("打开会话：进入 chat 并记录当前会话（导航轨不再折叠）", () => {
+  it("打开会话：进入 chat 并记录当前会话", () => {
     useUiStore.getState().openConversation("c1");
     const s = useUiStore.getState();
     expect(s.page).toBe("chat");
@@ -146,138 +147,6 @@ describe("团队动向定位：focusTeamActivity（d.90）", () => {
     useUiStore.getState().setPage("home");
     expect(useUiStore.getState().teamFocusUserId).toBeNull();
     expect(useUiStore.getState().teamFocusActivityId).toBeNull();
-  });
-});
-
-describe("ui store 导航顺序", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
-  });
-
-  it("默认顺序：固定 8 项（主页 / 团队 / 会话 / 协作 / 插件 / 知识库 / 模型 / 设置）", () => {
-    // 工作台（主页 → 团队 → 会话 → 协作）→ 能力（插件）→ 资料（知识库/模型）→ 系统（设置）
-    expect(useUiStore.getState().navOrder).toEqual([
-      "home",
-      "team",
-      "chat",
-      "collab",
-      "plugins",
-      "vault",
-      "model",
-      "settings",
-    ]);
-  });
-
-  it("moveNav 上移/下移生效并落盘", () => {
-    useUiStore.getState().moveNav("collab", -1);
-    expect(useUiStore.getState().navOrder.indexOf("collab")).toBe(2);
-    useUiStore.getState().moveNav("collab", 1);
-    expect(useUiStore.getState().navOrder.indexOf("collab")).toBe(3);
-    expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
-      useUiStore.getState().navOrder,
-    );
-  });
-
-  it("到顶/到底与未知页为 no-op（不写盘）", () => {
-    const before = useUiStore.getState().navOrder;
-    useUiStore.getState().moveNav("home", -1);
-    useUiStore.getState().moveNav("settings", 1);
-    useUiStore.getState().moveNav("no-such-page" as never, 1);
-    expect(useUiStore.getState().navOrder).toEqual(before);
-  });
-
-  it("恢复默认", () => {
-    useUiStore.getState().setNavOrder(["settings", "collab", "home"]);
-    expect(useUiStore.getState().navOrder[0]).toBe("settings");
-    useUiStore.getState().resetNavOrder();
-    expect(useUiStore.getState().navOrder).toEqual([...DEFAULT_NAV_ORDER]);
-  });
-});
-
-describe("normalizeNavOrder / readStoredNavOrder", () => {
-  it("去重、剔除未知页（含已删除的记忆页）、缺失项补在末尾", () => {
-    expect(normalizeNavOrder(["memory", "memory", "chat", 42, "home"])).toEqual([
-      "chat",
-      "home",
-      "team",
-      "collab",
-      "plugins",
-      "vault",
-      "model",
-      "settings",
-    ]);
-  });
-
-  it("合并前的旧页面名折叠成宿主页，且不与已有宿主页重复", () => {
-    // 老用户 localStorage 里可能还是 13 项：读回后必须只剩 10 个宿主页，
-    // 顺序以旧列表中「第一次出现」的位置为准。
-    // d.138：tasks 原来折叠到 { chat, view: "tasks" }，而对话页早就不认这个视图——
-    // 「派任务」「新建任务」会静默落到对话 Tab。任务现在活在团队页看板里，
-    // tasks 改折叠成 team/board，于是旧的 tasks 项不再占 chat 的位置，
-    // chat 只能按默认顺序补到 memory 之后。
-    expect(
-      normalizeNavOrder([
-        "settings",
-        "workspace",
-        "home",
-        "skills",
-        "tasks",
-        "interfaces",
-        "memory",
-      ]),
-    ).toEqual([
-      "settings",
-      "team",
-      "home",
-      "plugins",
-      "chat",
-      "collab",
-      "vault",
-      "model",
-    ]);
-  });
-
-  it("非数组/损坏 JSON → 默认顺序", () => {
-    expect(normalizeNavOrder("不是数组")).toEqual([...DEFAULT_NAV_ORDER]);
-    expect(readStoredNavOrder({ getItem: () => "坏 JSON" })).toEqual([...DEFAULT_NAV_ORDER]);
-    expect(readStoredNavOrder({ getItem: () => '["settings","home"]' })).toEqual([
-      "settings",
-      "home",
-      "team",
-      "chat",
-      "collab",
-      "plugins",
-      "vault",
-      "model",
-    ]);
-    expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
-  });
-
-  it("没动过顺序的老用户跟随新默认顺序；自定义顺序原样保留", () => {
-    const legacyDefault = JSON.stringify([
-      "home",
-      "team",
-      "chat",
-      "staff",
-      "infohub",
-      "automations",
-      "plugins",
-      "memory",
-      "settings",
-    ]);
-    expect(readStoredNavOrder({ getItem: () => legacyDefault })).toEqual([...DEFAULT_NAV_ORDER]);
-    // 用户亲手排过的顺序（哪怕很短）不被升级覆盖；已删除的记忆页被剔除
-    expect(readStoredNavOrder({ getItem: () => '["memory","settings"]' })).toEqual([
-      "settings",
-      "home",
-      "team",
-      "chat",
-      "collab",
-      "plugins",
-      "vault",
-      "model",
-    ]);
   });
 });
 
@@ -417,77 +286,6 @@ describe("ui store 自动化意图", () => {
   });
 });
 
-/**
- * 导航栏显示模式（d.68）：pinned（默认常显）/ auto（自动隐藏）。
- * store 只做状态与持久化；解析/坏值回落由 lib/navPrefs 的用例覆盖。
- */
-describe("ui store 导航栏模式", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    useUiStore.setState({ navMode: "pinned", navOpen: false });
-  });
-
-  it("默认常显，浮层默认收起", () => {
-    const s = useUiStore.getState();
-    expect(s.navMode).toBe("pinned");
-    expect(s.navOpen).toBe(false);
-  });
-
-  it("setNavMode 切换并落盘；切档时收起浮层", () => {
-    useUiStore.getState().openNav(); // pinned 下 openNav 是 no-op
-    expect(useUiStore.getState().navOpen).toBe(false);
-
-    useUiStore.getState().setNavMode("auto");
-    expect(useUiStore.getState().navMode).toBe("auto");
-    expect(localStorage.getItem(NAV_MODE_KEY)).toBe("auto");
-
-    useUiStore.getState().openNav();
-    expect(useUiStore.getState().navOpen).toBe(true);
-
-    // 切回 pinned：浮层必须一起收起，否则会出现「常显 + 还挂着浮层」的半展开态
-    useUiStore.getState().setNavMode("pinned");
-    expect(useUiStore.getState().navMode).toBe("pinned");
-    expect(useUiStore.getState().navOpen).toBe(false);
-    expect(localStorage.getItem(NAV_MODE_KEY)).toBe("pinned");
-  });
-
-  it("toggleNavMode 在固定 ↔ 自动之间来回", () => {
-    useUiStore.getState().toggleNavMode();
-    expect(useUiStore.getState().navMode).toBe("auto");
-    useUiStore.getState().toggleNavMode();
-    expect(useUiStore.getState().navMode).toBe("pinned");
-  });
-
-  it("Ctrl+B 语义（toggleNav）：pinned → 切 auto；auto → 展开/收起浮层", () => {
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navMode).toBe("auto");
-    expect(useUiStore.getState().navOpen).toBe(false);
-
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navOpen).toBe(true);
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navOpen).toBe(false);
-    // 收起浮层 ≠ 放弃自动隐藏：再按一次还能呼出
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navOpen).toBe(true);
-    expect(useUiStore.getState().navMode).toBe("auto");
-  });
-
-  it("openNav/closeNav 只在 auto 下对浮层生效", () => {
-    useUiStore.getState().openNav();
-    expect(useUiStore.getState().navOpen).toBe(false);
-
-    useUiStore.getState().setNavMode("auto");
-    useUiStore.getState().openNav();
-    expect(useUiStore.getState().navOpen).toBe(true);
-    useUiStore.getState().closeNav();
-    expect(useUiStore.getState().navOpen).toBe(false);
-    // 重复 close 不产生额外状态变化（幂等）
-    useUiStore.getState().closeNav();
-    expect(useUiStore.getState().navOpen).toBe(false);
-  });
-});
-
 /** modules 运行时下线后：旧模块页 id 一律折叠到对应插件页，入口不再被门禁拦到插件区。 */
 describe("旧模块页入口折叠到插件页", () => {
   beforeEach(() => {
@@ -603,5 +401,69 @@ describe("插件首页卡快捷入口意图 pluginPageIntent（d.139）", () => 
     useUiStore.getState().setPluginPageIntent("heming.infohub", "agenda");
     useUiStore.getState().leaveConversation();
     expect(useUiStore.getState().pluginPageIntent).toBeNull();
+  });
+});
+
+
+/**
+ * 默认页与会话恢复：page 默认值改为 chat，存过的会话页在刷新后仍然优先；
+ * 非法/已删除的页一律回落 chat，不再猜。
+ * 模块初始化只发生一次，这里用 vi.resetModules + 动态 import 重算初始 state。
+ */
+describe("默认页与会话恢复（精简外壳后默认进会话）", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("sessionStorage 里存过设置页：重新初始化后恢复 settings", async () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "settings", activeConversationId: null }),
+    );
+    vi.resetModules();
+    const mod = await import("./ui.js");
+    expect(mod.useUiStore.getState().page).toBe("settings");
+  });
+
+  it("sessionStorage 里存过会话页：重新初始化后恢复 chat 与当前会话", async () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "chat", activeConversationId: "c1" }),
+    );
+    vi.resetModules();
+    const mod = await import("./ui.js");
+    const st = mod.useUiStore.getState();
+    expect(st.page).toBe("chat");
+    expect(st.activeConversationId).toBe("c1");
+  });
+
+  it("sessionStorage 里是非法页：回落 chat", async () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "nope", activeConversationId: null }),
+    );
+    vi.resetModules();
+    const mod = await import("./ui.js");
+    expect(mod.useUiStore.getState().page).toBe("chat");
+  });
+
+  it("sessionStorage 里是已删除的旧页：回落 chat", async () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "memory", activeConversationId: null }),
+    );
+    vi.resetModules();
+    const mod = await import("./ui.js");
+    expect(mod.useUiStore.getState().page).toBe("chat");
+  });
+
+  it("插件页是合法宿主页：刷新仍能恢复到 plugin:<id>", async () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "plugin:acme.page-kit", activeConversationId: null }),
+    );
+    vi.resetModules();
+    const mod = await import("./ui.js");
+    expect(mod.useUiStore.getState().page).toBe("plugin:acme.page-kit");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { TeamMember } from "@heming/shared";
-import { DEFAULT_NAV_ORDER } from "../../store/ui.js";
+import { SHORTCUT_PAGES } from "../../App.js";
 import { PALETTE_PAGES, findPalettePage, shortcutLabel } from "./pages.js";
 import { PALETTE_SETTINGS, findPaletteSetting } from "./settings.js";
 import { PALETTE_ACTIONS, findPaletteAction } from "./actions.js";
@@ -38,23 +38,22 @@ function member(id: string, displayName: string, over: Partial<TeamMember> = {})
 }
 
 describe("palette · 页面目录", () => {
-  it("覆盖 8 个导航页，且与 store 的默认导航顺序是同一集合", () => {
+  it("覆盖 8 个页面的固定集合（页面菜单/命令面板/Alt 快捷键共用这一份真源）", () => {
     expect(PALETTE_PAGES).toHaveLength(8);
-    expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual([...DEFAULT_NAV_ORDER].sort());
+    expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual(
+      ["chat", "collab", "home", "model", "plugins", "settings", "team", "vault"],
+    );
   });
 
-  it("Alt 快捷键与 App/NavRail 的绑定一致（1/2/5/6/8/0）", () => {
+  it("Alt 快捷键与 App 的 SHORTCUT_PAGES 绑定一致（1/2/5/6/8/0）", () => {
     const digits = Object.fromEntries(
       PALETTE_PAGES.filter((p) => p.digit).map((p) => [p.page, p.digit]),
     );
-    expect(digits).toEqual({
-      home: "1",
-      team: "2",
-      collab: "5",
-      settings: "6",
-      chat: "8",
-      plugins: "0",
-    });
+    // App 里的表是「按键 → 页面」，这里反过来比对，别让两处各记一份。
+    const fromApp = Object.fromEntries(
+      Object.entries(SHORTCUT_PAGES).map(([digit, page]) => [page, digit]),
+    );
+    expect(digits).toEqual(fromApp);
   });
 
   it("显示名唯一，且每页都有一句描述（描述参与检索）", () => {
@@ -72,12 +71,11 @@ describe("palette · 页面目录", () => {
 });
 
 describe("palette · 设置分区与动作目录", () => {
-  it("设置分区固定 5 个且顺序固定（id 必须与 SettingsPage 一致）", () => {
+  it("设置分区固定 4 个且顺序固定（id 必须与 SettingsPage 一致）", () => {
     expect(PALETTE_SETTINGS.map((s) => s.tab)).toEqual([
       "profile",
       "model",
       "appearance",
-      "navigation",
       "about",
     ]);
   });

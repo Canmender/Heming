@@ -74,10 +74,10 @@ describe("快捷键帮助的全局入口", () => {
     expect(await screen.findByRole("dialog", { name: "快捷键" })).toBeInTheDocument();
   });
 
-  it("导航轨的 ? 按钮再次打开帮助（入口常驻）", async () => {
+  it("顶栏的快捷键帮助按钮再次打开帮助（入口常驻）", async () => {
     render(<App />);
     await screen.findByLabelText("用户名");
-    // 未登录时导航轨不渲染；直接验证登录态：给一个用户后应用壳出现
+    // 未登录时顶栏不渲染；直接验证登录态：给一个用户后应用壳出现
     act(() => {
       useAuthStore.setState({
         token: "t1",

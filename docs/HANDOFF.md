@@ -1,15 +1,71 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.147.4.85.11`
-- 本轮标签：**会话界面复刻 ChatGPT / Claude + 记忆页退场 + 多智能体协作独立成页**（分支 `refactor/single-agent`）。上一轮（d.146.4.85.11）把产品收成「唯一内置智能体 + 会话模式」；本轮在此之上做三件事：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 当前版本：`d.147.4.86.11`
+- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面入口只留顶栏「页面」菜单与命令面板（Ctrl+K），打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
 - 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
 
-## 0. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
+## 0. 2026-11-15 极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航（分支 `refactor/minimal-app`，版本 d.147.4.86.11）
+
+用户口径：大范围重构、最大化简化——外壳对齐截图里那类智能体应用，左侧只留会话侧栏、右侧内容；
+**删掉左侧图标导航轨**，页面入口收进顶栏「页面」菜单 + 命令面板，打开应用默认进「会话」页。
+本轮是纯前端外壳重构（修订位 85 → 86），没有接口/数据格式不兼容：`heming.session.view.v1`
+里存过的页面仍优先恢复，非法页面回落默认页。
+
+**外壳（`packages/web`）**
+- 新增 `components/TopBar.tsx`：40px 顶栏（桌面端 `desktop-titlebar` 拖拽带、浏览器 `h-10`；未登录空态也渲染），
+  左侧品牌「和鸣」；右侧 `data-testid="topbar-actions"` 依次为页面菜单、命令面板（Ctrl+K）、快捷键帮助、
+  通知中心、账户菜单（设置 / 退出登录二次确认）。
+- 新增 `components/PageMenu.tsx`：触发按钮 `aria-label="打开页面菜单"`，菜单 `role="menu"`、菜单项
+  `role="menuitem"`（innerText 恰好等于页面名、当前页 `aria-current="page"`；Esc / 点外部关闭）。
+  页面清单唯一真源仍是 `PALETTE_PAGES` + `usePluginPageEntries()` 里可用的插件页。
+- 新增 `components/Sidebar.tsx`：所有页面常驻复用 `ConversationRail`（新建/改名/删除/分页/错误区与旧会话页一致）；
+  `AssistantPage.tsx` 改瘦成纯内容（`sr-only` 标题 + 首载失败重试 + 有会话时 `ChatPage` + 无会话空态）。
+- `ChatPage.tsx`：删掉无人再传的 `embedded` 参数（唯一使用方是 `AssistantPage`），顶栏标题由 `span` 改 `h2`；
+  `ui/EmptyState.tsx` 新增 `titleAs`，会话空态标题用 `h2`——整页只剩 sr-only h1 时，设计审计的「标题层级 ≥2」必红。
+- `App.tsx`：删掉 `NavRail`、已登录分支的 `TitleBar`、`navMode/navOpen/navOrder`、热区 `paddingLeft` 与 `Ctrl+B`；
+  `SHORTCUT_PAGES`（`Alt+1/2/5/6/8/0`）保留。
+- `store/ui.ts`：`page` 默认值 `"home"` → `"chat"`；存储页合法性校验改按 `PALETTE_PAGES` 页面集合 + `plugin:` 前缀。
+
+**导航状态与设置项简化**
+- 删除 `components/NavRail.tsx`、`lib/navPrefs.ts`、`lib/navViews.ts`、`lib/navGroups.ts`；`store/ui.ts` 去掉
+  nav 状态与 `DEFAULT_NAV_ORDER`/`NAV_ORDER_KEY` 及落盘恢复。
+- 设置页删除「导航」页签、导航模式卡、导航顺序卡与「恢复默认外观」里的导航复位，相关 icon/import 一并删除。
+- `lib/palette/pages.ts`：文案里的「导航轨」改成「顶部页面菜单」，页面集合与 `digit` 不变。
+
+**设计审计脚本**
+- `scripts/design-audit.mjs`：`goPage` 改为「点 `button[aria-label="打开页面菜单"]` → 等 `[role="menu"]` →
+  点 innerText 恰好等于页面名的 `[role="menuitem"]`」，失败信息 `页面菜单项不存在：${label}`；
+  登录后的启动等待从 `nav[aria-label="主导航"]` 改为 `[data-testid="topbar"]`（均带中文注释）。
+  `PAGES` / `THRESHOLDS` / `WIDTHS` / `setTheme` 等页面清单、门槛与视口逻辑未动。
+
+**文档与版本**
+- `CHANGELOG.md` 顶部新增 d.147.4.86.11 条目；`node scripts/build-changelog.mjs` 重新生成
+  `packages/web/src/generated/changelog.ts`；`README.md` 能力清单与外壳说明同步；版本 `d.147.4.85.11` →
+  `d.147.4.86.11`（根 / desktop / web / server / shared 一致）。
+
+**验证**（verifier 在最终树执行，环境 Node v24.15.0 / pnpm 10.33.2，日志 `.tmp/verify-*.log`）：
+1. `node --check scripts/design-audit.mjs` — 通过。
+2. `pnpm typecheck` — exit 0（shared/setup/pet-widget/desktop/server/web 全部 Done，无 error）。
+3. `pnpm --filter @heming/web test` — exit 0：**300 files / 4339 tests passed**。
+4. `pnpm --filter @heming/server test` 271 passed（15 files）；`@heming/shared test` 119 passed（8 files）；
+   `@heming/desktop test`（node --check ×N + node --test ×52）**853 pass / 0 fail**。
+5. `pnpm build` — exit 0（仅 chunk>500kB 与 PLUGIN_TIMINGS 提示）。
+6. `pnpm plugin:check` — exit 0：6/6 清单通过 + pet-widget 源码模式 1 通过 + examples 5 通过，0 失败。
+7. `pnpm design:audit -- --json .tmp/audit.json --shots .tmp/shots`（浅色）与 `--theme dark`（深色）各一遍 —
+   均 exit 0：8 页 + 11 个子页签 × 3 断点（1440×900 / 1280×800 / 1024×768）= **57 条/主题，0 阈值违规**
+   （docOverflowX / contrastFail / body11 / hitUnder32 / unnamedClickables / imgNoAlt / emoji 全 0；
+   字号档位 3–7，标题层级 chat=h1/h2、home=h1/h2/h2 起）。截图 48 张在 `.tmp/shots`。
+8. 手工验收：顶栏页面菜单切页、命令面板 Ctrl+K 切页、侧栏在各页面常驻、默认打开会话、设置页无「导航」页签
+   已由上面的 Web 测试与 design:audit 覆盖；**窄窗布局与桌面标题栏拖拽未真机复验**（audit 只跑浏览器三断点，
+   桌面端建议下次开包时顺手点一遍）。
+
+
+## 0-历史. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
 
 用户口径：智能体界面「复刻一般智能体应用」（参考 ChatGPT / Claude 官方极简风）；记忆页**界面完全去掉**，
 全部按默认值在后台运行；多智能体协作**单独做一个页面**完成。本轮是特性变更（版本特性位 146 → 147），
