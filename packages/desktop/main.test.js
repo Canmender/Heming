@@ -177,13 +177,36 @@ test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还�
 });
 
 // ── 本地包安装的运行时接线（d.25）──
-test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe", () => {
+test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe / runtime:status", () => {
+  assert.ok(mainCode.includes("buildChildEnv(bundledEnv("), "探测用的 PATH 要经过 bundledEnv：内置解释器也算本机有");
+  assert.ok(mainCode.includes('secureIpc.handle("runtime:status"'), "内置运行时状态要经来源守卫注册（否则渲染层拿不到）");
   assert.ok(mainCode.includes("planSpawn: planStdioSpawn"), "spawn 前必须翻译逻辑命令（Windows 的 npx 是 .cmd）");
   assert.ok(mainCode.includes('secureIpc.handle("runtime:probe"'), "渲染层要能探测本机运行时（经来源守卫注册）");
   // 探测用的 PATH 必须与真正 spawn 时一致，否则界面说「没有」而启动成功（或反之）
   assert.ok(/probeLocalRuntime\(\{[\s\S]{0,120}buildChildEnv\(/.test(mainCode), "探测应使用补全后的 PATH");
   // shell:false 的约束在 mcp-stdio 里，main.js 不允许出现 shell:true
   assert.ok(!/shell:\s*true/.test(mainCode), "禁止任何 shell:true");
+});
+
+// ── 内置运行时状态（d.147.4.94.11「内置运行时自包含」）──
+test("main.js：runtime:status 进 TRUSTED_CHANNELS，处理器回带 note 的状态快照", () => {
+  const trusted = mainCode.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
+  assert.ok(trusted, "main.js 必须有 TRUSTED_CHANNELS 清单");
+  assert.ok(trusted[1].includes('"runtime:status"'), "runtime:status 只认主窗口（进受信清单）");
+  assert.ok(mainCode.includes('secureIpc.handle("runtime:status"'), "runtime:status 经 secureIpc 注册");
+  assert.ok(
+    mainCode.includes('require("./bundled-runtime")'),
+    "状态必须来自 bundled-runtime，别在主进程再算一份路径",
+  );
+
+  // 处理器直接回 runtimeStatus()：字段与给用户看的 note 都要带上
+  const { runtimeStatus } = require("./bundled-runtime");
+  const status = runtimeStatus();
+  for (const key of ["bundled", "depsReady", "python", "uv", "runtimeDir", "note"]) {
+    assert.ok(key in status, `状态快照应含 ${key}`);
+  }
+  assert.equal(typeof status.note, "string");
+  assert.ok(status.note.length > 0, "note 是要直接显示给用户的");
 });
 
 test("main.js：子进程回收走 will-quit 闸，不再同步 dispose（d.50）", () => {

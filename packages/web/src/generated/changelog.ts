@@ -12,6 +12,39 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.94.11",
+    "date": "2026-11-15",
+    "title": "内置运行环境自包含：装完即用，不用再装 Python 和 uv",
+    "bullets": [
+      "修 bug（一）：`packages/desktop/bundled-runtime.js` 里内置入口的键是 `windows-desktop` / `scrapling`，而渲染层传来的 id 是 `mcp-windows-desktop` / `mcp-scrapling`（`systemMcpServerId()` 加的 `mcp-` 前缀），于是**从来没匹配上、永远静默退回系统 uvx**。`builtinKind()` 现在归一 `mcp-` 前缀，并同时按命令/参数里的包名（`windows-mcp` / `scrapling`）识别。",
+      "修 bug（二）：`runtime/mcp-env` 是裸 venv——382MB、`Lib/` 里只有 site-packages，没有 `os.py`、没有 `python312.dll`，`pyvenv.cfg` 指向 `C:\\Users\\ADMIN\\AppData\\Roaming\\uv\\python\\...`，换个路径就废。改成 `packages/desktop/runtime/python/` 自包含解释器（python-build-standalone CPython 3.12.13，可整树搬路径），依赖直接装进它自己的 site-packages，**没有 pyvenv.cfg**；体积 Python 424MB + `runtime/bin`（uv 0.12.5 + uvx）49MB，依赖 107 个精确 pin（`packages/desktop/runtime-requirements.txt`，含 mcp 2.3.0 / scrapling 0.5 / windows-mcp 0.8.5 / playwright 1.64.0 / patchright 1.64.1）。",
+      "修 bug（三）：`packages/desktop/package.json` 的 `extraResources` 里 runtime filter 曾写着 `!**/__pycache__/**`，而 `scripts/prepare-runtime.mjs` 恰恰是把 `.pyc` 编译进各自的 `__pycache__/`——预编译照跑、日志照打「✓ 已预编译，可以打包」，包里却一个 `.pyc` 都没有。实测 r100 产物 `resources/runtime` 下 `*.pyc` 数量为 **0**（源目录 789 个），「预编译降启动耗时」这层从没真正生效。现在 filter 去掉这条排除（保留 `!**/*.pyc.tmp`、`!**/tests/**` 等），并在 `packages/desktop/packaging.plugins.test.js` 加回归用例「内置运行时的 filter 不得排除 `__pycache__`」，把 prepare-runtime 与打包配置两端钉在一起。",
+      "新增 `scripts/build-mcp-runtime.mjs`（`--force` / `--check` / `--no-uv`）：定位本机 uv（`where uv` + 常见安装位）→ `uv python find 3.12` + `realpathSync` 取真实解释器 → 复制成 `runtime/python` → `uv pip install --python runtime/python/python.exe -r runtime-requirements.txt`（先删 `Lib/EXTERNALLY-MANAGED` 并加 `--break-system-packages`，因为这份是要分发的拷贝）→ 把 `uv.exe` / `uvx.exe` 拷进 `runtime/bin` → 删旧 venv → 自检 `python.exe -I -c \"import windows_mcp, scrapling\"`。`--check` 只做自检不重建。",
+      "新增 `scripts/verify-mcp-runtime.mjs`：把整个 runtime 复制到 `.tmp/runtime-relocate/<stamp>/mods/runtime`，用 `createRequire` 加载**搬走后**的 `bundled-runtime.js` / `mcp-stdio.js` / `local-runtime.js`，断言 `runtimeStatus().bundled`、python 路径在搬家目录内，再对两个服务各走 `initialize` → `notifications/initialized` → `tools/list`，断言工具数（Windows 桌面控制 20 个、网页抓取 16 个），最后 `disposeAll()`。这就是「装到别人机器上也能用」的可复现证据；`--reuse` 复用上一次副本。",
+      "`resolveMcpCommand()` 内置就绪时返回 `runtime/python/python.exe -I -m windows_mcp serve` 与 `python.exe -I -c \"from scrapling.cli import mcp; mcp()\"`（`-I` 隔离：不读 `PYTHONPATH` / `PYTHONHOME`、cwd 不进 `sys.path`）；`bundledEnv()` 把 `runtime/python`、`runtime/bin` 追加进子进程 `PATH` 并删掉继承的 `PYTHONHOME` / `VIRTUAL_ENV`。`runtime:probe` 改用 `bundledEnv()` 拼的 PATH，不再出现「跑在包内 Python 上、探测却说没装 uv」的矛盾。",
+      "主进程新增 `runtime:status` IPC（`{ bundled, depsReady, python, uv, runtimeDir, note }`），preload 暴露 `__heming_runtime.status()`；接口页「系统能力」区新增一行运行时状态（`data-testid=\"mcp-runtime-status\"`）：正常显示「系统能力使用包内运行时，无需安装 Python 或 uv」，缺依赖 / 缺失时用警示色并提示重新安装。",
+      "`scripts/build-desktop.mjs`：缺 `packages/desktop/runtime/python` 或 `.pyc` 未预编译时**直接中止打包**，并提示先跑 `node scripts/build-mcp-runtime.mjs`。",
+      "`scripts/release.mjs`：`--desktop` 预检阶段做同样的检查，不再等打完包才发现；通过后在发布说明里记一行「内置运行时已就绪（自包含 Python + 依赖 + uv）」。",
+      "Scrapling 的浏览器类工具依赖 playwright 浏览器二进制，本轮不随包分发，因此仍不可用。",
+      "Windows 桌面控制首次连接约 19 秒（导入 UI Automation 依赖较多），之后在同一进程内复用。",
+      "**验证（d.147.4.94.11，工作树实跑，全 exit 0）**",
+      "— `pnpm typecheck` 6 个项目全部 Done（0 报错）；`packages/web` 的 `vitest run` 为 **306 files / 4409 tests passed**（0 failed）。",
+      "— server **15 files / 284 tests**、shared **8 files / 119 tests**、desktop **863 pass / 0 fail / 0 cancelled**（52 个 `node --test` 文件整包跑完，无 first-fail 截断）。",
+      "— `pnpm build` 0（仅 chunk 体积警告）；`pnpm plugin:check` 清单 6/6 + pet-widget 1/1 + examples 5/5，`plugin.schema.json` 已是最新。",
+      "— `node scripts/design-audit.mjs` 浅色与 `--theme dark` 各 **57 条（8 页 + 11 个子页签 × 3 断点）`failures: []`**，截图各 24 张（`.tmp/shots12`、`.tmp/shots12-dark`）。",
+      "— `node scripts/prepare-runtime.mjs --check` → `✓ 内置运行时已预编译，可以打包`；`node scripts/verify-mcp-runtime.mjs --reuse` 把 `runtime/` 整棵搬到 `.tmp/runtime-relocate/<stamp>/mods/runtime` 后实测：`runtimeStatus` 为 `bundled=true depsReady=true`、python 路径在搬家目录内；`mcp-windows-desktop` → `…\\runtime\\python\\python.exe -I -m windows_mcp serve`，**握手 20060ms · windows-mcp 4.1.1 · 20 个工具**；`mcp-scrapling` → `python.exe -I -c from scrapling.cli import mcp; mcp()`，**握手 2830ms · Scrapling 0.5 · 16 个工具**；`✓ 搬家验证通过`（副本自动清理，源目录未动）。",
+      "— 第三处 bug 的复核证据：`grep __pycache__ packages/desktop/package.json` 已无命中，`find packages/desktop/runtime -name \"*.pyc\"` = **789**（r100 产物里是 0）；新增的 `packaging.plugins.test.js` 回归用例随 desktop 套件一起绿。",
+      "— 「接口」页浏览器核对（浏览器环境无 Electron 桥）：`data-testid=\"mcp-system-servers\"` 在、两张只读卡（Windows 桌面控制 / 网页抓取（Scrapling））`data-system-mcp=\"true\"`、系统区内删除按钮 0 个；`mcp-runtime-status` **不渲染**（`readBundledRuntimeStatus()` 为 null，符合契约），无 `role=\"alert\"`、无运行时异常；1440 与 1024 均 `docOverflowX=0`、`bodyOverflowX=0`。截图：`.tmp/shots-runtime/{interfaces-runtime-1440,interfaces-runtime-1024}.png`。",
+      "— **未真机复验**：Electron 桌面端 `mcp-runtime-status` 状态行的实际渲染（浏览器无桥，单测覆盖正常/缺失/无桥三态）；桌面端标题栏拖拽；r101 真实打包产物（打包前的硬拦与 filter 回归用例已绿，但本轮未跑 electron-builder）。"
+    ],
+    "paragraphs": [
+      "上一轮把 Windows 桌面控制与网页抓取收成「系统能力」，但它们的运行环境仍指望着用户机器上装好 Python / uv；更糟的是 r100 打出去的 `runtime/mcp-env` 是个指向构建机路径的裸 venv，到了用户机器上连标准库都加载不了。这一轮把运行时做成自包含（自带解释器 + 依赖 + uv，整棵树可以搬路径），并在打包链路上加硬拦，杜绝再发坏包。",
+      "**内置运行时（packages/desktop）**",
+      "**打包链路**",
+      "**已知限制**"
+    ]
+  },
+  {
     "version": "d.147.4.93.11",
     "date": "2026-11-15",
     "title": "会话页编排条 + MCP 收进系统能力",

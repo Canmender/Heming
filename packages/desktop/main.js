@@ -30,7 +30,7 @@ const { createChildReclaimer } = require("./child-kill");
 const { createMagpieHost, resolveBinaryPath } = require("./magpie-host");
 const { startMagpieProxy } = require("./magpie-proxy");
 const { createMagpieCli, validateCliArgs, terminalCommand } = require("./magpie-cli");
-const { bundledPython } = require("./bundled-runtime");
+const { bundledEnv, bundledPython, runtimeStatus } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 const { helperPath, planPath, buildUpdatePlan, helperEnv } = require("./update-helper");
 
@@ -156,6 +156,7 @@ const TRUSTED_CHANNELS = [
   "mcp:stdio:cancel",
   "mcp:stdio:stop",
   "runtime:probe",
+  "runtime:status",
   // 工作区选目录（d.147.4.91.11）：只回绝对路径给渲染层做会话分组，不读目录、不写文件。
   "app:pickDirectory",
   // web 模块体系（d.131）已下线：模块页/模块包全部改由插件体系承担，
@@ -1216,9 +1217,17 @@ if (!gotLock) {
   // 只回传能力布尔与解析到的路径，不执行任何命令、不写任何东西。
   // PATH 用 buildChildEnv 补全过的那份：与真正 spawn 时的查找范围一致，
   // 不然会出现「探测说没有、启动却成功了」这种自相矛盾的界面。
+  // PATH 用 `buildChildEnv(bundledEnv(...))`：内置运行时（包内解释器 + 内置 uv）也算
+  // 「本机有」。否则会出现自相矛盾的界面——系统能力明明跑在包内 Python 上，
+  // 这里却报「未安装 uv」，用户被提示去装一个根本不需要的东西。
   secureIpc.handle("runtime:probe", () =>
-    probeLocalRuntime({ env: buildChildEnv({ ...process.env }), execPath: process.execPath }),
+    probeLocalRuntime({ env: buildChildEnv(bundledEnv({ ...process.env })), execPath: process.execPath }),
   );
+
+  // 内置运行时状态（d.147.4.94.11）：只回路径与布尔，不执行命令。
+  // 系统能力区据此说清「跑的是包内运行时」还是「退回系统 uvx」——
+  // 出问题时用户看到的日志与界面提示要对得上。
+  secureIpc.handle("runtime:status", () => runtimeStatus());
 
   // 子进程回收闸（d.50）：`will-quit` 是同步事件，回收却是异步的 —— 旧写法发完
   // dispose 就任由 Electron 退下去，两个桥里 `child.kill()` 只杀直接子进程，

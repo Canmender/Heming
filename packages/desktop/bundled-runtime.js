@@ -6,20 +6,33 @@
  *
  * 和鸣只面向桌面安装版，且**内置全部运行环境**：用户装完就能用，不需要自己装
  * Python、uv 或任何 MCP 服务。实现方式是把这套东西打进安装包
- * （`resources/runtime/`），启动 MCP 时直接指向包内的可执行文件。
+ * （`resources/runtime/`），启动 MCP 时直接指向包内的解释器。
  *
- * 于是同一个预置（MCP 服务定义）在两种状态下要指向**完全不同的路径**：
+ * ## 目录形态（d.147.4.94.11 起）
  *
- * | 状态 | 指向 | 为什么 |
+ * ```
+ * runtime/
+ *   python/python.exe        python-build-standalone 的完整解释器（可重定位）
+ *   python/Lib/site-packages windows-mcp / scrapling / mcp 等依赖直接装在这里
+ *   bin/uv.exe  bin/uvx.exe  可选：给 Registry 的 pypi 包用，系统能力不需要
+ * ```
+ *
+ * **不再有 venv**。旧版是「裸 venv + 指向构建机 uv 托管 Python 的 pyvenv.cfg」，
+ * 只有 `Lib/site-packages`，没有标准库也没有 `python312.dll`——包搬上别的机器
+ * 连 `import os` 都做不到。现在的形态整棵树可整体搬路径、换机器运行。
+ *
+ * ## 三种状态
+ *
+ * | 状态 | 指向 | 说明 |
  * |---|---|---|
- * | 打包后 | `resources/runtime/mcp-env/Scripts/*.exe` | 用户装好的那份 |
- * | 开发态 | `resources/runtime/mcp-env/Scripts/*.exe`（同一份） | 本地开发直接复用构建产物 |
- * | 两者都没有 | 退回 `uvx` + PATH 补全 | 没构建过内置运行时时不至于完全不可用 |
+ * | 内置就绪 | `runtime/python/python.exe -I …` | 用户装好即用，零外部依赖 |
+ * | 内置缺依赖 | 同上（但导入会失败） | 界面要提示重装，不要静默 |
+ * | 内置缺失 | 退回配置里的 `uvx` + PATH 补全 | 开发态没构建过运行时时不至于全挂 |
  *
- * 最后一行是刻意保留的退路：内置运行时构建要十几分钟（拉 Python + 200+ 个包），
+ * 最后一行是刻意保留的退路：内置运行时构建要几分钟（拷解释器 + 装 100+ 个包），
  * 不可能塞进日常开发流程。没有它的话，改一行前端代码就会让 MCP 全挂。
  *
- * 路径解析集中在这里而不是散在各处：预置定义、std子进程环境、界面提示
+ * 路径解析集中在这里而不是散在各处：预置定义、stdio 子进程环境、界面提示
  * 都要用到同一个答案，写三份迟早漂移。
  */
 
@@ -48,25 +61,76 @@ function runtimeDir() {
   return path.join(__dirname, RUNTIME_DIR);
 }
 
+/** 是否存在（任何异常都按「不存在」处理：权限/路径异常不该让 MCP 区初始化失败）。 */
+function exists(target) {
+  try {
+    return fs.existsSync(target);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * 内置解释器路径（Windows 上是 Scripts/python.exe）。
+ * 内置解释器路径。
  *
  * 返回 null 表示内置运行时不可用——调用方据此退回 `uvx`，不要抛异常：
  * 「内置缺失」应该是降级，不是崩溃。
  */
 function bundledPython() {
   const candidates = [
-    path.join(runtimeDir(), "mcp-env", "Scripts", "python.exe"),
-    path.join(runtimeDir(), "mcp-env", "Scripts", "python3.exe"),
-    path.join(runtimeDir(), "mcp-env", "bin", "python3"),
+    path.join(runtimeDir(), "python", "python.exe"),
+    path.join(runtimeDir(), "python", "python3.exe"),
+    path.join(runtimeDir(), "python", "bin", "python3"),
   ];
   for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      /* 忽略：权限或路径异常都按「不可用」处理 */
-    }
+    if (exists(candidate)) return candidate;
   }
+  return null;
+}
+
+/**
+ * 内置 uv（可选）。
+ *
+ * 系统能力（Windows-MCP / Scrapling）用不到它——它们跑在包内解释器上。
+ * 它是给 Registry 装来的 **pypi 本地包**用的：有它，用户机器上不用装 uv；
+ * 没有它，那条路径会退回系统 `uvx`（探测不到就提示用户自己装）。
+ */
+function bundledUv() {
+  const candidates = [path.join(runtimeDir(), "bin", "uvx.exe"), path.join(runtimeDir(), "bin", "uv")];
+  for (const candidate of candidates) {
+    if (exists(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** 内置依赖是否装好（site-packages 里两个入口包都在）。 */
+function bundledDepsReady() {
+  const site = path.join(runtimeDir(), "python", "Lib", "site-packages");
+  return exists(path.join(site, "windows_mcp")) && exists(path.join(site, "scrapling"));
+}
+
+/**
+ * 把配置里的 id / 命令归一，判断它是不是我们的内置系统能力。
+ *
+ * 为什么不能只看 id：渲染层存下来的 id 是 `mcp-windows-desktop`、
+ * `mcp-scrapling`（`systemMcpServerId()` 加的 `mcp-` 前缀），而最早那版实现
+ * 只认 `windows-desktop` / `scrapling`，于是**一次都没匹配上**，永远退回 uvx。
+ * 这里同时认两种写法，并且再看一眼原始命令里有没有对应包名，
+ * 这样即使将来 id 规则又变，也不会静默退化成「要用户装 uv」。
+ *
+ * @returns {"windows-desktop"|"scrapling"|null}
+ */
+function builtinKind(spec) {
+  const safe = spec && typeof spec === "object" ? spec : {};
+  const id = String(safe.id ?? "").trim().toLowerCase().replace(/^mcp-/, "");
+  const command = String(safe.command ?? "").toLowerCase();
+  const args = Array.isArray(safe.args) ? safe.args.map((a) => String(a).toLowerCase()) : [];
+  const haystack = [command, ...args].join(" ");
+
+  if (id === "windows-desktop" || id === "windows-desktop-control" || haystack.includes("windows-mcp")) {
+    return "windows-desktop";
+  }
+  if (id === "scrapling" || haystack.includes("scrapling")) return "scrapling";
   return null;
 }
 
@@ -74,7 +138,7 @@ function bundledPython() {
  * 解析一个 MCP 服务的启动命令。
  *
  * @param {object} spec
- * @param {string} spec.id 预置 id，如 "windows-desktop" / "scrapling"
+ * @param {string} spec.id 服务 id（`mcp-windows-desktop` 或旧的 `windows-desktop`）
  * @param {string} spec.command 原本的启动命令（通常是 uvx）
  * @param {string[]} spec.args 原本的参数
  * @returns {{command: string, args: string[], bundled: boolean, missing: boolean}}
@@ -86,49 +150,35 @@ function resolveMcpCommand(spec) {
   const safe = spec && typeof spec === "object" ? spec : {};
   const originalCommand = typeof safe.command === "string" ? safe.command : "";
   const originalArgs = Array.isArray(safe.args) ? safe.args : [];
+  const fallback = { command: originalCommand, args: originalArgs, bundled: false, missing: true };
 
   const python = bundledPython();
-  const envScripts = python ? path.dirname(python) : "";
+  if (!python) return fallback;
 
-  /** 内置解释器 + 模块入口的映射。 */
-  const BUNDLED_ENTRY = {
-    // Windows-MCP：入口是控制台脚本
-    "windows-desktop": envScripts ? path.join(envScripts, "windows-mcp.exe") : "",
-    // Scrapling：注意**不能**用 `python -m scrapling`——
-    // scrapling 不是可执行包（没有 __main__.py），会报
-    // "No module named scrapling.__main__"。环境提供的是独立的 scrapling-mcp.exe。
-    scrapling: envScripts ? path.join(envScripts, "scrapling-mcp.exe") : "",
-  };
+  const kind = builtinKind(safe);
+  if (!kind) return fallback;
 
-  const entry = BUNDLED_ENTRY[safe.id];
-  if (python && entry) {
-    try {
-      if (fs.existsSync(entry)) {
-        return {
-          command: entry,
-          args: safe.id === "windows-desktop" ? ["serve"] : [],
-          bundled: true,
-          missing: false,
-        };
-      }
-    } catch {
-      /* 落到下面的退回分支 */
-    }
+  // `-I` 隔离模式（等价 -E -s -P）：不读 PYTHONPATH / PYTHONHOME / 用户 site-packages，
+  // 也不把 cwd 放进 sys.path。用户机器上别处的 Python 配置就不会污染包内这份环境。
+  const base = { command: python, bundled: true, missing: false };
+  if (kind === "windows-desktop") {
+    // 入口与 console_scripts 一致：windows_mcp.__main__:main，参数原样传 `serve`。
+    return { ...base, args: ["-I", "-m", "windows_mcp", "serve"] };
   }
-
-  // 内置缺失或不认识这个预置：退回原命令，交给 mcp-stdio 的 PATH 补全去找系统 uvx
-  return { command: originalCommand, args: originalArgs, bundled: false, missing: true };
+  // Scrapling 没有 `__main__`（`python -m scrapling` 会报 No module named scrapling.__main__），
+  // 它提供的是 `scrapling.cli:mcp` 这个 click 命令——直接调它即可。
+  return { ...base, args: ["-I", "-c", "from scrapling.cli import mcp; mcp()"] };
 }
 
 /**
  * 给子进程补上内置运行时的环境变量。
  *
  * 目的有两个：
- * 1. 让 Python 找到自己的标准库——直接跑 `mcp-env/Scripts/python.exe` 时，
- *    它靠 `pyvenv.cfg` 定位基础解释器，这通常已经够用；
- * 2. 把内置运行时目录放进 PATH，这样 MCP 服务内部再调用 `uv`/`python` 时
- *    用的是包内那份，而不是用户机器上可能存在的旧版本——
- *    版本不一致是这类「能启动但行为诡异」问题的主因。
+ * 1. 把内置解释器与 bin 目录放进 PATH，这样 MCP 服务内部再调用 `python`/`uv` 时
+ *    用的是包内那份，而不是用户机器上可能存在的旧版本——版本不一致是这类
+ *    「能启动但行为诡异」问题的主因；
+ * 2. 抹掉继承来的 `PYTHONHOME` / `VIRTUAL_ENV`：这两个变量会让包内解释器
+ *    去别处找标准库，是「装了却起不来」的经典原因。
  *
  * 只影响子进程，不修改系统环境变量。
  */
@@ -136,10 +186,8 @@ function bundledEnv(base = process.env) {
   const python = bundledPython();
   if (!python) return base;
 
-  const scripts = path.dirname(python);
-  const envRoot = path.join(runtimeDir(), "mcp-env");
   const pathKey = Object.keys(base).find((k) => k.toLowerCase() === "path") ?? "PATH";
-  const additions = [scripts, path.join(envRoot, "Scripts")].filter(
+  const additions = [path.dirname(python), path.join(runtimeDir(), "bin")].filter(
     (p, i, arr) => p && arr.indexOf(p) === i,
   );
 
@@ -152,38 +200,40 @@ function bundledEnv(base = process.env) {
     merged.push(item);
   }
 
-  return {
-    ...base,
-    [pathKey]: merged.join(path.delimiter),
-    // 明确指向包内环境，避免服务端再去读用户目录里的虚拟环境
-    VIRTUAL_ENV: envRoot,
-    HEMING_RUNTIME: runtimeDir(),
-  };
+  const env = { ...base, [pathKey]: merged.join(path.delimiter), HEMING_RUNTIME: runtimeDir() };
+  delete env.PYTHONHOME;
+  delete env.VIRTUAL_ENV;
+  return env;
 }
 
 /**
  * 运行时状态快照，供界面显示。
  *
- * 界面上要能区分「内置可用」与「退回系统环境」——两者行为不同，
+ * 界面上要能区分「内置可用」「内置缺依赖」「退回系统环境」——三者行为不同，
  * 出问题时用户报的日志也不一样。
  */
 function runtimeStatus() {
   const python = bundledPython();
-  return {
-    bundled: Boolean(python),
-    runtimeDir: runtimeDir(),
-    python,
-    /** 简短说明，用于设置区提示。 */
-    note: python
-      ? "内置运行时已就绪，无需安装任何外部环境"
-      : "未找到内置运行时，MCP 将尝试使用系统已安装的 uvx",
-  };
+  const uv = bundledUv();
+  const depsReady = python ? bundledDepsReady() : false;
+  let note;
+  if (python && depsReady) {
+    note = "系统能力使用包内运行时，无需安装 Python 或 uv";
+  } else if (python) {
+    note = "内置运行时缺少依赖包，系统能力可能启动失败，建议重新安装和鸣";
+  } else {
+    note = "未找到内置运行时，MCP 将尝试使用系统已安装的 uvx（需自行安装 uv）";
+  }
+  return { bundled: Boolean(python && depsReady), runtimeDir: runtimeDir(), python, uv, depsReady, note };
 }
 
 module.exports = {
   RUNTIME_DIR,
+  bundledDepsReady,
   bundledEnv,
   bundledPython,
+  bundledUv,
+  builtinKind,
   resolveMcpCommand,
   runtimeDir,
   runtimeStatus,

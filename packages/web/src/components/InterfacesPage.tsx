@@ -17,6 +17,10 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
 import { PageShell } from "./layout/PageShell.js";
 import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import {
+  readBundledRuntimeStatus,
+  type BundledRuntimeStatus,
+} from "../lib/registry/runtime.js";
 import { useUiStore } from "../store/ui.js";
 import { Button } from "../components/ui/Button.js";
 
@@ -124,6 +128,13 @@ export function InterfacesView({
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   /** 正在执行的手动调用（`serverId::toolName`）；进行中禁用按钮，防重复执行。 */
   const [testRunning, setTestRunning] = useState<string | null>(null);
+  /**
+   * 内置运行时状态（桌面端才读得到；浏览器 / 旧版主进程为 null）。
+   *
+   * 为什么放这里：系统能力跑的是包内运行时，装包损坏时会退回系统 uvx，
+   * 用户看到的「连不上」其实该修的是安装包——状态行要出现在系统能力区。
+   */
+  const [runtimeStatus, setRuntimeStatus] = useState<BundledRuntimeStatus | null>(null);
 
   const bump = () => setTick((n) => n + 1);
   /** stdio 需要桌面端：浏览器里只能登记配置，连接会失败。 */
@@ -147,6 +158,19 @@ export function InterfacesView({
 
   // 组件卸载时刷新不设置状态
   useEffect(() => () => setConn({}), []);
+
+  // 内置运行时状态只在挂载时读一次：浏览器/旧版主进程没有桥（返回 null），
+  // 读不到就静默不渲染——不显示「未知」这类噪音。
+  useEffect(() => {
+    let alive = true;
+    void readBundledRuntimeStatus().then((status) => {
+      // 读不到（null）就不写状态：省一次无意义的 setState，也避免测试里的 act 噪音。
+      if (alive && status) setRuntimeStatus(status);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const resetForm = () => {
     setName("");
@@ -603,6 +627,19 @@ export function InterfacesView({
           Windows 桌面控制与网页抓取随应用内置，登录后自动连接；不可删除、不可修改配置。
           只读工具默认启用，写操作仍需逐个授权。
         </p>
+        {/* 内置运行时状态（桌面端）：正常时弱化色，装包损坏时警示色并给出恢复动作。
+            浏览器里读不到桥 → runtimeStatus 恒为 null，这一行不渲染。 */}
+        {runtimeStatus && (
+          <p
+            data-testid="mcp-runtime-status"
+            className={`mt-1 text-ui-sm ${runtimeStatus.bundled ? "text-muted" : "text-warn"}`}
+          >
+            {runtimeStatus.note}
+            {!runtimeStatus.bundled && (runtimeStatus.python === null || !runtimeStatus.depsReady)
+              ? " 重新安装和鸣即可恢复。"
+              : ""}
+          </p>
+        )}
         <div className="mt-3 flex flex-col gap-3">
           {systemServers.length > 0 ? (
             systemServers.map((server) => renderServerCard(server, true))

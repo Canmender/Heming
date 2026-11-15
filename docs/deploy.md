@@ -51,7 +51,7 @@ pnpm -r build
 #   `packages/web/dist` 与 `packages/{shared,server}/dist` 一起排掉。
 # 其余几个易漏的大体积产物：
 #   packages/desktop/web-dist —— 桌面壳嵌入用产物（注入了 VITE_API_BASE，绝不能上云）
-#   packages/desktop/runtime —— 内置 Python + MCP 运行时（约 378MB），只打进安装包
+#   packages/desktop/runtime —— 内置 Python + MCP 运行时（自包含 CPython 3.12 + 依赖 + uv，约 473MB；由 node scripts/build-mcp-runtime.mjs 生成、不进 git），只打进安装包
 #   release —— 桌面安装包产物
 #   @hemingdesktop —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
 #   data .tmp .workbuddy —— 本机开发库 / 临时目录 / 项目记忆

@@ -33,8 +33,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RUNTIME = join(ROOT, "packages", "desktop", "runtime");
-const ENV_DIR = join(RUNTIME, "mcp-env");
-const PYTHON = join(ENV_DIR, "Scripts", "python.exe");
+// d.147.4.94.11 起内置运行时是自包含解释器（不再是裸 venv）：
+// `runtime/python/` 里同时有标准库、DLL 与 site-packages，整棵树可搬路径。
+const ENV_DIR = join(RUNTIME, "python");
+const PYTHON = join(ENV_DIR, "python.exe");
 
 /**
  * 必须预编译的包。

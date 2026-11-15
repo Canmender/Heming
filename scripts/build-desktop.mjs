@@ -9,9 +9,10 @@
  *    本机为省 C 盘删掉了 electron 下载 zip，缺这一项时 electron-builder 会去联网重下并失败；
  * 3. 把输出目录指向 `scripts/release-dir.mjs` 解析出的位置（默认 D 盘，不占 C 盘）；
  * 4. 其余参数原样透传，例如 `node scripts/build-desktop.mjs --win nsis`。
- * 5. 内置运行时存在时，先跑 `prepare-runtime.mjs --check` 确认 .pyc 已预编译。
- *    缺了它包照样能启动，只是 MCP 首次连接慢一倍（16.2s vs 7.8s），
- *    装到用户机器上才发现就太晚了——所以在打包这一步拦住。
+ * 5. 内置运行时（`packages/desktop/runtime/python`，d.147.4.94.11 起系统能力全靠它）
+ *    必须存在且已预编译 .pyc：缺失直接中止并提示先跑 `scripts/build-mcp-runtime.mjs`。
+ *    没有它，装到用户机器上系统能力（Windows 桌面控制 / 网页抓取）就是坏的——
+ *    这比「打不出包」严重得多，所以在打包这一步硬性拦住。
  * 6. 把 packages/setup 打出来的自绘安装器暂存成更新助手（resources/updater/setup.exe），
  *    应用内「重启并安装」时由它接管，见 stageUpdateHelper()。
  *
@@ -33,9 +34,23 @@ if (!version) {
   process.exit(1);
 }
 
-// 内置运行时的字节码校验（见文件头注释第 5 条）。
-// 运行时目录不存在时跳过——那是「不内置」的构建方式，不该被拦。
-if (existsSync(join(desktopDir, "runtime", "mcp-env"))) {
+// 内置运行时校验（见文件头注释第 5 条）。
+// d.147.4.94.11 起这是硬性依赖：系统能力（Windows 桌面控制 / 网页抓取）全部跑在包内
+// `runtime/python` 上。早期版本允许「不内置」的构建方式，结果 r100 带着一个裸 venv
+// 发了出去——用户机器上连 `import os` 都失败。宁可打不出包，也不要再发一个坏包。
+const runtimePythonDir = join(desktopDir, "runtime", "python");
+if (!existsSync(runtimePythonDir)) {
+  console.error(
+    [
+      "[build-desktop] 缺内置运行时 packages/desktop/runtime/python，已中止打包。",
+      "  系统能力（Windows 桌面控制 / 网页抓取）依赖它，没有它装完就是坏的。",
+      "  先跑：node scripts/build-mcp-runtime.mjs",
+      "  （需要本机有 uv 与 Python 3.12，约 5 分钟，产物 ~500MB，不进 git）",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+{
   const prepared = spawnSync(process.execPath, [join(root, "scripts", "prepare-runtime.mjs"), "--check"], {
     stdio: "inherit",
   });

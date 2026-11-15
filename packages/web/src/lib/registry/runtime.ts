@@ -2,9 +2,10 @@
  * 本机运行时探测（本地包安装的前置条件，d.25）。
  *
  * ## 为什么必须探测
- * Registry 的 npm / pypi 类服务要在**用户机器上**跑 `npx` / `uvx`，而我们刻意不内置
- * 这两个运行时（内置 = 安装包 +30MB，且上游一发新版就得重打包）。于是「能不能装」
- * 不是常量和：装了跑不起来的包，用户只会在连接阶段看到一句「已保存配置，但连接失败」，
+ * Registry 的 npm / pypi 类服务要在**用户机器上**跑 `npx` / `uvx`。d.147.4.94.11 起
+ * `uv`/`uvx` 随安装包内置（`resources/runtime/bin`，供 pypi 本地包用），Node 仍不内置
+ * （随包带 Node 相当于 +30MB，且上游一发新版就得重打包）。所以「能不能装」仍不是常量：
+ * 装了跑不起来的包，用户只会在连接阶段看到一句「已保存配置，但连接失败」，
  * 完全不知道该装 Node 还是该换服务。
  *
  * ## 探测的时机
@@ -49,6 +50,50 @@ const RUNTIME_FIX: Record<RuntimeKey, string> = {
 
 export interface RuntimeBridgeApi {
   probe: () => Promise<unknown>;
+  /** 内置运行时状态（d.147.4.94.11）；旧版主进程没有这个方法，按「读不到」处理。 */
+  status?: () => Promise<unknown>;
+}
+
+/**
+ * 内置运行时状态（主进程 `runtime:status` 的返回值）。
+ *
+ * 与上面的 `LocalRuntimeStatus` 不是一回事：那个回答「这台机器能不能跑 npm/pypi 包」，
+ * 这个回答「系统能力跑的是包内运行时还是退回系统 uvx」——后者决定界面上要不要提示
+ * 「请重新安装和鸣」。
+ */
+export interface BundledRuntimeStatus {
+  /** 包内解释器与依赖都齐（真正的「装完即用」）。 */
+  bundled: boolean;
+  /** 解释器在、但依赖没装齐（安装包损坏或被改动）。 */
+  depsReady: boolean;
+  python: string | null;
+  /** 内置 uv 的绝对路径；没有则为 null（pypi 本地包会退回系统 uvx）。 */
+  uv: string | null;
+  runtimeDir: string;
+  note: string;
+}
+
+/** 读内置运行时状态；浏览器里没有桥 → null（界面据此不显示这一段）。 */
+export async function readBundledRuntimeStatus(): Promise<BundledRuntimeStatus | null> {
+  const bridge = runtimeBridge();
+  if (typeof bridge?.status !== "function") return null;
+  let raw: unknown;
+  try {
+    raw = await bridge.status();
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.bundled !== "boolean") return null;
+  return {
+    bundled: r.bundled,
+    depsReady: r.depsReady === true,
+    python: typeof r.python === "string" ? r.python : null,
+    uv: typeof r.uv === "string" ? r.uv : null,
+    runtimeDir: typeof r.runtimeDir === "string" ? r.runtimeDir : "",
+    note: typeof r.note === "string" ? r.note : "",
+  };
 }
 
 /** 取桥（浏览器里没有 → undefined）。 */

@@ -25,6 +25,23 @@ test("preload 暴露 __mcp_stdio 与 __heming_runtime（stdio 传输与运行时
   assert.ok(src.includes('exposeInMainWorld("__mcp_stdio"'));
   assert.ok(src.includes('exposeInMainWorld("__heming_runtime"'));
   assert.ok(src.includes('invoke("runtime:probe")'));
+  assert.ok(src.includes('invoke("runtime:status")'), "内置运行时状态桥（d.147.4.94.11）");
+});
+
+test("__heming_runtime.status 走 runtime:status 并回传状态快照", async () => {
+  const invoked = [];
+  const status = {
+    bundled: true,
+    depsReady: true,
+    python: "C:\\runtime\\python\\python.exe",
+    uv: "C:\\runtime\\bin\\uvx.exe",
+    runtimeDir: "C:\\runtime",
+    note: "系统能力使用包内运行时，无需安装 Python 或 uv",
+  };
+  const exposed = loadExposed({}, { invoked, invokeResults: { "runtime:status": () => status } });
+  assert.equal(typeof exposed.__heming_runtime.status, "function");
+  assert.deepEqual(await exposed.__heming_runtime.status(), status);
+  assert.deepEqual(invoked, [["runtime:status", undefined]]);
 });
 
 test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {

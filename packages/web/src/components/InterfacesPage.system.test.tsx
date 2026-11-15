@@ -75,6 +75,19 @@ function fakeMcp(): PluginMcpPort {
 
 let plugins: PluginStore;
 
+/** 运行时桥的测试替身（结构与 `RuntimeBridgeApi` 一致）。 */
+interface RuntimeBridgeStub {
+  probe: ReturnType<typeof vi.fn>;
+  status: ReturnType<typeof vi.fn>;
+}
+
+/** 挂/摘 `window.__heming_runtime`；传 undefined 表示「浏览器环境，没有桥」。 */
+function setRuntimeBridge(bridge: RuntimeBridgeStub | undefined): void {
+  const win = window as unknown as { __heming_runtime?: RuntimeBridgeStub };
+  if (bridge) win.__heming_runtime = bridge;
+  else delete win.__heming_runtime;
+}
+
 beforeEach(() => {
   localStorage.clear();
   // 接口区已并入插件区（d.67）：宿主页 = plugins，视图 = interfaces（MCP Tab）
@@ -94,7 +107,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  setRuntimeBridge(undefined);
+  cleanup();
+});
 
 describe("接口区 · 系统能力卡片", () => {
   it("系统能力卡片只读：标 data-system-mcp、显示「始终参与对话」、没有删除入口", () => {
@@ -141,5 +157,60 @@ describe("接口区 · 系统能力卡片", () => {
     expect(pluginChip.textContent).toBe("插件：天气能力包");
     // 插件来源不应同时出现系统徽标
     expect(within(card).queryByText(/内置：/)).toBeNull();
+  });
+
+  it("内置运行时正常：显示状态说明，用弱化色且不带警示色", async () => {
+    const note = "系统能力使用包内运行时，无需安装 Python 或 uv";
+    setRuntimeBridge({
+      probe: vi.fn(),
+      status: vi.fn(async () => ({
+        bundled: true,
+        depsReady: true,
+        python: "C:\\x\\python.exe",
+        uv: null,
+        runtimeDir: "C:\\x",
+        note,
+      })),
+    });
+    const registry = new McpRegistry(makeStorage([]), () => new Date(T0).toISOString());
+
+    render(<InterfacesPage registry={registry} plugins={plugins} />);
+    const line = await screen.findByTestId("mcp-runtime-status");
+    // 状态行只出现在系统能力区里
+    expect(screen.getByTestId("mcp-system-servers")).toContainElement(line);
+    expect(line.textContent).toContain(note);
+    expect(line.className).toContain("text-muted");
+    expect(line.className).not.toContain("text-warn");
+  });
+
+  it("内置运行时缺失：警示色，提示重新安装和鸣", async () => {
+    const note = "未找到包内运行时，已退回系统 uvx";
+    setRuntimeBridge({
+      probe: vi.fn(),
+      status: vi.fn(async () => ({
+        bundled: false,
+        depsReady: false,
+        python: null,
+        uv: "C:\\Windows\\uv.exe",
+        runtimeDir: "C:\\x",
+        note,
+      })),
+    });
+    const registry = new McpRegistry(makeStorage([]), () => new Date(T0).toISOString());
+
+    render(<InterfacesPage registry={registry} plugins={plugins} />);
+    const line = await screen.findByTestId("mcp-runtime-status");
+    expect(line.textContent).toContain(note);
+    expect(line.textContent).toContain("重新安装和鸣");
+    expect(line.className).toContain("text-warn");
+    expect(line.className).not.toContain("text-muted");
+  });
+
+  it("没有运行时桥（浏览器）：不渲染状态行", () => {
+    setRuntimeBridge(undefined);
+    const registry = new McpRegistry(makeStorage([]), () => new Date(T0).toISOString());
+
+    render(<InterfacesPage registry={registry} plugins={plugins} />);
+    expect(screen.queryByTestId("mcp-runtime-status")).toBeNull();
   });
 });

@@ -73,6 +73,11 @@ contextBridge.exposeInMainWorld("__mcp_stdio", {
 contextBridge.exposeInMainWorld("__heming_runtime", {
   /** 返回 { platform, npm, pypi, note, ... }；只读探测，不执行任何命令。 */
   probe: () => ipcRenderer.invoke("runtime:probe"),
+  /**
+   * 内置运行时状态（d.147.4.94.11）：`{ bundled, depsReady, python, uv, note }`。
+   * 「系统能力」用它说明跑的是包内运行时还是退回系统 uvx。
+   */
+  status: () => ipcRenderer.invoke("runtime:status"),
 });
 
 // —— 版本号 ——

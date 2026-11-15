@@ -102,3 +102,23 @@ test("信息中枢引擎装机链必须随安装包分发（选装 Python 引擎
     );
   }
 });
+
+test("内置运行时的 filter 不得排除 __pycache__（d.147.4.94.11 回归）", () => {
+  // prepare-runtime.mjs 用 compileall 把 windows_mcp / scrapling 的 .pyc 写进各自的
+  // __pycache__/，目的就是把 MCP 首连从 16.2s 降到 7.8s。但安装包的 runtime filter
+  // 曾写着 `!**/__pycache__/**`——预编译照跑、包里一个 .pyc 都没有（r100 就是这样
+  // 发出去的），而且没有任何用例会因为「包里少了 .pyc」而红。这条把两端钉在一起。
+  const entry = (build.extraResources ?? []).find(
+    (item) => typeof item === "object" && item.from === "runtime",
+  );
+  assert.ok(entry, "安装包应包含内置运行时（from: runtime）");
+  const filter = Array.isArray(entry.filter) ? entry.filter : [];
+  assert.ok(
+    !filter.some((rule) => /__pycache__/.test(rule) && rule.startsWith("!")),
+    `runtime filter 不能排除 __pycache__（会丢掉预编译的 .pyc）：${filter.join(", ")}`,
+  );
+  assert.ok(
+    filter.some((rule) => /\.pyc/.test(rule) && rule.startsWith("!")),
+    "仍应排除 *.pyc.tmp 这类编译中途产物",
+  );
+});

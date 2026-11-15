@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "147.4.93",
+  "version": "147.4.94",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -90,7 +90,6 @@
         "filter": [
           "**/*",
           "!**/*.pyc.tmp",
-          "!**/__pycache__/**",
           "!**/tests/**",
           "!**/test/**",
           "!**/*.chm"
@@ -147,7 +146,7 @@
       "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.147.4.93.11",
-  "shortVersion": "147.4.93.11",
-  "shortVersionWindows": "147.4.93.11"
+  "hemingVersion": "d.147.4.94.11",
+  "shortVersion": "147.4.94.11",
+  "shortVersionWindows": "147.4.94.11"
 }

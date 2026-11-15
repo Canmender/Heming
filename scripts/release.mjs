@@ -938,6 +938,13 @@ function planPreflight(ctx) {
   } else {
     preview.push("找不到 .superpowers/deploy-bare.py（只用 --deploy 时才需要）");
   }
+  if (ctx.opts.desktop) {
+    preview.push(
+      existsSync(join(ROOT, "packages", "desktop", "runtime", "python"))
+        ? "内置运行时存在（真跑会再校验 .pyc）"
+        : "缺内置运行时 packages/desktop/runtime/python：真跑会在预检就拒绝（先跑 scripts/build-mcp-runtime.mjs）",
+    );
+  }
   return {
     commands: [
       {
@@ -972,6 +979,26 @@ async function runPreflight(ctx) {
     });
   }
   notes.push(`pnpm ${pnpm.output.trim().split(/\r?\n/).pop()}`);
+
+  // 内置运行时（d.147.4.94.11）是桌面端硬性依赖：系统能力（Windows 桌面控制 /
+  // 网页抓取）全部跑在包内自包含 Python 上。r100 曾带着一个指向构建机的裸 venv
+  // 发出去，用户机器上连 `import os` 都失败——所以这一步放在最前面，别等打完包再说。
+  if (ctx.opts.desktop) {
+    const runtimePython = join(ROOT, "packages", "desktop", "runtime", "python");
+    if (!existsSync(runtimePython)) {
+      throw new StepError("缺内置运行时 packages/desktop/runtime/python", {
+        hint: "先跑 `node scripts/build-mcp-runtime.mjs`（需本机 uv + Python 3.12，约 5 分钟，产物 ~500MB，不进 git）；系统能力没有它就是坏的。",
+      });
+    }
+    const prepared = await capture(ctx, "node scripts/prepare-runtime.mjs --check");
+    if (prepared.code !== 0) {
+      throw new StepError("内置运行时未预编译 .pyc", {
+        hint: "跑 `node scripts/prepare-runtime.mjs` 之后再打包（不预编译会让 MCP 启动慢一倍）。",
+        tail: prepared.tail40,
+      });
+    }
+    notes.push("内置运行时已就绪（自包含 Python + 依赖 + uv）");
+  }
 
   const git = await capture(ctx, "git status --porcelain");
   if (git.code !== 0) {
