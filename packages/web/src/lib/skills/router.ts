@@ -87,8 +87,8 @@ export interface RouteContext {
   usage?: Record<string, SkillUsage>;
   binding?: SkillBinding;
   /**
-   * 该智能体**已分配**的技能 id（技能页的分配是真边界，不只是展示）。
-   * 缺省表示不限制——纯池路由（单测/预览）仍可对全量打分。
+   * 可选白名单：只允许这些技能 id 参与打分（单测/预览用）。
+   * d.148.4.95 起生产链路不再按智能体分配传入——全部已启用技能都参与匹配。
    * 置顶不能绕过它：`pinned` 只是排序偏好，不是授权。
    */
   allowed?: ReadonlySet<string> | readonly string[];

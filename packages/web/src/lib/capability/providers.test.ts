@@ -6,13 +6,14 @@ import {
   selfProvider,
   teamProvider,
   vaultProvider,
+  webToolsProvider,
 } from "./index.js";
 import { TEAM_TOOLS } from "./teamTools.js";
 import { SelfEditBudget, type SelfEditStore } from "../selfEdit/index.js";
 
 /** 只关心注册表的策略接口；自我修改的执行细节由 selfEdit 自己的用例覆盖。 */
-function fakePolicy(configured: boolean, allowed = true): SelfEditStore {
-  return { configured: () => configured, allowed: () => allowed } as unknown as SelfEditStore;
+function fakePolicy(allowed: boolean): SelfEditStore {
+  return { allowed: () => allowed } as unknown as SelfEditStore;
 }
 
 describe("内置能力提供者", () => {
@@ -24,6 +25,7 @@ describe("内置能力提供者", () => {
       ["wiki", "builtin"],
       ["vault", "builtin"],
       ["files", "builtin"],
+      ["webtools", "builtin"],
       ["infohub", "builtin"],
       ["plugin-market", "plugin"],
       ["team", "builtin"],
@@ -69,6 +71,10 @@ describe("内置能力提供者", () => {
     expect(filesProvider.build({ agentId: "a", conversationId: "c" })).toBeNull();
   });
 
+  it("webtools 没有主进程 HTTP 桥时不注入（浏览器端不可见，绝不给假联网）", () => {
+    expect(webToolsProvider.build({ agentId: "a", conversationId: "c" })).toBeNull();
+  });
+
   it("infohub 未连接（无桌面桥）时不注入归档工具", () => {
     expect(infohubProvider.build({ agentId: "a", conversationId: "c" })).toBeNull();
   });
@@ -77,13 +83,14 @@ describe("内置能力提供者", () => {
     expect(selfProvider.build({ agentId: "a", conversationId: "c" })).toBeNull();
   });
 
-  it("self 只在用户显式配置过该智能体时注入", () => {
+  it("self 默认注入；只有显式关掉过（allowed=false）的智能体才不注入", () => {
     const ctx = (policy: SelfEditStore) => ({
       agentId: "a",
       conversationId: "c",
       selfEdit: { policy, budget: new SelfEditBudget() },
     });
 
+    // d.148.4.95：单一内置智能体，自我优化默认开启、不再有页面开关。
     expect(selfProvider.build(ctx(fakePolicy(false)))).toBeNull();
 
     const bridge = selfProvider.build(ctx(fakePolicy(true)));

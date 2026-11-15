@@ -287,30 +287,31 @@ describe("技能池 · 路由", () => {
     );
   });
 
-  it("未分配的自定义技能不进入路由（分配是真边界）", () => {
+  it("未显式分配的自定义技能也参与路由（「启用」就是唯一开关）", () => {
     const { pool } = freshPool();
     const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"], tags: ["语言"] });
-    // 没有分配记录 → 默认只有内置技能
-    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).not.toContain(
+    // d.148.4.95：单智能体产品不再按智能体分配，新建/导入的技能启用后即可命中
+    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).toContain(
       custom.id,
     );
 
-    pool.assign("agent-a", custom.id);
-    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).toContain(
+    // 真正的边界是启用开关：关掉才不参与
+    pool.setEnabled(custom.id, false);
+    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).not.toContain(
       custom.id,
     );
   });
 
-  it("置顶不能绕过分配（pinned 只是排序偏好，不是授权）", () => {
+  it("置顶只是排序偏好，不能绕过「禁用」过滤", () => {
     const { pool } = freshPool();
     const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"] });
-    pool.setBinding("agent-a", { pinned: [custom.id] });
+    pool.setBinding("agent-a", { pinned: [custom.id], disabled: [custom.id] });
     expect(pool.route({ query: "", agentId: "agent-a" }).map((m) => m.skill.id)).not.toContain(
       custom.id,
     );
   });
 
-  it("无 agentId 的纯池路由不受分配限制（预览/单测口径）", () => {
+  it("无 agentId 时同样对全量启用技能打分（预览/单测口径）", () => {
     const { pool } = freshPool();
     const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"] });
     expect(pool.route({ query: "翻译" }).map((m) => m.skill.id)).toContain(custom.id);

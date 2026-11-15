@@ -16,7 +16,8 @@ import type { WidgetRecord, WidgetsBridge } from "../types/widgets.js";
  * 所以这里也给页面注入独立的 SkillPool 与 McpRegistry——两个视图各自读自己的单例。
  */
 
-// 技能 Tab 内嵌的技能视图会拉一次智能体名册：固定成内存名册，不依赖网络。
+// d.148.4.95：技能视图已改成单一列表、不再拉智能体名册；桩保留成内存名册，
+// 以免将来恢复调用时打到真实接口（现在即使不被引用也无副作用）。
 vi.mock("../lib/agentsApi.js", () => ({
   listAgents: vi.fn(async () => [{ id: "a1", name: "和鸣助手" }]),
 }));
@@ -491,11 +492,14 @@ describe("PluginsPage 导航合并", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
-    // 原技能区页的完整能力都在：分配提示（固定内置智能体）、技能池、搜索
+    // 原技能区页的完整能力都在：搜索 + 单一列表的两个页签（本机技能 / 社区）
     expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
-    expect(screen.getByText(/技能启用并分配给「和鸣」后/)).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "已分配" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
+    expect(screen.getByText(/技能启用后即在对话里生效/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "本机技能" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "社区" })).toBeInTheDocument();
     // 嵌入后不再有自己的页面标题
     expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
@@ -543,6 +547,24 @@ describe("PluginsPage 导航合并", () => {
     expect(document.activeElement).toBe(pluginsTab);
   });
 
+  it("页签行在页头正下方（PageShell.tabs 槽），与模型/团队页同一位置、同一套图标", () => {
+    renderPage();
+    const list = screen.getByRole("tablist", { name: "能力分区" });
+    const row = list.parentElement as HTMLElement;
+    // 与页头同一左右内边距；此前页签埋在统计卡与提示条之后、缩进也与内容列不同
+    expect(row.className).toContain("border-line-soft");
+    expect(row.className).toContain("px-6");
+    expect(row.className).toContain("max-[1199px]:px-4");
+    // 三个分区页签都带 14px 图标（与模型页 / 团队页的一级页签同一视觉语言）
+    for (const label of ["插件", "技能", "MCP"]) {
+      const tab = within(list).getByRole("tab", { name: label });
+      expect(tab.querySelector("svg"), `${label} 页签缺图标`).not.toBeNull();
+    }
+    // 统计卡回到页签下方（内容区），层级关系是「页签 → 内容」
+    const stats = screen.getByLabelText("统计 插件");
+    expect(row.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("消费一次性视图意图：旧 setPage(\"interfaces\") 落到 MCP Tab", () => {
     useUiStore.getState().setPage("interfaces");
     renderPage();
@@ -560,7 +582,6 @@ describe("PluginsPage 导航合并", () => {
     };
     const before = readSkillStat();
 
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
     const dialog = screen.getByRole("dialog", { name: "新建技能" });
     fireEvent.change(within(dialog).getByLabelText("技能名称"), {

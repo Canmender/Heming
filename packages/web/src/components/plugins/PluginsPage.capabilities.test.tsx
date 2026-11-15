@@ -17,8 +17,8 @@ import { McpRegistry, MCP_SERVERS_KEY, type McpServerConfig } from "../../lib/mc
 import { useUiStore } from "../../store/ui.js";
 import { describeCapabilityStats } from "./viewModel.js";
 
-// 技能 Tab 内嵌的是完整技能视图，它会自己拉一次智能体名册：
-// 固定成内存名册，用例不依赖网络、也不受 Fetch 实现差异影响。
+// d.148.4.95：技能视图已改成单一列表、不再拉智能体名册；桩保留成内存名册，
+// 以免将来恢复调用时打到真实接口（现在即使不被引用也无副作用）。
 vi.mock("../../lib/agentsApi.js", () => ({
   listAgents: vi.fn(async () => [{ id: "a1", name: "阿和" }]),
 }));
@@ -418,9 +418,13 @@ describe("插件页 · 三个 Tab", () => {
       "id",
       "plugins-skills-panel",
     );
-    // 完整技能视图：搜索框与「已分配 / 技能池」子页签都在（旧的只读摘要已删除）
+    // 完整技能视图：搜索框与「本机技能 / 社区」两个页签都在（旧的只读摘要已删除）
     expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "本机技能" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "社区" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /在技能区管理/ })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 
@@ -552,21 +556,18 @@ describe("插件页 · 工具目录", () => {
 });
 
 describe("插件页 · 技能 Tab（内嵌完整技能视图）", () => {
-  it("插件技能进技能池，来源徽标可打开插件详情（不跨页）", async () => {
-    const result = installV3();
-    const skillId = result.plugin.skillIds[0]!;
-    pool.assign("a1", skillId);
+  it("插件技能进本机技能列表，来源徽标可打开插件详情（不跨页）", async () => {
+    installV3();
 
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
-    // 名册到位后自动选第一个智能体；切到「技能池」看全量技能
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
 
-    const row = await screen.findByRole("row", { name: /周报/ });
-    // 插件来源在技能池里可辨识（插件技能 materialize 后 source 仍是 imported）
-    expect(within(row).getByText("插件")).toBeInTheDocument();
-    const chip = within(row).getByRole("button", { name: "打开插件 报告工具箱" });
-    expect(within(row).getByRole("switch", { name: "启用 周报" })).toHaveAttribute(
+    // 单一列表：插件技能直接平铺在「已装技能」分组里，不再需要先分配/切技能池
+    const card = await screen.findByRole("group", { name: "技能卡 周报" });
+    // 插件来源可辨识（插件技能 materialize 后 source 仍是 imported）
+    expect(within(card).getByText("插件")).toBeInTheDocument();
+    const chip = within(card).getByRole("button", { name: "打开插件 报告工具箱" });
+    expect(within(card).getByRole("switch", { name: "启用 周报" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -588,10 +589,13 @@ describe("插件页 · MCP Tab（内嵌完整接口视图）", () => {
     expect(report).toHaveTextContent("已连接");
     expect(within(report).getByRole("button", { name: "打开插件 报告工具箱" })).toBeInTheDocument();
 
-    // 系统能力（T31 起常驻、只读）：名称来自定义表，卡片上没有删除入口
-    const system = screen.getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
-    expect(system).toHaveTextContent("始终参与对话");
-    expect(within(system).queryByRole("button", { name: /删除/ })).toBeNull();
+    // 系统能力不再在接口视图里出卡片（d.147.4.95.11）：连接状态收在工具授权上方的状态条，
+    // 工具开关仍在「工具分组 系统能力」里——同一份能力只展示一次。
+    expect(screen.queryByRole("region", { name: "MCP 服务 Windows 桌面控制" })).toBeNull();
+    const systemStrip = screen.getByTestId("mcp-system-status");
+    expect(systemStrip).toHaveTextContent("随应用内置");
+    expect(systemStrip).toHaveTextContent("Windows 桌面控制");
+    expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "MCP 服务 Registry 演示服务" }),
     ).toHaveTextContent("Registry");

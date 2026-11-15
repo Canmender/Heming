@@ -89,7 +89,7 @@ const PALETTE_VIEWS: PaletteViewEntry[] = [
     page: "plugins",
     view: "skills",
     label: "插件 › 技能",
-    description: "技能池：装给智能体用的技能",
+    description: "本机技能：启用后对话时按需匹配",
     keywords: ["技能", "技能池", "能力", "skill"],
   },
   {

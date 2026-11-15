@@ -133,7 +133,7 @@ export class SkillPool {
   private readonly now: () => number;
   private data: PoolData;
   private bindingMap: Record<string, SkillBinding>;
-  /** 智能体 → 已分配技能 id（无记录 = 默认内置全部分配）。 */
+  /** 智能体 → 已分配技能 id（旧数据兼容；d.148.4.95 起路由不再据此过滤）。 */
   private assignmentMap: Record<string, string[]>;
 
   constructor(storage?: StorageLike, now?: () => number) {
@@ -269,7 +269,7 @@ export class SkillPool {
     });
   }
 
-  /** 使用统计只读快照（技能池列表的「使用次数 / 最近使用」列）。 */
+  /** 使用统计只读快照（路由加权用；界面自 d.148.4.95 起不再展示「使用次数」列）。 */
   usages(): Record<string, SkillUsage> {
     const out: Record<string, SkillUsage> = {};
     for (const [id, stat] of Object.entries(this.data.usage)) out[id] = { ...stat };
@@ -340,8 +340,8 @@ export class SkillPool {
   }
 
   /**
-   * 路由：带 `agentId` 时只能命中**已分配**的技能（分配是真边界，不只是技能页展示）。
-   * 没有分配记录时 `assigned()` 回落到全部内置技能，开箱即用语义不变。
+   * 路由：**全部已启用技能**都参与匹配（d.148.4.95 起不再按智能体分配，
+   * 单智能体产品里「启用」就是唯一开关；agentId 只用于 pinned/disabled 行为）。
    */
   route(input: {
     query: string;
@@ -354,7 +354,6 @@ export class SkillPool {
         skills: this.data.skills,
         usage: this.data.usage,
         binding: input.agentId ? this.bindingMap[input.agentId] : undefined,
-        allowed: input.agentId ? this.assigned(input.agentId) : undefined,
       },
       {
         query: input.query,

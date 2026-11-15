@@ -127,7 +127,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   {
     name: "self_skill_list",
     riskHint: "read",
-    description: "列出自己已分配的技能及其完整定义（指令正文）。",
+    description: "列出本机全部技能及其完整定义（指令正文）。",
     parameters: { type: "object", properties: {} },
   },
   {
@@ -518,11 +518,8 @@ export async function runSelfTool(
 
     /* ---------------------------------------------------------- 技能 */
     case "self_skill_list": {
-      const assigned = deps.skills.assigned("");
-      const mine = assigned
-        .map((id) => deps.skills.get(id))
-        .filter((s): s is NonNullable<typeof s> => Boolean(s));
-      const list = mine.length ? mine : deps.skills.list();
+      // d.148.4.95：技能不再按智能体分配，列表直接是全量技能池。
+      const list = deps.skills.list();
       if (!list.length) return ok("当前没有任何技能。");
       return ok(
         list

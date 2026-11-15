@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
-import { SelfEditCard } from "./SelfEditCard.js";
-import { PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { useModalA11y } from "./useModalA11y.js";
@@ -10,8 +7,6 @@ import {
   type SkillDefinition,
   type SkillPool,
 } from "../lib/skills/index.js";
-import { memoryStore } from "../lib/memory/index.js";
-import { mcpRegistry } from "../lib/mcp/index.js";
 import { PageShell } from "./layout/PageShell.js";
 import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
@@ -22,14 +17,17 @@ import { Switch } from "./ui/Switch.js";
 import { Button } from "../components/ui/Button.js";
 import { useRovingTabs } from "../lib/ui/tabs.js";
 
-/** 技能视图的三个页签（顺序即键盘 ←/→ 顺序）。 */
-type SkillTab = "groups" | "pool" | "hub";
-const SKILL_TAB_ORDER: readonly SkillTab[] = ["groups", "pool", "hub"];
+/** 技能视图的两个页签（顺序即键盘 ←/→ 顺序）。 */
+type SkillTab = "local" | "hub";
+const SKILL_TAB_ORDER: readonly SkillTab[] = ["local", "hub"];
 
 /**
- * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图；分配对象固定为唯一内置智能体。
- * 数据只来自本机 lib/skills 的单例（测试注入独立实例），不重写存储：
- * 启用、删除、导入、沉淀全部走 SkillPool 的既有 API。
+ * 技能区：本机技能（四类分组）与社区两个视图。
+ *
+ * d.148.4.95：产品只有唯一内置智能体，技能不再「分配给某个智能体」——
+ * 启用即对对话生效（路由层把全部已启用技能都纳入匹配），页面删掉分配/移除、
+ * 技能池表格、使用统计与自我优化卡，只留「有哪些技能 + 开关 + 详情/删除」。
+ * 数据只来自本机 lib/skills 的单例（测试注入独立实例），不重写存储。
  */
 
 export type SkillCategory = "builtin" | "installed" | "distilled" | "custom";
@@ -46,7 +44,7 @@ export function categorizeSkill(skill: Pick<SkillDefinition, "source">): SkillCa
   return CATEGORY_BY_SOURCE[skill.source];
 }
 
-/** 来源的中文标签（技能池表格与抽屉共用）。 */
+/** 来源的中文标签（卡片与抽屉共用）。 */
 export const SOURCE_LABEL: Record<SkillDefinition["source"], string> = {
   builtin: "内置",
   imported: "已装",
@@ -66,13 +64,13 @@ const GROUPS: readonly GroupMeta[] = [
     key: "builtin",
     title: "内置技能",
     hint: "随应用预置，删除后不会自动恢复",
-    empty: "暂无内置技能：预置技能删除后不再自动恢复，可从技能池导入。",
+    empty: "暂无内置技能：预置技能删除后不再自动恢复。",
   },
   {
     key: "installed",
     title: "已装技能",
-    hint: "由 SKILL.md 或 JSON 导入",
-    empty: "暂无已装技能：在技能池「导入 SKILL.md」后出现在这里。",
+    hint: "由 SKILL.md、JSON 或社区安装",
+    empty: "暂无已装技能：点「导入 SKILL.md」，或去社区装一个。",
   },
   {
     key: "distilled",
@@ -84,7 +82,7 @@ const GROUPS: readonly GroupMeta[] = [
     key: "custom",
     title: "自定义技能",
     hint: "本机新建的技能",
-    empty: "暂无自定义技能：点「新建技能」直接建一个，或把导入的技能转为沉淀。",
+    empty: "暂无自定义技能：点「新建技能」直接建一个。",
   },
 ];
 
@@ -123,7 +121,7 @@ export const SKILL_TEMPLATES: readonly SkillTemplate[] = [
     name: "写作润色",
     description: "把草稿改顺、改清楚，保留原意",
     instructions:
-      "你在帮我润色中文文稿。\n1. 先通读全文，保留作者原意与事实，不新增观点。\n2. 只改病句、重复和口语化表达，语气跟随原文。\n3. 先给改后全文，再用 3 条以内说明主要改动。",
+      "你在帮我润色中文文稿。\\n1. 先通读全文，保留作者原意与事实，不新增观点。\\n2. 只改病句、重复和口语化表达，语气跟随原文。\\n3. 先给改后全文，再用 3 条以内说明主要改动。",
   },
   {
     key: "review",
@@ -131,7 +129,7 @@ export const SKILL_TEMPLATES: readonly SkillTemplate[] = [
     name: "代码审查",
     description: "找出改动里的 bug、风险与遗漏",
     instructions:
-      "你在审查一段代码改动。\n1. 先读上下文与调用方，确认改动意图。\n2. 按「会出错 > 有风险 > 可读性」的顺序列问题，标出文件与行号。\n3. 每个问题都给出具体改法；没问题就直说，不要凑数。",
+      "你在审查一段代码改动。\\n1. 先读上下文与调用方，确认改动意图。\\n2. 按「会出错 > 有风险 > 可读性」的顺序列问题，标出文件与行号。\\n3. 每个问题都给出具体改法；没问题就直说，不要凑数。",
   },
   {
     key: "minutes",
@@ -139,7 +137,7 @@ export const SKILL_TEMPLATES: readonly SkillTemplate[] = [
     name: "会议纪要",
     description: "把讨论整理成结论、待办与负责人",
     instructions:
-      "你在整理会议纪要。\n1. 输出三块：结论、待办（负责人 + 期限）、待定问题。\n2. 只写会上真实说过的内容，不补充推测。\n3. 待办要能直接执行；信息缺失时标注「待确认」。",
+      "你在整理会议纪要。\\n1. 输出三块：结论、待办（负责人 + 期限）、待定问题。\\n2. 只写会上真实说过的内容，不补充推测。\\n3. 待办要能直接执行；信息缺失时标注「待确认」。",
   },
 ];
 
@@ -149,7 +147,7 @@ export const SKILL_TEMPLATES: readonly SkillTemplate[] = [
  * 新建技能弹窗（d.68 简化）：
  * - 必填只有「名称」与「技能内容」，其余可空；
  * - 3 个模板只填空字段；
- * - 创建后直接分配给唯一内置智能体（否则技能建了却「不会用于对话」，新手最容易踩）。
+ * - 创建后立即启用，对话时按需自动匹配（不再需要「分配给谁」这一步）。
  */
 function SkillCreateDialog({
   open,
@@ -205,8 +203,6 @@ function SkillCreateDialog({
       enabled: true,
       version: "1.0.0",
     });
-    // 单一内置智能体：建好即分配，否则「建好了却不会用于对话」是新手最容易踩的坑。
-    skills.assign(SYSTEM_AGENT_ID, created.id);
     onCreated(created);
     onClose();
   };
@@ -303,7 +299,7 @@ function SkillCreateDialog({
             value={instructions}
             maxLength={8000}
             placeholder={
-              "写清「什么时候用它 + 按什么步骤做」。例如：\n你在帮我润色周报。\n1. 先删掉套话与重复。\n2. 保留数字与结论，语气跟随原文。\n3. 先给改后全文，再说明主要改动。"
+              "写清「什么时候用它 + 按什么步骤做」。例如：\\n你在帮我润色周报。\\n1. 先删掉套话与重复。\\n2. 保留数字与结论，语气跟随原文。\\n3. 先给改后全文，再说明主要改动。"
             }
             onChange={(e) => {
               setInstructions(e.target.value);
@@ -319,14 +315,12 @@ function SkillCreateDialog({
         </label>
 
         <p className={`mt-2 ${hintCls}`}>
-          {`创建后会自动分配给「${SYSTEM_AGENT.name}」，对话时就能用。`}
+          创建后立即启用，对话时会按需自动匹配；想暂时不用，可在列表里关掉开关。
         </p>
-
       </form>
     </Dialog>
   );
 }
-
 
 /* ---------------------------------------------------------------- 基础件 */
 
@@ -343,18 +337,6 @@ function TagList({ items, empty }: { items: string[]; empty: string }) {
       ))}
     </div>
   );
-}
-
-/** ISO 时间 → 本地「YYYY-MM-DD HH:mm」；缺失或非法返回「—」。 */
-function formatAt(at: string | undefined): string {
-  if (!at) return "—";
-  const ms = Date.parse(at);
-  if (!Number.isFinite(ms)) return "—";
-  const date = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`;
 }
 
 /* ------------------------------------------------------------------ 插件来源 */
@@ -523,7 +505,7 @@ export interface SkillsViewProps {
   /** 额外容器类（宿主控制高度/内边距用；视图本身不自带 PageShell）。 */
   className?: string;
   /**
-   * 技能池发生变更（新建/导入/启停/分配/删除）后通知宿主。
+   * 技能池发生变更（新建/导入/启停/删除）后通知宿主。
    *
    * 为什么需要：宿主（插件区）的统计卡与能力快照来自 `describeCapabilities`，
    * 只在宿主自己的 `tick` 变化时重算。此前在「技能」Tab 里新建一个技能后，
@@ -536,12 +518,11 @@ export interface SkillsViewProps {
 export type SkillsPageProps = SkillsViewProps;
 
 /**
- * 可嵌入的技能视图（d.67 导航合并）。
+ * 可嵌入的技能视图（d.67 导航合并；d.148.4.95 去分配）。
  *
  * 为什么把技能区从「页」降级成「视图」：导航里技能区与插件区各有一个入口，
  * 但插件技能本来就会物化进技能池、分配与启停是同一份数据——两个入口只是
- * 把同一个能力面拆成两处。合并后插件区（能力中心）承载一个「技能」Tab，
- * 本视图保留技能池、分配、导入/沉淀/删除、搜索与分组，只去掉页面外壳。
+ * 把同一个能力面拆成两处。合并后插件区（能力中心）承载一个「技能」Tab。
  */
 export function SkillsView({
   skills = skillPool,
@@ -550,11 +531,8 @@ export function SkillsView({
   className = "",
   onChanged,
 }: SkillsViewProps = {}) {
-  const [tab, setTab] = useSessionTab<"groups" | "pool" | "hub">(
-    "heming.tab.skills.v1",
-    "groups",
-    ["groups", "pool", "hub"],
-  );
+  // v2：旧的 groups/pool 两个页签已合并成单一列表，读到旧值时回落到「本机技能」。
+  const [tab, setTab] = useSessionTab<SkillTab>("heming.tab.skills.v2", "local", SKILL_TAB_ORDER);
   // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
   const skillTabs = useRovingTabs({
     count: SKILL_TAB_ORDER.length,
@@ -603,12 +581,6 @@ export function SkillsView({
   /** 新建技能弹窗（d.68：名称 + 内容即可创建，模板只填空字段）。 */
   const [createOpen, setCreateOpen] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  /** 全产品唯一内置智能体：技能仍按 agentId 存分配，但 UI 不再让用户切换。 */
-  const agentId = SYSTEM_AGENT_ID;
-  const agentName = SYSTEM_AGENT.name;
-  /** 「＋ 添加技能」浮层：当前要往哪个分类里加（null = 关闭）。 */
-  const [addFor, setAddFor] = useState<SkillCategory | null>(null);
-  const closeAddPanel = () => setAddFor(null);
 
   const bump = () => {
     setTick((n) => n + 1);
@@ -618,18 +590,9 @@ export function SkillsView({
 
   // tick 只用于在 store 变更后强制重读快照（store 非响应式）。
   const list = useMemo(() => skills.list(), [skills, tick]);
-  const usages = useMemo(() => skills.usages(), [skills, tick]);
 
-  /** 内置智能体已分配的技能 id 集合。 */
-  const assignedIds = useMemo(
-    () => new Set(skills.assigned(agentId)),
-    // tick 让 store 变更后重算
-    [skills, agentId, tick],
-  );
-
-  /** 「技能」页只列已分配给当前智能体的技能；「技能池」才是全量。 */
   const keyword = query.trim().toLowerCase();
-  /** 搜索词命中名称 / 描述 / 标签（分组与技能池共用同一口径）。 */
+  /** 搜索词命中名称 / 描述 / 标签（全部技能共用一个口径）。 */
   const matchesKeyword = (skill: SkillDefinition): boolean =>
     !keyword ||
     [skill.name, skill.description, ...skill.tags].some((text) =>
@@ -637,26 +600,7 @@ export function SkillsView({
     );
 
   const byCategory = (key: SkillCategory): SkillDefinition[] =>
-    list.filter(
-      (skill) =>
-        categorizeSkill(skill) === key && assignedIds.has(skill.id) && matchesKeyword(skill),
-    );
-
-  /** 某分类下「还没分配给当前智能体」的技能（＋ 面板用）。 */
-  const addableIn = (key: SkillCategory): SkillDefinition[] =>
-    list.filter((skill) => categorizeSkill(skill) === key && !assignedIds.has(skill.id));
-
-  const assignSkill = (skill: SkillDefinition) => {
-    skills.assign(agentId, skill.id);
-    bump();
-    setMsg({ kind: "ok", text: `已为「${agentName}」添加技能：${skill.name}` });
-  };
-
-  const unassignSkill = (skill: SkillDefinition) => {
-    skills.unassign(agentId, skill.id);
-    bump();
-    setMsg({ kind: "ok", text: `已从「${agentName}」移除技能：${skill.name}` });
-  };
+    list.filter((skill) => categorizeSkill(skill) === key && matchesKeyword(skill));
 
   const enabledCount = list.filter((skill) => skill.enabled).length;
   const filtered = list.filter(matchesKeyword);
@@ -680,21 +624,6 @@ export function SkillsView({
     setRemoveTarget(null);
     bump();
     setMsg({ kind: "ok", text: `已删除技能：${skill.name}` });
-  };
-
-  const distillSkill = (skill: SkillDefinition) => {
-    try {
-      const copy = skills.distill(skill.id);
-      // 沉淀 = 已验证可用：直接分配给内置智能体，避免「沉淀完却看不见」
-      skills.assign(agentId, copy.id);
-      bump();
-      setMsg({ kind: "ok", text: `已沉淀为「${copy.name}」` });
-    } catch (err) {
-      setMsg({
-        kind: "error",
-        text: `沉淀失败：${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
   };
 
   const onImport = () => {
@@ -731,6 +660,67 @@ export function SkillsView({
     }
   };
 
+  /** 导入面板（工具栏与空态共用；抽出来避免两份文案漂移）。 */
+  const importPanel = importOpen ? (
+    <div className="mt-3 border-t border-line-soft pt-3">
+      <label className="block text-ui-sm text-muted">
+        导入技能内容
+        <textarea
+          aria-label="导入技能内容"
+          value={importText}
+          onChange={(e) => setImportText(e.target.value)}
+          placeholder="粘贴 SKILL.md（以 --- 开头）或技能 JSON；同名/同 id 走更新"
+          className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-ui-xs outline-hidden focus:border-ink"
+        />
+      </label>
+      <div className="mt-2 flex items-center gap-2">
+        <Button
+          type="button"
+          onClick={onImport}
+          disabled={!importText.trim()}
+          size="sm" variant="primary"
+        >
+          确认导入
+        </Button>
+        <span className={hintCls}>支持 SKILL.md、单技能 JSON、整池 JSON</span>
+      </div>
+    </div>
+  ) : null;
+
+  const toolbar = (
+    <section className={`${cardCls} mt-3`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          onClick={() => {
+            setMsg(null);
+            setCreateOpen(true);
+          }}
+          size="sm" variant="primary"
+        >
+          新建技能
+        </Button>
+        <Button
+          type="button"
+          onClick={() => {
+            setImportOpen((open) => !open);
+            setMsg(null);
+          }}
+          size="md" variant="ghost"
+        >
+          导入 SKILL.md
+        </Button>
+        <Button type="button" onClick={onExportAll} size="md" variant="ghost">
+          导出全部
+        </Button>
+        <span className={`ml-auto ${hintCls}`}>
+          共 {list.length} 个 · 已启用 {enabledCount} 个
+        </span>
+      </div>
+      {importPanel}
+    </section>
+  );
+
   const groupsPanel = (
     <>
       {GROUPS.map((group) => {
@@ -740,56 +730,11 @@ export function SkillsView({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-ui-sm font-semibold text-muted">{group.title}</span>
               <span className={badgeCls}>{items.length}</span>
-              <button
-                type="button"
-                aria-label={`为${group.title}添加技能`}
-                title={`为${group.title}添加技能`}
-                onClick={() => {
-                  setMsg(null);
-                  setAddFor(group.key);
-                }}
-                className="ui-hit flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-subtle-3 disabled:opacity-40"
-              >
-                <PlusIcon width={12} height={12} />
-              </button>
               <span className={`ml-auto ${hintCls}`}>{group.hint}</span>
             </div>
             {items.length === 0 ? (
-              <div className="mt-2">
-                <div className={hintCls}>
-                  {keyword
-                    ? `没有匹配「${query.trim()}」的技能`
-                    : `「${agentName}」还没有这类技能，点上方 ＋ 添加。`}
-                </div>
-                {!keyword && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {group.key === "custom" && (
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          setMsg(null);
-                          setCreateOpen(true);
-                        }}
-                        size="sm" variant="primary"
-                      >
-                        新建技能
-                      </Button>
-                    )}
-                    {group.key === "installed" && (
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          setTab("pool");
-                          setImportOpen(true);
-                          setMsg(null);
-                        }}
-                        size="sm" variant="ghost"
-                      >
-                        导入 SKILL.md
-                      </Button>
-                    )}
-                  </div>
-                )}
+              <div className={`mt-2 ${hintCls}`}>
+                {keyword ? `没有匹配「${query.trim()}」的技能` : group.empty}
               </div>
             ) : (
               <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -844,14 +789,6 @@ export function SkillsView({
                       >
                         详情
                       </Button>
-                      <Button
-                        type="button"
-                        aria-label={`移除 ${skill.name}`}
-                        onClick={() => unassignSkill(skill)}
-                        size="sm" variant="ghost"
-                      >
-                        移除
-                      </Button>
                       {skill.source === "builtin" ? (
                         <span className={`ml-auto ${hintCls}`}>内置不可删</span>
                       ) : (
@@ -877,71 +814,14 @@ export function SkillsView({
     </>
   );
 
-  /** 导入面板（技能池动作区与空态共用；抽出来避免两份文案漂移）。 */
-  const importPanel = importOpen ? (
-    <div className="mt-3 border-t border-line-soft pt-3">
-      <label className="block text-ui-sm text-muted">
-        导入技能内容
-        <textarea
-          aria-label="导入技能内容"
-          value={importText}
-          onChange={(e) => setImportText(e.target.value)}
-          placeholder="粘贴 SKILL.md（以 --- 开头）或技能 JSON；同名/同 id 走更新"
-          className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-ui-xs outline-hidden focus:border-ink"
-        />
-      </label>
-      <div className="mt-2 flex items-center gap-2">
-        <Button
-          type="button"
-          onClick={onImport}
-          disabled={!importText.trim()}
-          size="sm" variant="primary"
-        >
-          确认导入
-        </Button>
-        <span className={hintCls}>支持 SKILL.md、单技能 JSON、整池 JSON</span>
-      </div>
-    </div>
-  ) : null;
-
-  const poolPanel = (
-    <>
-      {list.length === 0 ? (
-        <section className={`${cardCls} mt-3`}>
-          <EmptyState
-            title="技能池还是空的"
-            desc={`新建一个技能，或粘贴 SKILL.md 导入。技能启用并分配给「${SYSTEM_AGENT.name}」后，对话时才会生效。`}
-            actions={
-              <>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setMsg(null);
-                    setCreateOpen(true);
-                  }}
-                  size="sm" variant="primary"
-                >
-                  新建技能
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setImportOpen(true);
-                    setMsg(null);
-                  }}
-                  size="md" variant="ghost"
-                >
-                  导入 SKILL.md
-                </Button>
-              </>
-            }
-          />
-          {importPanel}
-        </section>
-      ) : (
-        <>
-          <section className={`${cardCls} mt-3`}>
-            <div className="flex flex-wrap items-center gap-2">
+  const localPanel =
+    list.length === 0 ? (
+      <section className={`${cardCls} mt-3`}>
+        <EmptyState
+          title="还没有任何技能"
+          desc="新建一个技能，或粘贴 SKILL.md 导入；社区里也能装现成的。启用后对话时会按需自动匹配。"
+          actions={
+            <>
               <Button
                 type="button"
                 onClick={() => {
@@ -955,134 +835,30 @@ export function SkillsView({
               <Button
                 type="button"
                 onClick={() => {
-                  setImportOpen((open) => !open);
+                  setImportOpen(true);
                   setMsg(null);
                 }}
                 size="md" variant="ghost"
               >
                 导入 SKILL.md
               </Button>
-              <Button type="button" onClick={onExportAll} size="md" variant="ghost">
-                导出全部
-              </Button>
-              <span className={`ml-auto ${hintCls}`}>
-                共 {list.length} 个 · 已启用 {enabledCount} 个
-              </span>
-            </div>
-            {importPanel}
-          </section>
-
+            </>
+          }
+        />
+        {importPanel}
+      </section>
+    ) : (
+      <>
+        {toolbar}
+        {filtered.length === 0 ? (
           <section className={`${cardCls} mt-3`}>
-            <div className="flex items-center gap-2">
-              <span className="text-ui-sm font-semibold text-muted">全部技能</span>
-              <span className={badgeCls}>{filtered.length}</span>
-            </div>
-
-            {filtered.length === 0 ? (
-              <div className={`mt-2 ${hintCls}`}>
-                {list.length === 0
-                  ? "技能池为空：可导入 SKILL.md 或新建技能"
-                  : `没有匹配「${query.trim()}」的技能`}
-              </div>
-            ) : (
-              <div className="mt-2 overflow-x-auto">
-                <table className="ui-table min-w-[760px]">
-                  <thead>
-                    <tr>
-                      <th>名称</th>
-                      <th>来源</th>
-                      <th>启用</th>
-                      <th className="text-right">使用次数</th>
-                      <th>最近使用</th>
-                      <th>标签</th>
-                      <th className="text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((skill) => (
-                      <tr key={skill.id} className="align-top">
-                        <td>
-                          <div className="truncate font-semibold text-ink">{skill.name}</div>
-                          <div className="mt-0.5 line-clamp-2 break-words ui-caption">
-                            {skill.description || "暂无描述"}
-                          </div>
-                        </td>
-                        <td>
-                          {skill.source === "builtin" ? (
-                            <SystemSourceChip systemName={systemName} />
-                          ) : (
-                            <span className={badgeCls}>{SOURCE_LABEL[skill.source]}</span>
-                          )}
-                          {skill.pluginId && pluginNames.get(skill.pluginId) ? (
-                            <span className="ml-1.5 inline-flex align-middle">
-                              <PluginSourceChip
-                                pluginName={pluginNames.get(skill.pluginId)!}
-                                onOpen={() => openPlugin(skill.pluginId!)}
-                              />
-                            </span>
-                          ) : null}
-                        </td>
-                        <td>
-                          <Switch
-                            label={`启用 ${skill.name}`}
-                            checked={skill.enabled}
-                            onChange={(next) => toggleEnabled(skill, next)}
-                          />
-                        </td>
-                        <td className="ui-numeric text-right text-body">
-                          {usages[skill.id]?.count ?? 0}
-                        </td>
-                        <td className="ui-caption">{formatAt(usages[skill.id]?.at)}</td>
-                        <td>
-                          <TagList items={skill.tags} empty="—" />
-                        </td>
-                        <td className="text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              aria-label={`池中详情 ${skill.name}`}
-                              onClick={() => setDetailId(skill.id)}
-                              size="sm" variant="ghost"
-                            >
-                              详情
-                            </Button>
-                            {skill.source !== "builtin" && skill.source !== "distilled" && (
-                              <Button
-                                type="button"
-                                aria-label={`沉淀 ${skill.name}`}
-                                onClick={() => distillSkill(skill)}
-                                size="sm" variant="ghost"
-                              >
-                                转为沉淀
-                              </Button>
-                            )}
-                            {skill.source !== "builtin" && (
-                              <Button
-                                type="button"
-                                aria-label={`池中删除 ${skill.name}`}
-                                onClick={() => removeSkill(skill)}
-                                size="sm" variant="ghost" className="text-danger"
-                              >
-                                删除
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div className={hintCls}>没有匹配「{query.trim()}」的技能</div>
           </section>
-
-          <p className={`mt-2 ${hintCls}`}>
-            启用并分配给「{SYSTEM_AGENT.name}」后，技能才会在对话里生效。
-          </p>
-        </>
-      )}
-    </>
-  );
+        ) : (
+          groupsPanel
+        )}
+      </>
+    );
 
   return (
     <div className={className}>
@@ -1090,10 +866,10 @@ export function SkillsView({
         <div className="flex flex-wrap items-center gap-2">
           {tab !== "hub" && (
             <span className={hintCls}>
-              技能启用并分配给「{agentName}」后即在对话里生效；当前已分配 {assignedIds.size} 个
+              技能启用后即在对话里生效；共 {list.length} 个 · 已启用 {enabledCount} 个
             </span>
           )}
-          </div>
+        </div>
         <div
           role="tablist"
           aria-label="技能视图"
@@ -1103,35 +879,22 @@ export function SkillsView({
           <Button
             type="button"
             role="tab"
-            id="skill-groups-tab"
+            id="skill-local-tab"
             ref={skillTabs.getTabRef(0)}
             tabIndex={skillTabs.tabIndexFor(0)}
-            aria-controls={tab === "groups" ? "skill-groups-panel" : undefined}
-            aria-selected={tab === "groups"}
-            onClick={() => setTab("groups")}
-            size="sm" variant={tab === "groups" ? "primary" : "ghost"} className={tab === "groups" ? undefined : "text-muted"}
+            aria-controls={tab === "local" ? "skill-local-panel" : undefined}
+            aria-selected={tab === "local"}
+            onClick={() => setTab("local")}
+            size="sm" variant={tab === "local" ? "primary" : "ghost"} className={tab === "local" ? undefined : "text-muted"}
           >
-            已分配
-          </Button>
-          <Button
-            type="button"
-            role="tab"
-            id="skill-pool-tab"
-            ref={skillTabs.getTabRef(1)}
-            tabIndex={skillTabs.tabIndexFor(1)}
-            aria-controls={tab === "pool" ? "skill-pool-panel" : undefined}
-            aria-selected={tab === "pool"}
-            onClick={() => setTab("pool")}
-            size="sm" variant={tab === "pool" ? "primary" : "ghost"} className={tab === "pool" ? undefined : "text-muted"}
-          >
-            技能池
+            本机技能
           </Button>
           <Button
             type="button"
             role="tab"
             id="skill-hub-tab"
-            ref={skillTabs.getTabRef(2)}
-            tabIndex={skillTabs.tabIndexFor(2)}
+            ref={skillTabs.getTabRef(1)}
+            tabIndex={skillTabs.tabIndexFor(1)}
             aria-controls={tab === "hub" ? "skill-hub-panel" : undefined}
             aria-selected={tab === "hub"}
             onClick={() => setTab("hub")}
@@ -1142,9 +905,8 @@ export function SkillsView({
         </div>
       </div>
 
-      {/* 搜索提到页头：分组视图与技能池共用同一个搜索词（此前分组视图完全忽略它）。
-          社区 Tab 用自己的搜索框（服务端检索 + 防抖），不复用本机技能搜索。 */}
-      {tab !== "hub" && (
+      {/* 搜索只作用于本机技能列表；社区 Tab 有自己的服务端检索框。 */}
+      {tab === "local" && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
             aria-label="搜索技能"
@@ -1154,11 +916,7 @@ export function SkillsView({
             className={`${inputSmCls} min-w-[180px] max-w-[320px] flex-1`}
           />
           <span className={hintCls}>
-            {keyword
-              ? tab === "groups"
-                ? `分组内匹配 ${GROUPS.reduce((n, g) => n + byCategory(g.key).length, 0)} 个`
-                : `匹配 ${filtered.length} 个`
-              : "搜索同时作用于分组与技能池"}
+            {keyword ? `匹配 ${filtered.length} 个` : "搜索同时作用于名称、描述与标签"}
           </span>
         </div>
       )}
@@ -1171,13 +929,11 @@ export function SkillsView({
 
       <div
         role="tabpanel"
-        id={tab === "groups" ? "skill-groups-panel" : tab === "pool" ? "skill-pool-panel" : "skill-hub-panel"}
-        aria-labelledby={tab === "groups" ? "skill-groups-tab" : tab === "pool" ? "skill-pool-tab" : "skill-hub-tab"}
+        id={tab === "local" ? "skill-local-panel" : "skill-hub-panel"}
+        aria-labelledby={tab === "local" ? "skill-local-tab" : "skill-hub-tab"}
       >
-        {tab === "groups" ? (
-          groupsPanel
-        ) : tab === "pool" ? (
-          poolPanel
+        {tab === "local" ? (
+          localPanel
         ) : (
           <SkillHubPanel
             skills={skills}
@@ -1185,64 +941,10 @@ export function SkillsView({
               setTick((n) => n + 1);
               onChanged?.();
             }}
-            onGoAssign={() => setTab("pool")}
+            onGoSkills={() => setTab("local")}
           />
         )}
       </div>
-
-      {addFor && (
-        <Dialog
-          ariaLabel="添加技能"
-          title={`为「${agentName}」添加${GROUPS.find((g) => g.key === addFor)?.title ?? ""}`}
-          size="sm"
-          maxHeightVh={70}
-          onClose={closeAddPanel}
-          closeLabel="关闭添加面板"
-          bodyClassName="px-4 pb-4"
-        >
-            <div>
-              {addableIn(addFor).length === 0 ? (
-                <p className={hintCls}>该分类下没有可添加的技能；可先去技能池导入或沉淀。</p>
-              ) : (
-                <ul className="divide-y divide-line-soft">
-                  {addableIn(addFor).map((skill) => (
-                    <li key={skill.id}>
-                      <button
-                        type="button"
-                        aria-label={`添加 ${skill.name}`}
-                        onClick={() => {
-                          assignSkill(skill);
-                          setAddFor(null);
-                        }}
-                        className="ui-list-row w-full text-left"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-ui-sm font-medium">{skill.name}</span>
-                          <span className={`block truncate ${hintCls}`}>
-                            {skill.description || "暂无描述"}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-ui-xs text-muted">
-                          {SOURCE_LABEL[skill.source]}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-        </Dialog>
-      )}
-
-      {/* 写作能力（去 AI 味）不再单独占卡片：规则已并入内置「写作润色」技能的默认流程，
-          技能池里的「去 AI 味」技能与 tone_detect 工具仍可直接使用（d.126）。 */}
-
-      {/* 自我优化：让智能体改自己的记忆/技能/MCP。与「技能」同属能力配置，故放这里 */}
-      <SelfEditCard
-        agents={[{ id: SYSTEM_AGENT_ID, name: SYSTEM_AGENT.name }]}
-        agentId={agentId}
-        targets={{ memory: memoryStore, skills, mcp: mcpRegistry }}
-      />
 
       <SkillCreateDialog
         open={createOpen}
@@ -1250,10 +952,7 @@ export function SkillsView({
         onClose={() => setCreateOpen(false)}
         onCreated={(skill) => {
           bump();
-          setMsg({
-            kind: "ok",
-            text: `已新建技能「${skill.name}」，并分配给「${agentName}」；对话时就会用上。`,
-          });
+          setMsg({ kind: "ok", text: `已新建技能「${skill.name}」；对话时就会按需匹配。` });
         }}
       />
 
@@ -1292,7 +991,7 @@ export function SkillsView({
           }
         >
           <p className="text-ui-sm leading-6">
-            删除技能「{removeTarget.name}」？技能定义、使用统计和分配记录都会被移除，
+            删除技能「{removeTarget.name}」？技能定义和使用统计都会被移除，
             此操作不可恢复。
           </p>
         </ConfirmDialog>

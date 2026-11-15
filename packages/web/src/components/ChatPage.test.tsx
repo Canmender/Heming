@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
-import type { Message, User, WsClientEvent } from "@heming/shared";
+import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
 import { UNBOUND_ADD_SOURCE_LABEL } from "./ux/UnboundModelNotice.js";
 import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
@@ -4225,7 +4225,12 @@ describe("ChatPage 工具轮可视化接线", () => {
     expect(sealed.some((t) => (t ?? "").includes("不是最终答案"))).toBe(true);
   });
 
-  it("未授权自我优化时不注入 self 工具，但 chart 工具照常在（两者授权是独立的）", async () => {
+  it("显式关掉自我优化时不注入 self 工具（旧版配置仍生效），chart 工具照常在", async () => {
+    // d.148.4.95 起自我优化默认开启、只有旧版显式关掉过的不注入。
+    window.localStorage.setItem(
+      "heming.selfEdit.v1",
+      JSON.stringify({ [SYSTEM_AGENT_ID]: { enabled: false } }),
+    );
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
         mockMessagesFetch([]);

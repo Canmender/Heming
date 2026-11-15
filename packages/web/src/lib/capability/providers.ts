@@ -10,6 +10,7 @@ import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
 import { buildToneToolBridge } from "../tone/tools.js";
 import { buildVaultToolBridge } from "../vault/tools.js";
+import { buildWebToolsBridgeIfAvailable } from "../webtools/tools.js";
 import { buildWikiToolBridge } from "../wiki/tools.js";
 import type { CapabilityProvider } from "./types.js";
 
@@ -76,6 +77,20 @@ export const filesProvider: CapabilityProvider = {
 };
 
 /**
+ * 内置联网工具（d.148.4.95.11 · web_search / web_read / now）：
+ * 只在**有主进程 HTTP 桥**时注入（浏览器端返回 null）。
+ *
+ * 为什么要桥：渲染层 origin 是 `app://heming`，直连第三方会被同源策略拦下；
+ * 主进程的通用代发桥（`workflow:http`）已做安全收口，在这里复用比新开一条 IPC
+ * 通道更小也更安全。三个工具都只读，由 `guarded + floor=read` 默认放行。
+ */
+export const webToolsProvider: CapabilityProvider = {
+  id: "webtools",
+  origin: "builtin",
+  build: () => buildWebToolsBridgeIfAvailable(),
+};
+
+/**
  * 本机归档工具：只在桌面端且用户已连接信息中枢时注入。
  * 未连接时返回 null——绝不为了「能用」而替用户拉起 Python 进程。
  */
@@ -99,15 +114,15 @@ export const pluginMarketProvider: CapabilityProvider = {
 };
 
 /**
- * 自我修改工具：只有用户**显式配置过**该智能体才注入（沿用改前口径）。
- * 配置过但关闭时仍会构建——`buildSelfToolBridge` 产出空 tools，由注册表过滤。
+ * 自我修改工具：默认开启（d.148.4.95 起不再有页面开关）。
+ * 只有旧版本里显式关掉过的智能体才不注入；关掉时 `allowed()` 为 false。
  */
 export const selfProvider: CapabilityProvider = {
   id: "self",
   origin: "self",
   build: (ctx) => {
     const selfEdit = ctx.selfEdit;
-    if (!selfEdit || !selfEdit.policy.configured(ctx.agentId)) return null;
+    if (!selfEdit || !selfEdit.policy.allowed(ctx.agentId)) return null;
     return buildSelfToolBridge(
       {
         memory: memoryStore,

@@ -12,6 +12,33 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.148.4.95.11",
+    "date": "2026-11-15",
+    "title": "技能区极简化：单一列表，删掉分配与自我优化配置",
+    "bullets": [
+      "`components/SkillsPage.tsx` 整文件重写（1321 → 约 1020 行）：页签「已分配 / 技能池 / 社区」收成「本机技能 / 社区」（`SkillTab = \"local\" | \"hub\"`，会话页签 key 升为 `heming.tab.skills.v2`，旧的 `groups` / `pool` 自动回落「本机技能」）。「本机技能」是单列表：页头「技能启用后即在对话里生效；共 N 个 · 已启用 M 个」+ 搜索（名称/描述/标签）+ 新建技能 / 导入 SKILL.md / 导出全部，下面按来源分四组（内置 / 已装 / 沉淀 / 自定义），卡片保留名称、来源徽标（「内置：…」/「已装」等）、版本、启用开关、描述、标签与「详情 / 删除」，内置仍不可删。",
+      "删掉的东西：两个子页签、每组「＋ 添加技能」弹窗、卡片「移除」、新建/沉淀后的 `assign(SYSTEM_AGENT_ID, …)`、技能池表格的「使用次数 / 最近使用 / 转为沉淀」、所有「分配给「和鸣」」文案。四分类与沉淀来源保留。",
+      "自我优化：删除 `components/SelfEditCard.tsx`（275 行）与 `SelfEditCard.test.tsx`；功能改为默认开启——`lib/capability/providers.ts` 里 self 工具的注入判据由 `policy.configured(agentId)` 改成 `policy.allowed(agentId)`（缺省 true），旧版本里显式关掉过（`enabled: false`）的智能体仍不注入；`lib/selfEdit/guards.ts` 的 `configured()` 保留为旧数据兼容/排查用，注释同步口径。",
+      "社区（`components/skills/SkillHubPanel.tsx`）：`onGoAssign` → `onGoSkills`、内部 `goAssign` → `goSkills`（跳回时改 `setPage(\"plugins\")` 落到技能区），按钮「去技能区分配」→「查看已装技能」，安装成功提示改为「已安装「X」；已启用，对话时会按需匹配。」，各处「默认不分配给任何智能体」改为「默认启用、对话时按需匹配」。",
+      "`lib/skills/store.ts`：`route()` 不再传 `allowed: this.assigned(agentId)`——全部已启用技能参与匹配，`agentId` 只剩 pinned/disabled 语义（d.148.4.95 起不再按智能体分配）。",
+      "`lib/selfEdit/tools.ts`：`self_skill_list` 直接 `deps.skills.list()`，不再按分配过滤；`assigned()/assign()/unassign()` 与绑定存储保留（旧数据、插件与记忆侧调用未动）。",
+      "`components/ChatPage.tsx`：自我优化相关注释改为「默认开启、不再提供页面开关」。",
+      "`components/SkillsPage.test.tsx` 整篇重写（两个页签的键盘操作、单列表与四组计数、搜索、导入 SKILL.md、新建模板、删除二次确认、空态、无「已分配/技能池」与无自我优化开关）；`SkillsPage.plugin.test.tsx` / `SkillsPage.system.test.tsx` 改用卡片视图（`技能卡 X` / `详情 X`）；`PluginsPage.test.tsx` / `PluginsPage.capabilities.test.tsx` / `SkillHubPanel.test.tsx` 同步新文案与页签；`providers.test.ts`（self 默认注入）、`ChatPage.test.tsx`（显式关掉才不注入）同步；`lib/skills/skills.test.ts` 的路由用例改为「启用即参与、禁用是唯一边界，置顶只是排序」。",
+      "`pnpm --filter @heming/web typecheck` exit 0；`pnpm --filter @heming/web build`（tsc + vite build）exit 0，仅 chunk 体积警告。",
+      "技能区相关 4 个测试文件 **19/19 passed**：`SkillsPage.test.tsx`（10）、`SkillsPage.plugin.test.tsx`（4）、`SkillsPage.system.test.tsx`（3）、`SkillsPage.focusSkill.test.tsx`（2）。",
+      "全量 `vitest run`：**304 files / 4442 tests passed，9 failed**。9 条全部落在**本轮未触碰、工作树里正在改的团队共享/团队页**（`HomePage` 团队动向 2、`TeamBoardPage` 3、`TeamPage` 2、`lib/team/share.test.ts` 2：`DEFAULT_TEAM_SHARE` 新增 `activitiesClearedAt` 后断言与夹具尚未同步），与技能区改动无关。",
+      "`node scripts/build-changelog.mjs` 已重新生成 `generated/changelog.ts`（246 条）与 `releaseNotes.ts`（134 条）；`packages/desktop` 的 `version-sync.test.js` + `changelog-sync.test.js` **10/10 passed**。",
+      "为让 typecheck 能跑，顺带修了工作树里两处团队共享 WIP 的语法/类型缺口：`lib/team/share.ts` 文档注释块缺 `/**` 起始（TS1109/TS1127）、`lib/team/share.test.ts` 的 `ON` 常量缺 `activitiesClearedAt`（TS2741）。两处都只是恢复可编译状态，未改其设计意图，需该改动的作者复核。"
+    ],
+    "paragraphs": [
+      "产品确定只做单一内置智能体后，技能区里只服务多智能体的那层配置（把技能分配给某个智能体、按智能体分组的「已分配 / 技能池」、每个智能体的自我优化开关）已经没有意义。这一轮把它们从界面移除、收为系统内部默认：技能区打开就是一张按来源分组的列表，启用即生效；自我优化默认开启、不再有页面开关。",
+      "**技能区（packages/web）**",
+      "**数据层**",
+      "**测试**",
+      "**验证（d.148.4.95.11，工作树实跑）**"
+    ]
+  },
+  {
     "version": "d.147.4.94.11",
     "date": "2026-11-15",
     "title": "内置运行环境自包含：装完即用，不用再装 Python 和 uv",

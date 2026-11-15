@@ -139,16 +139,16 @@ function renderPanel(routes: Routes = {}, pool?: SkillPool) {
   const skills = pool ?? new SkillPool(memoryStorage());
   const { fetchImpl, calls } = makeFetch(routes);
   const onInstalled = vi.fn();
-  const onGoAssign = vi.fn();
+  const onGoSkills = vi.fn();
   const utils = render(
     <SkillHubPanel
       skills={skills}
       deps={{ fetchImpl, baseUrl: BASE }}
       onInstalled={onInstalled}
-      onGoAssign={onGoAssign}
+      onGoSkills={onGoSkills}
     />,
   );
-  return { ...utils, skills, calls, onInstalled, onGoAssign };
+  return { ...utils, skills, calls, onInstalled, onGoSkills };
 }
 
 beforeEach(() => {
@@ -441,7 +441,7 @@ describe("SkillHubPanel · 社区更新聚合（d.110）", () => {
       hasMore: false,
       fetchedAt: "2026-11-08T00:00:00.000Z",
     };
-    const { onGoAssign } = renderPanel(
+    const { onGoSkills } = renderPanel(
       {
         page,
         downloadFor: async (url) => {
@@ -478,16 +478,15 @@ describe("SkillHubPanel · 社区更新聚合（d.110）", () => {
     const manual = pool.list().find((skill) => skill.name === "手工技能");
     expect(manual?.instructions).toBe("手工内容");
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "去技能区分配" }));
-    expect(onGoAssign).toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "查看已装技能" }));
+    expect(onGoSkills).toHaveBeenCalled();
     expect(useUiStore.getState().page).toBe("plugins");
-    expect(useUiStore.getState().pageView).toBe("skills");
   });
 });
 
 describe("SkillHubPanel · Key 与安装", () => {
   it("无 Key 点安装 → Key 引导；保存后下载 → 预览 → 确认写入技能池并记 community", async () => {
-    const { skills, onInstalled, onGoAssign } = renderPanel();
+    const { skills, onInstalled, onGoSkills } = renderPanel();
     await screen.findByText("周报助手");
     fireEvent.click(screen.getAllByRole("button", { name: "安装" })[0]!);
 
@@ -512,14 +511,16 @@ describe("SkillHubPanel · Key 与安装", () => {
       community: { source: "xiaping", skillId: "xp-1", version: "1.2.0" },
     });
     expect(saved!.enabled).toBe(true);
-    // 默认不分配：技能池里没有该技能的智能体分配记录
+    // 安装即启用：装完就在技能列表里，对话时按需匹配（不再有「分配」这一步）
     expect(onInstalled).toHaveBeenCalled();
-    expect(screen.getByText(/已安装「周报助手」/)).toBeInTheDocument();
+    expect(
+      screen.getByText("已安装「周报助手」；已启用，对话时会按需匹配。"),
+    ).toBeInTheDocument();
 
-    // 安装成功后给「去技能区分配」出口：切到技能区 + 由宿主切「技能池」Tab
-    fireEvent.click(screen.getByRole("button", { name: "去技能区分配" }));
-    expect(onGoAssign).toHaveBeenCalled();
-    expect(useUiStore.getState().pageView).toBe("skills");
+    // 安装成功后给「查看已装技能」出口：切到插件区的技能视图
+    fireEvent.click(screen.getByRole("button", { name: "查看已装技能" }));
+    expect(onGoSkills).toHaveBeenCalled();
+    expect(useUiStore.getState().page).toBe("plugins");
   });
 
   it("「用这个名字创建账号」需要明确点击，并把 Key 存到本机", async () => {

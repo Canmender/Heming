@@ -42,7 +42,7 @@ import { Button } from "../../components/ui/Button.js";
  * - 技能内容只有 SKILL.md 文本，交给 `parseImportText` 解析；**不执行随包代码**；
  * - 写入走 `skills.update`（同社区 skillId 或同名）或 `skills.create`，`source: "imported"`；
  * - `community` 记来源/上游 id/版本/作者/主页，用于「已安装 / 有新版本」徽标；
- * - **默认不分配给任何智能体**（沿用导入语义）。
+ * - 安装后直接进技能池、默认启用，对话时即可按需匹配（不再有「分配给谁」这一步）。
  */
 
 export const HUB_SEARCH_DEBOUNCE_MS = 250;
@@ -108,8 +108,8 @@ export interface SkillHubPanelProps {
   deps?: SkillHubClientDeps;
   /** 安装/更新后通知宿主刷新技能列表。 */
   onInstalled?: () => void;
-  /** 「去技能区分配」：由宿主把技能视图切到技能池 Tab（不新增全局状态）。 */
-  onGoAssign?: () => void;
+  /** 「查看已装技能」：由宿主把技能视图切回本机列表（不新增全局状态）。 */
+  onGoSkills?: () => void;
 }
 
 /* ─────────────────────────────── Key 弹窗 ─────────────────────────────── */
@@ -459,7 +459,7 @@ function HubDetailDialog({
           </section>
 
           <p className={`mt-3 ${HINT}`}>
-            社区技能是第三方提供的**指令文本**；和鸣不会执行随技能下发的代码，安装后默认不分配给任何智能体。
+            社区技能是第三方提供的**指令文本**；和鸣不会执行随技能下发的代码，安装后默认启用、对话时按需匹配。
           </p>
         </div>
 
@@ -554,11 +554,11 @@ function InstallPreviewDialog({
         </dl>
         {sameName && (
           <p role="alert" className={`mt-2 ${ERROR_TEXT}`}>
-            本机已有同名技能「{sameName.name}」，确认安装将更新它的内容（保留原启用/分配状态）。
+            本机已有同名技能「{sameName.name}」，确认安装将更新它的内容（保留原启用状态）。
           </p>
         )}
         <p className={`mt-2 ${HINT}`}>
-          以上内容来自第三方社区；安装后写入技能池并标记为「已装」，默认不分配给任何智能体。
+          以上内容来自第三方社区；安装后写入技能池并标记为「已装」，默认启用、对话时按需匹配。
         </p>
         <div className="mt-3 flex items-center justify-end gap-2">
           <Button type="button" size="md" variant="ghost" onClick={onCancel}>
@@ -584,7 +584,7 @@ function BulkUpdateDialog({
   onConfirm,
   onClose,
   onStop,
-  onGoAssign,
+  onGoSkills,
 }: {
   rows: CommunityUpdateRow[];
   running: boolean;
@@ -594,7 +594,7 @@ function BulkUpdateDialog({
   onConfirm: () => void;
   onClose: () => void;
   onStop: () => void;
-  onGoAssign: () => void;
+  onGoSkills: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, onClose, { active: !running });
@@ -682,8 +682,8 @@ function BulkUpdateDialog({
             </Button>
           )}
           {done && ok > 0 && (
-            <Button type="button" size="md" variant="primary" onClick={onGoAssign}>
-              去技能区分配
+            <Button type="button" size="md" variant="primary" onClick={onGoSkills}>
+              查看已装技能
             </Button>
           )}
         </div>
@@ -694,7 +694,7 @@ function BulkUpdateDialog({
 
 /* ─────────────────────────────── 主面板 ─────────────────────────────── */
 
-export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHubPanelProps) {
+export function SkillHubPanel({ skills, deps, onInstalled, onGoSkills }: SkillHubPanelProps) {
   const fetchImpl = deps?.fetchImpl;
   const baseUrl = deps?.baseUrl;
 
@@ -734,8 +734,8 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
   const [bulkRows, setBulkRows] = useState<CommunityUpdateRow[]>([]);
   /** 批量更新「停止」：AbortController 终止在途与后续请求（d.113 P1-8）。 */
   const bulkAbortRef = useRef<AbortController | null>(null);
-  /** 安装/更新成功后提供「去技能区分配」出口。 */
-  const [showGoAssign, setShowGoAssign] = useState(false);
+  /** 安装/更新成功后提供「查看已装技能」出口。 */
+  const [showGoSkills, setShowGoSkills] = useState(false);
 
   /** 状态：挂载与手动重试时拉。 */
   useEffect(() => {
@@ -967,18 +967,18 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
       }
       setPreview(null);
       setTick((n) => n + 1);
-      setShowGoAssign(true);
-      setMsg({ kind: "ok", text: `已安装「${parsed.name}」；默认未分配给任何智能体。` });
+      setShowGoSkills(true);
+      setMsg({ kind: "ok", text: `已安装「${parsed.name}」；已启用，对话时会按需匹配。` });
       onInstalled?.();
     } catch (err) {
       setMsg({ kind: "error", text: `安装失败：${errorText(err)}` });
     }
   };
 
-  /** 「去技能区分配」：切到技能区 → 技能池 Tab（宿主回调负责页内 Tab，不新增全局状态）。 */
-  const goAssign = () => {
-    useUiStore.getState().setPage("skills");
-    onGoAssign?.();
+  /** 「查看已装技能」：切回技能区的本机列表（宿主回调负责页内 Tab，不新增全局状态）。 */
+  const goSkills = () => {
+    useUiStore.getState().setPage("plugins");
+    onGoSkills?.();
   };
 
   /**
@@ -1091,7 +1091,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
         : `社区技能更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`,
     });
     if (ok > 0) {
-      setShowGoAssign(true);
+      setShowGoSkills(true);
       onInstalled?.();
     }
   };
@@ -1157,7 +1157,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
           </Button>
         </div>
         <p className={`mt-1 ${HINT}`}>
-          技能来自第三方社区，内容是指令文本；和鸣不执行随技能下发的代码，安装后默认不分配给任何智能体。
+          技能来自第三方社区，内容是指令文本；和鸣不执行随技能下发的代码，安装后默认启用、对话时按需匹配。
           {!status!.reachable ? " 上游暂不可达，列表可能来自缓存。" : ""}
         </p>
       </div>
@@ -1172,9 +1172,9 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
             全部更新
           </Button>
         )}
-        {showGoAssign && (
-          <Button type="button" size="sm" variant="ghost" onClick={goAssign}>
-            去技能区分配
+        {showGoSkills && (
+          <Button type="button" size="sm" variant="ghost" onClick={goSkills}>
+            查看已装技能
           </Button>
         )}
       </div>
@@ -1418,7 +1418,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
             setBulkRows([]);
           }}
           onStop={stopBulkUpdate}
-          onGoAssign={goAssign}
+          onGoSkills={goSkills}
         />
       )}
     </section>

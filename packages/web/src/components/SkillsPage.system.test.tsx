@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup, within } from "@testing-library/react";
 import { SkillsPage } from "./SkillsPage.js";
 import { SkillPool } from "../lib/skills/index.js";
 import { PluginStore, describeSystemPlugin, type PluginMcpPort } from "../lib/plugins/index.js";
@@ -8,17 +8,12 @@ import type { McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
 
 /**
- * d.65 T3：技能区的「内置：系统能力」来源徽标。
+ * d.65 T3：技能区的「内置：系统能力」来源徽标（d.148.4.95 单一列表版）。
  *
  * 1. 内置技能的来源徽标是**非按钮**（系统插件没有详情页可跳），文案为「内置：<系统能力名>」，
  *    名称来自 describeSystemPlugin().name，页面里不硬编码；
  * 2. 插件技能仍是可点的「插件：<名>」徽标（对比，确认没被一起改坏）。
  */
-
-vi.mock("../lib/agentsApi.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/agentsApi.js")>();
-  return { ...actual, listAgents: vi.fn(async () => []) };
-});
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
 
@@ -100,30 +95,29 @@ describe("技能区 · 系统来源徽标", () => {
     const systemName = describeSystemPlugin().name;
 
     render(<SkillsPage skills={skills} plugins={plugins} />);
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
 
-    const row = screen.getByRole("row", { name: new RegExp(builtin.name) });
-    const chip = within(row).getByText(`：${systemName}`, { exact: false }).closest(".ui-chip")!;
+    // 单一列表：默认「本机技能」，内置技能在「内置技能」分组里直接平铺成卡片。
+    const card = screen.getByRole("group", { name: `技能卡 ${builtin.name}` });
+    const chip = within(card).getByText(`：${systemName}`, { exact: false }).closest(".ui-chip")!;
     expect(chip).toBeTruthy();
     expect(chip.textContent).toBe(`内置：${systemName}`);
     // 非按钮：来源徽标没有可点语义（系统插件没有详情页）
     expect(chip.tagName).not.toBe("BUTTON");
-    expect(within(row).queryByRole("button", { name: new RegExp(systemName) })).toBeNull();
+    expect(within(card).queryByRole("button", { name: new RegExp(systemName) })).toBeNull();
   });
 
   it("名称取自 describeSystemPlugin().name（不是页面硬编码的「系统能力」字面量）", () => {
     const systemName = describeSystemPlugin().name;
     expect(systemName.length).toBeGreaterThan(0);
     render(<SkillsPage skills={skills} plugins={plugins} />);
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     expect(screen.getAllByText(`：${systemName}`, { exact: false }).length).toBeGreaterThan(0);
   });
 
-  it("插件技能仍是可点徽标（与系统徽标并存不混淆）", () => {
+  it("插件技能仍是可点徽标（与系统徽标并存不混淆）", async () => {
     render(<SkillsPage skills={skills} plugins={plugins} />);
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
 
-    const pluginChip = screen.getByRole("button", { name: "打开插件 天气能力包" });
+    const pluginCard = screen.getByRole("group", { name: "技能卡 出行建议" });
+    const pluginChip = within(pluginCard).getByRole("button", { name: "打开插件 天气能力包" });
     expect(pluginChip.textContent).toBe("插件：天气能力包");
     // 系统徽标不可点、插件徽标可点
     expect(screen.queryByRole("button", { name: /打开系统/ })).toBeNull();

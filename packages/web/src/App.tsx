@@ -566,7 +566,7 @@ function AppShell({
       // 知识库（d.114）：本地 vault 三栏界面（文件树 / 编辑器 / 反链标签图谱），数据不出设备
       <KnowledgePage />
     ) : currentPage === "plugins" ? (
-      // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
+      // 插件区（能力中心）：插件 / 技能 / MCP 三个 Tab（技能区自 d.67 并入，d.148.4.95 起为单一列表）
       <PluginsPage />
     ) : isPluginPagePage(currentPage) ? (
       // 插件页面（d.124）：入口来自已装插件的页面贡献，渲染路径由来源决定

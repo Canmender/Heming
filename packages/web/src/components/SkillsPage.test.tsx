@@ -1,13 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
-import { SkillsPage, SkillsView, categorizeSkill, SOURCE_LABEL, SKILL_TEMPLATES } from "./SkillsPage.js";
+import {
+  SkillsPage,
+  SkillsView,
+  categorizeSkill,
+  SOURCE_LABEL,
+  SKILL_TEMPLATES,
+} from "./SkillsPage.js";
 import { SkillPool, SKILLS_KEY, BUILTIN_SKILLS, type StorageLike } from "../lib/skills/index.js";
 
 /**
- * 技能区 UI 用例：全部跑真实 lib/skills 的 SkillPool，只注入独立内存存储，
- * 用例之间零污染；分类映射走导出的纯函数 categorizeSkill。
- * 产品只有唯一内置智能体，分配键固定为 SYSTEM_AGENT_ID。
+ * 技能区 UI 用例（d.148.4.95 单一列表版）：
+ * 全部跑真实 lib/skills 的 SkillPool，只注入独立内存存储，用例之间零污染；
+ * 分类映射走导出的纯函数 categorizeSkill。
+ *
+ * 这一版去掉了多智能体时代的「已分配 / 技能池」两页签与全部「分配」动作：
+ * 技能只有「启用 / 停用」，启用后对话时自动匹配。
  */
 
 const T0 = new Date("2026-10-17T08:00:00.000Z").getTime();
@@ -50,11 +58,14 @@ function renderPage() {
   return render(<SkillsPage skills={pool} />);
 }
 
-/** 渲染并等「技能」分组视图就绪（内置技能默认已分配）。 */
+/** 渲染并等「本机技能」列表视图就绪。 */
 async function renderReady() {
   const r = renderPage();
   await waitFor(() =>
-    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
+    expect(screen.getByRole("tab", { name: "本机技能" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    ),
   );
   return r;
 }
@@ -63,50 +74,71 @@ function group(name: string): HTMLElement {
   return screen.getByRole("region", { name });
 }
 
-describe("SkillsPage 技能区", () => {
-  it("页签键盘可达：整组一个 Tab 停靠点，←/→ 切换视图并移动焦点", async () => {
+function card(name: string): HTMLElement {
+  return screen.getByRole("group", { name: `技能卡 ${name}` });
+}
+
+describe("SkillsPage 技能区（单一列表）", () => {
+  it("页签键盘可达：整组一个 Tab 停靠点，←/→ 在「本机技能 / 社区」间切换并移动焦点", async () => {
     await renderReady();
     const list = screen.getByRole("tablist", { name: "技能视图" });
-    const groupsTab = within(list).getByRole("tab", { name: "已分配" });
-    const poolTab = within(list).getByRole("tab", { name: "技能池" });
+    const localTab = within(list).getByRole("tab", { name: "本机技能" });
+    const hubTab = within(list).getByRole("tab", { name: "社区" });
 
-    expect(groupsTab).toHaveAttribute("tabindex", "0");
-    expect(poolTab).toHaveAttribute("tabindex", "-1");
+    expect(localTab).toHaveAttribute("tabindex", "0");
+    expect(hubTab).toHaveAttribute("tabindex", "-1");
 
-    groupsTab.focus();
-    fireEvent.keyDown(groupsTab, { key: "ArrowRight" });
-    expect(poolTab).toHaveAttribute("aria-selected", "true");
-    expect(document.activeElement).toBe(poolTab);
-    expect(document.getElementById("skill-pool-panel")).not.toBeNull();
+    localTab.focus();
+    fireEvent.keyDown(localTab, { key: "ArrowRight" });
+    expect(hubTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(hubTab);
+    expect(document.getElementById("skill-hub-panel")).not.toBeNull();
 
-    fireEvent.keyDown(poolTab, { key: "ArrowLeft" });
-    expect(groupsTab).toHaveAttribute("aria-selected", "true");
-    expect(document.activeElement).toBe(groupsTab);
+    fireEvent.keyDown(hubTab, { key: "ArrowLeft" });
+    expect(localTab).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(localTab);
   });
 
-  it("默认渲染技能 tab、四类分组与已分配技能（内置默认分配）", async () => {
+  it("默认就是本机技能单列表：四类分组、内置技能、计数与搜索都在，没有分配页签", async () => {
     await renderReady();
 
     expect(screen.getByRole("heading", { name: "技能区" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "技能池" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "本机技能" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "社区" })).toHaveAttribute("aria-selected", "false");
 
-    // 首启种子 4 个内置技能
-    expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length))).toBeInTheDocument();
+    // 多智能体时代的分配页签/入口已删除。
+    expect(screen.queryByRole("tab", { name: "已分配" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "技能池" })).toBeNull();
+    expect(screen.queryByText(/分配给「和鸣」/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^为.*添加技能$/ })).toBeNull();
+
+    // 首启种子内置技能全在「内置技能」组里。
     expect(
-      within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" }),
+      within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length)),
     ).toBeInTheDocument();
+    expect(within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" })).toBeInTheDocument();
 
     for (const title of ["已装技能", "沉淀技能", "自定义技能"]) {
       expect(within(group(title)).getByText("0")).toBeInTheDocument();
     }
-    // 已选智能体：沉淀组空态是「该智能体还没有这类技能」
     expect(
-      within(group("沉淀技能")).getByText(/「和鸣」还没有这类技能/),
+      within(group("沉淀技能")).getByText(/暂无沉淀技能/),
     ).toBeInTheDocument();
+
+    // 页头只讲「启用后生效」，不再提分配。
+    expect(
+      screen.getByText(
+        `技能启用后即在对话里生效；共 ${BUILTIN_SKILLS.length} 个 · 已启用 ${BUILTIN_SKILLS.length} 个`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
+    expect(screen.getByText("搜索同时作用于名称、描述与标签")).toBeInTheDocument();
+
+    // 自我优化卡已从页面移除（功能改为系统内部默认开启）。
+    expect(screen.queryByText(/允许自我优化/)).toBeNull();
   });
 
-  it("categorizeSkill 把四种来源映射为四类分组", () => {
+  it("categorizeSkill 把四种来源映射为四类分组，模板保留三个", () => {
     expect(categorizeSkill({ source: "builtin" })).toBe("builtin");
     expect(categorizeSkill({ source: "imported" })).toBe("installed");
     expect(categorizeSkill({ source: "distilled" })).toBe("distilled");
@@ -118,415 +150,111 @@ describe("SkillsPage 技能区", () => {
       distilled: "沉淀",
       user: "自定义",
     });
+
+    expect(SKILL_TEMPLATES.map((item) => item.label)).toEqual(["写作润色", "代码审查", "会议纪要"]);
   });
 
-  it("切到技能池后列出全部技能（含未启用）与来源、使用统计", async () => {
-    pool.create({
-      name: "私有技能",
-      description: "仅本机使用的内部技能",
-      instructions: "按内部规范处理。",
-      triggers: ["内部"],
-      tags: ["内部"],
-      enabled: false,
-      version: "1.0.0",
-    });
-    pool.importText(SKILL_MD);
-    const imported = pool.list().find((skill) => skill.name === "财报速读");
-    expect(imported).toBeDefined();
-    pool.distill((imported as { id: string }).id);
-    const disabled = pool.list().find((skill) => skill.name === "私有技能");
-    pool.recordUsage((disabled as { id: string }).id);
-
-    renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-
-    expect(screen.getByRole("tab", { name: "技能池" })).toHaveAttribute("aria-selected", "true");
-    // 表头 + 全部技能行
-    expect(screen.getAllByRole("row")).toHaveLength(pool.list().length + 1);
-
-    // 未启用的自定义技能同样在池中，且开关为关
-    const customRow = screen.getByRole("row", { name: /私有技能/ });
-    expect(within(customRow).getByText("自定义")).toBeInTheDocument();
-    expect(
-      within(customRow).getByRole("switch", { name: "启用 私有技能" }),
-    ).toHaveAttribute("aria-checked", "false");
-    expect(within(customRow).getByText("1")).toBeInTheDocument();
-    expect(within(customRow).getByText(/^2026-10-17 \d{2}:\d{2}$/)).toBeInTheDocument();
-
-    // 四种来源标签都能在池中出现
-    // d.65：内置技能的来源徽标改为「系统：<系统能力名>」（非按钮、不可点）。
-    // 徽标拆成两个文本节点，这里断言整段文案，来源分类本身不变。
-    expect(
-      within(screen.getByRole("row", { name: /记忆整理/ })).getByText("：系统能力", { exact: false }),
-    ).toBeInTheDocument();
-    expect(within(screen.getByRole("row", { name: /财报速读（沉淀）/ })).getByText("沉淀")).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("row", { name: /^财报速读 [^（]/ })).getByText("已装"),
-    ).toBeInTheDocument();
-  });
-
-  it("技能池搜索按名称、描述、标签过滤并给无结果提示", async () => {
-    pool.importText(SKILL_MD);
+  it("搜索按名称、描述、标签过滤；无结果时给出提示", async () => {
     await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-
     const search = screen.getByLabelText("搜索技能");
-    fireEvent.change(search, { target: { value: "财务" } }); // 命中标签
-    expect(screen.getByRole("row", { name: /财报速读/ })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: /记忆整理/ })).not.toBeInTheDocument();
 
-    fireEvent.change(search, { target: { value: "现金流" } }); // 命中描述
-    expect(screen.getByRole("row", { name: /财报速读/ })).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "记忆" } });
+    expect(screen.getByText("匹配 1 个")).toBeInTheDocument();
+    expect(within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" })).toBeInTheDocument();
 
-    fireEvent.change(search, { target: { value: "查无此技能" } });
-    expect(screen.getByText("没有匹配「查无此技能」的技能")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "财报" } });
+    expect(screen.getByText("匹配 0 个")).toBeInTheDocument();
+    expect(screen.getByText("没有匹配「财报」的技能")).toBeInTheDocument();
   });
 
-  it("搜索框在页头，并且同样过滤分组视图", async () => {
-    pool.importText(SKILL_MD);
-    const imported = pool.list().find((s) => s.name === "财报速读")!;
-    pool.assign(SYSTEM_AGENT_ID, imported.id);
+  it("内置技能不可删，启用开关直接写回技能池", async () => {
     await renderReady();
+    const builtinCard = card("记忆整理");
 
-    // 搜索框不属于任何分组卡（此前埋在「技能池」面板里）
-    const search = screen.getByLabelText("搜索技能");
-    expect(search.closest('[role="region"]')).toBeNull();
+    expect(within(builtinCard).getByText("内置不可删")).toBeInTheDocument();
+    expect(within(builtinCard).queryByRole("button", { name: "删除 记忆整理" })).toBeNull();
 
-    fireEvent.change(search, { target: { value: "现金流" } });
-    expect(
-      within(group("已装技能")).getByRole("group", { name: "技能卡 财报速读" }),
-    ).toBeInTheDocument();
-    // 不匹配的内置技能从分组里消失，并给出「没有匹配」而不是「还没有这类技能」
-    expect(
-      within(group("内置技能")).queryByRole("group", { name: "技能卡 记忆整理" }),
-    ).not.toBeInTheDocument();
-    expect(within(group("内置技能")).getByText("没有匹配「现金流」的技能")).toBeInTheDocument();
-  });
-
-  it("技能卡操作区常显（弱化而非 hover 才出现）", async () => {
-    await renderReady();
-    const card = within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" });
-    const remove = within(card).getByRole("button", { name: "移除 记忆整理" });
-    const bar = remove.parentElement as HTMLElement;
-    expect(bar.className).not.toContain("opacity-0");
-    expect(bar.className).toContain("opacity-70");
-  });
-
-  it("启用开关会调用 store 并立即反映到两个视图", async () => {
-    await renderReady();
-
-    const toggle = screen.getByRole("switch", { name: "启用 写作润色" });
+    const toggle = within(builtinCard).getByRole("switch", { name: "启用 记忆整理" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
-
     fireEvent.click(toggle);
-
-    expect(pool.get("builtin-writing")?.enabled).toBe(false);
-    expect(screen.getByRole("switch", { name: "启用 写作润色" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    expect(screen.getByRole("switch", { name: "启用 写作润色" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+    expect(pool.list().find((skill) => skill.name === "记忆整理")?.enabled).toBe(false);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
-  it("技能池可把已装技能转为沉淀，沉淀会自动分配给当前智能体", async () => {
-    pool.importText(SKILL_MD);
+  it("导入 SKILL.md：进「已装技能」组并可打开详情", async () => {
     await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "沉淀 财报速读" }));
-
-    const distilled = pool.list().filter((skill) => skill.source === "distilled");
-    expect(distilled).toHaveLength(1);
-    expect(distilled[0].name).toBe("财报速读（沉淀）");
-    expect(distilled[0].enabled).toBe(true);
-    expect(screen.getByRole("status")).toHaveTextContent("已沉淀为「财报速读（沉淀）」");
-    // 沉淀副本自身不再提供「转为沉淀」
-    expect(
-      screen.queryByRole("button", { name: "沉淀 财报速读（沉淀）" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
-    expect(within(group("沉淀技能")).getByText("1")).toBeInTheDocument();
-  });
-
-  it("导入 SKILL.md 后可用 ＋ 把它加进已装技能组", async () => {
-    await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-
     fireEvent.click(screen.getByRole("button", { name: "导入 SKILL.md" }));
     fireEvent.change(screen.getByLabelText("导入技能内容"), { target: { value: SKILL_MD } });
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
 
     expect(screen.getByRole("status")).toHaveTextContent("导入完成：新增 1 个，更新 0 个");
+    expect(within(group("已装技能")).getByText("1")).toBeInTheDocument();
+    const imported = card("财报速读");
+    expect(within(imported).getByText(/已装/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
-    // 导入的技能默认不分配：用分组头 ＋ 加进来
-    expect(within(group("已装技能")).getByText("0")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "为已装技能添加技能" }));
-    fireEvent.click(screen.getByRole("button", { name: "添加 财报速读" }));
-    expect(
-      within(group("已装技能")).getByRole("group", { name: "技能卡 财报速读" }),
-    ).toBeInTheDocument();
+    fireEvent.click(within(imported).getByRole("button", { name: "详情 财报速读" }));
+    expect(screen.getByRole("dialog", { name: "技能详情 财报速读" })).toBeInTheDocument();
   });
 
-  it("详情抽屉展示完整指令，内置技能不提供删除", async () => {
-    await renderReady();
-
-    fireEvent.click(screen.getByRole("button", { name: "详情 代码审查" }));
-
-    const dialog = screen.getByRole("dialog", { name: "技能详情 代码审查" });
-    expect(within(dialog).getByRole("heading", { name: "代码审查" })).toBeInTheDocument();
-    expect(within(dialog).getByText(/你在审查一段代码变更/)).toBeInTheDocument();
-    expect(within(dialog).getByText("审查")).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: /删除/ })).not.toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("删除技能要二次确认：取消不删，确认后从技能池移除", async () => {
-    await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    fireEvent.click(screen.getByRole("button", { name: "导入 SKILL.md" }));
-    fireEvent.change(screen.getByLabelText("导入技能内容"), { target: { value: SKILL_MD } });
-    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
-
-    const remove = await screen.findByRole("button", { name: "池中删除 财报速读" });
-
-    fireEvent.click(remove);
-    const dialog = screen.getByRole("dialog", { name: "删除技能" });
-    expect(within(dialog).getByText(/此操作不可恢复/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(pool.list().some((k) => k.name === "财报速读")).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "池中删除 财报速读" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "删除技能" })).getByRole("button", {
-        name: "删除",
-      }),
-    );
-    expect(pool.list().some((k) => k.name === "财报速读")).toBe(false);
-    expect(screen.getByRole("status")).toHaveTextContent("已删除技能：财报速读");
-  });
-
-  it("四组皆空时给出「该智能体还没有这类技能」空态", async () => {
-    map.set(
-      SKILLS_KEY,
-      JSON.stringify({ version: 1, seeded: true, skills: [], usage: {} }),
-    );
-    pool = new SkillPool(makeStorage(map), () => T0);
-    await renderReady();
-
-    for (const title of ["内置技能", "已装技能", "沉淀技能", "自定义技能"]) {
-      expect(within(group(title)).getByText("0")).toBeInTheDocument();
-    }
-    // 已选中智能体时，空态是「该智能体还没有这类技能」，而不是「池里没有」
-    expect(screen.getAllByText(/还没有这类技能，点上方 ＋ 添加/)).toHaveLength(4);
-  });
-});
-
-describe("SkillsPage 技能分配（唯一内置智能体）", () => {
-  it("给内置智能体添加的技能只在已分配视图出现，移除后计数归零", async () => {
-    // 先建技能再渲染（store 非响应式，渲染后新增不会自动出现在列表里）
-    pool.create({
-      name: "私有技能",
-      description: "内部使用",
-      instructions: "按规范处理。",
-      triggers: ["内部"],
-      tags: ["内部"],
-      enabled: true,
-      version: "1.0.0",
-    });
-    await renderReady();
-    expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length))).toBeInTheDocument();
-
-    // 内置智能体默认已分配内置技能；自定义技能目前为 0
-    expect(within(group("自定义技能")).getByText("0")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "为自定义技能添加技能" }));
-    fireEvent.click(screen.getByRole("button", { name: "添加 私有技能" }));
-    expect(within(group("自定义技能")).getByText("1")).toBeInTheDocument();
-    const created = pool.list().find((skill) => skill.name === "私有技能");
-    expect(pool.assigned(SYSTEM_AGENT_ID)).toContain(created?.id);
-
-    // 取消分配后计数归零，技能定义仍留在池里
-    fireEvent.click(screen.getByRole("button", { name: "移除 私有技能" }));
-    expect(within(group("自定义技能")).getByText("0")).toBeInTheDocument();
-    expect(pool.get(created!.id)).toBeDefined();
-  });
-
-  it("卡片上的「移除」取消分配，技能池里仍然保留该技能", async () => {
-    await renderReady();
-    fireEvent.click(screen.getByRole("button", { name: "移除 写作润色" }));
-
-    expect(pool.assigned(SYSTEM_AGENT_ID)).not.toContain("builtin-writing");
-    // 池里还在
-    expect(pool.get("builtin-writing")).toBeDefined();
-    expect(within(group("内置技能")).getByText(String(BUILTIN_SKILLS.length - 1))).toBeInTheDocument();
-  });
-
-  it("＋ 面板只列该分类下尚未分配的技能", async () => {
+  it("删除技能要二次确认：取消不删，确认后从列表移除", async () => {
     pool.importText(SKILL_MD);
     await renderReady();
-    fireEvent.click(screen.getByRole("button", { name: "为已装技能添加技能" }));
 
-    const dialog = screen.getByRole("dialog", { name: "添加技能" });
-    expect(within(dialog).getByRole("button", { name: "添加 财报速读" })).toBeInTheDocument();
-    // 内置技能不该出现在「已装技能」的添加面板里
-    expect(within(dialog).queryByRole("button", { name: "添加 写作润色" })).not.toBeInTheDocument();
-    // 加完之后面板自动关闭，卡片出现
-    fireEvent.click(within(dialog).getByRole("button", { name: "添加 财报速读" }));
-    expect(screen.queryByRole("dialog", { name: "添加技能" })).not.toBeInTheDocument();
-    expect(within(group("已装技能")).getByText("1")).toBeInTheDocument();
+    fireEvent.click(within(card("财报速读")).getByRole("button", { name: "删除 财报速读" }));
+    let dialog = screen.getByRole("dialog", { name: "删除技能" });
+    expect(within(dialog).queryByText(/分配记录/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "删除技能" })).toBeNull();
+    expect(card("财报速读")).toBeInTheDocument();
+
+    fireEvent.click(within(card("财报速读")).getByRole("button", { name: "删除 财报速读" }));
+    dialog = screen.getByRole("dialog", { name: "删除技能" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已删除技能：财报速读");
+    expect(screen.queryByRole("group", { name: "技能卡 财报速读" })).toBeNull();
   });
-});
 
-/* ------------------------------------------- 新建技能（d.68 简化流程） */
-
-describe("SkillsPage 新建技能（简化）", () => {
-  it("3 个模板只填空字段；必填只有名称与内容，缺了会指到具体字段", async () => {
+  it("新建技能可用模板填好空字段，创建后进「自定义技能」且无需分配", async () => {
     await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
-
     const dialog = screen.getByRole("dialog", { name: "新建技能" });
-    expect(within(dialog).getAllByRole("button", { name: /^使用模板 / })).toHaveLength(3);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "使用模板 写作润色" }));
-    const writing = SKILL_TEMPLATES.find((tpl) => tpl.key === "writing")!;
-    const nameInput = within(dialog).getByLabelText("技能名称");
-    const contentInput = within(dialog).getByLabelText("技能内容");
-    expect(nameInput).toHaveValue(writing.name);
-    expect(contentInput).toHaveValue(writing.instructions);
+    expect(within(dialog).getByLabelText("技能名称")).toHaveValue("写作润色");
+    expect(within(dialog).getByText(/已套用「写作润色」/)).toBeInTheDocument();
 
-    // 已输入的名称不被覆盖；换模板也不覆盖已填的内容
-    fireEvent.change(nameInput, { target: { value: "我的润色" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "使用模板 会议纪要" }));
-    expect(within(dialog).getByLabelText("技能名称")).toHaveValue("我的润色");
-    expect(within(dialog).getByLabelText("技能内容")).toHaveValue(writing.instructions);
-
-    // 必填清空后提交：分别提示名称与内容，且不写库
-    fireEvent.change(within(dialog).getByLabelText("技能名称"), { target: { value: "" } });
-    fireEvent.change(within(dialog).getByLabelText("技能内容"), { target: { value: "   " } });
-    const before = pool.list().length;
-    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
-    expect(within(dialog).getByText("请给技能起个名字")).toBeInTheDocument();
-    expect(within(dialog).getByText(/技能内容不能为空/)).toBeInTheDocument();
-    expect(pool.list()).toHaveLength(before);
-    expect(screen.getByRole("dialog", { name: "新建技能" })).toBeInTheDocument();
-  });
-
-  it("创建后自动分配给当前智能体，自定义技能组里直接可见", async () => {
-    await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
-
-    const dialog = screen.getByRole("dialog", { name: "新建技能" });
+    // 模板名与内置技能同名：改个名字，避免「技能卡 写作润色」二义。
     fireEvent.change(within(dialog).getByLabelText("技能名称"), {
       target: { value: "周报润色" },
     });
-    fireEvent.change(within(dialog).getByLabelText("技能描述"), {
-      target: { value: "把周报改得更短、更像人写的" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("技能内容"), {
-      target: { value: "你在帮我润色周报。\n1. 先删掉套话。\n2. 保留数字与结论。" },
-    });
     fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
-
-    expect(screen.queryByRole("dialog", { name: "新建技能" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("已新建技能「周报润色」");
-    expect(screen.getByRole("status")).toHaveTextContent("和鸣");
-
-    const created = pool.list().find((skill) => skill.name === "周报润色");
-    expect(created).toBeDefined();
-    expect(created?.source).toBe("user");
-    expect(created?.instructions).toContain("润色周报");
-    // 自动分配：否则「建好了却不会用于对话」是新手最容易踩的坑
-    expect(pool.assigned(SYSTEM_AGENT_ID)).toContain(created?.id);
-
-    fireEvent.click(screen.getByRole("tab", { name: "已分配" }));
-    expect(
-      within(group("自定义技能")).getByRole("group", { name: "技能卡 周报润色" }),
-    ).toBeInTheDocument();
-  });
-
-  it("新建技能后触发 onChanged，宿主（插件区）统计能同帧刷新", async () => {
-    const onChanged = vi.fn();
-    render(<SkillsPage skills={pool} onChanged={onChanged} />);
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "已新建技能「周报润色」；对话时就会按需匹配。",
     );
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
-
-    const dialog = screen.getByRole("dialog", { name: "新建技能" });
-    fireEvent.change(within(dialog).getByLabelText("技能名称"), {
-      target: { value: "自检刷新技能" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("技能内容"), {
-      target: { value: "自检用：验证宿主统计刷新。" },
-    });
-    expect(onChanged).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
-    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(within(group("自定义技能")).getByText("1")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "技能卡 周报润色" })).toBeInTheDocument();
+    expect(screen.queryByText(/分配给/)).toBeNull();
   });
 
-  it("技能池空态：动作直达「新建技能」「导入 SKILL.md」", async () => {
+  it("技能为空时给出单一空态与两个出口", async () => {
     map.set(SKILLS_KEY, JSON.stringify({ version: 1, seeded: true, skills: [], usage: {} }));
-    pool = new SkillPool(makeStorage(map), () => T0);
-    await renderReady();
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    const empty = new SkillPool(makeStorage(map), () => T0);
+    render(<SkillsView skills={empty} />);
 
-    expect(screen.getByText("技能池还是空的")).toBeInTheDocument();
+    expect(screen.getByText("还没有任何技能")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建技能" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "导入 SKILL.md" }));
-    expect(screen.getByLabelText("导入技能内容")).toBeInTheDocument();
-
-    // 新建入口同样直达弹窗
-    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
-    expect(screen.getByRole("dialog", { name: "新建技能" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入 SKILL.md" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "内置技能" })).toBeNull();
+    expect(screen.getByText(/共 0 个 · 已启用 0 个/)).toBeInTheDocument();
   });
 
-  it("把「未分配的技能不会用于对话」写清楚（技能视图与技能池各一处）", async () => {
-    await renderReady();
-    expect(
-      screen.getByText(/技能启用并分配给「和鸣」后即在对话里生效/),
-    ).toBeInTheDocument();
+  it("嵌入式 SkillsView 无 h1；旧外壳仍保留「技能区」标题", async () => {
+    const { unmount } = render(<SkillsView skills={pool} />);
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("tab", { name: "本机技能" })).toBeInTheDocument();
+    unmount();
 
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    expect(
-      screen.getByText(/启用并分配给「和鸣」后，技能才会在对话里生效/),
-    ).toBeInTheDocument();
-  });
-});
-
-
-describe("SkillsView 嵌入视图", () => {
-  it("去掉 PageShell 与页面标题，保留智能体分配、技能池、搜索与来源徽标", async () => {
-    const { container } = render(<SkillsView skills={pool} />);
-    // 嵌入后由宿主页提供唯一的页面标题
-    expect(container.querySelector("h1")).toBeNull();
-
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute("aria-selected", "true"),
-    );
-    expect(screen.getByRole("tab", { name: "已分配" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
-    expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
-    // 内置技能默认分配给第一个智能体，来源徽标仍是「内置：<系统能力名>」
-    const card = within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" });
-    expect(within(card).getByText("：系统能力", { exact: false })).toBeInTheDocument();
-
-    // 子页签照常可用
-    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
-    expect(screen.getByRole("row", { name: /记忆整理/ })).toBeInTheDocument();
+    renderPage();
+    expect(screen.getByRole("heading", { name: "技能区" })).toBeInTheDocument();
   });
 });

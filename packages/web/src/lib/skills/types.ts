@@ -60,8 +60,9 @@ export const SKILL_BINDINGS_KEY = "heming.skillBindings.v1";
  * 智能体 → 已分配技能 id 列表（`heming.skillAssignments.v1`）。
  *
  * 与 `SkillBinding` 的区别：binding 管「路由行为」（置顶/禁用），assigned 管
- * 「这个智能体拥有哪些技能」——技能页只展示已分配的，技能池才是全量。
- * 没有记录时默认分配全部内置技能（开箱即用），其余技能需要显式添加。
+ * 「这个智能体拥有哪些技能」。d.148.4.95 起产品只有唯一内置智能体、界面不再
+ * 暴露分配：路由对所有已启用技能生效，此键仅保留读写以兼容旧数据。
+ * 没有记录时默认分配全部内置技能（旧版本的开箱即用语义）。
  */
 export const SKILL_ASSIGNMENTS_KEY = "heming.skillAssignments.v1";
 
