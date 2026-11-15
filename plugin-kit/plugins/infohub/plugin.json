@@ -2,8 +2,8 @@
   "schemaVersion": 4,
   "id": "heming.infohub",
   "name": "信息中枢",
-  "version": "1.4.0",
-  "description": "在本机采集、浏览、检索 QQ / 微信聊天记录与日程；可用大模型把聊天整理成可编辑的日程表格。归档只读，数据不离开本机。",
+  "version": "1.6.0",
+  "description": "在本机浏览 QQ / 微信聊天记录与日程；采集在后台静默进行，归档只读，数据只留在本机。",
   "author": "和鸣",
   "distribution": "bundle",
   "permissions": {
@@ -16,14 +16,13 @@
     "graphics": [],
     "eval": false,
     "chat": true,
-    "infohub": true,
-    "notify": true
+    "infohub": true
   },
   "contributions": {
     "page": {
       "title": "信息中枢",
       "icon": "message",
-      "summary": "本机 QQ / 微信归档：全文检索、会话浏览与日程",
+      "summary": "本机 QQ / 微信归档：会话浏览与日程",
       "entry": "files/index.html"
     },
     "homeCards": [
@@ -36,8 +35,8 @@
         "primary": "还没有归档数据",
         "actions": [
           {
-            "label": "检索归档",
-            "intent": "search"
+            "label": "全部会话",
+            "intent": "chats"
           },
           {
             "label": "全部日程",
@@ -50,12 +49,12 @@
       {
         "id": "open-infohub",
         "title": "打开信息中枢",
-        "description": "检索本机 QQ / 微信归档，浏览会话与日程",
+        "description": "浏览本机 QQ / 微信归档的会话与日程",
         "keywords": [
           "信息中枢",
           "归档",
           "聊天记录",
-          "检索",
+          "会话",
           "日程",
           "infohub"
         ],
@@ -69,10 +68,5 @@
   "publisher": {
     "id": "heming",
     "publicKey": "ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk"
-  },
-  "packageSha256": "9f04bc7b605c1ee77a9b84d9c117dc105eac2dbf39aa0dfd5e22ca63faa6cf55",
-  "signature": {
-    "alg": "ed25519",
-    "value": "JCh8WmGJTWuAa4tBz3V9xdHUPvQycH_a1GlTLGu8pW6GfIqw4clNp1_JCaVJlGPeYB7iwF20lH8dWbSrCq3SDw"
   }
 }
