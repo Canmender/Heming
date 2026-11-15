@@ -530,6 +530,27 @@ async function goPage(cdp, sid, label) {
     /* 没有开机动画（热重载/已退场）时这里不阻塞 */
   }
   await sleep(500);
+  // 页面主体也可能有二次异步渲染（团队看板、用量图表）：等文本长度稳定，避免量到半张页。
+  {
+    let last = -1;
+    let stable = 0;
+    for (let i = 0; i < 20; i += 1) {
+      let len;
+      try {
+        len = await evalJs(cdp, sid, `document.querySelector('main')?.innerText.length ?? 0`);
+      } catch {
+        len = last;
+      }
+      if (len === last && len > 0) {
+        stable += 1;
+        if (stable >= 3) break;
+      } else {
+        stable = 0;
+        last = len;
+      }
+      await sleep(150);
+    }
+  }
 }
 
 async function setTheme(cdp, sid, theme) {
@@ -641,6 +662,32 @@ async function run() {
     );
     return metrics;
   };
+  /*
+   * 页签切过去之后，内容常常还在异步加载（团队「看板」两块面板、模型用量等）。
+   * 只 sleep 一个固定值会在机器慢的时候量到「半张页」——2026-11-15 深色审计就
+   * 抓到过一次 team~看板只有 h1、标题层级被误判成 1 级的假红。这里改成等
+   * main 的文本长度连续几次不变，最多 4s；稳定后再量。
+   */
+  const waitForStableMainText = async () => {
+    let last = -1;
+    let stable = 0;
+    for (let i = 0; i < 26; i += 1) {
+      let len;
+      try {
+        len = await evalJs(cdp, sid, `document.querySelector('main')?.innerText.length ?? 0`);
+      } catch {
+        len = last;
+      }
+      if (len === last && len > 0) {
+        stable += 1;
+        if (stable >= 3) return;
+      } else {
+        stable = 0;
+        last = len;
+      }
+      await sleep(150);
+    }
+  };
   const clickTab = async (index) => {
     const ok = await evalJs(
       cdp,
@@ -652,7 +699,8 @@ async function run() {
         return tabs[${index}].textContent.trim();
       })()`,
     );
-    await sleep(450);
+    await sleep(250);
+    await waitForStableMainText();
     return ok;
   };
 

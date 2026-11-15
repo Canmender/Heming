@@ -7,8 +7,7 @@ import {
   secureStorageHydrated,
 } from "../secureStorage.js";
 import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
-import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
-import type { McpPreset } from "./presets.js";
+import { SYSTEM_MCP_SERVERS, isSystemMcpServer, systemMcpServerId } from "./presets.js";
 
 /** 存储键（带版本，便于将来迁移）。 */
 export const MCP_SERVERS_KEY = "heming.mcp.servers.v1";
@@ -16,11 +15,11 @@ export const MCP_TOOLS_KEY = "heming.mcp.tools.v1";
 /** 已启用的工具（`serverId::toolName`），**默认不启用**：工具可能有副作用，必须显式打开。 */
 export const MCP_ENABLED_TOOLS_KEY = "heming.mcp.enabledTools.v1";
 /**
- * 被用户删掉过的预置服务 id（`heming.mcp.removedPresets.v1`）。
+ * 旧版本记录「用户删掉过的预置服务 id」的键。
  *
- * 为什么需要单独记：删掉最后一条服务后列表为空，如果不记这个，
- * 下次启动会被「存储为空 → 预置」的条件重新塞回来——用户就删不掉了。
- * 所以删除预置时在此记一笔，预置逻辑见到记录就跳过。
+ * @deprecated 系统能力不可删除，新逻辑**不再读写**这个键；保留导出只是为了让
+ * 尚未迁移的旧测试/旧调用还能通过类型检查（见 `removedPresetIds` / `restorePresets`）。
+ * 那个键里的历史数据留着无害：不会再有预置逻辑去读它。
  */
 export const MCP_REMOVED_PRESETS_KEY = "heming.mcp.removedPresets.v1";
 /**
@@ -204,66 +203,91 @@ export class McpRegistry {
     this.enabled = this.readEnabled();
     /*
      * 启动时序（d.59）：hydrate 未完成时 `readServers()` 可能只是「缓存未命中」的空表，
-     * 与「真的没有服务」无法区分。Electron 46 没有同步桥兜底，此时 `seedDefaults()`
-     * 会把预置写盘、覆盖磁盘上的密文配置（用户请求头 token 一起丢）。
-     * 所以这里推迟预置，等 hydrate 完成后由 `refreshAfterHydrate()` 重新判断。
-     * 浏览器（无桥）没有这个问题，行为不变。
+     * 与「真的没有服务」无法区分。Electron 46 没有同步桥兜底，此时若调用
+     * `ensureSystemServers()`，会把系统能力写盘、覆盖磁盘上的密文配置
+     * （用户请求头 token 一起丢）。所以这里推迟补齐，等 hydrate 完成后由
+     * `refreshAfterHydrate()` 再调；浏览器（无桥）没有这个问题，行为不变。
      */
     if (secureStorageHydrated() || !hasSecureBridge()) {
-      this.seedDefaults();
+      this.ensureSystemServers();
     }
   }
 
   /**
-   * 首次使用时预置默认服务（用户要求「默认接入」Windows 桌面控制）。
+   * 确保两条系统能力始终在服务列表里（幂等；构造期与 hydrate 后都要调）。
    *
-   * 两条守卫，缺一不可：
-   * 1. 只在**存储里完全没有 MCP 服务**时执行——用户已经配过就别插手；
-   * 2. 跳过被用户**删过**的预置（见 MCP_REMOVED_PRESETS_KEY）——
-   *    只靠条件 1 的话，删掉最后一条服务会让列表变空，下次启动又被塞回来，
-   *    用户就永远删不掉它了。
+   * 与旧的「首次预置」有三点不同：
+   * 1. 不再看「存储里是否已有服务」——用户配过私有服务，不等于不需要系统能力；
+   * 2. 不受删除记录影响——系统能力本来就不可删除，没有「删过就跳过」这回事；
+   * 3. 已经存在同 id 条目时**不重复插入**，只把「由定义表决定」的只读字段校正回来：
+   *    名称 / 传输 / 地址 / 命令 / 参数 / 启用位 / 来源。请求头、超时、创建时间
+   *    与工具授权一律保留——那是用户的数据（系统能力用不到请求头，但升级时覆盖
+   *    等于把用户 token 永久丢掉）。
+   *
+   * 密文读不出来时（`undecryptableKeys`）直接跳过：此时内存列表可能是空表，
+   * 落盘会把磁盘上的用户配置**永久覆盖**。宁可这一轮少显示系统能力，
+   * 也不动密文——换回原账户还能恢复。
    */
-  private seedDefaults(): void {
-    if (this.serverList.length > 0) return;
-    // 键存在但解不开（keyring 重置 / 换系统账户 / 密文损坏）时 readServers 只能
-    // 读出空表；此时若继续预置并落盘，会把用户原有服务与请求头**永久覆盖**。
-    // 宁可这一轮显示空，也不动磁盘上的密文——升级回原账户还能恢复。
+  ensureSystemServers(): void {
     if (secureStorageStatus().undecryptableKeys.includes(MCP_SERVERS_KEY)) return;
-    const removed = this.readRemovedPresets();
     const at = this.now();
     let changed = false;
-    for (const preset of DEFAULT_PRESET_SERVERS) {
-      // 每条预置有各自的固定 id（删除记录、isPreset 判定都按 id 走）
-      const id = presetServerId(preset.id);
-      if (removed.has(id)) continue;
-      if (this.pushPreset(preset, at)) changed = true;
+    for (const system of SYSTEM_MCP_SERVERS) {
+      const id = systemMcpServerId(system.id);
+      const idx = this.serverList.findIndex((s) => s.id === id);
+      if (idx < 0) {
+        this.serverList.push({
+          id,
+          name: system.name,
+          transport: system.transport,
+          url: system.url,
+          command: system.command,
+          args: system.args ? [...system.args] : undefined,
+          // 系统能力始终参与对话：界面上没有「停用」入口，停用后模型能力会静默缺失。
+          enabled: true,
+          origin: "preset",
+          createdAt: at,
+          updatedAt: at,
+        });
+        changed = true;
+        continue;
+      }
+      const current = this.serverList[idx];
+      const next: McpServerConfig = {
+        ...current,
+        name: system.name,
+        transport: system.transport,
+        url: system.url,
+        command: system.command,
+        args: system.args ? [...system.args] : undefined,
+        enabled: true,
+        origin: "preset",
+        updatedAt: at,
+      };
+      if (!this.sameSystemConfig(current, next)) {
+        this.serverList[idx] = next;
+        changed = true;
+      }
     }
     if (changed) this.saveServers();
   }
 
   /**
-   * 往列表末尾补一条预置；同 id 或同名服务已存在时不覆盖，返回 false。
+   * 系统能力「由定义表决定」的字段是否已经与定义一致。
    *
-   * 首次预置与两条「找回」路径（`restorePresets` / `restorePreset`）共用这一处，
-   * 免得哪天规则只改了一边：用户手填了同名服务时，任何路径都不能拿预置去顶掉他的配置。
+   * 只比较这些字段：`headers` / `timeoutMs` / `createdAt` 属于用户数据，
+   * 不参与比较，也就不会被校正逻辑顺手覆盖。
    */
-  private pushPreset(preset: McpPreset, at: string): boolean {
-    const id = presetServerId(preset.id);
-    const hasSameId = this.serverList.some((s) => s.id === id);
-    const hasSameName = this.serverList.some((s) => s.name.trim() === preset.name.trim());
-    if (hasSameId || hasSameName) return false;
-    this.serverList.push({
-      id,
-      name: preset.name,
-      transport: preset.transport,
-      url: preset.url,
-      command: preset.command,
-      args: preset.args ? [...preset.args] : undefined,
-      enabled: true,
-      createdAt: at,
-      updatedAt: at,
-    });
-    return true;
+  private sameSystemConfig(a: McpServerConfig, b: McpServerConfig): boolean {
+    return (
+      a.name === b.name &&
+      a.transport === b.transport &&
+      a.url === b.url &&
+      a.command === b.command &&
+      (a.args ?? []).join("\u0000") === (b.args ?? []).join("\u0000") &&
+      a.enabled === b.enabled &&
+      a.origin === b.origin
+    );
   }
 
   /**
@@ -271,24 +295,27 @@ export class McpRegistry {
    *
    * 合并规则（与 `store/llm.ts` 同一套思路）：
    * 1. 用户已经改过服务列表（`serversMutated`）→ **不重读**，内存即最新（写路径已落盘）；
-   * 2. 否则重读安全键；读到空才补此前被推迟的预置（`seedDeferred`）。
+   * 2. 否则重读安全键，然后**无论读到什么都补一次系统能力**（幂等）。
    *
    * 任何情况下都不会删改磁盘上的密文：读不到时仍按空表展示，由 secure 层标记
    * `undecryptableKeys`（d.36 口径：密文留在原地，换回原账户还能恢复）。
    */
   refreshAfterHydrate(): void {
-    if (this.serversMutated) return;
+    if (this.serversMutated) {
+      this.ensureSystemServers();
+      return;
+    }
     this.serverList = this.readServers();
     this.toolMap = this.readTools();
     this.enabled = this.readEnabled();
-    if (this.serverList.length === 0) this.seedDefaults();
+    this.ensureSystemServers();
   }
 
   /**
    * 重新读本机存储并重建内存态（安装事务回滚后必须调）。
    *
-   * 照 `refreshAfterHydrate` 的读法重建三份内存数据，但**不**做启动时序判断、
-   * 也**不**重放预置（`seedDefaults`）——回滚场景要的是「存储是什么，内存就是什么」，
+   * 照 `refreshAfterHydrate` 的读法重建三份内存数据，但**不**做启动时序判断，
+   * 也**不**补系统能力——回滚场景要的是「存储是什么，内存就是什么」，
    * 顺带写盘会把刚恢复的快照又改掉。`serversMutated` 一并复位。
    */
   reload(): void {
@@ -298,39 +325,22 @@ export class McpRegistry {
     this.serversMutated = false;
   }
 
-  private readRemovedPresets(): Set<string> {
-    const raw = this.storage.getItem(MCP_REMOVED_PRESETS_KEY);
-    if (!raw) return new Set();
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed)
-        ? new Set(parsed.filter((x): x is string => typeof x === "string"))
-        : new Set();
-    } catch {
-      return new Set();
-    }
-  }
-
-  private writeRemovedPresets(set: Set<string>): void {
-    this.storage.setItem(MCP_REMOVED_PRESETS_KEY, JSON.stringify([...set]));
-  }
-
   /**
-   * 预置服务发现完工具后，把只读那批自动启用（见 McpPreset.safeTools）。
+   * 系统能力发现完工具后，把只读那批自动启用（见 `SystemMcpServer.safeTools`）。
    *
    * **用户关掉的不再打开**：enabled 是「已启用集合」，关掉的工具不在里面，
    * 只按 `has(key)` 判重会把它当成「从未配置」而重新启用——
-   * 等于用户的选择被静默推翻。所以这里额外查 `disabledPresets`：一旦用户
+   * 等于用户的选择被静默推翻。所以这里额外查 `readUserDisabled`：一旦用户
    * 明确关过某工具，就记下来，之后不再自动开（要恢复得他再手动勾一次）。
    */
   autoEnableSafeTools(serverId: string, tools: McpTool[]): string[] {
-    // 非预置服务一律不自动启用：第三方服务的工具名可能与白名单撞名
+    // 非系统能力一律不自动启用：第三方服务的工具名可能与白名单撞名
     // （比如人家也有个叫 Screenshot 的），开错等于给了没预期的权限。
-    if (!this.isPreset(serverId)) return [];
-    // 按**服务 id**反查所属预设：不同预置的白名单不同
+    if (!this.isSystem(serverId)) return [];
+    // 按**服务 id**反查所属系统能力：不同能力的白名单不同
     // （Windows-MCP 是 Screenshot/Snapshot，Scrapling 是 make_request 那一批）。
-    const preset = DEFAULT_PRESET_SERVERS.find((p) => presetServerId(p.id) === serverId);
-    const safe = new Set(preset?.safeTools ?? []);
+    const system = SYSTEM_MCP_SERVERS.find((p) => systemMcpServerId(p.id) === serverId);
+    const safe = new Set(system?.safeTools ?? []);
     if (!safe.size) return [];
     const userOff = this.readUserDisabled(serverId);
     const enabled: string[] = [];
@@ -377,72 +387,70 @@ export class McpRegistry {
     }
   }
 
-  /** 该服务是否属于预置（界面据此标注「默认接入」）。 */
-  isPreset(serverId: string): boolean {
-    return DEFAULT_PRESET_SERVERS.some((p) => presetServerId(p.id) === serverId);
+  /**
+   * 该服务是否属于系统能力（界面走只读展示、存储层据此拒绝删除/改配置）。
+   *
+   * 只按固定 id 判定，不看列表里有没有：即使本轮因密文读不出还没补齐，
+   * 也不能把系统能力当成用户服务而允许删改。
+   */
+  isSystem(serverId: string): boolean {
+    return isSystemMcpServer(serverId);
   }
 
   /**
-   * 被用户删掉过的预置服务 id（按预置顺序）。
+   * 系统能力列表（按定义表顺序，只返回当前确实在内存列表里的）。
    *
-   * 界面据此决定要不要显示「恢复预置服务」：删过才显示，没删过不占地方。
+   * 顺序不依赖落盘顺序：用户服务先存在时，补齐的系统能力会追加在末尾；
+   * 界面要稳定显示在上方，所以这里按定义表重排。返回拷贝，调用方改不到内部状态。
+   */
+  systemServers(): McpServerConfig[] {
+    return SYSTEM_MCP_SERVERS.map((system) => systemMcpServerId(system.id))
+      .map((id) => this.serverList.find((s) => s.id === id))
+      .filter((s): s is McpServerConfig => !!s)
+      .map((s) => ({
+        ...s,
+        args: s.args ? [...s.args] : undefined,
+        headers: s.headers ? { ...s.headers } : undefined,
+      }));
+  }
+
+  /** 该服务是否属于系统能力。@deprecated 旧名；新代码请用 `isSystem`。 */
+  isPreset(serverId: string): boolean {
+    return this.isSystem(serverId);
+  }
+
+  /**
+   * 被用户删掉过的系统能力 id。
+   *
+   * @deprecated 系统能力不可删除，所以恒为空数组；保留只为兼容尚未迁移的旧测试。
    */
   removedPresetIds(): string[] {
-    const removed = this.readRemovedPresets();
-    return DEFAULT_PRESET_SERVERS.map((p) => presetServerId(p.id)).filter((id) => removed.has(id));
+    return [];
   }
 
   /**
-   * 恢复预置服务（d.77）：把「用户删掉的预置」补回来。
+   * 「恢复系统能力」。
    *
-   * 为什么需要它：`remove()` 会把预置 id 记进 removedPresets，之后 `seedDefaults()`
-   * 永不再补——初衷是「用户能真正删掉它」，但界面上没有回退路径，删错了就只能手填。
-   * 这里给出显式的找回动作，语义是**可逆的删除**：
-   * 1. 清掉这些 id 的删除记录（再删一次仍然记得住）；
-   * 2. 只补**当前列表里确实没有**的预置，且**同名服务已存在时不覆盖**——
-   *    用户手填了同名服务时，不能拿预置去顶掉他的配置；
-   * 3. 不动其它服务的工具授权与请求头。
-   *
-   * @returns 本次真正补回的条数（已存在的不算）
+   * @deprecated 系统能力始终存在（由 `ensureSystemServers()` 负责），没有「恢复」这个动作；
+   * 恒返回 0。保留只为兼容尚未迁移的旧测试，新代码不要调用。
    */
   restorePresets(): number {
-    const removed = this.readRemovedPresets();
-    const before = [...removed].sort().join(",");
-    const at = this.now();
-    let restored = 0;
-    for (const preset of DEFAULT_PRESET_SERVERS) {
-      removed.delete(presetServerId(preset.id));
-      if (this.pushPreset(preset, at)) restored += 1;
-    }
-    if (restored > 0) {
-      this.serversMutated = true;
-      this.saveServers();
-    }
-    // 删除记录也要落盘：哪怕这次一条都没补（已被同名服务顶替），
-    // 记录清掉才能让「以后再删一次」重新被记住。
-    if ([...removed].sort().join(",") !== before) this.writeRemovedPresets(removed);
-    return restored;
+    this.ensureSystemServers();
+    return 0;
   }
 
   /**
-   * 按预置 id 补回**指定**的一条预置服务（界面「预置服务」区的一键接入）。
+   * 按定义 id 取一条系统能力。
    *
-   * 与 `restorePresets()` 的差别：只处理点的那一条，别的服务与工具授权都不动。
-   * 调用前没有删除记录也允许——用户可能是在旧版本里丢过这条预置
-   * （配置被覆盖 / 换账户后密文读不出），不该因为「没删过」就找不回来。
-   *
-   * @returns 新加的服务（界面据此顺手触发一次连接）；同 id/同名已存在时 null
+   * @deprecated 系统能力始终存在，调用前无需「补回」；这里只返回现有配置（不存在时 null）。
+   * 保留只为兼容尚未迁移的旧测试。
    */
-  restorePreset(presetId: string): McpServerConfig | null {
-    const preset = DEFAULT_PRESET_SERVERS.find((p) => p.id === presetId);
-    if (!preset) return null;
-    const removed = this.readRemovedPresets();
-    if (removed.delete(presetServerId(preset.id))) this.writeRemovedPresets(removed);
-    if (!this.pushPreset(preset, this.now())) return null;
-    this.serversMutated = true;
-    this.saveServers();
-    const created = this.serverList[this.serverList.length - 1];
-    return created ? { ...created, args: created.args ? [...created.args] : undefined } : null;
+  restorePreset(systemId: string): McpServerConfig | null {
+    const system = SYSTEM_MCP_SERVERS.find((p) => p.id === systemId);
+    if (!system) return null;
+    const current = this.serverList.find((s) => s.id === systemMcpServerId(system.id));
+    if (!current) return null;
+    return { ...current, args: current.args ? [...current.args] : undefined };
   }
 
   private readServers(): McpServerConfig[] {
@@ -556,9 +564,16 @@ export class McpRegistry {
     return { ...server };
   }
 
+  /**
+   * 更新一台**用户添加的**服务。
+   *
+   * 系统能力的配置只读：命令、参数、地址都由定义表决定，改了也连不上，
+   * 所以直接抛错——`update()` 的调用方都是界面保存动作，静默不生效更难排查。
+   */
   update(id: string, patch: Partial<Omit<McpServerConfig, "id" | "createdAt">>): McpServerConfig {
     const idx = this.serverList.findIndex((s) => s.id === id);
     if (idx < 0) throw new Error("MCP 服务不存在");
+    if (this.isSystem(id)) throw new Error("系统能力不可修改配置");
     const next: McpServerConfig = {
       ...this.serverList[idx],
       ...patch,
@@ -571,22 +586,24 @@ export class McpRegistry {
     return { ...next };
   }
 
-  remove(id: string): void {
+  /**
+   * 删除一台**用户添加的**服务。
+   *
+   * 系统能力不可删除：返回 false，不改任何状态。选返回 false 而不是抛错，
+   * 是因为删除入口本来就不会渲染系统能力，这里是纵深防御，界面无需 try/catch。
+   */
+  remove(id: string): boolean {
+    if (this.isSystem(id)) return false;
     this.serverList = this.serverList.filter((s) => s.id !== id);
     this.serversMutated = true;
     delete this.toolMap[id];
     for (const key of [...this.enabled]) {
       if (key.startsWith(`${id}::`)) this.enabled.delete(key);
     }
-    // 删掉的是预置服务 → 记一笔，否则下次启动会因「列表为空」被重新预置
-    if (this.isPreset(id)) {
-      const removed = this.readRemovedPresets();
-      removed.add(id);
-      this.writeRemovedPresets(removed);
-    }
     this.saveServers();
     this.saveTools();
     this.saveEnabled();
+    return true;
   }
 
   /** 缓存某台服务的最新工具清单（刷新时整表替换）。 */
@@ -643,9 +660,9 @@ export class McpRegistry {
     const key = toolKey(serverId, toolName);
     if (on) this.enabled.add(key);
     else this.enabled.delete(key);
-    // 预置服务的只读工具：用户关掉时记一笔，之后自动启用逻辑不再打开它。
+    // 系统能力的只读工具：用户关掉时记一笔，之后自动启用逻辑不再打开它。
     // 再打开时撤掉记录，让「显式开启」优先于「曾被关过」。
-    if (this.isPreset(serverId)) {
+    if (this.isSystem(serverId)) {
       const off = this.readUserDisabled(serverId);
       if (on) off.delete(toolName);
       else off.add(toolName);

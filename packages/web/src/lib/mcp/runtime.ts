@@ -67,9 +67,9 @@ export async function refreshServerTools(
     await client.initialize();
     const tools = await client.listTools();
     registry.setTools(serverId, tools);
-    // 预置服务：把只读那批工具自动打开（PowerShell/Registry 这类写操作的绝不在内）。
+    // 系统能力：把只读那批工具自动打开（PowerShell/Registry 这类写操作的绝不在内）。
     // 用户手动关掉的不会被再打开——autoEnableSafeTools 内部查 userDisabled。
-    if (registry.isPreset(serverId)) registry.autoEnableSafeTools(serverId, tools);
+    if (registry.isSystem(serverId)) registry.autoEnableSafeTools(serverId, tools);
     registry.setStatus(serverId, { state: "connected", tools: tools.length });
     return tools;
   } catch (err) {

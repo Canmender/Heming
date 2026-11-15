@@ -2,8 +2,8 @@
  * d.59 · 启动时序（MCP 服务配置）：hydrate 完成后的补读、预置推迟与用户输入保护。
  *
  * 风险背景：Electron 46 没有同步桥兜底时，构造期 `readServers()` 对「缓存未命中的密文」
- * 只能拿到 null（异步补取是后台的）；此时若照旧 `seedDefaults()`，会用预置明文覆盖
- * 磁盘上的密文服务配置（请求头 token 一起丢）。所以构造期推迟预置，hydrate 后重新判断。
+ * 只能拿到 null（异步补取是后台的）；此时若照旧补齐系统能力，会写盘覆盖磁盘上的密文
+ * 服务配置（请求头 token 一起丢）。所以构造期推迟补齐，hydrate 后重新判断。
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -13,6 +13,7 @@ import {
 } from "../secureStorage.js";
 import { McpRegistry } from "./store.js";
 import { MCP_SERVERS_KEY } from "./store.js";
+import { SYSTEM_WINDOWS_DESKTOP_ID, SYSTEM_SCRAPLING_ID } from "./presets.js";
 import type { StorageLike } from "../memory/types.js";
 
 function memStorage(): StorageLike & { map: Map<string, string> } {
@@ -102,8 +103,15 @@ describe("McpRegistry · hydrate 时序", () => {
     await hydration;
     reg.refreshAfterHydrate();
 
-    expect(reg.servers().map((s) => s.id)).toEqual(["real-server"]);
-    expect(base.map.get(MCP_SERVERS_KEY)).toBe(envelopeOf("enc:placeholder")); // 未被预置覆盖
+    // 磁盘上的用户服务被读回来；系统能力按 ensureSystemServers() 追加在末尾
+    expect(reg.servers().map((s) => s.id)).toEqual([
+      "real-server",
+      SYSTEM_WINDOWS_DESKTOP_ID,
+      SYSTEM_SCRAPLING_ID,
+    ]);
+    expect(reg.get("real-server")?.url).toBe("https://real.test/mcp");
+    // 磁盘仍是密文（没有被明文预置覆盖）
+    expect(base.map.get(MCP_SERVERS_KEY)).toContain("__hemingEnc");
   });
 
   it("hydrate 前用户已改服务 → 不被 hydrate 重读覆盖", async () => {

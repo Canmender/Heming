@@ -588,10 +588,10 @@ describe("插件页 · MCP Tab（内嵌完整接口视图）", () => {
     expect(report).toHaveTextContent("已连接");
     expect(within(report).getByRole("button", { name: "打开插件 报告工具箱" })).toBeInTheDocument();
 
-    // 来源口径不变：预置带「内置」徽标、Registry 装来的带 Registry 徽标
-    expect(screen.getByRole("region", { name: "MCP 服务 Windows 桌面" })).toHaveTextContent(
-      "内置",
-    );
+    // 系统能力（T31 起常驻、只读）：名称来自定义表，卡片上没有删除入口
+    const system = screen.getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
+    expect(system).toHaveTextContent("始终参与对话");
+    expect(within(system).queryByRole("button", { name: /删除/ })).toBeNull();
     expect(
       screen.getByRole("region", { name: "MCP 服务 Registry 演示服务" }),
     ).toHaveTextContent("Registry");

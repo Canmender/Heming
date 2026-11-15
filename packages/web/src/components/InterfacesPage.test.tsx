@@ -112,12 +112,13 @@ describe("InterfacesPage", () => {
     expect(within(card).getByText("插件")).toBeInTheDocument();
   });
 
-  it("一条服务都没有时才显示引导文案（删光后的状态）", () => {
+  it("系统能力常驻；没有私有服务时只显示私有区的引导文案", () => {
     const empty = new McpRegistry(memStorage(), () => new Date().toISOString());
-    // 把预置清掉，构造真正的零服务状态
-    for (const s of [...empty.servers()]) empty.remove(s.id);
     render(<InterfacesPage registry={empty} />);
-    expect(screen.getByText(/还没有 MCP 服务/)).toBeInTheDocument();
+    // 系统能力始终在（不可删除），私有区单独给引导
+    expect(screen.getByTestId("mcp-system-servers")).toBeInTheDocument();
+    expect(screen.getByText("还没有私有 MCP 服务")).toBeInTheDocument();
+    expect(screen.queryByText(/还没有 MCP 服务，先添加一台/)).toBeNull();
   });
 
   it("添加 HTTP 服务后出现在列表，并自动开始连接（无需手动点）", async () => {
@@ -321,67 +322,57 @@ describe("InterfacesView 嵌入视图", () => {
   });
 });
 
-/* ------------------------------------- 内置预置服务：缺失可见、可一键接入（d.78） */
+/* --------------------------------- 系统能力区：常驻只读（d.147.4.93.11） */
 
-describe("内置预置服务：缺失时列出并可接入", () => {
-  /** 全新存储 → 首次预置两条（Windows 桌面控制 / 网页抓取）。 */
+describe("系统能力：常驻、只读、不可删改", () => {
   function freshRegistry(): McpRegistry {
     return new McpRegistry(memStorage());
   }
 
-  it("预置都在时不占地方：不显示「预置服务」区", () => {
+  it("系统能力区常驻在最上面：两条卡都标 data-system-mcp、显示「始终参与对话」、没有删除入口", () => {
     const fresh = freshRegistry();
-    expect(fresh.servers()).toHaveLength(2);
     render(<InterfacesView registry={fresh} />);
+
+    const section = screen.getByTestId("mcp-system-servers");
+    expect(section).toHaveAttribute("aria-label", "系统能力");
+    const win = within(section).getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
+    const scrape = within(section).getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" });
+    for (const card of [win, scrape]) {
+      expect(card).toHaveAttribute("data-system-mcp", "true");
+      expect(within(card).getByText("始终参与对话")).toBeInTheDocument();
+      expect(within(card).queryByRole("button", { name: /删除/ })).toBeNull();
+      expect(within(card).queryByRole("checkbox")).toBeNull(); // 没有「参与对话」开关
+    }
+    // 旧的「预置服务」独立区块不再存在
     expect(screen.queryByRole("region", { name: "预置服务" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /接入预置/ })).toBeNull();
   });
 
-  /**
-   * 「预置凭空消失」的现场：存储里只有用户自己的服务，也没有删除记录
-   * ——旧版本里配置被覆盖 / 换账户后密文读不出都会这样。旧 UI 只在有删除记录时
-   * 才给找回入口，这种情形下用户完全看不到 Windows 桌面控制。
-   */
-  it("预置不在列表里（且没有删除记录）时也列出来，接入后自动连接", async () => {
+  it("存储里已有用户服务时系统能力照样补在最上面，用户服务留在私有区", () => {
     const reg = new McpRegistry(memStorageWithServer());
     render(<InterfacesView registry={reg} />);
-    const region = screen.getByRole("region", { name: "预置服务" });
-    expect(within(region).getByText("Windows 桌面控制")).toBeInTheDocument();
-    expect(within(region).getAllByRole("button", { name: /接入预置/ })).toHaveLength(2);
 
-    fireEvent.click(within(region).getByRole("button", { name: "接入预置 Windows 桌面控制" }));
-
-    expect(screen.getByRole("status")).toHaveTextContent("已接入预置服务：Windows 桌面控制");
-    expect(screen.getByRole("region", { name: "MCP 服务 Windows 桌面控制" })).toBeInTheDocument();
-    // 接入即自动连接（与「添加服务」一致），不用再点一次
-    await waitFor(() => expect(refreshServerTools).toHaveBeenCalled());
-    // 这一条已接入 → 按钮消失；另一条还没接入 → 区还在
-    expect(screen.queryByRole("button", { name: "接入预置 Windows 桌面控制" })).toBeNull();
+    const systemSection = screen.getByTestId("mcp-system-servers");
+    expect(within(systemSection).getAllByRole("region")).toHaveLength(2);
+    const privateSection = screen.getByRole("region", { name: "私有 MCP 服务" });
+    expect(within(privateSection).getByRole("region", { name: "MCP 服务 已存在的服务" })).toBeInTheDocument();
+    // 私有卡没有系统标记
     expect(
-      screen.getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
-    ).toBeInTheDocument();
+      within(privateSection).getByRole("region", { name: "MCP 服务 已存在的服务" }).getAttribute("data-system-mcp"),
+    ).toBeNull();
   });
 
-  it("删除预置后该条在「预置服务」里重新出现，确认框说明可重新接入", () => {
+  it("私有服务删除确认里不出现预置说明（旧文案随预置语义一起删掉）", () => {
     const fresh = freshRegistry();
+    const mine = fresh.add({ name: "我自己的", transport: "http", url: "https://x.example.com/mcp" });
     render(<InterfacesView registry={fresh} />);
-    expect(screen.queryByRole("region", { name: "预置服务" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "删除 网页抓取（Scrapling）" }));
+    fireEvent.click(screen.getByRole("button", { name: `删除 ${mine.name}` }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(/这是随应用内置的预置服务/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/可在「预置服务」里重新接入/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
-
-    const region = screen.getByRole("region", { name: "预置服务" });
-    fireEvent.click(
-      within(region).getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
-    );
-    expect(
-      screen.getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" }),
-    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/这是随应用内置的预置服务/)).toBeNull();
+    expect(within(dialog).queryByText(/可在「预置服务」里重新接入/)).toBeNull();
   });
 
-  it("已有同名服务时不再列出该预置（不给点了没反应的按钮）", () => {
+  it("同名用户服务不会顶替系统能力：两条系统能力仍在，用户那条归私有区", () => {
     const reg = new McpRegistry(
       memStorageWithServer({
         id: "mine",
@@ -390,21 +381,15 @@ describe("内置预置服务：缺失时列出并可接入", () => {
       }),
     );
     render(<InterfacesView registry={reg} />);
-    expect(screen.queryByRole("button", { name: "接入预置 Windows 桌面控制" })).toBeNull();
-    // 网页抓取仍缺 → 区还在，说明只是这一条被同名服务顶替
-    expect(screen.getByRole("region", { name: "预置服务" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
-    ).toBeInTheDocument();
-    expect(reg.servers().filter((s) => s.name === "Windows 桌面控制")).toHaveLength(1);
-  });
 
-  it("手填的服务删除确认里不出现预置说明", () => {
-    const fresh = freshRegistry();
-    const mine = fresh.add({ name: "我自己的", transport: "http", url: "https://x.example.com/mcp" });
-    render(<InterfacesView registry={fresh} />);
-    fireEvent.click(screen.getByRole("button", { name: `删除 ${mine.name}` }));
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).queryByText(/这是随应用内置的预置服务/)).toBeNull();
+    const systemSection = screen.getByTestId("mcp-system-servers");
+    expect(within(systemSection).getAllByRole("region")).toHaveLength(2);
+    const privateSection = screen.getByRole("region", { name: "私有 MCP 服务" });
+    const mineCard = within(privateSection).getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
+    expect(mineCard.getAttribute("data-system-mcp")).toBeNull();
+    // 系统能力那条地址仍是内置命令入口（不是用户的 URL）
+    expect(
+      within(systemSection).getByRole("region", { name: "MCP 服务 Windows 桌面控制" }).textContent,
+    ).toContain("uvx");
   });
 });

@@ -15,9 +15,8 @@ import {
 import { PlusIcon, TrashIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
-import { DEFAULT_PRESET_SERVERS, MCP_PRESETS, presetServerId } from "../lib/mcp/presets.js";
 import { PageShell } from "./layout/PageShell.js";
-import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
 import { Button } from "../components/ui/Button.js";
 
@@ -37,23 +36,6 @@ function pluginIdFromServerId(serverId: string): string | null {
 }
 
 /**
- * 「内置：<系统能力名>」来源徽标（d.65 T3）。
- *
- * 前缀用「内置」而非「系统」：系统插件名就是「系统能力」，避免「系统：系统能力」重复。
- *
- * 与插件徽标一样用 .ui-chip，但**不是按钮**——预置服务随应用内置，没有插件详情页可跳。
- * 名字取自 describeSystemPlugin().name，页面里不硬编码。
- */
-function SystemSourceChip({ systemName }: { systemName: string }) {
-  return (
-    <span className="ui-chip" title="随应用内置；不可停用或卸载">
-      <span>内置</span>
-      <span>：{systemName}</span>
-    </span>
-  );
-}
-
-/**
  * 接口区：MCP 服务与工具调用。
  *
  * 三件事：
@@ -62,14 +44,19 @@ function SystemSourceChip({ systemName }: { systemName: string }) {
  * 3. 逐个工具开关「是否交给模型」+ 手动测试调用（`tools/call`）。
  *
  * 安全默认：**工具默认不启用**，必须显式打开才会进入模型提示词。
+ * 唯一例外是系统能力（Windows 桌面控制 / 网页抓取）的只读白名单——
+ * 它们是应用自身能力，发现工具后自动启用；写操作仍需逐个授权。
  */
 /**
  * 可嵌入的接口（MCP）视图（d.67 导航合并）。
  *
- * 为什么把接口区从「页」降级成「视图」：导航里接口区与插件区的「MCP」Tab
- * 看的是同一份 MCP 注册表（插件声明的远程服务也登记在这里），两个入口
- * 只是把同一张表拆成两处。合并后插件区承载「MCP」Tab，本视图保留服务
- * 增删改、请求头、连接、逐工具授权与协议说明，只去掉页面外壳。
+ * 布局分两段（d.93）：
+ * - **系统能力**：随应用内置的两条服务，只读展示（不可删除、不可改配置），
+ *   登录后由 `autoConnectAll()` 自动连接；工具仍可逐个开关；
+ * - **私有服务**：用户手动添加或从 Registry 安装，增删改与原来一致。
+ *
+ * 为什么把系统能力单独分区而不是混在列表里：混排时用户会以为自己也能删掉
+ * 「Windows 桌面控制」，删完才发现应用少了能力；分区后「可操作 / 只读」一眼可分。
  */
 export interface InterfacesViewProps {
   registry?: McpRegistry;
@@ -99,9 +86,6 @@ export function InterfacesView({
     return map;
   }, [plugins]);
 
-  /** 系统插件的显示名（预置服务来源徽标用；不硬编码文案）。 */
-  const systemName = useMemo(() => describeSystemPlugin({ mcp: registry }).name, [registry]);
-
   /**
    * 「插件：<名>」徽标的动作：
    * - 嵌入式（宿主传 onOpenPlugin）→ 宿主打开插件详情，留在插件区内；
@@ -126,8 +110,6 @@ export function InterfacesView({
   /** 单次请求超时（秒，可选）：空＝缺省（HTTP 20s / stdio 30s）。 */
   const [timeoutSec, setTimeoutSec] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  /** 当前选中的预设说明（点预设后显示，方便看前置条件与风险提示）。 */
-  const [presetHint, setPresetHint] = useState("");
   /**
    * 连接状态的**真实来源**是「有没有缓存到工具清单」，本页 state 只是过程态。
    *
@@ -147,6 +129,13 @@ export function InterfacesView({
   /** stdio 需要桌面端：浏览器里只能登记配置，连接会失败。 */
   const stdioReady = hasStdioBridge();
   const servers = useMemo(() => registry.servers(), [registry, tick]);
+  /** 系统能力：顺序按定义表（不跟随落盘顺序），只读展示。 */
+  const systemServers = useMemo(() => registry.systemServers(), [registry, tick]);
+  /** 私有服务：系统能力之外的全部服务（手填 / Registry / 插件）。 */
+  const userServers = useMemo(
+    () => servers.filter((server) => !registry.isSystem(server.id)),
+    [registry, servers, tick],
+  );
   const toolsByServer = useMemo(
     () => Object.fromEntries(servers.map((s) => [s.id, registry.tools(s.id)])),
     [registry, servers, tick],
@@ -154,25 +143,6 @@ export function InterfacesView({
   const enabledCount = useMemo(
     () => servers.reduce((n, s) => n + toolsByServer[s.id].filter((t) => registry.isToolEnabled(s.id, t.name)).length, 0),
     [registry, servers, toolsByServer, tick],
-  );
-  /**
-   * 还没接入的内置预置服务：界面把它们显式列出来，而不是等「用户删过」才给入口。
-   *
-   * 为什么不只看删除记录：预置可能因为升级、配置被覆盖、换系统账户后密文读不出
-   * 而凭空消失，这时根本没有删除记录，旧 UI 连找回按钮都不显示，用户只能手填。
-   * 改成「当前列表里缺哪条」来判断，丢过的预置就一定会重新出现、可以一键接回。
-   */
-  const missingPresets = useMemo(
-    () =>
-      DEFAULT_PRESET_SERVERS.filter(
-        // 同名也算「已有」：用户可能手填过同名服务，那再列一条「未接入」只会
-        // 点出一个「同名已存在，未重复接入」的提示，等于给用户一个没用的按钮。
-        (p) =>
-          !servers.some(
-            (s) => s.id === presetServerId(p.id) || s.name.trim() === p.name.trim(),
-          ),
-      ),
-    [servers],
   );
 
   // 组件卸载时刷新不设置状态
@@ -264,18 +234,6 @@ export function InterfacesView({
     setRemoveTarget(server);
   };
 
-  /** 接入一条内置预置服务；成功后顺手连一次，失败不阻断（配置已存下，可在列表里重试）。 */
-  const restorePreset = (presetId: string) => {
-    const added = registry.restorePreset(presetId);
-    bump();
-    if (!added) {
-      setMsg({ kind: "ok", text: "同名服务已存在，未重复接入（不会覆盖你的配置）" });
-      return;
-    }
-    setMsg({ kind: "ok", text: `已接入预置服务：${added.name}，正在拉取工具…` });
-    void connect(added);
-  };
-
   const confirmRemoveServer = () => {
     if (!removeTarget) return;
     const server = removeTarget;
@@ -309,6 +267,269 @@ export function InterfacesView({
     } finally {
       setTestRunning(null);
     }
+  };
+
+  /**
+   * 渲染一台 MCP 服务卡片。
+   *
+   * 系统能力与私有服务共用同一张卡片：工具清单、测试面板、连接/错误展示完全一致；
+   * 差别只在头部——系统能力没有「参与对话」开关与删除按钮，状态旁给一个重试连接。
+   * `system` 不看 `origin` 而看 `registry.isSystem(id)`：旧数据里 origin 可能是
+   * manual，但固定 id 就是系统能力，不能因此把它当用户服务处理。
+   */
+  const renderServerCard = (server: McpServerConfig, system: boolean) => {
+    const tools = toolsByServer[server.id] ?? [];
+    // 本页 state 里没有记录时，按「是否已发现过工具」判断：
+    // 已发现 = App 启动时已自动连过（清单会落盘），显示「已连接」；
+    // 未发现 = 还没连过或连失败，显示各自状态。
+    // 用 hasDiscovered 而不是「清单长度>0」——零工具的服务也算连上过。
+    // 优先看本页刚发起的连接；没有就看**最近一次连接尝试**的结果，
+    // 只有「从没连过但有旧快照」才退回「已连接」——其余情况一律如实标错。
+    const live = registry.status(server.id);
+    const state: McpConnState =
+      conn[server.id] ??
+      (live
+        ? live.state === "connected"
+          ? "ready"
+          : live.state
+        : registry.hasDiscovered(server.id)
+          ? // 有快照但本进程还没连过：显示已连接（沿用历史语义），
+            // 真正的「坏了」由 setStatus 记录后覆盖成 stale
+            "ready"
+          : "idle");
+    return (
+      <section
+        key={server.id}
+        aria-label={`MCP 服务 ${server.name}`}
+        data-system-mcp={system ? "true" : undefined}
+        className="ui-card p-4"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-ui-md font-semibold">{server.name}</span>
+          {system && (
+            <span className="ui-chip" title="随应用内置，不可删除、不可修改配置">
+              随应用内置
+            </span>
+          )}
+          <span className="ui-chip">
+            {server.transport === "http" ? "HTTP" : "stdio"}
+          </span>
+          {/* 从 Registry 装的本地包：把「哪类包、钉的哪个版本」摊出来。
+              界面据此能看出本机跑的是钉死版本，不是上游最新版。 */}
+          {server.origin === "registry" && (
+            <span className="ui-chip">
+              {`Registry${server.registryType ? ` · ${server.registryType}` : ""}${
+                server.registryVersion ? ` · v${server.registryVersion}` : ""
+              }`}
+            </span>
+          )}
+          {server.origin === "plugin" && (() => {
+            const pluginId = pluginIdFromServerId(server.id);
+            const pluginName = pluginId ? pluginNames.get(pluginId) : undefined;
+            return (
+              <button
+                type="button"
+                aria-label={`打开插件 ${pluginName ?? pluginId ?? "（未知插件）"}`}
+                title="随插件安装；停用或卸载插件时同步"
+                onClick={() => {
+                  if (pluginId) openPlugin(pluginId);
+                }}
+                className="ui-chip hover:text-ink"
+              >
+                <span>插件</span>
+                <span>：{pluginName ?? "未知插件"}</span>
+              </button>
+            );
+          })()}
+          <span
+            className={`rounded-full px-2 py-0.5 text-ui-xs ${
+              state === "ready"
+                ? "bg-success-soft text-success"
+                : state === "error"
+                  ? "bg-danger-soft text-danger"
+                  : state === "stale"
+                    ? "bg-warn-soft text-warn"
+                    : state === "connecting"
+                      ? "bg-warn-soft text-warn"
+                      : "bg-subtle-2 text-muted"
+            }`}
+            title={state === "stale" ? registry.status(server.id)?.error ?? "最近一次连接失败" : undefined}
+          >
+            {state === "ready"
+              ? "已连接"
+              : state === "error"
+                ? "连接失败"
+                : state === "stale"
+                  ? "已断开（清单过期）"
+                  : state === "connecting"
+                    ? "连接中…"
+                    : "未连接"}
+          </span>
+          <span className="text-ui-xs text-muted">
+            {tools.length ? `${tools.length} 个工具` : "未获取工具"}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {system ? (
+              // 系统能力始终参与对话：没有「停用」入口（停用后模型能力会静默缺失）。
+              <span className="text-ui-xs text-muted">始终参与对话</span>
+            ) : (
+              <label className="flex items-center gap-1 text-ui-xs text-muted">
+                <input
+                  type="checkbox"
+                  aria-label={`启用服务 ${server.name}`}
+                  checked={server.enabled}
+                  onChange={(e) => {
+                    registry.update(server.id, { enabled: e.target.checked });
+                    bump();
+                  }}
+                />
+                参与对话
+              </label>
+            )}
+            <Button
+              type="button"
+              aria-label={`连接 ${server.name}`}
+              title={system ? "重新连接系统能力" : undefined}
+              onClick={() => void connect(server)}
+              disabled={state === "connecting"}
+              size="sm" variant="ghost"
+            >
+              {state === "connecting"
+                ? "连接中…"
+                : tools.length
+                  ? "刷新工具"
+                  : system
+                    ? "重新连接"
+                    : "连接"}
+            </Button>
+            {!system && (
+              <Button
+                type="button"
+                aria-label={`删除 ${server.name}`}
+                onClick={() => removeServer(server)}
+                size="sm" variant="ghost" className="text-danger"
+              >
+                <TrashIcon width={12} height={12} />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {server.transport === "stdio" && !stdioReady && (
+          <p className="mt-2 text-ui-sm text-warn">
+            stdio 服务只能在桌面端连接；当前是浏览器环境。
+          </p>
+        )}
+
+        {connError[server.id] && (
+          <p role="alert" className="mt-2 text-ui-sm text-danger">
+            {connError[server.id]}
+          </p>
+        )}
+
+        {/* 命令行片段：12px 等宽（命令不是正文，但 11px 在这类等宽串上会糊） */}
+        <p className="mt-1 truncate font-mono ui-caption">
+          {server.transport === "http" ? server.url : `${server.command} ${(server.args ?? []).join(" ")}`}
+        </p>
+
+        {tools.length === 0 ? (
+          <p className="mt-3 text-ui-sm text-muted">
+            {system
+              ? "正在连接或尚未发现工具；点「重新连接」重试。连接成功后可逐个开关工具。"
+              : "点「连接」拉取工具清单。连接成功后可逐个授权给模型调用。"}
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="ui-table min-w-[560px]">
+              <thead>
+                <tr>
+                  <th>工具</th>
+                  <th>描述</th>
+                  <th>交给模型</th>
+                  <th className="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tools.map((tool) => {
+                  const enabled = registry.isToolEnabled(server.id, tool.name);
+                  const key = `${server.id}::${tool.name}`;
+                  return (
+                    <tr key={tool.name}>
+                      <td className="font-mono">{tool.name}</td>
+                      <td className="max-w-[320px] truncate text-muted">
+                        {tool.description || "—"}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`启用工具 ${tool.name}`}
+                          checked={enabled}
+                          onChange={(e) => {
+                            registry.setToolEnabled(server.id, tool.name, e.target.checked);
+                            bump();
+                          }}
+                        />
+                      </td>
+                      <td className="text-right">
+                        <Button
+                          type="button"
+                          aria-label={`测试 ${tool.name}`}
+                          onClick={() => {
+                            setTestFor(testFor === key ? null : key);
+                            setTestArgs("{}");
+                            setTestResult(null);
+                          }}
+                          size="sm" variant="ghost"
+                        >
+                          测试
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {testFor && testFor.startsWith(`${server.id}::`) && (
+              <div className="mt-3 rounded-lg border border-line bg-subtle-2 p-3">
+                <div className="ui-section-title">
+                  测试 {testFor.split("::")[1]}
+                </div>
+                <textarea
+                  aria-label="测试参数"
+                  value={testArgs}
+                  onChange={(e) => setTestArgs(e.target.value)}
+                  className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 font-mono text-ui-xs outline-hidden focus:border-ink"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void runTest(server, testFor.split("::")[1])}
+                    disabled={testRunning === testFor}
+                    size="sm" variant="primary"
+                  >
+                    {testRunning === testFor ? "执行中…" : "执行"}
+                  </Button>
+                  <span className="ui-caption">按每个工具的说明填写参数（JSON 对象）</span>
+                </div>
+                {testResult && (
+                  <pre
+                    role="status"
+                    className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 ui-caption ${
+                      testResult.ok
+                        ? "border-success-line bg-success-soft text-success"
+                        : "border-danger-line bg-danger-soft text-danger"
+                    }`}
+                  >
+                    {testResult.text}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    );
   };
 
   if (discover) {
@@ -355,7 +576,7 @@ export function InterfacesView({
           添加 MCP 服务
         </Button>
         <span className="ml-auto ui-caption">
-          MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
+          MCP 协议 {MCP_PROTOCOL_VERSION} · 只读工具默认启用，其余逐个授权
         </span>
       </div>
       {msg && (
@@ -371,40 +592,29 @@ export function InterfacesView({
         </div>
       )}
 
-      {/* 内置预置服务缺失时列在这里（判断见 missingPresets 注释）：
-          用户永远看得见「本该有这条」，点一下就能接回，不用手填命令与参数。 */}
-      {missingPresets.length > 0 && (
-        <section
-          aria-label="预置服务"
-          className="mb-4 ui-card p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="ui-section-title">预置服务</span>
-            <span className="ui-chip">未接入</span>
-          </div>
-          <p className="mt-1 text-ui-sm text-muted">
-            工具默认关闭；启用后每次调用仍需你确认。
-          </p>
-          <div className="mt-2 flex flex-col gap-2">
-            {missingPresets.map((preset) => (
-              <div key={preset.id} className="flex flex-wrap items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-ui-md font-semibold">{preset.name}</div>
-                  <div className="mt-0.5 ui-caption">{preset.hint}</div>
-                </div>
-                <Button
-                  type="button"
-                  aria-label={`接入预置 ${preset.name}`}
-                  onClick={() => restorePreset(preset.id)}
-                  size="sm" variant="primary"
-                >
-                  接入
-                </Button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* 系统能力：只读分区，永远排在最上面。不可删除、不可改配置，
+          但工具开关可用（写操作仍需逐个授权）。 */}
+      <section aria-label="系统能力" data-testid="mcp-system-servers" className="mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="ui-section-title">系统能力</span>
+          <span className="ui-chip">随应用内置</span>
+        </div>
+        <p className="mt-1 text-ui-sm text-muted">
+          Windows 桌面控制与网页抓取随应用内置，登录后自动连接；不可删除、不可修改配置。
+          只读工具默认启用，写操作仍需逐个授权。
+        </p>
+        <div className="mt-3 flex flex-col gap-3">
+          {systemServers.length > 0 ? (
+            systemServers.map((server) => renderServerCard(server, true))
+          ) : (
+            // 密文读不出时 ensureSystemServers 会跳过补齐（避免覆盖用户配置），
+            // 这一轮就看不到系统能力；换回原系统账户/Credential Manager 记录后可恢复。
+            <p className="rounded-lg border border-dashed border-line bg-surface p-3 text-ui-sm text-muted">
+              系统能力暂不可用（本机服务配置读取失败）；恢复系统账户的凭据后重启应用即可。
+            </p>
+          )}
+        </div>
+      </section>
 
       {formOpen && (
         <section className="ui-card mb-4 p-4">
@@ -431,35 +641,6 @@ export function InterfacesView({
                 <option value="stdio">stdio（桌面端，本机进程）</option>
               </select>
             </label>
-            {/* 常用服务预设：一次填好传输/命令/参数。stdio 参数拼错时不会报错，
-                只表现为「连上了但没有工具」，很难排查——所以值得一键填。 */}
-            <div className="md:col-span-2">
-              <span className="ui-caption">常用预设</span>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                {MCP_PRESETS.map((p) => (
-                  <Button
-                    key={p.id}
-                    type="button"
-                    aria-label={`套用预设 ${p.name}`}
-                    title={p.hint}
-                    onClick={() => {
-                      setName(p.name);
-                      setTransport(p.transport);
-                      setUrl(p.url ?? "");
-                      setCommand(p.command ?? "");
-                      setArgs((p.args ?? []).join(" "));
-                      setPresetHint(p.hint);
-                      setMsg({ kind: "ok", text: `已填好「${p.name}」，确认后点保存` });
-                    }}
-                    size="sm" variant="ghost"
-                  >
-                    {p.name}
-                    {p.verified && <span className="ml-1 text-ui-xs text-success">已实测</span>}
-                  </Button>
-                ))}
-                {presetHint && <span className="ui-caption">{presetHint}</span>}
-              </div>
-            </div>
             {transport === "http" ? (
               <label className="ui-caption md:col-span-2">
                 服务地址
@@ -546,253 +727,22 @@ export function InterfacesView({
         </section>
       )}
 
-      {servers.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center text-ui-md text-muted">
-          还没有 MCP 服务
+      {/* 私有服务：用户手填 / 从 Registry 安装 / 插件声明；增删改与原来一致。 */}
+      <section aria-label="私有 MCP 服务" className="mt-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="ui-section-title">私有服务</span>
+          <span className="ui-caption">手动添加，或从 Registry 安装</span>
         </div>
-      ) : (
-        <div className="mt-4 flex flex-col gap-3">
-          {servers.map((server) => {
-            const tools = toolsByServer[server.id] ?? [];
-            // 本页 state 里没有记录时，按「是否已发现过工具」判断：
-            // 已发现 = App 启动时已自动连过（清单会落盘），显示「已连接」；
-            // 未发现 = 还没连过或连失败，显示各自状态。
-            // 用 hasDiscovered 而不是「清单长度>0」——零工具的服务也算连上过。
-            // 优先看本页刚发起的连接；没有就看**最近一次连接尝试**的结果，
-            // 只有「从没连过但有旧快照」才退回「已连接」——其余情况一律如实标错。
-            const live = registry.status(server.id);
-            const state: McpConnState =
-              conn[server.id] ??
-              (live
-                ? live.state === "connected"
-                  ? "ready"
-                  : live.state
-                : registry.hasDiscovered(server.id)
-                  ? // 有快照但本进程还没连过：显示已连接（沿用历史语义），
-                    // 真正的「坏了」由 setStatus 记录后覆盖成 stale
-                    "ready"
-                  : "idle");
-            return (
-              <section
-                key={server.id}
-                aria-label={`MCP 服务 ${server.name}`}
-                className="ui-card p-4"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-ui-md font-semibold">{server.name}</span>
-                  {(server.origin === "preset" || registry.isPreset(server.id)) && (
-                    <SystemSourceChip systemName={systemName} />
-                  )}
-                  <span className="ui-chip">
-                    {server.transport === "http" ? "HTTP" : "stdio"}
-                  </span>
-                  {/* 从 Registry 装的本地包：把「哪类包、钉的哪个版本」摊出来。
-                      界面据此能看出本机跑的是钉死版本，不是上游最新版。 */}
-                  {server.origin === "registry" && (
-                    <span className="ui-chip">
-                      {`Registry${server.registryType ? ` · ${server.registryType}` : ""}${
-                        server.registryVersion ? ` · v${server.registryVersion}` : ""
-                      }`}
-                    </span>
-                  )}
-                  {server.origin === "plugin" && (() => {
-                    const pluginId = pluginIdFromServerId(server.id);
-                    const pluginName = pluginId ? pluginNames.get(pluginId) : undefined;
-                    return (
-                      <button
-                        type="button"
-                        aria-label={`打开插件 ${pluginName ?? pluginId ?? "（未知插件）"}`}
-                        title="随插件安装；停用或卸载插件时同步"
-                        onClick={() => {
-                          if (pluginId) openPlugin(pluginId);
-                        }}
-                        className="ui-chip hover:text-ink"
-                      >
-                        <span>插件</span>
-                        <span>：{pluginName ?? "未知插件"}</span>
-                      </button>
-                    );
-                  })()}
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-ui-xs ${
-                      state === "ready"
-                        ? "bg-success-soft text-success"
-                        : state === "error"
-                          ? "bg-danger-soft text-danger"
-                          : state === "stale"
-                            ? "bg-warn-soft text-warn"
-                            : state === "connecting"
-                              ? "bg-warn-soft text-warn"
-                              : "bg-subtle-2 text-muted"
-                    }`}
-                    title={state === "stale" ? registry.status(server.id)?.error ?? "最近一次连接失败" : undefined}
-                  >
-                    {state === "ready"
-                      ? "已连接"
-                      : state === "error"
-                        ? "连接失败"
-                        : state === "stale"
-                          ? "已断开（清单过期）"
-                          : state === "connecting"
-                            ? "连接中…"
-                            : "未连接"}
-                  </span>
-                  <span className="text-ui-xs text-muted">
-                    {tools.length ? `${tools.length} 个工具` : "未获取工具"}
-                  </span>
-                  <div className="ml-auto flex items-center gap-2">
-                    <label className="flex items-center gap-1 text-ui-xs text-muted">
-                      <input
-                        type="checkbox"
-                        aria-label={`启用服务 ${server.name}`}
-                        checked={server.enabled}
-                        onChange={(e) => {
-                          registry.update(server.id, { enabled: e.target.checked });
-                          bump();
-                        }}
-                      />
-                      参与对话
-                    </label>
-                    <Button
-                      type="button"
-                      aria-label={`连接 ${server.name}`}
-                      onClick={() => void connect(server)}
-                      disabled={state === "connecting"}
-                      size="sm" variant="ghost"
-                    >
-                      {state === "connecting"
-                        ? "连接中…"
-                        : tools.length
-                          ? "刷新工具"
-                          : "连接"}
-                    </Button>
-                    <Button
-                      type="button"
-                      aria-label={`删除 ${server.name}`}
-                      onClick={() => removeServer(server)}
-                      size="sm" variant="ghost" className="text-danger"
-                    >
-                      <TrashIcon width={12} height={12} />
-                    </Button>
-                  </div>
-                </div>
-
-                {server.transport === "stdio" && !stdioReady && (
-                  <p className="mt-2 text-ui-sm text-warn">
-                    stdio 服务只能在桌面端连接；当前是浏览器环境。
-                  </p>
-                )}
-
-                {connError[server.id] && (
-                  <p role="alert" className="mt-2 text-ui-sm text-danger">
-                    {connError[server.id]}
-                  </p>
-                )}
-
-                {/* 命令行片段：12px 等宽（命令不是正文，但 11px 在这类等宽串上会糊） */}
-                <p className="mt-1 truncate font-mono ui-caption">
-                  {server.transport === "http" ? server.url : `${server.command} ${(server.args ?? []).join(" ")}`}
-                </p>
-
-                {tools.length === 0 ? (
-                  <p className="mt-3 text-ui-sm text-muted">
-                    点「连接」拉取工具清单。连接成功后可逐个授权给模型调用。
-                  </p>
-                ) : (
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="ui-table min-w-[560px]">
-                      <thead>
-                        <tr>
-                          <th>工具</th>
-                          <th>描述</th>
-                          <th>交给模型</th>
-                          <th className="text-right">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tools.map((tool) => {
-                          const enabled = registry.isToolEnabled(server.id, tool.name);
-                          const key = `${server.id}::${tool.name}`;
-                          return (
-                            <tr key={tool.name}>
-                              <td className="font-mono">{tool.name}</td>
-                              <td className="max-w-[320px] truncate text-muted">
-                                {tool.description || "—"}
-                              </td>
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  aria-label={`启用工具 ${tool.name}`}
-                                  checked={enabled}
-                                  onChange={(e) => {
-                                    registry.setToolEnabled(server.id, tool.name, e.target.checked);
-                                    bump();
-                                  }}
-                                />
-                              </td>
-                              <td className="text-right">
-                                <Button
-                                  type="button"
-                                  aria-label={`测试 ${tool.name}`}
-                                  onClick={() => {
-                                    setTestFor(testFor === key ? null : key);
-                                    setTestArgs("{}");
-                                    setTestResult(null);
-                                  }}
-                                  size="sm" variant="ghost"
-                                >
-                                  测试
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    {testFor && testFor.startsWith(`${server.id}::`) && (
-                      <div className="mt-3 rounded-lg border border-line bg-subtle-2 p-3">
-                        <div className="ui-section-title">
-                          测试 {testFor.split("::")[1]}
-                        </div>
-                        <textarea
-                          aria-label="测试参数"
-                          value={testArgs}
-                          onChange={(e) => setTestArgs(e.target.value)}
-                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 font-mono text-ui-xs outline-hidden focus:border-ink"
-                        />
-                        <div className="mt-2 flex items-center gap-2">
-                          <Button
-                            type="button"
-                            onClick={() => void runTest(server, testFor.split("::")[1])}
-                            disabled={testRunning === testFor}
-                            size="sm" variant="primary"
-                          >
-                            {testRunning === testFor ? "执行中…" : "执行"}
-                          </Button>
-                          <span className="ui-caption">按每个工具的说明填写参数（JSON 对象）</span>
-                        </div>
-                        {testResult && (
-                          <pre
-                            role="status"
-                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 ui-caption ${
-                              testResult.ok
-                                ? "border-success-line bg-success-soft text-success"
-                                : "border-danger-line bg-danger-soft text-danger"
-                            }`}
-                          >
-                            {testResult.text}
-                          </pre>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
-      )}
+        {userServers.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-dashed border-line bg-surface p-6 text-center text-ui-sm text-muted">
+            还没有私有 MCP 服务
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col gap-3">
+            {userServers.map((server) => renderServerCard(server, false))}
+          </div>
+        )}
+      </section>
 
       {enabledCount > 0 && <p className="mt-4 ui-caption">已授权 {enabledCount} 个工具给模型调用。</p>}
       <p className="mt-2 ui-caption">
@@ -824,10 +774,7 @@ export function InterfacesView({
         >
           <p className="text-ui-sm leading-6">
             删除 MCP 服务「{removeTarget.name}」？这条配置、缓存的工具清单与逐个工具的授权开关都会被移除；
-            {registry.isPreset(removeTarget.id)
-              ? "这是随应用内置的预置服务，删除后可在「预置服务」里重新接入。"
-              : "需要时得重新添加或从发现页安装。"}
-            删除不会卸载本机的第三方包。
+            需要时得重新添加或从发现页安装。删除不会卸载本机的第三方包。
           </p>
         </ConfirmDialog>
       )}

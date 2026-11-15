@@ -3899,6 +3899,15 @@ describe("输入栏高度（clampComposerHeight）", () => {
 describe("ChatPage 工具轮可视化接线", () => {
   /** 本 describe 不继承主 describe 的 beforeEach：助手会话与流式状态各就位。 */
   beforeEach(() => {
+    // 隔离自足：单独跑本 describe（-t）时没有主 describe 的 beforeEach 兜底，
+    // 必须自己复位 auth/滚动桩/通知与待确认队列，否则发送链路直接静默不跑（6 例同红）。
+    vi.restoreAllMocks();
+    localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
+    setNotificationStorage(createMemoryStorage());
+    useNotificationStore.setState({ items: [] });
+    useHitlStore.getState().cancelAll("测试隔离");
+    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({ page: "chat", activeConversationId: "c1" });
     useChatStore.setState({
       conversations: [
@@ -3922,9 +3931,20 @@ describe("ChatPage 工具轮可视化接线", () => {
       pendingE2e: {},
     });
     vi.mocked(hasSubtle).mockReturnValue(true);
+    // E2E 封条桩：主 describe 的 beforeEach 会装它，单独跑本 describe 时没有，
+    // 不装则发送路径在 sealMessage 处抛错、整条工具轮链路静默不跑。
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
+    vi.mocked(visionImageDataUrl).mockReset();
+    vi.mocked(visionImageDataUrl).mockResolvedValue("aW1n");
     vi.mocked(streamChat).mockReset(); // 调用计数跨用例累积会误伤「第 2 轮」断言
     // 每次清掉上一个用例可能留下的 MCP 服务（含预置的），保证 armEchoServer 独占
     for (const s of [...mcpRegistry.servers()]) mcpRegistry.remove(s.id);
+    // 系统能力（stdio）在 jsdom 里没有桌面桥，先标记为「已探测、无工具」：
+    // 否则发送前的 autoConnectAll 预检会拿桩客户端的空 listTools 覆盖 armEchoServer 的工具授权。
+    for (const s of mcpRegistry.servers()) {
+      if (mcpRegistry.isSystem(s.id)) mcpRegistry.setTools(s.id, []);
+    }
   });
 
   /** 与 ChatPage describe 内同名助手等价（那个是块内私有，这里用局部版）。 */
@@ -3951,8 +3971,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     try {
       const send = vi.fn();
       vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-            mockMessagesFetch([]);
-      render(<ChatPage />);
+      mockMessagesFetch([]);      render(<ChatPage />);
       // 等 WS 句柄就绪：输入栏在 connected 之后才渲染。
       // 单次 act 可能不足以冲掉队列里的连接回调，故显式等它出现。
       await waitFor(() =>
@@ -4020,7 +4039,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     try {
       const send = vi.fn();
       vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-            mockMessagesFetch([]);
+      mockMessagesFetch([]);
       render(<ChatPage />);
       await waitFor(() =>
         expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument(),
@@ -4838,5 +4857,135 @@ describe("UX-A 未绑定模型与对话空态", () => {
 
     // 会话内搜索不是导出，保留
     expect(screen.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();
+  });
+});
+
+/**
+ * T32：编排条 + 三个视图页签（对话 / 轨迹 / 上下文）。
+ *
+ * 这里验证「壳层接线」：默认停在对话、切页签换面板、chips 反映真实计数并跳页、
+ * 以及「切走再切回输入框草稿仍在」——它依赖 chat 面板用 hidden 保活而不是卸载。
+ * 三个页签内部各自的内容（轨迹文案、上下文预算口径）由
+ * components/chat/{OrchestrationBar,TrajectoryView,ContextView}.test.tsx 覆盖。
+ */
+describe("ChatPage · 编排条与视图页签（T32）", () => {
+  const setup = async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument(),
+    );
+    bindAssistant();
+    return send;
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(connectWs).mockReset();
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
+    vi.mocked(streamChat).mockReset();
+    vi.mocked(streamChat).mockResolvedValue("");
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
+    useUiStore.setState({ page: "chat", activeConversationId: "c1" });
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和小鸣",
+            avatar: null,
+            owner_id: null,
+            description: "",
+          },
+          title: "周会纪要",
+          unreadCount: 0,
+        },
+      ],
+      messages: {},
+      messagesLoading: {},
+      messagesError: {},
+      streaming: {},
+      streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
+    });
+  });
+
+  it("默认停在「对话」：页签 aria-selected 正确、对话面板可见（无 hidden）", async () => {
+    await setup();
+    expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "轨迹" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "上下文" })).toHaveAttribute("aria-selected", "false");
+
+    const chatPanel = document.getElementById("chat-view-panel-chat")!;
+    expect(chatPanel).toHaveAttribute("role", "tabpanel");
+    expect(chatPanel.className).not.toContain("hidden");
+    expect(screen.queryByRole("tabpanel", { name: "轨迹" })).toBeNull();
+    expect(screen.queryByRole("tabpanel", { name: "上下文" })).toBeNull();
+  });
+
+  it("切「轨迹」：出轨迹面板与空态文案，对话面板保留在 DOM 里但 hidden（草稿不丢）", async () => {
+    await setup();
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "还没发出去的草稿" },
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
+    const trail = await screen.findByRole("tabpanel", { name: "轨迹" });
+    expect(within(trail).getByRole("heading", { level: 2, name: "这一轮还没有轨迹" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "轨迹" })).toHaveAttribute("aria-selected", "true");
+
+    // 对话面板不卸载：只加 hidden，所以草稿/滚动/搜索状态都还在
+    const chatPanel = document.getElementById("chat-view-panel-chat")!;
+    expect(chatPanel.className).toContain("hidden");
+    expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("还没发出去的草稿");
+  });
+
+  it("切「上下文」：出上下文面板，进度条 aria-valuenow 是数字、明细三行齐全", async () => {
+    await setup();
+    fireEvent.click(screen.getByRole("tab", { name: "上下文" }));
+    const context = await screen.findByRole("tabpanel", { name: "上下文" });
+    const bar = within(context).getByRole("progressbar", { name: "上下文预算" });
+    expect(Number(bar.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(0);
+    expect(within(context).getByRole("list", { name: "上下文明细" })).toBeInTheDocument();
+  });
+
+  it("chips 反映真实计数；点「智能体团队」跳到团队页", async () => {
+    await setup();
+    const orchestration = await screen.findByTestId("chat-orchestration");
+    expect(within(orchestration).getByRole("heading", { level: 2, name: "周会纪要" }))
+      .toBeInTheDocument();
+    expect(document.querySelector('[data-chip="tools"]')!.textContent).toMatch(/^\d+ 个工具调用$/);
+    expect(document.querySelector('[data-chip="tasks"]')!.textContent).toMatch(/^\d+ 个后台任务$/);
+    expect(document.querySelector('[data-chip="mode"]')!.textContent).toBe("标准模式");
+
+    fireEvent.click(screen.getByRole("button", { name: "智能体团队" }));
+    expect(useUiStore.getState().page).toBe("team");
+  });
+
+  it("切走再切回：输入框草稿仍在（面板 hidden 保活，不是重新挂载）", async () => {
+    await setup();
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "草稿：明天再发" } });
+    expect(input).toHaveValue("草稿：明天再发");
+
+    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
+    await screen.findByRole("tabpanel", { name: "轨迹" });
+    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
+
+    const again = screen.getByPlaceholderText("输入消息…");
+    expect(again).toBe(input);
+    expect(again).toHaveValue("草稿：明天再发");
+    expect(document.getElementById("chat-view-panel-chat")!.className).not.toContain("hidden");
   });
 });

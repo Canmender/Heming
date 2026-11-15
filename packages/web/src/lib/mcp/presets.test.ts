@@ -1,6 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { MCP_PRESETS, DEFAULT_PRESET_SERVERS, findMcpPreset } from "./presets.js";
+import {
+  SYSTEM_MCP_SERVERS,
+  SYSTEM_WINDOWS_DESKTOP_ID,
+  SYSTEM_SCRAPLING_ID,
+  DEFAULT_PRESET_SERVERS,
+  MCP_PRESETS,
+  findSystemMcpServer,
+  findMcpPreset,
+  isSystemMcpServer,
+  systemMcpServerId,
+} from "./presets.js";
 import { McpRegistry, MCP_SERVERS_KEY } from "./store.js";
+
+/**
+ * 系统能力定义表（d.147.4.93.11）。
+ *
+ * 旧名 `MCP_PRESETS` / `findMcpPreset` 仍作为 @deprecated 别名导出，
+ * 新代码只用 `SYSTEM_MCP_SERVERS` / `findSystemMcpServer`。
+ */
 
 /** 内存存储，可预置初始内容以模拟「已经配过」。 */
 function memStorage(initial: Record<string, string> = {}) {
@@ -15,7 +32,7 @@ function memStorage(initial: Record<string, string> = {}) {
 
 const FIXED_NOW = () => "2026-10-20T00:00:00.000Z";
 
-/** 一条用户自己配的服务（用于验证预置不干扰既有配置）。 */
+/** 一条用户自己配的服务（用于验证系统能力不干扰既有配置）。 */
 function myOwnServer() {
   return {
     id: "mine",
@@ -28,10 +45,10 @@ function myOwnServer() {
   };
 }
 
-describe("MCP 服务预设", () => {
-  it("每条预设都有名称、传输方式、说明与可执行的入口", () => {
-    expect(MCP_PRESETS.length).toBeGreaterThan(0);
-    for (const p of MCP_PRESETS) {
+describe("MCP 系统能力定义表", () => {
+  it("每条定义都有名称、传输方式、说明与可执行的入口", () => {
+    expect(SYSTEM_MCP_SERVERS.length).toBeGreaterThan(0);
+    for (const p of SYSTEM_MCP_SERVERS) {
       expect(p.name.length).toBeGreaterThan(0);
       expect(["http", "stdio"]).toContain(p.transport);
       expect(p.hint.length).toBeGreaterThan(10);
@@ -40,9 +57,10 @@ describe("MCP 服务预设", () => {
     }
   });
 
-  it("Windows 桌面控制预设给出可直接用的 uvx 命令", () => {
-    const p = findMcpPreset("windows-desktop");
+  it("Windows 桌面控制给出可直接用的 uvx 命令", () => {
+    const p = findSystemMcpServer("windows-desktop");
     expect(p).not.toBeNull();
+    expect(p!.id).toBe("windows-desktop");
     expect(p!.transport).toBe("stdio");
     expect(p!.command).toBe("uvx");
     expect(p!.args).toEqual(["windows-mcp", "serve"]);
@@ -50,78 +68,93 @@ describe("MCP 服务预设", () => {
     expect(p!.verified).toBe(true);
   });
 
-  it("未知 id 返回 null（界面据此忽略点击，不崩）", () => {
-    expect(findMcpPreset("查无此预设")).toBeNull();
+  it("两条定义各自的落盘 id 固定（升级后旧数据能对上）", () => {
+    expect(systemMcpServerId("windows-desktop")).toBe(SYSTEM_WINDOWS_DESKTOP_ID);
+    expect(systemMcpServerId("windows-desktop")).toBe("mcp-windows-desktop");
+    expect(systemMcpServerId("scrapling")).toBe(SYSTEM_SCRAPLING_ID);
+    expect(systemMcpServerId("scrapling")).toBe("mcp-scrapling");
+    // 未知定义 id 也有稳定的兜底命名
+    expect(systemMcpServerId("whatever")).toBe("mcp-whatever");
   });
 
-  it("预设能直接喂给 registry.add —— 验证不会撞上参数校验", () => {
-    // 用「已有配置」绕开首次预置，让 add 的结果可单独核对
-    const storage = memStorage({ [MCP_SERVERS_KEY]: JSON.stringify([myOwnServer()]) });
-    const registry = new McpRegistry(storage, FIXED_NOW);
-    for (const p of MCP_PRESETS) {
-      const saved = registry.add({
-        name: p.name,
-        transport: p.transport,
-        url: p.url,
-        command: p.command,
-        args: p.args,
-      });
-      expect(saved.id).toBeTruthy();
-    }
-    // 1 条自有 + 2 条预设
-    expect(registry.servers()).toHaveLength(1 + MCP_PRESETS.length);
+  it("isSystemMcpServer 按落盘 id 判定，不依赖列表里是否存在", () => {
+    expect(isSystemMcpServer(SYSTEM_WINDOWS_DESKTOP_ID)).toBe(true);
+    expect(isSystemMcpServer(SYSTEM_SCRAPLING_ID)).toBe(true);
+    expect(isSystemMcpServer("mine")).toBe(false);
+    expect(isSystemMcpServer("windows-desktop")).toBe(false);
+  });
+
+  it("未知 id 返回 null（界面据此忽略点击，不崩）", () => {
+    expect(findSystemMcpServer("查无此预设")).toBeNull();
+  });
+
+  it("旧的 @deprecated 别名指向同一份定义（不复制、不漂移）", () => {
+    expect(MCP_PRESETS).toBe(SYSTEM_MCP_SERVERS);
+    expect(DEFAULT_PRESET_SERVERS).toBe(SYSTEM_MCP_SERVERS);
+    expect(findMcpPreset("windows-desktop")).toBe(findSystemMcpServer("windows-desktop"));
   });
 });
 
-describe("默认接入（首次预置 Windows 桌面控制）", () => {
-  it("存储为空时自动预置，命令参数开箱可用", () => {
+describe("系统能力自动补齐", () => {
+  it("存储为空时补齐两条，命令参数开箱可用并已落盘", () => {
     const storage = memStorage();
     const registry = new McpRegistry(storage, FIXED_NOW);
     const servers = registry.servers();
-    expect(servers).toHaveLength(DEFAULT_PRESET_SERVERS.length);
+    expect(servers).toHaveLength(SYSTEM_MCP_SERVERS.length);
     const win = servers[0];
+    expect(win.id).toBe(SYSTEM_WINDOWS_DESKTOP_ID);
     expect(win.name).toBe("Windows 桌面控制");
     expect(win.transport).toBe("stdio");
     expect(win.command).toBe("uvx");
     expect(win.args).toEqual(["windows-mcp", "serve"]);
     expect(win.enabled).toBe(true);
-    expect(registry.isPreset(win.id)).toBe(true);
+    expect(win.origin).toBe("preset");
+    expect(registry.isSystem(win.id)).toBe(true);
     // 已落盘，刷新后仍在
     expect(storage.raw.has(MCP_SERVERS_KEY)).toBe(true);
   });
 
-  it("预置两条：Windows 桌面控制与网页抓取；文件系统那条不预置（带具体路径）", () => {
+  it("两条系统能力：Windows 桌面控制与网页抓取；文件系统那条不再内置", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
     const names = registry.servers().map((s) => s.name);
     expect(names).toEqual(["Windows 桌面控制", "网页抓取（Scrapling）"]);
-    // 文件系统那条带 `D:/Heming` 这样的具体路径，对不同用户是错的，不预置
-    expect(DEFAULT_PRESET_SERVERS.some((p) => p.id === "filesystem")).toBe(false);
+    // 文件系统那条带 `D:/Heming` 这样的具体路径，对不同用户是错的，不内置
+    expect(SYSTEM_MCP_SERVERS.some((p) => p.id === "filesystem")).toBe(false);
   });
 
-  it("两条预置各有独立 id（共用一个会导致互相覆盖、删除记录串台）", () => {
+  it("两条系统能力各有独立 id（共用一个会导致互相覆盖、工具授权串台）", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
     const ids = registry.servers().map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain("mcp-windows-desktop");
-    expect(ids).toContain("mcp-scrapling");
+    expect(ids).toContain(SYSTEM_WINDOWS_DESKTOP_ID);
+    expect(ids).toContain(SYSTEM_SCRAPLING_ID);
   });
 
-  it("删掉一条预置，另一条不受影响（也不会被塞回来）", () => {
+  it("系统能力删不掉：remove 返回 false，重启后两条都在", () => {
     const storage = memStorage();
     const first = new McpRegistry(storage, FIXED_NOW);
-    const scrapling = first.servers().find((s) => s.id === "mcp-scrapling");
-    expect(scrapling).toBeDefined();
-    first.remove(scrapling!.id);
-    // 删掉的那条不再回来，另一条仍在
+    for (const s of [...first.servers()]) {
+      expect(first.remove(s.id)).toBe(false);
+    }
+    expect(first.servers()).toHaveLength(SYSTEM_MCP_SERVERS.length);
     const second = new McpRegistry(storage, FIXED_NOW);
-    const ids = second.servers().map((s) => s.id);
-    expect(ids).not.toContain("mcp-scrapling");
-    expect(ids).toContain("mcp-windows-desktop");
+    expect(second.servers().map((s) => s.id)).toEqual(
+      SYSTEM_MCP_SERVERS.map((p) => systemMcpServerId(p.id)),
+    );
+  });
+
+  it("用户已有配置时也补系统能力，但不动用户的数据", () => {
+    const storage = memStorage({ [MCP_SERVERS_KEY]: JSON.stringify([myOwnServer()]) });
+    const registry = new McpRegistry(storage, FIXED_NOW);
+    expect(registry.servers()).toHaveLength(1 + SYSTEM_MCP_SERVERS.length);
+    const mine = registry.get("mine")!;
+    expect(mine.name).toBe("我自己的服务");
+    expect(mine.url).toBe("https://x.com/mcp");
   });
 
   it("Scrapling 只自动启用只读那批；browser_actions / browser_evaluate 不开", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
-    const id = registry.servers().find((s) => s.id === "mcp-scrapling")!.id;
+    const id = SYSTEM_SCRAPLING_ID;
     const enabled = registry.autoEnableSafeTools(id, [
       { name: "make_request" }, // 纯 HTTP 读
       { name: "browser_fetch_once" }, // 隐身浏览器读页面
@@ -140,10 +173,10 @@ describe("默认接入（首次预置 Windows 桌面控制）", () => {
     expect(registry.isToolEnabled(id, "browser_save_state")).toBe(false);
   });
 
-  it("两条预置的白名单互不串台（Windows-MCP 的 Screenshot 不该开在 Scrapling 上）", () => {
+  it("两条系统能力的白名单互不串台（Windows-MCP 的 Screenshot 不该开在 Scrapling 上）", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
-    const scraplingId = registry.servers().find((s) => s.id === "mcp-scrapling")!.id;
-    const winId = registry.servers().find((s) => s.id === "mcp-windows-desktop")!.id;
+    const scraplingId = SYSTEM_SCRAPLING_ID;
+    const winId = SYSTEM_WINDOWS_DESKTOP_ID;
     // 在 Scrapling 上发现 Windows-MCP 的工具名 → 不该被自动启用
     registry.autoEnableSafeTools(scraplingId, [{ name: "Screenshot" }, { name: "Snapshot" }]);
     expect(registry.isToolEnabled(scraplingId, "Screenshot")).toBe(false);
@@ -152,26 +185,9 @@ describe("默认接入（首次预置 Windows 桌面控制）", () => {
     expect(registry.isToolEnabled(winId, "make_request")).toBe(false);
   });
 
-  it("用户已有配置时不动他的数据（不塞预置进去）", () => {
-    const storage = memStorage({ [MCP_SERVERS_KEY]: JSON.stringify([myOwnServer()]) });
-    const registry = new McpRegistry(storage, FIXED_NOW);
-    expect(registry.servers()).toHaveLength(1);
-    expect(registry.servers()[0].name).toBe("我自己的服务");
-  });
-
-  it("用户把预置全删完后不会被再塞回来", () => {
-    const storage = memStorage();
-    const first = new McpRegistry(storage, FIXED_NOW);
-    for (const s of [...first.servers()]) first.remove(s.id);
-    expect(first.servers()).toHaveLength(0);
-    // 再开一次应用：存储里已是空数组，但仍视为「用户主动删过」，不再预置
-    const second = new McpRegistry(storage, FIXED_NOW);
-    expect(second.servers()).toHaveLength(0);
-  });
-
   it("只自动启用只读工具；PowerShell / Registry / Click 一律不开", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
-    const id = registry.servers()[0].id;
+    const id = SYSTEM_WINDOWS_DESKTOP_ID;
     const enabled = registry.autoEnableSafeTools(id, [
       { name: "Screenshot" },
       { name: "Snapshot" },
@@ -195,7 +211,7 @@ describe("默认接入（首次预置 Windows 桌面控制）", () => {
 
   it("用户手动关掉的只读工具，不会被再次自动打开", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
-    const id = registry.servers()[0].id;
+    const id = SYSTEM_WINDOWS_DESKTOP_ID;
     const tools = [{ name: "Screenshot" }];
     registry.autoEnableSafeTools(id, tools);
     registry.setToolEnabled(id, "Screenshot", false); // 用户主动关掉
@@ -203,7 +219,7 @@ describe("默认接入（首次预置 Windows 桌面控制）", () => {
     expect(registry.isToolEnabled(id, "Screenshot")).toBe(false);
   });
 
-  it("非预置服务不会被自动启用任何工具", () => {
+  it("私有服务不会被自动启用任何工具", () => {
     const storage = memStorage({ [MCP_SERVERS_KEY]: JSON.stringify([myOwnServer()]) });
     const registry = new McpRegistry(storage, FIXED_NOW);
     expect(registry.autoEnableSafeTools("mine", [{ name: "Screenshot" }])).toEqual([]);
@@ -226,9 +242,10 @@ describe("默认接入（首次预置 Windows 桌面控制）", () => {
       "Process",
       "Notification",
     ];
-    const safe = findMcpPreset("windows-desktop")!.safeTools ?? [];
-    for (const name of safe) {
-      expect(forbidden).not.toContain(name);
+    for (const system of SYSTEM_MCP_SERVERS) {
+      for (const name of system.safeTools ?? []) {
+        expect(forbidden).not.toContain(name);
+      }
     }
   });
 });

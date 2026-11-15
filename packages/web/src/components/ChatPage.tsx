@@ -97,6 +97,10 @@ import {
 import { conversationTitle } from "./assistant/conversationTitle.js";
 // 右侧「会话进度」栏（d.147.4.88）：Codex / ChatGPT 式的按钮呼出侧栏。
 import { ProgressPanel } from "./ProgressPanel.js";
+import { OrchestrationBar, type ChatView } from "./chat/OrchestrationBar.js";
+import { TrajectoryView } from "./chat/TrajectoryView.js";
+import { ContextView } from "./chat/ContextView.js";
+import { useConversationProgress } from "../lib/progress/useConversationProgress.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
@@ -538,6 +542,10 @@ export function ChatPage({
   /** A1：历史三态（加载中 / 失败 / 加载成功且为空）按会话分桶读。 */
   const messagesLoading = useChatStore((s) => s.messagesLoading[convId] ?? false);
   const messagesError = useChatStore((s) => s.messagesError[convId] ?? null);
+  // 编排条数据：会话级轨迹进度 + 本会话进行中的后台任务数（T32）。
+  const progress = useConversationProgress(convId);
+  const tasks = useTaskStore((s) => s.tasks);
+  const runningTaskCount = tasks.filter((t) => t.conversationId === convId && t.status === "running").length;
   /** 本会话是否已经完成过一次历史拉取（含失败）：首帧骨架与「真空态」的区分依据。 */
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
   const plainById = useChatStore((s) => s.plainById);
@@ -663,6 +671,8 @@ export function ChatPage({
    * 换会话或切页面时组件卸载，开合自然回到默认隐藏——不需要额外的清理 effect。
    */
   const [progressOpen, setProgressOpen] = useState(false);
+  // 会话视图（T32）：对话 / 轨迹 / 上下文三块同页切换，不新开路由。
+  const [view, setView] = useState<ChatView>("chat");
   /** 提示位「还有 N 条」的展开状态；提示数量变化时复位（见下方 effect）。 */
   const [noticeExpanded, setNoticeExpanded] = useState(false);
   /** 会话内搜索：只在打开时占用 header 下方一条，不常驻挤压消息区。 */
@@ -1940,6 +1950,8 @@ export function ChatPage({
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
     convIdRef.current = convId;
+    // 视图也是会话级：换会话回到「对话」，不要停在上一个会话的轨迹页。
+    setView("chat");
   }, [convId]);
 
   // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
@@ -2958,58 +2970,73 @@ export function ChatPage({
   return (
     <div className="flex h-full">
       <div className="relative flex h-full min-w-0 flex-1 flex-col">
-      <header className="relative flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-chat-gutter">
-        <IconButton
-          label="返回"
-          className="-ml-1"
-          icon={<ChevronIcon width={16} height={16} className="rotate-180" />}
-          onClick={leave}
-        />
-        {/* 极简顶栏：标题小字 + 通道状态 + 右侧 ghost 图标（无厚边框、无头像）。
-            h2 而不是 span：整页只剩 h1（sr-only「会话」）时文档大纲会断档，
-            读屏和设计审计都需要「页标题 → 会话标题」这两级。
-            标题用会话名而不是智能体名（d.147.4.88）：名字已经写在侧栏左下角，
-            顶部再复读一遍「和鸣」既占位又像产品自夸；会话名才是这里该答的问题。 */}
-        <h2 className="ui-section-title min-w-0 truncate">
-          {conv ? conversationTitle(conv, messages) : "会话"}
-        </h2>
-        <span className="flex items-center gap-1.5 text-ui-xs text-muted">
-          <span
-            aria-hidden="true"
-            className={`h-1.5 w-1.5 rounded-full ${
-              connState === "open"
-                ? "bg-success"
-                : connState === "closed"
-                  ? "bg-warn"
-                  : "bg-line-strong"
-            }`}
+      {/* 会话头（T32 编排条）：第一行标题 + 编排事实 chips + 右侧既有动作，
+          第二行「对话 / 轨迹 / 上下文」页签。返回、通道状态、会话进度、会话内搜索
+          全部保留；进度栏仍在最右侧独立渲染，不随页签切换。 */}
+      <OrchestrationBar
+        title={conv ? conversationTitle(conv, messages) : "会话"}
+        toolsCount={progress.counts.total}
+        tasksCount={runningTaskCount}
+        view={view}
+        onViewChange={setView}
+        onOpenTeam={() => useUiStore.getState().setPage("team")}
+        leading={
+          <IconButton
+            label="返回"
+            className="-ml-1"
+            icon={<ChevronIcon width={16} height={16} className="rotate-180" />}
+            onClick={leave}
           />
-          {/* 这里只描述「实时通道」状态，不要和「智能体能否对话（模型绑定）」混为一谈：
-              以前写「已连接」时，紧挨着的「当前智能体还没有绑定模型连接」提示条会自相矛盾。 */}
-          {connState === "open" ? "通道已连接" : connState === "closed" ? "通道断开" : "通道连接中…"}
-        </span>
-        {recovered && connState === "open" && (
-          <span role="status" className="text-ui-xs text-success">
-            通道已恢复
-          </span>
-        )}
-        {/* 会话进度栏开关（Codex 式）：在会话内搜索左侧，默认收起。 */}
-        <IconButton
-          label="会话进度"
-          className={`ml-auto${progressOpen ? " bg-subtle-3 text-ink" : ""}`}
-          aria-expanded={progressOpen}
-          icon={<WorkflowIcon width={18} height={18} />}
-          onClick={() => setProgressOpen((v) => !v)}
-        />
-        {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
-        <IconButton
-          label="搜索会话"
-          className={searchOpen ? "bg-subtle-3" : ""}
-          aria-pressed={searchOpen}
-          icon={<SearchIcon width={18} height={18} />}
-          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-        />
-      </header>
+        }
+        right={
+          <>
+            {/* 这里只描述「实时通道」状态，不要和「智能体能否对话（模型绑定）」混为一谈：
+                以前写「已连接」时，紧挨着的「当前智能体还没有绑定模型连接」提示条会自相矛盾。 */}
+            <span className="flex items-center gap-1.5 text-ui-xs text-muted">
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connState === "open"
+                    ? "bg-success"
+                    : connState === "closed"
+                      ? "bg-warn"
+                      : "bg-line-strong"
+                }`}
+              />
+              {connState === "open" ? "通道已连接" : connState === "closed" ? "通道断开" : "通道连接中…"}
+            </span>
+            {recovered && connState === "open" && (
+              <span role="status" className="text-ui-xs text-success">
+                通道已恢复
+              </span>
+            )}
+            {/* 会话进度栏开关（Codex 式）：默认收起。 */}
+            <IconButton
+              label="会话进度"
+              className={progressOpen ? "bg-subtle-3 text-ink" : ""}
+              aria-expanded={progressOpen}
+              icon={<WorkflowIcon width={18} height={18} />}
+              onClick={() => setProgressOpen((v) => !v)}
+            />
+            {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
+            <IconButton
+              label="搜索会话"
+              className={searchOpen ? "bg-subtle-3" : ""}
+              aria-pressed={searchOpen}
+              icon={<SearchIcon width={18} height={18} />}
+              onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            />
+          </>
+        }
+      />
+      {/* 主区（T32）：chat 面板始终挂载，切到轨迹/上下文时只用 hidden 隐藏——
+          条件渲染会把输入框草稿、滚动位置、搜索态全丢掉。 */}
+      <div
+        id="chat-view-panel-chat"
+        role="tabpanel"
+        aria-labelledby="chat-view-tab-chat"
+        className={view === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      >
       {connState === "closed" && (
         <div
           role="status"
@@ -3650,6 +3677,31 @@ export function ChatPage({
         </div>
         </div>
       </form>
+      </div>
+      {view === "trail" ? (
+        <div
+          id="chat-view-panel-trail"
+          role="tabpanel"
+          aria-labelledby="chat-view-tab-trail"
+          className="flex-1 overflow-y-auto px-chat-gutter py-6"
+        >
+          <div className="mx-auto w-full max-w-[min(100%,960px)]">
+            <TrajectoryView progress={progress} />
+          </div>
+        </div>
+      ) : null}
+      {view === "context" ? (
+        <div
+          id="chat-view-panel-context"
+          role="tabpanel"
+          aria-labelledby="chat-view-tab-context"
+          className="flex-1 overflow-y-auto px-chat-gutter py-6"
+        >
+          <div className="mx-auto w-full max-w-[min(100%,960px)]">
+            <ContextView conversationId={convId} />
+          </div>
+        </div>
+      ) : null}
       {/* HITL 工具确认弹窗（设计 §4.3）：
           智能体要调有副作用的工具时，先问用户同不同意。
           弹窗由 store 驱动（pending 单槽 + 队列），这里只负责渲染与回传裁决。 */}

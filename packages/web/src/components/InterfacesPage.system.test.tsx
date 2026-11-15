@@ -8,12 +8,11 @@ import type { StorageLike } from "../lib/memory/types.js";
 import { useUiStore } from "../store/ui.js";
 
 /**
- * d.65 T3：接口区的「内置：系统能力」来源徽标。
+ * 系统能力卡片（d.147.4.93.11）。
  *
- * 1. `origin === "preset"` 的预置服务：来源徽标是**非按钮**的「内置：<系统能力名>」，
- *    名字取自 describeSystemPlugin().name；
- * 2. 手工/Registry 来源不变（不出系统徽标）；
- * 3. 插件来源仍是可点徽标（对比）。
+ * 旧语义是「预置服务」：按 origin 显示「内置：<系统能力名>」徽标、可删可恢复；
+ * 新语义是「系统能力」：固定 id、常驻只读（不可删、不可改配置），
+ * 卡片标 `data-system-mcp="true"`、显示「始终参与对话」、没有删除入口。
  */
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
@@ -97,22 +96,20 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("接口区 · 系统来源徽标", () => {
-  it("预置服务的来源徽标是「内置：<系统能力名>」且不可点（非按钮）", () => {
-    const systemName = describeSystemPlugin().name;
-    const registry = new McpRegistry(
-      makeStorage([
-        server({ id: "preset-core", name: "预置服务", origin: "preset" }),
-      ]),
-      () => new Date(T0).toISOString(),
-    );
+describe("接口区 · 系统能力卡片", () => {
+  it("系统能力卡片只读：标 data-system-mcp、显示「始终参与对话」、没有删除入口", () => {
+    const registry = new McpRegistry(makeStorage([]), () => new Date(T0).toISOString());
 
     render(<InterfacesPage registry={registry} plugins={plugins} />);
-    const card = screen.getByRole("region", { name: "MCP 服务 预置服务" });
-    const chip = within(card).getByText(`：${systemName}`, { exact: false }).closest(".ui-chip")!;
-    expect(chip.textContent).toBe(`内置：${systemName}`);
-    expect(chip.tagName).not.toBe("BUTTON");
-    expect(within(card).queryByRole("button", { name: new RegExp(systemName) })).toBeNull();
+    const section = screen.getByTestId("mcp-system-servers");
+    const card = within(section).getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
+    expect(card).toHaveAttribute("data-system-mcp", "true");
+    expect(within(card).getByText("始终参与对话")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /删除/ })).toBeNull();
+    // 卡片给出可直接执行的入口
+    expect(card.textContent).toContain("uvx");
+    // 旧「内置：<系统能力名>」徽标不再出现
+    expect(within(card).queryByText(/内置：/)).toBeNull();
   });
 
   it("手工来源的服务不出系统徽标", () => {

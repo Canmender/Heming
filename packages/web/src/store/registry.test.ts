@@ -294,7 +294,8 @@ describe("Registry store：本地包安装的运行时门槛", () => {
     const result = await store.getState().install(local, local.options[0]);
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(result.canceled).toBe(true);
-    expect(mcp.servers()).toHaveLength(0);
+    // 系统能力（预置的桌面控制/抓取）不计入用户服务：只看用户自己加的
+    expect(mcp.servers().filter((s) => !mcp.isSystem(s.id))).toHaveLength(0);
   });
 
   it("装成功后写入台账：registryType / registryVersion / 逻辑命令", async () => {

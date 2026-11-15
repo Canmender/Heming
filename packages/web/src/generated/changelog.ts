@@ -12,6 +12,37 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.93.11",
+    "date": "2026-11-15",
+    "title": "会话页编排条 + MCP 收进系统能力",
+    "bullets": [
+      "新增 `components/chat/OrchestrationBar.tsx`（导出 `OrchestrationBar` 与 `type ChatView = \"chat\" | \"trail\" | \"context\"`）：容器 `data-testid=\"chat-orchestration\"`；第一行是返回槽 + 会话标题（`conversationTitle()`，无会话回落「会话」）+ 四个 chip——`data-chip=\"team\"`「智能体团队」可点（`onOpenTeam` → `useUiStore.getState().setPage(\"team\")`）、`data-chip=\"mode\"`「标准模式」、`data-chip=\"tools\"`「N 个工具调用」、`data-chip=\"tasks\"`「N 个后台任务」；右侧 `right` 槽原样收进通道状态、会话进度、会话内搜索，`leading` 槽收进返回按钮。第二行是 `role=\"tablist\" aria-label=\"会话视图\"`，三个 `role=\"tab\"`（对话/轨迹/上下文）带 `id=\"chat-view-tab-{id}\"`、`data-view`、`aria-controls=\"chat-view-panel-{id}\"`；页签视觉复用 `lib/ui/tabStyles.js` 的 `PAGE_TABLIST` / `pageTabClass`，不再另抄一套药丸样式。",
+      "两个计数都是真实数据，为 0 就显示 0：工具调用数取 `useConversationProgress().counts.total`；后台任务数取 `useTaskStore((s) => s.tasks)` 里 `conversationId === convId && status === \"running\"` 的条数（`ChatPage.tsx:548`）。没有对应实体的「子智能体」不编数字。",
+      "新增 `components/chat/TrajectoryView.tsx`：「轨迹」页签把 `useConversationProgress().steps` 按时间顺序铺成竖列（`<section aria-label=\"本轮轨迹\" data-view-panel=\"trail\">` + `<h3>` + `<ol>`），每步是 `StepStatusDot` + `STEP_TONES` 状态词 + `stepDuration()` 耗时 + 完整 `detail`（整页宽度，不截断）；有数据但无步骤时说明「这一轮没有可列出的步骤。」，完全没数据时 `EmptyState`「这一轮还没有轨迹」。",
+      "新增 `components/chat/ContextView.tsx`：「上下文」页签按真实预算口径估算本会话用量——每条消息 `estimateTokens(正文) + ROW_TOKEN_OVERHEAD`（与 `planContext` 的 rowCost 同式），预算 `DEFAULT_BUDGET_TOKENS = 6000`、注入预留 `DEFAULT_RESERVED_TOKENS = 900`；进度条 `role=\"progressbar\" aria-label=\"上下文预算\"` 的 `aria-valuenow` 报真实用量（超预算时条封顶、数字不变），下面三行明细是消息条数 / 工具结果条数 / 注入预留额度，不显示占位百分比。",
+      "`ChatPage.tsx` 接线（+103/−51）：`view` 状态放在组件本地（`useState<ChatView>(\"chat\")`），换会话的 `useEffect` 里 `setView(\"chat\")` 复位；**chat 面板始终挂载，切到轨迹/上下文只是加 `hidden`**，所以输入框草稿、滚动位置、会话内搜索态都不丢；trail/context 面板按需渲染（`role=\"tabpanel\"` + `aria-labelledby`，内容列仍 `max-w-[min(100%,960px)]`）。右侧 `ProgressPanel` 在 tabpanel 之外独立渲染，页签切换不影响它开合。",
+      "`lib/mcp/presets.ts` 定义表改语义为「系统内置能力」：`SystemMcpServer` / `SYSTEM_MCP_SERVERS`（`windows-desktop` → `uvx windows-mcp serve`；`scrapling` → `uvx --from scrapling[ai] scrapling mcp`，命令、参数与 `safeTools` 只读白名单均未改）/ `findSystemMcpServer` / `SYSTEM_WINDOWS_DESKTOP_ID` / `SYSTEM_SCRAPLING_ID` / `systemMcpServerId` / `isSystemMcpServer`；旧导出名（`McpPreset`、`MCP_PRESETS`、`DEFAULT_PRESET_SERVERS`、`findMcpPreset`、`PRESET_*_ID`、`presetServerId`、`isPreset`）保留为 `@deprecated` 兼容别名（`lib/mcp/index.ts` 仍 re-export），新代码走带 `System` 的一套。",
+      "`lib/mcp/store.ts` 以 `ensureSystemServers()` 取代旧的 `seedDefaults()` / `pushPreset`：幂等补齐——缺 id 才插入，已存在同 id 只校正由定义表决定的字段（名称/传输/地址/命令/参数/启用位/来源），**请求头、超时、`createdAt` 与工具授权一律保留**（覆盖等于把用户 token 丢掉）；`secureStorageStatus().undecryptableKeys` 命中时整轮跳过，避免用空表覆盖磁盘密文。调用点：构造器在 `secureStorageHydrated()` 或没有安全桥时调一次，hydrate 完成后 `refreshAfterHydrate()` 再调（Electron 46 没有同步桥，过早补齐会覆盖密文配置）。",
+      "系统项只读：`isSystem()`（固定 id 判定，不看列表里有没有）、`systemServers()`（按定义表顺序返回拷贝）；`remove()` 对系统 id 返回 `false` 且不改状态；`update()` 对系统 id 抛「系统能力不可修改配置」；`autoEnableSafeTools()` 只对系统能力按 `safeTools` 自动启用只读工具，用户明确关掉的工具记在 `MCP_USER_DISABLED_KEY` 里、之后不再被自动打开。`lib/mcp/runtime.ts:72` 的 `registry.isPreset` 改为 `registry.isSystem`，自动连接与只读工具自动启用链路不变。",
+      "「找回预置」那条路径退役：`MCP_REMOVED_PRESETS_KEY`、`removedPresetIds()`、`restorePresets()`、`restorePreset()` 本轮保留为行为恒空的兼容 shim（`removedPresetIds()` 恒 `[]`、`restorePresets()` 恒 `0`），只为兼容尚未迁移的旧测试；行为上已没有「删掉再找回」这回事。真正删除的是 `seedDefaults()` / `pushPreset()` 两个写入入口。",
+      "`components/InterfacesPage.tsx`：「接口」页上半新增只读「系统能力」区（`<section aria-label=\"系统能力\" data-testid=\"mcp-system-servers\">`，每张卡 `data-system-mcp=\"true\"`，没有删除按钮、没有参与对话开关，显示「始终参与对话」，保留工具开关与「连接 / 重新连接」；密文读不出时显示「系统能力暂不可用…」提示），下半是 `aria-label=\"私有 MCP 服务\"` 区，手填 / Registry / 插件来的服务照旧增删改；「添加 MCP 服务」里的「常用预设」下拉整块删除，头部文案改为「MCP 协议 … · 只读工具默认启用，其余逐个授权」。",
+      "升级兼容：系统项落盘 `origin` 仍是 `\"preset\"`、id 仍是 `mcp-<id>` 前缀，旧「预置服务」与新的系统能力是同一批条目——升级后同 id 复用既有条目（不重复插入），已配好的工具授权继续生效。",
+      "**验证（d.147.4.93.11，工作树实跑，全 exit 0）**",
+      "— `pnpm typecheck` 6 个项目全部 Done（0 报错）；`packages/web` 的 `vitest run` 为 **306 files / 4406 tests passed**（0 failed）。",
+      "— server **15 files / 284 tests**、shared **8 files / 119 tests**、desktop **856 pass / 0 fail / 0 cancelled**（52 个 `node --test` 文件整包跑完，无 first-fail 截断）。",
+      "— `pnpm build` 0（仅 chunk 体积警告）；`pnpm plugin:check` 清单 6/6 + pet-widget 1/1 + examples 5/5，`plugin.schema.json` 已是最新。",
+      "— `node scripts/design-audit.mjs` 浅色与 `--theme dark` 各 **57 条（8 页 + 11 个子页签 × 3 断点）`failures: []`**：横向溢出、对比度不合格、11px 正文、有效命中区 <32、无名字可点全 0。本轮给审计脚本补了「页面/页签内容就绪等待」（轮询 `main` 文本长度直到稳定），修掉一次 `team~看板` 只在深色首跑出现的采集时序假红（页面两块看板还没渲染完就量了标题层级）。",
+      "— 真实浏览器核对（1440×900，JSON API 建一段会话）：编排条 `data-testid=\"chat-orchestration\"` 在、`h2` 是会话标题、四个 chip 文案为「智能体团队 / 标准模式 / N 个工具调用 / N 个后台任务」；切「轨迹」得到 `role=\"tabpanel\"` 与「这一轮还没有轨迹」，切「上下文」得到 `role=\"progressbar\" aria-label=\"上下文预算\"`（`aria-valuenow=0`、`0 / 6000 tokens`），切回「对话」输入框草稿仍在（`draftPreserved=true`）。",
+      "— 「接口」页：`data-testid=\"mcp-system-servers\"` 两行系统能力（Windows 桌面控制 / 网页抓取（Scrapling））`data-system-mcp=\"true\"`、区内删除按钮 0 个；「添加 MCP 服务」为内联表单，唯一的下拉是「传输方式」，预设下拉已不存在；1440 与 1024 均 `docOverflowX=0`、`bodyOverflowX=0`。截图：`.tmp/shots12b/`（审计 24 张）、`.tmp/shots-orch/{chat-orchestration-1440,chat-orchestration-1024,interfaces-mcp-1440}.png`。",
+      "— **未真机复验**：Electron 原生「选择文件夹」对话框（web/headless 下没有 `window.heming.pickDirectory`）；桌面端标题栏拖拽；系统能力里 stdio 在真实桌面端的连通结果（浏览器环境按设计显示「只能在桌面端连接」）。"
+    ],
+    "paragraphs": [
+      "会话页顶部从「一行标题」变成「编排条 + 对话/轨迹/上下文页签」：标题右侧列出这一轮的编排事实（团队、模式、工具调用数、后台任务数），第二行三个页签切换主区。Windows 桌面控制与网页抓取也不再是要用户自己找命令、填参数、再点连接的「预置」，而是随应用内置的系统能力：在「接口」页只读展示、始终参与对话，只读工具默认启用，其余仍逐个授权。",
+      "**会话页（packages/web）**",
+      "**MCP 系统能力（packages/web）**"
+    ]
+  },
+  {
     "version": "d.147.4.92.11",
     "date": "2026-11-15",
     "title": "新对话先选工作区：点「新对话」弹出工作区选择",

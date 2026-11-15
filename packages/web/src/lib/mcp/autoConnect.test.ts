@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { autoConnectAll } from "./runtime.js";
 import { McpRegistry } from "./store.js";
+import { SYSTEM_WINDOWS_DESKTOP_ID, SYSTEM_SCRAPLING_ID } from "./presets.js";
 import type { McpServerConfig } from "./types.js";
 import type { StorageLike } from "../memory/types.js";
 
@@ -10,7 +11,12 @@ import type { StorageLike } from "../memory/types.js";
  * 这里不打真实 MCP 服务（那要起子进程、依赖网络），而是把 runtime 依赖的
  * 两个外部点替换掉：`refreshServerTools` 用的 registry 与 stdio 桥可用性。
  * 重点验证的是**编排语义**——哪些服务会被试、失败怎么办、结果长什么样。
+ *
+ * d.147.4.93.11：系统能力始终存在且启用，浏览器端没有 stdio 桥 → 它们会以
+ * `skipped` 结果出现。断言用户服务的部分时统一按 serverId 过滤掉系统能力。
  */
+
+const SYSTEM_IDS = new Set([SYSTEM_WINDOWS_DESKTOP_ID, SYSTEM_SCRAPLING_ID]);
 
 function memStorage(): StorageLike {
   const map = new Map<string, string>();
@@ -35,15 +41,17 @@ function server(over: Partial<McpServerConfig> = {}): McpServerConfig {
 }
 
 /**
- * 建一个「只有指定这些服务」的 registry。
- * 必须清掉首次预置——否则 servers() 里总会多一条 Windows 桌面控制，
- * 断言「共 N 台」就会一直差一。用 remove 而非改存储，是走真实删除路径。
+ * 建一个带指定用户服务的 registry。系统能力不需要也不允许手工清理，
+ * 断言时用 `userResults()` 过滤掉它们。
  */
 function registryWith(servers: McpServerConfig[]): McpRegistry {
   const registry = new McpRegistry(memStorage(), () => "2026-10-20T00:00:00.000Z");
-  for (const s of [...registry.servers()]) registry.remove(s.id);
   for (const s of servers) registry.add(s);
   return registry;
+}
+
+function userResults<T extends { serverId: string }>(results: T[]): T[] {
+  return results.filter((r) => !SYSTEM_IDS.has(r.serverId));
 }
 
 describe("autoConnectAll：自动连接编排", () => {
@@ -54,20 +62,26 @@ describe("autoConnectAll：自动连接编排", () => {
     registry = new McpRegistry(memStorage(), () => "2026-10-20T00:00:00.000Z");
   });
 
-  it("没有启用中的服务时不做任何事", async () => {
-    const registry = registryWith([
-      server({ id: "off", name: "停用的", enabled: false }),
-    ]);
+  it("用户没有服务时只出现系统能力，且浏览器端按「跳过」处理、不报成连接失败", async () => {
     const results = await autoConnectAll(registry);
-    expect(results).toEqual([]);
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.serverId).sort()).toEqual(
+      [SYSTEM_WINDOWS_DESKTOP_ID, SYSTEM_SCRAPLING_ID].sort(),
+    );
+    for (const row of results) {
+      // 浏览器 jsdom 没有 stdio 桥：跳过而不是硬失败
+      expect(row.skipped).toBe(true);
+      expect(row.ok).toBe(false);
+      expect(row.error).toContain("桌面端");
+    }
   });
 
-  it("逐台返回结果：成功的带工具数，失败的不抛异常", async () => {
-    const registry = registryWith([
+  it("用户的启用服务都会被尝试：成功的带工具数，失败的不抛异常", async () => {
+    registry = registryWith([
       server({ id: "ok", name: "好的", url: "https://ok.example.com/mcp" }),
       server({ id: "bad", name: "坏的", url: "https://bad.invalid/mcp" }),
     ]);
-    const results = await autoConnectAll(registry);
+    const results = userResults(await autoConnectAll(registry));
     expect(results).toHaveLength(2);
     // 两台都不该让 autoConnectAll 抛出去——一个 MCP 坏了不该挡住整个应用
     const bad = results.find((r) => r.name === "坏的");
@@ -83,10 +97,10 @@ describe("autoConnectAll：自动连接编排", () => {
   });
 
   it("结果里带 serverId 与名字，界面可直接展示", async () => {
-    const registry = registryWith([
+    registry = registryWith([
       server({ id: "obs", name: "可观测的", url: "https://obs.example.com/mcp" }),
     ]);
-    const results = await autoConnectAll(registry);
+    const results = userResults(await autoConnectAll(registry));
     const row = results.find((r) => r.name === "可观测的")!;
     expect(row.serverId).toBe("obs");
     expect(row.name).toBe("可观测的");
@@ -94,21 +108,21 @@ describe("autoConnectAll：自动连接编排", () => {
     expect(typeof row.tools).toBe("number");
   });
 
-  it("停用的服务不会被尝试连接", async () => {
-    const registry = registryWith([
+  it("停用的用户服务不会被尝试连接", async () => {
+    const base = registryWith([
       server({ id: "off", name: "停用的", enabled: false, url: "https://off.invalid/mcp" }),
     ]);
-    const results = await autoConnectAll(registry);
-    expect(results).toHaveLength(0);
+    const results = userResults(await autoConnectAll(base));
+    expect(results.find((r) => r.serverId === "off")).toBeUndefined();
   });
 
   it("多台服务的结果顺序与启用顺序一致", async () => {
-    const registry = registryWith([
+    registry = registryWith([
       server({ id: "a", name: "甲", url: "https://a.invalid/mcp" }),
       server({ id: "b", name: "乙", url: "https://b.invalid/mcp" }),
       server({ id: "c", name: "丙", url: "https://c.invalid/mcp" }),
     ]);
-    const results = await autoConnectAll(registry);
+    const results = userResults(await autoConnectAll(registry));
     expect(results.length, "三台都要被试过").toBe(3);
     // 界面按 index 取名字，顺序错位会张冠李戴
     expect(results.map((r) => r.serverId)).toEqual(["a", "b", "c"]);
@@ -138,7 +152,7 @@ describe("autoConnectAll：并行而非串行", () => {
     ]);
 
     const started = Date.now();
-    const results = await connect(registry);
+    const results = userResults(await connect(registry));
     const elapsed = Date.now() - started;
 
     expect(results).toHaveLength(3);
@@ -162,7 +176,7 @@ describe("autoConnectAll：并行而非串行", () => {
       server({ id: "first", name: "先", url: "https://x.invalid/mcp" }),
       server({ id: "second", name: "后", url: "https://y.invalid/mcp" }),
     ]);
-    const results = await connect(registry);
+    const results = userResults(await connect(registry));
     expect(results.map((r) => r.serverId)).toEqual(["first", "second"]);
     vi.doUnmock("./httpClient.js");
     vi.resetModules();
