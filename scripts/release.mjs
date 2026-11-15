@@ -116,6 +116,12 @@ const TAR_EXCLUDES = [
    */
   "packages/setup/build",
   "packages/setup/payload",
+  /*
+   * 离线安装器的落地目录（`packages/setup/release-offline`）：一份约 400MB 的整包副本。
+   * 2026-11-15 实测带着两版存量把它算进部署包，体积直接到 800MB 被第 8 步红线拦下。
+   * 它只是本机做离线分发的原料，云端只要 dist（同 build/payload 的道理）。
+   */
+  "packages/setup/release-offline",
   "packages/desktop/update-helper",
   ".tmp-module-dl",
   "plugin-kit/plugins/pet-widget/dist",
@@ -128,7 +134,7 @@ const TAR_EXCLUDES = [
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload)|desktop\/update-helper)\//;
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload|release-offline)|desktop\/update-helper)\//;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",
