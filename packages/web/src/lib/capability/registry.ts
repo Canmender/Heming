@@ -2,6 +2,12 @@ import type { ToolBridge } from "../agentStream.js";
 import { listsName, mergeToolBridges } from "../selfEdit/merge.js";
 import type { CapabilityContext, CapabilityProvider } from "./types.js";
 
+/** 工具规格名（排序/去重都按它；拿不到名字的排到最后，不抛）。 */
+function toolNameOf(tool: unknown): string {
+  const fn = (tool as { function?: { name?: unknown } }).function;
+  return typeof fn?.name === "string" ? fn.name : "\uffff";
+}
+
 /**
  * 能力注册表：把「工具从哪来」收成一张可枚举的清单。
  *
@@ -46,7 +52,11 @@ export class CapabilityRegistry {
     if (!merged) return null;
 
     return {
-      tools: merged.tools,
+      // 工具清单按名字排序（P2-T12）：工具块是请求前缀的一部分，上游前缀缓存
+      // 按 token 序列命中——顺序随「哪个 MCP 服务先连上」抖动，缓存就会整块失效。
+      // 注册顺序仍决定**同名工具的优先级**（execute/meta 走 mergeToolBridges 的
+      // 查找，不看这里的排列）；排序只影响模型看到的清单顺序。
+      tools: [...merged.tools].sort((a, b) => toolNameOf(a).localeCompare(toolNameOf(b))),
       execute: merged.execute,
       meta: (name) => {
         const owner = entries.find((e) => listsName(e.bridge, name));

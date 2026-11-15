@@ -93,6 +93,43 @@ describe("buildAgentContext", () => {
     expect(out.skills.map((m) => m.skill.id)).toEqual([matched.id]);
   });
 
+  it("前缀稳定（P2-T12）：注入内容只追加在原文之后，原文段逐字不变", () => {
+    // 上游前缀缓存按 token 序列命中：原提示词必须一直是**同一段字节**，
+    // 记忆/技能只能追加在末尾。这里用两次不同注入验证「前缀没被改写」。
+    const skills = emptySkills();
+    addCodeReview(skills);
+    const memory = makeMemory();
+    const first = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "帮我审查一下",
+      basePrompt: BASE,
+      memory,
+      skills,
+    });
+    memory.upsertSemantic({
+      agentId: "a1",
+      key: "偏好",
+      value: "回答尽量短",
+      source: "explicit",
+    });
+    const second = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "顺便看下我的偏好",
+      basePrompt: BASE,
+      memory,
+      skills,
+    });
+
+    expect(first.systemPrompt.slice(0, BASE.length)).toBe(BASE);
+    expect(second.systemPrompt.slice(0, BASE.length)).toBe(BASE);
+    // 两次注入内容不同，但共同前缀至少覆盖原提示词本身（不漏一个字）
+    expect(first.systemPrompt.startsWith(BASE)).toBe(true);
+    expect(second.systemPrompt.startsWith(BASE)).toBe(true);
+    expect(first.systemPrompt).not.toBe(second.systemPrompt);
+  });
+
   it("未传 memory/skills → 严格原样返回 basePrompt", () => {
     const out = buildAgentContext({
       agentId: "a1",

@@ -7,6 +7,10 @@ owner: evals
 tags: [read, context, capability]
 setup:
   fixture: read-002
+# P2-T12：显式声明缓存读，用来证明 cache_read 计数从「假模型 → onUsage → rollout
+# turn_end.usage → 报告 cache_read_ratio」这条路是通的（缺省不上报 ≠ 上报 0）。
+usage:
+  cacheRead: 700
 prompt: |
   工作区里有一份《中文技术文档.md》，请读完后用简体中文回答三个问题，每个答案一句话：
   1. 工具轮上限是多少？

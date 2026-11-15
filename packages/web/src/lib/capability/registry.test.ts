@@ -32,16 +32,28 @@ function makeProvider(
 }
 
 describe("CapabilityRegistry", () => {
-  it("按注册顺序合并工具；全空返回 null", () => {
+  it("合并工具后按名字排序（稳定前缀，P2-T12）", () => {
+    // 注册顺序 = 优先级，但清单顺序必须是确定的：MCP 服务连上的先后不能
+    // 让工具块换序（换序 = 上游前缀缓存整块失效）。
     const reg = new CapabilityRegistry()
-      .register(makeProvider("a", "mcp", makeBridge(["a_tool"], "A")))
-      .register(makeProvider("b", "builtin", makeBridge(["b_tool"], "B")));
+      .register(makeProvider("b", "builtin", makeBridge(["b_tool"], "B")))
+      .register(makeProvider("a", "mcp", makeBridge(["a_tool"], "A")));
     const names = (reg.build(CTX)?.tools ?? []).map(
       (t) => (t as { function: { name: string } }).function.name,
     );
     expect(names).toEqual(["a_tool", "b_tool"]);
 
     expect(new CapabilityRegistry().build(CTX)).toBeNull();
+  });
+
+  it("同一个提供者内部的工具也按名字排序，且不丢工具", () => {
+    const reg = new CapabilityRegistry().register(
+      makeProvider("x", "builtin", makeBridge(["zeta", "alpha", "mike"], "X")),
+    );
+    const names = (reg.build(CTX)?.tools ?? []).map(
+      (t) => (t as { function: { name: string } }).function.name,
+    );
+    expect(names).toEqual(["alpha", "mike", "zeta"]);
   });
 
   it("null 桥与空 tools 的提供者都被跳过", () => {

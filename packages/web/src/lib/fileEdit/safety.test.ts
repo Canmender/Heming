@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { assessPatchSafety } from "./safety.js";
 import type { FileRoot } from "./paths.js";
 
@@ -84,5 +84,60 @@ describe("补丁三态安全判定", () => {
       roots: [WRITE],
     });
     expect(result.verdict).toBe("ask");
+  });
+});
+
+describe("硬排除（ADR-3 / P2-T13）", () => {
+  it("写可执行脚本即使在写根内也要问（.bat/.ps1/.cmd/.vbs/.exe 全列）", () => {
+    for (const ext of [".bat", ".ps1", ".cmd", ".vbs", ".exe"]) {
+      const result = assessPatchSafety({
+        targets: [`D:/Obsidian/学院事务/evil${ext}`],
+        deletions: 0,
+        roots: [WRITE],
+      });
+      expect(result.verdict, ext).toBe("ask");
+      expect(result.reason, ext).toContain("可执行脚本");
+    }
+  });
+
+  it("大小写不敏感：EVIL.BAT 一样要问", () => {
+    const result = assessPatchSafety({
+      targets: ["D:/Obsidian/学院事务/EVIL.BAT"],
+      deletions: 0,
+      roots: [WRITE],
+    });
+    expect(result.verdict).toBe("ask");
+  });
+
+  it("改 package.json / 锁文件要问（脚本链路）", () => {
+    for (const name of ["package.json", "pnpm-lock.yaml"]) {
+      const result = assessPatchSafety({
+        targets: [`D:/Obsidian/学院事务/${name}`],
+        deletions: 0,
+        roots: [WRITE],
+      });
+      expect(result.verdict, name).toBe("ask");
+      expect(result.reason, name).toContain("依赖/构建/测试");
+    }
+  });
+
+  it("普通文本文件不触发硬排除（不误伤）", () => {
+    for (const name of ["notes/a.md", "报告.txt", "batch.md", "package.json.md"]) {
+      const result = assessPatchSafety({
+        targets: [`D:/Obsidian/学院事务/${name}`],
+        deletions: 0,
+        roots: [WRITE],
+      });
+      expect(result.verdict, name).toBe("auto");
+    }
+  });
+
+  it("硬排除不放松已有判定：只读根仍是 reject，优先于硬排除的 ask", () => {
+    const result = assessPatchSafety({
+      targets: ["D:/参考/evil.bat"],
+      deletions: 0,
+      roots: [WRITE, READ],
+    });
+    expect(result.verdict).toBe("reject");
   });
 });
