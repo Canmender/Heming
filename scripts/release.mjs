@@ -122,6 +122,13 @@ const TAR_EXCLUDES = [
    * 它只是本机做离线分发的原料，云端只要 dist（同 build/payload 的道理）。
    */
   "packages/setup/release-offline",
+  /*
+   * `services/agent-pipeline/.venv`：本机 Python 虚拟环境（5152 项里 4223 项是它）。
+   * 云端只跑 node（install-app.sh 从不引用 services/），把 venv 打进去既无意义，
+   * 又会把 tar 清单撑过 capture 的行数上限（见第 8 步 maxLines 注释）。
+   */
+  "services/agent-pipeline/.venv",
+  "__pycache__",
   "packages/desktop/update-helper",
   ".tmp-module-dl",
   "plugin-kit/plugins/pet-widget/dist",
@@ -134,7 +141,7 @@ const TAR_EXCLUDES = [
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload|release-offline)|desktop\/update-helper)\//;
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload|release-offline)|desktop\/update-helper)\/|(^|\/)(\.venv|__pycache__)\//;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",
@@ -505,7 +512,7 @@ function killTree(child) {
  * 跑一条命令：实时转发输出、保留最后 40 行（失败时打印）、支持超时。
  * @returns {Promise<{code:number, signal:string|null, timedOut:boolean, durationMs:number, output:string, tail40:string[]}>}
  */
-function runCommand({ cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = false }) {
+function runCommand({ cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = false, maxLines = 4000 }) {
   const started = Date.now();
   return new Promise((done) => {
     let child;
@@ -530,7 +537,7 @@ function runCommand({ cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = false })
       return;
     }
 
-    /** @type {string[]} 全量输出（截断，仅供文本检索） */
+    /** @type {string[]} 全量输出（按 maxLines 截断，仅供文本检索） */
     const outputLines = [];
     /** @type {string[]} 最后 40 行 */
     const tail = [];
@@ -538,7 +545,7 @@ function runCommand({ cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = false })
     let timedOut = false;
 
     const pushLine = (text, stream) => {
-      if (outputLines.length < 4000) outputLines.push(text);
+      if (outputLines.length < maxLines) outputLines.push(text);
       tail.push(stream === "err" ? `[stderr] ${text}` : text);
       if (tail.length > 40) tail.shift();
       if (quiet) return;
@@ -595,15 +602,15 @@ function runCommand({ cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = false })
 
 /** 带上下文的一层包装：记录最后一条命令（失败时打印用），默认继承 --quiet。 */
 async function run(ctx, spec) {
-  const { cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = ctx.opts.quiet } = spec;
+  const { cmd, cwd = ROOT, env = {}, timeoutMs = 0, quiet = ctx.opts.quiet, maxLines } = spec;
   ctx.lastCommand = { cmd, cwd };
   if (!quiet) print(`\n$ ${cmd}`);
-  return runCommand({ cmd, cwd, env, timeoutMs, quiet });
+  return runCommand({ cmd, cwd, env, timeoutMs, quiet, maxLines });
 }
 
-/** 只读短命令：吃输出、不打印。 */
-async function capture(ctx, cmd, { cwd = ROOT, timeoutMs = 120_000 } = {}) {
-  const result = await runCommand({ cmd, cwd, timeoutMs, quiet: true });
+/** 只读短命令：吃输出、不打印。maxLines 用于长清单（tar -tzf 这类上千行输出）。 */
+async function capture(ctx, cmd, { cwd = ROOT, timeoutMs = 120_000, maxLines = 4000 } = {}) {
+  const result = await runCommand({ cmd, cwd, timeoutMs, quiet: true, maxLines });
   return result;
 }
 
@@ -1721,8 +1728,12 @@ async function runDeploy(ctx) {
     }
     if (size > 50 * 1024 * 1024) notesWarn.push(`部署包 ${formatBytes(size)} 偏大（预期 5MB 量级），核对排除表`);
 
+    // 这份清单是本轮唯一能证明「包里有该有的东西」的证据，必须拿全量：
+    // capture 默认只留前 4000 行，2026-11-15 一次 7081 项的清单被截断，
+    // 排在后面的 packages/server|shared|web/dist 全被当成「缺失」误拦。
     const list = await capture(ctx, `${TAR_BIN} -tzf ${shellQuote(tarPath)}`, {
       timeoutMs: ctx.opts.timeout || STEP_TIMEOUTS.deployStage,
+      maxLines: 200_000,
     });
     if (list.code !== 0) throw new StepError("tar -tzf 读取失败", { tail: list.tail40 });
     const entries = list.output.split(/\r?\n/).filter(Boolean);
