@@ -70,7 +70,7 @@ function resolveInfohubPackageDir({ isPackaged, dirname }) {
   return path.join(dirname, "..", "infohub");
 }
 
-/** 首次使用且用户没指定目录时的默认位置：`<根目录>/infohub`（和鸣统一放在 ~/Heming 下）。 */
+/** 首次使用且用户没指定目录时的默认位置：`<根目录>/infohub`（根目录默认是数据根/安装目录）。 */
 function resolveDefaultHome(rootDir) {
   return path.join(rootDir, "infohub");
 }

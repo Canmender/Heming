@@ -1508,7 +1508,9 @@ app.whenReady().then(() => {
       log: (line) => console.log(line),
       packageDir: () => infohubEngineDirs().packageDir,
       libraryDir: () => infohubEngineDirs().libraryDir,
-      defaultHome: resolveDefaultHome(path.join(os.homedir(), "Heming")),
+      // 默认归档目录跟着数据根走：打包版是 `<安装目录>/data/infohub`，
+      // 开发态回落到 userData；不再默认写到 `~/Heming/infohub`。
+      defaultHome: resolveDefaultHome(DATA_ROOT || app.getPath("userData")),
       bundledPythonPath: bundledPython(),
     });
     infohubBridge.onEvent((event) => {
