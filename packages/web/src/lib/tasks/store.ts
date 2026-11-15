@@ -37,6 +37,8 @@ export const MAX_PROMPT_CHARS = 4000;
 export const MAX_RESULT_CHARS = 12_000;
 /** 单条工具结果在任务记录里的上限（报告另有截断）。 */
 export const MAX_STEP_RESULT_CHARS = 1600;
+/** 幂等键上限（落盘字段；正常只有 20 来字符，留余量防手改数据撑爆存储）。 */
+export const MAX_IDEMPOTENCY_CHARS = 120;
 /** 报告末尾来源上限（与 agentStream 的 MAX_SOURCES 同口径）。 */
 export const MAX_REPORT_SOURCES = 8;
 /** 单键上限：localStorage 整个源约 5MB，给记忆/设置等键留余量。 */
@@ -102,6 +104,15 @@ export interface TaskRecord {
    * 上限与 rollout 一致（各 20 条、每条 200 字），任务区存储有字节上限，证据不能撑爆它。
    */
   evidence?: RolloutEvidence;
+  /**
+   * 幂等键（P4/T18）：同一个「目标 + 会话 + 智能体」在**仍在运行**时只允许一条任务。
+   *
+   * 为什么需要：任务区投递是「写进输入区 → 连接就绪后自动发送」，双击、刷新后重投、
+   * 或应用重启后恢复队列，都可能把同一次投递变成两条任务——于是同一个补丁被写两次、
+   * 同一条命令被执行两次。键由 `taskIdempotencyKey()` 确定性生成，不落随机数。
+   * 只在 running 期间去重：任务结束后用户主动再发一次是**新的一次执行**，不该被吞。
+   */
+  idempotencyKey?: string;
   steps: TaskStep[];
 }
 
@@ -132,6 +143,27 @@ let idSeq = 0;
 function newTaskId(now: number): string {
   idSeq += 1;
   return `task-${now.toString(36)}-${idSeq.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * 确定性幂等键（P4/T18）：同一次投递在重启/重投后仍得到同一个键。
+ *
+ * 为什么不用 `crypto.randomUUID()`：幂等的语义是「同一件事认出是同一件」，
+ * 随机 id 天生认不出来。这里用 FNV-1a 32 位把会话 + 智能体 + 目标压成短键即可：
+ * 它只用于去重，不是安全边界（碰撞概率在同一会话内可忽略，真撞了也只是少建一条）。
+ */
+export function taskIdempotencyKey(input: {
+  conversationId: string;
+  agentId: string;
+  prompt: string;
+}): string {
+  const text = `${input.conversationId}\u0000${input.agentId}\u0000${oneLine(input.prompt)}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `task-key-${hash.toString(36)}`;
 }
 
 /** 按码点截断（避免切坏代理对）。 */
@@ -610,6 +642,9 @@ function pickTask(raw: unknown): TaskRecord | null {
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : createdAt,
     ...(typeof raw.endedAt === "number" ? { endedAt: raw.endedAt } : {}),
     ...(typeof raw.streamId === "string" ? { streamId: raw.streamId } : {}),
+    ...(typeof raw.idempotencyKey === "string" && raw.idempotencyKey
+      ? { idempotencyKey: clip(raw.idempotencyKey, MAX_IDEMPOTENCY_CHARS) }
+      : {}),
     ...(pickForkedFrom(raw.forkedFrom) ? { forkedFrom: pickForkedFrom(raw.forkedFrom)! } : {}),
     ...(typeof raw.result === "string" ? { result: raw.result } : {}),
     ...(typeof raw.error === "string" ? { error: raw.error } : {}),
@@ -631,6 +666,28 @@ export function readTasks(storage: StorageLike = createDefaultStorage()): TaskRe
 
 /* ------------------------------------------------------------------ store */
 
+/**
+ * 启动恢复（P4/T18）：读盘 → 把上次没跑完的 running 任务收口成失败 → **回写**。
+ *
+ * 为什么要回写：`markStaleTasks` 只改内存，不落盘；应用重启后如果没人再触发
+ * `markStale`，那条「进行中」会一直留在存储里，下次启动又会被重新判一次，
+ * 且用户看到的是「还在跑」。回写一次，状态与证据都定稿在盘上。
+ *
+ * 为什么要收口而不是续跑：本机流不跨进程恢复，中途的副作用无法判定是否已完成
+ * （写入了一半？命令执行到哪？），自动重跑等于**重复副作用**。最小版只保证
+ * 「状态与证据仍在 + 重投不重复建任务」，真正的续跑要等幂等执行日志。
+ */
+export function loadTasksAtStartup(
+  storage: StorageLike = createDefaultStorage(),
+  now = Date.now(),
+): TaskRecord[] {
+  const raw = readTasks(storage);
+  if (raw.length === 0) return raw;
+  const recovered = markStaleTasks(raw, now);
+  if (recovered !== raw) writeJson(storage, TASKS_KEY, recovered, TASKS_BYTE_LIMIT);
+  return recovered;
+}
+
 interface TaskState {
   tasks: TaskRecord[];
   /** 建档（任务列表按创建时间倒序，最新在前）。返回任务 id。 */
@@ -641,6 +698,11 @@ interface TaskState {
     prompt: string;
     /** 分叉新建任务时带上来源；普通新建不传。 */
     forkedFrom?: TaskForkedFrom;
+    /**
+     * 幂等键（P4/T18）：同键且仍在 running 的任务已存在时，不再新建。
+     * 传了就落盘，重启后重投仍能认出「这是同一次投递」。
+     */
+    idempotencyKey?: string;
     now?: number;
   }) => string;
   /** 绑定当前流（onStart 时调用；重试换新流后覆盖，任务详情据此找到最新一条）。 */
@@ -749,9 +811,27 @@ function patchTask(
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
-  tasks: markStaleTasks(readTasks(), Date.now()),
+  tasks: loadTasksAtStartup(getStorage(), Date.now()),
 
-  create: ({ conversationId, agentId, agentName, prompt, forkedFrom, now = Date.now() }) => {
+  create: ({
+    conversationId,
+    agentId,
+    agentName,
+    prompt,
+    forkedFrom,
+    idempotencyKey,
+    now = Date.now(),
+  }) => {
+    // 幂等去重（P4/T18）：同键的 running 任务已存在 → 直接复用它，不新建。
+    // 返回既有 id 而不是报错：调用方拿到的是「这次投递对应的任务」，行为与首次一致，
+    // 而副作用只有一份。
+    const key = idempotencyKey ? clip(idempotencyKey, MAX_IDEMPOTENCY_CHARS) : undefined;
+    if (key) {
+      const existing = get().tasks.find(
+        (task) => task.idempotencyKey === key && task.status === "running",
+      );
+      if (existing) return existing.id;
+    }
     const id = newTaskId(now);
     const task: TaskRecord = {
       id,
@@ -764,6 +844,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
       ...(forkedFrom ? { forkedFrom } : {}),
+      ...(key ? { idempotencyKey: key } : {}),
       steps: [],
     };
     set({ tasks: persist([task, ...get().tasks]) });
@@ -828,11 +909,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const origin = get().tasks.find((task) => task.id === taskId);
     if (!origin) return null;
     // 目标/智能体/会话原样继承：重跑不重新解读用户意图，也不换会话（消息仍在那条对话里）。
+    // 幂等键：双击「重跑」只应产生一条新任务（同键 running 去重），跑完后再点才是新的一次。
     const id = get().create({
       conversationId: origin.conversationId,
       agentId: origin.agentId,
       agentName: origin.agentName,
       prompt: origin.prompt,
+      idempotencyKey: `${taskIdempotencyKey(origin)}:rerun`,
       now,
     });
     return id;
@@ -847,6 +930,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       agentName: origin.agentName,
       prompt: origin.prompt,
       forkedFrom,
+      // 同一个分叉点双击只建一条；分叉点不同则是不同的新任务。
+      idempotencyKey: `${taskIdempotencyKey(origin)}:fork:${forkedFrom.streamId}:${forkedFrom.seq}`,
       now,
     });
     return id;

@@ -132,6 +132,15 @@ pnpm eval:agent -- --real --model gpt-4o-mini        # 夜间任务；需要 HEM
 工具层自己的路径校验（绝对路径 / `..` / 只读根）仍按真实实现返回文案，因此
 `hitl` grader 把「闸门拒绝」与「工具失败」都记成 `denied`。
 
+### 只读并行与证据
+
+- 执行器与线上同一条路径：只读工具（含检索）最多 3 路并行（`MAX_PARALLEL_READS`），
+  写工具仍按调用顺序串行。`tool-003` 就是压在这个上限上的用例——3 个 `file_read`
+  一次发出，必须三个都执行（排队不能漏读）。
+- 成功回合的 `assistant_final.evidence` 由真实调用生成（`file_patch` 的目标文件、
+  命令工具的动作），`evidence` grader 据此判「有没有真的做完」：只自称完成 → 红。
+
+
 ### 报告形状（`--json`）
 
 与基线同形，可直接 `--compare`：
@@ -141,7 +150,7 @@ pnpm eval:agent -- --real --model gpt-4o-mini        # 夜间任务；需要 HEM
   "model": "eval-offline",
   "date": "2026-11-15",
   "env": { "node": "v24.x", "pnpm": "10.x" },
-  "totals": { "cases": 17, "passed": 17, "pass@1": 1, "tokens_per_pass": 2040, "cache_read_ratio": 0, "p95_ms": 120 },
+  "totals": { "cases": 18, "passed": 18, "pass@1": 1, "tokens_per_pass": 2040, "cache_read_ratio": 0, "p95_ms": 120 },
   "cases": [{ "id": "read-001", "tags": ["read"], "passed": true, "rounds": 2,
               "tokens": { "input": 900, "output": 120, "cacheRead": 0, "cacheWrite": 0 },
               "durationMs": 90, "failures": [] }]

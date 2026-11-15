@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+﻿import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
 import { useNotificationStore } from "../../store/notifications.js";
 import type { StorageLike } from "../memory/types.js";
@@ -14,7 +14,9 @@ import {
   markStaleTasks,
   pruneTasks,
   readTasks,
+  loadTasksAtStartup,
   setTaskStorage,
+  taskIdempotencyKey,
   taskStats,
   taskForkNotice,
   taskTitle,
@@ -684,5 +686,73 @@ describe("完成证据（P3-T15）", () => {
     expect(huge.evidence?.files).toHaveLength(20);
     expect(huge.evidence?.commands[0].length).toBeLessThanOrEqual(200);
     expect(huge.evidence?.outputDigest?.length).toBeLessThanOrEqual(400);
+  });
+});
+
+describe("任务续跑（P4/T18）：幂等键与重启恢复", () => {
+  const base = { conversationId: "c1", agentId: "a1", agentName: "和小鸣", prompt: "把 notes/待办.md 第 3 条改好" };
+
+  it("同一个幂等键在 running 期间只建一条任务（重复投递不重复副作用）", () => {
+    const key = taskIdempotencyKey(base);
+    const first = useTaskStore.getState().create({ ...base, idempotencyKey: key });
+    const second = useTaskStore.getState().create({ ...base, idempotencyKey: key });
+    expect(second).toBe(first);
+    expect(useTaskStore.getState().tasks).toHaveLength(1);
+    expect(readTasks(storage)).toHaveLength(1);
+  });
+
+  it("任务结束后同键可以再建——用户主动再发一次是新的一次执行", () => {
+    const key = taskIdempotencyKey(base);
+    const first = useTaskStore.getState().create({ ...base, idempotencyKey: key });
+    useTaskStore.getState().settle(first, { status: "done", result: "好" });
+    const second = useTaskStore.getState().create({ ...base, idempotencyKey: key });
+    expect(second).not.toBe(first);
+    expect(useTaskStore.getState().tasks).toHaveLength(2);
+  });
+
+  it("不同目标得到不同键；不传键时不参与去重", () => {
+    expect(taskIdempotencyKey(base)).not.toBe(taskIdempotencyKey({ ...base, prompt: "换一件事" }));
+    useTaskStore.getState().create({ ...base });
+    useTaskStore.getState().create({ ...base });
+    expect(useTaskStore.getState().tasks).toHaveLength(2);
+  });
+
+  it("幂等键落盘并能读回（重启后重投仍认得出同一次投递）", () => {
+    const key = taskIdempotencyKey(base);
+    useTaskStore.getState().create({ ...base, idempotencyKey: key });
+    expect(readTasks(storage)[0].idempotencyKey).toBe(key);
+  });
+
+  it("重启恢复：上次没跑完的任务收口为失败、证据仍在，且状态回写盘上", () => {
+    const old = Date.now() - TASK_STALE_MS - 60_000;
+    storage.setItem(
+      TASKS_KEY,
+      JSON.stringify([
+        makeTask({
+          status: "running",
+          createdAt: old,
+          updatedAt: old,
+          evidence: { files: ["notes/待办.md"], commands: ["file_patch: notes/待办.md"] },
+          steps: [{ id: "s1", name: "file_patch", args: "{}", status: "ok", startedAt: old, endedAt: old + 5 }],
+        }),
+      ]),
+    );
+    const recovered = loadTasksAtStartup(storage, Date.now());
+    expect(recovered[0].status).toBe("failed");
+    expect(recovered[0].error).toContain("中断");
+    expect(recovered[0].evidence?.files).toEqual(["notes/待办.md"]);
+    expect(recovered[0].steps).toHaveLength(1);
+    expect(readTasks(storage)[0].status).toBe("failed");
+  });
+
+  it("重启恢复不误伤刚开始跑的任务", () => {
+    const now = Date.now();
+    storage.setItem(
+      TASKS_KEY,
+      JSON.stringify([makeTask({ status: "running", createdAt: now, updatedAt: now })]),
+    );
+    const recovered = loadTasksAtStartup(storage, now);
+    expect(recovered[0].status).toBe("running");
+    expect(readTasks(storage)[0].status).toBe("running");
   });
 });

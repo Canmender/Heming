@@ -1,4 +1,4 @@
-﻿import type { WsClientEvent } from "@heming/shared";
+import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
 import {
   streamChat,
@@ -143,6 +143,48 @@ function withHeartbeat<T>(deps: TriggerDeps, streamId: string, job: Promise<T>):
 }
 /** 答案末尾来源脚注最多列几条（再多用户也不会看）。 */
 export const MAX_SOURCES = 8;
+
+/**
+ * 只读工具（含检索）的最大并行度（P4/T19）。
+ *
+ * 为什么要有上限而不是「全并行」：一轮里模型常常一次发 5–10 个读调用。无上限时
+ * 它们同时打本机文件系统/MCP/搜索服务，既把下载带宽与句柄抢光，也让工具端超时率上升；
+ * 串行又会让「读三个文件」白等三份延迟。3 路是折中：常见 2–3 个读调用完全并行，
+ * 更多时分批。
+ *
+ * 写工具不受这个限制——它们由调用处的写队列（`writeChain`）串行，顺序不可乱。
+ */
+export const MAX_PARALLEL_READS = 3;
+
+/** 限流器：最多 `limit` 个任务同时跑，排队者按提交顺序启动。 */
+function createLimiter(limit: number): <T>(job: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const release = () => {
+    active -= 1;
+    const resume = waiting.shift();
+    if (resume) resume();
+  };
+  return function run<T>(job: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const start = () => {
+        active += 1;
+        job().then(
+          (value) => {
+            release();
+            resolve(value);
+          },
+          (error) => {
+            release();
+            reject(error);
+          },
+        );
+      };
+      if (active < limit) start();
+      else waiting.push(start);
+    });
+  };
+}
 
 /**
  * 把工具带回的来源拼成确定性脚注。
@@ -1449,6 +1491,8 @@ export function runAgentMentions(
              * 轮数上限为止。这里只做提醒（结果仍真的执行），让模型自己判断要不要换路。
              */
             let writeChain: Promise<void> = Promise.resolve();
+            // 只读/检索走有上限的并行（P4/T19），写工具仍按调用顺序串行。
+            const runRead = createLimiter(MAX_PARALLEL_READS);
             // 工具执行可能很久（MCP/命令/浏览器），长等待期间发心跳，别让界面把「在跑」看成「卡死」。
             await withHeartbeat(
               deps,
@@ -1459,7 +1503,9 @@ export function runAgentMentions(
                     settled[i] = await runOne(call, i);
                   };
                   // 检索是纯内存操作，与只读工具一样并行，不占用写队列
-                  if (searchIndexes.has(i) || riskOf(call.function.name) === "read") return job();
+                  if (searchIndexes.has(i) || riskOf(call.function.name) === "read") {
+                    return runRead(job);
+                  }
                   const chained = writeChain.then(job, job);
                   // 链上任何一环失败都不能断链：失败已落在 settled 里，后续照常排队。
                   writeChain = chained.then(

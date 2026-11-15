@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure } from "./agentStream.js";
+import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
@@ -2353,5 +2353,48 @@ describe("assistant_final.evidence（P3-T15：完成即证据）", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     const final = items.find((it) => it.type === "assistant_final");
     expect(final?.evidence).toBeUndefined();
+  });
+});
+
+describe("只读工具并行上限（P4/T19）", () => {
+  it("一轮 5 个只读调用：并行度不超过 3，且确实并行（不串行白等）", async () => {
+    let active = 0;
+    let peak = 0;
+    let round = 0;
+    const calls = Array.from({ length: 5 }, (_, i) => ({
+      id: `r${i}`,
+      type: "function" as const,
+      function: { name: "srv__read", arguments: JSON.stringify({ path: `f${i}.md` }) },
+    }));
+    const execute = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { text: "内容", ok: true };
+    });
+    const { deps } = makeDeps({
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void }) => {
+        round += 1;
+        if (round === 1) {
+          o.onToolCalls?.(calls);
+          return "";
+        }
+        o.onDelta("都读完了");
+        return "都读完了";
+      }) as never,
+      getTools: () => ({
+        tools: calls.map((c) => ({ type: "function", function: { name: c.function.name } })) as never,
+        meta: () => ({ risk: "read" as const }),
+        execute,
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "读这五个文件", deps);
+
+    expect(execute).toHaveBeenCalledTimes(5);
+    expect(peak).toBeLessThanOrEqual(MAX_PARALLEL_READS);
+    expect(peak).toBeGreaterThan(1);
+    expect(MAX_PARALLEL_READS).toBe(3);
   });
 });
