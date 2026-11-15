@@ -178,6 +178,30 @@ describe("团队视图页签（③-1 roving tabindex）", () => {
       expect(document.getElementById(id)).not.toBeNull();
     }
   });
+
+  it("页签行常驻页头下方（不再被名册挤到右栏，也不再在工作台视图消失）", async () => {
+    await renderPage();
+    const list = screen.getByRole("tablist", { name: "团队视图" });
+    const row = list.parentElement as HTMLElement;
+    // 与模型/插件页同一套位置：页头正下方的通栏行、同左右内边距
+    expect(row.className).toContain("border-line-soft");
+    expect(row.className).toContain("px-6");
+    // 此前页签挂在右栏 <main> 里、被 300px 名册 aside 挤到右边
+    expect(list.closest("aside")).toBeNull();
+    // 五个页签都带 14px 图标
+    for (const label of ["工作台", "动向", "看板", "团队日程", "用量"]) {
+      expect(
+        within(list).getByRole("tab", { name: label }).querySelector("svg"),
+        `${label} 页签缺图标`,
+      ).not.toBeNull();
+    }
+
+    // 工作台视图此前 headerExtra=null、页签整条消失（进去就切不出来）：现在仍在，且能切回动向
+    fireEvent.click(within(list).getByRole("tab", { name: "工作台" }));
+    expect(within(list).getByRole("tab", { name: "工作台" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(list).getByRole("tab", { name: "动向" }));
+    expect(within(list).getByRole("tab", { name: "动向" })).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 describe("团队用量：默认关闭只看本人", () => {

@@ -176,6 +176,22 @@ describe("ModelPage · 结构与主路径", () => {
     expect(container.querySelector(".ui-segment-group")).toBeNull();
   });
 
+  it("页签行落在页头正下方（PageShell.tabs 槽），与插件/团队页同一位置", () => {
+    installBridge();
+    render(<ModelPage />);
+    const tablist = screen.getByRole("tablist", { name: "模型页分区" });
+    const row = tablist.parentElement as HTMLElement;
+    // PageShell 统一给的通栏行：与页头同左右内边距；页签的 -mb-px 压住本行底边
+    expect(row.className).toContain("border-line-soft");
+    expect(row.className).toContain("px-6");
+    expect(row.className).toContain("max-[1199px]:px-4");
+    // 内容面板与页签配对（同一套 tabpanel 契约，三页一致）
+    const panel = screen.getByRole("tabpanel");
+    const selected = screen.getByRole("tab", { name: "模型" });
+    expect(selected).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", selected.id);
+  });
+
   it("浏览器没有命令桥：提示只能在桌面端添加，但仍可看模型", () => {
     render(<ModelPage />);
     expect(screen.getByRole("status")).toHaveTextContent(/请打开和鸣桌面端/);

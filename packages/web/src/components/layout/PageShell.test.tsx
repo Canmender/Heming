@@ -66,6 +66,42 @@ describe("PageShell 布局与排版基元", () => {
     expect(container.querySelector(".custom-body")).toBeInTheDocument();
   });
 
+  it("tabs 槽在页头正下方、通栏同内边距，且不随内容滚动（三页一级页签的统一位置）", () => {
+    const { container } = render(
+      <PageShell
+        title="插件"
+        tabs={
+          <div role="tablist" aria-label="能力分区">
+            <button type="button" role="tab" aria-selected="true">
+              插件
+            </button>
+          </div>
+        }
+        headerExtra={<nav>筛选条</nav>}
+      >
+        <div>内容</div>
+      </PageShell>,
+    );
+    const list = screen.getByRole("tablist", { name: "能力分区" });
+    const row = list.parentElement as HTMLElement;
+    // 与页头同一左右内边距（24 / 窄窗 16），页签的 -mb-px 下划线压住本行 border-b
+    expect(row.className).toContain("border-b");
+    expect(row.className).toContain("border-line-soft");
+    expect(row.className).toContain("px-6");
+    expect(row.className).toContain("max-[1199px]:px-4");
+
+    // 顺序：页头 → 页签行 → headerExtra → 滚动内容
+    const header = container.querySelector("header") as HTMLElement;
+    expect(header.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const extra = screen.getByText("筛选条").parentElement as HTMLElement;
+    expect(row.compareDocumentPosition(extra) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 页签行固定：不在滚动容器里（滚动时页签不会跟着走）
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
+    expect(scroller.contains(list)).toBe(false);
+    expect(scroller.contains(screen.getByText("筛选条"))).toBe(false);
+  });
+
   it("scroll=false 时也套宽度档位（此前传 width 被静默忽略）", () => {
     const { container } = render(
       <PageShell title="设置" width="readable" scroll={false}>

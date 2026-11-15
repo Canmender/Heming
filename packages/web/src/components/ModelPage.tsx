@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
-import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { PageTabs } from "./layout/PageTabs.js";
 import {
   AlertIcon,
   AssistantIcon,
@@ -506,30 +506,17 @@ export function ModelPage() {
           {busy === "refresh" ? "刷新中…" : "刷新模型"}
         </Button>
       }
-      headerExtra={
-        // 一级页签统一走 PAGE_TABLIST / pageTabClass（下划线式，与设置页、插件页、记忆页、团队页同一套视觉）。
-        // 之前是贴着窗口左缘的 .ui-segment-group 药丸控件，与全站页面级切换栏不一致。
-        // 左右内边距与页头/内容区同列（24 / 窄窗 16），选中项的 -mb-px 压住 PageShell.headerExtra 的外边框。
-        <div
-          role="tablist"
-          aria-label="模型页分区"
-          className={`${PAGE_TABLIST} px-6 max-[1199px]:px-4`}
-        >
-          {TABS.filter((item) => cli !== null || item.key !== "sources").map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.key}
-              // 标准页签本身只给排版类名；这里保留 14px 图标，所以补 inline-flex + gap 让图标与文案对齐。
-              className={`${pageTabClass(tab === item.key)} inline-flex items-center gap-1.5`}
-              onClick={() => setTab(item.key)}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
+      // 一级页签走 PageShell.tabs + PageTabs（下划线式，与插件页、团队页同一套结构与位置）。
+      // 位置由 PageShell 统一给（紧贴页头、与页头同左基线），页面不再自己摆。
+      tabs={
+        <PageTabs
+          label="模型页分区"
+          idPrefix="model"
+          // 浏览器端没有 CLI 时「来源」进不去，页签与图标一起隐藏（不然点进去是空页）。
+          items={TABS.filter((item) => cli !== null || item.key !== "sources")}
+          active={tab}
+          onChange={(key) => setTab(key as TabKey)}
+        />
       }
     >
       {!cli && (
@@ -542,7 +529,14 @@ export function ModelPage() {
         </div>
       )}
 
-      <div key={tab} className="rta-enter">
+      {/* 页签面板：id / aria-labelledby 与 PageTabs 的 `model-*` 约定对齐（tab↔panel 双向可达）。 */}
+      <div
+        key={tab}
+        role="tabpanel"
+        id={`model-${tab}-panel`}
+        aria-labelledby={`model-${tab}-tab`}
+        className="rta-enter"
+      >
         {/* ── 模型 ───────────────────────────────────────────── */}
         {tab === "models" && (
           <section aria-label="可用模型" className="space-y-4">

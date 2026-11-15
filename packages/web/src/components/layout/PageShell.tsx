@@ -55,7 +55,16 @@ export interface PageShellProps {
   className?: string;
   /** 内容区额外类（例如 `flex flex-col gap-4`） */
   bodyClassName?: string;
-  /** 页头与内容之间插入的附加行（页签、筛选条等），不滚动 */
+  /**
+   * 页面级一级页签（传 `<PageTabs …/>`）：紧贴页头下方的一整行，通栏、与页头同左右内边距，
+   * 选中项的 2px 下划线（-mb-px）压住本行底边。
+   *
+   * 为什么单独给一个槽而不是让页面自己塞 headerExtra：插件 / 团队 / 模型三个页面的
+   * 页签此前各自摆放（页头下 / 右栏 main 里 / 统计卡之后），同一层级切换在三页上
+   * 落在三个位置、三种缩进。位置由 PageShell 统一给，页面只提供页签内容。
+   */
+  tabs?: ReactNode;
+  /** 页头与内容之间插入的附加行（筛选条、状态条等），不滚动 */
   headerExtra?: ReactNode;
   /** 内容区顶部是否留内边距（默认 true；自带 padding 的段落可关）。仅 scroll=true 时生效：
    *  scroll=false 的页面自己管内边距（页签栏与内容列共用同一层 px-6），这里再加会双计。 */
@@ -71,6 +80,7 @@ export function PageShell({
   scroll = true,
   className = "",
   bodyClassName = "",
+  tabs,
   headerExtra,
   padded = true,
   children,
@@ -92,6 +102,11 @@ export function PageShell({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{actions}</div>
         ) : null}
       </header>
+      {/* 页签栏：与页头同一左右内边距（24 / 窄窗 16），通栏、不滚动。
+          页签自己的 -mb-px 下划线就压在这条 border-b 上——统一在这里给，页面不再各写一套定位。 */}
+      {tabs ? (
+        <div className="shrink-0 border-b border-line-soft px-6 max-[1199px]:px-4">{tabs}</div>
+      ) : null}
       {headerExtra ? <div className="shrink-0 border-b border-line-soft">{headerExtra}</div> : null}
       {/* 2026-11-14 审计 B2：纵向滚 + 横向滚此前同开（overflow-y-auto overflow-x-auto）。
           后果：任何一页稍微宽一点就出现**两条**滚动条，鼠标滚轮在底部横条上失效、

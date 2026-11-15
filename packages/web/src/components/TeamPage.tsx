@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSessionTab } from "../lib/sessionState.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { AsyncBoundary } from "./ui/AsyncBoundary.js";
 import { SkeletonLine } from "./ui/Skeleton.js";
-import { useRovingTabs } from "../lib/ui/tabs.js";
 import type {
   TeamActivity,
   TeamActivityKind,
@@ -33,7 +32,14 @@ import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
-import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { PageTabs } from "./layout/PageTabs.js";
+import {
+  CalendarIcon,
+  ChartIcon,
+  HomeIcon,
+  SessionsIcon,
+  TaskIcon,
+} from "./icons.js";
 import { fmtTokens } from "../lib/format/tokens.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -113,6 +119,14 @@ const TEAM_TAB_LABELS: Record<TeamTab, string> = {
   agenda: "团队日程",
   usage: "用量",
 };
+/** 页签图标：与模型页、插件页同一套 14px 描边，三页一级页签视觉语言一致。 */
+const TEAM_TAB_ICONS: Record<TeamTab, ReactNode> = {
+  workspace: <HomeIcon width={14} height={14} />,
+  feed: <SessionsIcon width={14} height={14} />,
+  board: <TaskIcon width={14} height={14} />,
+  agenda: <CalendarIcon width={14} height={14} />,
+  usage: <ChartIcon width={14} height={14} />,
+};
 
 export function TeamPage() {
   const me = useAuthStore((s) => s.user);
@@ -157,14 +171,7 @@ export function TeamPage() {
   const [tab, setTab] = useSessionTab<TeamTab>(TEAM_TAB_KEY, "feed", TEAM_TABS);
   // 页签 id 前缀用 useId：团队页若被同屏挂载两份（如嵌入视图），静态 id 会撞车。
   const teamTabPrefix = useId();
-  const teamTabDomId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-tab`;
-  const teamPanelDomId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-panel`;
-  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
-  const teamTabs = useRovingTabs({
-    count: TEAM_TABS.length,
-    activeIndex: TEAM_TABS.indexOf(tab),
-    onChange: (index) => setTab(TEAM_TABS[index]),
-  });
+  const teamTabPanelId = (key: TeamTab) => `${teamTabPrefix}-team-${key}-panel`;
   const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
   const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
   const [usageReady, setUsageReady] = useState(false);
@@ -568,6 +575,21 @@ export function TeamPage() {
           共享 {shareCount}/3
         </span>
       }
+      // 一级页签走 PageShell.tabs + PageTabs：紧贴页头、通栏，与模型页/插件页同一位置。
+      // 此前它挂在右栏 <main> 里，被 300px 名册挤到右边，且「工作台」视图下整条消失（切不出去）。
+      tabs={
+        <PageTabs
+          label="团队视图"
+          idPrefix={`${teamTabPrefix}-team`}
+          items={TEAM_TABS.map((key) => ({
+            key,
+            label: TEAM_TAB_LABELS[key],
+            icon: TEAM_TAB_ICONS[key],
+          }))}
+          active={tab}
+          onChange={(key) => setTab(key as TeamTab)}
+        />
+      }
       headerExtra={
         tab === "workspace" ? null : (
         <div className="bg-subtle px-6 py-2 max-[1199px]:px-4">
@@ -818,37 +840,12 @@ export function TeamPage() {
             </div>
           )}
 
-          {/* 四个视图互斥：动向（默认）/ 看板 / 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
-          <div
-            className={`${PAGE_TABLIST} items-center border-b border-line-soft px-6`}
-            role="tablist"
-            aria-label="团队视图"
-            onKeyDown={teamTabs.onKeyDown}
-          >
-            {TEAM_TABS.map((key, index) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                id={teamTabDomId(key)}
-                ref={teamTabs.getTabRef(index)}
-                tabIndex={teamTabs.tabIndexFor(index)}
-                aria-controls={tab === key ? teamPanelDomId(key) : undefined}
-                aria-selected={tab === key}
-                onClick={() => setTab(key)}
-                className={pageTabClass(tab === key)}
-              >
-                {TEAM_TAB_LABELS[key]}
-              </button>
-            ))}
-          </div>
-
-          {/* 一个 tabpanel 包住四个互斥视图：id/aria-labelledby 随当前 tab 走，
-              既补齐了此前缺失的 tab→panel 关联，也保持 <main> 的 flex 布局不变。 */}
+          {/* 四个视图互斥：动向（默认）/ 看板 / 团队日程（只读）/ 用量（本机 + 开启共享后的排行）。
+              页签本身已上移到页头下方（PageShell.tabs），这里只剩内容区。 */}
           <div
             role="tabpanel"
-            id={teamPanelDomId(tab)}
-            aria-labelledby={teamTabDomId(tab)}
+            id={teamTabPanelId(tab)}
+            aria-labelledby={`${teamTabPrefix}-team-${tab}-tab`}
             className="flex min-h-0 flex-1 flex-col"
           >
           {tab === "workspace" && <TeamWorkspace />}

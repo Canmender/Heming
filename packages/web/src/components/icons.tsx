@@ -285,6 +285,16 @@ export const TaskIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+/** 用量：三根递增的柱子——表达「用了多少 / 在团队里排第几」。 */
+export const ChartIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 20h16" />
+    <path d="M7 20v-6" />
+    <path d="M12 20V8" />
+    <path d="M17 20v-9" />
+  </svg>
+);
+
 /** 视频通话：摄像机轮廓 + 取景框。 */
 export const VideoIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>

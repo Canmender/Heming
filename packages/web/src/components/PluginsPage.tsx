@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { PluginCatalogEntry } from "@heming/shared";
 import { useSessionTab } from "../lib/sessionState.js";
 import {
@@ -29,11 +29,11 @@ import {
   FileIcon,
   PackageIcon,
   PlugIcon,
+  SkillsIcon,
   XIcon,
 } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
-import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
-import { useRovingTabs } from "../lib/ui/tabs.js";
+import { PageTabs } from "./layout/PageTabs.js";
 import { IconButton } from "./ui/IconButton.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
 import { EmptyState } from "./ui/EmptyState.js";
@@ -90,10 +90,14 @@ type TabKey = "plugins" | "skills" | "mcp";
  * - **技能**：和鸣自带 + 社区（论坛）安装，嵌完整的技能视图；
  * - **MCP**：和鸣自带/预置 + 注册表社区安装；工具授权也在这一页（工具只是 MCP 的明细）。
  */
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "plugins", label: "插件" },
-  { key: "skills", label: "技能" },
-  { key: "mcp", label: "MCP" },
+/**
+ * 三个分区：与模型页、团队页一样带 14px 描边图标（icons.tsx 同一套），
+ * 三页的一级页签才像同一个控件——此前只有模型页有图标。
+ */
+const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
+  { key: "plugins", label: "插件", icon: <PackageIcon width={14} height={14} /> },
+  { key: "skills", label: "技能", icon: <SkillsIcon width={14} height={14} /> },
+  { key: "mcp", label: "MCP", icon: <PlugIcon width={14} height={14} /> },
 ];
 
 /**
@@ -152,12 +156,6 @@ export function PluginsPage({
   const [tick, setTick] = useState(0);
   const setPage = useUiStore((s) => s.setPage);
   const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
-  // 页签键盘行为（③-1）：整组一个 Tab 停靠点，←/→/Home/End 切换并移动焦点。
-  const tabs = useRovingTabs({
-    count: TABS.length,
-    activeIndex: TABS.findIndex((item) => item.key === tab),
-    onChange: (index) => setTab(TABS[index].key),
-  });
   const [installOpen, setInstallOpen] = useState(false);
   /** 仓库面板正在下载的包（id@version）：只禁那一张卡的按钮。 */
   const [repoLoadingKey, setRepoLoadingKey] = useState<string | null>(null);
@@ -547,6 +545,17 @@ export function PluginsPage({
       title="插件"
       subtitle="技能、工具、MCP 与命令，全部在本机管理。"
       width="wide"
+      // 一级页签紧贴页头、与页头同左基线（位置由 PageShell 给）；此前它埋在统计卡之后，
+      // 和模型页/团队页的位置都对不上。统计卡改到页签下面，作为「插件」视图的内容。
+      tabs={
+        <PageTabs
+          label="能力分区"
+          idPrefix="plugins"
+          items={TABS}
+          active={tab}
+          onChange={(key) => setTab(key as TabKey)}
+        />
+      }
     >
       <PluginStats stats={stats} />
 
@@ -578,34 +587,6 @@ export function PluginsPage({
           />
         </div>
       )}
-
-      {/* Tab 栏：复用技能区的角色与下划线样式 */}
-      <div
-        className={`${PAGE_TABLIST} border-b border-line-soft`}
-        role="tablist"
-        aria-label="能力分区"
-        onKeyDown={tabs.onKeyDown}
-      >
-        {TABS.map((item, index) => {
-          const active = tab === item.key;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              id={`plugins-${item.key}-tab`}
-              ref={tabs.getTabRef(index)}
-              tabIndex={tabs.tabIndexFor(index)}
-              aria-controls={active ? `plugins-${item.key}-panel` : undefined}
-              aria-selected={active}
-              onClick={() => setTab(item.key)}
-              className={pageTabClass(active)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
 
       <div
         role="tabpanel"
