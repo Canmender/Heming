@@ -41,7 +41,7 @@ for (const f of factories) {
       expect(agents[0]).toMatchObject({
         id: SYSTEM_AGENT_ID,
         owner_id: null,
-        name: "和小鸣",
+        name: "和鸣",
         avatar: null,
         description: "和鸣官方预设智能体",
       });

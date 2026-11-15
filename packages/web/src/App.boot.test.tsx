@@ -19,8 +19,6 @@ vi.mock("./components/TeamBoardPage.js", () => ({ TeamBoardPage: () => <div>Team
 vi.mock("./components/ChatPage.js", () => ({ ChatPage: () => <div>ChatPage</div> }));
 vi.mock("./components/RadarContacts.js", () => ({ RadarContacts: () => <div>RadarContacts</div> }));
 vi.mock("./components/SettingsPage.js", () => ({ SettingsPage: () => <div>SettingsPage</div> }));
-vi.mock("./components/FileTree.js", () => ({ FileTree: () => <div>FileTree</div> }));
-vi.mock("./components/FilePreviewModal.js", () => ({ FilePreviewModal: () => null }));
 
 // 只桩掉网络函数：getToken/setToken/restore 走真实实现（getToken 读模块内 token）。
 vi.mock("./lib/api.js", async (importOriginal) => {
@@ -28,9 +26,6 @@ vi.mock("./lib/api.js", async (importOriginal) => {
   return {
     ...actual,
     fetchMe: vi.fn(),
-    fetchFiles: vi.fn().mockResolvedValue([]),
-    fetchFileUsage: vi.fn().mockResolvedValue({ used: 0, quota: 0 }),
-    uploadFile: vi.fn(),
   };
 });
 
@@ -63,8 +58,7 @@ describe("App 启动动画集成", () => {
       page: "home", activeConversationId: null,
       pendingAttachment: null,
     });
-    // d.67 T4：App 在 <1200 渲染窄窗布局（默认不渲染右侧共享文件栏）。jsdom 默认 1024，
-    // 与本文件既有断言（右侧文件栏存在）不符——统一按宽窗 1280 跑，不改产品口径。
+    // jsdom 的 innerWidth 默认 1024；统一按宽窗 1280 跑，避免启动用例被窄窗布局干扰。
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1280 });
   });
 
@@ -144,7 +138,7 @@ describe("App 启动动画集成", () => {
     expect(screen.queryByText("加载中…")).toBeNull();
   });
 
-  // ── 体验优化轮 C 轨：启动圆环落位 / 右栏标题与悬停说明 ──
+  // ── 体验优化轮 C 轨：启动圆环落位 ──
 
   it("登录页启动动画：圆环只在右半区扩散（不再横穿登录卡）", () => {
     render(<App />);
@@ -160,19 +154,4 @@ describe("App 启动动画集成", () => {
     await waitFor(() => { expect(useAuthStore.getState().status).toBe("authed"); });
   });
 
-  it("右侧文件栏：标题「共享文件」，绑定/上传按钮都有悬停说明", async () => {
-    setToken("t1");
-    useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
-    // d.76：共享文件面板只在智能体页渲染
-    useUiStore.setState({ page: "chat" });
-    render(<App />);
-    await act(async () => { bootDoneFns[0]?.(); });
-    await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });
-
-    expect(screen.getByText("共享文件")).toBeTruthy();
-    const bind = screen.getByRole("button", { name: "绑定本地文件到会话" });
-    expect(bind.getAttribute("title")).toContain("工作区");
-    const upload = screen.getByText("上传").closest("button");
-    expect(upload?.getAttribute("title")).toBe("上传文件到共享文件");
-  });
 });

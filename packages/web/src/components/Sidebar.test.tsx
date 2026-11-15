@@ -14,7 +14,7 @@ import { useUiStore } from "../store/ui.js";
 const systemAgent = {
   id: "system-assistant",
   owner_id: null,
-  name: "和小鸣",
+  name: "和鸣",
   avatar: null,
   description: "和鸣官方预设智能体",
 };

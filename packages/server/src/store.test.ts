@@ -58,7 +58,7 @@ describe("memory store", () => {
   it("名册恒为唯一内置智能体：创建/修改/删除能力已不存在", () => {
     const agents = store.listAgents();
     expect(agents).toHaveLength(1);
-    expect(agents[0]).toMatchObject({ id: SYSTEM_AGENT_ID, name: "和小鸣", owner_id: null, avatar: null });
+    expect(agents[0]).toMatchObject({ id: SYSTEM_AGENT_ID, name: "和鸣", owner_id: null, avatar: null });
     // CRUD 已从 Store 接口移除（编译期保证）；运行期名册不因任何会话操作增长。
     store.createAgentConversation(aliceId, "anything");
     expect(store.listAgents()).toEqual(agents);

@@ -26,7 +26,7 @@ export interface PalettePage {
 export const PALETTE_PAGES: PalettePage[] = [
   { page: "home", label: "主页", description: "统计、最近动向与今日概览", digit: "1" },
   { page: "team", label: "团队", description: "成员名册、动向流与团队看板", digit: "2" },
-  { page: "chat", label: "会话", description: "与小鸣对话：会话列表、历史与新建会话", digit: "8" },
+  { page: "chat", label: "会话", description: "与和鸣对话：会话列表、历史与新建会话", digit: "8" },
   {
     page: "plugins",
     label: "插件",

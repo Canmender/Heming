@@ -41,7 +41,7 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
   {
     id: "new-chat",
     label: "新建会话",
-    description: "和小鸣开始一段新的对话",
+    description: "和鸣开始一段新的对话",
     keywords: ["会话", "对话", "新建", "chat", "conversation"],
   },
   {

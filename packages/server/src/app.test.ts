@@ -128,7 +128,7 @@ describe("auth + team API", () => {
       .get("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`);
     expect(mine.body).toHaveLength(1);
-    expect(mine.body[0].agent.name).toBe("和小鸣");
+    expect(mine.body[0].agent.name).toBe("和鸣");
 
     const msgs = await request(app)
       .get(`/api/conversations/${conv.body.id}/messages`)
@@ -557,7 +557,7 @@ describe("agents api", () => {
     const list = await request(app).get("/api/agents").set("Authorization", `Bearer ${a.token}`);
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(1);
-    expect(list.body[0]).toMatchObject({ id: SYSTEM_AGENT_ID, name: "和小鸣", owner_id: null });
+    expect(list.body[0]).toMatchObject({ id: SYSTEM_AGENT_ID, name: "和鸣", owner_id: null });
     // I6 红线：名册 API 永不暴露 system_prompt（GET 列表每一条都不得带该键）
     expect(list.body.some((x: Record<string, unknown>) => "system_prompt" in x)).toBe(false);
     expect(store.listAgents()).toHaveLength(1);

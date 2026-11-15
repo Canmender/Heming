@@ -2,6 +2,38 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.147.4.87.11（2026-11-15）— 全产品只叫「和鸣」：手写标志进顶栏，共享文件面板退场，会话进度留空壳
+
+品牌口径收口：产品名与内置智能体名统一叫「和鸣」，「和小鸣」从界面文案里退场；顶栏左上换成登录页同款手写标志；会话页右侧的「共享文件」面板连同窄窗抽屉整体删掉（文件库 API 与云端存储保留，团队交付物照旧走共享库）；右侧新增默认隐藏的「会话进度」空壳栏，由顶栏按钮开合，内容后续再填。
+
+**品牌统一（shared / web）**
+- `packages/shared/src/schemas.ts`：`SYSTEM_AGENT.name` 由「和小鸣」改为「和鸣」；`SYSTEM_AGENT_ID` 仍是 `system-assistant`，接口与落库契约不变。
+- 界面里硬编码的「和小鸣」文案同步改「和鸣」：`lib/palette/pages.ts` 的会话页描述、`lib/palette/actions.ts` 的「新建对话」动作描述；侧栏头部、会话页标题、协作页参与者等展示位读的都是 `SYSTEM_AGENT.name`，随 shared 这一处改动同步。
+- 系统提示词本轮没有改：服务端 `store.ts` 的 `systemPrompt` 恒为空串，不存在「自称」文案，不需要迁移。
+- 不做历史数据迁移：已存在的消息、任务记录里旧名字原样保留，只有新渲染的界面文案统一。
+
+**顶栏手写标志（packages/web）**
+- `components/TopBar.tsx`：左上品牌位由文字 `<span>和鸣</span>` 改为复用 `components/Wordmark.tsx`（登录页同款手写标志，`width={78}`、`currentColor` 跟随文字色）；顶栏高度、桌面拖拽区与右侧动作区不变。会话页再多一颗「会话进度」按钮（按钮条位置见下）。
+
+**会话页「共享文件」面板退场（packages/web）**
+- `App.tsx`：删除右侧「共享文件」aside（上传/预览/配额/面板内 `role="alert"` 提示）与窄窗顶部的「共享文件」按钮 + 覆盖层抽屉；会话页回到「会话侧栏 + 聊天」两栏。
+- 文件库 API、云端存储与每用户配额（`HEMING_FILE_QUOTA_MB`）保留：团队交付物等仍走共享库，只是不再有常驻面板入口。
+- 只服务该面板的 `components/FilePreviewModal.tsx`、`components/FileTree.tsx` 及两者用例随之删除（团队交付物上传/预览改走既有任务与文件库路径）。
+
+**「会话进度」栏（空壳，packages/web）**
+- 新增 `components/ProgressPanel.tsx`：右侧「会话进度」栏（`aria-label="会话进度"`、标题 + 关闭按钮「关闭会话进度」），空态只放说明占位，具体进度内容后续接入。
+- 默认隐藏，由顶栏「会话进度」按钮开合；仅会话页展示（其它页面不渲染按钮），离开会话页自动收起，开合状态只活在壳里、不进 store。
+
+**验证**（2026-11-15 实跑，全部 exit 0）
+- `pnpm typecheck`：6 个项目全 Done，无 TS error。
+- web `vitest run` 299 files / 4315 tests passed；server 15 files / 271；shared 8 files / 119；desktop 853 pass。
+- `pnpm build` 通过（仅 chunk 体积警告）；`pnpm plugin:check` 6/6 + pet-widget 1/1 + examples 5/5。
+- `pnpm design:audit` 浅色与 `--theme dark` 深色：各 8 页 + 11 个子页签 × 3 断点 = 57 条，`failures: []`
+  （横向溢出 / 对比度不合格 / 11px 正文 / 命中区 <32 / 无名可点全 0，字号档 3–7）；截图 48 张在 `.tmp/shots`。
+- 产品侧 `SYSTEM_AGENT.name` 改「和鸣」后，`PluginsPage.test.tsx` / `SkillsPage.test.tsx` /
+  `CollaborationPage.test.tsx` 里仍写旧名的断言与 fixture 同步更新（8 例）。
+- 未真机复验：窄窗布局与桌面标题栏拖拽（design:audit 只跑浏览器三断点）。
+
 ## d.147.4.86.11（2026-11-15）— 极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航
 
 外壳收成「顶栏 + 常驻会话侧栏 + 内容区」，对齐截图里那类智能体应用：左侧图标导航轨整体移除，

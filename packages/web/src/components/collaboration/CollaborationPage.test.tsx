@@ -29,7 +29,7 @@ vi.mock("../../lib/magpieCli.js", () => ({
 
 const HEMING_PROFILE: LlmProfile = {
   id: "mp:heming",
-  label: "和小鸣的档案",
+  label: "和鸣的档案",
   provider: "openai",
   apiKey: "sk-heming",
   model: "deepseek/deepseek-chat",
@@ -106,10 +106,10 @@ describe("协作页 · 页面骨架与默认参与者", () => {
     expect(screen.getByRole("heading", { level: 2, name: "协作过程" })).toBeInTheDocument();
   });
 
-  it("默认固定包含且只包含「和小鸣」：勾选、禁用、显示绑定模型", async () => {
+  it("默认固定包含且只包含「和鸣」：勾选、禁用、显示绑定模型", async () => {
     await renderReady();
     const heming = screen.getByRole("checkbox", {
-      name: "「和小鸣」（内置，固定参与）",
+      name: "「和鸣」（内置，固定参与）",
     });
     expect(heming).toBeChecked();
     expect(heming).toBeDisabled();
@@ -182,14 +182,14 @@ describe("协作页 · 配置", () => {
     expect(select.value).toBe("3");
   });
 
-  it("「和小鸣」未绑定模型时给出可读错误，不能开始", async () => {
+  it("「和鸣」未绑定模型时给出可读错误，不能开始", async () => {
     vi.mocked(resolveBoundProfile).mockReturnValue(undefined);
     await renderReady();
     fillTask();
     addClaude();
     expect(screen.getByRole("button", { name: "开始协作" })).toBeDisabled();
     expect(
-      screen.getAllByText("「和小鸣」还没有绑定模型，请先在模型页为它绑定连接。").length,
+      screen.getAllByText("「和鸣」还没有绑定模型，请先在模型页为它绑定连接。").length,
     ).toBeGreaterThan(0);
   });
 });
@@ -211,7 +211,7 @@ describe("协作页 · 运行与历史", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始协作" }));
 
     await screen.findByText(/已完成 · 流水线 · 共 2 个回合/);
-    expect(await screen.findByLabelText("第 1 个回合：和小鸣，方案")).toBeInTheDocument();
+    expect(await screen.findByLabelText("第 1 个回合：和鸣，方案")).toBeInTheDocument();
     expect(await screen.findByLabelText("第 2 个回合：Claude Code，评审与定稿")).toBeInTheDocument();
 
     expect(seenModels).toEqual(["deepseek/deepseek-chat", "claude-sonnet-4-5"]);
@@ -219,7 +219,7 @@ describe("协作页 · 运行与历史", () => {
       .mocked(streamChatRouted)
       .mock.calls.find(([profile]) => profile.model === "deepseek/deepseek-chat");
     expect(hemingCall?.[1][0].content).toContain("多人协作");
-    expect(hemingCall?.[1][0].content).toContain("你以「和小鸣」的身份参与");
+    expect(hemingCall?.[1][0].content).toContain("你以「和鸣」的身份参与");
     const localCall = vi
       .mocked(streamChatRouted)
       .mock.calls.find(([profile]) => profile.model === "claude-sonnet-4-5");
@@ -231,7 +231,7 @@ describe("协作页 · 运行与历史", () => {
       | null;
     expect(saved?.task).toBe("写一份本地笔记应用的 PRD");
     expect(saved?.turns).toHaveLength(2);
-    expect(saved?.turns.map((turn) => turn.agentName)).toEqual(["和小鸣", "Claude Code"]);
+    expect(saved?.turns.map((turn) => turn.agentName)).toEqual(["和鸣", "Claude Code"]);
   });
 
   it("刷新后恢复最近一次协作（标记「上次协作」，回填任务与回合）", async () => {
@@ -239,13 +239,13 @@ describe("协作页 · 运行与历史", () => {
       id: "run-old",
       mode: "debate",
       task: "上一次的任务",
-      participants: [{ agentId: SYSTEM_AGENT_ID, name: "和小鸣" }],
+      participants: [{ agentId: SYSTEM_AGENT_ID, name: "和鸣" }],
       rounds: 1,
       turns: [
         {
           id: "t1",
           agentId: SYSTEM_AGENT_ID,
-          agentName: "和小鸣",
+          agentName: "和鸣",
           role: "方案",
           round: 1,
           text: "上一次的产出内容",
@@ -276,7 +276,7 @@ describe("协作页 · 运行与历史", () => {
       id: "run-old",
       mode: "sequential",
       task: "旧任务",
-      participants: [{ agentId: SYSTEM_AGENT_ID, name: "和小鸣" }],
+      participants: [{ agentId: SYSTEM_AGENT_ID, name: "和鸣" }],
       rounds: 1,
       turns: [],
       status: "done",
@@ -309,7 +309,7 @@ describe("协作页 · 运行与历史", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止协作" }));
 
     await screen.findByText(/已中止 · 保留 1 个已产生回合/);
-    expect(screen.getByLabelText("第 1 个回合：和小鸣，方案")).toBeInTheDocument();
+    expect(screen.getByLabelText("第 1 个回合：和鸣，方案")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "停止协作" })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "开始协作" })).toBeInTheDocument(),

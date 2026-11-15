@@ -102,7 +102,7 @@ describe("SkillsPage 技能区", () => {
     }
     // 已选智能体：沉淀组空态是「该智能体还没有这类技能」
     expect(
-      within(group("沉淀技能")).getByText(/「和小鸣」还没有这类技能/),
+      within(group("沉淀技能")).getByText(/「和鸣」还没有这类技能/),
     ).toBeInTheDocument();
   });
 
@@ -439,7 +439,7 @@ describe("SkillsPage 新建技能（简化）", () => {
 
     expect(screen.queryByRole("dialog", { name: "新建技能" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已新建技能「周报润色」");
-    expect(screen.getByRole("status")).toHaveTextContent("和小鸣");
+    expect(screen.getByRole("status")).toHaveTextContent("和鸣");
 
     const created = pool.list().find((skill) => skill.name === "周报润色");
     expect(created).toBeDefined();
@@ -495,12 +495,12 @@ describe("SkillsPage 新建技能（简化）", () => {
   it("把「未分配的技能不会用于对话」写清楚（技能视图与技能池各一处）", async () => {
     await renderReady();
     expect(
-      screen.getByText(/技能启用并分配给「和小鸣」后即在对话里生效/),
+      screen.getByText(/技能启用并分配给「和鸣」后即在对话里生效/),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
     expect(
-      screen.getByText(/启用并分配给「和小鸣」后，技能才会在对话里生效/),
+      screen.getByText(/启用并分配给「和鸣」后，技能才会在对话里生效/),
     ).toBeInTheDocument();
   });
 });

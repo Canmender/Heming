@@ -4,21 +4,28 @@ import { useUiStore } from "../store/ui.js";
 import { IconButton } from "./ui/IconButton.js";
 import { Button } from "./ui/Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
-import { KeyboardIcon, SearchIcon } from "./icons.js";
+import { KeyboardIcon, SearchIcon, TaskIcon } from "./icons.js";
 import { PageMenu } from "./PageMenu.js";
 import { NotificationCenter } from "./NotificationCenter.js";
+import { Wordmark } from "./Wordmark.js";
 
 /** 顶栏高度档位：浏览器与桌面共用 40px（8pt 网格），只是桌面端还要兼做窗口拖拽带。 */
 export function TopBar({
   onOpenSearch,
   onOpenShortcuts,
+  progressOpen,
+  onToggleProgress,
 }: {
   onOpenSearch: () => void;
   onOpenShortcuts: () => void;
+  /** 「会话进度」是否正开着：只用来点亮按钮（开着时 text-ink），不输出 aria-pressed/expanded 状态属性。 */
+  progressOpen: boolean;
+  onToggleProgress: () => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const setPage = useUiStore((s) => s.setPage);
+  const page = useUiStore((s) => s.page);
   const displayName = user?.displayName?.trim() || "我";
 
   /**
@@ -65,10 +72,20 @@ export function TopBar({
             : "flex w-full min-w-0 items-center gap-2"
         }
       >
-        {/* 品牌位兼作桌面拖拽区（只有右侧动作区是 no-drag）。 */}
-        <span className="shrink-0 text-ui-sm font-semibold tracking-wide text-ink">和鸣</span>
+        {/* 品牌位兼作桌面拖拽区（只有右侧动作区是 no-drag）。
+            用产品的手写字样（与登录页/启动动画同源），不再排一行「和鸣」正文。 */}
+        <Wordmark width={78} className="shrink-0 text-ink" />
 
         <div data-testid="topbar-actions" className="app-no-drag ml-auto flex items-center gap-1">
+          {/* 会话进度只属于会话页：其它页面没有「这一轮」可看，按钮出现只添噪音。 */}
+          {page === "chat" ? (
+            <IconButton
+              label="会话进度"
+              icon={<TaskIcon width={16} height={16} />}
+              onClick={onToggleProgress}
+              className={progressOpen ? "text-ink" : undefined}
+            />
+          ) : null}
           <PageMenu />
           <IconButton
             label="打开命令面板"

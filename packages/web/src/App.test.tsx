@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
-import { App, clampAsideWidth, ASIDE_MIN, ASIDE_MAX } from "./App.js";
+import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
-import { setToken, fetchFileBlobText } from "./lib/api.js";
+import { setToken } from "./lib/api.js";
 
 // 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
 // 自动完成的 BootWave 桩让既有用例聚焦认证/右栏/导航行为；完整的门禁路由用例见 App.boot.test.tsx。
@@ -15,12 +15,6 @@ vi.mock("./components/BootWave.js", () => ({
     return null;
   },
 }));
-
-// 预览接线用：文件内容取纯文本走独立函数（其余 api 保持真实实现）
-vi.mock("./lib/api.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./lib/api.js")>();
-  return { ...actual, fetchFileBlobText: vi.fn() };
-});
 
 // 命令面板打开时预取名册、首页拉取团队数据都走 fetchTeam（真实 api → mock fetch）。
 // 桩掉 connectWs，避免 ChatPage 挂载时 jsdom 真去建 WebSocket。
@@ -57,7 +51,7 @@ afterEach(() => {
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
-/** 按 URL 分发：/api/me 返回用户，/api/files 返回共享文件列表，工作区/健康等返回空集合，其余 404。 */
+/** 按 URL 分发：/api/me 返回用户，团队/朋友/会话等返回空集合，其余 404。 */
 function mockFetch(
   routes: {
     me?: unknown;
@@ -112,27 +106,20 @@ describe("App 认证门禁", () => {
     render(<App />);
 
     // 新外壳：顶栏常驻 + 常驻会话侧栏，原左侧图标导航轨已删除
-    expect(await screen.findByTestId("topbar")).toBeInTheDocument();
+    const topbar = await screen.findByTestId("topbar");
+    expect(topbar).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("topbar").textContent).toContain("和鸣"); // 顶栏左侧品牌
+    // 顶栏左侧换成手写「Heming」标志，不再有文字品牌 span
+    expect(within(topbar).getByRole("img", { name: "Heming" })).toBeInTheDocument();
+    expect(topbar.textContent).not.toContain("和鸣");
     expect(screen.queryByText("登录你的账号")).not.toBeInTheDocument();
 
-    // v7 主页挂载后还会发起 /api/health 探测与工作区数据加载，硬计数改为按 URL 断言
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(true),
-    );
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/me");
     const headers = init.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer t1");
     expect(useAuthStore.getState().status).toBe("authed");
     expect(useAuthStore.getState().user?.username).toBe("alice");
-
-    const filesCall = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/files");
-    expect(filesCall).toBeTruthy();
-    expect(((filesCall![1] as RequestInit).headers as Headers).get("Authorization")).toBe(
-      "Bearer t1",
-    );
   });
 
   it("有 token 但服务端返回 401：清 token 回到登录页", async () => {
@@ -165,166 +152,6 @@ describe("App 认证门禁", () => {
     expect(screen.queryByText(/网络恢复后会自动重试/)).toBeNull();
     expect(screen.getByRole("button", { name: "立即重试" })).toBeInTheDocument();
     expect(localStorage.getItem("heming.token")).toBe("keep-me");
-  });
-});
-
-describe("App 右栏云端共享（仅智能体页显示）", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    vi.restoreAllMocks();
-    setToken(null);
-    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    // d.76：共享文件面板从全局右栏移到智能体页；本组用例统一落在 chat 页验证。
-    useUiStore.setState({ page: "chat", activeConversationId: null });
-  });
-
-  it("登录后拉取共享文件并渲染上传按钮与根级行", async () => {
-    setToken("t1");
-    mockFetch({
-      files: [
-        {
-          id: "f1",
-          owner: "alice",
-          name: "需求草案.md",
-          mime: "text/markdown",
-          size: 18,
-          updatedAt: "2026-10-13T00:00:00.000Z",
-        },
-      ],
-    });
-
-    render(<App />);
-
-    const uploadBtn = await screen.findByRole("button", { name: "上传" });
-    expect(uploadBtn).toBeInTheDocument();
-    expect(await screen.findByText("需求草案.md")).toBeInTheDocument();
-    expect(screen.getByText("云端共享")).toBeInTheDocument();
-    // 根级行（无 parentId）直接显示，非文件夹行不带展开箭头
-    expect(screen.queryByRole("button", { name: "切换文件夹 需求草案.md" })).not.toBeInTheDocument();
-  });
-
-  it("文件行点预览打开预览模态，点关闭消失（onPreview 接线）", async () => {
-    setToken("t1");
-    mockFetch({
-      files: [
-        {
-          id: "f1",
-          owner: "alice",
-          name: "需求草案.md",
-          mime: "text/markdown",
-          size: 18,
-          updatedAt: "2026-10-13T00:00:00.000Z",
-        },
-      ],
-    });
-    vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
-
-    render(<App />);
-
-    fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
-    expect(await screen.findByRole("heading", { name: "内容" })).toBeInTheDocument();
-    expect(fetchFileBlobText).toHaveBeenCalledWith("f1");
-
-    fireEvent.click(screen.getByLabelText("关闭预览"));
-    expect(screen.queryByLabelText("关闭预览")).not.toBeInTheDocument();
-  });
-
-  it("右栏头部显示存储用量（fmtBytes：5.0MB / 200.0MB）", async () => {
-    setToken("t1");
-    mockFetch({
-      usage: { used: 5 * 1024 * 1024, quota: 200 * 1024 * 1024 },
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("5.0MB / 200.0MB")).toBeInTheDocument();
-  });
-
-  it("用量接口失败时静默不显示用量（不打断文件列表渲染）", async () => {
-    setToken("t1");
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url === "/api/me") return Promise.resolve(jsonRes(alice));
-      if (url === "/api/files/usage")
-        return Promise.resolve(jsonRes({ error: "boom" }, 500));
-      if (url === "/api/files") return Promise.resolve(jsonRes([]));
-      if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
-      if (
-        (url === "/api/conversations" || url.startsWith("/api/conversations?")) ||
-        url === "/api/friends" ||
-        url === "/api/friends/requests"
-      )
-        return Promise.resolve(jsonRes([]));
-      return Promise.resolve(jsonRes({ error: "not found" }, 404));
-    });
-
-    render(<App />);
-
-    expect(await screen.findByRole("button", { name: "上传" })).toBeInTheDocument();
-    expect(screen.queryByText(/\/ 200MB$/)).not.toBeInTheDocument();
-  });
-
-  it("未登录时不拉取文件列表", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    render(<App />);
-    expect(screen.queryByRole("button", { name: "上传" })).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("上传失败（413 非 JSON 体）时面板内联提示走 http 413 兜底且不刷新列表", async () => {
-    setToken("t1");
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url === "/api/me") return Promise.resolve(jsonRes(alice));
-      // 真实网关超限时多为纯文本体，res.json() 解析失败 → api.ts 兜底 `http ${status}`
-      if (url === "/api/files" && init?.method === "POST")
-        return Promise.resolve(new Response("Payload too large", { status: 413 }));
-      if (url === "/api/files") return Promise.resolve(jsonRes([]));
-      // HomePage 挂载时的 health/工作区探测，正常应答避免噪声告警
-      if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
-      if (
-        (url === "/api/conversations" || url.startsWith("/api/conversations?")) ||
-        url === "/api/friends" ||
-        url === "/api/friends/requests"
-      )
-        return Promise.resolve(jsonRes([]));
-      return Promise.resolve(jsonRes({ error: "not found" }, 404));
-    });
-    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const origClick = HTMLInputElement.prototype.click;
-    HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
-      if (this.type !== "file") {
-        origClick.call(this);
-        return;
-      }
-      const file = new File(["hi"], "a.txt", { type: "text/plain" });
-      // jsdom 的 Blob 未实现 arrayBuffer，补上以走真实上传路径（否则在读文件处就进 catch）
-      Object.defineProperty(file, "arrayBuffer", {
-        value: async () => new TextEncoder().encode("hi").buffer,
-      });
-      Object.defineProperty(this, "files", { value: [file], configurable: true });
-      queueMicrotask(() => {
-        void this.onchange?.(new Event("change"));
-      });
-    };
-    try {
-      render(<App />);
-      const btn = await screen.findByRole("button", { name: "上传" });
-      btn.click();
-      // d.140 R4：失败提示从阻塞式 window.alert 改成面板内联 role="alert"。
-      const inlineAlert = await screen.findByRole("alert");
-      expect(inlineAlert).toHaveTextContent(/http 413/);
-      expect(alertSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith("上传失败", expect.any(Error));
-      // 失败后不触发 refreshFiles 的 GET（仅 restore 的 /api/me 与初始 GET /api/files）
-      const getCalls = fetchMock.mock.calls.filter(
-        (c) => String(c[0]) === "/api/files" && !(c[1] as RequestInit | undefined)?.method,
-      );
-      expect(getCalls).toHaveLength(1);
-    } finally {
-      HTMLInputElement.prototype.click = origClick;
-    }
   });
 });
 
@@ -433,36 +260,28 @@ describe("App 导航快捷键与隐藏态", () => {
   });
 
   it("模态弹窗开着时 Alt+N 不切页、Ctrl+K 不开面板，关掉后两者恢复", async () => {
-    // d.76：共享文件面板只在智能体页，本用例需要文件行来打开预览
-    useUiStore.setState({ page: "chat" });
     setToken("t1");
-    mockFetch({
-      files: [
-        {
-          id: "f1",
-          owner: "alice",
-          name: "需求草案.md",
-          mime: "text/markdown",
-          size: 18,
-          updatedAt: "2026-10-13T00:00:00.000Z",
-        },
-      ],
-    });
-    vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
+    mockFetch();
     render(<App />);
     await screen.findByTestId("topbar");
 
-    fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
-    await screen.findByLabelText("关闭预览");
+    // 账户菜单 → 退出登录，开一个真实模态（共享文件预览已随面板一起删除）
+    fireEvent.click(screen.getByRole("button", { name: "账户：爱丽丝" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
+    const dialog = await screen.findByRole("dialog", { name: "退出登录" });
+    expect(dialog).toBeInTheDocument();
 
     // inert 挡得住点击，挡不住挂在 window 上的 keydown：这里必须显式拦
     fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().page).toBe("home");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("关闭预览")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "退出登录" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("关闭预览"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "退出登录" })).not.toBeInTheDocument(),
+    );
     fireEvent.keyDown(window, { key: "5", altKey: true });
     expect(useUiStore.getState().page).toBe("collab");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
@@ -606,174 +425,74 @@ describe("App 桌面窗口标题栏", () => {
   });
 });
 
-describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页）", () => {
+describe("App 会话进度栏（默认隐藏，顶栏按钮开合）", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
     delete (window as unknown as { heming?: unknown }).heming;
     setToken("t1");
     mockFetch();
+    useAuthStore.setState({ token: "t1", user: null, status: "pending", error: null });
     useUiStore.setState({ page: "chat", activeConversationId: null });
   });
 
-  it("目录栏头部有「绑定」与「上传」两个入口", async () => {
+  it("默认 chat 页：顶栏有「会话进度」按钮，但面板不渲染", async () => {
     render(<App />);
     await screen.findByTestId("topbar");
-    expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "上传" })).toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: "会话进度" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "会话进度" })).not.toBeInTheDocument();
   });
 
-  it("没有打开会话时点绑定给出内联提示（不静默失败）", async () => {
-    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
-    // 这块目录栏只在智能体页可见，且前一个用例可能留下 activeConversationId
-    // （有会话时点「绑定」走上传分支、不出内联提示）。显式置为「智能体页 + 无会话」，
-    // 用例才只验它自己声明的那条路径——先前靠上一个用例的残留状态，才会偶发红。
-    useUiStore.setState({ page: "chat", activeConversationId: null });
+  it("点顶栏按钮出现面板，再点收起", async () => {
     render(<App />);
     await screen.findByTestId("topbar");
-    fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
-    // 智能体页上可能已有别的失败提示（role=alert），所以按文案定位这条通知，
-    // 再确认它落在了一个 alert 里——等的是同一个状态，不是改断言。
-    const notice = await screen.findByText("先打开一个会话，再绑定文件", {}, { timeout: 4000 });
-    expect(notice.closest('[role="alert"]')).not.toBeNull();
-    expect(alertSpy).not.toHaveBeenCalled();
-  });
 
-  it("拖动手柄可改变目录栏宽度并落盘", async () => {
-    const { container } = render(<App />);
-    await screen.findByTestId("topbar");
-    const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
-    const aside = container.querySelector('aside[aria-label="共享文件"]') as HTMLElement;
+    fireEvent.click(screen.getByRole("button", { name: "会话进度" }));
+    const panel = await screen.findByRole("complementary", { name: "会话进度" });
+    expect(
+      within(panel).getByRole("heading", { level: 2, name: "这一轮还没有进度" }),
+    ).toBeInTheDocument();
 
-    // jsdom 不实现 PointerEvent（typeof undefined），fireEvent.pointerDown 造出的事件
-    // React 认不出来、onPointerDown 不触发。这里用 MouseEvent 顶替——它同样带
-    // clientX 且冒泡，足够驱动本组件的指针拖动逻辑（同 RadarContacts 测试的做法）。
-    fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 0, button: 0 }));
-    fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 80 }));
-    expect(aside.style.width).toBe("320px"); // 默认 240 + 拖动 80
-    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }));
-
-    // 松手后宽度落盘，下次启动沿用
-    expect(localStorage.getItem("heming.asideWidth.v1")).toBe("320");
-  });
-
-  it("clampAsideWidth：夹在上下限之间，非法值回落默认", () => {
-    expect(clampAsideWidth(100)).toBe(ASIDE_MIN);
-    expect(clampAsideWidth(9999)).toBe(ASIDE_MAX);
-    expect(clampAsideWidth(Number.NaN)).toBe(240);
-    expect(clampAsideWidth(300)).toBe(300);
-  });
-});
-
-/**
- * d.67 T4 · 窄窗（<1200）响应式：右侧共享文件栏默认不渲染，改由顶部按钮打开覆盖层抽屉。
- *
- * 只验证交互契约（不验证像素）：无 aside 列 / 有入口 / 抽屉 aria-modal + 遮罩 / Esc 与焦点归还 /
- * 拖宽后恢复宽窗 aside。宽窗既有可拖拽 aside 的用例在上一组，保持原断言不变。
- */
-describe("App 窄窗响应式：共享文件改抽屉", () => {
-  const draftFile = {
-    id: "f1",
-    owner: "alice",
-    name: "需求草案.md",
-    mime: "text/markdown",
-    size: 18,
-    updatedAt: "2026-10-13T00:00:00.000Z",
-  };
-
-  beforeEach(() => {
-    localStorage.clear();
-    vi.restoreAllMocks();
-    delete (window as unknown as { heming?: unknown }).heming;
-    setToken("t1");
-    useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
-    useUiStore.setState({ page: "chat", activeConversationId: null });
-    mockFetch({ files: [draftFile] });
-    setViewportWidth(1024); // 窄窗：<1200
-  });
-
-  afterEach(() => {
-    setViewportWidth(1280);
-  });
-
-  it("窄窗默认不渲染 aside 列，但顶部有「共享文件」入口（aria-expanded=false）", async () => {
-    render(<App />);
-    const trigger = await screen.findByRole("button", { name: "打开共享文件" });
-
-    expect(screen.queryByRole("complementary", { name: "共享文件" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("separator", { name: "调整目录栏宽度" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
-  });
-
-  it("点入口打开覆盖层抽屉：role=dialog + aria-modal + 遮罩，内容与宽窗同一份", async () => {
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "共享文件" });
-    expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(screen.getByTestId("shared-files-backdrop")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "打开共享文件" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
+    fireEvent.click(screen.getByRole("button", { name: "会话进度" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).not.toBeInTheDocument(),
     );
-
-    // 抽屉里是真实的 aside 内容组件（表头入口 + FileTree 行），不是另复制一份
-    expect(within(dialog).getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "上传" })).toBeInTheDocument();
-    expect(within(dialog).getByText("需求草案.md")).toBeInTheDocument();
   });
 
-  it("Esc 关闭抽屉，关闭后焦点回到触发按钮", async () => {
+  it("面板内「关闭会话进度」也能收起", async () => {
     render(<App />);
-    const trigger = await screen.findByRole("button", { name: "打开共享文件" });
-    trigger.focus();
-    fireEvent.click(trigger);
-
-    const dialog = await screen.findByRole("dialog", { name: "共享文件" });
-    // 打开即把焦点移进面板（模态契约）
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    await waitFor(() => expect(trigger).toHaveFocus());
-  });
-
-  it("点遮罩也能关闭抽屉", async () => {
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
-    await screen.findByRole("dialog", { name: "共享文件" });
-
-    fireEvent.click(screen.getByTestId("shared-files-backdrop"));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  });
-
-  it("从窄窗拖宽到 ≥1200：抽屉自动收起，恢复可拖拽 aside 与宽度记忆", async () => {
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
-    await screen.findByRole("dialog", { name: "共享文件" });
-
-    act(() => setViewportWidth(1280));
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
-    const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
-    expect(handle).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
-  });
-
-  it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，且不再有共享文件入口", async () => {
-    useUiStore.setState({ page: "settings" });
-    const { container } = render(<App />);
     await screen.findByTestId("topbar");
-    // d.76：文件管理只在智能体页，其它页连入口都不出现
-    expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
 
-    const main = container.querySelector("main");
-    expect(main?.className).toContain("min-w-0");
-    expect(main?.className).toContain("overflow-hidden");
-    // 共享文件 aside 不存在（常驻会话侧栏是另一条 aside，不算在文件栏里）
-    expect(container.querySelectorAll('aside[aria-label="共享文件"]').length).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "会话进度" }));
+    await screen.findByRole("complementary", { name: "会话进度" });
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭会话进度" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("离开 chat 自动关闭；其它页顶栏不再有「会话进度」按钮", async () => {
+    render(<App />);
+    await screen.findByTestId("topbar");
+
+    fireEvent.click(screen.getByRole("button", { name: "会话进度" }));
+    await screen.findByRole("complementary", { name: "会话进度" });
+
+    act(() => {
+      useUiStore.setState({ page: "home" });
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "会话进度" })).not.toBeInTheDocument();
+
+    // 回到会话页：按钮恢复，面板仍是关着的
+    act(() => {
+      useUiStore.setState({ page: "chat" });
+    });
+    expect(await screen.findByRole("button", { name: "会话进度" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "会话进度" })).not.toBeInTheDocument();
   });
 });

@@ -2,14 +2,14 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNod
 import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
-import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
-import { SYSTEM_AGENT, SYSTEM_AGENT_ID, type SharedFileMeta } from "@heming/shared";
+import { getToken } from "./lib/api.js";
+import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 // 常驻壳与登录页保持同步导入：它们是首帧就要画出来的东西（顶栏/登录表单），
 // 拆成异步反而会让首屏先闪一块占位。下面所有**页面**都改成路由级懒加载。
 import { LoginPage } from "./components/LoginPage.js";
 import { TopBar } from "./components/TopBar.js";
 import { Sidebar } from "./components/Sidebar.js";
-import { FileTree } from "./components/FileTree.js";
+import { ProgressPanel } from "./components/ProgressPanel.js";
 import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
@@ -24,9 +24,8 @@ import { useLlmStore } from "./store/llm.js";
 import { usePluginPageEntries } from "./lib/pages/usePluginPages.js";
 import { isPluginPagePage, pluginPageEntry } from "./lib/pages/registry.js";
 import { PluginPageHost } from "./components/plugins/PluginPageHost.js";
-import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
+import { hasOpenModal } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
-import { useViewport } from "./lib/viewport.js";
 import { Button } from "./components/ui/Button.js";
 import { PAGE_WIDTH_CLASS } from "./components/layout/PageShell.js";
 
@@ -63,13 +62,10 @@ const KnowledgePage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })),
 );
-// 下面三个是「按需出现」的全局浮层/卡片，同样不该进首屏：
-// 命令面板（Ctrl+K 才挂载）、文件预览模态（点预览才挂载）、安装确认卡（有 pending 才有内容）。
+// 下面是「按需出现」的全局浮层/卡片，同样不该进首屏：
+// 命令面板（Ctrl+K 才挂载）、安装确认卡（有 pending 才有内容）。
 const CommandPalette = lazy(() =>
   import("./components/CommandPalette.js").then((m) => ({ default: m.CommandPalette })),
-);
-const FilePreviewModal = lazy(() =>
-  import("./components/FilePreviewModal.js").then((m) => ({ default: m.FilePreviewModal })),
 );
 const RegistryInstallCard = lazy(() =>
   import("./components/RegistryInstallCard.js").then((m) => ({ default: m.RegistryInstallCard })),
@@ -140,158 +136,6 @@ export const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
   "8": "chat",
   "0": "plugins",
 };
-
-/** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
-export const ASIDE_MIN = 180;
-export const ASIDE_MAX = 560;
-const ASIDE_DEFAULT = 240;
-
-/** 夹住目录栏宽度；非法值回落到默认宽。 */
-export function clampAsideWidth(n: number): number {
-  if (!Number.isFinite(n)) return ASIDE_DEFAULT;
-  return Math.min(ASIDE_MAX, Math.max(ASIDE_MIN, Math.round(n)));
-}
-
-const ASIDE_WIDTH_KEY = "heming.asideWidth.v1";
-
-/** 读上次调好的目录栏宽度；缺失/损坏 → 默认 240。 */
-function readAsideWidth(): number {
-  try {
-    const raw = window.localStorage.getItem(ASIDE_WIDTH_KEY);
-    return raw ? clampAsideWidth(Number(raw)) : ASIDE_DEFAULT;
-  } catch {
-    return ASIDE_DEFAULT;
-  }
-}
-
-/** 宽度落盘；存不下（隐私模式）时只在本次会话生效。 */
-function persistAsideWidth(n: number): void {
-  try {
-    window.localStorage.setItem(ASIDE_WIDTH_KEY, String(n));
-  } catch {
-    /* 忽略 */
-  }
-}
-
-function fmtBytes(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`;
-  return `${n}B`;
-}
-
-/**
- * 右侧「共享文件」面板内容（d.67 T4 从 AppShell 内联 jsx 提取）。
- *
- * 为什么提取：宽窗的可拖拽 aside 与窄窗的覆盖层抽屉**必须是同一份内容**
- * （表头/用量/绑定/上传/FileTree/预览模态）。复制一份等于以后两端行为慢慢分叉。
- * 本组件只管渲染，数据与回调仍由 AppShell 持有（数据加载、上传、预览状态都不搬）。
- */
-interface SharedFilesPanelProps {
-  files: SharedFileMeta[];
-  usage: { used: number; quota: number } | null;
-  previewFile: SharedFileMeta | null;
-  /** 绑定到当前会话（无会话时由 AppShell 给提示，不静默失败）。 */
-  onBind: () => void;
-  onUpload: () => void;
-  onPreview: (file: SharedFileMeta) => void;
-  onClosePreview: () => void;
-  onSendToConversation: (item: SharedFileMeta) => void;
-  /** 抽屉模式才传：显示面板内的关闭按钮（宽窗 aside 不传，布局与改前一致）。 */
-  onClose?: () => void;
-  /** 面板内联提示（d.140 R4：替代 window.alert，不再阻塞、可被读屏播报）。 */
-  notice?: string | null;
-  onDismissNotice?: () => void;
-}
-
-function SharedFilesPanel({
-  files,
-  usage,
-  previewFile,
-  onBind,
-  onUpload,
-  onPreview,
-  onClosePreview,
-  onSendToConversation,
-  onClose,
-  notice,
-  onDismissNotice,
-}: SharedFilesPanelProps) {
-  return (
-    <>
-      {/* d.68：表头左内边距与文件树行对齐（FileTree 行是 px-2），表头标题不再比内容缩进一档。
-          d.141：表头改成可换行的两段式——标题 + 用量在左，动作按钮成组靠右。
-          改动前三颗按钮都是 shrink-0、标题 whitespace-nowrap，aside 拖到最小宽（180）时
-          一行放不下，按钮会被挤出面板右缘（被父级 overflow-hidden 裁掉、点不到）。
-          现在按组换行：窄了就整组落到第二行，不靠写死宽度硬顶。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line-soft px-2 py-2">
-        {/* d.62：表头用全站统一的 section 档（13/20/600） */}
-        <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
-        {usage && (
-          <span className="ui-micro min-w-0 grow basis-24 truncate tabular-nums">
-            {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
-          </span>
-        )}
-        {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            aria-label="绑定本地文件到会话"
-            title="绑定工作区文件到当前会话（需先打开一个会话）"
-            onClick={onBind}
-            size="sm" variant="ghost"
-          >
-            绑定
-          </Button>
-          <Button
-            type="button"
-            title="上传文件到共享文件"
-            onClick={onUpload}
-            size="sm" variant="ghost"
-          >
-            上传
-          </Button>
-          {onClose ? (
-            <Button
-              type="button"
-              aria-label="关闭共享文件面板"
-              onClick={onClose}
-              size="sm" variant="ghost"
-            >
-              关闭
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {notice && (
-        <div role="alert" className="ui-alert ui-alert-warn mx-2 mt-2 items-center">
-          <span className="min-w-0 flex-1">{notice}</span>
-          {onDismissNotice && (
-            <Button
-              type="button"
-              onClick={onDismissNotice}
-              size="sm" variant="ghost" className="shrink-0"
-            >
-              知道了
-            </Button>
-          )}
-        </div>
-      )}
-      <div className="min-h-0 flex-1">
-        <FileTree
-          items={files}
-          localPaths={[]}
-          onPreview={onPreview}
-          onSendToConversation={onSendToConversation}
-        />
-      </div>
-      {previewFile && (
-        <Suspense fallback={null}>
-          <FilePreviewModal file={previewFile} onClose={onClosePreview} />
-        </Suspense>
-      )}
-    </>
-  );
-}
 
 /**
  * 顶层：主界面常驻，启动动画作为全屏遮罩盖在其上。
@@ -527,86 +371,15 @@ function AppShell({
     });
   }, [authUser, mcpReady]);
 
-  const [files, setFiles] = useState<SharedFileMeta[]>([]);
-  const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
-  /** 共享文件面板的内联提示（三处原本会阻塞整页的 window.alert 改为面板内 role="alert"）。 */
-  const [asideNotice, setAsideNotice] = useState<string | null>(null);
-
-  /** 右栏文件行 hover「预览」的目标文件（null = 模态关闭）。 */
-  const [previewFile, setPreviewFile] = useState<SharedFileMeta | null>(null);
-  const refreshFiles = useCallback(() => {
-    void fetchFiles().then(setFiles);
-    void fetchFileUsage()
-      .then(setUsage)
-      .catch(() => setUsage(null)); // 用量接口失败静默（不影响文件列表）
-  }, []);
-  useEffect(() => {
-    if (authUser) refreshFiles();
-  }, [authUser, refreshFiles]);
-
-  const onUpload = async () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      try {
-        await uploadFile(file); // base64 编码与 POST 已下沉到 lib/api
-        setAsideNotice(null);
-        refreshFiles();
-      } catch (e) {
-        console.error("上传失败", e);
-        setAsideNotice(`上传失败：${e instanceof Error ? e.message : String(e)}`);
-      }
-    };
-    input.click();
-  };
-
-  /** 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败（行为同提取前）。 */
-  const onBindFile = () => {
-    if (!useUiStore.getState().activeConversationId) {
-      setAsideNotice("先打开一个会话，再绑定文件");
-      return;
-    }
-    setAsideNotice(null);
-    void onUpload();
-  };
-
-  /** 目录文件名 → 发到当前会话（非会话页/无会话时提示，行为同提取前）。 */
-  const onSendFileToConversation = (item: SharedFileMeta) => {
-    const { page: currentPage, activeConversationId } = useUiStore.getState();
-    if (currentPage !== "chat" || !activeConversationId) {
-      setAsideNotice("先打开一个会话，再从目录发送文件");
-      return;
-    }
-    setAsideNotice(null);
-    useUiStore.getState().sendFileToConversation(activeConversationId, {
-      id: item.id,
-      name: item.name,
-      mime: item.mime,
-      size: item.size,
-    });
-  };
-
-  /*
-   * d.67 T4 · 窄窗（<1200）响应式：
-   * 宽窗完全保持原样（可拖拽 aside、宽度记忆、最小/最大、拖动手柄 aria 都不动）；
-   * 窄窗默认不渲染 aside 列，改由顶部「共享文件」按钮打开覆盖层抽屉（同一份面板内容）。
-   * 断点只在 viewport.ts 定义一次，这里不写死 1200。
-   */
-  const { narrow } = useViewport();
-  const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
-  const filesDrawerRef = useRef<HTMLElement | null>(null);
-  const closeFilesDrawer = useCallback(() => setFilesDrawerOpen(false), []);
-  // 抽屉是模态：Esc 关闭、Tab 在面板内循环、背景 inert、关闭后焦点回到触发按钮。
-  useModalA11y(filesDrawerRef, closeFilesDrawer, { active: narrow && filesDrawerOpen });
-  // 拖宽到 ≥1200 时自动收起：宽窗有常驻 aside，不能同时压一层遮罩。
-  useEffect(() => {
-    if (!narrow) setFilesDrawerOpen(false);
-  }, [narrow]);
-
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+  /**
+   * 右侧「会话进度」面板的开合（会话页专属）。
+   *
+   * 为什么放在壳里的 useState 而不是 ui store：它不是页面/导航状态，不跨页复用、
+   * 也不需要落盘；放在壳里，切页时组件卸载、状态自然回默认（隐藏）。
+   */
+  const [progressOpen, setProgressOpen] = useState(false);
 
   // d.124：插件页面入口（导航轨、设置区导航说明、路由守卫读同一份注册表投影）。
   const pluginPageEntries = usePluginPageEntries();
@@ -648,6 +421,14 @@ function AppShell({
   useEffect(() => {
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
+
+  // 右侧「会话进度」面板：默认隐藏、离开会话页就收起。开合状态只活在壳里，
+  // 不进 store——它不是页面状态，也不该跟着会话切换被记住。
+  // 必须留在下面 authUser 提前 return 之前：未登录→已登录那次重渲染若多出 hook，
+  // React 会直接报 "Rendered more hooks than during the previous render"。
+  useEffect(() => {
+    if (currentPage !== "chat") setProgressOpen(false);
+  }, [currentPage]);
 
   // 界面插件（原桌宠，d.98）的「打开设置 / 气泡直达页面」出口：主进程只转发白名单页面。
   // 旧 preload 没有 onOpenPage 时自动跳过（页面跳转是便利功能，不是可用性前提）。
@@ -726,54 +507,6 @@ function AppShell({
   useEffect(() => {
     void refreshWidgets();
   }, []);
-
-  // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
-  const [asideWidth, setAsideWidth] = useState(() => readAsideWidth());
-  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // 宽度变化只跟水平位移；竖向位移忽略，避免拖出边界后卡住
-    const startX = e.clientX;
-    const startW = asideWidthRef.current;
-    const move = (ev: PointerEvent) => {
-      // 往右拖 = 变宽，故用 startX 减当前 x
-      setAsideWidth(clampAsideWidth(startW + (ev.clientX - startX)));
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    // 拖动期禁用光标选择与默认选中，否则会顺带把文件文字全刷成选中态
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  }, []);
-  /**
-   * 键盘调宽（2026-11-14 审计 D3）。
-   *
-   * 这个手柄一直只有指针入口：有 `role="separator"` 和 aria-valuenow，却没有 tabIndex，
-   * 键盘用户既到不了、也调不动——「有 ARIA 没入口」比完全不标更糟（读屏会念出一个
-   * 不可操作的分隔条）。补齐：Tab 可达、方向键 ±16px、Shift+方向键 ±64px（快速）、
-   * Home/End 到两端，并把 aria-valuetext 写成「320 像素」而不是裸数字。
-   */
-  const onResizeKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = e.shiftKey ? 64 : 16;
-    let next: number | null = null;
-    if (e.key === "ArrowLeft") next = asideWidthRef.current - step;
-    else if (e.key === "ArrowRight") next = asideWidthRef.current + step;
-    else if (e.key === "Home") next = ASIDE_MIN;
-    else if (e.key === "End") next = ASIDE_MAX;
-    if (next === null) return;
-    e.preventDefault();
-    setAsideWidth(clampAsideWidth(next));
-  }, []);
-  // 回调里读不到最新 state，用 ref 兜住当前宽度（与 RadarContacts 的 zoom 兜法一致）
-  const asideWidthRef = useRef(asideWidth);
-  asideWidthRef.current = asideWidth;
-  useEffect(() => {
-    persistAsideWidth(asideWidth);
-  }, [asideWidth]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -859,121 +592,32 @@ function AppShell({
       <SettingsPage />
     );
 
-  /**
-   * 共享文件面板只在会话页出现（用户要求：文件管理只留在会话对话页）。
-   * 其它页面不再常驻右栏，主内容获得完整宽度；窄窗入口也只在会话页显示。
-   */
-  const showFilesPanel = currentPage === "chat";
-
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface">
-      {/* 顶栏是唯一常驻的全局控件条：品牌位兼作桌面拖拽区，右侧是页面菜单/命令面板/
-          快捷键帮助/通知/账户。旧的桌面标题栏与导航轨都被它取代。 */}
-      <TopBar onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
+      {/* 顶栏是唯一常驻的全局控件条：手写标志兼作桌面拖拽区，右侧是页面菜单/命令面板/
+          快捷键帮助/通知/账户（会话页再多一颗「会话进度」）。旧的桌面标题栏与导航轨都被它取代。 */}
+      <TopBar
+        onOpenSearch={onOpenSearch}
+        onOpenShortcuts={onOpenShortcuts}
+        progressOpen={progressOpen}
+        onToggleProgress={() => setProgressOpen((v) => !v)}
+      />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* 会话侧栏常驻：所有页面左侧都保持会话入口（导航轨删除后的主要导航面）。 */}
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。
-              宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。
-              d.141：从「一个 justify-end 的裸 div」改成显式 toolbar——纵向内边距用刻度 8（py-2，
-              原来是 6 不属于任何档），并给读屏一个区域名，与页面内工具栏同一套结构。 */}
-          {narrow && showFilesPanel && (
-            <div
-              role="toolbar"
-              aria-label="页面工具栏"
-              className="flex shrink-0 items-center justify-end gap-2 border-b border-line-soft px-4 py-2"
-            >
-              <Button
-                type="button"
-                aria-label="打开共享文件"
-                aria-haspopup="dialog"
-                aria-expanded={filesDrawerOpen}
-                onClick={() => setFilesDrawerOpen(true)}
-                size="sm" variant="ghost"
-              >
-                共享文件
-              </Button>
-            </div>
-          )}
-          {/* min-w-0 + overflow-hidden：窄窗下宽页面（settings/team/workspace/memory）不横向撑破主列 */}
+          {/* min-w-0 + overflow-hidden：窄窗下宽页面（settings/team 等）不横向撑破主列 */}
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（标题栏/导航/目录栏）不动。
+            {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（顶栏/侧栏）不动。
                 启动动画挂着时页面 chunk 已在后台加载，揭开时通常已经就绪。 */}
             <Suspense fallback={<PageFallback />}>{view}</Suspense>
           </div>
         </main>
-        {/* 宽窗：右侧工作目录可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
-            绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。
-            窄窗不渲染这一列（内容改由顶部按钮 + 覆盖层抽屉承载，见下方）。 */}
-        {!narrow && showFilesPanel && (
-          <aside
-            aria-label="共享文件"
-            className="relative flex shrink-0 flex-col border-l border-line-soft"
-            style={{ width: asideWidth }}
-          >
-            <div
-              role="separator"
-              tabIndex={0}
-              aria-orientation="vertical"
-              aria-label="调整目录栏宽度"
-              aria-valuemin={ASIDE_MIN}
-              aria-valuemax={ASIDE_MAX}
-              aria-valuenow={asideWidth}
-              aria-valuetext={`${asideWidth} 像素`}
-              onPointerDown={onResizeStart}
-              onKeyDown={onResizeKeyDown}
-              className="absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize transition-colors duration-fast hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink motion-reduce:transition-none"
-            />
-            <SharedFilesPanel
-              files={files}
-              usage={usage}
-              previewFile={previewFile}
-              onBind={onBindFile}
-              onUpload={() => void onUpload()}
-              onPreview={setPreviewFile}
-              onClosePreview={() => setPreviewFile(null)}
-              onSendToConversation={onSendFileToConversation}
-              notice={asideNotice}
-              onDismissNotice={() => setAsideNotice(null)}
-            />
-          </aside>
+        {/* 会话进度：默认隐藏，由顶栏按钮开合；内容后续再接入（先留结构）。 */}
+        {currentPage === "chat" && progressOpen && (
+          <ProgressPanel onClose={() => setProgressOpen(false)} />
         )}
       </div>
-      {/* 窄窗共享文件抽屉：覆盖层 + aria-modal；Esc/焦点归还/背景 inert 由 useModalA11y 统一托管。 */}
-      {narrow && showFilesPanel && filesDrawerOpen && (
-        <div className="fixed inset-0 z-40 flex justify-end" data-testid="shared-files-drawer-overlay">
-          <button
-            type="button"
-            aria-label="关闭共享文件遮罩"
-            data-testid="shared-files-backdrop"
-            onClick={closeFilesDrawer}
-            className="absolute inset-0 cursor-default bg-scrim"
-          />
-          <aside
-            id="shared-files-drawer"
-            ref={filesDrawerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="共享文件"
-            className="ui-overlay-shadow relative flex h-full w-[min(360px,90vw)] flex-col border-l border-line-soft bg-surface"
-          >
-            <SharedFilesPanel
-              files={files}
-              usage={usage}
-              previewFile={previewFile}
-              onBind={onBindFile}
-              onUpload={() => void onUpload()}
-              onPreview={setPreviewFile}
-              onClosePreview={() => setPreviewFile(null)}
-              onSendToConversation={onSendFileToConversation}
-              onClose={closeFilesDrawer}
-              notice={asideNotice}
-              onDismissNotice={() => setAsideNotice(null)}
-            />
-          </aside>
-        </div>
-      )}
       {/* 安装确认是全局的：从接口区发起，但用户可能立刻切页；
           挂在根节点上，pending 在第几页都能弹出来。 */}
       <Suspense fallback={null}>
