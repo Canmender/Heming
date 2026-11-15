@@ -2,7 +2,7 @@
 
 原生电脑端智能体应用平台（云端团队名册）：一个内置智能体、会话式工作 + 独立协作页 + 真实团队动向。
 
-> **当前版本**：`d.150.4.95.11`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
+> **当前版本**：`d.151.4.95.11`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
 > **版本号规则**：5 段 `d.特性.破坏性.修订.构建`，**每次修改/修复都要 bump** —— 见 [docs/VERSION-MANAGEMENT.md](docs/VERSION-MANAGEMENT.md)
 > 改动记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -83,6 +83,19 @@ pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 ```
 
 说明：根目录 `pnpm test` / `pnpm typecheck` 会先自动 `pnpm -r build`（`shared` 的类型产物被其他包经 workspace 引用，fresh clone 直接跑测试会因缺 `dist` 失败），再执行各包的 test/typecheck。
+
+### 智能体评测（确定性）
+
+```bash
+pnpm eval:agent                                   # 跑全部 18 条用例（离线：脚本化模型 + 真实编排层）
+pnpm eval:agent -- --filter edit                  # 只跑 id 含 edit 的用例
+pnpm eval:agent -- --compare evals/baselines/latest.json   # 与冻结基线比（分数/token/p95 三项红线）
+pnpm eval:agent -- --repeat 3 --json evals/reports/freeze.json  # 稳定性：3 次分数极差 ≤3 个百分点
+```
+
+- 用例 `evals/cases/*.yaml` + 夹具 `evals/fixtures/`，契约见 [evals/README.md](evals/README.md)；基线 `evals/baselines/latest.json` 只许人工复核后更新（运行器没有 `--update-baseline`）。
+- 判定：分数降 >2%、每通过用例 token 涨 >10%、p95 涨 >15%（且 >100ms 噪声门限）即红；安全用例（tags 含 `security`）任一失败一票否决。报告写 `evals/reports/`（不入库）。
+- 夜间真实模型任务需要 `HEMING_EVAL_API_KEY`（`--real`），缺 key 时 GitHub Actions 的 nightly job 显示 skipped 而不是绿。
 
 ## 结构
 

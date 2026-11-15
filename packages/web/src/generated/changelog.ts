@@ -12,6 +12,46 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.151.4.95.11",
+    "date": "2026-11-15",
+    "title": "智能体能力调优：先有度量，再改工具层",
+    "bullets": [
+      "rollout v3：`turn_end` 带 `usage{input,output,cacheRead,cacheWrite,rounds}`、`tool_result.ms`；`llmClient` 认 `cache_read_input_tokens` / `prompt_tokens_details.cached_tokens` / `cache_creation_input_tokens`。",
+      "用量按会话/回合归因：`store/tokenUsage.ts` 记录加 `conversationId`/`streamId`，新增 `recordsForConversation` / `recordsForStream` / `totalsOf`；会话页「上下文」页签新增「本会话消耗」与「回合消耗明细」。",
+      "题集 `evals/cases/*.yaml` 18 条（12 条能力 + 5 条安全 + 1 条只读并行）与 `evals/fixtures/`；`evals/README.md` 是契约（字段、10 种 grader、阈值、基线冻结流程）。",
+      "`evals/runner/` 用 tsx 直接加载真实 `runAgentMentions`，注入脚本化模型、`node:fs` 文件桥与确定性 HITL 闸门（无人值守时 `ask→deny`）；`scripts/eval-agent.mjs` 是 CLI（`--filter/--json/--repeat/--compare/--real`，`--real` 缺 key 显式 exit 2）。",
+      "基线 `evals/baselines/latest.json`，报告写 `evals/reports/`（不入库）。阈值写死：分数降 >2%、每通过用例 token 涨 >10%、p95 涨 >15%（且 >100ms 噪声门限）即红；安全用例任一失败一票否决；基线只许人工改（运行器没有 `--update-baseline`）。",
+      "`.githooks/pre-commit`（L0：受影响包的 lint（有才跑）+ typecheck）、`.githooks/pre-push`（L1：typecheck + web 全量）、`scripts/install-hooks.mjs`（`git config core.hooksPath .githooks`）。",
+      "`.github/workflows/verify.yml`（L2：typecheck + 四包测试 + build + plugin:check + 确定性 eval）、`.github/workflows/eval-nightly.yml`（L3：cron 02:00 + dispatch；无 `HEMING_EVAL_API_KEY` 时显示 skipped，不假绿）。",
+      "新增 `lib/toolError.ts`：工具失败统一返回 `{error_code, retry_with, hint}`；`lib/mcp/bridge.ts` 与 `lib/fileEdit/tools.ts` 全部对齐，文本保留原有中文开头并在末尾追加「可重试：…」；只读根、安全拒绝这类「照做也不通」的情况不给 `retry_with`。",
+      "`agentContext/toolResults.ts`：同一工具多次调用折叠成「最近一次全文 + 前几次单行摘要」，带图片说明的行不压（那是「模型看不到图」的唯一解释）。",
+      "新增 `agentContext/turnBudget.ts`：`planTurnBudget` 把 6000 / 3000 / 12000 三处闸门收进同一本账（系统提示词含在 900 注入预留里，超出才额外扣历史），`prepareHistory` 与轮次收口都走它。",
+      "工具清单按名字稳定排序（前缀缓存友好）；`fileEdit` 两个工具 schema 1034 → 825 字符（−20.2%），格式关键字全保留并有体积上限测试。",
+      "HITL 硬排除（`fileEdit/safety.ts`）：`.exe/.bat/.ps1/.cmd/.vbs/.msi/.scr` 与 `package.json`/`package-lock.json`/`pnpm-lock.yaml` 从 auto 降级为 ask（只紧不松）；题集 sec-002 / sec-003 由 allowed 收紧为 denied。",
+      "rollout v5：`assistant_final.evidence{files,commands,outputDigest}` 由真实成功调用生成（不再让模型自述完成）；任务区落盘并进任务报告「完成证据」；评测器新增 `evidence` grader，只自称完成直接判负。",
+      "rollout v4：`turn_end.failure` 六抽屉（`context_overflow` / `tool_error` / `model_refusal` / `hitl_denied` / `max_rounds` + `provider_error` 兜底）；`classifyTurnFailure` 判序有单测；会话页「上下文」页签新增失败归因与「记忆注入」展开（注入了哪几条、被裁原因、疑似引用）。",
+      "任务幂等键（同「目标+会话+智能体」在 running 期间只允许一条，防双击/刷新重投写两遍）、`loadTasksAtStartup` 启动时把超 10 分钟未收尾的 running 收口为失败并回写（不自动重跑：本机流不跨进程恢复，自动重跑等于重复副作用）。",
+      "只读工具并行上限 3 路（`MAX_PARALLEL_READS`），写工具仍串行；新增 tool-003 用例正好压在上限上。",
+      "`lib/tasks/forkTask.ts` 的分叉版本判定写死 `=== 2`，rollout 升到 v3 后所有分叉被静默降级、前缀为空；改为 `< 2 || > ROLLOUT_VERSION`，分叉前缀恢复。",
+      "`pnpm typecheck` 全仓 Done；`pnpm --filter @heming/web test` **317 files / 4685 tests passed**。",
+      "`pnpm eval:agent -- --compare evals/baselines/latest.json`：18/18、pass@1 100%、tokens/pass 2607、p95 26ms（噪声门限内不判红）、安全 6 条全过；`--repeat 3` 分数极差 0.0 个百分点。",
+      "`pnpm build` exit 0；`pnpm plugin:check` 通过；`design:audit` 浅色/深色各 0 违规。",
+      "评测默认离线：用脚本化模型跑真实编排层（确定性、无网络、无端口）。夜间真实模型任务需要 `HEMING_EVAL_API_KEY`，缺 key 时 job 显示 skipped 而不是绿。",
+      "各批（P0→P4）在并行会话占用版本字段期间落地，均未自带 bump，提交信息已注明；本条统一给到 d.151.4.95.11。"
+    ],
+    "paragraphs": [
+      "把「智能体好不好」从感觉变成一条可复现的命令：先补埋点与题集建立基线，再按计划一批只改一个变量，每批都用同一条 `pnpm eval:agent` 验证分数不降、token 不涨、p95 不退化。计划与依据见 `docs/research/2026-11-15-agent-tuning-execution-plan.md`、`docs/research/agent-tuning/`。",
+      "**P0 度量基线（`evals/` + `scripts/eval-agent.mjs`）**",
+      "**P1 门禁分层**",
+      "**P2 工具层（一次一个变量）**",
+      "**P3 可信度**",
+      "**P4 续跑与并行**",
+      "**回归修复**",
+      "**验证（d.151.4.95.11，工作树实跑）**",
+      "**说明**"
+    ]
+  },
+  {
     "version": "d.150.4.95.11",
     "date": "2026-11-15",
     "title": "联网搜索更准更省、内置工具扩到 7 个、工具授权区可搜索/折叠/批量",

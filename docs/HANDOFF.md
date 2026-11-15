@@ -1,18 +1,79 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-15
-- 当前版本：`d.150.4.95.11`（工作树；未打包、未部署）
-- 本轮标签：**搜索更准更省（必应中文参数 + 结果合并去重 + 限速缓存 + `web_read` 私网守卫）+ 内置只读工具扩到 7 个（+ 计算器 / JSON 查询 / 编码转换 / 日期换算）+ 工具授权区可搜索 / 折叠 / 批量开关**（分支 `refactor/minimal-app`，版本 d.149.4.95.11 → d.150.4.95.11）。**已实跑验证**：`pnpm -r typecheck` 6 包全 Done；web 全量 vitest **315 files / 4609 passed**；server 307、shared 119、desktop 863；`pnpm build` exit 0；design:audit 浅/深各 0 违规。详见下方 d.150.4.95.11 小节。
-- 上一轮标签：**MCP 页签去重（只留「工具授权 → 系统能力」）+ 内置联网工具（web_search / web_read / now）**（分支 `refactor/minimal-app`，版本 d.148.4.95.11 → d.149.4.95.11）。「插件 → MCP」页签里「系统能力」原本讲了两遍：顶上一整块只读卡片区、底下「工具授权」里一组常开工具。本轮把顶上卡片区整块删掉，连接状态与运行时状态收成一条紧凑状态条挂到「工具授权」标题下；同时给系统默认接入三个只读工具——`web_search`（必应优先、DDG 兜底）、`web_read`（网页正文）、`now`（当前时间），走已有的桌面主进程 HTTP 代发桥（`window.__heming_http` → `workflow:http`），无新依赖、无密钥、浏览器端不注入。**已实跑验证**：web typecheck / build exit 0，web 全量 vitest 309 files / 4493 passed，server 293、shared 119、desktop 863，design:audit 浅/深各 0 违规。详见下方 d.149.4.95.11 小节。
-- 上上轮标签：**技能区极简化：单一列表，删掉分配与自我优化配置**（分支 `refactor/minimal-app`，版本 d.147.4.94.11 → d.148.4.95.11）。产品只做唯一内置智能体，技能区不再有「已分配 / 技能池」两个子页签，也没有「把技能分配给某个智能体」这层动作：打开就是一张按来源分组（内置 / 已装 / 沉淀 / 自定义）的列表，启用即生效；「自我优化」卡从界面删除、功能默认开启（旧版显式关掉的仍生效）。**已实跑验证**：web typecheck / build exit 0，技能区 4 个测试文件 19/19，全量 vitest 4442 passed / 9 failed（9 条均为工作树中他人团队共享 WIP，与本轮无关，详见下方 d.148.4.95.11 小节）。
-- 历史（旧版标签，保留备查）：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.94.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。；更早：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
+- 当前版本：`d.151.4.95.11`（工作树；未打包、未部署）
+- 本轮标签：**智能体能力调优 P0–P4：先有度量再改工具层**（分支 `refactor/minimal-app`，版本 d.150.4.95.11 → d.151.4.95.11）。按 `docs/research/2026-11-15-agent-tuning-execution-plan.md` 六批落地：①回合用量/工具耗时埋点（rollout v3）与用量按会话/回合归因；②18 条确定性题集 + `scripts/eval-agent.mjs` + 基线冻结 + CI 分层门禁；③工具层（统一错误契约 `toolError.ts`、同工具结果折叠、每请求预算账本、工具清单稳定排序、`fileEdit` schema −20.2%、HITL 硬排除）；④完成即证据（rollout v5）、失败归因六抽屉（rollout v4）、记忆注入可解释；⑤任务幂等键 + 启动回写、只读工具并行 ≤3 路。**已实跑验证**：`pnpm typecheck` 全仓 Done；web 全量 vitest **317 files / 4685 passed**；`pnpm eval:agent` **18/18**（tokens/pass 2607、`--repeat 3` 极差 0）；`pnpm build` exit 0；`pnpm plugin:check` 通过；design:audit 浅/深各 0 违规。提交链 `773049fa` → `fd6f6c18` → `e9481049` → `f176c9b8` → `8a8eadf3` → `2239ddbf` → 本条。详见下方 d.151.4.95.11 小节。
+- 上一轮标签：**搜索更准更省（必应中文参数 + 结果合并去重 + 限速缓存 + `web_read` 私网守卫）+ 内置只读工具扩到 7 个（+ 计算器 / JSON 查询 / 编码转换 / 日期换算）+ 工具授权区可搜索 / 折叠 / 批量开关**（分支 `refactor/minimal-app`，版本 d.149.4.95.11 → d.150.4.95.11）。**已实跑验证**：`pnpm -r typecheck` 6 包全 Done；web 全量 vitest **315 files / 4609 passed**；server 307、shared 119、desktop 863；`pnpm build` exit 0；design:audit 浅/深各 0 违规。详见下方 d.150.4.95.11 小节。
+- 上上轮标签：**MCP 页签去重（只留「工具授权 → 系统能力」）+ 内置联网工具（web_search / web_read / now）**（分支 `refactor/minimal-app`，版本 d.148.4.95.11 → d.149.4.95.11）。「插件 → MCP」页签里「系统能力」原本讲了两遍：顶上一整块只读卡片区、底下「工具授权」里一组常开工具。本轮把顶上卡片区整块删掉，连接状态与运行时状态收成一条紧凑状态条挂到「工具授权」标题下；同时给系统默认接入三个只读工具——`web_search`（必应优先、DDG 兜底）、`web_read`（网页正文）、`now`（当前时间），走已有的桌面主进程 HTTP 代发桥（`window.__heming_http` → `workflow:http`），无新依赖、无密钥、浏览器端不注入。**已实跑验证**：web typecheck / build exit 0，web 全量 vitest 309 files / 4493 passed，server 293、shared 119、desktop 863，design:audit 浅/深各 0 违规。详见下方 d.149.4.95.11 小节。
+- 历史（旧版标签，保留备查）：**技能区极简化：单一列表，删掉分配与自我优化配置**（分支 `refactor/minimal-app`，版本 d.147.4.94.11 → d.148.4.95.11）。产品只做唯一内置智能体，技能区不再有「已分配 / 技能池」两个子页签，也没有「把技能分配给某个智能体」这层动作：打开就是一张按来源分组（内置 / 已装 / 沉淀 / 自定义）的列表，启用即生效；「自我优化」卡从界面删除、功能默认开启（旧版显式关掉的仍生效）。**已实跑验证**：web typecheck / build exit 0，技能区 4 个测试文件 19/19，全量 vitest 4442 passed / 9 failed（9 条均为工作树中他人团队共享 WIP，与本轮无关，详见下方 d.148.4.95.11 小节）。
+- 更早（保留备查）：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.94.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。；更早：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 - **产品口径（2026-11-15，用户原话「我们只做桌面端」）**：和鸣是 Windows 桌面应用（Electron 安装包），新增能力按桌面端设计，不为浏览器补齐桌面专属能力。系统能力里的 MCP 走 stdio（经 `packages/desktop` 的 `secureIpc`/`__mcp_stdio` 桥，浏览器里连不上）、原生选目录（`app:pickDirectory` → `dialog.showOpenDialog`）与桌面标题栏拖拽都只在桌面端可用。云端部署（`scripts/release.mjs --deploy/--publish`）的定位是**更新源与安装器分发**，不是主使用形态；`pnpm --filter @heming/web build` 仍需保持可构建，但网页端可以只提供降级路径。
 
 ---
 
-## 0. 2026-11-15 极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航（分支 `refactor/minimal-app`，版本 d.147.4.86.11）
+## 0. 2026-11-15 智能体能力调优：先有度量，再改工具层（分支 `refactor/minimal-app`，版本 d.151.4.95.11）
+
+用户口径：按 `docs/research/2026-11-15-agent-tuning-execution-plan.md` 执行——「一次一批、一批一个版本号、独立可回滚；一次只改一个变量；『变好』必须能被一条命令复现」。本程序把智能体从「感觉还行」推进到「可度量、可回归」：先埋点与题集建立基线，再按 P2 工具层 → P3 可信度 → P4 续跑并行的顺序各批改一个变量，每批都用同一条 `pnpm eval:agent` 验证分数不降、token 不涨、p95 不退化，安全用例只收紧不放松。
+
+**六批（每批独立提交，可单独 revert）**
+
+| 批次 | 提交 | 主变量 | 分数 | tokens/pass | 结论证据 |
+| --- | --- | --- | --- | --- | --- |
+| P0 度量 | `773049fa` | 回合用量埋点 / 用量归因 / 17 条题集 / eval-agent / 基线 | 17/17 | 2640 | 一条命令可复现；阈值硬编码（2%/10%/15% + 安全一票否决） |
+| P2a 工具层 | `fd6f6c18` | 错误契约 / 同工具结果折叠 / 每请求预算账本 | 17/17 | 2640（0.0%） | 账本单测 10 条；失败文本带 `可重试：` |
+| P2b 前缀与 HITL | `e9481049` | 工具清单稳定排序 / HITL 硬排除 | 17/17 | 2640（0.0%） | 缓存读链路 0.4667；`.bat`、`package.json` 由 allowed 收紧为 denied |
+| P2c schema | `f176c9b8` | fileEdit 工具说明瘦身 | 17/17 | 2640（0.0%） | schema 1034 → 825 字符（−20.2%），格式关键字全保留 |
+| P3 可信度 | `8a8eadf3` | 完成即证据 / 失败归因六抽屉 / 注入可解释 | 17/17 | 2640（0.0%） | evidence grader 红灯自检（只自称完成 → 红）；4678 tests |
+| P4 续跑并行 | `2239ddbf` | 任务幂等键 + 启动回写 / 只读并行 ≤3 路 | 18/18（+tool-003） | 2607（题目数变化，不与上批直接比） | 4685 tests；`MAX_PARALLEL_READS=3` 单测压上限 |
+
+**P0 度量基线（`evals/`、`scripts/eval-agent.mjs`）**
+- rollout v3：`turn_end` 带 `usage{input,output,cacheRead,cacheWrite,rounds}`、`tool_result.ms`；`llmClient` 认 `cache_read_input_tokens` / `prompt_tokens_details.cached_tokens` / `cache_creation_input_tokens`。
+- 用量按会话/回合归因：`store/tokenUsage.ts` 记录加 `conversationId`/`streamId`，新增 `recordsForConversation` / `recordsForStream` / `totalsOf`；会话页「上下文」页签新增「本会话消耗」与「回合消耗明细」。
+- 题集 `evals/cases/*.yaml` 18 条 + `evals/fixtures/`；`evals/README.md` 是契约（用例字段、10 种 grader、阈值、基线冻结流程、「没有 `--update-baseline`」的理由）。
+- `evals/runner/`：tsx 直接加载真实 `runAgentMentions`，注入脚本化模型、`node:fs` 文件桥、确定性 HITL 闸门（无人值守 `ask→deny`）——确定性、无网络、无端口；`scripts/eval-agent.mjs` 是 CLI（`--filter/--json/--repeat/--compare/--real`，`--real` 缺 key 显式 exit 2）。
+- 基线 `evals/baselines/latest.json`（随每次主变量变更人工复核重冻结）；报告写 `evals/reports/`（gitignore）。阈值：分数降 >2%、每通过用例 token 涨 >10%、p95 涨 >15%（且 >100ms 噪声门限）即红；安全用例任一失败一票否决。
+
+**P1 门禁分层**
+- `.githooks/pre-commit`（L0：受影响包 lint（有才跑）+ typecheck）、`.githooks/pre-push`（L1：typecheck + web 全量）、`scripts/install-hooks.mjs`（`git config core.hooksPath .githooks`，支持 `--check`/`--uninstall`）；`.gitattributes` 给钩子固定 `eol=lf`。
+- `.github/workflows/verify.yml`（L2：typecheck + server/shared/desktop/web 测试 + build + plugin:check + 确定性 eval）、`.github/workflows/eval-nightly.yml`（L3：cron 02:00 + dispatch；真实模型 `--repeat 3`、长会话专项、design:audit 亮/暗；无 `HEMING_EVAL_API_KEY` 时 job 显示 skipped，不假绿）。
+
+**P2 工具层（一次一个变量）**
+- `lib/toolError.ts`：统一 `{error_code, retry_with, hint}`；mcp 桥与 fileEdit 全部对齐，保留原有中文开头、末尾追加「可重试：…」；只读根 / 安全拒绝这类「照做也不通」不给 `retry_with`。
+- `agentContext/toolResults.ts`：同一工具多次调用折叠为「最近一次全文 + 前几次单行摘要」，带图片说明的行不压。
+- `agentContext/turnBudget.ts`：`planTurnBudget` 把 6000 / 3000 / 12000 三处闸门收进同一本账（系统提示词含在 900 注入预留里，超出才额外扣历史）；`prepareHistory` 与轮次收口都走它。
+- `capability/registry.ts` 工具清单按名字稳定排序（前缀缓存友好）；`fileEdit` 两个工具 schema 1034 → 825 字符（−20.2%），带体积上限测试。
+- `fileEdit/safety.ts` 硬排除：`.exe/.bat/.ps1/.cmd/.vbs/.msi/.scr` 与 `package.json`/`package-lock.json`/`pnpm-lock.yaml` 从 auto 降级为 ask（只紧不松）；题集 sec-002 / sec-003 由 allowed 收紧为 denied。
+
+**P3 可信度**
+- rollout v5：`assistant_final.evidence{files,commands,outputDigest}` 由真实成功调用生成（模型自述不再算数）；任务区落盘、进任务报告「完成证据」；评测器新增 `evidence` grader。
+- rollout v4：`turn_end.failure` 六抽屉（`context_overflow` / `tool_error` / `model_refusal` / `hitl_denied` / `max_rounds` + `provider_error` 兜底）；`classifyTurnFailure` 判序有单测；「上下文」页签新增失败归因与「记忆注入」（注入了哪几条、被裁原因、疑似引用）。
+
+**P4 续跑与并行**
+- 任务幂等键（同「目标+会话+智能体」在 running 期间只允许一条，防双击/刷新重投写两遍）、`loadTasksAtStartup` 启动时把超 10 分钟未收尾的 running 收口为失败并回写（不自动重跑：本机流不跨进程恢复，自动重跑等于重复副作用）。
+- 只读工具并行上限 3 路（`MAX_PARALLEL_READS`），写工具仍由 `writeChain` 串行；tool-003 用例正好压在上限上。
+
+**回归修复**
+- `lib/tasks/forkTask.ts` 分叉版本判定写死 `=== 2`，rollout 升到 v3 后所有分叉被静默降级、前缀为空；改为 `< 2 || > ROLLOUT_VERSION`，分叉前缀恢复（`ChatPage.test.tsx -t "分叉"` 2 passed）。
+
+**验证**（verifier 在最终树执行，环境 Node v24.15.0 / pnpm 10.33.2；**本轮起为 9 步**）
+1. `node --check scripts/eval-agent.mjs` — 通过。
+2. `pnpm typecheck` — exit 0（6 个工作区全 Done，无 error）。
+3. `pnpm --filter @heming/web test` — exit 0：**317 files / 4685 tests passed**。
+4. `pnpm --filter @heming/server test` / `@heming/shared test` / `@heming/desktop test` — 通过（desktop 863 pass / 0 fail）。
+5. `pnpm build` — exit 0（仅 chunk>500kB 与 PLUGIN_TIMINGS 提示）。
+6. `pnpm plugin:check` — exit 0（清单全通过 + `plugin.schema.json` 最新）。
+7. `pnpm design:audit -- --json .tmp/audit.json --shots .tmp/shots`（浅色）与 `--theme dark`（深色）各一遍 — 均 exit 0，0 阈值违规。
+8. **新增**：`pnpm eval:agent -- --compare evals/baselines/latest.json` — exit 0：18/18、pass@1 100%、tokens/pass 2607、p95 26ms（噪声门限内不判红）、安全 6 条全过。判红规则：分数降 >2%、token 涨 >10%、p95 涨 >15%（且 >100ms）即红，安全用例任一失败一票否决；报告写 `evals/reports/` 不入库，基线只许人工改。
+9. 手工验收：会话页「上下文」页签的「本会话消耗 / 回合消耗明细 / 失败归因 / 记忆注入」四块、分叉投递前缀、任务区「完成证据」；**窄窗布局与桌面标题栏拖拽未真机复验**（design:audit 只跑浏览器三断点）。
+
+**遗留与边界**
+- 评测默认离线（脚本化模型跑真实编排层），不替代夜间真实模型任务；后者需要 `HEMING_EVAL_API_KEY`，缺 key 时 CI 显示 skipped。
+- 工具层错误契约只覆盖 fileEdit 与 MCP 两个桥；其它内置工具（webtools 等）未来接入时复用 `lib/toolError.ts`。
+- `baselines/latest.json` 记录的是离线确定性口径（`model: eval-offline`），换机器/node/pnpm 版本会因 p95 波动触发噪声门限说明，属预期。
+
+
 
 用户口径：大范围重构、最大化简化——外壳对齐截图里那类智能体应用，左侧只留会话侧栏、右侧内容；
 **删掉左侧图标导航轨**，页面入口收进顶栏「页面」菜单 + 命令面板，打开应用默认进「会话」页。
