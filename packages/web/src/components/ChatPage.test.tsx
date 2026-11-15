@@ -1433,36 +1433,97 @@ describe("ChatPage", () => {
   });
 
 
-  it("输入区有表情/图片/文件/语音/发送按钮（工具行 + 输入行两行布局）", async () => {
+  /**
+   * d.147.4.90 单框样式：表情/图片/文件/语音收进左下角圆形「更多操作」菜单，
+   * 右侧当前模型徽标，最右圆形发送。旧的两行工具行（表情/图片/文件 + mic）已删。
+   */
+  function openAttachMenu(): HTMLElement {
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    return screen.getByRole("menu", { name: "更多操作菜单" });
+  }
+
+  /** 点「更多操作」菜单里的某一项（表情 / 图片（≤6MB） / 文件（≤6MB） / 语音输入）。 */
+  function clickAttachItem(name: string | RegExp): void {
+    fireEvent.click(within(openAttachMenu()).getByRole("menuitem", { name }));
+  }
+
+  /** 打开语音双选项浮层：更多操作 → 语音输入。 */
+  function openVoiceChoices(): void {
+    clickAttachItem("语音输入");
+  }
+
+  it("输入区为单框样式：正文 textarea + 动作行（更多操作 / 当前模型 / 发送）", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {}); // 冲刷挂载 effects
 
-    expect(screen.getByLabelText("表情")).toBeInTheDocument();
-    expect(screen.getByLabelText("图片")).toBeInTheDocument();
-    expect(screen.getByLabelText("文件")).toBeInTheDocument();
-    expect(screen.getByLabelText("语音输入")).toBeInTheDocument();
+    const input = screen.getByPlaceholderText("输入消息…");
+    const more = screen.getByRole("button", { name: "更多操作" });
+    expect(more).toHaveAttribute("aria-haspopup", "menu");
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /^当前模型：/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeInTheDocument();
 
-    // 工具行（表情/图片/文件）与输入行（输入框/语音/发送）是两个相邻容器
-    const tool = screen.getByLabelText("表情").parentElement!;
-    const input = screen.getByPlaceholderText("输入消息…");
-    expect(tool).toContainElement(screen.getByLabelText("图片"));
-    expect(tool).toContainElement(screen.getByLabelText("文件"));
-    const inputRow = input.parentElement!;
-    expect(inputRow).toContainElement(screen.getByLabelText("语音输入"));
-    expect(inputRow).toContainElement(screen.getByRole("button", { name: "发送" }));
-    expect(tool).not.toBe(inputRow);
+    // 旧的四个独立入口已删（不再各自是按钮）
+    expect(screen.queryByLabelText("表情")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("图片")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("文件")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("语音输入")).not.toBeInTheDocument();
+
+    // 单框：textarea 与动作行同处一个圆角边框容器里，只有一层 border
+    const box = more.closest('[class*="rounded-[26px]"]');
+    expect(box).not.toBeNull();
+    expect(box).toContainElement(input);
+    expect(box).toContainElement(screen.getByRole("button", { name: "发送" }));
   });
 
-
-  it("点语音输入：无 Web Speech API 的环境提示不支持，不静默", async () => {
+  it("「更多操作」菜单：aria-expanded 同步、四项齐全，点「关闭更多操作」收起", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
 
-    // mic 按钮改弹双选项浮层：先开菜单，再选「转文字」走原 STT 路径
-    fireEvent.click(screen.getByLabelText("语音输入"));
+    const more = screen.getByRole("button", { name: "更多操作" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    const menu = openAttachMenu();
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent?.trim())).toEqual([
+      "表情",
+      "图片（≤6MB）",
+      "文件（≤6MB）",
+      "语音输入",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭更多操作" }));
+    expect(screen.queryByRole("menu", { name: "更多操作菜单" })).not.toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("动作行模型徽标：未绑定显示「未绑定模型」，点击去模型页", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "当前模型：未绑定模型" }));
+    expect(useUiStore.getState().page).toBe("model");
+  });
+
+  it("动作行模型徽标：已绑定时显示连接名", async () => {
+    mockMessagesFetch([]);
+    bindAssistant();
+    render(<ChatPage />);
+    await act(async () => {});
+
+    expect(screen.getByRole("button", { name: "当前模型：l" })).toBeInTheDocument();
+  });
+
+
+  it("点「更多操作」→ 语音输入：无 Web Speech API 的环境提示不支持，不静默", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 单框样式：语音入口收在「更多操作」菜单里，打开后再选「转文字」走原 STT 路径
+    openVoiceChoices();
     fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
   });
@@ -1472,7 +1533,7 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
-    fireEvent.click(screen.getByLabelText("语音输入"));
+    openVoiceChoices();
     fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
 
@@ -1503,18 +1564,16 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
       expect(instances).toHaveLength(1);
       expect(instances[0].start).toHaveBeenCalledTimes(1);
-      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink"); // 识别中
 
       // 切会话：旧识别器必须立即停（否则其 onresult 继续回填新会话草稿）
       act(() => {
         useUiStore.setState({ activeConversationId: "c2" });
       });
       expect(instances[0].stop).toHaveBeenCalledTimes(1);
-      expect(screen.getByLabelText("语音输入")).not.toHaveClass("bg-ink"); // 识别态复位
 
       // 实例已清空：再切会话/卸载不重复 stop 旧实例
       act(() => {
@@ -1522,15 +1581,15 @@ describe("ChatPage", () => {
       });
       expect(instances[0].stop).toHaveBeenCalledTimes(1);
 
-      // 新会话重开识别后，旧实例晚到的 onend 不得误清新会话的指示
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      // 新会话重开识别后，旧实例晚到的 onend 不得停掉新实例
+      // （单框样式后没有独立 mic 按钮指示识别态，改从识别器实例行为断言）
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
       expect(instances).toHaveLength(2);
-      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink");
       act(() => {
         instances[0].onend?.();
       });
-      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink");
+      expect(instances[1].stop).not.toHaveBeenCalled();
       expect(instances[1].start).toHaveBeenCalledTimes(1); // 新实例确在识别
     } finally {
       delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
@@ -1804,7 +1863,7 @@ describe("ChatPage", () => {
   });
 
   /**
-   * 工具行选文件走 document.createElement("input") 弹系统选择器（jsdom 无文件 UI）：
+   * 「更多操作」菜单选文件走 document.createElement("input") 弹系统选择器（jsdom 无文件 UI）：
    * 拦下创建的 input、塞 files、手动触 onchange，等价于「用户选中了文件」。
    */
   function captureFilePicker() {
@@ -1819,7 +1878,7 @@ describe("ChatPage", () => {
     );
     return {
       pick(accept: string | undefined, file: File | Partial<File>) {
-        fireEvent.click(screen.getByLabelText(accept ? "图片" : "文件"));
+        clickAttachItem(accept ? /^图片/ : /^文件/);
         const input = created[0];
         expect(input).toBeDefined();
         expect(input.type).toBe("file");
@@ -2294,15 +2353,48 @@ describe("ChatPage", () => {
     };
   }
 
-  it("语音按钮弹双选项浮层", async () => {
+  it("「更多操作」→ 语音输入：弹双选项浮层", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
 
     expect(screen.queryByText("语音消息（录音）")).not.toBeInTheDocument(); // 未点开不出浮层
-    fireEvent.click(screen.getByLabelText("语音输入"));
+    openVoiceChoices();
     expect(await screen.findByText("语音输入（转文字）")).toBeInTheDocument();
     expect(await screen.findByText("语音消息（录音）")).toBeInTheDocument();
+  });
+
+  it("语音识别中在输入框上方显示「识别中…」与停止按钮，点停止后消失", async () => {
+    mockMessagesFetch([]);
+    class FakeSR {
+      lang = "";
+      interimResults = false;
+      continuous = false;
+      onresult?: () => void;
+      onend?: () => void;
+      onerror?: () => void;
+      start = vi.fn();
+      // 真实识别器 stop 后异步收尾并触发 onend；ChatPage 的 listening 复位依赖它
+      stop = () => {
+        this.onend?.();
+      };
+    }
+    (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition = FakeSR;
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      openVoiceChoices();
+      fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
+      // 独立 mic 按钮删除后，识别态落在这条 status 行上
+      expect(screen.getByRole("status")).toHaveTextContent("识别中…说完会自动填进输入框");
+      fireEvent.click(screen.getByRole("button", { name: "停止语音输入" }));
+      await act(async () => {});
+      expect(screen.queryByText("识别中…说完会自动填进输入框")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "停止语音输入" })).not.toBeInTheDocument();
+    } finally {
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    }
   });
 
   it("无 MediaRecorder 时语音消息选项禁用并给提示，转文字入口不受影响", async () => {
@@ -2311,7 +2403,7 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
-    fireEvent.click(screen.getByLabelText("语音输入"));
+    openVoiceChoices();
     expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeDisabled();
     expect(screen.getByText("当前环境不支持录音")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "语音输入（转文字）" })).toBeEnabled();
@@ -2336,7 +2428,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {}); // getUserMedia → MediaRecorder.start 落定
       expect(screen.getByRole("status")).toHaveTextContent("录音中…（最长 60 秒）");
@@ -2392,7 +2484,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
       fireEvent.click(screen.getByLabelText("停止录音")); // 开始后立即停：真实时差远小于 1s
@@ -2417,7 +2509,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
       expect(screen.getByRole("status")).toHaveTextContent("录音中");
@@ -2455,7 +2547,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
       expect(screen.getByRole("status")).toHaveTextContent("录音中");
@@ -2514,7 +2606,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
       expect(screen.getByRole("status")).toHaveTextContent("录音中");
@@ -2542,7 +2634,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
 
@@ -2563,7 +2655,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {}); // 停在 await getUserMedia（授权弹窗未决）
       expect(media.instances).toHaveLength(0); // 尚未创建 recorder
@@ -2597,13 +2689,13 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {}); // 停在 await getUserMedia（授权弹窗挂起，录音态仍为 false）
       expect(screen.queryByText(/录音中/)).not.toBeInTheDocument(); // 危险窗口：浮层未禁用
 
       // 授权挂起期再开浮层点「录音」：第二次必须原地返回（连 getUserMedia 都不该调）
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
       expect(media.getUserMedia).toHaveBeenCalledTimes(1); // 第二次被 pending 位挡在门外
@@ -2636,7 +2728,7 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       await act(async () => {});
 
-      fireEvent.click(screen.getByLabelText("语音输入"));
+      openVoiceChoices();
       expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeDisabled();
       expect(screen.getByText("当前环境不支持录音")).toBeInTheDocument();
     } finally {
@@ -3516,11 +3608,10 @@ describe("ChatPage", () => {
     clickSend();
 
     expect(await screen.findByText("上传中…（≤6MB）")).toBeInTheDocument();
-    expect(screen.getByLabelText("图片")).toBeDisabled();
-    expect(screen.getByLabelText("文件")).toBeDisabled();
-    expect(screen.getByLabelText("语音输入")).toBeDisabled();
+    const more = screen.getByRole("button", { name: "更多操作" });
+    expect(more).toBeDisabled(); // 图片/文件/语音都收在它里面，一个入口挡住三条路
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
-    expect(screen.getByLabelText("图片").getAttribute("title")).toContain("6MB");
+    expect(more.getAttribute("title")).toBe("表情、图片、文件、语音");
     await waitFor(() => expect(releaseUpload).not.toBeNull()); // 等加密/上传真正发起
 
     act(() =>
@@ -3541,7 +3632,7 @@ describe("ChatPage", () => {
     await waitFor(() =>
       expect(screen.queryByText("上传中…（≤6MB）")).not.toBeInTheDocument(),
     );
-    expect(screen.getByLabelText("图片")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "更多操作" })).not.toBeDisabled();
     // 发送成功后待发列表清空（附件已随消息发出）
     expect(screen.queryByRole("list", { name: "待发附件" })).not.toBeInTheDocument();
   });
@@ -3796,8 +3887,8 @@ describe("ChatPage", () => {
 
 
 describe("输入栏高度（clampComposerHeight）", () => {
-  it("默认 132，夹在 72–360 之间并取整", () => {
-    expect(clampComposerHeight(Number.NaN)).toBe(132);
+  it("默认 96，夹在 72–360 之间并取整", () => {
+    expect(clampComposerHeight(Number.NaN)).toBe(96);
     expect(clampComposerHeight(10)).toBe(72);
     expect(clampComposerHeight(999)).toBe(360);
     expect(clampComposerHeight(150.6)).toBe(151);

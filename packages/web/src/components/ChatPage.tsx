@@ -87,7 +87,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PlusIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
@@ -234,7 +234,7 @@ async function fetchPeerKeysCached(userId: string) {
 }
 
 const COMPOSER_HEIGHT_KEY = "heming.chat.composerHeight.v1";
-const DEFAULT_COMPOSER_HEIGHT = 132;
+const DEFAULT_COMPOSER_HEIGHT = 96;
 const MIN_COMPOSER_HEIGHT = 72;
 const MAX_COMPOSER_HEIGHT = 360;
 
@@ -689,6 +689,8 @@ export function ChatPage({
   );
   /** 表情选择器开关（输入区工具行左上角）。 */
   const [emojiOpen, setEmojiOpen] = useState(false);
+  /** 「更多操作」浮层开关（d.147.4.90：左下角圆形 + 号把表情/图片/文件/语音收进一个菜单）。 */
+  const [attachOpen, setAttachOpen] = useState(false);
   /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
   const [listening, setListening] = useState(false);
   /** 语音双选项浮层（mic 按钮弹出：转文字 / 录音），会话级清理。 */
@@ -1023,6 +1025,11 @@ export function ChatPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [effectiveMentions, llmBindings, llmProfiles],
   );
+
+  /** 输入框动作行显示的模型名：与发送前拦截共用同一个 resolveProfile，未绑定就明说。 */
+  const composerModelLabel = conv
+    ? (resolveProfile(conv.agent.id)?.label ?? "未绑定模型")
+    : "未绑定模型";
 
   /** 空对话示例按当前绑定模型的能力挑选（不支持工具就别给「帮我查一下」这种）。 */
   const emptyExamples = useMemo(() => {
@@ -2241,7 +2248,7 @@ export function ChatPage({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (draft.trim() !== "") return;
-      if (emojiOpen || voiceMenu || searchOpen) {
+      if (emojiOpen || voiceMenu || searchOpen || attachOpen) {
         return;
       }
       abortRuns();
@@ -2250,7 +2257,7 @@ export function ChatPage({
     return () => document.removeEventListener("keydown", onKey);
     // abortRuns 每帧重建；本 effect 只关心「是否该接 Esc」的门槛状态
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLocal.length, draft, emojiOpen, voiceMenu, searchOpen]);
+  }, [activeLocal.length, draft, emojiOpen, voiceMenu, searchOpen, attachOpen]);
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 多行输入框：Enter 发送、Shift+Enter 换行（输入法组词中不拦，否则中文选词会被当成发送）
@@ -3305,7 +3312,15 @@ export function ChatPage({
         )}
         {/* 提示位（B 轨 E3）：录音/上传占住这一位（互斥），其余提示按列表渲染，
             最多 2 行 +「还有 N 条」——此前四五条各占一行，能把输入区顶出可视区。 */}
-        {recording ? (
+        {listening ? (
+          // 独立 mic 按钮退场后，「识别中」需要一处可见落点（d.147.4.90）。
+          <div className="flex items-center gap-3 px-chat-gutter pt-2 ui-body-sm">
+            <span role="status">识别中…说完会自动填进输入框</span>
+            <Button size="sm" variant="ghost" aria-label="停止语音输入" onClick={toggleVoice}>
+              停止
+            </Button>
+          </div>
+        ) : recording ? (
           <div className="flex items-center gap-3 px-chat-gutter pt-2 ui-body-sm">
             <span role="status">录音中…（最长 60 秒）</span>
             <Button size="sm" variant="ghost" aria-label="停止录音" onClick={stopRecording}>
@@ -3369,32 +3384,9 @@ export function ChatPage({
             ) : null}
           </div>
         ) : null}
-        {/* 圆角输入容器：工具行 + 待发附件 + 无边框 textarea + 语音/圆形发送按钮都在这一块里。
-            只保留一层 border（focus-within 加深），视觉上是一个完整输入框。 */}
-        <div className="rounded-3xl border border-line bg-surface transition-colors focus-within:border-line-strong">
-        {/* 工具行：表情 / 图片 / 文件（容器内左上角） */}
-        <div className="flex items-center gap-1 px-2 pt-1.5">
-          <IconButton
-            label="表情"
-            className={emojiOpen ? "bg-subtle-3" : ""}
-            icon={<SmileIcon width={16} height={16} />}
-            onClick={() => setEmojiOpen((v) => !v)}
-          />
-          <IconButton
-            label="图片"
-            title="发送图片（≤6MB）"
-            disabled={uploading}
-            icon={<ImageIcon width={16} height={16} />}
-            onClick={() => pickFile("image/*")}
-          />
-          <IconButton
-            label="文件"
-            title="发送文件（≤6MB）"
-            disabled={uploading}
-            icon={<FileIcon width={16} height={16} />}
-            onClick={() => pickFile(undefined)}
-          />
-        </div>
+        {/* 圆角输入容器（d.147.4.90 起仿 Codex/ChatGPT 的单框样式）：正文在上，
+            工具与发送收进下方动作行（左下圆形「+」、右下圆形发送），只保留一层 border。 */}
+        <div className="rounded-[26px] border border-line bg-surface transition-colors focus-within:border-line-strong">
         {/* 待发附件（E1）：选中后先堆在这里，可逐个移除；发送时随正文一起提交 */}
         {pendingFiles.length > 0 ? (
           <ul
@@ -3450,7 +3442,7 @@ export function ChatPage({
         >
           <span className="h-[2px] w-10 rounded-full bg-line-soft transition-colors group-hover:bg-line-strong" />
         </div>
-        <div className="relative flex items-end gap-2 px-2 pb-2" style={{ height: composerHeight }}>
+        <div className="relative px-4 pt-1" style={{ height: composerHeight }}>
           {emojiOpen && (
             <EmojiPicker
               onPick={(e) => {
@@ -3468,7 +3460,7 @@ export function ChatPage({
             ref={composerRef}
             aria-label="消息输入框"
             aria-describedby={unboundAgent ? UNBOUND_NOTICE_ID : undefined}
-            className={`h-full w-full flex-1 resize-none bg-transparent px-1.5 py-1 text-ui-base leading-6 outline-hidden placeholder:text-muted ${FOCUS_RING}`}
+            className={`h-full w-full resize-none bg-transparent pb-1 pt-2 text-ui-base leading-6 outline-hidden placeholder:text-muted ${FOCUS_RING}`}
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
@@ -3504,19 +3496,111 @@ export function ChatPage({
               )}
             </div>
           )}
+        </div>
+        {/* 动作行（d.147.4.90，仿 Codex/ChatGPT）：左下圆形「+」把表情/图片/文件/语音
+            收进一个菜单；右侧当前模型徽标 + 圆形发送。 */}
+        <div className="flex items-center gap-1.5 px-2.5 pb-2">
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="更多操作"
+              aria-haspopup="menu"
+              aria-expanded={attachOpen}
+              title="表情、图片、文件、语音"
+              disabled={uploading}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border border-line transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                attachOpen
+                  ? "bg-subtle-3 text-ink"
+                  : "text-muted hover:bg-subtle-2 hover:text-ink"
+              } ${FOCUS_RING}`}
+              onClick={() => setAttachOpen((v) => !v)}
+            >
+              <PlusIcon width={16} height={16} aria-hidden="true" />
+            </button>
+            {attachOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="关闭更多操作"
+                  className="fixed inset-0 z-30 cursor-default"
+                  onClick={() => setAttachOpen(false)}
+                />
+                <div
+                  role="menu"
+                  aria-label="更多操作菜单"
+                  className="absolute bottom-full left-0 z-40 mb-1 w-[176px] rounded-xl border border-line-soft bg-surface p-1 ui-overlay-shadow"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      setEmojiOpen(true);
+                    }}
+                  >
+                    <SmileIcon width={16} height={16} aria-hidden="true" />
+                    表情
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={uploading}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      pickFile("image/*");
+                    }}
+                  >
+                    <ImageIcon width={16} height={16} aria-hidden="true" />
+                    图片（≤6MB）
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={uploading}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      pickFile(undefined);
+                    }}
+                  >
+                    <FileIcon width={16} height={16} aria-hidden="true" />
+                    文件（≤6MB）
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={uploading}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      setVoiceMenu(true);
+                    }}
+                  >
+                    <MicIcon width={16} height={16} aria-hidden="true" />
+                    语音输入
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {/* 当前模型徽标：点它去模型页换来源（与未绑定提示同一个解析器，不另造状态）。 */}
           <button
             type="button"
-            aria-label="语音输入"
-            title="语音输入"
-            disabled={uploading}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              listening
-                ? "border-ink bg-ink text-surface"
-                : "border-transparent text-muted hover:bg-subtle-2 hover:text-ink"
-            }`}
-            onClick={() => setVoiceMenu((v) => !v)}
+            aria-label={`当前模型：${composerModelLabel}`}
+            title={composerModelLabel}
+            onClick={() => useUiStore.getState().setPage("model")}
+            className={`inline-flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-ui-sm transition-colors hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
           >
-            <MicIcon width={16} height={16} />
+            <span
+              className={`max-w-[160px] truncate ${unboundAgent ? "text-warn" : "text-muted"}`}
+            >
+              {composerModelLabel}
+            </span>
+            <span aria-hidden="true" className="text-ui-xs text-muted">
+              ▾
+            </span>
           </button>
           {/* 圆形发送按钮：图标 + aria-label（读屏名与 hover 提示仍是「发送」）。 */}
           <button
@@ -3537,7 +3621,7 @@ export function ChatPage({
                   ? unboundNoticeText(unboundAgent.name)
                   : "发送"
             }
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
+            className={`ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
           >
             <svg
               width="16"

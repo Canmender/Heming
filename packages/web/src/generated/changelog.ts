@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.90.11",
+    "date": "2026-11-15",
+    "title": "输入框改成单框：工具收进「+」，模型名回到动作行",
+    "bullets": [
+      "`components/ChatPage.tsx`：改成单框——一个 `rounded-[26px] border` 圆角容器，上方是无边框 `textarea`（`aria-label=\"消息输入框\"`、`placeholder=\"输入消息…\"`），下方一条动作行；原先在文本框上沿的 表情 / 图片 / 文件 三个图标按钮与独立的「语音输入」按钮全部退场。",
+      "动作行左侧：圆形「+」按钮（`aria-label=\"更多操作\"`、`aria-haspopup=\"menu\"`、`aria-expanded={attachOpen}`、`title=\"表情、图片、文件、语音\"`；上传中 disabled），点开 `role=\"menu\" aria-label=\"更多操作菜单\"`，内含四个 `role=\"menuitem\"`：表情 / 图片（≤6MB）/ 文件（≤6MB）/ 语音输入。选「表情」打开既有 `EmojiPicker`；选「语音输入」打开既有双选项浮层（转文字 / 录音），录音项在无 MediaRecorder 时禁用并注明「当前环境不支持录音」；菜单向左上弹出，外点用全屏透明按钮（`aria-label=\"关闭更多操作\"`）关闭。",
+      "动作行右侧：当前模型徽标（`aria-label={`当前模型：${composerModelLabel}`}`，解析器与未绑定提示同源：未绑定时回落「未绑定模型」并标 `text-warn`），点击 `setPage(\"model\")` 去「模型」页换来源；最右圆形发送按钮（`type=\"submit\"`、`aria-label=\"发送\"`，草稿为空且无待发附件 / 上传中 / 正在生成 / 未绑定模型却要正文回答时 disabled，`title` 分别说明原因，未绑定语气沿用 `unboundNoticeText`）。",
+      "既有行为保留：未绑定模型的 `aria-describedby` 提示与「纯附件消息照旧可发」判定；上沿 `role=\"separator\" aria-label=\"调整输入栏高度\"` 拖动把手与 `heming.chat.composerHeight.v1` 高度记忆；待发附件列表与数量读屏播报（`role=\"status\"`）；底部 `ComposerHints` 快捷键提示；`Enter` 发送 / `Shift+Enter` 换行与草稿落盘。",
+      "**验证（d.147.4.90.11，工作树实跑，全 exit 0）**：",
+      "— `pnpm typecheck` 6 个项目全 Done，无 TS error；`pnpm build` 通过（仅 chunk >500kB 警告）。",
+      "— web `vitest run`：**299 files / 4327 tests passed**（新增「单框样式」「更多操作菜单开合」「模型徽标跳转」「识别中提示」等用例；`ChatPage.test.tsx` 单文件 134 条）。",
+      "— server 15 files / 271 tests；shared 8 files / 119 tests；desktop 853 pass / 0 fail。",
+      "— `pnpm plugin:check`：清单 6/6，pet-widget 源码模式 1/1，examples 5/5，`plugin.schema.json` 已最新。",
+      "— `pnpm design:audit` 浅色（`.tmp/audit6.json` / `.tmp/shots7`）与 `--theme dark`（`.tmp/audit6-dark.json` / `.tmp/shots7-dark`）：各 57 条（19 个页面/页签 × 3 断点），`failures: []`，横向溢出 / 对比度 / 11px 正文 / 命中区 <32 / 无名字可点五项全 0；截图 24 + 24 张。",
+      "— 视觉量测：输入框单层容器 960×146、`border-radius: 26px`、textarea 926×92；菜单四项文本 = 表情 / 图片（≤6MB）/ 文件（≤6MB）/ 语音输入；右侧「会话进度」栏 280px 时输入框结构不变、`docOverflowX = 0`；1024 断点开栏后 textarea 宽 394、`composerRight 720 < panelLeft 744`、无横向溢出。",
+      "— 顺带修了审计脚本的假红：`scripts/design-audit.mjs` 的 `goPage` 增加「等开机动画（BootWave）退场」（上一轮抓到过 `team@1024` 只有 splash，标题层级被量成 0）。",
+      "— **未真机复验**：① 桌面端（Electron）标题栏拖拽与 ≤1024 窄窗的实际观感；② 右侧进度栏拖拽调宽在真实指针设备上的手感（自动化只覆盖 pointer 事件与键盘 / 持久化）。"
+    ],
+    "paragraphs": [
+      "会话输入区从「文本框上沿一排图标 + 独立语音按钮」收成一层圆角框：正文在上，工具与发送在下方的动作行里，视觉对齐 Codex / ChatGPT 的单输入框。表情 / 图片 / 文件 / 语音收进左侧圆形「+」菜单，当前模型名挪到动作行右侧（未绑定时就地提示、点它去模型页），最右仍是圆形发送。输入框高度拖动、待发附件、快捷键等既有行为不动。",
+      "**输入区（packages/web）**",
+      "**验证**"
+    ]
+  },
+  {
     "version": "d.147.4.89.11",
     "date": "2026-11-15",
     "title": "导航回到侧栏、会话页去掉导出、右侧进度栏可调宽",

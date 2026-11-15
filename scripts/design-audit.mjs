@@ -522,6 +522,13 @@ async function goPage(cdp, sid, label) {
   }
 
   await waitFor(cdp, sid, `(() => { const m = document.querySelector('main'); return !!m && m.innerText.trim().length > 10; })()`, 15000, label);
+  // 开机动画（BootWave）盖住整页且不可交互：不等它退场，截图会抓到波纹、标题层级也会量成 0
+  // （2026-11-15 抓到过一次 team@1024：screenshot 只有 splash）。它最多 3s，等不到也不致命。
+  try {
+    await waitFor(cdp, sid, `!document.body.innerText.includes("点击任意处")`, 8000, "开机动画退场");
+  } catch {
+    /* 没有开机动画（热重载/已退场）时这里不阻塞 */
+  }
   await sleep(500);
 }
 
