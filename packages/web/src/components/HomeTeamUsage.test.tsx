@@ -51,7 +51,8 @@ beforeEach(() => {
 });
 
 describe("首页 Token 用量卡的「团队」页签", () => {
-  it("共享关闭：不采集不上传不请求，只给说明与开启入口", async () => {
+  it("手动关闭共享：不采集不上传不请求，只给说明与开启入口", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: false } });
     render(<HomeTeamUsage />);
     expect(screen.getByText(/「用量」共享未开启/)).toBeInTheDocument();
     expect(fetchTeamUsage).not.toHaveBeenCalled();
@@ -61,8 +62,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
     expect(useUiStore.getState().page).toBe("team");
   });
 
-  it("共享开启：先同步白名单摘要再拉排行，前 5 名只显示名与 token 数", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+  it("默认全开（同队成员）：先同步白名单摘要再拉排行，前 5 名只显示名与 token 数", async () => {
     render(<HomeTeamUsage />);
 
     await waitFor(() => expect(screen.getByText("鲍勃")).toBeInTheDocument());

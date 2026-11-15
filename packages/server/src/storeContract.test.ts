@@ -199,6 +199,41 @@ for (const f of factories) {
       store.touchUser("nope"); // 静默忽略
     });
 
+    it("可见名册：无团队只剩自己、同队互见去重、跨队不串（两实现同语义）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const c = store.createUser("carol", "h", "卡罗尔");
+      const d = store.createUser("dave", "h", "戴夫");
+      const ids = (viewerId: string) =>
+        store
+          .listTeamCollaborators(viewerId)
+          .map((m) => m.user.id)
+          .sort();
+
+      // 没有任何团队：只看到自己（不再回全站名册）
+      expect(ids(a.id)).toEqual([a.id]);
+      expect(ids(d.id)).toEqual([d.id]);
+
+      const t1 = store.createWorkspaceTeam(a.id, { name: "一起", goal: "" }).team.id;
+      store.addWorkspaceMember(t1, a.id, "bob");
+      const t2 = store.createWorkspaceTeam(c.id, { name: "另一队", goal: "" }).team.id;
+      expect(t2).toBeTruthy();
+
+      expect(ids(a.id)).toEqual([a.id, b.id].sort());
+      expect(ids(b.id)).toEqual([a.id, b.id].sort());
+      expect(ids(c.id)).toEqual([c.id]);
+      expect(ids(d.id)).toEqual([d.id]);
+
+      // 再共享一个团队也不重复（去重）
+      const t3 = store.createWorkspaceTeam(a.id, { name: "第二个共同团队", goal: "" }).team.id;
+      store.addWorkspaceMember(t3, a.id, "bob");
+      expect(ids(a.id)).toEqual([a.id, b.id].sort());
+
+      // 排序：最近活跃倒序、null 最后、同值按显示名（与 roster 口径一致）
+      store.touchUser(b.id);
+      expect(store.listTeamCollaborators(a.id).map((m) => m.user.id)).toEqual([b.id, a.id]);
+    });
+
     it("团队动向：(actorId, sourceId) 幂等、倒序、游标、actor 过滤与清空", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
@@ -219,6 +254,10 @@ for (const f of factories) {
 
       expect(store.listTeamActivities().map((x) => x.sourceId)).toEqual(["task:2", "task:1", "task:1"]);
       expect(store.listTeamActivities({ actorId: b.id })).toHaveLength(1);
+      // 可见范围进过滤阶段：actorIds 与 actorId/limit 组合，空数组直接空结果
+      expect(store.listTeamActivities({ actorIds: [b.id] }).map((x) => x.actorId)).toEqual([b.id]);
+      expect(store.listTeamActivities({ actorIds: [b.id], limit: 1 })).toHaveLength(1);
+      expect(store.listTeamActivities({ actorIds: [] })).toEqual([]);
       expect(
         store.listTeamActivities({ before: "2026-11-02T00:00:00.000Z" }).map((x) => x.sourceId),
       ).toEqual(["task:1", "task:1"]);
@@ -334,6 +373,15 @@ for (const f of factories) {
       // 区间是闭区间：只取 11-02 时 11-01 不在其中
       expect(store.listTeamUsage({ from: "2026-11-02", to: "2026-11-02" })).toHaveLength(2);
       expect(store.listTeamUsage({ from: "2026-10-01", to: "2026-10-31" })).toEqual([]);
+      // 可见范围进查询阶段：actorIds 过滤 + 空数组直接空结果
+      expect(
+        store
+          .listTeamUsage({ from: "2026-11-01", to: "2026-11-02", actorIds: [b.id] })
+          .map((r) => r.actorId),
+      ).toEqual([b.id]);
+      expect(store.listTeamUsage({ from: "2026-11-01", to: "2026-11-02", actorIds: [] })).toEqual(
+        [],
+      );
       expect(() =>
         store.upsertTeamUsage("nope", { ...base, tokens: 1 }),
       ).toThrow("user not found");

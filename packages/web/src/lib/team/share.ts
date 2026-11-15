@@ -12,7 +12,8 @@ import { agendaBucket, type AgendaBucket } from "../agendaBucket.js";
  * 团队共享设置与本机摘要采集（设计 §7）。
  *
  * 三条边界：
- * - 默认全关，用户逐类开启；
+ * - 默认对**同队成员**共享白名单摘要（任务 / 日程 / 用量三类，可逐类关闭）；
+ *   名册、动向、用量排行都只在同队成员之间可见（服务端按队收口）；
  * - 只上报白名单字段（标题/状态/时间），正文、提示词、工具参数、
  *   任务结果、日程证据与发送人一律不出本机；
  * - `sourceId` 由来源与更新时刻确定性生成，重复同步按幂等键跳过。
@@ -26,7 +27,7 @@ import { agendaBucket, type AgendaBucket } from "../agendaBucket.js";
  * 任务动向的标题：**固定占位词**，不得携带任何任务内容。
  *
  * 本站点原有实现直接发 `task.title`，而那个标题是从提示词首行裁出来的，
- * 等于把用户的问题交给全站同事（违反 HANDOFF「提示词一律不出本机」）。
+ * 等于把用户的问题交给同队同事（违反 HANDOFF「提示词一律不出本机」）。
  */
 export const TASK_ACTIVITY_TITLE = "任务";
 
@@ -43,7 +44,9 @@ export const TEAM_UPLOAD_LIMIT = 50;
 const PER_SOURCE_LIMIT = { tasks: 20, agenda: 30 } as const;
 
 /**
- * 共享开关：任务 / 日程 / 用量三类（②-3 新增 `usage`，默认关）。
+ * 共享开关：任务 / 日程 / 用量三类（②-3 新增 `usage`）。
+ * **默认全开**：加入团队即默认与同队成员共享这三类白名单摘要，可逐类手动关闭；
+ * 提示词、对话正文与工具参数始终不出本机。
  * 旧版本存过的 `staff` 字段读回时直接丢弃——团队页只保留真实成员的动向。
  */
 export interface TeamShareSettings {
@@ -71,13 +74,22 @@ export interface TeamShareSettings {
 }
 
 export const DEFAULT_TEAM_SHARE: TeamShareSettings = {
-  tasks: false,
-  agenda: false,
-  usage: false,
+  tasks: true,
+  agenda: true,
+  usage: true,
   usageClearedAt: null,
   activitiesClearedAt: null,
   lastSyncAt: null,
 };
+
+/**
+ * 开关字段读取：缺失（旧版本没有这个字段）时回落到当前默认值，
+ * 显式存成 `true` 才算开；其它脏值一律按关处理（不因为坏数据擅自共享）。
+ */
+function readShareFlag(raw: unknown, fallback: boolean): boolean {
+  if (raw === undefined) return fallback;
+  return raw === true;
+}
 
 /** 水位统一解析：正有限数 → 取整毫秒；其它（含 0/NaN/字符串）→ null。 */
 function normalizeWatermark(raw: unknown): number | null {
@@ -88,9 +100,9 @@ export function normalizeTeamShareSettings(raw: unknown): TeamShareSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_TEAM_SHARE };
   const o = raw as Record<string, unknown>;
   return {
-    tasks: o.tasks === true,
-    agenda: o.agenda === true,
-    usage: o.usage === true,
+    tasks: readShareFlag(o.tasks, DEFAULT_TEAM_SHARE.tasks),
+    agenda: readShareFlag(o.agenda, DEFAULT_TEAM_SHARE.agenda),
+    usage: readShareFlag(o.usage, DEFAULT_TEAM_SHARE.usage),
     usageClearedAt: normalizeWatermark(o.usageClearedAt),
     activitiesClearedAt: normalizeWatermark(o.activitiesClearedAt),
     lastSyncAt:
@@ -116,8 +128,7 @@ function persistTeamShareSettings(
  *
  * 共享开关和清除水位都是**这个人的决定**，不是这台机器的：同一台电脑换账号登录时
  * 如果沿用上一个人的设置，新账号会在从未同意的情况下把本机任务、日程、用量
- * 上报给全站团队（等于绕过「默认全关」这条隐私红线）；上一个人的水位对新账号
- * 也没有意义（会莫名吞掉新账号自己的摘要）。
+ * 上报给同队成员；上一个人的水位对新账号也没有意义（会莫名吞掉新账号自己的摘要）。
  */
 export const TEAM_SHARE_OWNER_KEY = "heming.team.share.owner.v1";
 
@@ -133,8 +144,8 @@ export function readTeamShareOwner(storage: StorageLike = createDefaultStorage()
  * 三种情形：
  * - 首次绑定（旧版本没有归属键）：**认领**现有设置而不是清空——老用户升级后开关不丢；
  * - 同一账号：no-op（每次渲染都调用也不会写盘）；
- * - 换账号：清回默认全关并落盘，水位一起清空，同时把内存里的 store 同步过来
- *   （TeamPage / HomeTeamUsage 读的是 store，只改 localStorage 会等到刷新才生效）。
+ * - 换账号：清回默认设置（当前默认=三类全开）并落盘，水位一起清空，同时把内存里的
+ *   store 同步过来（TeamPage / HomeTeamUsage 读的是 store，只改 localStorage 会等到刷新才生效）。
  */
 export function bindTeamShareUser(
   userId: string,

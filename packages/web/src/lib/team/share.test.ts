@@ -56,18 +56,22 @@ function agenda(
 const ON: TeamShareSettings = { tasks: true, agenda: true, usage: true, usageClearedAt: null, activitiesClearedAt: null, lastSyncAt: null };
 
 describe("团队共享设置", () => {
-  it("默认全关（任务 / 日程 / 用量三类）", () => {
+  it("默认全开（任务 / 日程 / 用量三类对同队成员共享）", () => {
     expect(DEFAULT_TEAM_SHARE).toEqual({
-      tasks: false,
-      agenda: false,
-      usage: false,
+      tasks: true,
+      agenda: true,
+      usage: true,
       usageClearedAt: null,
       activitiesClearedAt: null,
       lastSyncAt: null,
     });
     expect(normalizeTeamShareSettings(null)).toEqual(DEFAULT_TEAM_SHARE);
-    // 用量是 ②-3 新增：旧配置里没有这个字段，读回必须是关（不能默认开）
-    expect(normalizeTeamShareSettings({ tasks: true })).toMatchObject({ usage: false });
+    // 旧配置里没有 usage 字段：读回跟随新的默认（开），而不是被旧口径钉死
+    expect(normalizeTeamShareSettings({ tasks: true })).toMatchObject({ usage: true });
+    // 用户显式关掉的类别必须保留
+    expect(
+      normalizeTeamShareSettings({ tasks: false, agenda: false, usage: false }),
+    ).toEqual({ ...DEFAULT_TEAM_SHARE, tasks: false, agenda: false, usage: false });
   });
 
   it("旧版本存过的 staff 字段读回时丢弃", () => {
@@ -82,10 +86,13 @@ describe("团队共享设置", () => {
     });
   });
 
-  it("坏字段一律回落为关闭", () => {
-    expect(normalizeTeamShareSettings({ tasks: "yes", agenda: 1, lastSyncAt: "x" })).toEqual(
-      DEFAULT_TEAM_SHARE,
-    );
+  it("坏字段按关处理，缺字段回落默认（全开）", () => {
+    expect(normalizeTeamShareSettings({ tasks: "yes", agenda: 1, lastSyncAt: "x" })).toMatchObject({
+      tasks: false,
+      agenda: false,
+      usage: true,
+      lastSyncAt: null,
+    });
     expect(normalizeTeamShareSettings({ usageClearedAt: -5 })).toMatchObject({ usageClearedAt: null });
   });
 });
@@ -99,9 +106,9 @@ describe("团队摘要采集", () => {
     expect(items.map((i) => i.kind).sort()).toEqual(["agenda", "task"]);
   });
 
-  it("关闭的来源不采集", () => {
+  it("手动关闭的来源不采集", () => {
     const items = collectTeamActivities(
-      { ...DEFAULT_TEAM_SHARE, agenda: true },
+      { ...DEFAULT_TEAM_SHARE, tasks: false },
       { tasks: [task({ id: "t1", updatedAt: 1_000 })], agenda: [agenda({ id: 1, dueTs: 2_000 })] },
     );
     expect(items).toHaveLength(1);
@@ -162,8 +169,10 @@ function usage(at: Date, over: Partial<UsageRecord> = {}): UsageRecord {
 }
 
 describe("团队用量采集（②-3）", () => {
-  it("默认关闭：不采集（关闭时不上传、不采集是隐私红线）", () => {
-    expect(collectTeamUsage(DEFAULT_TEAM_SHARE, [usage(NOW)], NOW)).toEqual([]);
+  it("关闭用量后不采集（关闭时不上传、不采集是隐私红线）", () => {
+    expect(
+      collectTeamUsage({ ...DEFAULT_TEAM_SHARE, usage: false }, [usage(NOW)], NOW),
+    ).toEqual([]);
   });
 
   it("只上报白名单字段：日期/模型/连接名/token/未上报轮数", () => {
@@ -290,7 +299,7 @@ describe("团队摘要采集：隐私与临期口径（d.113）", () => {
     );
     expect(items).toHaveLength(1);
     expect(items[0]!.title).toBe(TASK_ACTIVITY_TITLE);
-    // 旧实现把 task.title（= 提问首行裁剪）当标题上报，等于把提示词发给全站同事
+    // 旧实现把 task.title（= 提问首行裁剪）当标题上报，等于把提示词发给同队同事
     const wire = JSON.stringify(items[0]);
     expect(wire).not.toContain("不该上传的提示词");
     expect(wire).not.toContain("任务 t1");
@@ -439,7 +448,7 @@ describe("共享设置按账号隔离（隐私边界）", () => {
     expect(useTeamShareStore.getState().settings).toEqual(ON);
   });
 
-  it("换账号：开关回默认全关、水位清空、内存 store 同步（不能继承上一个人的同意）", () => {
+  it("换账号：回到默认设置（全开）、水位清空、内存 store 同步（不能继承上一个人的水位）", () => {
     const storage = fakeStorage();
     const mine: TeamShareSettings = {
       ...ON,

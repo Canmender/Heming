@@ -32,6 +32,26 @@ function activity(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * 建一个工作台团队并把给定用户名拉进去。
+ *
+ * 团队名册/动向/用量的可见范围现在是「同队成员」，所以凡是「a 要看见 b」的用例，
+ * 都必须先让两人真的同队——否则测的就是旧的全站口径。
+ */
+async function makeTeam(app: App, ownerToken: string, name: string, usernames: string[] = []) {
+  const created = await request(app).post("/api/teams").set(auth(ownerToken)).send({ name });
+  expect(created.status).toBe(201);
+  const teamId = created.body.team.id as string;
+  for (const username of usernames) {
+    const added = await request(app)
+      .post(`/api/teams/${teamId}/members`)
+      .set(auth(ownerToken))
+      .send({ username });
+    expect(added.status).toBe(200);
+  }
+  return teamId;
+}
+
 describe("团队名册与在线状态", () => {
   let app: App;
   beforeEach(() => {
@@ -40,16 +60,35 @@ describe("团队名册与在线状态", () => {
   });
   afterEach(() => presence.reset());
 
-  it("全站一个团队：所有用户都在名册里", async () => {
+  it("没有团队时名册只剩自己：不再把其他注册用户当成队员", async () => {
     const a = await register(app, "alice", "爱丽丝");
-    const b = await register(app, "bob", "鲍勃");
+    await register(app, "bob", "鲍勃");
+    await register(app, "carol", "卡罗尔");
+
     const res = await request(app).get("/api/team").set(auth(a.token));
     expect(res.status).toBe(200);
-    expect(res.body.members.map((m: { user: { id: string } }) => m.user.id).sort()).toEqual(
-      [a.user.id, b.user.id].sort(),
-    );
+    expect(res.body.members.map((m: { user: { id: string } }) => m.user.id)).toEqual([a.user.id]);
     expect(res.body.onlineCount).toBe(0);
     expect(res.body.members.every((m: { online: boolean }) => m.online === false)).toBe(true);
+  });
+
+  it("同队成员互相可见；跨队不串；无队只看到自己", async () => {
+    const a = await register(app, "alice", "爱丽丝");
+    const b = await register(app, "bob", "鲍勃");
+    const c = await register(app, "carol", "卡罗尔");
+    const d = await register(app, "dave", "戴夫");
+
+    await makeTeam(app, a.token, "一起", ["bob"]); // A、B 同队
+    await makeTeam(app, c.token, "另一队", []); // C 自己一队
+
+    const ids = async (token: string) =>
+      (await request(app).get("/api/team").set(auth(token))).body.members
+        .map((m: { user: { id: string } }) => m.user.id)
+        .sort();
+    expect(await ids(a.token)).toEqual([a.user.id, b.user.id].sort());
+    expect(await ids(b.token)).toEqual([a.user.id, b.user.id].sort());
+    expect(await ids(c.token)).toEqual([c.user.id]);
+    expect(await ids(d.token)).toEqual([d.user.id]);
   });
 
   it("登录会推进最近活跃时间", async () => {
@@ -62,14 +101,21 @@ describe("团队名册与在线状态", () => {
     expect(Number.isFinite(Date.parse(seenAt))).toBe(true);
   });
 
-  it("presence 登记后 /api/team 标记在线并按在线优先排序", async () => {
+  it("presence 登记后 /api/team 标记在线并按在线优先排序（只看同队）", async () => {
     const a = await register(app, "alice", "爱丽丝");
     const b = await register(app, "bob", "鲍勃");
+    const outsider = await register(app, "carol", "卡罗尔");
+    await makeTeam(app, a.token, "一起", ["bob"]);
     presence.online(b.user.id);
+    presence.online(outsider.user.id); // 不同队的人上线也不该出现在 A 的名册里
+
     const res = await request(app).get("/api/team").set(auth(a.token));
-    expect(res.body.onlineCount).toBe(1);
-    expect(res.body.members[0].user.id).toBe(b.user.id);
+    expect(res.body.members.map((m: { user: { id: string } }) => m.user.id)).toEqual([
+      b.user.id,
+      a.user.id,
+    ]);
     expect(res.body.members[0].online).toBe(true);
+    expect(res.body.onlineCount).toBe(1);
   });
 
   it("未鉴权 401", async () => {
@@ -407,6 +453,7 @@ describe("团队动向", () => {
 
   it("清空只删自己的动向", async () => {
     const b = await register(app, "bob", "鲍勃");
+    await makeTeam(app, token, "同队", ["bob"]); // 同队才互相可见（跨队动向不出现）
     await request(app)
       .post("/api/team/activities")
       .set(auth(token))
@@ -560,6 +607,7 @@ describe("团队用量（②-3）", () => {
 
   it("排行按 token 降序、只给聚合数与显示名；本人明细只含自己", async () => {
     const b = await register(app, "bob", "鲍勃");
+    await makeTeam(app, token, "同队", ["bob"]); // 排行只聚合同队成员
     await post([usage({ tokens: 100 })]);
     await post([usage({ tokens: 900, model: "claude-y" })], b.token);
     await post([usage({ tokens: null, unreported: 2 })], b.token);
@@ -649,6 +697,7 @@ describe("团队用量（②-3）", () => {
 
   it("清除我的用量：只删自己的行，返回 deleted，排行不再包含本人", async () => {
     const b = await register(app, "bob", "鲍勃");
+    await makeTeam(app, token, "同队", ["bob"]);
     await post([usage({ tokens: 100 }), usage({ date: "2026-11-01", tokens: 50 })]);
     await post([usage({ tokens: 900 })], b.token);
 
@@ -768,6 +817,105 @@ describe("动向时间口径（d.113）", () => {
       .query({ limit: 2, before: last.occurredAt, beforeId: last.id })
       .set(auth(token));
     expect(page2.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual(["t:0"]);
+  });
+});
+
+describe("可见范围收口：只在同队成员之间（d.54 口径变更）", () => {
+  let app: App;
+  let a: { token: string; user: { id: string; username: string } };
+  let b: { token: string; user: { id: string; username: string } };
+  let c: { token: string; user: { id: string; username: string } };
+  let d: { token: string; user: { id: string; username: string } };
+
+  beforeEach(async () => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    a = await register(app, "alice", "爱丽丝");
+    b = await register(app, "bob", "鲍勃");
+    c = await register(app, "carol", "卡罗尔");
+    d = await register(app, "dave", "戴夫");
+    await makeTeam(app, a.token, "一起", ["bob"]); // A、B 同队
+    await makeTeam(app, c.token, "另一队", []); // C 自己一队，与 A/B 无关
+  });
+  afterEach(() => presence.reset());
+
+  const postActivity = (token: string, item: Record<string, unknown>) =>
+    request(app).post("/api/team/activities").set(auth(token)).send({ items: [item] });
+
+  it("动向：跨队成员的动向不出现在我的流里，无队的人只能看到自己", async () => {
+    expect(
+      (await postActivity(a.token, activity({ sourceId: "task:a", title: "任务" }))).status,
+    ).toBe(201);
+    expect((await postActivity(b.token, activity({ sourceId: "task:b" }))).status).toBe(201);
+    expect((await postActivity(c.token, activity({ sourceId: "task:c" }))).status).toBe(201);
+    expect((await postActivity(d.token, activity({ sourceId: "task:d" }))).status).toBe(201);
+
+    const aView = await request(app).get("/api/team/activities").set(auth(a.token));
+    expect(aView.body.activities.map((x: { sourceId: string }) => x.sourceId).sort()).toEqual([
+      "task:a",
+      "task:b",
+    ]);
+    expect(await (async () => (await request(app).get("/api/team/activities").set(auth(d.token))).body.activities.map((x: { sourceId: string }) => x.sourceId))()).toEqual([
+      "task:d",
+    ]);    // C 的流里只有自己
+    const cView = await request(app).get("/api/team/activities").set(auth(c.token));
+    expect(cView.body.activities.map((x: { sourceId: string }) => x.sourceId)).toEqual(["task:c"]);
+  });
+
+  it("动向：查不可见 actorId 返回 200 空列表（不 404 泄漏存在性）", async () => {
+    await postActivity(c.token, activity({ sourceId: "task:c" }));
+    const probe = await request(app)
+      .get("/api/team/activities")
+      .query({ actorId: c.user.id })
+      .set(auth(a.token));
+    expect(probe.status).toBe(200);
+    expect(probe.body.activities).toEqual([]);
+    // 可见成员的 actorId 查询照常返回
+    await postActivity(a.token, activity({ sourceId: "task:a" }));
+    const mine = await request(app)
+      .get("/api/team/activities")
+      .query({ actorId: a.user.id })
+      .set(auth(a.token));
+    expect(mine.body.activities.map((x: { sourceId: string }) => x.sourceId)).toEqual(["task:a"]);
+  });
+
+  it("用量：排行只含同队成员，跨队/无队的人不进排行也不泄漏显示名", async () => {
+    const to = dayKeyUtc(new Date());
+    const usage = (tokens: number) => ({
+      date: to,
+      model: "gpt-x",
+      tokens,
+      unreported: 0,
+      connections: [] as string[],
+    });
+    for (const [token, tokens] of [
+      [a.token, 10],
+      [b.token, 900],
+      [c.token, 5000],
+      [d.token, 7000],
+    ] as const) {
+      const res = await request(app)
+        .post("/api/team/usage")
+        .set(auth(token))
+        .send({ items: [usage(tokens)] });
+      expect(res.status).toBe(200);
+    }
+
+    const view = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to })
+      .set(auth(a.token));
+    expect(view.status).toBe(200);
+    expect(view.body.ranking.map((r: { displayName: string }) => r.displayName)).toEqual([
+      "鲍勃",
+      "爱丽丝",
+    ]);
+    expect(view.body.rankingTotal).toBe(2); // 去重人数按可见集合算
+    // 跨队成员（卡罗尔/戴夫）的 token 与显示名都不应出现
+    expect(JSON.stringify(view.body)).not.toContain("卡罗尔");
+    expect(JSON.stringify(view.body)).not.toContain("戴夫");
+    expect(JSON.stringify(view.body)).not.toContain("5000");
+    expect(JSON.stringify(view.body)).not.toContain("7000");
   });
 });
 

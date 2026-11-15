@@ -308,7 +308,7 @@ export const uploadTeamUsage = (items: TeamUsageInput[], request?: ApiRequestOpt
     request,
   );
 
-/** 本人用量明细 + 全站排行；`to` 传本地今天（服务端不猜时区）。 */
+/** 本人用量明细 + 同队成员排行（没有团队时只有自己）；`to` 传本地今天（服务端不猜时区）。 */
 export const fetchTeamUsage = (
   opts: { range?: TeamUsageRange; to?: string } = {},
   request?: ApiRequestOptions,
@@ -328,7 +328,7 @@ export const clearMyTeamUsage = (request?: ApiRequestOptions) =>
  * 团队工作台（d.92 · 用户自建团队）
  * ══════════════════════════════════════════════════════════════════════
  *
- * 与上面「全站一个团队」的 TeamRoster/TeamActivity 是两层东西：
+ * 与上面「同队成员可见」的 TeamRoster/TeamActivity 是两层东西：
  * 这里是用户自己建的工作组（名字 / 目标 / 方案 / 任务 / 成员），权限判定只在
  * 服务端（是否成员 / 是否 owner）。智能体能力提供者 `team_*`（lib/capability/teamTools.ts）
  * 与 UI 走同一套 REST 封装，错误口径一致（ApiError，中文 message 原样上抛）。

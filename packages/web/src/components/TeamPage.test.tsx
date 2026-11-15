@@ -14,7 +14,8 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { useTokenUsageStore } from "../store/tokenUsage.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
-import { DEFAULT_TEAM_SHARE, useTeamShareStore } from "../lib/team/share.js";
+import { useTaskStore, type TaskRecord } from "../lib/tasks/store.js";
+import { DEFAULT_TEAM_SHARE, useTeamShareStore, type TeamShareSettings } from "../lib/team/share.js";
 
 // 只替换团队相关的 API：其余导出（getToken 等）必须保留真实实现，
 // 否则 auth store 初始化就会炸。
@@ -33,16 +34,38 @@ vi.mock("../lib/api.js", async (importOriginal) => {
 });
 
 /**
- * 团队页 ②-3：用量排行（默认只看本人，开启共享才上传/可见排行）与团队日程（只读摘要）。
+ * 团队页 ②-3：用量排行（默认与同队成员共享，可手动关闭）与团队日程（只读摘要）。
  *
  * 两个验收重点：
- * - 隐私：关闭共享时**不采集、不上传**，请求体里只有白名单字段；
+ * - 隐私：关闭共享时**不采集、不上传**，请求体里只有白名单字段；默认共享的也只是白名单摘要。
  * - 口径：排行按 token 降序，未上报单独展示（不是 0）。
  */
 
 const me = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const bob = { id: "u2", username: "bob", displayName: "鲍勃" };
 const nowIso = new Date().toISOString();
+
+/** 用户把三类共享都手动关掉（默认是全开）。 */
+const ALL_OFF: TeamShareSettings = {
+  ...DEFAULT_TEAM_SHARE,
+  tasks: false,
+  agenda: false,
+  usage: false,
+};
+
+/** 默认共享下用于验证「挂载即同步」的本机任务（只上白名单摘要，提示词不出本机）。 */
+const taskRecord: TaskRecord = {
+  id: "t1",
+  conversationId: "c1",
+  agentId: "a1",
+  agentName: "小鸣",
+  title: "整理周报",
+  prompt: "不该上传的提示词",
+  status: "running",
+  createdAt: Date.now() - 60_000,
+  updatedAt: Date.now(),
+  steps: [],
+};
 
 function member(user: typeof me, online = false) {
   return { user, lastSeenAt: nowIso, online };
@@ -119,7 +142,7 @@ beforeEach(() => {
 
 async function renderPage() {
   render(<TeamPage />);
-  // 页头副标题已精简（uiux3：只保留「全站一个团队」），改用成员名作为「数据已到位」信号。
+  // 页头副标题是「与你在同一团队的同事」，改用成员名作为「数据已到位」信号。
   await screen.findAllByText(/爱丽丝|鲍勃/);
 }
 
@@ -204,27 +227,15 @@ describe("团队视图页签（③-1 roving tabindex）", () => {
   });
 });
 
-describe("团队用量：默认关闭只看本人", () => {
-  it("默认关闭：不上传、不采集、不拉排行；用量区显示本机统计", async () => {
+describe("团队用量：默认与同队成员共享，可手动关闭", () => {
+  it("默认全开：三个开关勾选、挂载即上传白名单并拉排行", async () => {
     await renderPage();
-    // 三个开关默认关
-    expect(screen.getByLabelText("用量排行")).not.toBeChecked();
+    // 默认对同队成员共享三类白名单摘要
+    expect(screen.getByLabelText("任务摘要")).toBeChecked();
+    expect(screen.getByLabelText("日程摘要")).toBeChecked();
+    expect(screen.getByLabelText("用量排行")).toBeChecked();
 
-    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
-    expect(screen.getByText("本机用量（仅自己可见）")).toBeInTheDocument();
-    expect(screen.getByText(/不上传、不采集/)).toBeInTheDocument();
-    expect(screen.getAllByText(/700/).length).toBeGreaterThan(0); // 本机合计（明细也含同值）
-    expect(screen.getAllByText(/未上报 1 轮/).length).toBeGreaterThan(0);
-
-    // 隐私红线：关闭时没有任何用量请求（GET 也不发，排行数据不进内存）
-    expect(uploadTeamUsage).not.toHaveBeenCalled();
-    expect(fetchTeamUsage).not.toHaveBeenCalled();
-  });
-
-  it("开启共享后：只上传白名单字段并展示排行（按 token 降序）", async () => {
-    await renderPage();
-    fireEvent.click(screen.getByLabelText("用量排行"));
-
+    // 默认共享：挂载后立即同步一次白名单摘要，再拉排行（不必先去团队页）
     await waitFor(() => expect(uploadTeamUsage).toHaveBeenCalledTimes(1));
     const items = vi.mocked(uploadTeamUsage).mock.calls[0]![0];
     expect(items).toEqual([
@@ -251,7 +262,37 @@ describe("团队用量：默认关闭只看本人", () => {
     expect(ranking).not.toHaveTextContent("gpt-x");
   });
 
+  it("手动关掉用量共享：不上传、不采集、不拉排行；用量区显示本机统计", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
+    await renderPage();
+    expect(screen.getByLabelText("用量排行")).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    expect(screen.getByText("本机用量（仅自己可见）")).toBeInTheDocument();
+    expect(screen.getByText(/不上传、不采集/)).toBeInTheDocument();
+    expect(screen.getAllByText(/700/).length).toBeGreaterThan(0); // 本机合计（明细也含同值）
+    expect(screen.getAllByText(/未上报 1 轮/).length).toBeGreaterThan(0);
+
+    // 隐私红线：关闭时没有任何用量请求（GET 也不发，排行数据不进内存）
+    expect(uploadTeamUsage).not.toHaveBeenCalled();
+    expect(fetchTeamUsage).not.toHaveBeenCalled();
+  });
+
+  it("手动关掉后再开启：只上传白名单字段并展示排行（按 token 降序）", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
+    await renderPage();
+    fireEvent.click(screen.getByLabelText("用量排行"));
+
+    await waitFor(() => expect(uploadTeamUsage).toHaveBeenCalledTimes(1));
+    expect(fetchTeamUsage).toHaveBeenCalledWith({ range: "7d", to: expect.any(String) });
+
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    const ranking = await screen.findByRole("region", { name: "团队用量排行" });
+    expect(within(ranking).getAllByRole("listitem")[0]).toHaveTextContent("鲍勃");
+  });
+
   it("排行空态：没有成员共享时给可解释文案", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     vi.mocked(fetchTeamUsage).mockResolvedValue(usageResponse({ ranking: [] }));
     await renderPage();
     fireEvent.click(screen.getByLabelText("用量排行"));
@@ -260,6 +301,7 @@ describe("团队用量：默认关闭只看本人", () => {
   });
 
   it("排行被截断时说明总人数（P2-6：不再静默只给前 100）", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     vi.mocked(fetchTeamUsage).mockResolvedValue(
       usageResponse({ rankingTotal: 130, rankingTruncated: true }),
     );
@@ -270,6 +312,7 @@ describe("团队用量：默认关闭只看本人", () => {
   });
 
   it("区间切换会带 range 重新拉取", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     await renderPage();
     fireEvent.click(screen.getByLabelText("用量排行"));
     await waitFor(() => expect(fetchTeamUsage).toHaveBeenCalledTimes(1));
@@ -313,7 +356,6 @@ describe("团队用量：清除已上传记录", () => {
       );
 
     await renderPage();
-    fireEvent.click(screen.getByLabelText("用量排行"));
     await waitFor(() => expect(fetchTeamUsage).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
 
@@ -340,7 +382,6 @@ describe("团队用量：清除已上传记录", () => {
 
 describe("团队协作口径（d.88）", () => {
   it("关闭某一类共享：给一次性说明「关≠撤回」，原有动向仍然可见", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, tasks: true } });
     vi.mocked(fetchTeamActivities).mockResolvedValue({
       activities: [activity({ id: "a1", title: "整理周报", kind: "task", status: "done" })],
     });
@@ -352,16 +393,34 @@ describe("团队协作口径（d.88）", () => {
     // 关掉「任务摘要」共享 → 说明关≠撤回
     fireEvent.click(screen.getByLabelText("任务摘要"));
     expect(await screen.findByText(/已停止上报任务摘要/)).toBeInTheDocument();
-    expect(screen.getByText(/不撤回已上传的内容/)).toBeInTheDocument();
+    expect(screen.getByText(/已上传的内容需要手动清除/)).toBeInTheDocument();
     // 已上传的动向仍显示（关闭只停未来上报）
     expect(screen.getAllByText("任务 · 已完成").length).toBeGreaterThan(0);
   });
 
-  it("团队只有自己时，说明新同事账号从哪来", async () => {
+  it("默认全开：挂载即同步白名单摘要；手动关掉两类后不再上传", async () => {
+    useTaskStore.setState({ tasks: [taskRecord] });
+    await renderPage();
+    await waitFor(() => expect(uploadTeamActivities).toHaveBeenCalledTimes(1));
+    const items = vi.mocked(uploadTeamActivities).mock.calls[0]![0];
+    expect(items.map((i) => i.kind)).toContain("task");
+    // 白名单：提示词/正文/工具参数都不在请求体里
+    expect(JSON.stringify(items)).not.toMatch(/prompt|content|args|result/);
+
+    // 手动关掉任务与日程共享 → 不再产生上传（挂载那次之后计数不变）
+    fireEvent.click(screen.getByLabelText("任务摘要"));
+    fireEvent.click(screen.getByLabelText("日程摘要"));
+    expect(screen.getByLabelText("任务摘要")).not.toBeChecked();
+    expect(screen.getByLabelText("日程摘要")).not.toBeChecked();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(uploadTeamActivities).toHaveBeenCalledTimes(1);
+  });
+
+  it("团队只有自己时，说明怎么加入团队", async () => {
     vi.mocked(fetchTeam).mockResolvedValue({ members: [member(me, true)], onlineCount: 1 });
     await renderPage();
-    expect(screen.getByText(/团队是全站名册/)).toBeInTheDocument();
-    expect(screen.getByText(/账号由管理员在服务端创建/)).toBeInTheDocument();
+    expect(screen.getByText(/你还没加入团队/)).toBeInTheDocument();
+    expect(screen.getByText(/让队长把你拉进来/)).toBeInTheDocument();
   });
 
   it("名册有多人时不再显示「只有你」的说明", async () => {
@@ -374,7 +433,6 @@ describe("团队协作口径（d.88）", () => {
   });
 
   it("共享已开启但没数据时，空态说的是「等摘要」而不是「去开启共享」", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, tasks: true } });
     vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
     await renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "动向" }));
@@ -384,7 +442,9 @@ describe("团队协作口径（d.88）", () => {
   });
 
   it("只开用量排行时，动向空态仍提示去开启任务/日程共享（不误称已开启共享）", async () => {
-    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    useTeamShareStore.setState({
+      settings: { ...DEFAULT_TEAM_SHARE, tasks: false, agenda: false, usage: true },
+    });
     vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
     await renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "动向" }));
@@ -395,6 +455,7 @@ describe("团队协作口径（d.88）", () => {
   });
 
   it("成员详情给出「近 N 天动向条数」与用量口径（未共享时说清）", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: false } });
     await renderPage();
     fireEvent.click(screen.getByRole("button", { name: /鲍勃/ }));
     expect(await screen.findByText(/近 7 天动向 0 条/)).toBeInTheDocument();
@@ -428,6 +489,7 @@ describe("首页动向条目 → 定位到那一条（d.90）", () => {
 
 describe("团队日程：只读摘要", () => {
   it("未连接信息中枢：空态给「去连接」出口，且不自动拉起、不上传", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     await renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "团队日程" }));
     expect(screen.getByText("还没有共享的日程")).toBeInTheDocument();
@@ -441,6 +503,7 @@ describe("团队日程：只读摘要", () => {
   });
 
   it("有日程摘要时按时间列出，只读（不新增任何上传）", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     vi.mocked(fetchTeamActivities).mockResolvedValue({
       activities: [
         activity({ id: "a1", title: "项目周会", occurredAt: "2026-11-02T09:00:00.000Z" }),
@@ -500,7 +563,7 @@ describe("团队页布局（d.62-B）", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("团队");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("全站一个团队");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("与你在同一团队的同事");
   });
 });
 
@@ -596,6 +659,7 @@ describe("d.109 撤回口径与共享说明", () => {
   });
 
   it("共享 0/3 时页面有显式说明（不再只藏在 hover title 里）", async () => {
+    useTeamShareStore.setState({ settings: { ...ALL_OFF } });
     await renderPage();
     expect(screen.getByText(/当前未共享任何内容/)).toBeInTheDocument();
   });

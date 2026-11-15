@@ -580,7 +580,7 @@ export function TeamPage() {
     <PageShell
       scroll={false}
       title="团队"
-      subtitle="全站一个团队"
+      subtitle="与你在同一团队的同事"
       actions={
         <span
           className="ui-chip"
@@ -652,7 +652,7 @@ export function TeamPage() {
               <span className="ui-caption">
                 {share.lastSyncAt
                   ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
-                  : "尚未同步"}
+                  : "正在首次同步…"}
               </span>
             )}
             <Button
@@ -670,11 +670,14 @@ export function TeamPage() {
               清除共享记录
             </Button>
           </div>
-          {/* 一句说清「上报什么 / 关掉不等于撤回」，空团队时再补一句名册来源。 */}
+          {/* 一句说清「默认共享什么 / 关掉不等于撤回 / 什么永远不出本机」。 */}
           <p className="mt-1 ui-body-sm text-muted">
-            只上报标题与状态摘要，不含对话与工具参数；关闭只停止上报，不撤回已上传的内容。
+            默认与团队成员共享任务 / 日程摘要与你的用量；关闭只停止后续上传，已上传的内容需要手动清除。
+            提示词与对话正文始终不出本机。
             {shareCount === 0 ? " 当前未共享任何内容，团队看不到你的任务、日程或用量。" : null}
-            {members.length <= 1 ? " 团队是全站名册，新同事账号由管理员在服务端创建，登录后自动出现。" : null}
+            {members.length <= 1
+              ? " 你还没加入团队。到「工作台」新建团队或让队长把你拉进来后，队友会出现在这里。"
+              : null}
           </p>
           {shareNotice && (
             <p role="status" className="mt-1 ui-body-sm text-warn">
@@ -750,7 +753,7 @@ export function TeamPage() {
                     title={members.length === 0 ? "还没有其他成员" : "没有符合条件的成员"}
                     desc={
                       members.length === 0
-                        ? "团队是全站名册，新同事账号由管理员在服务端创建，登录后自动出现。"
+                        ? "你还没加入团队。到「工作台」新建团队或让队长把你拉进来后，队友会出现在这里。"
                         : "换个关键词，或关掉「仅看在线」。"
                     }
                   />
@@ -1153,7 +1156,7 @@ export function TeamPage() {
                 <section className="mt-3" aria-label="本机用量">
                   <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
                   <p className="mt-1 ui-body-sm leading-5 text-muted">
-                    「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
+                    「用量」共享未开启：不上传、不采集，团队排行也不会显示。开启后会同步近 30 天的
                     聚合摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
                   </p>
                   <div className="mt-2 flex flex-wrap items-baseline gap-4 text-ui-sm">

@@ -406,10 +406,12 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
   });
 
-  // —— d.54 团队系统：单团队名册 + 动向摘要（全站登录可见）——
+  // —— d.54 团队系统：名册 + 动向摘要（只在「同队成员」之间可见）——
+  // 口径变更（用户反馈）：以前是「全站一个团队」，没建团队的人也能看到所有注册用户。
+  // 现在可见集合 = 自己 + 与自己至少同属一个工作台团队的人（`listTeamCollaborators`）。
 
-  app.get("/api/team", authOnly, (_req, res) => {
-    const members = store.listTeamMembers().map((m) => ({
+  app.get("/api/team", authOnly, (req, res) => {
+    const members = store.listTeamCollaborators(userId(req)).map((m) => ({
       ...m,
       online: presence.isOnline(m.user.id),
     }));
@@ -495,11 +497,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "beforeId 需要配合 before 使用" });
       return;
     }
+    // 可见范围：同队成员。actorId 若指定了不可见的人，直接给空列表——
+    // 不返回 404/403，否则等于告诉对方「这个 user id 存在」。
+    const collaborators = store.listTeamCollaborators(userId(req));
+    const visibleActorIds = collaborators.map((m) => m.user.id);
+    if (actorId !== undefined && !visibleActorIds.includes(actorId)) {
+      res.json({ activities: [] });
+      return;
+    }
     // T2-02：收紧写侧之前入库的 task 行，title 仍是用户提问首行（隐私红线残留）。
     // db.ts 的迁移已清存量，这里再按 kind 强制投影一次兜底——旧库恢复、第三方导入、
     // 迁移没跑到的新建库都不该让 API 吐出提示词。与 web `labels.ts` 的 activityTitle() 同口径。
     const activities = store
-      .listTeamActivities({ limit, before, beforeId, actorId })
+      .listTeamActivities({ limit, before, beforeId, actorId, actorIds: visibleActorIds })
       .map((a) => (a.kind === "task" ? { ...a, title: TASK_ACTIVITY_TITLE } : a));
     res.json({ activities });
   });
@@ -576,10 +586,11 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   });
 
   /**
-   * 本人明细 + 全站排行。
+   * 本人明细 + 同队排行。
    *
    * `range` 只接受 7d/30d；`to` 可选（客户端本地今天）——不传则用服务端 UTC 今天。
    * 排行只回聚合数与显示名，模型/连接名等明细只在 `self` 里出现。
+   * 可见范围 = 同队成员：陌生人的用量行不参与聚合，`names` 也不查全站（否则泄漏显示名）。
    */
   app.get("/api/team/usage", authOnly, (req, res) => {
     const rawRange = typeof req.query.range === "string" ? req.query.range : "7d";
@@ -594,8 +605,9 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     const bounds = usageRangeBounds(parsedRange.data, rawTo ?? dayKeyUtc());
-    const rows = store.listTeamUsage(bounds);
-    const names = new Map(store.listTeamMembers().map((m) => [m.user.id, m.user.displayName]));
+    const collaborators = store.listTeamCollaborators(userId(req));
+    const rows = store.listTeamUsage({ ...bounds, actorIds: collaborators.map((m) => m.user.id) });
+    const names = new Map(collaborators.map((m) => [m.user.id, m.user.displayName]));
     res.json(
       summarizeTeamUsage(rows, {
         viewerId: userId(req),

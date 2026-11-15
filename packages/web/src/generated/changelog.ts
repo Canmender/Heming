@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.152.4.95.11",
+    "date": "2026-11-15",
+    "title": "团队页改为同队可见 + 默认共享",
+    "bullets": [
+      "**可见性**：`GET /api/team`、`/api/team/activities`、`/api/team/usage` 只返回「自己 + 至少同属一个工作台团队的成员」；没有任何团队时只有自己（单人视图），不再把同一实例的其他注册用户当成同事。",
+      "**默认共享**：任务摘要 / 日程摘要 / 用量三类默认对同队成员开启，团队页仍可逐类关闭；关闭只停止后续上报，**关闭 ≠ 撤回**，已上传内容要显式「清除共享记录 / 清除我的用量」。",
+      "**隐私边界未变**：只上行白名单摘要（动向 `kind/title/detail/status/sourceId/occurredAt`，用量 `date/model/tokens/unreported/connections`），任务摘要标题恒为固定占位「任务」，提示词、对话正文、工具参数、任务结果、附件与文件名永不出本机。",
+      "文档口径同步：`docs/HANDOFF.md` 两节边界、`docs/superpowers/specs/2026-11-02-team-system-design.md` 文末「2026-11-15 口径修订（d.152）」，以及 `lib/capability/teamTools.ts` / `lib/api.ts` 的注释与工具描述。"
+    ],
+    "paragraphs": [
+      "团队可见性从「全站可见」收口到「同队成员」，共享默认从全关改为全开；隐私边界不变。"
+    ]
+  },
+  {
     "version": "d.151.4.95.11",
     "date": "2026-11-15",
     "title": "智能体能力调优：先有度量，再改工具层",

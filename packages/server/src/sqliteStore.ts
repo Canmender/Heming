@@ -699,6 +699,40 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }>;
       return rows.map((r) => ({ user: rowToUser(r), lastSeenAt: r.last_seen_at ?? null }));
     },
+    listTeamCollaborators(viewerId) {
+      // viewer 自己 + 与之共享至少一个工作台团队的人（跨队不串、去重）。
+      // 排序放在 JS 里用与内存实现逐字相同的比较器：SQLite 的 COLLATE NOCASE 与
+      // JS 的 localeCompare("zh-Hans-CN") 对中文显示名不等价，两 Store 必须同序。
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT u.id, u.username, u.display_name, u.avatar, u.last_seen_at
+             FROM users u
+            WHERE u.id = ?
+               OR u.id IN (
+                    SELECT m2.user_id
+                      FROM team_members m1
+                      JOIN team_members m2 ON m2.team_id = m1.team_id
+                     WHERE m1.user_id = ?
+                  )`,
+        )
+        .all(viewerId, viewerId) as Array<{
+        id: string;
+        username: string;
+        display_name: string;
+        avatar: string | null;
+        last_seen_at: string | null;
+      }>;
+      return rows
+        .map((r) => ({ user: rowToUser(r), lastSeenAt: r.last_seen_at ?? null }))
+        .sort((a, b) => {
+          if (a.lastSeenAt !== b.lastSeenAt) {
+            if (a.lastSeenAt === null) return 1;
+            if (b.lastSeenAt === null) return -1;
+            return a.lastSeenAt < b.lastSeenAt ? 1 : -1;
+          }
+          return a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN");
+        });
+    },
     addTeamActivity(actorId, input: TeamActivityInput) {
       mustUser(actorId);
       const now = new Date().toISOString();
@@ -754,6 +788,12 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       if (opts.actorId) {
         where.push("actor_id = ?");
         params.push(opts.actorId);
+      }
+      // 可见范围进 SQL：不能先 LIMIT 再过滤，否则不可见成员的行会占掉名额。
+      if (opts.actorIds) {
+        if (opts.actorIds.length === 0) return [];
+        where.push(`actor_id IN (${opts.actorIds.map(() => "?").join(", ")})`);
+        params.push(...opts.actorIds);
       }
       const sql = `SELECT id, actor_id, kind, title, detail, status, source_id, occurred_at, created_at
                    FROM team_activities
@@ -832,14 +872,18 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         new Date().toISOString(),
       );
     },
-    listTeamUsage({ from, to }) {
-      const rows = db
-        .prepare(
-          `SELECT actor_id, date, model, tokens, unreported, connections
-           FROM team_usage WHERE date >= ? AND date <= ?
-           ORDER BY date ASC, actor_id ASC, model ASC`,
-        )
-        .all(from, to) as Array<{
+    listTeamUsage({ from, to, actorIds }) {
+      // 可见范围进 SQL（同 listTeamActivities）：先过滤再排序，不可见成员的数据不参与聚合。
+      let sql = `SELECT actor_id, date, model, tokens, unreported, connections
+           FROM team_usage WHERE date >= ? AND date <= ?`;
+      const params: Array<string | number> = [from, to];
+      if (actorIds) {
+        if (actorIds.length === 0) return [];
+        sql += ` AND actor_id IN (${actorIds.map(() => "?").join(", ")})`;
+        params.push(...actorIds);
+      }
+      sql += " ORDER BY date ASC, actor_id ASC, model ASC";
+      const rows = db.prepare(sql).all(...params) as Array<{
         actor_id: string;
         date: string;
         model: string;

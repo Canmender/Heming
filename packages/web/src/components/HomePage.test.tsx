@@ -11,13 +11,22 @@ import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage
 import { ONBOARDING_KEY, useOnboardingStore } from "../lib/onboarding.js";
 import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
 import { resetPluginHomeCards } from "../lib/plugins/homeCards.js";
-import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
+import { fetchTeam, fetchTeamActivities, fetchTeamUsage, uploadTeamUsage } from "../lib/api.js";
+import { DEFAULT_TEAM_SHARE, useTeamShareStore } from "../lib/team/share.js";
 import { latestUserUpdates } from "../lib/changelog.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
 vi.mock("../lib/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api.js")>();
-  return { ...actual, fetchTeam: vi.fn(), fetchTeamActivities: vi.fn() };
+  return {
+    ...actual,
+    fetchTeam: vi.fn(),
+    fetchTeamActivities: vi.fn(),
+    // d.152：共享默认全开，首页「Token 用量 → 团队」页签会先同步再拉排行；
+    // 这两个口子必须一起桩掉，否则会走裸 fetch（本文件的 fetch 只服务 /api/health）。
+    fetchTeamUsage: vi.fn(),
+    uploadTeamUsage: vi.fn(),
+  };
 });
 
 const user: User = { id: "u1", username: "alice", displayName: "测试阿丽" };
@@ -106,6 +115,18 @@ describe("HomePage", () => {
     vi.restoreAllMocks();
     vi.mocked(fetchTeam).mockReset();
     vi.mocked(fetchTeamActivities).mockReset();
+    vi.mocked(fetchTeamUsage).mockReset();
+    vi.mocked(uploadTeamUsage).mockReset();
+    // d.152：共享默认全开。每个用例都从这里出发，避免上一个用例手动关掉后漏到下个用例。
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
+    vi.mocked(uploadTeamUsage).mockResolvedValue({ written: 0, stored: 0 });
+    vi.mocked(fetchTeamUsage).mockResolvedValue({
+      range: "30d",
+      from: "2026-11-01",
+      to: "2026-11-15",
+      self: { total: 0, unreported: 0, byModel: [], byDay: [] },
+      ranking: [],
+    });
     useTokenUsageStore.getState().reset();
     // UX-A 首跑引导：默认「无连接 + 没关过」；每个用例显式决定，避免状态泄漏
     localStorage.removeItem(ONBOARDING_KEY);
@@ -311,16 +332,41 @@ describe("HomePage", () => {
     expect(useUiStore.getState().page).toBe("model");
   });
 
-  it("Token 用量卡「团队」页签：共享关闭时给开启入口，不拉排行", async () => {
+  it("Token 用量卡「团队」页签：默认共享全开，直接拉团队排行", async () => {
     useTokenUsageStore.getState().record("claude-sonnet-5", 700, now.toISOString());
+    vi.mocked(fetchTeamUsage).mockResolvedValue({
+      range: "30d",
+      from: "2026-11-01",
+      to: "2026-11-15",
+      self: { total: 700, unreported: 0, byModel: [], byDay: [] },
+      ranking: [{ userId: "u2", displayName: "鲍勃", tokens: 1200, unreported: 0, days: 2 }],
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "团队" }));
+    // d.152：团队内默认共享用量，卡片不再要求先「去团队页开启」
+    await waitFor(() => expect(screen.getByText(/近 30 天 · 团队排行/)).toBeInTheDocument());
+    // 「鲍勃」在首页别处也会出现（团队动向行），这里只看排行卡内部
+    const usageCard = screen.getByText(/近 30 天 · 团队排行/).closest(".ui-card") as HTMLElement;
+    expect(within(usageCard).getByText("鲍勃")).toBeInTheDocument();
+    expect(vi.mocked(fetchTeamUsage)).toHaveBeenCalledWith(
+      expect.objectContaining({ range: "30d" }),
+    );
+  });
+
+  it("Token 用量卡「团队」页签：手动关闭用量共享后给开启入口，不拉排行", async () => {
+    useTokenUsageStore.getState().record("claude-sonnet-5", 700, now.toISOString());
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: false } });
     render(<HomePage />);
     await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "团队" }));
     expect(screen.getByText(/「用量」共享未开启/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "去团队页开启" })).toBeInTheDocument();
-    // 默认共享是关的：这一页不经 lib/api 拉排行（HomePage 的 fetch 只允许 /api/health）
-    expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/team/usage"));
+    // 关闭后这一页不采集、不上传、不请求排行
+    expect(vi.mocked(fetchTeamUsage)).not.toHaveBeenCalled();
+    expect(vi.mocked(uploadTeamUsage)).not.toHaveBeenCalled();
   });
 
   it("页脚：服务状态 + 文件目录 + 更新日志入口（系统状态不再占一整卡）", async () => {

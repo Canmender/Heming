@@ -206,8 +206,21 @@ export interface Store {
   // —— d.54 团队系统：在线活跃与动向（单团队，全站用户即成员）——
   /** 刷新用户最近活跃时间；用户不存在时静默忽略（登录态已保证存在）。 */
   touchUser(userId: string): void;
-  /** 全站名册（用户 + 最近活跃）；在线态由调用方叠加，不落库。 */
+  /** 全站名册（用户 + 最近活跃）；在线态由调用方叠加，不落库。
+   *
+   * @deprecated d.54 的「全站一个团队」口径已废弃：名册/动向/用量只在**同队成员**之间可见。
+   * 这里保留接口只为兼容既有 Store 契约测试与可能的运维脚本；业务路由请用
+   * `listTeamCollaborators(viewerId)`（不再有「陌生注册用户」这层泄漏面）。
+   */
   listTeamMembers(): { user: User; lastSeenAt: string | null }[];
+  /**
+   * 可见名册：viewer 自己 + 与 viewer 至少同属一个工作台团队的成员（去重）。
+   *
+   * 没有加入任何团队时只返回自己——「还没建团队就看见别的注册用户」正是要修的口径。
+   * 排序与 `listTeamMembers` 一致：`lastSeenAt` 倒序、null 排最后、同值按
+   * `displayName.localeCompare("zh-Hans-CN")`；在线态仍由 app 层叠加。
+   */
+  listTeamCollaborators(viewerId: string): { user: User; lastSeenAt: string | null }[];
   /**
    * 写入一条动向摘要。按 (actorId, sourceId) 幂等：
    * 已存在返回 false（skipped），新写入返回 true（inserted）。
@@ -217,13 +230,15 @@ export interface Store {
    * 动向流：排序固定 `occurredAt DESC, id DESC`（两 Store 同语义，同刻用 id 兜底保证确定性）。
    * `before` 为游标时间（严格小于）；给了 `beforeId` 时比较 `(occurredAt, id) < (before, beforeId)`，
    * 使同一时间戳的剩余条目也能翻到（旧客户端只传 `before` = 旧语义）。
-   * `actorId` 可过滤。
+   * `actorId` 可过滤；`actorIds` 可把范围限定成「可见成员集合」——它必须参与查询/内存过滤，
+   * 不能先按 limit 取一批再过滤（否则同队成员的最新动向会被陌生人的行占掉名额）。
    */
   listTeamActivities(opts?: {
     limit?: number;
     before?: string;
     beforeId?: string;
     actorId?: string;
+    actorIds?: string[];
   }): TeamActivity[];
   /** 清空某位成员已上传的动向，返回删除条数。 */
   clearTeamActivities(actorId: string): number;
@@ -253,8 +268,11 @@ export interface Store {
    * 补报/修正也只覆盖那一格。用户不存在时抛 "user not found"（与动向同口径）。
    */
   upsertTeamUsage(actorId: string, input: TeamUsageInput): void;
-  /** 区间（自然日闭区间）内全部成员的用量行；排行/本人明细由调用方聚合。 */
-  listTeamUsage(opts: { from: string; to: string }): TeamUsageRow[];
+  /**
+   * 区间（自然日闭区间）内全部成员的用量行；排行/本人明细由调用方聚合。
+   * `actorIds` 可把范围限定成「可见成员集合」（过滤在查询阶段完成）。
+   */
+  listTeamUsage(opts: { from: string; to: string; actorIds?: string[] }): TeamUsageRow[];
   /**
    * 删除某位成员已上传的全部用量行，返回删除条数。
    *
@@ -723,6 +741,29 @@ export function createMemoryStore(): Store {
         lastSeenAt: lastSeen.get(user.id) ?? null,
       }));
     },
+    listTeamCollaborators(viewerId) {
+      // viewer 自己 + 与之共享至少一个工作台团队的人；无团队时只剩自己。
+      const ids = new Set<string>([viewerId]);
+      for (const member of teamMembers.values()) {
+        if (member.userId !== viewerId) continue;
+        for (const other of teamMembers.values()) {
+          if (other.teamId === member.teamId) ids.add(other.userId);
+        }
+      }
+      return [...ids]
+        .map((id) => users.get(id))
+        .filter((row): row is NonNullable<typeof row> => row !== undefined)
+        .map((row) => ({ user: row.user, lastSeenAt: lastSeen.get(row.user.id) ?? null }))
+        .sort((a, b) => {
+          // 与 roster 口径一致：最近活跃倒序、null 最后、同值显示名（SQLite 同语义）。
+          if (a.lastSeenAt !== b.lastSeenAt) {
+            if (a.lastSeenAt === null) return 1;
+            if (b.lastSeenAt === null) return -1;
+            return a.lastSeenAt < b.lastSeenAt ? 1 : -1;
+          }
+          return a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN");
+        });
+    },
     addTeamActivity(actorId, input) {
       mustUser(actorId);
       const key = `${actorId}\0${input.sourceId}`;
@@ -759,7 +800,10 @@ export function createMemoryStore(): Store {
     },
     listTeamActivities(opts = {}) {
       const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
+      // 可见范围必须在过滤阶段生效：先收敛 actor 再排序/截断，否则 limit 会被不可见行占掉。
+      const visible = opts.actorIds ? new Set(opts.actorIds) : null;
       const rows = teamActivities
+        .filter((a) => (visible ? visible.has(a.actorId) : true))
         .filter((a) => (opts.actorId ? a.actorId === opts.actorId : true))
         .filter((a) => {
           if (!opts.before) return true;
@@ -830,9 +874,11 @@ export function createMemoryStore(): Store {
         connections: [...(input.connections ?? [])],
       });
     },
-    listTeamUsage({ from, to }) {
+    listTeamUsage({ from, to, actorIds }) {
+      const visible = actorIds ? new Set(actorIds) : null;
       return [...teamUsage.values()]
         .filter((row) => row.date >= from && row.date <= to)
+        .filter((row) => (visible ? visible.has(row.actorId) : true))
         .sort(
           (a, b) =>
             (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||

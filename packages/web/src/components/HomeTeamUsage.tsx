@@ -13,7 +13,7 @@ import { Button } from "../components/ui/Button.js";
 const TOP_N = 5;
 
 /**
- * 首页「Token 用量」卡片的「团队」页签：近 30 天全站用量排行（前 5 名 + 我的合计）。
+ * 首页「Token 用量」卡片的「团队」页签：近 30 天团队用量排行（前 5 名 + 我的合计）。
  *
  * 边界与团队页一致：
  * - 关闭「用量」共享时不采集、不上传、不请求；只给一句说明与开启入口，不拿旧数据冒充。
@@ -69,7 +69,7 @@ export function HomeTeamUsage() {
     return (
       <div className="mt-2">
         <p className="text-ui-xs leading-5 text-muted">
-          「用量」共享未开启：不上传、不采集，也看不到全站排行。开启后只同步近 30
+          「用量」共享未开启：不上传、不采集，也看不到团队排行。开启后只同步近 30
           天的 token 数、模型名与连接名。
         </p>
         <Button
@@ -117,7 +117,7 @@ export function HomeTeamUsage() {
   return (
     <div className="mt-2">
       <div className="flex items-baseline gap-2">
-        <span className="text-ui-xs text-muted">近 30 天 · 全站排行（只含显示名与 token 数）</span>
+        <span className="text-ui-xs text-muted">近 30 天 · 团队排行（只含显示名与 token 数）</span>
         <button
           type="button"
           className="ui-link ml-auto shrink-0"
