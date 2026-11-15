@@ -173,7 +173,7 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
     expect(screen.queryByRole("button", { name: "打开页面菜单" })).toBeNull();
   });
 
-  it("会话侧栏常驻：h2「工作区」+「新建会话」；点「新对话」进入会话页", async () => {
+  it("会话侧栏常驻：h2「工作区」+「新建会话」；点「新对话」选未分组后进入会话页", async () => {
     useUiStore.setState({ page: "home" });
     render(<App />);
 
@@ -189,8 +189,10 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
       .getByRole("heading", { level: 2, name: "工作区" })
       .closest("aside") as HTMLElement;
     expect(rail).not.toBeNull();
-    // 侧栏里也有两个同名入口（rail 顶部 + 空态），取第一个即可。
+    // 侧栏里也有两个同名入口（rail 顶部 + 空态），取第一个：它先开工作区菜单。
     fireEvent.click(within(rail).getAllByRole("button", { name: "新建会话" })[0]!);
+    const picker = await screen.findByTestId("new-conversation-workspace-menu");
+    fireEvent.click(within(picker).getByRole("menuitem", { name: "未分组" }));
 
     await waitFor(() =>
       expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
@@ -199,6 +201,32 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
     );
     await waitFor(() => expect(useUiStore.getState().page).toBe("chat"));
     expect(useUiStore.getState().activeConversationId).toBe("c9");
+  });
+
+  it("会话页空态「新建会话」只请求左栏打开工作区菜单，不直接建会话", async () => {
+    useUiStore.setState({ page: "chat", newSessionPickerRequest: 0 });
+    render(<App />);
+
+    await screen.findByTestId("topbar");
+    // 空态那颗按钮在主区；侧栏顶部还有一颗同名的「新建会话」（它自己开菜单）。
+    const main = await screen.findByRole("main");
+    fireEvent.click(await within(main).findByRole("button", { name: "新建会话" }));
+
+    // 信号自增，左侧 rail 收到后把「新对话」的工作区菜单打开。
+    const picker = await screen.findByTestId("new-conversation-workspace-menu");
+    expect(useUiStore.getState().newSessionPickerRequest).toBe(1);
+    const rail = screen
+      .getByRole("heading", { level: 2, name: "工作区" })
+      .closest("aside") as HTMLElement;
+    expect(
+      within(rail).getAllByRole("button", { name: "新建会话" })[0],
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(picker).toBeVisible();
+
+    // 只发信号：没有建会话、没有选中新会话。
+    expect(useChatStore.getState().openAgent).not.toHaveBeenCalled();
+    expect(useUiStore.getState().activeConversationId).toBeNull();
+    expect(screen.queryByTestId("chat-page")).toBeNull();
   });
 
   it("浏览器（无 window.heming）：TopBar 仍渲染且高度是 h-10，不是桌面标题栏", async () => {

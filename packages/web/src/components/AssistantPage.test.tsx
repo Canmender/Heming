@@ -12,7 +12,8 @@ import { useAuthStore } from "../store/auth.js";
  * - `<h1 class="sr-only">会话</h1>`（页面标题，不再有可见页头/元信息条/Tab）；
  * - 首载失败提示 + 重试；
  * - 有当前会话时渲染 `<ChatPage />`；
- * - 没有会话时的空态「开始新会话」+ 新建入口。
+ * - 没有会话时的空态「开始新会话」+ 新建入口（d.147.4.92.11 起只发信号，
+ *   由常驻 Sidebar 打开左栏的工作区选择菜单，本页不再直接建会话）。
  *
  * ChatPage 换成探针，只验证「什么时候挂载」，不跑对话链路。
  */
@@ -58,6 +59,7 @@ beforeEach(() => {
     pageView: null,
     activeConversationId: null,
     paletteIntent: null,
+    newSessionPickerRequest: 0,
   });
   useChatStore.setState({
     conversations: [] as never,
@@ -108,19 +110,19 @@ describe("没有会话：空态与新建入口", () => {
     expect(empty?.className).toContain("max-w-[440px]");
   });
 
-  it("点新建会话 → 直接建 fresh 会话（单智能体，不再选人）并打开", async () => {
+  it("点新建会话 → 只请求左栏打开工作区菜单，本页不直接建会话", async () => {
     useChatStore.setState({ conversations: [conv1, convNew] as never });
     render(<AssistantPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
 
-    await waitFor(() =>
-      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
-        fresh: true,
-      }),
-    );
-    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
-    expect(screen.getByTestId("chat-page")).toBeInTheDocument();
+    // d.147.4.92.11：空态入口只发信号（+1），由 Sidebar 消费并打开 rail 的工作区菜单。
+    await waitFor(() => expect(useUiStore.getState().newSessionPickerRequest).toBe(1));
+    expect(useChatStore.getState().openAgent).not.toHaveBeenCalled();
+    expect(useUiStore.getState().activeConversationId).toBeNull();
+    // 没有建会话，所以仍停在空态、不挂 ChatPage。
+    expect(screen.getByText("开始新会话")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-page")).toBeNull();
   });
 });
 

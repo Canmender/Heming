@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
-import { startNewConversation } from "../lib/newConversation.js";
 import { ChatPage } from "./ChatPage.js";
 import { Button } from "./ui/Button.js";
 import { EmptyState } from "./ui/EmptyState.js";
@@ -20,10 +19,8 @@ export function AssistantPage() {
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
   const pageView = useUiStore((s) => s.pageView);
-
-  /** 空态里点「新建会话」：失败原因就地显示（侧栏同时也会显示各自那份）。 */
-  const [error, setError] = useState("");
-  const [opening, setOpening] = useState(false);
+  /** 空态里的「新建会话」：不直接建，交给左栏先问「建在哪个工作区」。 */
+  const requestNewSessionPicker = useUiStore((s) => s.requestNewSessionPicker);
 
   // 旧导航意图（tasks / chat）已没有对应视图可切：读走即清，避免残留意图被别的页面消费。
   useEffect(() => {
@@ -33,19 +30,6 @@ export function AssistantPage() {
   const retryLoad = useCallback(() => {
     void loadWorkspace().catch(() => {});
   }, [loadWorkspace]);
-
-  const onCreate = async () => {
-    if (opening) return;
-    setOpening(true);
-    setError("");
-    try {
-      await startNewConversation();
-    } catch (err) {
-      setError(err instanceof Error && err.message ? `新建会话失败：${err.message}` : "新建会话失败");
-    } finally {
-      setOpening(false);
-    }
-  };
 
   /** 首载失败的提示文案：只在还没成功过时提示（成功过的后台刷新失败不提示）。 */
   const loadFailure = !workspaceReady && workspaceError ? `会话列表加载失败：${workspaceError}` : null;
@@ -66,11 +50,6 @@ export function AssistantPage() {
           </Button>
         </div>
       ) : null}
-      {error ? (
-        <p role="alert" className="mx-3 mt-2 text-ui-sm text-danger">
-          {error}
-        </p>
-      ) : null}
       {activeConv ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <ChatPage />
@@ -81,16 +60,15 @@ export function AssistantPage() {
             className="max-w-[440px]"
             titleAs="h2"
             title="开始新会话"
-            desc="每段会话彼此独立保存；也可以从左侧会话列表继续历史会话。"
+            desc="每段会话彼此独立保存；点「新建会话」可以先选落进哪个文件夹，也可以从左侧继续历史会话。"
             actions={
               <Button
                 type="button"
                 size="md"
                 variant="primary"
-                busy={opening}
-                onClick={() => void onCreate()}
+                onClick={requestNewSessionPicker}
               >
-                {opening ? "新建中…" : "新建会话"}
+                新建会话
               </Button>
             }
           />

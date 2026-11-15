@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.147.4.91.11`
-- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.91.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 当前版本：`d.147.4.92.11`
+- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.92.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
 - 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
@@ -163,6 +163,22 @@
   - `design:audit` 浅色与深色各 **57 条 `failures: []`**（19 视图 × 3 断点；横向溢出 / 对比度 / 11px 正文 / 命中区 < 32 / 无名字可点全 0）。
   - 截图见 `.tmp/shots-workspace2/{rail-groups-1440,rail-collapsed-1440,rail-new-workspace-1440,rail-groups-dark-1440,rail-groups-1024}.png`；1024 下 `docOverflowX=0`。
   - **未真机复验**：Electron 原生选目录弹窗的观感与取消路径；≤1024 窄窗下长分组列表的滚动。
+
+**后续修订（d.147.4.92.11）**
+- 现状：左栏只有一个「新对话」主按钮，原来直接沿用当前会话的工作区默默建会话；同一栏挂着多个文件夹的会话时，落点不可见也不可选。本轮改成点主按钮先弹「选择工作区」菜单，选完才建。
+- 改动点（`packages/web/src/components/assistant/ConversationRail.tsx`）：新增 `pickerOpen` / `workspaceChoices` / `startIn(workspace)`；主按钮加 `aria-haspopup="menu"` / `aria-expanded={pickerOpen}` / `title="新建会话（可选择工作区）"`；选项来源复用左栏分组（`groupConversations`，含空工作区，顺序最近活跃在前；「未分组」在无会话时补在末尾）；菜单底部「新建工作区…」复用 `WorkspaceDialog` 的 new 模式；Escape / 面板外 `pointerdown` 关闭（`target.closest("[data-workspace-picker]")`，不抢焦点）；空态「新建会话」按钮改为先开同一菜单；组头「+」仍直连 `onNewConversation(group.path)`。
+- 本轮新增 DOM 契约（写测试 / 设计审计别猜）：
+  - 触发器容器：`data-workspace-picker`；菜单：`role="menu"` + `aria-label="选择工作区"` + `data-testid="new-conversation-workspace-menu"`；首行文案「新对话建在」。
+  - 菜单项：`role="menuitem"`（文件夹图标 + 名称，`title` 为完整路径）；默认落点带 `aria-current="true"` + 勾；「新建工作区…」也是 `role="menuitem"`。
+  - 主按钮本身：`aria-label="新建会话"`、`aria-haspopup="menu"`、`aria-expanded`。
+- 会话页空态入口（同版本补）：`AssistantPage.tsx` 中央「新建会话」不再直接建会话，改为 `useUiStore.getState().requestNewSessionPicker()`；`store/ui.ts` 新增 `newSessionPickerRequest: number`（自增，0=未请求）+ `requestNewSessionPicker()`；`Sidebar.tsx` 订阅它并传给 rail 的 `newSessionRequest?: number`，rail 内 `useEffect` 见到 >0 即 `setPickerOpen(true)`。`AssistantPage` 的 `opening`/`error`/`startNewConversation` 直连已删（`loadFailure` 与「重试」保留）。
+- 侧栏接线：`packages/web/src/components/Sidebar.tsx` 把 `onNewConversation(workspace)` 接到 `startNewConversationIn(workspace)`（`lib/newConversation.ts`；默认落点 = 活动会话工作区 → 刚新建的工作区 → 未分组），`Sidebar.tsx` 本身只改注释。
+- **验证（d.147.4.92.11，工作树实跑，全 exit 0）**
+  - `pnpm typecheck` 6 项目 Done；`pnpm build`、`pnpm plugin:check`（6/6 + pet-widget 1/1 + examples 5/5）通过。
+  - `packages/web` **303 files / 4386 tests**；`server` 15 / 284；`shared` 8 / 119；`desktop` 856 pass / 0 fail。
+  - `design:audit` 浅色与深色各 **57 条 `failures: []`**。
+  - 真实浏览器核对：菜单 5 项、默认勾选「未分组」、Escape/外点关闭、选「未分组」建出 `workspace: null` 会话、选 `D:\work\demo` 建出该路径会话、空列表入口先开菜单、1024 下 `docOverflowX=0`。截图 `.tmp/shots-picker/{menu-1440,menu-rail-empty-1440,menu-1024}.png`。
+  - **未真机复验**：Electron 原生「选择文件夹」对话框；桌面端标题栏拖拽。
 
 ## 0-历史. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
 

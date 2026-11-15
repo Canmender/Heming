@@ -16,7 +16,7 @@ import { Button } from "./ui/Button.js";
  * 当前活动会话所在工作区（`null` = 未分组/无活动会话）。
  *
  * 命令面板「新建会话」没有工作区上下文，用这个把新会话落到用户正在看的那个
- * 文件夹里——和栏头「新对话」按钮的落点规则一致。读 `getState()` 而不是订阅：
+ * 文件夹里（栏头「新对话」按钮是菜单选择，不走这里）。读 `getState()` 而不是订阅：
  * 只在事件触发的那一刻需要一次快照，订阅会让侧栏跟着 workspace 变化重渲染。
  */
 function activeWorkspaceOf(): string | null {
@@ -58,6 +58,8 @@ export function Sidebar() {
   const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
   /** 一次性命令面板意图：`new-session` = 直接开始一段新会话（消费即清）。 */
   const paletteIntent = useUiStore((s) => s.paletteIntent);
+  /** 会话页空态发来的「打开工作区选择」信号（自增计数器）。 */
+  const newSessionPickerRequest = useUiStore((s) => s.newSessionPickerRequest);
   const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
 
   /** 正在新建会话（防重；同时作为 rail 的 busy 态）。 */
@@ -152,6 +154,7 @@ export function Sidebar() {
         error={error}
         onOpen={openConversation}
         onNewConversation={(workspace) => void startNew(workspace)}
+        newSessionRequest={newSessionPickerRequest}
         onRename={(id, title) => renameConversationTitle(id, title)}
         onDeleteRequest={(conv) => setDeleteTarget(conv)}
         onMoveConversation={moveConversation}

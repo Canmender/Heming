@@ -303,6 +303,16 @@ interface UiState {
   /** 打开设置页并可选直达某分组（复用 setPage 的清理语义）。 */
   openSettings: (tab?: string) => void;
   consumeSettingsTab: () => void;
+  /**
+   * 「新建会话」工作区选择请求（自增计数器）。
+   *
+   * 会话页空态的「新建会话」按钮不在左栏，但选择菜单归左栏（`ConversationRail`）。
+   * 这里只发一个信号、不直接建会话，保证「新对话先选工作区」在所有入口口径一致；
+   * 侧栏读到变化后把菜单打开，用户再选。0 表示还没点过。
+   */
+  newSessionPickerRequest: number;
+  /** 请求左栏打开「新对话 → 选择工作区」菜单（自增，同值连点也各触发一次）。 */
+  requestNewSessionPicker: () => void;
   /** 命令面板投递的一次性意图（内存，消费即清）。 */
   paletteIntent: PaletteIntent | null;
   /** 投递意图（token 自增；data 只携带定位 id，不含内容正文）。 */
@@ -460,6 +470,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   automationIntent: null,
   vaultIntent: null,
   settingsTab: null,
+  newSessionPickerRequest: 0,
+  requestNewSessionPicker: () =>
+    set((state) => ({ newSessionPickerRequest: state.newSessionPickerRequest + 1 })),
   paletteIntent: null,
   setPaletteIntent: (kind, data) => {
     paletteIntentToken += 1;

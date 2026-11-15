@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.92.11",
+    "date": "2026-11-15",
+    "title": "新对话先选工作区：点「新对话」弹出工作区选择",
+    "bullets": [
+      "`components/assistant/ConversationRail.tsx`：栏头主按钮从「直接建会话」改成菜单触发器（`aria-haspopup=\"menu\"`、`aria-expanded={pickerOpen}`、`title=\"新建会话（可选择工作区）\"`），点开后在 `[data-workspace-picker]` 容器里渲染 `role=\"menu\" aria-label=\"选择工作区\"`（`data-testid=\"new-conversation-workspace-menu\"`、限高 280px 可滚动）：第一行是「新对话建在」，每个选项 `role=\"menuitem\"` + 文件夹图标 + 名称，当前默认落点带 `aria-current=\"true\"` 与勾，`title` 显示完整路径。",
+      "选项来源就是左栏分组本身（新增的 `workspaceChoices` 复用 `groupConversations`）：顺序与列表一致（最近活跃在前），空工作区也列出来；「未分组」在没有会话时不会成组，但新建必须能选它，所以在末尾补一条。菜单底部「新建工作区…」复用 `WorkspaceDialog` 的 new 模式（打开前先关菜单）；任一选项点击走 `startIn(path)` → `onNewConversation(workspace)`，建 fresh 会话并落到该工作区。",
+      "会话页空态的入口也统一：`components/AssistantPage.tsx` 中央那颗「新建会话」原来直接建一段未分组会话，现在只调 `store/ui.ts` 新增的 `requestNewSessionPicker()`（`newSessionPickerRequest` 自增计数器），`components/Sidebar.tsx` 把它转成 rail 的新 prop `newSessionRequest`，rail 见到计数变化就打开同一个菜单——点一下就落到「选工作区」这一步，不再出现两个入口两种结果。`AssistantPage` 里随之删掉了 `opening` / `error` 与 `startNewConversation` 直连（加载失败提示与重试保留）。",
+      "关闭与其它入口：Escape 或面板外 `pointerdown` 关闭（用 `target.closest(\"[data-workspace-picker]\")` 判断，不抢焦点）；会话列表为空时那个「新建会话」按钮改成先 `setPickerOpen(true)` 开同一个菜单；组头「+」仍是直连该组。`components/Sidebar.tsx` 侧把 `onNewConversation(workspace)` 接到 `startNewConversationIn(workspace)`，默认落点仍是「活动会话所在工作区 → 刚新建的工作区 → 未分组」。",
+      "**验证（d.147.4.92.11，工作树实跑，全 exit 0）**",
+      "— `pnpm typecheck`：6 个项目全 Done；`pnpm build`、`pnpm plugin:check`（6/6 + pet-widget 1/1 + examples 5/5）通过。",
+      "— `packages/web`：`vitest run` **303 files / 4386 tests passed**（新增 7 例覆盖菜单开合、选项顺序、默认勾选、落点、Escape/外点关闭、空态入口）。",
+      "— 其余包：`server` 15 / **284**；`shared` 8 / 119；`desktop` **856 pass / 0 fail**。",
+      "— `node scripts/design-audit.mjs` 浅色与 `--theme dark` 各 **57 条（19 个视图 × 3 个断点）**，`failures: []`。",
+      "— 真实浏览器（headless Chromium + 真服务端）核对：菜单 5 项（`demo` / `empty` / `Heming` / `未分组` / `新建工作区…`，前三项 `title` 为完整路径）、`aria-expanded=true`、无活动会话时默认勾选「未分组」；Escape 与点外部各关一次；选「未分组」后服务端新增 `workspace: null` 会话并出现在未分组组体，选 `D:\\work\\demo` 的会话 `workspace` 为该路径；栏内空列表（0 会话）点「新建会话」先开菜单（只有「未分组」+「新建工作区…」两项）；1024 下菜单 251px、`docOverflowX=0`。截图 `.tmp/shots-picker/{menu-1440,menu-rail-empty-1440,menu-1024}.png`。",
+      "— **未真机复验**：Electron 原生「选择文件夹」对话框（web 下不渲染该按钮）；桌面端标题栏拖拽。"
+    ],
+    "paragraphs": [
+      "左栏只剩一个「新对话」主按钮，但它原来默默沿用当前会话所在的工作区：同一栏挂着好几个文件夹的会话时，「这段新对话建在哪」其实该由用户自己定。这轮把它改成先弹一个工作区选择菜单，选完才建会话；组头「+」仍保持「就在这个文件夹下开」的直连语义。",
+      "**左栏（packages/web）**"
+    ]
+  },
+  {
     "version": "d.147.4.91.11",
     "date": "2026-11-15",
     "title": "左侧栏变成工作区：会话按本机文件夹分组",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Conversation, Message, Workspace } from "@heming/shared";
 import { EmptyState } from "../ui/EmptyState.js";
-import { ChevronIcon, FolderIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
+import { CheckIcon, ChevronIcon, FolderIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
@@ -21,7 +21,8 @@ import { WorkspaceDialog, type WorkspaceDialogMode } from "./WorkspaceDialog.js"
  * （本机一个文件夹），二级信息是**会话名**（d.147.4.91.11）。
  *
  * 结构：
- * - 顶部：「工作区」+ 搜索 / 新建工作区两个图标；下面整行「新对话」主按钮；
+ * - 顶部：「工作区」+ 搜索 / 新建工作区两个图标；下面整行「新对话」主按钮，
+ *   点它先选这次会话落在哪个工作区（含未分组、空工作区与「新建工作区…」）；
  * - 列表按工作区分组（`groupConversations`）：组头 = 文件夹图标 + 名称 + 会话数 +
  *   折叠 chevron，组头右侧 hover 出「+」直接在该组新建；会话行左缩进 20px；
  * - 当前会话高亮（`aria-current`），含活动会话的组头浅底；有草稿的会话带「草稿」；
@@ -63,6 +64,11 @@ export interface ConversationRailProps {
    * 组头「+」用该组的路径。真正的建会话动作由调用方（Sidebar）执行。
    */
   onNewConversation: (workspace: string | null) => void;
+  /**
+   * 外部请求打开工作区选择菜单（自增计数器；0/未变化 = 不动作）。
+   * 会话页空态的「新建会话」不在本栏，靠它把用户领到同一个菜单上。
+   */
+  newSessionRequest?: number;
   /** 会话改名（行内菜单）：服务端 PATCH 由调用方负责。 */
   onRename: (conversationId: string, title: string) => void | Promise<void>;
   /** 请求删除会话（调用方弹二次确认，rail 不直接删）。 */
@@ -113,6 +119,7 @@ export function ConversationRail({
   error = "",
   onOpen,
   onNewConversation,
+  newSessionRequest = 0,
   onRename,
   onDeleteRequest,
   onMoveConversation,
@@ -183,6 +190,54 @@ export function ConversationRail({
   }, [conversations, activeConversationId]);
   /** 新对话落点：活动会话的工作区 → 刚新建的工作区 → 未分组。 */
   const newConversationWorkspace = activeWorkspace ?? preferredWorkspace;
+
+  /**
+   * 「新对话」工作区选择菜单（d.147.4.92.11）：点主按钮先选落在哪个工作区，
+   * 而不是默默用当前会话那个——同一栏里同时挂着好几段不同文件夹的会话时，
+   * 「新对话建在哪」是用户要自己决定的事。
+   *
+   * 选项来自分组本身（含空工作区），顺序与列表一致（最近活跃在前、未分组最后），
+   * 当前默认落点打勾；菜单底部一条「新建工作区…」复用栏头的 new 弹窗。
+   */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const workspaceChoices = useMemo(() => {
+    const choices = groups.map((group) => ({ path: group.path, name: group.name }));
+    // 「未分组」在没有会话时不会成组，但新建会话必须能选它——补在最后保持列表顺序。
+    if (!choices.some((choice) => choice.path === null)) {
+      choices.push({ path: null, name: "未分组" });
+    }
+    return choices;
+  }, [groups]);
+
+  // 外部请求（会话页空态的「新建会话」）→ 直接把菜单打开。
+  // 依赖只看计数器：打开后用户再点外部关掉，不会被这个 effect 重新打开。
+  useEffect(() => {
+    if (newSessionRequest > 0) setPickerOpen(true);
+  }, [newSessionRequest]);
+
+  // 点菜单外 / Escape 关闭（与行内 ⋯ 菜单同一套轻量处理，不抢焦点）。
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDown = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest("[data-workspace-picker]")) setPickerOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPickerOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pickerOpen]);
+
+  /** 选好工作区：关菜单 → 交给调用方建会话（`null` = 未分组）。 */
+  const startIn = (workspace: string | null) => {
+    setPickerOpen(false);
+    onNewConversation(workspace);
+  };
 
   const closeSearch = () => {
     setQuery("");
@@ -471,7 +526,7 @@ export function ConversationRail({
           actions={
             <Button
               type="button"
-              onClick={() => onNewConversation(null)}
+              onClick={() => setPickerOpen(true)}
               busy={opening}
               size="sm" variant="primary" className="w-full"
             >
@@ -546,13 +601,16 @@ export function ConversationRail({
         </button>
       </header>
 
-      {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。 */}
-      <div className="px-2 pb-2 pt-1">
+      {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。
+          点击先展开工作区选择（d.147.4.92.11），选完才建会话。 */}
+      <div className="relative px-2 pb-2 pt-1" data-workspace-picker>
         <Button
           type="button"
           aria-label="新建会话"
-          title="新建会话"
-          onClick={() => onNewConversation(newConversationWorkspace)}
+          aria-haspopup="menu"
+          aria-expanded={pickerOpen}
+          title="新建会话（可选择工作区）"
+          onClick={() => setPickerOpen((open) => !open)}
           busy={opening}
           size="md"
           variant="primary"
@@ -561,6 +619,54 @@ export function ConversationRail({
           <PlusIcon width={16} height={16} aria-hidden="true" />
           新对话
         </Button>
+        {pickerOpen ? (
+          <div
+            role="menu"
+            aria-label="选择工作区"
+            data-testid="new-conversation-workspace-menu"
+            className="absolute left-2 right-2 top-full z-20 -mt-1 max-h-[280px] overflow-y-auto rounded-xl border border-line-soft bg-surface py-1 shadow-lg"
+          >
+            <p className="px-2 pb-1 pt-1 text-ui-xs text-muted">新对话建在</p>
+            {workspaceChoices.map((choice) => {
+              const current = choice.path === newConversationWorkspace;
+              return (
+                <button
+                  key={choice.path ?? UNGROUPED_ID}
+                  type="button"
+                  role="menuitem"
+                  aria-current={current ? "true" : undefined}
+                  title={choice.path ?? undefined}
+                  onClick={() => startIn(choice.path)}
+                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui-sm text-body transition-colors hover:bg-subtle-2 hover:text-ink focus-visible:bg-subtle-2 focus-visible:text-ink"
+                >
+                  <FolderIcon width={14} height={14} aria-hidden="true" className="shrink-0 text-muted" />
+                  <span className="min-w-0 flex-1 truncate">{choice.name}</span>
+                  {current ? (
+                    <CheckIcon
+                      width={14}
+                      height={14}
+                      aria-hidden="true"
+                      className="shrink-0 text-muted"
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
+            <div className="my-1 border-t border-line-soft" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setPickerOpen(false);
+                openNewWorkspaceDialog();
+              }}
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-ui-sm text-body transition-colors hover:bg-subtle-2 hover:text-ink focus-visible:bg-subtle-2 focus-visible:text-ink"
+            >
+              <PlusIcon width={14} height={14} aria-hidden="true" className="shrink-0 text-muted" />
+              新建工作区…
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* 搜索：默认收起，点栏头放大镜才展开（对齐参考图的图标式入口，不占一行）。

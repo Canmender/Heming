@@ -173,12 +173,14 @@ describe("Sidebar · 常驻结构", () => {
 });
 
 describe("Sidebar · 新建会话", () => {
-  it("侧栏「新建会话」→ 直接建 fresh 会话并打开（单智能体，不再选人）", async () => {
+  it("侧栏「新建会话」→ 先选工作区（未分组）再建 fresh 会话并打开（单智能体，不再选人）", async () => {
     useChatStore.setState({ conversations: [conv1, conv2, convNew] as never });
     render(<Sidebar />);
 
-    // 顶部主操作（展开态 rail header）与空态可能同名，取第一个。
+    // 顶部主操作（展开态 rail header）与空态可能同名，取第一个；现在它先开工作区菜单。
     fireEvent.click(screen.getAllByRole("button", { name: "新建会话" })[0]!);
+    const picker = screen.getByTestId("new-conversation-workspace-menu");
+    fireEvent.click(within(picker).getByRole("menuitem", { name: "未分组" }));
 
     await waitFor(() =>
       expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("system-assistant", {
@@ -186,6 +188,22 @@ describe("Sidebar · 新建会话", () => {
       }),
     );
     await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c9"));
+  });
+
+  it("会话页空态发来的信号（newSessionPickerRequest）会把 rail 的工作区菜单打开", async () => {
+    useUiStore.setState({ newSessionPickerRequest: 0 });
+    render(<Sidebar />);
+
+    const trigger = screen.getAllByRole("button", { name: "新建会话" })[0]!;
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("new-conversation-workspace-menu")).toBeNull();
+
+    act(() => useUiStore.getState().requestNewSessionPicker());
+
+    expect(await screen.findByTestId("new-conversation-workspace-menu")).toBeVisible();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    // 只是打开菜单，没有建会话。
+    expect(useChatStore.getState().openAgent).not.toHaveBeenCalled();
   });
 
   it("命令面板 new-session 意图：建 fresh 会话、切到会话页并清空意图", async () => {
