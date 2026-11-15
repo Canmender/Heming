@@ -13,10 +13,12 @@ import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
 import { supportsKind } from "./capabilityNotice.js";
 import { IMAGE_TOKEN_COST, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
+import { DEFAULT_TURN_CAPS, planTurnBudget } from "./agentContext/turnBudget.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
 import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
 import type { RolloutInput, RolloutUsage } from "./rollout/types.js";
+import type { ToolFailure } from "./toolError.js";
 
 /**
  * 工具调用最多允许的连续轮次。
@@ -32,8 +34,14 @@ export const MAX_TOOL_ROUNDS = 12;
  *
  * 工具轮每轮都把「历史 + 已累积的全部工具结果」重发一遍，输入成本随轮次线性涨。
  * 到这里就收口：把已有文本给用户，并明确告知「还能继续」，而不是悄悄停在半路。
+ *
+ * P2-T11：这个数值现在来自统一账本 `DEFAULT_TURN_CAPS.turnTool`，此处保留导出
+ * 只为兼容旧引用；新代码请用 `planTurnBudget`。
  */
-export const MAX_TURN_TOOL_TOKENS = 12_000;
+export const MAX_TURN_TOOL_TOKENS = DEFAULT_TURN_CAPS.turnTool;
+
+/** P2-T11：本次运行的三个预算上限（来自统一账本，改上限只改账本）。 */
+const turnCaps = DEFAULT_TURN_CAPS;
 
 /**
  * 工具目录超过多少个就切到「按需发现」。
@@ -173,7 +181,18 @@ export interface ToolBridge {
   execute: (
     call: { name: string; arguments: string },
     opts?: { signal?: AbortSignal },
-  ) => Promise<{ text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[] }>;
+  ) => Promise<{
+    text: string;
+    ok: boolean;
+    sources?: ToolSource[];
+    images?: ToolImage[];
+    /**
+     * 失败契约（P2-T9）：`ok=false` 时带稳定错误码与重试建议（见 lib/toolError.ts）。
+     *
+     * 文本里同样有这些信息；结构字段供上层统计/归因用。可选——老的桥不返回也不影响。
+     */
+    error?: ToolFailure;
+  }>;
   /**
    * 工具的风险元数据（可选）：闸门用它判断该调用该不该问用户。
    *
@@ -671,6 +690,11 @@ export function runAgentMentions(
         } else {
           prompt = deps.getPrompt(m.agentId);
         }
+        /**
+         * P2-T11：系统提示词也进同一本预算账——它是请求里最先固定的那一块，
+         * 不算进来，历史预算就会把「系统 + 历史」算超。
+         */
+        const promptTokens = estimateTokens(prompt);
         const controller = new AbortController();
         controllers.add(controller);
         if (aborted) controller.abort(); // fetchHistory 期间已按中断：启动即中止
@@ -786,9 +810,12 @@ export function runAgentMentions(
            * 为什么放在这一层而不是等供应商 400：工具轮每轮重发全部历史 + 全部工具结果，
            * 超限是**结构性必然**而不是意外。等报错再收紧，用户已经白等两个来回。
            * 折叠只动 `role=tool` 的正文，消息条数不变——删消息会让 tool_call 对不上，直接 400。
+           *
+           * P2-T11：折叠预算从统一账本取（`planTurnBudget`），不再直接用常量——
+           * 这样「历史 6000 / 工具 3000 / 单轮 12000」是同一份账上的三个上限。
            */
           const folded = extra.length
-            ? foldToolResults(extra).rows
+            ? foldToolResults(extra, { budgetTokens: turnCaps.toolContext }).rows
             : extra;
           const prepared: ChatMessage[] = [...rows, userTurn, ...folded];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
@@ -1042,18 +1069,24 @@ export function runAgentMentions(
           };
           for (let round = 0; ; round++) {
             /**
-             * 预算驱动收口（G1）：工具结果累计超过 `MAX_TURN_TOOL_TOKENS` 就不再开新一轮。
+             * 预算驱动收口（G1）：工具结果累计超过单轮上限就不再开新一轮。
+             *
+             * P2-T11：上限来自统一账本（`planTurnBudget` 的 `turn` 闸门），
+             * 与历史预算、工具折叠预算共用同一个 `DEFAULT_TURN_CAPS`。
              *
              * 与「轮次到顶」的区别在**告知**：这里明确告诉用户「已达预算、可以继续」，
              * 而不是静默停在半路——用户看不懂为什么话没说完，只会觉得模型变笨了。
              */
-            if (round > 0 && toolTokens > MAX_TURN_TOOL_TOKENS) {
+            const budget = planTurnBudget({ systemTokens: promptTokens, toolTokens });
+            if (round > 0 && budget.over.includes("turn")) {
               emitDelta(
                 `\n\n（本次工具返回的内容已达预算上限，先给出当前结论。回复「继续」可以接着做。）`,
                 aggressive,
               );
               emitFooter();
-              console.warn(`工具结果累计 ${toolTokens} token 超过预算 ${MAX_TURN_TOOL_TOKENS}`);
+              console.warn(
+                `工具结果累计 ${toolTokens} token 超过单轮预算 ${budget.caps.turnTool}（账本：${budget.over.join("/")}）`,
+              );
               return;
             }
             // 工具轮的文本先攒着（可能是「我这就去查」这类中间话术，等工具结果回来再决定是否上行）。

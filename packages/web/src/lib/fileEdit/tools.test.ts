@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { FileFsBridge, FileReadResponse, FileWriteOp } from "./bridge.js";
 import type { FileRoot } from "./paths.js";
 import { MAX_FILE_BYTES } from "./limits.js";
@@ -278,5 +278,57 @@ describe("file_read 执行", () => {
     const result = await run(bridge, "file_read", { path: "a.md", root: "不存在" });
     expect(result.ok).toBe(false);
     expect(result.text).toContain("库");
+  });
+});
+
+describe("工具失败契约（P2-T9）：结构化 error_code + 一次改对的重试建议", () => {
+  it("file_read 文件不存在：给 not-found，并明说「新建用 Add File」", async () => {
+    const bridge = buildFileToolBridge({ bridge: fakeBridge(), roots: () => [ROOT] });
+    const result = await run(bridge, "file_read", { path: "没有.md" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("not-found");
+    expect(result.text).toContain("可重试：");
+    expect(result.text).toContain("Add File");
+  });
+
+  it("file_read 越界：path-escape 给「改成根内相对路径」的一次改法", async () => {
+    const bridge = buildFileToolBridge({ bridge: fakeBridge(), roots: () => [ROOT] });
+    const result = await run(bridge, "file_read", { path: "../外面的.md" });
+    expect(result.error?.error_code).toBe("path-escape");
+    expect(result.text).toContain("可重试：把 path 改成根内相对路径");
+    // 原有文案不动（题集 sec-005 的断言依赖它）
+    expect(result.text).toContain("路径不合法或越界：../外面的.md");
+  });
+
+  it("file_patch 锚点失败：match-failed + 「先 file_read 再重写锚点」，且结论仍是最后一句", async () => {
+    const fake = fakeBridge({ "D:/库/a.md": "第一行\n第二行\n" });
+    const bridge = buildFileToolBridge({ bridge: fake, roots: () => [ROOT] });
+    const result = await run(bridge, "file_patch", { patch: UPDATE_PATCH });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("match-failed");
+    expect(result.text).toContain("锚点匹配失败（match-failed）");
+    expect(result.text).toContain("可重试：先 file_read");
+    expect(result.text.trimEnd().endsWith("整份补丁未写入任何文件。")).toBe(true);
+    expect(fake.written).toHaveLength(0);
+  });
+
+  it("file_patch 只读根：root-readonly 拒绝，只给提示、不给可重试，且不写盘", async () => {
+    const fake = fakeBridge({ "D:/参考/a.md": "旧行\n" });
+    const bridge = buildFileToolBridge({
+      bridge: fake,
+      roots: () => [ROOT, READ_ROOT],
+    });
+    const result = await run(bridge, "file_patch", { patch: UPDATE_PATCH, root: "参考" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("root-readonly");
+    expect(result.text).not.toContain("可重试：");
+    expect(fake.written).toHaveLength(0);
+  });
+
+  it("未知工具：unknown-tool（不会静默成功）", async () => {
+    const bridge = buildFileToolBridge({ bridge: fakeBridge(), roots: () => [ROOT] });
+    const result = await bridge.execute({ name: "file_delete", arguments: "{}" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("unknown-tool");
   });
 });

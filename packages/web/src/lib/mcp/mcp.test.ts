@@ -438,6 +438,9 @@ describe("工具桥接（命名空间 + 执行）", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.text).toContain("未知工具");
+    // P2-T9：结构化契约——错误码稳定，重试建议直接给出正确工具名
+    expect(result.error?.error_code).toBe("unknown-tool");
+    expect(result.text).toContain("可重试：");
     // 工具名统一过 slug（小写），近邻建议也用同一个名字，模型直接照抄即可
     expect(result.text).toContain("shot__screenshot");
     expect(result.text).toContain("共 2 个可用工具");
@@ -459,14 +462,15 @@ describe("工具桥接（命名空间 + 执行）", () => {
       }),
     };
 
-    await expect(executeToolCall({ name: "nope", arguments: "{}" }, catalog, deps)).resolves.toMatchObject({
-      ok: false,
-      text: expect.stringContaining("未知工具"),
-    });
-    await expect(executeToolCall({ name, arguments: "not json" }, catalog, deps)).resolves.toMatchObject({
-      ok: false,
-      text: expect.stringContaining("不是合法 JSON"),
-    });
+    const unknown = await executeToolCall({ name: "nope", arguments: "{}" }, catalog, deps);
+    expect(unknown).toMatchObject({ ok: false, text: expect.stringContaining("未知工具") });
+    expect(unknown.error?.error_code).toBe("unknown-tool");
+
+    const badJson = await executeToolCall({ name, arguments: "not json" }, catalog, deps);
+    expect(badJson).toMatchObject({ ok: false, text: expect.stringContaining("不是合法 JSON") });
+    expect(badJson.error?.error_code).toBe("invalid-arguments");
+    expect(badJson.text).toContain("可重试：");
+
     await expect(executeToolCall({ name, arguments: '{"q":1}' }, catalog, deps)).resolves.toEqual({
       ok: true,
       text: 'echo:{"q":1}',
@@ -482,10 +486,9 @@ describe("工具桥接（命名空间 + 执行）", () => {
         },
       }),
     };
-    await expect(executeToolCall({ name, arguments: "{}" }, catalog, failing)).resolves.toMatchObject({
-      ok: false,
-      text: expect.stringContaining("连接断了"),
-    });
+    const broken = await executeToolCall({ name, arguments: "{}" }, catalog, failing);
+    expect(broken).toMatchObject({ ok: false, text: expect.stringContaining("连接断了") });
+    expect(broken.error?.error_code).toBe("mcp-exception");
   });
 });
 

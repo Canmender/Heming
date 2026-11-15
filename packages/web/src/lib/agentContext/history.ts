@@ -1,6 +1,7 @@
 import type { ChatMessage } from "./types.js";
 import { DEFAULT_RESERVED_TOKENS, planContext } from "./budget.js";
 import { estimateRowsTokens } from "./tokens.js";
+import { planTurnBudget } from "./turnBudget.js";
 import { SUMMARY_HEADER, SUMMARY_NOTICE, buildSummaryPrompt, deterministicSummary } from "./summary.js";
 import { normalizeContextSettings, type ContextSettings } from "./settings.js";
 import type { SummaryCache } from "./store.js";
@@ -24,6 +25,13 @@ export interface PrepareHistoryDeps {
    * 不加也能跑；由触发端传入才能让「每会话 20 条」真正按会话隔离。
    */
   conversationId?: string;
+  /**
+   * 系统提示词估算 token（P2-T11）：给了就算进同一个预算账，
+   * 历史额度 = context - 预留 - 系统 - 本轮工具结果。
+   */
+  systemTokens?: number;
+  /** 本轮已回灌的工具结果估算 token（P2-T11）。 */
+  toolTokens?: number;
 }
 
 /** 溢出重试的两次收紧（设计 §3.4）：只动预算与轮数，其余照旧。 */
@@ -70,10 +78,24 @@ export async function prepareHistory(
     if (!settings.enabled || !source.length) return source;
 
     const effective = tighten(settings, deps.aggressive);
+    /**
+     * P2-T11：历史额度从统一账本算——`planContext` 的 `reservedTokens` 语义是
+     * 「从总预算里再扣掉注入侧」，所以这里传 `budget - remaining.history`，
+     * 效果等于再扣掉系统提示词与本轮工具结果（不再各算各的）。
+     */
+    const ledger = planTurnBudget({
+      caps: { context: effective.budgetTokens },
+      systemTokens: deps.systemTokens,
+      toolTokens: deps.toolTokens,
+    });
+    const reservedForHistory = Math.max(
+      0,
+      effective.budgetTokens - ledger.remaining.history,
+    );
     let plan = planContext(source, {
       budgetTokens: effective.budgetTokens,
       keepRecentTurns: effective.keepRecentTurns,
-      reservedTokens: deps.reservedTokens ?? DEFAULT_RESERVED_TOKENS,
+      reservedTokens: deps.reservedTokens ?? reservedForHistory,
     });
     if (!plan.older.length) {
       // ★ 溢出重试的真实痛点：如果历史本来就全放得下，`older` 为空 → 原样返回 →

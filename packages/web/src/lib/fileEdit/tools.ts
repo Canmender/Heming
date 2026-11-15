@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 智能体侧的文件编辑工具：`file_patch`（写）与 `file_read`（读）。
  *
  * 为什么两个工具而不是 `read/write/delete` 三个（规格 §2）：
@@ -26,6 +26,13 @@ import { relFromRoot, resolveInsideRoot, type FileRoot } from "./paths.js";
 import { isPatchError, pickRoot } from "./resolve.js";
 import { isFileEditTool, parseToolArgs } from "./ruleTargets.js";
 import type { FileChange, PatchError } from "./types.js";
+import {
+  appendFailure,
+  contractLines,
+  failureResult,
+  type ToolFailure,
+  type ToolFailureResult,
+} from "../toolError.js";
 
 /** 工具声明（`parameters` 直接进 OpenAI/Anthropic 的 schema）。 */
 export interface FileToolSpec {
@@ -146,21 +153,40 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       const args = parseToolArgs(call.arguments);
       const roots = deps.roots();
       try {
+        // 先认名字再看可见性：未知工具必须回 unknown-tool，不能误报成「没有根」。
+        if (call.name !== "file_patch" && call.name !== "file_read") {
+          return failureResult("未知工具", call.name, {
+            error_code: "unknown-tool",
+            hint: "只支持 file_read / file_patch；不要臆造工具名",
+          });
+        }
         if (!visible.has(call.name)) {
-          return {
-            text:
-              call.name === "file_patch"
-                ? "file_patch 当前不可用：还没有可写根。目标不在可写根内；如需写入，请先在「设置 → 文件编辑」添加该目录为写根。"
-                : `工具 ${call.name} 当前不可用：还没有配置任何根目录。`,
-            ok: false,
-          };
+          return call.name === "file_patch"
+            ? failureResult(
+                "file_patch 当前不可用",
+                "还没有可写根。目标不在可写根内；如需写入，请先在「设置 → 文件编辑」添加该目录为写根。",
+                {
+                  error_code: "no-write-root",
+                  hint: "没有可写根时 file_patch 不会成功；读文件用 file_read，写盘要先让用户加根",
+                },
+              )
+            : failureResult("工具当前不可用", `${call.name}：还没有配置任何根目录。`, {
+                error_code: "no-roots",
+                hint: "没有配置根目录，文件工具无法使用；不要重试",
+              });
         }
         if (call.name === "file_patch") return await runPatch(args, roots);
         if (call.name === "file_read") return await runRead(args, roots);
-        return { text: `未知工具 ${call.name}`, ok: false };
+        return failureResult("未知工具", call.name, {
+          error_code: "unknown-tool",
+          hint: "只支持 file_read / file_patch",
+        });
       } catch (e) {
         // 永不抛：工具失败不该让整轮对话崩掉（与 wiki/chart 工具同口径）
-        return { text: `文件操作失败：${e instanceof Error ? e.message : String(e)}`, ok: false };
+        return appendFailure(`文件操作失败：${e instanceof Error ? e.message : String(e)}`, {
+          error_code: "io",
+          retry_with: "同一个调用重试一次；再失败就换做法或告诉用户",
+        });
       }
     },
   };
@@ -169,21 +195,28 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
   async function runPatch(
     args: Record<string, unknown>,
     roots: FileRoot[],
-  ): Promise<{ text: string; ok: boolean }> {
+  ): Promise<{ text: string; ok: boolean; error?: ToolFailure }> {
     if (roots.length === 0) {
-      return { text: `尚未配置可写根。${OUT_OF_ROOT_HINT}`, ok: false };
+      return failureResult("尚未配置可写根", OUT_OF_ROOT_HINT, {
+        error_code: "no-roots",
+        hint: "没有可写根时 file_patch 不会成功；先让用户在设置里添加写根",
+      });
     }
     const patchText = typeof args.patch === "string" ? args.patch : "";
     if (!patchText.trim()) {
-      return {
-        text: "patch 不能为空。请提供以 `*** Begin Patch` 开始、`*** End Patch` 结束的补丁文本。",
-        ok: false,
-      };
+      return failureResult(
+        "补丁为空",
+        "请提供以 `*** Begin Patch` 开始、`*** End Patch` 结束的补丁文本。",
+        {
+          error_code: "empty-patch",
+          retry_with: "按 *** Begin Patch / *** End Patch 结构重写补丁，至少包含一处 @@ 变更",
+        },
+      );
     }
     const rootName = typeof args.root === "string" ? args.root : undefined;
 
     const parsed = parsePatch(patchText);
-    if (!parsed.ok) return { text: formatPatchError(parsed.error), ok: false };
+    if (!parsed.ok) return patchFailure(parsed.error);
 
     const planned = await planPatch(parsed.plan, {
       roots,
@@ -191,7 +224,7 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       patchText,
       io: ioFor(roots),
     });
-    if (!planned.ok) return { text: formatPatchError(planned.error), ok: false };
+    if (!planned.ok) return patchFailure(planned.error);
 
     // 安全判定：只读根 / 越界直接拒绝；其余由 HITL 决定问不问。
     // ★ 写盘层（桌面端）无论如何都只写可写根内，这里是「早拒绝 + 明确文案」。
@@ -202,7 +235,10 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot() } : {}),
     });
     if (safety.verdict === "reject") {
-      return { text: `写入被拒绝：${safety.reason}`, ok: false };
+      return failureResult("写入被拒绝", safety.reason, {
+        error_code: "safety-reject",
+        hint: "目标不在可写根内或落在只读根；换根内相对路径，或让用户把该根改为可写",
+      });
     }
 
     const writes: { kind: "write"; path: string; content: string }[] = [];
@@ -233,31 +269,46 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
   async function runRead(
     args: Record<string, unknown>,
     roots: FileRoot[],
-  ): Promise<{ text: string; ok: boolean; sources?: ToolSource[] }> {
+  ): Promise<{ text: string; ok: boolean; sources?: ToolSource[]; error?: ToolFailure }> {
     if (roots.length === 0) {
-      return { text: "尚未配置根目录：请让用户在设置区「文件编辑」里添加一个根。", ok: false };
+      return failureResult("尚未配置根目录", "请让用户在设置区「文件编辑」里添加一个根。", {
+        error_code: "no-roots",
+        hint: "没有根目录时 file_read 无法使用；不要重试",
+      });
     }
     const rawPath = typeof args.path === "string" ? args.path.trim() : "";
-    if (!rawPath) return { text: "path 不能为空（例如 notes/a.md）。", ok: false };
+    if (!rawPath) {
+      return failureResult("path 为空", "path 不能为空（例如 notes/a.md）。", {
+        error_code: "invalid-path",
+        retry_with: "传根内相对路径，例如 notes/a.md",
+      });
+    }
 
     const rootName = typeof args.root === "string" ? args.root : undefined;
     const root = rootName
       ? roots.find((r) => r.name.trim().toLowerCase() === rootName.trim().toLowerCase())
       : roots[0];
     if (!root) {
-      return {
-        text: `没有名为「${rootName ?? ""}」的根。可用根：${roots.map((r) => `${r.name}（${r.path}）`).join("、")}。`,
-        ok: false,
-      };
+      return failureResult(
+        "未找到根",
+        `没有名为「${rootName ?? ""}」的根。可用根：${roots.map((r) => `${r.name}（${r.path}）`).join("、")}。`,
+        {
+          error_code: "root-unknown",
+          retry_with: `用可用根名之一重试：${roots.map((r) => r.name).join("、")}`,
+        },
+      );
     }
     const abs = resolveInsideRoot(root.path, rawPath);
     if (!abs) {
-      return {
-        text:
-          `路径不合法或越界：${rawPath}。file_read 只接受根「${root.name}」（${root.path}）内的相对路径，` +
+      // 首行保持历史文案不变（题集 sec-005 与老断言都按它匹配），契约行追加在后面。
+      return appendFailure(
+        `路径不合法或越界：${rawPath}。file_read 只接受根「${root.name}」（${root.path}）内的相对路径，` +
           "不能包含 `..` 或是绝对路径。",
-        ok: false,
-      };
+        {
+          error_code: "path-escape",
+          retry_with: "把 path 改成根内相对路径（不带盘符、不以 / 开头、不含 ..）",
+        },
+      );
     }
 
     const result = await deps.bridge.read({ roots, path: abs });
@@ -271,7 +322,12 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
             : code === "too-large"
               ? "文件超过单文件上限，无法整份读取。"
               : "";
-      return { text: `${result.error || "读取失败"}${hint ? `\n${hint}` : ""}`, ok: false };
+      return appendFailure(`${result.error || "读取失败"}${hint ? `\n${hint}` : ""}`, {
+        error_code: code,
+        ...(code === "not-found" ? { retry_with: "先用根内相对路径确认拼写；新建文件用 file_patch 的 *** Add File" } : {}),
+        ...(code === "binary" ? { hint: "不是 UTF-8 文本，不能按文本读；换别的文件" } : {}),
+        ...(code === "io" ? { retry_with: "同一个 file_read 重试一次；再失败就告诉用户读不了" } : {}),
+      });
     }
 
     const rel = relFromRoot(root.path, abs) ?? rawPath;
@@ -318,6 +374,84 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
   }
 }
 
+/**
+ * 每个补丁错误码对应的**可执行出路**（P2-T9 契约）。
+ *
+ * 规则：越界/只读/桥不可用这类「重试也白搭」的失败只给 `hint`，绝不给 `retry_with`——
+ * 否则模型会原样再撞一次，白烧一轮 token（这是 P0 题集里最常见的坏重试）。
+ */
+export function patchFailureOf(error: PatchError): ToolFailure {
+  switch (error.code) {
+    case "invalid-patch":
+      return {
+        error_code: error.code,
+        retry_with:
+          "按 `*** Update File: <根内相对路径>` / `@@` / `-旧行` / `+新行` 的结构重写，整份补丁以 `*** End Patch` 收尾",
+      };
+    case "empty-patch":
+      return { error_code: error.code, retry_with: "至少写一个 `@@` 变更块；只有 Begin/End 的空补丁没有意义" };
+    case "too-many-files":
+      return { error_code: error.code, retry_with: "拆成多次补丁提交，每次不超过 20 个文件" };
+    case "patch-too-large":
+      return { error_code: error.code, retry_with: "拆成多次更小的补丁（总量 ≤4MB、单块 ≤200 行）" };
+    case "file-too-large":
+      return {
+        error_code: error.code,
+        retry_with: "先 file_read 分段读出要改的那一段，再只改必需的小段；单文件不超过 2MB",
+      };
+    case "hunk-too-large":
+      return { error_code: error.code, retry_with: "把变更块拆小，每块不超过 200 行" };
+    case "path-invalid":
+      return {
+        error_code: error.code,
+        retry_with: "把路径改成根内相对路径：不带盘符、不以 `/` 开头、不含 `..`",
+      };
+    case "path-escape":
+      return {
+        error_code: error.code,
+        retry_with: "把路径改成根内相对路径：不带盘符、不以 `/` 开头、不含 `..`",
+      };
+    case "root-unknown":
+      return {
+        error_code: error.code,
+        hint: "`root` 要用可写根的根名；不确定时省略 root，让工具用第一条可写根",
+      };
+    case "root-readonly":
+      return { error_code: error.code, hint: "这条根是只读的；改到可写根，或让用户把它改成可写根" };
+    case "file-not-found":
+      return {
+        error_code: error.code,
+        retry_with: "新建文件用 `*** Add File: <路径>`；修改已有文件先 file_read 确认路径拼写",
+      };
+    case "file-exists":
+      return {
+        error_code: error.code,
+        retry_with: "目标已存在：改用 `*** Update File: <路径>`（`Add File` 只能新建）",
+      };
+    case "binary-file":
+      return { error_code: error.code, hint: "这不是 UTF-8 文本，不能用文本补丁修改；换别的文件" };
+    case "match-failed":
+      return {
+        error_code: error.code,
+        retry_with: "先 file_read 读出该文件当前内容，再按实际原文重写 `@@` 锚点；不要凭记忆改",
+      };
+    case "write-failed":
+      return {
+        error_code: error.code,
+        retry_with: "同一个补丁重试一次；再失败就检查目标是否被占用或只读，并告诉用户",
+      };
+    case "bridge-missing":
+      return { error_code: error.code, hint: "桌面文件桥不可用（不在桌面端或桥未连接）；不要重试" };
+    default:
+      return { error_code: error.code, hint: "按上面的说明调整后，只重试一次" };
+  }
+}
+
+/** 补丁失败的结构化结果：文本与 `formatPatchError` 完全一致，另带契约字段。 */
+export function patchFailure(error: PatchError): ToolFailureResult {
+  return { text: formatPatchError(error), ok: false, error: patchFailureOf(error) };
+}
+
 /** 失败文案（规格 §9：按原因分流，给出下一步建议，绝不只说 "patch failed"）。 */
 export function formatPatchError(error: PatchError): string {
   const head: Record<string, string> = {
@@ -348,6 +482,8 @@ export function formatPatchError(error: PatchError): string {
   if (error.code === "path-escape" || error.code === "path-invalid" || error.code === "root-unknown") {
     lines.push(OUT_OF_ROOT_HINT);
   }
+  // P2-T9：契约行（可重试 / 提示）排在最终结论之前，结论永远是最后一句。
+  lines.push(...contractLines(patchFailureOf(error)));
   lines.push("整份补丁未写入任何文件。");
   return lines.join("\n");
 }

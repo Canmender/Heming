@@ -1,5 +1,6 @@
 import type { HttpMcpClient } from "./httpClient.js";
 import type { McpToolRef } from "./types.js";
+import { failureResult, type ToolFailure } from "../toolError.js";
 
 /**
  * 把 MCP 工具桥接成模型能看懂的「函数调用」。
@@ -134,6 +135,13 @@ export interface ToolExecutionResult {
    * 现在文本里留说明，图片原文交给上层决定怎么投喂（见 agentStream 的图片回灌）。
    */
   images?: ToolImage[];
+  /**
+   * 失败契约（P2-T9）：`ok=false` 时带机器可读的错误码与重试建议。
+   *
+   * 文本里同样的信息也在（契约行追加在末尾），这里是给上层统计/归因用的结构字段。
+   * 可选：老的调用方只读 `text`/`ok` 不受影响。
+   */
+  error?: ToolFailure;
 }
 
 /** 单次工具结果最多带回几张图片：再多就会把上下文预算吃穿。 */
@@ -255,6 +263,11 @@ export async function executeToolCall(
   deps: ToolExecutionDeps,
   opts?: ToolCallOptions,
 ): Promise<ToolExecutionResult> {
+  const fail = (title: string, message: string, failure: ToolFailure): ToolExecutionResult => {
+    const result = failureResult(title, message, failure);
+    return { ...result, text: truncateToolResult(result.text) };
+  };
+
   const entry = catalog.byName.get(call.name);
   if (!entry) {
     // 模型偶尔会把工具名记岔（少个前缀、大小写不同、把「服务 · 工具」当名字）。
@@ -266,10 +279,14 @@ export async function executeToolCall(
       : names.length
         ? "；可用工具的名字请先用 tool_search 查一下"
         : "；当前没有任何可用的外部工具";
-    return {
-      text: `工具调用失败：未知工具 ${call.name}（共 ${names.length} 个可用工具${hint}）`,
-      ok: false,
-    };
+    return fail("工具调用失败", `未知工具 ${call.name}（共 ${names.length} 个可用工具${hint}）`, {
+      error_code: "unknown-tool",
+      ...(near.length
+        ? { retry_with: `改用相近的工具名 ${near[0]} 再调用一次` }
+        : names.length
+          ? { retry_with: "先调用 tool_search 查工具名，再按返回的完整名字重试" }
+          : { hint: "当前没有外部工具可用，别重试这个调用" }),
+    });
   }
 
   let args: Record<string, unknown> = {};
@@ -280,21 +297,42 @@ export async function executeToolCall(
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         args = parsed as Record<string, unknown>;
       } else {
-        return { text: "工具调用失败：参数必须是 JSON 对象", ok: false };
+        return fail("工具调用失败", "参数必须是 JSON 对象", {
+          error_code: "invalid-arguments",
+          retry_with: 'arguments 传 {"参数名": 值} 形式的 JSON 对象，不要传数组或字符串',
+        });
       }
     } catch {
-      return { text: `工具调用失败：参数不是合法 JSON（${raw.slice(0, 120)}）`, ok: false };
+      return fail("工具调用失败", `参数不是合法 JSON（${raw.slice(0, 120)}）`, {
+        error_code: "invalid-arguments",
+        retry_with: "按该工具的 parameters 重写 arguments，必须是合法 JSON（双引号、无尾逗号）",
+      });
     }
   }
 
   // 调用前就已被中断：不必再发请求（stdio 侧会把副作用留在子进程里）
-  if (opts?.signal?.aborted) return { text: "工具调用失败：本轮已中断，未执行", ok: false };
+  if (opts?.signal?.aborted) {
+    return fail("工具调用失败", "本轮已中断，未执行", {
+      error_code: "aborted",
+      hint: "用户已中断本轮，不要重试同一调用",
+    });
+  }
 
   try {
     const client = deps.clientFor(entry.ref.serverId);
     const result = await client.callTool(entry.ref.tool.name, args, { signal: opts?.signal });
     if (result.isError) {
-      return { text: truncateToolResult(`工具返回错误：${result.text || "（无详情）"}`), ok: false };
+      // 保留既有开头「工具返回错误：」——上层与用户都按它识别工具侧失败。
+      return {
+        text: truncateToolResult(
+          [
+            `工具返回错误：${result.text || "（无详情）"}`,
+            `可重试：按上面的错误信息修正参数后重新调用一次（同一错误连续两次就换方案）`,
+          ].join("\n"),
+        ),
+        ok: false,
+        error: { error_code: "mcp-error", retry_with: "按错误信息修正参数后重新调用一次" },
+      };
     }
     const images = imagesFromContent(result.content ?? []);
     const note = images.length ? `\n（工具返回 ${images.length} 张图片，已在下面单独附上）` : "";
@@ -304,6 +342,10 @@ export async function executeToolCall(
       ...(images.length ? { images } : {}),
     };
   } catch (err) {
-    return { text: truncateToolResult(`工具调用失败：${err instanceof Error ? err.message : String(err)}`), ok: false };
+    return fail("工具调用失败", err instanceof Error ? err.message : String(err), {
+      error_code: "mcp-exception",
+      retry_with: "同一个调用重试一次；再失败就改用其它工具或换做法",
+      hint: "这是调用通道异常（网络/进程），不是参数写错",
+    });
   }
 }

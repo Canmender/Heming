@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  KEEP_RECENT_SAME_TOOL,
   KEEP_RECENT_TOOL_RESULTS,
   MAX_TOOL_CONTEXT_TOKENS,
   foldToolResults,
+  summarizeToolResult,
 } from "./toolResults.js";
 import type { ChatMessage } from "./types.js";
 
@@ -75,5 +77,74 @@ describe("foldToolResults", () => {
     const result = foldToolResults(rows, { budgetTokens: MAX_TOOL_CONTEXT_TOKENS });
     expect(result.folded).toBe(0);
     expect(result.rows).toBe(rows);
+  });
+});
+
+/** 造一条带工具名与首行的工具结果（真实工具结果的首行通常是路径/标题）。 */
+function namedToolRow(name: string, id: string, body: string): ChatMessage {
+  return { role: "tool", tool_call_id: id, name, content: body };
+}
+
+describe("foldToolResults · 同名工具合并（P2-T10）", () => {
+  it("同一工具多次调用：最近一条保留全文，更早的压成单行摘要", () => {
+    const rows = [1, 2, 3].map((i) =>
+      namedToolRow("file_read", `c${i}`, `路径：notes/f${i}.md\n${"正文".repeat(600)}`),
+    );
+    const result = foldToolResults(rows, { budgetTokens: 10_000, keepRecent: 0 });
+
+    expect(result.merged).toBe(2);
+    // 最近一条原文不动
+    expect(result.rows[2]?.content).toBe(rows[2]?.content);
+    // 更早的只剩一行摘要，且能认出是哪个文件
+    expect(String(result.rows[0]?.content)).toContain("已折叠为单行摘要");
+    expect(String(result.rows[0]?.content)).toContain("notes/f1.md");
+    expect(result.afterTokens).toBeLessThan(result.beforeTokens);
+  });
+
+  it("不同工具互不影响（file_read 与 file_patch 各留全文）", () => {
+    const rows = [
+      namedToolRow("file_read", "a", `路径：a.md\n${"正文".repeat(600)}`),
+      namedToolRow("file_patch", "b", `已写入 1 个文件\n${"清单".repeat(600)}`),
+    ];
+    const result = foldToolResults(rows, { budgetTokens: 10_000, keepRecent: 0 });
+    expect(result.merged).toBe(0);
+    expect(result.rows).toBe(rows);
+  });
+
+  it("最近 keepRecent 条内不合并（模型往往还在用它们）", () => {
+    const rows = [1, 2].map((i) => namedToolRow("file_read", `c${i}`, `路径：f${i}.md\n${"正文".repeat(600)}`));
+    const result = foldToolResults(rows, { budgetTokens: 10_000, keepRecent: 2 });
+    expect(result.merged).toBe(0);
+    expect(result.rows).toBe(rows);
+  });
+
+  it("带图片说明的结果不压（那几行是「模型看不到图」的唯一解释）", () => {
+    const rows = [
+      namedToolRow("file_read", "a", `路径：a.png\n（本次返回了 2 张图片，但当前模型不支持读图，已省略）`),
+      namedToolRow("file_read", "b", `路径：b.png\n（本次返回了 2 张图片，但当前模型不支持读图，已省略）`),
+    ];
+    const result = foldToolResults(rows, { budgetTokens: 10_000, keepRecent: 0 });
+    expect(result.merged).toBe(0);
+  });
+
+  it("摘要保留首行与原文长度（模型据此判断要不要重查）", () => {
+    const summary = summarizeToolResult(namedToolRow("file_read", "a", "路径：x.md\n正文"));
+    expect(summary).toContain("file_read");
+    expect(summary).toContain("路径：x.md");
+    expect(summary).toContain("字符");
+    expect(summary.length).toBeLessThan(200);
+  });
+
+  it("默认只留最近 1 条同名工具全文（公开常量）", () => {
+    expect(KEEP_RECENT_SAME_TOOL).toBe(1);
+  });
+
+  it("典型长会话（同一文件读 5 次）至少省下 60% 工具结果 token", () => {
+    const body = `路径：notes/长文.md\n${"这是一段比较长的正文。".repeat(1200)}`;
+    const rows = [1, 2, 3, 4, 5].map((i) => namedToolRow("file_read", `c${i}`, body));
+    const result = foldToolResults(rows, { budgetTokens: 1_000_000, keepRecent: 0 });
+    const saved = 1 - result.afterTokens / result.beforeTokens;
+    expect(result.merged).toBe(4);
+    expect(saved).toBeGreaterThanOrEqual(0.6);
   });
 });

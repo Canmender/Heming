@@ -53,6 +53,10 @@ graders:
   - type: contains
     value: ["锚点匹配失败（match-failed）"]
     in: tool_result
+  # P2-T9：失败结果必须带「照做就能过」的重试建议，而不是只报错
+  - type: contains
+    value: ["可重试：先 file_read 读出该文件当前内容"]
+    in: tool_result
   - type: file_assert
     path: notes/说明.md
     contains: ["允许放一份不超过 1 KB 的 JSON 样例"]
