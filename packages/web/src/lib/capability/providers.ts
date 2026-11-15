@@ -77,12 +77,15 @@ export const filesProvider: CapabilityProvider = {
 };
 
 /**
- * 内置联网工具（d.148.4.95.11 · web_search / web_read / now）：
+ * 内置联网与本地只读工具（d.149.4.95.11 起：web_search / web_read / now；
+ * d.150.4.95.11 扩到 7 个，见 `lib/webtools/tools.ts`）：
  * 只在**有主进程 HTTP 桥**时注入（浏览器端返回 null）。
  *
  * 为什么要桥：渲染层 origin 是 `app://heming`，直连第三方会被同源策略拦下；
  * 主进程的通用代发桥（`workflow:http`）已做安全收口，在这里复用比新开一条 IPC
- * 通道更小也更安全。三个工具都只读，由 `guarded + floor=read` 默认放行。
+ * 通道更小也更安全。联网两个工具只读，web_read 另有私网地址守卫（`net-guard.ts`）；
+ * calculator / json_query / encoding / date_calc 是纯本地计算，同样只读，
+ * 由 `guarded + floor=read` 默认放行。
  */
 export const webToolsProvider: CapabilityProvider = {
   id: "webtools",

@@ -17,10 +17,6 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
 import { PageShell } from "./layout/PageShell.js";
 import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
-import {
-  readBundledRuntimeStatus,
-  type BundledRuntimeStatus,
-} from "../lib/registry/runtime.js";
 import { useUiStore } from "../store/ui.js";
 import { Button } from "../components/ui/Button.js";
 
@@ -48,19 +44,19 @@ function pluginIdFromServerId(serverId: string): string | null {
  * 3. 逐个工具开关「是否交给模型」+ 手动测试调用（`tools/call`）。
  *
  * 安全默认：**工具默认不启用**，必须显式打开才会进入模型提示词。
- * 唯一例外是系统能力（Windows 桌面控制 / 网页抓取）的只读白名单——
- * 它们是应用自身能力，发现工具后自动启用；写操作仍需逐个授权。
+ * 系统能力（Windows 桌面控制 / 网页抓取）的只读白名单在连接发现后自动启用，
+ * 写操作仍需逐个授权——那部分开关在「工具授权」里，不在本视图。
  */
 /**
  * 可嵌入的接口（MCP）视图（d.67 导航合并）。
  *
- * 布局分两段（d.93）：
- * - **系统能力**：随应用内置的两条服务，只读展示（不可删除、不可改配置），
- *   登录后由 `autoConnectAll()` 自动连接；工具仍可逐个开关；
- * - **私有服务**：用户手动添加或从 Registry 安装，增删改与原来一致。
+ * 布局（d.149.4.95.11 起只有一段）：**私有服务**——用户手动添加或从 Registry 安装，
+ * 增删改与原来一致。
  *
- * 为什么把系统能力单独分区而不是混在列表里：混排时用户会以为自己也能删掉
- * 「Windows 桌面控制」，删完才发现应用少了能力；分区后「可操作 / 只读」一眼可分。
+ * 系统能力（Windows 桌面控制 / 网页抓取）不再在这里画卡片：同一批东西在页面下方
+ * 「工具授权 → 系统能力」里已经有完整清单，顶部再列一遍是重复展示。它们的连接状态、
+ * 重新连接与内置运行时提示收在 `SystemCapabilityStatus`（挂在工具授权区），
+ * 应用启动时仍由 `autoConnectAll()` 自动连接。
  */
 export interface InterfacesViewProps {
   registry?: McpRegistry;
@@ -128,20 +124,11 @@ export function InterfacesView({
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   /** 正在执行的手动调用（`serverId::toolName`）；进行中禁用按钮，防重复执行。 */
   const [testRunning, setTestRunning] = useState<string | null>(null);
-  /**
-   * 内置运行时状态（桌面端才读得到；浏览器 / 旧版主进程为 null）。
-   *
-   * 为什么放这里：系统能力跑的是包内运行时，装包损坏时会退回系统 uvx，
-   * 用户看到的「连不上」其实该修的是安装包——状态行要出现在系统能力区。
-   */
-  const [runtimeStatus, setRuntimeStatus] = useState<BundledRuntimeStatus | null>(null);
 
   const bump = () => setTick((n) => n + 1);
   /** stdio 需要桌面端：浏览器里只能登记配置，连接会失败。 */
   const stdioReady = hasStdioBridge();
   const servers = useMemo(() => registry.servers(), [registry, tick]);
-  /** 系统能力：顺序按定义表（不跟随落盘顺序），只读展示。 */
-  const systemServers = useMemo(() => registry.systemServers(), [registry, tick]);
   /** 私有服务：系统能力之外的全部服务（手填 / Registry / 插件）。 */
   const userServers = useMemo(
     () => servers.filter((server) => !registry.isSystem(server.id)),
@@ -158,19 +145,6 @@ export function InterfacesView({
 
   // 组件卸载时刷新不设置状态
   useEffect(() => () => setConn({}), []);
-
-  // 内置运行时状态只在挂载时读一次：浏览器/旧版主进程没有桥（返回 null），
-  // 读不到就静默不渲染——不显示「未知」这类噪音。
-  useEffect(() => {
-    let alive = true;
-    void readBundledRuntimeStatus().then((status) => {
-      // 读不到（null）就不写状态：省一次无意义的 setState，也避免测试里的 act 噪音。
-      if (alive && status) setRuntimeStatus(status);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const resetForm = () => {
     setName("");
@@ -294,14 +268,12 @@ export function InterfacesView({
   };
 
   /**
-   * 渲染一台 MCP 服务卡片。
+   * 渲染一台私有 MCP 服务卡片。
    *
-   * 系统能力与私有服务共用同一张卡片：工具清单、测试面板、连接/错误展示完全一致；
-   * 差别只在头部——系统能力没有「参与对话」开关与删除按钮，状态旁给一个重试连接。
-   * `system` 不看 `origin` 而看 `registry.isSystem(id)`：旧数据里 origin 可能是
-   * manual，但固定 id 就是系统能力，不能因此把它当用户服务处理。
+   * 系统能力不再在这里出卡片（原因见文件头）：所有卡片都是用户可增删的服务，
+   * 「参与对话」开关与删除入口一视同仁，不再有 system 分支。
    */
-  const renderServerCard = (server: McpServerConfig, system: boolean) => {
+  const renderServerCard = (server: McpServerConfig) => {
     const tools = toolsByServer[server.id] ?? [];
     // 本页 state 里没有记录时，按「是否已发现过工具」判断：
     // 已发现 = App 启动时已自动连过（清单会落盘），显示「已连接」；
@@ -325,16 +297,10 @@ export function InterfacesView({
       <section
         key={server.id}
         aria-label={`MCP 服务 ${server.name}`}
-        data-system-mcp={system ? "true" : undefined}
         className="ui-card p-4"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-ui-md font-semibold">{server.name}</span>
-          {system && (
-            <span className="ui-chip" title="随应用内置，不可删除、不可修改配置">
-              随应用内置
-            </span>
-          )}
           <span className="ui-chip">
             {server.transport === "http" ? "HTTP" : "stdio"}
           </span>
@@ -393,49 +359,35 @@ export function InterfacesView({
             {tools.length ? `${tools.length} 个工具` : "未获取工具"}
           </span>
           <div className="ml-auto flex items-center gap-2">
-            {system ? (
-              // 系统能力始终参与对话：没有「停用」入口（停用后模型能力会静默缺失）。
-              <span className="text-ui-xs text-muted">始终参与对话</span>
-            ) : (
-              <label className="flex items-center gap-1 text-ui-xs text-muted">
-                <input
-                  type="checkbox"
-                  aria-label={`启用服务 ${server.name}`}
-                  checked={server.enabled}
-                  onChange={(e) => {
-                    registry.update(server.id, { enabled: e.target.checked });
-                    bump();
-                  }}
-                />
-                参与对话
-              </label>
-            )}
+            <label className="flex items-center gap-1 text-ui-xs text-muted">
+              <input
+                type="checkbox"
+                aria-label={`启用服务 ${server.name}`}
+                checked={server.enabled}
+                onChange={(e) => {
+                  registry.update(server.id, { enabled: e.target.checked });
+                  bump();
+                }}
+              />
+              参与对话
+            </label>
             <Button
               type="button"
               aria-label={`连接 ${server.name}`}
-              title={system ? "重新连接系统能力" : undefined}
               onClick={() => void connect(server)}
               disabled={state === "connecting"}
               size="sm" variant="ghost"
             >
-              {state === "connecting"
-                ? "连接中…"
-                : tools.length
-                  ? "刷新工具"
-                  : system
-                    ? "重新连接"
-                    : "连接"}
+              {state === "connecting" ? "连接中…" : tools.length ? "刷新工具" : "连接"}
             </Button>
-            {!system && (
-              <Button
-                type="button"
-                aria-label={`删除 ${server.name}`}
-                onClick={() => removeServer(server)}
-                size="sm" variant="ghost" className="text-danger"
-              >
-                <TrashIcon width={12} height={12} />
-              </Button>
-            )}
+            <Button
+              type="button"
+              aria-label={`删除 ${server.name}`}
+              onClick={() => removeServer(server)}
+              size="sm" variant="ghost" className="text-danger"
+            >
+              <TrashIcon width={12} height={12} />
+            </Button>
           </div>
         </div>
 
@@ -458,9 +410,7 @@ export function InterfacesView({
 
         {tools.length === 0 ? (
           <p className="mt-3 text-ui-sm text-muted">
-            {system
-              ? "正在连接或尚未发现工具；点「重新连接」重试。连接成功后可逐个开关工具。"
-              : "点「连接」拉取工具清单。连接成功后可逐个授权给模型调用。"}
+            点「连接」拉取工具清单。连接成功后可逐个授权给模型调用。
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
@@ -616,43 +566,6 @@ export function InterfacesView({
         </div>
       )}
 
-      {/* 系统能力：只读分区，永远排在最上面。不可删除、不可改配置，
-          但工具开关可用（写操作仍需逐个授权）。 */}
-      <section aria-label="系统能力" data-testid="mcp-system-servers" className="mb-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="ui-section-title">系统能力</span>
-          <span className="ui-chip">随应用内置</span>
-        </div>
-        <p className="mt-1 text-ui-sm text-muted">
-          Windows 桌面控制与网页抓取随应用内置，登录后自动连接；不可删除、不可修改配置。
-          只读工具默认启用，写操作仍需逐个授权。
-        </p>
-        {/* 内置运行时状态（桌面端）：正常时弱化色，装包损坏时警示色并给出恢复动作。
-            浏览器里读不到桥 → runtimeStatus 恒为 null，这一行不渲染。 */}
-        {runtimeStatus && (
-          <p
-            data-testid="mcp-runtime-status"
-            className={`mt-1 text-ui-sm ${runtimeStatus.bundled ? "text-muted" : "text-warn"}`}
-          >
-            {runtimeStatus.note}
-            {!runtimeStatus.bundled && (runtimeStatus.python === null || !runtimeStatus.depsReady)
-              ? " 重新安装和鸣即可恢复。"
-              : ""}
-          </p>
-        )}
-        <div className="mt-3 flex flex-col gap-3">
-          {systemServers.length > 0 ? (
-            systemServers.map((server) => renderServerCard(server, true))
-          ) : (
-            // 密文读不出时 ensureSystemServers 会跳过补齐（避免覆盖用户配置），
-            // 这一轮就看不到系统能力；换回原系统账户/Credential Manager 记录后可恢复。
-            <p className="rounded-lg border border-dashed border-line bg-surface p-3 text-ui-sm text-muted">
-              系统能力暂不可用（本机服务配置读取失败）；恢复系统账户的凭据后重启应用即可。
-            </p>
-          )}
-        </div>
-      </section>
-
       {formOpen && (
         <section className="ui-card mb-4 p-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -776,7 +689,7 @@ export function InterfacesView({
           </div>
         ) : (
           <div className="mt-3 flex flex-col gap-3">
-            {userServers.map((server) => renderServerCard(server, false))}
+            {userServers.map((server) => renderServerCard(server))}
           </div>
         )}
       </section>

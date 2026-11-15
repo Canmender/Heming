@@ -50,6 +50,7 @@ import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
+import { SystemCapabilityStatus } from "./mcp/SystemCapabilityStatus.js";
 import {
   describeBlockedTools,
   describeCapabilityStats,
@@ -733,7 +734,9 @@ export function PluginsPage({
           />
         )}
 
-        {/* MCP Tab：注册表 / 预置服务 + 工具授权（工具只是 MCP 的明细，不再单独成 Tab）。 */}
+        {/* MCP Tab：服务清单 + 工具授权（工具只是 MCP 的明细，不再单独成 Tab）。
+            系统能力不再在 InterfacesView 顶部重复画一遍：连接状态 / 重新连接 / 运行时提示
+            收在工具授权上方的紧凑状态条里，工具开关仍在下面「系统能力」分组。 */}
         {tab === "mcp" && (
           <>
             <InterfacesView registry={mcp} plugins={plugins} onOpenPlugin={openPluginDetail} />
@@ -744,6 +747,7 @@ export function PluginsPage({
                   按服务逐个开启；写操作仍逐次人工确认，插件声明的风险上限在这里执行
                 </span>
               </div>
+              <SystemCapabilityStatus registry={mcp} />
               <PluginToolPanel
                 groups={toolGroups}
                 blocked={blockedTools}

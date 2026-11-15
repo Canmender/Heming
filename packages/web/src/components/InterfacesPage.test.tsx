@@ -112,11 +112,11 @@ describe("InterfacesPage", () => {
     expect(within(card).getByText("插件")).toBeInTheDocument();
   });
 
-  it("系统能力常驻；没有私有服务时只显示私有区的引导文案", () => {
+  it("没有私有服务时只显示私有区引导文案（系统能力已不再在这里出卡片）", () => {
     const empty = new McpRegistry(memStorage(), () => new Date().toISOString());
     render(<InterfacesPage registry={empty} />);
-    // 系统能力始终在（不可删除），私有区单独给引导
-    expect(screen.getByTestId("mcp-system-servers")).toBeInTheDocument();
+    // d.147.4.95.11：顶部系统能力卡片区已删，系统能力只在「工具授权」里出现
+    expect(screen.queryByTestId("mcp-system-servers")).toBeNull();
     expect(screen.getByText("还没有私有 MCP 服务")).toBeInTheDocument();
     expect(screen.queryByText(/还没有 MCP 服务，先添加一台/)).toBeNull();
   });
@@ -322,44 +322,33 @@ describe("InterfacesView 嵌入视图", () => {
   });
 });
 
-/* --------------------------------- 系统能力区：常驻只读（d.147.4.93.11） */
+/* ---------------- 系统能力不在接口视图里重复展示（d.147.4.95.11） */
 
-describe("系统能力：常驻、只读、不可删改", () => {
+describe("系统能力：接口视图不再出卡片", () => {
   function freshRegistry(): McpRegistry {
     return new McpRegistry(memStorage());
   }
 
-  it("系统能力区常驻在最上面：两条卡都标 data-system-mcp、显示「始终参与对话」、没有删除入口", () => {
+  it("内置两条服务不在本视图渲染：没有系统能力区块，也没有 data-system-mcp 卡片", () => {
     const fresh = freshRegistry();
     render(<InterfacesView registry={fresh} />);
 
-    const section = screen.getByTestId("mcp-system-servers");
-    expect(section).toHaveAttribute("aria-label", "系统能力");
-    const win = within(section).getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
-    const scrape = within(section).getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" });
-    for (const card of [win, scrape]) {
-      expect(card).toHaveAttribute("data-system-mcp", "true");
-      expect(within(card).getByText("始终参与对话")).toBeInTheDocument();
-      expect(within(card).queryByRole("button", { name: /删除/ })).toBeNull();
-      expect(within(card).queryByRole("checkbox")).toBeNull(); // 没有「参与对话」开关
-    }
-    // 旧的「预置服务」独立区块不再存在
-    expect(screen.queryByRole("region", { name: "预置服务" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /接入预置/ })).toBeNull();
+    expect(screen.queryByTestId("mcp-system-servers")).toBeNull();
+    expect(screen.queryByRole("region", { name: "系统能力" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "MCP 服务 Windows 桌面控制" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" })).toBeNull();
+    // 私有区仍是空态引导
+    expect(screen.getByText("还没有私有 MCP 服务")).toBeInTheDocument();
   });
 
-  it("存储里已有用户服务时系统能力照样补在最上面，用户服务留在私有区", () => {
+  it("存储里已有用户服务时只渲染私有卡，系统能力不混进来", () => {
     const reg = new McpRegistry(memStorageWithServer());
     render(<InterfacesView registry={reg} />);
 
-    const systemSection = screen.getByTestId("mcp-system-servers");
-    expect(within(systemSection).getAllByRole("region")).toHaveLength(2);
     const privateSection = screen.getByRole("region", { name: "私有 MCP 服务" });
     expect(within(privateSection).getByRole("region", { name: "MCP 服务 已存在的服务" })).toBeInTheDocument();
-    // 私有卡没有系统标记
-    expect(
-      within(privateSection).getByRole("region", { name: "MCP 服务 已存在的服务" }).getAttribute("data-system-mcp"),
-    ).toBeNull();
+    expect(within(privateSection).getAllByRole("region")).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: "MCP 服务 Windows 桌面控制" })).toBeNull();
   });
 
   it("私有服务删除确认里不出现预置说明（旧文案随预置语义一起删掉）", () => {
@@ -372,7 +361,7 @@ describe("系统能力：常驻、只读、不可删改", () => {
     expect(within(dialog).queryByText(/可在「预置服务」里重新接入/)).toBeNull();
   });
 
-  it("同名用户服务不会顶替系统能力：两条系统能力仍在，用户那条归私有区", () => {
+  it("与系统能力同名的用户服务照常归私有区（名字不再被系统卡占用）", () => {
     const reg = new McpRegistry(
       memStorageWithServer({
         id: "mine",
@@ -382,14 +371,9 @@ describe("系统能力：常驻、只读、不可删改", () => {
     );
     render(<InterfacesView registry={reg} />);
 
-    const systemSection = screen.getByTestId("mcp-system-servers");
-    expect(within(systemSection).getAllByRole("region")).toHaveLength(2);
     const privateSection = screen.getByRole("region", { name: "私有 MCP 服务" });
     const mineCard = within(privateSection).getByRole("region", { name: "MCP 服务 Windows 桌面控制" });
-    expect(mineCard.getAttribute("data-system-mcp")).toBeNull();
-    // 系统能力那条地址仍是内置命令入口（不是用户的 URL）
-    expect(
-      within(systemSection).getByRole("region", { name: "MCP 服务 Windows 桌面控制" }).textContent,
-    ).toContain("uvx");
+    expect(mineCard).toBeInTheDocument();
+    expect(privateSection.textContent).toContain("https://mine.example.com/mcp");
   });
 });

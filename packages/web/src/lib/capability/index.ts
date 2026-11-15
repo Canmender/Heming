@@ -8,6 +8,7 @@ import {
   selfProvider,
   toneProvider,
   vaultProvider,
+  webToolsProvider,
   wikiProvider,
 } from "./providers.js";
 import { teamProvider } from "./teamTools.js";
@@ -15,8 +16,8 @@ import { teamProvider } from "./teamTools.js";
 /**
  * 应用默认注册表：先注册内置能力；插件能力由 mcp 提供者统一承载。
  *
- * 顺序即优先级（工具名重复时前者胜出），与改前一致并在 `files`、`plugin-market` 处插入：
- * `mcp → charts → tone → wiki → vault → files → infohub → plugin-market → team → self`。
+ * 顺序即优先级（工具名重复时前者胜出），与改前一致并在 `files`、`webtools` 处插入：
+ * `mcp → charts → tone → wiki → vault → files → webtools → infohub → plugin-market → team → self`。
  * `files` 放在 wiki 之后：wiki 是知识库专用只读工具，名字不会撞；
  * 放它在 infohub/self 之前，是因为文件编辑比「归档/自我修改」更常用。
  * `vault` 紧跟 wiki：两者都是知识库工具（`vault_*` 与 `wiki_*` 前缀不撞名），
@@ -31,6 +32,7 @@ export const capabilityRegistry = new CapabilityRegistry()
   .register(wikiProvider)
   .register(vaultProvider)
   .register(filesProvider)
+  .register(webToolsProvider)
   .register(infohubProvider)
   .register(pluginMarketProvider)
   .register(teamProvider)
@@ -48,5 +50,6 @@ export {
   teamProvider,
   toneProvider,
   vaultProvider,
+  webToolsProvider,
   wikiProvider,
 };

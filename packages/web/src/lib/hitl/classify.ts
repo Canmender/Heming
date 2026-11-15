@@ -81,6 +81,16 @@ const EXACT_RISK: Record<string, RiskLevel> = {
   self_mcp_add_server: "danger",
   self_mcp_update_server: "danger",
   self_mcp_remove_server: "danger",
+  // 内置联网工具（webtools）：只发请求 / 读本机时钟，不写存储。
+  // 桥的 meta 会先命中，这张表是「没有桥」时的兜底（与 tone_ 同口径）。
+  web_search: "read",
+  web_read: "read",
+  now: "read",
+  // 本地只读计算（d.150）：不联网、不写盘，纯函数求值
+  calculator: "read",
+  json_query: "read",
+  encoding: "read",
+  date_calc: "read",
 };
 
 /** 前缀规则（优先级 3）：图表与去 AI 味都不写任何存储。 */
@@ -107,17 +117,44 @@ const READ_WORDS = /get|list|read|fetch|query|search|view/i;
  * 参数摘要优先读取的字段（按顺序取第一个命中的）。
  *
  * ★ 这张表**同时被 `ruleResource` 复用**（「记住允许」的规则资源）：
- * 新增字段会同时收窄规则粒度。`title` / `team_id` 排在末尾，是为了只影响
+ * 新增字段会同时收窄规则粒度。`title` / 团队 id 排在末尾，是为了只影响
  * 团队工作台这类本来没有可识别目标字段的工具（原先退化成通配 `*`）；
  * 已有字段（path/url/query…）的匹配顺序与规则口径保持原样。
+ *
+ * 团队 id 同时列 camel 与 snake 两种写法：工具 schema 是 snake（`team_id`），
+ * 但团队快照把 id 以 camel（`teamId`）回传给模型，模型照抄哪种都可能——
+ * 摘要只认一种写法时，另一种就只剩 JSON 兜底（一串机器可读的键值）。
  */
-const SUMMARY_FIELDS = ["path", "file", "url", "query", "name", "server", "title", "team_id"];
+const SUMMARY_FIELDS = [
+  "path",
+  "file",
+  "url",
+  "query",
+  "name",
+  "server",
+  "title",
+  "team_id",
+  "teamId",
+  "planId",
+  "taskId",
+];
 
 /**
- * 「记住允许」的规则资源键：团队工具优先按 `team_id`（同一团队记住一次，而不是按标题，
- * 标题几乎每次都不同，会把规则碎片化）。其余工具沿用摘要字段的顺序。
+ * 团队工具的资源字段（按优先级，已归一化成 camelCase）。
+ *
+ * 同一团队里改任意方案/任务都应命中同一条规则（按团队记住一次），
+ * 而不是按方案标题把规则碎片化。
  */
-const RULE_RESOURCE_FIELDS = ["team_id", ...SUMMARY_FIELDS];
+const TEAM_RESOURCE_FIELDS = ["teamId", "planId", "taskId"];
+
+/**
+ * 「记住允许」的规则资源键：团队工具优先按 `teamId`，其余工具沿用摘要字段的顺序。
+ *
+ * ★ `ruleResource` 会先把参数键归一成 camelCase（`team_id` → `teamId`），
+ * 所以这里只写 camel 一种写法即可。不归一化的话，模型传 camelCase 时取不到
+ * 团队 id，规则会退化成通配 `*`——那是「该工具的所有调用都放行」（跨团队越权）。
+ */
+const RULE_RESOURCE_FIELDS = [...TEAM_RESOURCE_FIELDS, ...SUMMARY_FIELDS];
 
 /**
  * 字段名本身像敏感信息。
@@ -181,6 +218,14 @@ const DISPLAY_NAMES: Record<string, string> = {
   chart_types: "查询图表类型",
   chart_render: "生成图表",
   tone_detect: "检测 AI 味",
+  // 内置联网工具：弹窗与能力目录里显示中文动作名
+  web_search: "联网搜索",
+  web_read: "网页阅读",
+  now: "当前时间",
+  calculator: "计算",
+  json_query: "JSON 查询",
+  encoding: "编码转换",
+  date_calc: "日期换算",
   // 团队工作台（d.109 D1）：9 个 team_* 工具，弹窗里不再显示「外部工具 team_task_add」
   team_list: "列出团队",
   team_get: "查看团队",
@@ -318,6 +363,26 @@ function parseArgs(argsJson: string): Record<string, unknown> {
 }
 
 /**
+ * 参数键的规范写法：snake_case → camelCase（`team_id` → `teamId`）。
+ *
+ * 只用于规则资源匹配（`ruleResource`）。团队工具的 schema 声明 snake_case，
+ * 但快照回传的是 camelCase，模型两种都可能照抄；不归一化时只有一种能命中
+ * `RULE_RESOURCE_FIELDS`，另一种会让规则退化成通配 `*`。
+ *
+ * 同一个键两种写法同时出现时取第一个（工具层会拒绝重复别名，这里只做兜底）。
+ */
+function canonicalArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    const canon = key.includes("_")
+      ? key.replace(/_+([a-zA-Z0-9])/g, (_match, char: string) => char.toUpperCase())
+      : key;
+    if (!(canon in out)) out[canon] = value;
+  }
+  return out;
+}
+
+/**
  * 抹掉 URL 里的 userinfo（`user:pass@`）。
  *
  * ★ `SENSITIVE_PATTERNS` **不覆盖**这个形态（实测 `https://user:pass@host/mcp` 漏检），
@@ -405,7 +470,7 @@ export function summarizeArgs(argsJson: string): string {
  * URL 仍剥掉 userinfo；路径统一成正斜杠，避免 Windows / POSIX 写法不一致。
  */
 export function ruleResource(argsJson: string): string {
-  const args = parseArgs(argsJson);
+  const args = canonicalArgs(parseArgs(argsJson));
   for (const field of RULE_RESOURCE_FIELDS) {
     const value = args[field];
     if (typeof value !== "string" || !value.trim()) continue;

@@ -35,6 +35,20 @@ describe("风险分类", () => {
     expect(riskOfName("tone_detect")).toBe("read");
   });
 
+  it("内置联网工具是只读（发请求 / 读本机时钟，不写任何存储）", () => {
+    // 桥的 meta 会先命中（见 tools.ts），这张表是「没有桥」时的兜底
+    expect(riskOfName("web_search")).toBe("read");
+    expect(riskOfName("web_read")).toBe("read");
+    expect(riskOfName("now")).toBe("read");
+  });
+
+  it("本地只读工具（计算/JSON/编码/日期）免确认", () => {
+    expect(riskOfName("calculator")).toBe("read");
+    expect(riskOfName("json_query")).toBe("read");
+    expect(riskOfName("encoding")).toBe("read");
+    expect(riskOfName("date_calc")).toBe("read");
+  });
+
   it("MCP 工具不按名字猜只读：db__query / api__get_url 必须先确认", () => {
     // 服务端工具名可以是任意词，`query`/`get` 也可能是写操作；
     // 以前整串跑 READ_WORDS 会把它们判成 read 免确认执行。
@@ -147,6 +161,8 @@ describe("团队工具的展示名与参数摘要（d.109 D1）", () => {
   it("参数摘要能截到 title / team_id（仍走敏感词过滤）", () => {
     expect(summarizeArgs('{"team_id":"t1","title":"写落地页"}')).toBe("写落地页");
     expect(summarizeArgs('{"team_id":"t1"}')).toBe("t1");
+    // 快照回传的是 camelCase，模型照抄时摘要同样要认得（否则确认框里只剩一串 JSON）
+    expect(summarizeArgs('{"teamId":"t1","planId":"p1"}')).toBe("t1");
     // title 里夹带密钥同样被屏蔽（新字段不绕过敏感词检查）
     expect(summarizeArgs('{"title":"sk-abcdefghijklmnop"}')).toBe("***");
   });
@@ -239,6 +255,18 @@ describe("规则资源标识", () => {
   it("团队工具按 team_id 记规则（不按每次都会变的标题碎片化）", () => {
     expect(ruleResource('{"team_id":"t1","title":"写落地页"}')).toBe("t1");
     expect(ruleResource('{"title":"只有标题没有团队"}')).toBe("只有标题没有团队");
+  });
+
+  it("团队 id 的 camelCase 写法同样收窄规则（否则「记住允许」退化成通配）", () => {
+    // 快照把 id 以 camelCase 回传给模型，模型照抄 teamId / planId：
+    // 修复前这里返回 "*"，一次允许 = 该工具跨团队永久放行。
+    expect(ruleResource('{"teamId":"t1","planId":"p1"}')).toBe("t1");
+    expect(ruleResource('{"team_id":"t1","plan_id":"p1"}')).toBe("t1");
+    // 两种写法混用（模型只改了一半）也要命中，先归一化再查
+    expect(ruleResource('{"plan_id":"p1","teamId":"t1"}')).toBe("t1");
+    // 没有 teamId 时才退到方案 / 任务 id，仍比通配精确
+    expect(ruleResource('{"planId":"p1"}')).toBe("p1");
+    expect(ruleResource('{"taskId":"k1"}')).toBe("k1");
   });
 
   it("超长资源截断，避免把长文本写进 localStorage", () => {
