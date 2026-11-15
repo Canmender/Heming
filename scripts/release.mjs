@@ -141,7 +141,9 @@ const TAR_EXCLUDES = [
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload|release-offline)|desktop\/update-helper)\/|(^|\/)(\.venv|__pycache__)\//;
+// runtime / web-dist / resources 后面必须跟  或行尾：packages/desktop/runtime-requirements.txt
+// 是要上云的源文件，不能因为前缀相同被误判成运行时目录（2026-11-15 部署被它拦过一次）。
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)(\/|$)|(^|\/)packages\/(setup\/(build|payload|release-offline)|desktop\/update-helper)\/|(^|\/)(\.venv|__pycache__)\//;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",
