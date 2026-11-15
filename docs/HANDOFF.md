@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.147.4.87.11`
-- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.87.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面入口只留顶栏「页面」菜单与命令面板（Ctrl+K），打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 当前版本：`d.147.4.88.11`
+- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.88.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面入口只留顶栏「页面」菜单与命令面板（Ctrl+K），打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
 - 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
@@ -79,6 +79,38 @@
   `--theme dark` 各 57 条（8 页 + 11 子页签 × 3 断点）`failures: []`，截图 48 张在 `.tmp/shots`。
   测试侧同步：`PluginsPage.test.tsx` / `SkillsPage.test.tsx` / `CollaborationPage.test.tsx` 的旧名断言改「和鸣」（8 例）。
   **未真机复验**：窄窗布局与桌面标题栏拖拽。
+
+**后续修订（d.147.4.88.11）**
+- 顶栏继续瘦身：`components/TopBar.tsx` 只留品牌（手写标志）／「页面」菜单／命令面板／快捷键帮助／通知中心；删掉
+  「会话进度」按钮与 `progressOpen` / `onToggleProgress` 两个 props、账户头像按钮、账户下拉菜单与退出登录确认弹窗，
+  组件也不再 import `useAuthStore` / `useUiStore` / `ConfirmDialog` / `Button`。`data-testid="topbar"`、`desktop-titlebar`
+  拖拽带与右侧 `data-testid="topbar-actions"` 结构不变。
+- 账户入口：新增 `components/AccountMenu.tsx`（头像按钮 `aria-label="账户：名字"` + 向上弹的「账户菜单」：设置 / 退出登录
+  二次确认，点外部或 Esc 关闭），挂进会话栏左下角；`components/assistant/ConversationRail.tsx` 新增
+  `renderFooter?: (collapsed: boolean) => ReactNode` 插槽（展开态头像 + 名字、收起态只头像、菜单左对齐），`components/Sidebar.tsx`
+  传入 `renderFooter={(collapsed) => <AccountMenu collapsed={collapsed} />}`。
+- 会话栏减负：删掉栏底「本机运行 · Key 与记忆不出设备」那行隐私文案；栏头「和鸣」大标题并入「会话列表」单行
+  （`h2` + 数量 + 收起），产品名不再在栏里复读。
+- 会话页（`components/ChatPage.tsx`）：header 标题改会话名（`conversationTitle(conv, messages)`，无会话回落「会话」），
+  不再显示产品名；右上新增「会话进度」`IconButton`（`WorkflowIcon`、`aria-expanded`、开着时高亮），开合状态
+  `progressOpen` 放 ChatPage 本地（换会话/切页随组件卸载自然收起）；右侧栏与主区并列 flex，关闭时不渲染、主区铺满。
+  `App.tsx` 相应删掉壳层 `progressOpen` state、切页收起 effect 与 `ProgressPanel` 渲染，壳层注释同步。
+- 进度数据层：新增 `lib/progress/model.ts` 纯函数 `buildConversationProgress`（phase / headline / steps / tools / counts /
+  pendingConfirms / progress done-total / hasData，不造空步骤）；新增 `lib/progress/useConversationProgress.ts` 订阅 chat
+  store 的 `streaming`（按 `conversationId` + `lastAt` 取最新）与 `messages`（收口后回落最后一条助手消息的 thinking/tools）、
+  HITL `pending`（只算本会话 tool-call），推导逻辑不在组件里。
+- 进度面板：重写 `components/ProgressPanel.tsx` 四段——本轮进度（阶段徽标 + headline + `role="progressbar"` + 工具计数 +
+  待确认 `role="status"`）、动态流程图（`components/progress/FlowDiagram.tsx`）、任务步骤（`components/progress/StepsList.tsx`）、
+  工具调用（复用 `AgentStreamBubble` 的 `ToolTraceList` / `toolSummaryLabel`）；状态/文案/连接线映射在
+  `components/progress/status.ts`；空态沿用 `EmptyState`；段落用真实 `h2 → h3` 层级（设计审计要求）。
+- 验证（d.147.4.88.11，工作树实跑，全 exit 0）：`pnpm typecheck` 0（6 个包全 Done）；web `vitest run` 299 files /
+  4318 tests passed；server 15 files / 271 tests；shared 8 files / 119 tests；desktop 853 tests / 853 pass；`pnpm build` 0
+  （仅 chunk>500kB 警告）；`pnpm plugin:check` 0（清单 6/6 + pet-widget 源码 1/1 + examples 5/5）；`pnpm design:audit`
+  浅色 + `--theme dark` 各 57 条（19 × 3），`failures: []`，横向溢出/对比度/11px 正文/命中区 <32/无名字可点全 0，
+  字号档 3–7，截图 48 张（`.tmp/shots3`、`.tmp/shots3-dark`）。截图目检：顶栏只有手写标志 + 页面菜单 + 图标（右侧无
+  头像）；会话栏栏头单行「会话列表」，底部是头像/名字账户入口（隐私小字已移除）；会话区空态 `h2`「开始新会话」，
+  右侧「会话进度」栏默认不显示，会话内 header 的 `h2` 是会话名、右上第一颗按钮是「会话进度」。
+  **未真机复验**：桌面端标题栏拖拽；1024 窄窗打开右侧「会话进度」栏后输入区的挤压表现。
 
 ## 0-历史. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
 

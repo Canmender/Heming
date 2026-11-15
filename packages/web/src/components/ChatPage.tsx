@@ -87,13 +87,16 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon, AlertIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
   ReasoningBlock,
   ToolTraceGroup,
 } from "./AgentStreamBubble.js";
+import { conversationTitle } from "./assistant/conversationTitle.js";
+// 右侧「会话进度」栏（d.147.4.88）：Codex / ChatGPT 式的按钮呼出侧栏。
+import { ProgressPanel } from "./ProgressPanel.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import {
@@ -660,6 +663,13 @@ export function ChatPage({
     setPendingFiles([]);
   }, [convId]);
   const [exportOpen, setExportOpen] = useState(false);
+  /**
+   * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
+   *
+   * 状态放在 ChatPage 本地而不是 ui store/shell：这条栏只属于「当前会话」，
+   * 换会话或切页面时组件卸载，开合自然回到默认隐藏——不需要额外的清理 effect。
+   */
+  const [progressOpen, setProgressOpen] = useState(false);
   /** 提示位「还有 N 条」的展开状态；提示数量变化时复位（见下方 effect）。 */
   const [noticeExpanded, setNoticeExpanded] = useState(false);
   /**
@@ -3055,7 +3065,8 @@ export function ChatPage({
   const hiddenNoticeCount = notices.length - visibleNotices.length;
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="flex h-full">
+      <div className="relative flex h-full min-w-0 flex-1 flex-col">
       <header className="relative flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-chat-gutter">
         <IconButton
           label="返回"
@@ -3065,8 +3076,12 @@ export function ChatPage({
         />
         {/* 极简顶栏：标题小字 + 通道状态 + 右侧 ghost 图标（无厚边框、无头像）。
             h2 而不是 span：整页只剩 h1（sr-only「会话」）时文档大纲会断档，
-            读屏和设计审计都需要「页标题 → 会话标题」这两级。 */}
-        <h2 className="ui-section-title min-w-0 truncate">{headerTitle}</h2>
+            读屏和设计审计都需要「页标题 → 会话标题」这两级。
+            标题用会话名而不是智能体名（d.147.4.88）：名字已经写在侧栏左下角，
+            顶部再复读一遍「和鸣」既占位又像产品自夸；会话名才是这里该答的问题。 */}
+        <h2 className="ui-section-title min-w-0 truncate">
+          {conv ? conversationTitle(conv, messages) : "会话"}
+        </h2>
         <span className="flex items-center gap-1.5 text-ui-xs text-muted">
           <span
             aria-hidden="true"
@@ -3087,10 +3102,18 @@ export function ChatPage({
             通道已恢复
           </span>
         )}
+        {/* 会话进度栏开关（Codex 式）：在会话内搜索左侧，默认收起。 */}
+        <IconButton
+          label="会话进度"
+          className={`ml-auto${progressOpen ? " bg-subtle-3 text-ink" : ""}`}
+          aria-expanded={progressOpen}
+          icon={<WorkflowIcon width={18} height={18} />}
+          onClick={() => setProgressOpen((v) => !v)}
+        />
         {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
         <IconButton
           label="搜索会话"
-          className={`ml-auto${searchOpen ? " bg-subtle-3" : ""}`}
+          className={searchOpen ? "bg-subtle-3" : ""}
           aria-pressed={searchOpen}
           icon={<SearchIcon width={18} height={18} />}
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
@@ -3788,6 +3811,10 @@ export function ChatPage({
           }}
         />
       )}
+      </div>
+      {/* 右侧栏与主区并列（Codex 式）：主区 min-w-0，被挤压时输入框正常收缩；
+          栏自己带 border-l，关闭时整条不渲染、主区自然铺满。 */}
+      {progressOpen ? <ProgressPanel conversationId={convId} onClose={() => setProgressOpen(false)} /> : null}
     </div>
   );
 }

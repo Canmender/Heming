@@ -12,6 +12,42 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.147.4.88.11",
+    "date": "2026-11-15",
+    "title": "外壳做减法、会话页补位：账户回会话栏，右侧进度栏接入真实数据",
+    "bullets": [
+      "`components/TopBar.tsx`：只留品牌（手写标志）、「页面」菜单、命令面板、快捷键帮助与通知中心；删掉 `progressOpen` / `onToggleProgress` 两个 props、顶栏上的「会话进度」按钮，以及账户头像按钮、账户下拉菜单与退出登录确认弹窗。",
+      "顶栏组件不再 import `useAuthStore` / `useUiStore` / `ConfirmDialog` / `Button`；`data-testid=\"topbar\"`、`desktop-titlebar` 拖拽带与右侧 `data-testid=\"topbar-actions\"` 结构不变。",
+      "`components/assistant/ConversationRail.tsx`：删掉栏底「本机运行 · Key 与记忆不出设备」那行隐私文案（位置让给账户入口）；栏头由「和鸣 大标题 + 会话列表 二级标题」并成一行「会话列表 + 数量 + 收起」（`h2`，`ui-sm` muted），产品名不再在栏里复读。",
+      "新增 `renderFooter?: (collapsed: boolean) => ReactNode` 插槽：展开态（268px）是「头像 + 名字」一行，收起态（60px 头像条）只留头像、菜单起点对齐左边缘；菜单向上弹（贴着窗口底边，向下会被裁掉）。",
+      "`components/Sidebar.tsx`：`renderFooter={(collapsed) => <AccountMenu collapsed={collapsed} />}`。",
+      "新增 `components/AccountMenu.tsx`：账户头像按钮（`aria-label=\"账户：名字\"`、`aria-haspopup=\"menu\"`）、向上弹的 `role=\"menu\"`（`aria-label=\"账户菜单\"`，设置 / 退出登录）、退出二次确认；沿用原顶栏的「点外部或 Esc 关闭」行为。",
+      "`components/ChatPage.tsx`：header 的 `h2` 改为会话名（`conversationTitle(conv, messages)`，没有会话时回落「会话」），不再显示产品名；右上角在「搜索会话」左侧新增「会话进度」`IconButton`（`WorkflowIcon`、`aria-expanded`，开着时 `bg-subtle-3 text-ink`）。",
+      "开合状态 `progressOpen` 放在 ChatPage 本地 `useState`：换会话或切页时 ChatPage 卸载，状态自然回到默认隐藏，不需要额外清理 effect。",
+      "右侧栏与主区改为并列 flex：主区 `min-w-0` 可被压缩，栏自带 `border-l`，关闭时整条不渲染、主区自然铺满。",
+      "`App.tsx`：删掉壳层的 `progressOpen` state、切页收起 effect 与 `ProgressPanel` 渲染，`TopBar` 不再接进度相关 props；壳层注释同步（进度开关归会话页 header、账户头像归会话栏左下角）。",
+      "新增 `lib/progress/model.ts`：纯函数 `buildConversationProgress(input)`，输入流式 `AgentStreamState` / 收口后的 `MessageTranscript` / HITL 待确认条数，输出 `phase`（idle / thinking / acting / waiting / done / error）、`headline`（「正在思考」「正在调用工具」「等待确认 N 项」等）、`steps`（think / tool / confirm / answer）、`tools`、`counts`、`pendingConfirms`、进度 `done/total` 与 `hasData`；不造空步骤，没有思考/工具就不出对应节点。",
+      "新增 `lib/progress/useConversationProgress.ts`：订阅 chat store 的 `streaming`（按 `conversationId` 过滤、取 `lastAt` 最新一条）与 `messages`（收口后回落最后一条助手消息的 `thinking`/`tools`），再取 HITL store 的 `pending`（只算本会话的 `tool-call`）得到待确认条数，最后交给纯函数；推导逻辑一行不在组件里。",
+      "重写 `components/ProgressPanel.tsx`：仍是右侧 280px `aside`（`aria-label=\"会话进度\"`、`h2` 栏头 + 关闭按钮「关闭会话进度」），四段按「结论 → 顺序 → 细节」排列——**本轮进度**（阶段徽标 + headline + `role=\"progressbar\"` 进度条 + 工具计数 + 待确认 `role=\"status\"` 提示）、**动态流程图**、**任务步骤**、**工具调用**（复用 `AgentStreamBubble` 的 `ToolTraceList` / `toolSummaryLabel`）；无数据时保留空态 `EmptyState`；段落标题用真实 `h3`（设计审计要求 `h2 → h3` 层级）。",
+      "新增 `components/progress/status.ts`（`STEP_TONES` / `PHASE_TONES` / `formatDuration` / `stepDuration` / `connectorClass`，每个状态同时给文字标签，不只靠颜色）、`components/progress/FlowDiagram.tsx`（纯 div/CSS 竖排时间轴，`role=\"img\"` 一句话播报整条链路，实线/虚线区分已走完与进行中）、`components/progress/StepsList.tsx`（`ol` 有序列表，状态点 + 截断详情 + 耗时）。",
+      "`pnpm typecheck`：6 个包全 Done，0 错误。",
+      "测试：web `vitest run` 299 files / 4318 tests passed；server 15 files / 271 tests；shared 8 files / 119 tests；desktop 853 tests / 853 pass。",
+      "`pnpm build`：0（仅 chunk>500kB 警告）。",
+      "`pnpm plugin:check`：0（清单 6/6、pet-widget 源码 1/1、examples 5/5）。",
+      "`pnpm design:audit`：浅色 / `--theme dark` 各 57 条页面 × 断点（19 × 3），`failures: []`；横向溢出、对比度、11px 正文、命中区 <32、无名字可点全为 0，字号档 3–7；截图 48 张（`.tmp/shots3`、`.tmp/shots3-dark`）。",
+      "截图目检：顶栏只有手写标志 + 页面菜单 + 图标（右侧无头像）；会话栏栏头单行「会话列表」，底部是头像/名字账户入口（隐私小字已移除）；会话区空态 `h2`「开始新会话」，右侧「会话进度」栏默认不显示；会话内 header 的 `h2` 是会话名，右上第一颗按钮是「会话进度」。",
+      "未真机复验：桌面端标题栏拖拽；1024 窄窗打开右侧「会话进度」栏后输入区的挤压表现。"
+    ],
+    "paragraphs": [
+      "本轮不是新功能堆叠，是「减法 + 补位」：顶栏继续瘦身，账户头像与账户菜单搬回会话栏左下角；会话栏删掉底部隐私小字、栏头两行并成一行；会话页顶部标题从产品名换成当前会话名，右上角多一颗「会话进度」按钮，把上一版留白的右侧栏接上真实数据（本轮进度、动态流程图、任务步骤与工具调用）。默认仍是「会话」页，导航与页面结构不变。",
+      "**顶栏瘦身（packages/web）**",
+      "**会话栏（packages/web）**",
+      "**会话页（packages/web）**",
+      "**会话进度栏接真实数据（packages/web）**",
+      "**验证（d.147.4.88.11，工作树实跑，全 exit 0）**"
+    ]
+  },
+  {
     "version": "d.147.4.87.11",
     "date": "2026-11-15",
     "title": "全产品只叫「和鸣」：手写标志进顶栏，共享文件面板退场，会话进度留空壳",

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { Sidebar } from "./Sidebar.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
+import { useAuthStore } from "../store/auth.js";
 
 /**
  * 常驻会话侧栏（Sidebar）。
@@ -73,6 +74,13 @@ beforeEach(() => {
   localStorage.clear();
   window.sessionStorage.clear();
   vi.restoreAllMocks();
+  // 栏底账户入口读真实 auth store（名字进 aria-label / 菜单文案）。
+  useAuthStore.setState({
+    token: "t1",
+    user: { id: "u1", username: "alice", displayName: "爱丽丝" },
+    status: "authed",
+    error: null,
+  });
   useUiStore.setState({
     page: "chat",
     pageView: null,
@@ -278,5 +286,62 @@ describe("Sidebar · 搜索与分页", () => {
     await waitFor(() =>
       expect(useChatStore.getState().loadMoreConversations).toHaveBeenCalledTimes(1),
     );
+  });
+});
+
+/**
+ * d.147.4.88：身份从顶栏搬进侧栏左下角。
+ *
+ * 栏头只留「会话列表」（产品名在顶栏手写标志里），栏底原来的隐私文案换成账户入口；
+ * 收起态（60px 窄栏）只留头像，名字留给展开态——窄栏连会话名都显示不下，
+ * 再塞一个名字会把头像挤变形。
+ */
+describe("Sidebar · 栏头与账户入口", () => {
+  it("栏头只有一行「会话列表」：不再复读「和鸣」，也没有隐私文案", () => {
+    render(<Sidebar />);
+    const aside = screen
+      .getByRole("heading", { level: 2, name: "会话列表" })
+      .closest("aside") as HTMLElement;
+
+    expect(aside).not.toBeNull();
+    expect(within(aside).queryByRole("heading", { name: "和鸣" })).toBeNull();
+    expect(within(aside).queryByText("和鸣")).toBeNull();
+    expect(aside.textContent).not.toContain("本机运行");
+    expect(aside.textContent).not.toContain("Key 与记忆不出设备");
+  });
+
+  it("栏底账户入口：aria-haspopup=menu，菜单里「设置」切页并关闭、「退出登录」走二次确认", async () => {
+    render(<Sidebar />);
+    const account = screen.getByRole("button", { name: "账户：爱丽丝" });
+    expect(account).toHaveAttribute("aria-haspopup", "menu");
+    expect(account).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(account);
+    const menu = await screen.findByRole("menu", { name: "账户菜单" });
+    expect(within(menu).getByRole("menuitem", { name: "设置" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "设置" }));
+    expect(useUiStore.getState().page).toBe("settings");
+    expect(screen.queryByRole("menu", { name: "账户菜单" })).toBeNull();
+
+    // 退出登录不直接登出，先弹确认框
+    fireEvent.click(screen.getByRole("button", { name: "账户：爱丽丝" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
+    expect(screen.getByRole("dialog", { name: "退出登录" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "退出登录" })).toBeNull();
+  });
+
+  it("收起态只留头像（按钮内不显示名字），「展开会话列表」恢复名字", () => {
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "收起会话列表" }));
+
+    const collapsedAccount = screen.getByRole("button", { name: "账户：爱丽丝" });
+    expect(collapsedAccount.textContent).not.toContain("爱丽丝");
+    expect(screen.getByRole("button", { name: "展开会话列表" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开会话列表" }));
+    expect(screen.getByRole("button", { name: "账户：爱丽丝" }).textContent).toContain("爱丽丝");
   });
 });

@@ -9,7 +9,6 @@ import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { TopBar } from "./components/TopBar.js";
 import { Sidebar } from "./components/Sidebar.js";
-import { ProgressPanel } from "./components/ProgressPanel.js";
 import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
@@ -373,13 +372,6 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  /**
-   * 右侧「会话进度」面板的开合（会话页专属）。
-   *
-   * 为什么放在壳里的 useState 而不是 ui store：它不是页面/导航状态，不跨页复用、
-   * 也不需要落盘；放在壳里，切页时组件卸载、状态自然回默认（隐藏）。
-   */
-  const [progressOpen, setProgressOpen] = useState(false);
 
   // d.124：插件页面入口（导航轨、设置区导航说明、路由守卫读同一份注册表投影）。
   const pluginPageEntries = usePluginPageEntries();
@@ -421,14 +413,6 @@ function AppShell({
   useEffect(() => {
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
-
-  // 右侧「会话进度」面板：默认隐藏、离开会话页就收起。开合状态只活在壳里，
-  // 不进 store——它不是页面状态，也不该跟着会话切换被记住。
-  // 必须留在下面 authUser 提前 return 之前：未登录→已登录那次重渲染若多出 hook，
-  // React 会直接报 "Rendered more hooks than during the previous render"。
-  useEffect(() => {
-    if (currentPage !== "chat") setProgressOpen(false);
-  }, [currentPage]);
 
   // 界面插件（原桌宠，d.98）的「打开设置 / 气泡直达页面」出口：主进程只转发白名单页面。
   // 旧 preload 没有 onOpenPage 时自动跳过（页面跳转是便利功能，不是可用性前提）。
@@ -595,13 +579,8 @@ function AppShell({
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface">
       {/* 顶栏是唯一常驻的全局控件条：手写标志兼作桌面拖拽区，右侧是页面菜单/命令面板/
-          快捷键帮助/通知/账户（会话页再多一颗「会话进度」）。旧的桌面标题栏与导航轨都被它取代。 */}
-      <TopBar
-        onOpenSearch={onOpenSearch}
-        onOpenShortcuts={onOpenShortcuts}
-        progressOpen={progressOpen}
-        onToggleProgress={() => setProgressOpen((v) => !v)}
-      />
+          快捷键帮助/通知。会话进度开关与账户头像各有归属（会话页 header / 会话栏左下角）。 */}
+      <TopBar onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* 会话侧栏常驻：所有页面左侧都保持会话入口（导航轨删除后的主要导航面）。 */}
         <Sidebar />
@@ -613,10 +592,6 @@ function AppShell({
             <Suspense fallback={<PageFallback />}>{view}</Suspense>
           </div>
         </main>
-        {/* 会话进度：默认隐藏，由顶栏按钮开合；内容后续再接入（先留结构）。 */}
-        {currentPage === "chat" && progressOpen && (
-          <ProgressPanel onClose={() => setProgressOpen(false)} />
-        )}
       </div>
       {/* 安装确认是全局的：从接口区发起，但用户可能立刻切页；
           挂在根节点上，pending 在第几页都能弹出来。 */}

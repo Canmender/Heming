@@ -6,6 +6,7 @@ import { clearDraft } from "../lib/drafts.js";
 import { startNewConversation } from "../lib/newConversation.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { conversationTitle } from "./assistant/conversationTitle.js";
+import { AccountMenu } from "./AccountMenu.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Button } from "./ui/Button.js";
 
@@ -122,6 +123,7 @@ export function Sidebar() {
             );
           });
         }}
+        renderFooter={(collapsed) => <AccountMenu collapsed={collapsed} />}
       />
       {deleteTarget ? (
         <ConfirmDialog

@@ -1,59 +1,32 @@
-import { useEffect, useRef, useState } from "react";
-import { useAuthStore } from "../store/auth.js";
-import { useUiStore } from "../store/ui.js";
 import { IconButton } from "./ui/IconButton.js";
-import { Button } from "./ui/Button.js";
-import { ConfirmDialog } from "./ConfirmDialog.js";
-import { KeyboardIcon, SearchIcon, TaskIcon } from "./icons.js";
+import { KeyboardIcon, SearchIcon } from "./icons.js";
 import { PageMenu } from "./PageMenu.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { Wordmark } from "./Wordmark.js";
 
-/** 顶栏高度档位：浏览器与桌面共用 40px（8pt 网格），只是桌面端还要兼做窗口拖拽带。 */
+/**
+ * 顶栏（d.147.4.86 起是唯一常驻的全局控件条；d.147.4.88 再瘦一圈）。
+ *
+ * 现在只留四件事：品牌（手写标志，兼桌面拖拽带）、页面菜单、命令面板、快捷键帮助
+ * 与通知中心。原来挂在这里的两颗按钮各自回到自己的归属：
+ * - 「会话进度」→ 会话页 header（Codex 式：面板开关挨着它要开的那个面板）；
+ * - 账户头像 → 会话栏左下角（见 `AccountMenu`）。
+ *
+ * 顶栏越薄，内容越像内容：这是本轮「最大化简化」的落点。
+ */
 export function TopBar({
   onOpenSearch,
   onOpenShortcuts,
-  progressOpen,
-  onToggleProgress,
 }: {
   onOpenSearch: () => void;
   onOpenShortcuts: () => void;
-  /** 「会话进度」是否正开着：只用来点亮按钮（开着时 text-ink），不输出 aria-pressed/expanded 状态属性。 */
-  progressOpen: boolean;
-  onToggleProgress: () => void;
 }) {
-  const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
-  const setPage = useUiStore((s) => s.setPage);
-  const page = useUiStore((s) => s.page);
-  const displayName = user?.displayName?.trim() || "我";
-
   /**
    * 桌面端顶栏复用 `.desktop-titlebar`（拖拽区 + 让开右侧窗口控件），
    * 浏览器端没有窗口壳，就退化成一条普通 h-10 顶栏——两种形态结构一致，
    * 只是类名不同（测试与设计审计都按 `[data-testid="topbar"]` 定位）。
    */
   const isDesktop = typeof window !== "undefined" && !!window.heming;
-
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [confirmLogout, setConfirmLogout] = useState(false);
-  const accountRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!accountOpen) return;
-    const onDown = (e: Event) => {
-      if (!accountRef.current?.contains(e.target as Node)) setAccountOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAccountOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [accountOpen]);
 
   return (
     <header
@@ -77,15 +50,6 @@ export function TopBar({
         <Wordmark width={78} className="shrink-0 text-ink" />
 
         <div data-testid="topbar-actions" className="app-no-drag ml-auto flex items-center gap-1">
-          {/* 会话进度只属于会话页：其它页面没有「这一轮」可看，按钮出现只添噪音。 */}
-          {page === "chat" ? (
-            <IconButton
-              label="会话进度"
-              icon={<TaskIcon width={16} height={16} />}
-              onClick={onToggleProgress}
-              className={progressOpen ? "text-ink" : undefined}
-            />
-          ) : null}
           <PageMenu />
           <IconButton
             label="打开命令面板"
@@ -99,81 +63,8 @@ export function TopBar({
           />
           {/* 通知中心自带触发按钮（aria-label「通知中心」）与浮层，直接复用。 */}
           <NotificationCenter />
-          <div ref={accountRef} className="relative">
-            <button
-              type="button"
-              aria-label={`账户：${displayName}`}
-              aria-haspopup="menu"
-              aria-expanded={accountOpen}
-              onClick={() => setAccountOpen((v) => !v)}
-              className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-subtle-3 text-ui-sm font-semibold text-body transition-colors hover:bg-subtle-4"
-            >
-              {user?.avatar ? (
-                <img src={user.avatar} alt="" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                displayName.slice(0, 1)
-              )}
-            </button>
-            {accountOpen ? (
-              <div
-                role="menu"
-                aria-label="账户菜单"
-                className="absolute right-0 top-full z-50 mt-1 w-40 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full rounded-sm px-2 py-1.5 text-left text-body hover:bg-subtle-3 hover:text-ink"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    setPage("settings");
-                  }}
-                >
-                  设置
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full rounded-sm px-2 py-1.5 text-left text-danger hover:bg-subtle-3"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    setConfirmLogout(true);
-                  }}
-                >
-                  退出登录
-                </button>
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
-
-      {confirmLogout ? (
-        <ConfirmDialog
-          title="退出登录"
-          onCancel={() => setConfirmLogout(false)}
-          footer={
-            <>
-              <Button type="button" onClick={() => setConfirmLogout(false)} size="md" variant="ghost">
-                取消
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  setConfirmLogout(false);
-                  logout();
-                }}
-                size="md"
-                variant="danger"
-              >
-                退出登录
-              </Button>
-            </>
-          }
-        >
-          <p className="ui-caption leading-6">退出后需要重新登录才能继续使用和鸣。</p>
-        </ConfirmDialog>
-      ) : null}
     </header>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Conversation, Message } from "@heming/shared";
-import { SYSTEM_AGENT } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
@@ -46,6 +46,14 @@ export interface ConversationRailProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /**
+   * 栏底常驻插槽（d.147.4.88）：账户头像与菜单挂在这里。
+   *
+   * 为什么是函数而不是 ReactNode：收起态（60px 窄栏）与展开态（268px）要的
+   * 是同一份身份的两种排法（只头像 / 头像 + 名字），而「是不是收起态」只有
+   * rail 自己知道。交给调用方一个 `collapsed` 参数，比让调用方猜状态更稳。
+   */
+  renderFooter?: (collapsed: boolean) => ReactNode;
 }
 
 /** 最近活跃排序键：没有消息的排最后。 */
@@ -67,6 +75,7 @@ export function ConversationRail({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
+  renderFooter,
 }: ConversationRailProps) {
   const [collapsed, setCollapsed] = useState(false);
   // 极窄视口（≤900）自动收起成头像栏：264px 固定宽在 375 视口下会把对话区挤成一条缝。
@@ -352,31 +361,28 @@ export function ConversationRail({
         >
           <PlusIcon width={14} height={14} />
         </button>
+        {/* 收起态也留身份入口：60px 宽只放头像，菜单从栏内向上弹。 */}
+        {renderFooter ? <div className="mt-auto flex justify-center pb-2">{renderFooter(true)}</div> : null}
       </aside>
     );
   }
 
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-line-soft bg-subtle">
-      <header className="px-3 pb-1 pt-3">
-        <div className="flex items-center gap-2">
-          {/* 单智能体产品：栏顶第一行就是产品/智能体名。 */}
-          <span className="min-w-0 truncate text-ui-md font-semibold text-ink">
-            {SYSTEM_AGENT.name}
-          </span>
-          <span className="ui-micro text-muted">{sorted.length}</span>
-          <button
-            type="button"
-            aria-label="收起会话列表"
-            title="收起会话列表"
-            onClick={() => setCollapsed(true)}
-            className="ui-hit ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-subtle-2 hover:text-ink"
-          >
-            <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
-          </button>
-        </div>
-        {/* 二级标题：主区 h1 是「会话」（sr-only），栏头用 h2 给读屏用户两级大纲（设计审计门槛）。 */}
-        <h2 className="mt-1 text-ui-sm font-medium text-muted">会话列表</h2>
+      <header className="flex items-center gap-2 px-3 pb-1 pt-3">
+        {/* 栏头只留「会话列表」+ 数量 + 收起：产品名已经在顶栏的手写标志里，
+            这里再排一行「和鸣」等于同一句话说两遍，还挤掉了会话本身的位置。 */}
+        <h2 className="min-w-0 flex-1 truncate text-ui-sm font-medium text-muted">会话列表</h2>
+        <span className="ui-micro text-muted">{sorted.length}</span>
+        <button
+          type="button"
+          aria-label="收起会话列表"
+          title="收起会话列表"
+          onClick={() => setCollapsed(true)}
+          className="ui-hit flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-subtle-2 hover:text-ink"
+        >
+          <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
+        </button>
       </header>
 
       {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。 */}
@@ -461,10 +467,11 @@ export function ConversationRail({
           {error}
         </p>
       )}
-      {/* 隐私边界必留：压成一条弱化状态行。 */}
-      <p className="px-3 pb-3 pt-2 text-center text-ui-sm text-muted">
-        本机运行 · Key 与记忆不出设备
-      </p>
+      {/* 栏底：账户（头像 + 菜单）。原来这里是一行「本机运行 · Key 与记忆不出设备」的
+          隐私声明——按用户要求去掉正文，位置让给身份入口。 */}
+      {renderFooter ? (
+        <div className="shrink-0 border-t border-line-soft p-1.5">{renderFooter(false)}</div>
+      ) : null}
     </aside>
   );
 }

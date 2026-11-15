@@ -352,6 +352,9 @@ describe("ChatPage", () => {
             owner_id: null,
             description: "",
           },
+          // d.147.4.88：栏头标题改成会话名；旧用例没有 title 时会回落到首条用户消息，
+          // 让 `getByText(首条消息)` 撞上栏头。固定会话名，断言各测各的。
+          title: "周会纪要",
           unreadCount: 0,
         },
       ],
@@ -3828,6 +3831,8 @@ describe("ChatPage", () => {
             owner_id: null,
             description: "",
           },
+          // 栏头标题取会话名（d.147.4.88）；不给 title 会回落到「用户的话」这条消息。
+          title: "周会纪要",
           unreadCount: 0,
         },
       ],
@@ -4368,6 +4373,8 @@ describe("ChatPage 任务区接线", () => {
     id: "c1",
     type: "agent",
     agent: { id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "官方" },
+    // d.147.4.88：栏头标题取会话名；固定 title 避免回落到首条消息撞断言。
+    title: "周会纪要",
     unreadCount: 0,
   };
 
@@ -4787,5 +4794,92 @@ describe("UX-A 未绑定模型与对话空态", () => {
     expect(hints).toHaveTextContent("Enter");
     expect(hints).toHaveTextContent("Shift+Enter");
     expect(hints).toHaveTextContent("Esc");
+  });
+
+  /**
+   * d.147.4.88：栏头从「智能体名」改成「会话名」——名字已经在侧栏左下角的账户区，
+   * 顶部复读「和鸣」既占位又像产品自夸；会话名才是这里该回答的问题。
+   */
+  it("栏头标题取会话名（不再复读智能体名）", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和鸣",
+            avatar: null,
+            owner_id: null,
+            description: "",
+          },
+          title: "周会纪要",
+          unreadCount: 0,
+        },
+      ],
+    });
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "周会纪要" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "和鸣" })).toBeNull();
+  });
+
+  it("没有会话名也没有历史时，栏头回落「新的对话」", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和鸣",
+            avatar: null,
+            owner_id: null,
+            description: "",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "新的对话" })).toBeInTheDocument();
+  });
+
+  /**
+   * 会话进度栏（d.147.4.88）：开合收在 ChatPage header 右上角，不再挂在全局顶栏。
+   * 收起时整条不渲染（主区自然铺满），开合状态进 `aria-expanded` 让读屏也能感知。
+   */
+  it("「会话进度」按钮开合右侧面板：aria-expanded 同步，关闭/再点都能收起", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+
+    const toggle = await screen.findByRole("button", { name: "会话进度" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("complementary", { name: "会话进度" })).toBeNull();
+
+    fireEvent.click(toggle);
+    const panel = await screen.findByRole("complementary", { name: "会话进度" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(panel).getByRole("heading", { level: 2, name: "会话进度" })).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("heading", { level: 2, name: "这一轮还没有进度" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "关闭会话进度" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).toBeNull(),
+    );
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // 按钮本身也是开合开关：再点打开、再点收起
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("complementary", { name: "会话进度" })).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).toBeNull(),
+    );
   });
 });
