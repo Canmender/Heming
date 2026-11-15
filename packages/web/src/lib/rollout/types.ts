@@ -13,8 +13,13 @@
  * 下标会跟着变。`seq` 是**分叉的前提**，也是配对校验的定位依据。
  */
 
-/** 日志格式版本：形状变了就 +1，读取端据此决定要不要迁移。 */
-export const ROLLOUT_VERSION = 2;
+/**
+ * 日志格式版本：形状变了就 +1，读取端据此决定要不要迁移。
+ *
+ * v3（P0/T1）：`turn_end.usage` 记每回合 token（含前缀缓存读写），`tool_result.ms` 记工具耗时。
+ * 两个字段都可选：v2 旧日志照常读（缺字段就是缺数据，不补默认业务值）。
+ */
+export const ROLLOUT_VERSION = 3;
 
 /** 所有 item 的公共字段：一回合内按 `seq` 严格递增。 */
 export interface RolloutItemBase {
@@ -69,6 +74,14 @@ export interface RolloutToolResult extends RolloutItemBase {
   denied?: boolean;
   /** 回灌给模型的文本（截断后）。 */
   text: string;
+  /**
+   * 这次工具调用从发出到拿到结果的墙钟耗时（毫秒，v3 起）。
+   *
+   * 记的是编排层看到的整段等待：HITL 等用户点「允许」的时间也算在内——
+   * 复盘时「为什么这一轮慢」正是要把「用户确认慢」与「工具本身慢」区分开。
+   * 被拒（`denied`）的调用不执行，通常没有这个字段。
+   */
+  ms?: number;
 }
 
 /** 最终答案（成功收口时的全文）。 */
@@ -78,12 +91,34 @@ export interface RolloutAssistantFinal extends RolloutItemBase {
   text: string;
 }
 
+/**
+ * 一回合的 token 用量（v3 起，P0/T1）。
+ *
+ * 为什么记在 `turn_end` 而不是每条 item：用量是**回合级**事实（一次运行可能有多轮
+ * `streamChat`，每轮各报一份），挂在条目上会让「一回合花了多少」需要跨条目求和。
+ * 字段全部可选、缺省不写：没上报就是没上报，不按 0 计（与 `recordUsage` 的 null 同口径）。
+ */
+export interface RolloutUsage {
+  /** 本回合所有模型轮次的输入 token 之和（仅当每轮都报齐了 input 才写）。 */
+  input?: number;
+  /** 本回合所有模型轮次的输出 token 之和（同上）。 */
+  output?: number;
+  /** 前缀缓存命中的输入 token 之和（网关报了才写）。 */
+  cacheRead?: number;
+  /** 前缀缓存写入的输入 token 之和（网关报了才写）。 */
+  cacheWrite?: number;
+  /** 本回合实际发生了几次模型轮次（工具循环里每轮 +1）。 */
+  rounds: number;
+}
+
 /** 回合终态：每次 run 恰好一条。 */
 export interface RolloutTurnEnd extends RolloutItemBase {
   type: "turn_end";
   streamId: string;
   status: "ok" | "aborted" | "error";
   error?: string;
+  /** 本回合用量（v3）：一次都没拿到 usage 时整块省略。 */
+  usage?: RolloutUsage;
 }
 
 /** 分配式 Omit：直接对联合类型做 `Omit` 会把各分支的字段抹平，只剩公共键。 */

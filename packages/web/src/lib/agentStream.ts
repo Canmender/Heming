@@ -16,7 +16,7 @@ import { foldToolResults } from "./agentContext/toolResults.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
 import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
-import type { RolloutInput } from "./rollout/types.js";
+import type { RolloutInput, RolloutUsage } from "./rollout/types.js";
 
 /**
  * 工具调用最多允许的连续轮次。
@@ -346,11 +346,21 @@ export interface TriggerDeps {
    * `served`（d.48 路由组）：**真正答话的那个连接**。走候选链时 profile 是
    * `route.<gid>` 合成档，按它记账会把「哪个 Key 花的钱」彻底糊掉（价目与额度都按 Key 走）；
    * 单连接没有留痕时为 undefined，调用方按 profile.id 记即可。
+   *
+   * `streamId` / `conversationId`（P0/T2）：这笔账属于哪个回合、哪个会话。
+   * 没有它，用量面板只能按模型聚合，回答不了「这次长任务花了多少」。
    */
   recordUsage?: (
     model: string,
     tokens: number | null,
-    served?: { profileId: string; profileLabel?: string; input?: number; output?: number },
+    served?: {
+      profileId: string;
+      profileLabel?: string;
+      input?: number;
+      output?: number;
+      streamId?: string;
+      conversationId?: string;
+    },
   ) => void;
   /**
    * 回合事件日志（G6）：每回合开始/每次工具调用与结果/最终答案/终态各回调一次。
@@ -688,15 +698,21 @@ export function runAgentMentions(
         let usageTotal = 0;
         let usageSeen = false;
         /**
-         * 提示词/生成拆分累加（d.48 记账用）：口径与 usageTotal 一致（含前缀缓存的
-         * （d.93 起网关统一 OpenAI 形状，不再有缓存 token 口径），
-         * 缓存命中其实更便宜，估出来只会偏贵不会偏便宜。
+         * 提示词/生成拆分累加（d.48 记账用）：口径与 usageTotal 一致。
+         * d.93 起网关统一 OpenAI 形状，但**缓存口径仍可能上报**（Anthropic 形状或
+         * `prompt_tokens_details.cached_tokens`）：记下来才能回答「前缀缓存到底有没有命中」，
+         * 这是 P2/T12 的唯一判据。
          */
         let usageInput = 0;
         let usageOutput = 0;
         /** 报了 usage 的轮数 / 其中报了完整 input+output 的轮数（两者相等才敢给拆分）。 */
         let usageRounds = 0;
         let usageSplitRounds = 0;
+        /** 前缀缓存读写累加 + 各自上报的轮数（0 轮 = 该网关不报缓存，字段整块省略）。 */
+        let usageCacheRead = 0;
+        let usageCacheWrite = 0;
+        let usageCacheReadRounds = 0;
+        let usageCacheWriteRounds = 0;
         /**
          * 候选链留痕（d.48）：绑路由组时每次问候选都留一条，用于①气泡里显示「换了谁」
          * ②失败收口时说清「都问过谁」（否则错误只说最后一个候选的状态码）。
@@ -907,6 +923,10 @@ export function runAgentMentions(
           usageOutput = 0;
           usageRounds = 0;
           usageSplitRounds = 0;
+          usageCacheRead = 0;
+          usageCacheWrite = 0;
+          usageCacheReadRounds = 0;
+          usageCacheWriteRounds = 0;
           /**
            * 工具目录构建失败不能带走整轮对话。
            *
@@ -1082,6 +1102,15 @@ export function runAgentMentions(
                   usageInput += u.inputTokens;
                   usageOutput += u.outputTokens;
                 }
+                // 缓存口径按「报了的轮」累加：没报的轮不能按 0 算，否则命中率会假性偏低。
+                if (u.cacheReadTokens !== undefined) {
+                  usageCacheReadRounds++;
+                  usageCacheRead += u.cacheReadTokens;
+                }
+                if (u.cacheWriteTokens !== undefined) {
+                  usageCacheWriteRounds++;
+                  usageCacheWrite += u.cacheWriteTokens;
+                }
               },
               onDelta: (d) => {
                 if (!useTools) {
@@ -1236,8 +1265,24 @@ export function runAgentMentions(
               | undefined
             )[] =
               new Array(calls.length);
+            /**
+             * 每次工具调用的耗时（v3 / P0-T1）：`callId → ms`。
+             *
+             * 为什么记在编排层而不是工具桥里：耗时的观察点在这里——
+             * 用户点「允许」的等待、排队串行写盘的等待都算这一轮，
+             * 只有这一层看得到全貌（桥里只能看到「执行」那一小段）。
+             */
+            const toolMs = new Map<string, number>();
             const runOne = async (call: ToolCall, i: number) => {
-              if (searchIndexes.has(i)) return runToolSearch(call);
+              /** 计时起点：包含 HITL 等待（见 `toolMs` 的落地口径）。 */
+              const startedAt = Date.now();
+              /** 被闸门拒掉的调用**不执行**：不记耗时的字段（没有「执行」这回事）。 */
+              const gated = outcomes?.[i];
+              if (searchIndexes.has(i)) {
+                const found = await runToolSearch(call);
+                toolMs.set(call.id, Math.max(0, Date.now() - startedAt));
+                return found;
+              }
               // 溢出重试会从 round 0 重跑：同一个 call.id 只执行一次，结果原样复用。
               const cached = executed.get(call.id);
               if (cached) return cached;
@@ -1273,6 +1318,8 @@ export function runAgentMentions(
               const repeat = repeatedCalls.get(callKey) ?? 0;
               repeatedCalls.set(callKey, repeat + 1);
               const tracked = job.then((result) => {
+                // 只在真正执行过时记耗时（被拒/复用缓存的调用没有「执行」这一段）。
+                if (gated?.kind !== "deny") toolMs.set(call.id, Math.max(0, Date.now() - startedAt));
                 if (repeat === 0) return result;
                 return {
                   ...result,
@@ -1349,6 +1396,7 @@ export function runAgentMentions(
                 ok: result.ok,
                 ...(denied ? { denied: true } : {}),
                 text: result.text,
+                ...(toolMs.has(call.id) ? { ms: toolMs.get(call.id)! } : {}),
               });
             });
             /**
@@ -1416,6 +1464,26 @@ export function runAgentMentions(
             );
           }
         };
+        /**
+         * 本回合用量快照（v3 / P0-T1）。
+         *
+         * 与 `recordUsage` 同口径但**独立成函数**：`recordUsage` 可能被触发端吞掉异常，
+         * 而 `turn_end.usage` 是复盘时唯一能自证的事实——两者都成功才算这笔账记全了。
+         * 中断/失败也给快照：已经发生的轮次是事实，能解释「这一轮为什么贵」。
+         */
+        const turnUsage = (): RolloutUsage | undefined => {
+          if (!usageSeen) return undefined;
+          const split =
+            usageRounds > 0 && usageSplitRounds === usageRounds
+              ? { input: usageInput, output: usageOutput }
+              : {};
+          return {
+            rounds: usageRounds,
+            ...split,
+            ...(usageCacheReadRounds > 0 ? { cacheRead: usageCacheRead } : {}),
+            ...(usageCacheWriteRounds > 0 ? { cacheWrite: usageCacheWrite } : {}),
+          };
+        };
         try {
           /** 溢出重试（设计 §3.4）：首次 → aggressive 1 → 2，两次仍失败即交给下面的既有失败收口。 */
           let failure: Error | null = null;
@@ -1444,7 +1512,13 @@ export function runAgentMentions(
           const text = local || acc;
           if (await sendFinish(text)) {
             record({ type: "assistant_final", streamId, text });
-            record({ type: "turn_end", streamId, status: "ok" });
+            const turnTokens = turnUsage();
+            record({
+              type: "turn_end",
+              streamId,
+              status: "ok",
+              ...(turnTokens ? { usage: turnTokens } : {}),
+            });
             notifyTurnComplete(deps, m.agentId, userText, text, "ok");
             // 用量记账：成功收口前恰好一次；一次都没拿到就记 null（未上报）。
             // 记账是旁路副作用，失败不得反噬收口（与 onRunSettled 同口径吞掉）。
@@ -1461,6 +1535,9 @@ export function runAgentMentions(
                   profileId: served?.profileId ?? profile.id,
                   profileLabel: served?.profileLabel ?? profile.label,
                   ...split,
+                  // 归属（P0/T2）：回合与会话；缺了它用量面板只能按模型聚合。
+                  streamId,
+                  conversationId,
                 },
               );
             } catch {
@@ -1500,11 +1577,13 @@ export function runAgentMentions(
             await sendError(abortedRun ? "aborted" : "provider_error", errorText);
           } finally {
             // 终态先于异常传播落定：sendError 抛错（发送链异常）时任务区也要收口。
+            const turnTokens = turnUsage();
             record({
               type: "turn_end",
               streamId,
               status: abortedRun ? "aborted" : "error",
               ...(abortedRun ? {} : { error: err.message.slice(0, 300) }),
+              ...(turnTokens ? { usage: turnTokens } : {}),
             });
             settle({
               status: abortedRun ? "aborted" : "error",

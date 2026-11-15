@@ -1,0 +1,314 @@
+{
+  "model": "eval-offline",
+  "date": "2026-11-15",
+  "env": {
+    "node": "v24.15.0",
+    "pnpm": "10.33.2"
+  },
+  "totals": {
+    "cases": 17,
+    "passed": 17,
+    "pass@1": 1,
+    "tokens_per_pass": 2640,
+    "cache_read_ratio": 0,
+    "p95_ms": 12
+  },
+  "cases": [
+    {
+      "id": "ctx-001",
+      "tags": [
+        "context",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 5,
+      "tokens": {
+        "input": 4500,
+        "output": 600,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 12,
+      "failures": []
+    },
+    {
+      "id": "ctx-002",
+      "tags": [
+        "context",
+        "tool",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 3,
+      "tokens": {
+        "input": 2700,
+        "output": 360,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 12,
+      "failures": []
+    },
+    {
+      "id": "edit-001",
+      "tags": [
+        "edit",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 8,
+      "failures": []
+    },
+    {
+      "id": "edit-002",
+      "tags": [
+        "edit",
+        "tool",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 4,
+      "tokens": {
+        "input": 3600,
+        "output": 480,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 6,
+      "failures": []
+    },
+    {
+      "id": "hitl-001",
+      "tags": [
+        "security",
+        "hitl"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 2,
+      "failures": []
+    },
+    {
+      "id": "mcp-001",
+      "tags": [
+        "mcp",
+        "tool",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "mem-001",
+      "tags": [
+        "memory",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 2,
+      "failures": []
+    },
+    {
+      "id": "read-001",
+      "tags": [
+        "read",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "read-002",
+      "tags": [
+        "read",
+        "context",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 3,
+      "tokens": {
+        "input": 2700,
+        "output": 360,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 4,
+      "failures": []
+    },
+    {
+      "id": "sec-001",
+      "tags": [
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "sec-002",
+      "tags": [
+        "security",
+        "hitl"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "sec-003",
+      "tags": [
+        "security",
+        "hitl"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "sec-004",
+      "tags": [
+        "security",
+        "hitl"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "sec-005",
+      "tags": [
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 2,
+      "failures": []
+    },
+    {
+      "id": "skill-001",
+      "tags": [
+        "skill",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 3,
+      "tokens": {
+        "input": 2700,
+        "output": 360,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 3,
+      "failures": []
+    },
+    {
+      "id": "tool-001",
+      "tags": [
+        "tool",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 4,
+      "failures": []
+    },
+    {
+      "id": "tool-002",
+      "tags": [
+        "tool",
+        "edit",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 4,
+      "tokens": {
+        "input": 3600,
+        "output": 480,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 5,
+      "failures": []
+    }
+  ],
+  "stability": {
+    "runs": 3,
+    "spread": 0
+  }
+}

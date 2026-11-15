@@ -1532,6 +1532,8 @@ export function ChatPage({
       streamChat: streamChatRouted,
       // Token 用量记账（d.32）：编排层在成功收口前调用一次；
       // null = 供应商一次都没上报 → 记「未上报」，而不是写 0 冒充真实用量。
+      // d.148（P0-T2）：served 里带 conversationId/streamId，记账同时可归因到
+      // 「哪个会话的哪一回合」——用量面板才答得了「这句话为什么这么贵」。
       recordUsage: (model, tokens, served) =>
         tokens === null
           ? useTokenUsageStore.getState().recordUnreported(model, undefined, served)

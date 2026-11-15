@@ -1,0 +1,30 @@
+# 用例 read-001：只读问答（中文 README 摘要）
+# 用途：验证单文件读取后能按中文 README 的三条要点做结构化总结。
+# P0 期望：一次 file_read 后直接回答，不再追加工具调用；三条要点全部命中。
+id: read-001
+name: 只读问答：中文 README 三条要点
+owner: evals
+tags: [read, capability]
+setup:
+  fixture: read-001
+prompt: |
+  请读一下工作区里的 README.md，用简体中文回答：和鸣这个项目的三条要点分别是什么？
+  每条一句话，三个要点都要覆盖，不要展开成段落，也不要补充文件里没有的内容。
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: README.md
+  - text: |
+      和鸣的三条要点是：
+      1. 本地优先：会话记录、文件改动和 token 用量都留在本机，云端同步是可选项；
+      2. 工具可审计：每次工具调用与结果都写入 rollout，失败原因按类型归档，方便复盘；
+      3. 技能即插件：能力以技能包形式安装与卸载，不用改主程序就能扩展工作流。
+graders:
+  - type: tool_called
+    tool: file_read
+    times: 1
+  - type: contains
+    value: ["本地优先", "工具可审计", "技能即插件"]
+  - type: max_rounds
+    value: 3

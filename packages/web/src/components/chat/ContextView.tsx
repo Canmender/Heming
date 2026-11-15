@@ -1,6 +1,87 @@
+import { useMemo } from "react";
 import { transcriptOf, useChatStore } from "../../store/chat.js";
+import {
+  recordsForConversation,
+  totalsOf,
+  useTokenUsageStore,
+  type UsageRecord,
+} from "../../store/tokenUsage.js";
+import { rolloutLog } from "../../lib/rollout/index.js";
+import { streamUsageTotals, toolTimings } from "../../lib/rollout/view.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
 import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
+
+/** 一个回合（stream）的用量 + 工具耗时（数据来自记账 + 回放日志，两处都是本机真实数据）。 */
+interface TurnUsageRow {
+  streamId: string;
+  model: string;
+  tokens: number | null;
+  /** 回放日志里的轮次数与缓存拆分；旧日志没有就是 undefined（界面显示「—」）。 */
+  rounds?: number;
+  cacheRead?: number;
+  /** 工具调用耗时合计与次数（被拒调用不计耗时）。 */
+  toolMs?: number;
+  toolCount: number;
+}
+
+const MAX_TURN_ROWS = 5;
+
+/**
+ * 把本会话的记账记录按回合（streamId）折叠，并尽量补上回放日志里的
+ * 轮次数 / 缓存读 / 工具耗时。
+ *
+ * 为什么要两处合并：记账回答「花了多少」，回放日志回答「贵在哪」（轮次、缓存、工具耗时）。
+ * 两者都可能缺（老记录没有 streamId、日志被清过），缺就是缺，界面不编数字。
+ */
+function turnRowsOf(records: UsageRecord[]): TurnUsageRow[] {
+  const byStream = new Map<string, TurnUsageRow>();
+  for (const r of records) {
+    if (!r.streamId) continue;
+    const existing = byStream.get(r.streamId);
+    if (existing) {
+      // 同一回合理论上只记一次；真出现多次就累加，接口不会漏掉钱。
+      existing.tokens = existing.tokens === null || r.tokens === null ? null : existing.tokens + r.tokens;
+      continue;
+    }
+    byStream.set(r.streamId, {
+      streamId: r.streamId,
+      model: r.model,
+      tokens: r.tokens,
+      toolCount: 0,
+    });
+  }
+
+  const rows: TurnUsageRow[] = [];
+  for (const row of byStream.values()) {
+    let items: ReturnType<typeof rolloutLog.read> = [];
+    try {
+      items = rolloutLog.read(row.streamId);
+    } catch {
+      items = []; // 日志读不出来不影响记账口径
+    }
+    if (items.length > 0) {
+      const usage = streamUsageTotals(items);
+      if (usage.reported) {
+        row.rounds = usage.rounds;
+        row.cacheRead = usage.cacheRead;
+      }
+      const timings = toolTimings(items);
+      row.toolCount = timings.length;
+      const totalMs = timings.reduce((sum, t) => sum + (t.ms ?? 0), 0);
+      if (totalMs > 0) row.toolMs = totalMs;
+    }
+    rows.push(row);
+  }
+  return rows.slice(-MAX_TURN_ROWS).reverse();
+}
+
+function formatTokens(n: number): string {
+  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+function formatMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
 
 /**
  * 「上下文」页签（T32）：本会话的上下文预算用量。
@@ -16,6 +97,7 @@ import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentC
 export function ContextView({ conversationId }: { conversationId: string | null }) {
   const messages = useChatStore((s) => (conversationId ? s.messages[conversationId] : undefined));
   const rows = messages ?? [];
+  const records = useTokenUsageStore((s) => s.records);
 
   let used = 0;
   let toolResults = 0;
@@ -27,6 +109,12 @@ export function ContextView({ conversationId }: { conversationId: string | null 
   const budget = DEFAULT_BUDGET_TOKENS;
   // 进度条宽度按比例给，但 aria-valuenow 报真实用量（超预算时进度条封顶、数字说真话）。
   const ratio = budget > 0 ? Math.min(1, used / budget) : 0;
+
+  // 本会话的**真实消耗**（P0-T2）：只认显式带 conversationId 的记账，归不到的不算进来。
+  const usage = useMemo(() => {
+    const conv = recordsForConversation(records, conversationId ?? "");
+    return { totals: totalsOf(conv), turns: turnRowsOf(conv) };
+  }, [records, conversationId]);
 
   return (
     <section aria-label="上下文" data-view-panel="context">
@@ -65,6 +153,48 @@ export function ContextView({ conversationId }: { conversationId: string | null 
           <span className="shrink-0 tabular-nums text-ink">{DEFAULT_RESERVED_TOKENS} tokens</span>
         </li>
       </ul>
+      {/* 真实消耗（P0-T2）：记账按会话/回合归因，回答「这句话花了多少、贵在哪」。
+          与上面的上下文预算不是一套口径：上面是「还没发出去的行会有多大」，这里是「已经花掉多少」。 */}
+      <h4 className="ui-section-title mb-2 mt-5">本会话消耗</h4>
+      <ul aria-label="本会话消耗" className="list-none space-y-1.5 p-0">
+        <li className="flex items-baseline justify-between gap-3 text-ui-sm">
+          <span className="text-muted">已上报</span>
+          <span className="shrink-0 tabular-nums text-ink" data-testid="conversation-tokens">
+            {formatTokens(usage.totals.total)} tokens
+          </span>
+        </li>
+        <li className="flex items-baseline justify-between gap-3 text-ui-sm">
+          <span className="text-muted">回合数</span>
+          <span className="shrink-0 tabular-nums text-ink">
+            {usage.totals.runs} 次
+            {/* 未上报单独说清楚：混进「已上报」就成了编数字。 */}
+            {usage.totals.unreported > 0 ? `（${usage.totals.unreported} 次未上报）` : ""}
+          </span>
+        </li>
+      </ul>
+      {usage.turns.length > 0 ? (
+        <ol aria-label="回合消耗明细" className="mt-3 list-none space-y-1.5 p-0">
+          {usage.turns.map((turn) => (
+            <li
+              key={turn.streamId}
+              className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-md border border-line-soft px-2 py-1.5 text-ui-sm"
+            >
+              <span className="min-w-0 truncate text-muted" title={turn.streamId}>
+                {turn.model}
+              </span>
+              <span className="shrink-0 tabular-nums text-ink">
+                {turn.tokens === null ? "未上报" : `${formatTokens(turn.tokens)} tokens`}
+                {turn.rounds !== undefined ? ` · ${turn.rounds} 轮` : ""}
+                {/* 前缀缓存：报了就显示，没报就不显示（旧日志/供应商不拆）。 */}
+                {turn.cacheRead !== undefined ? ` · 缓存读 ${formatTokens(turn.cacheRead)}` : ""}
+                {turn.toolMs !== undefined ? ` · 工具 ${formatMs(turn.toolMs)}` : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-3 text-ui-sm text-muted">这个会话还没有可归因的用量记录。</p>
+      )}
     </section>
   );
 }

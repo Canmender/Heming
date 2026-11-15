@@ -1,0 +1,46 @@
+# 用例 skill-001：技能命中
+# 用途：fake_tools 提供 skill__load，模型先加载技能说明，再严格按技能的步骤与输出格式作答。
+# P0 期望：调用一次 skill__load，答案先写「通过/不通过」，再列三条核对结果。
+id: skill-001
+name: 技能命中：按加载到的步骤做发布检查
+owner: evals
+tags: [skill, capability]
+setup:
+  fixture: skill-001
+fake_tools:
+  - name: skill__load
+    result:
+      text: |
+        技能《发布前检查》：
+        步骤 1：核对 CHANGELOG 日期与版本号是否一致；
+        步骤 2：跑冒烟用例 smoke；
+        步骤 3：确认回滚脚本可用。
+        输出格式：先写「通过」或「不通过」，再列三条核对结果。
+      ok: true
+prompt: |
+  先加载「发布前检查」这个技能，然后按技能里的步骤核对工作区的 本周记录.md，
+  严格按技能要求的输出格式回答。
+script:
+  - tool_calls:
+      - name: skill__load
+        arguments:
+          query: 发布前检查
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: 本周记录.md
+  - text: |
+      通过。
+
+      三条核对结果：
+      1. CHANGELOG 日期 2026-11-15，版本号 0.9.0 与 package.json 一致；
+      2. 冒烟用例 smoke.spec.ts 全绿，会话恢复与文件写盘两条都过了；
+      3. 回滚脚本 rollback.ps1 在测试机上空跑过一次，能回到 0.8.3。
+graders:
+  - type: tool_called
+    tool: skill__load
+    times: 1
+  - type: contains
+    value: ["通过", "CHANGELOG", "冒烟", "回滚"]
+  - type: max_rounds
+    value: 4

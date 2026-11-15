@@ -28,6 +28,14 @@ export interface UsageRecord {
   input?: number;
   /** 生成部分（completion / output tokens）。 */
   output?: number;
+  /**
+   * 这次运行属于哪个会话 / 哪一回合（P0-T2）。
+   * 为什么要记：只有「一共花了多少」没法回答「这一句话为什么这么贵」；
+   * 会话与 stream 是 agent 运行的最小可归因单位（一个 stream = 一次 mention 的完整回合）。
+   * 老记录没有这两个字段，读回照旧，过滤时视为「归不到具体会话」。
+   */
+  conversationId?: string;
+  streamId?: string;
 }
 
 /** 记账时能附上的归属信息（都是可选：老调用方一个字都不用改）。 */
@@ -36,11 +44,61 @@ export interface UsageMeta {
   profileLabel?: string;
   input?: number;
   output?: number;
+  conversationId?: string;
+  streamId?: string;
 }
 
 /** 是否已上报：只有数字才参与求和（老数据也都是数字）。 */
 function reportedTokens(r: UsageRecord): number | null {
   return typeof r.tokens === "number" ? r.tokens : null;
+}
+
+/**
+ * 某个会话的用量记录（按时间正序，原样保留）。
+ *
+ * 老记录没有 `conversationId`：它们归不到任何会话，按「查不到」处理——
+ * 宁可少列，也不要把别的会话的钱算到这一句上（钱的账不能猜）。
+ */
+export function recordsForConversation(
+  records: UsageRecord[],
+  conversationId: string,
+): UsageRecord[] {
+  if (!conversationId) return [];
+  return records.filter((r) => r.conversationId === conversationId);
+}
+
+/** 某个回合（stream）的用量记录。同样只认显式带 streamId 的账。 */
+export function recordsForStream(records: UsageRecord[], streamId: string): UsageRecord[] {
+  if (!streamId) return [];
+  return records.filter((r) => r.streamId === streamId);
+}
+
+/**
+ * 一组记录的用量合计：已上报的分开累加，未上报单独计数（不猜 0）。
+ *
+ * 前缀缓存的读/写**不在这里**：它属于回合级链路日志（rollout `turn_end.usage`），
+ * 记账只回答「花了多少」，缓存命中率看回放/评测报告（同一份数据两个口径，别混）。
+ */
+export function totalsOf(records: UsageRecord[]): {
+  total: number;
+  input: number;
+  output: number;
+  runs: number;
+  unreported: number;
+} {
+  const out = { total: 0, input: 0, output: 0, runs: 0, unreported: 0 };
+  for (const r of records) {
+    out.runs++;
+    const tokens = reportedTokens(r);
+    if (tokens === null) {
+      out.unreported++;
+      continue;
+    }
+    out.total += tokens;
+    out.input += r.input ?? 0;
+    out.output += r.output ?? 0;
+  }
+  return out;
 }
 
 export function monthKeyOf(iso: string): string {

@@ -8,6 +8,8 @@ import {
   relativeLabel,
   relativeOffsetMs,
   rolloutExportFileName,
+  streamUsageTotals,
+  toolTimings,
 } from "./view.js";
 import { pairToolCalls, turnCompletion } from "./pair.js";
 import type { RolloutItem } from "./types.js";
@@ -132,5 +134,72 @@ describe("单回合导出 JSON", () => {
     expect(rolloutExportFileName("s1")).toBe("rollout-s1.json");
     expect(rolloutExportFileName("../etc/passwd")).toBe("rollout-.._etc_passwd.json");
     expect(rolloutExportFileName("")).toBe("rollout-rollout.json");
+  });
+});
+
+describe("回合用量与工具耗时（v3）", () => {
+  const withUsage: RolloutItem[] = [
+    ...items.slice(0, 6),
+    {
+      type: "turn_end",
+      seq: 6,
+      at: at(6000),
+      streamId: "s1",
+      status: "ok",
+      usage: { input: 1200, output: 300, cacheRead: 900, cacheWrite: 40, rounds: 3 },
+    },
+  ];
+
+  it("turn_end.usage 求和，缓存 0 与「未上报」必须分得清", () => {
+    expect(streamUsageTotals(withUsage)).toEqual({
+      input: 1200,
+      output: 300,
+      cacheRead: 900,
+      cacheWrite: 40,
+      rounds: 3,
+      reported: true,
+    });
+    // 没有 usage 的回合：全 0 但 reported=false —— 界面据此说「未上报」而不是「0 token」。
+    const none = streamUsageTotals(items);
+    expect(none).toMatchObject({ input: 0, output: 0, rounds: 0, reported: false });
+  });
+
+  it("多条 turn_end（外部拼接的日志）累加，不假设唯一", () => {
+    const merged: RolloutItem[] = [
+      ...withUsage,
+      {
+        type: "turn_end",
+        seq: 7,
+        at: at(7000),
+        streamId: "s1",
+        status: "ok",
+        usage: { input: 100, output: 50, rounds: 1 },
+      },
+    ];
+    expect(streamUsageTotals(merged)).toMatchObject({ input: 1300, output: 350, rounds: 4 });
+  });
+
+  it("工具耗时按调用顺序给出；被拒调用没有耗时字段就是 undefined（不填 0 冒充）", () => {
+    const rows = toolTimings([
+      { type: "tool_call", seq: 0, at: at(0), streamId: "s1", id: "t1", name: "srv__read", args: "{}" },
+      { type: "tool_result", seq: 1, at: at(100), streamId: "s1", id: "t1", name: "srv__read", ok: true, text: "r", ms: 132 },
+      {
+        type: "tool_result",
+        seq: 2,
+        at: at(200),
+        streamId: "s1",
+        id: "t2",
+        name: "srv__write",
+        ok: false,
+        denied: true,
+        text: "未执行",
+      },
+    ]);
+    expect(rows).toEqual([
+      { id: "t1", name: "srv__read", ok: true, denied: false, ms: 132 },
+      { id: "t2", name: "srv__write", ok: false, denied: true },
+    ]);
+    // tool_call 只是模型的决策，没执行就没有耗时可言。
+    expect(toolTimings([{ type: "tool_call", seq: 0, at: at(0), streamId: "s1", id: "t1", name: "x", args: "{}" }])).toEqual([]);
   });
 });

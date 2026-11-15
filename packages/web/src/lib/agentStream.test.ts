@@ -1812,10 +1812,16 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     expect(streamChat).toHaveBeenCalledTimes(2); // 工具轮 + 答案轮
     expect(recordUsage).toHaveBeenCalledTimes(1);
     // 100（totalTokens）+ 40+10（没有 total 时用 input+output）
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, 150, {
-      profileId: "p1",
-      profileLabel: "l",
-    });
+    expect(recordUsage).toHaveBeenCalledWith(
+      profile.model,
+      150,
+      expect.objectContaining({
+        profileId: "p1",
+        profileLabel: "l",
+        conversationId: "c1",
+        streamId: expect.any(String),
+      }),
+    );
   });
 
   it("一次都没拿到 usage → 记 null（未上报），不记 0", async () => {
@@ -1823,10 +1829,11 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     const { deps } = makeDeps({ recordUsage });
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(recordUsage).toHaveBeenCalledTimes(1);
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, null, {
-      profileId: "p1",
-      profileLabel: "l",
-    });
+    expect(recordUsage).toHaveBeenCalledWith(
+      profile.model,
+      null,
+      expect.objectContaining({ profileId: "p1", profileLabel: "l", conversationId: "c1" }),
+    );
   });
 
   it("失败/中止的运行不记账", async () => {
@@ -1854,12 +1861,17 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     );
     const { deps } = makeDeps({ streamChat: streamChat as never, recordUsage });
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, 35, {
-      profileId: "p1",
-      profileLabel: "l",
-      input: 30,
-      output: 5,
-    });
+    expect(recordUsage).toHaveBeenCalledWith(
+      profile.model,
+      35,
+      expect.objectContaining({
+        profileId: "p1",
+        profileLabel: "l",
+        input: 30,
+        output: 5,
+        conversationId: "c1",
+      }),
+    );
   });
 
   it("有一轮没报拆分 → 宁可不给拆分，也不给少算一期的数字", async () => {
@@ -1897,10 +1909,11 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(streamChat).toHaveBeenCalledTimes(2);
     // 总量照记 135，但拆分缺一轮 → 不写（写了就是把费用算少）
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, 135, {
-      profileId: "p1",
-      profileLabel: "l",
-    });
+    expect(recordUsage).toHaveBeenCalledWith(
+      profile.model,
+      135,
+      expect.objectContaining({ profileId: "p1", profileLabel: "l", conversationId: "c1" }),
+    );
   });
 
   it("候选链：按**答话的候选**记账，并把留痕逐条交给触发端（d.48）", async () => {
@@ -1932,13 +1945,171 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     );
     const { deps } = makeDeps({ streamChat: streamChat as never, recordUsage, onAttempt });
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-    expect(recordUsage).toHaveBeenCalledWith("kimi-v1", 10, {
-      profileId: "p2",
-      profileLabel: "备用 Key",
-      input: 8,
-      output: 2,
-    });
+    expect(recordUsage).toHaveBeenCalledWith(
+      "kimi-v1",
+      10,
+      expect.objectContaining({
+        profileId: "p2",
+        profileLabel: "备用 Key",
+        input: 8,
+        output: 2,
+        conversationId: "c1",
+      }),
+    );
     expect(onAttempt).toHaveBeenCalledTimes(2);
     expect(onAttempt.mock.calls[0][1].profileId).toBe("p1");
+  });
+
+  /* ------------------------------------------------ P0-T1：回合用量与工具耗时 */
+
+  /* 本地两轮流（与 HITL 段同式，但作用域独立，别跨 describe 借 helper）。 */
+  function twoRoundStream(calls: unknown[]) {
+    const rounds = [
+      { text: "我先做一下", calls },
+      { text: "做完了", calls: [] as never[] },
+    ];
+    let round = 0;
+    return vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        if (r.text) o.onDelta(r.text);
+        return r.text;
+      },
+    );
+  }
+
+  const echoCall = [
+    { id: "call_1", type: "function" as const, function: { name: "srv__echo", arguments: "{}" } },
+  ];
+  const writeCall = [
+    { id: "call_1", type: "function" as const, function: { name: "fs__write_file", arguments: '{"p":"a"}' } },
+  ];
+
+  it("turn_end 带 usage：轮次、拆分、缓存都写进回合日志（面板据此回答「贵在哪」）", async () => {
+    const items: { type: string; streamId?: string; usage?: unknown }[] = [];
+    const rounds = [
+      {
+        usage: { inputTokens: 800, outputTokens: 20, cacheReadTokens: 600, cacheWriteTokens: 0 },
+        calls: [{ id: "c1", type: "function" as const, function: { name: "srv__echo", arguments: "{}" } }],
+      },
+      { usage: { inputTokens: 300, outputTokens: 120, cacheReadTokens: 250 }, calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: {
+          onDelta: (t: string) => void;
+          onUsage?: (u: Usage) => void;
+          onToolCalls?: (c: unknown[]) => void;
+        },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        o.onUsage?.(r.usage as Usage);
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const start = items.find((it) => it.type === "turn_start");
+    const end = items.find((it) => it.type === "turn_end");
+    expect(start?.streamId).toBeTruthy();
+    // 同一条回合：用量必须挂在真正属于它的 streamId 上（多 mention 时不能串）。
+    expect(end?.streamId).toBe(start?.streamId);
+    expect((end as { status?: string }).status).toBe("ok");
+    expect(end?.usage).toEqual({
+      input: 1100,
+      output: 140,
+      cacheRead: 850,
+      cacheWrite: 0,
+      rounds: 2,
+    });
+  });
+
+  it("供应商没报缓存字段时，usage 里不写 0 冒充「零缓存」", async () => {
+    const items: { type: string; usage?: unknown }[] = [];
+    const streamChat = vi.fn(
+      async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ inputTokens: 10, outputTokens: 2 });
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const end = items.find((it) => it.type === "turn_end") as { usage?: Record<string, number> };
+    expect(end.usage).toEqual({ input: 10, output: 2, rounds: 1 });
+    expect(end.usage && "cacheRead" in end.usage).toBe(false);
+  });
+
+  it("tool_result 带真实耗时 ms；被拒的调用不记耗时（没执行就没有耗时）", async () => {
+    const items: { type: string; ms?: number; denied?: boolean; id?: string }[] = [];
+    const streamChat = twoRoundStream(echoCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          return { text: "工具说", ok: true };
+        },
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const result = items.find((it) => it.type === "tool_result");
+    expect(result?.ms).toBeTypeOf("number");
+    expect(result?.ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("被拒的工具调用：tool_result 标记 denied 且不带 ms", async () => {
+    const items: { type: string; ms?: number; denied?: boolean }[] = [];
+    const streamChat = twoRoundStream(writeCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async () => ({ text: "写好了", ok: true }),
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+          cause: "user" as const,
+        })),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const result = items.find((it) => it.type === "tool_result");
+    expect(result?.denied).toBe(true);
+    expect(result?.ms).toBeUndefined();
   });
 });

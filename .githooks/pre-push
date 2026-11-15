@@ -1,0 +1,73 @@
+#!/bin/sh
+# =============================================================================
+# 和鸣 · 分层 CI · L1 pre-push（推送前中检）
+# -----------------------------------------------------------------------------
+# 层级：L1                    目标时长：3–8 分钟（typecheck 会先 `pnpm -r build`，慢是正常的）
+# 触发：git push
+#
+# 为什么这么分层（ADR-1，见 docs/research/2026-11-15-agent-tuning-execution-plan.md §7）：
+#   「全量类型检查 + web 单测」是 3–8 分钟级的检查：
+#     · 放进 L0 pre-commit 会让每次提交都卡半分钟以上 → 开发者必然 --no-verify；
+#     · 放进 L2 PR CI 又太晚（等 CI 才红，往返一趟十分钟）。
+#   放在 push 前正好：进 CI 之前就挡掉大部分明显回归，同时不拖慢提交节奏。
+#
+# 本层不做（职责在别层）：
+#   · server / shared / desktop 全量测试、`pnpm build`、`pnpm plugin:check`、确定性 eval
+#     → L2 `.github/workflows/verify.yml`
+#   · 真实模型 eval、design:audit 亮/暗 → L3 `.github/workflows/eval-nightly.yml`
+#
+# 本地如何跑：
+#   pnpm typecheck                     # 根脚本：pnpm -r build && pnpm -r typecheck
+#   pnpm --filter @heming/web test     # vitest run
+#
+# 绕过（仅紧急时）：git push --no-verify
+#   —— PR CI（L2）仍会跑同一批检查，请尽快补绿，别把红留在分支上。
+# =============================================================================
+set -eu
+
+if ! ROOT=$(git rev-parse --show-toplevel 2>/dev/null); then
+  printf '[L1 pre-push] 警告：当前目录不是 git 工作区，跳过检查。\n' >&2
+  exit 0
+fi
+cd "$ROOT"
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  printf '[L1 pre-push] ✗ 找不到 pnpm，请先确认 Node ≥24 与 pnpm 已安装且在 PATH 里。\n' >&2
+  printf '  仅紧急时可用：git push --no-verify\n' >&2
+  exit 1
+fi
+
+report_failure() {
+  label="$1"
+  printf '\n[L1 pre-push] ✗ 未通过：%s\n' "$label" >&2
+  printf '\n  怎么处理：\n' >&2
+  printf '    1) 先本地复现并修好：%s\n' "$label" >&2
+  printf '    2) 仅紧急时（线上故障 / 必须立刻推送）才用：git push --no-verify\n' >&2
+  printf '       —— 跳过后 L2 PR CI 仍会跑同一批检查，请尽快补绿。\n\n' >&2
+}
+
+run_gate() {
+  label="$1"
+  shift
+  printf '\n[L1] ▶ %s\n' "$label"
+  if "$@"; then
+    printf '[L1] ✓ %s\n' "$label"
+    return 0
+  fi
+  report_failure "$label"
+  exit 1
+}
+
+printf '\n[L1 pre-push] 开始：类型检查 + @heming/web 单测（3–8 分钟，属正常耗时）\n'
+
+# 1) 类型检查：根脚本 `pnpm -r build && pnpm -r typecheck`，覆盖
+#    shared / setup / pet-widget / desktop / server / web 六个项目。
+run_gate "pnpm typecheck" pnpm typecheck
+
+# 2) web 单测（vitest run）。并发由 packages/web/vite.config.ts 的
+#    maxWorkers: 8 固定——那是踩坑调出来的（满并发会饿死动态 import），
+#    不要在这里或 CI 里按核数覆盖。
+run_gate "pnpm --filter @heming/web test" pnpm --filter @heming/web test
+
+printf '\n[L1 pre-push] ✓ 全部通过，可以推送。\n'
+exit 0

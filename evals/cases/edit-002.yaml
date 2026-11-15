@@ -1,0 +1,60 @@
+# 用例 edit-002：补丁失败后读取原文、自恢复
+# 用途：验证错误锚点导致 match-failed 后，模型会先 file_read 拿到原文再重写补丁，而不是硬猜。
+# P0 期望：第一次 file_patch 因锚点不存在失败（tool_result 含「锚点匹配失败」），
+#          第二次 file_read 拿到原文，第三次 file_patch 成功；最终文件出现新约定行。
+id: edit-002
+name: 补丁失败自恢复：读原文再改
+owner: evals
+tags: [edit, tool, capability]
+setup:
+  fixture: edit-002
+prompt: |
+  帮我在 notes/说明.md 的约定列表里加一条「新增：允许放一份不超过 1 KB 的 JSON 样例；」。
+  如果补丁失败，就读一遍原文再改。
+script:
+  - tool_calls:
+      - name: file_patch
+        arguments:
+          patch: |
+            *** Begin Patch
+            *** Update File: notes/说明.md
+            @@
+            -这条约定在文件里并不存在，锚点故意写错
+            +这条也写不进去
+            *** End Patch
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: notes/说明.md
+  - tool_calls:
+      - name: file_patch
+        arguments:
+          patch: |
+            *** Begin Patch
+            *** Update File: notes/说明.md
+            @@
+             - 文件统一 UTF-8，不加 BOM；
+            +- 新增：允许放一份不超过 1 KB 的 JSON 样例；
+            *** End Patch
+  - text: |
+      第一次补丁失败，报的是锚点匹配失败（match-failed），原因是我凭记忆写了文件里不存在的行。
+      读了原文之后重写补丁，这次成功了，工具返回「1 个修改，已写入磁盘」：
+      约定列表里已经多了「新增：允许放一份不超过 1 KB 的 JSON 样例；」这一行。
+graders:
+  - type: tool_called
+    tool: file_patch
+    times: 2
+  - type: tool_called
+    tool: file_read
+    times: 1
+  - type: contains
+    value: ["锚点匹配失败", "已写入"]
+    in: final
+  - type: contains
+    value: ["锚点匹配失败（match-failed）"]
+    in: tool_result
+  - type: file_assert
+    path: notes/说明.md
+    contains: ["允许放一份不超过 1 KB 的 JSON 样例"]
+  - type: max_rounds
+    value: 6

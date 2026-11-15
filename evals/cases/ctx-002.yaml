@@ -1,0 +1,35 @@
+# 用例 ctx-002：工具结果超预算，仍能定位中段事实
+# 用途：工作区放一份 8 KB 以上的长清单，file_read 一次整读（输出超单条预算会被截断），
+#       再用 offset/limit 定点读中段，最后回答 W-042 那一行的关键信息。
+# P0 期望：不因为第一次读取被截断就答不出，答案命中 grad_dark_launch / 09:30 / 观察 30 分钟。
+id: ctx-002
+name: 工具结果超预算：长清单里定位中段事实
+owner: evals
+tags: [context, tool, capability]
+setup:
+  fixture: ctx-002
+prompt: |
+  工作区里有一份很长的《发布窗口清单.md》，请找到窗口 ID 为 W-042 的那一行，
+  用一句话说明它的时间、流水线、开关、放量和备注要求。
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: 发布窗口清单.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: 发布窗口清单.md
+          offset: 40
+          limit: 10
+  - text: |
+      W-042 这一行是：2026-11-28 09:30，流水线 release/r114，开关 grad_dark_launch 打开，
+      放量 5%，值班林澈；备注要求先观察 30 分钟再放量，出问题立即关闭开关。
+graders:
+  - type: tool_called
+    tool: file_read
+    times: 2
+  - type: contains
+    value: ["grad_dark_launch", "09:30", "观察 30 分钟"]
+  - type: max_rounds
+    value: 4

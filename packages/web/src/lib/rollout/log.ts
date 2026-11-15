@@ -8,6 +8,7 @@ import {
   type RolloutItemType,
   type RolloutStreamView,
   type RolloutSummary,
+  type RolloutUsage,
 } from "./types.js";
 
 /**
@@ -106,6 +107,34 @@ function knownType(value: unknown): RolloutItemType | null {
 }
 
 /**
+ * 解析 `turn_end.usage`（v3）：结构对不上就整块丢掉，**不补默认值**。
+ *
+ * 单个字段坏了只丢那个字段（例如 input 缺失但 output 有值仍保留 output）：
+ * 用量是审计用的旁证，宁可少一条也不要编一条。
+ */
+function pickUsage(raw: unknown): RolloutUsage | null {
+  if (!isPlainObject(raw)) return null;
+  const rounds =
+    typeof raw.rounds === "number" && Number.isFinite(raw.rounds) && raw.rounds > 0
+      ? Math.floor(raw.rounds)
+      : 0;
+  if (!rounds) return null;
+  const count = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const input = count(raw.input);
+  const output = count(raw.output);
+  const cacheRead = count(raw.cacheRead);
+  const cacheWrite = count(raw.cacheWrite);
+  return {
+    rounds,
+    ...(input !== undefined ? { input } : {}),
+    ...(output !== undefined ? { output } : {}),
+    ...(cacheRead !== undefined ? { cacheRead } : {}),
+    ...(cacheWrite !== undefined ? { cacheWrite } : {}),
+  };
+}
+
+/**
  * 存储里的一条原始记录 → 带 seq 的 item。
  *
  * 解析口径与项目其它本机数据一致：**结构不符就丢弃这一条**（不猜、不补默认业务值），
@@ -163,12 +192,16 @@ function pickItem(raw: unknown, index: number): RolloutItem | null {
         ok: raw.ok === true,
         ...(raw.denied === true ? { denied: true } : {}),
         text: asString(raw.text),
+        ...(typeof raw.ms === "number" && Number.isFinite(raw.ms) && raw.ms >= 0
+          ? { ms: Math.floor(raw.ms) }
+          : {}),
       };
     case "assistant_final":
       return { type, seq, at, streamId, text: asString(raw.text) };
     case "turn_end": {
       const status = raw.status;
       if (status !== "ok" && status !== "aborted" && status !== "error") return null;
+      const usage = pickUsage(raw.usage);
       return {
         type,
         seq,
@@ -176,6 +209,7 @@ function pickItem(raw: unknown, index: number): RolloutItem | null {
         streamId,
         status,
         ...(typeof raw.error === "string" && raw.error ? { error: raw.error } : {}),
+        ...(usage ? { usage } : {}),
       };
     }
     default:

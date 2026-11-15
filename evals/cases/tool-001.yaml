@@ -1,0 +1,30 @@
+# 用例 tool-001：单工具一次调用
+# 用途：最小能力基线 —— 只调一次 file_read，不重复读、不追加工具。
+# P0 期望：恰好一次 file_read，答案覆盖发布检查的三条硬性条件。
+id: tool-001
+name: 单工具：一次读取回答发布检查三条
+owner: evals
+tags: [tool, capability]
+setup:
+  fixture: tool-001
+prompt: |
+  帮我看看工作区 notes/发布检查.md 里「必须满足的三条」是什么，
+  用一句话一条列出来，不要调用别的工具，也不要重复读文件。
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: notes/发布检查.md
+  - text: |
+      发布前必须满足的三条是：
+      1. CHANGELOG 的日期改成当天，且版本号与 package.json 一致；
+      2. 回滚脚本 rollback.ps1 在测试机上空跑过一次，确认能回到上一版；
+      3. 冒烟用例 smoke.spec.ts 全绿，尤其是会话恢复与文件写盘两条。
+graders:
+  - type: tool_called
+    tool: file_read
+    times: 1
+  - type: contains
+    value: ["CHANGELOG", "回滚脚本", "冒烟"]
+  - type: max_rounds
+    value: 3

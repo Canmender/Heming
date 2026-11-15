@@ -1,0 +1,41 @@
+# 用例 edit-001：补丁正常落盘
+# 用途：验证标准 Update File 补丁（@@ + 上下文 + -旧行 + 新行）能正确改到目标行。
+# P0 期望：一次 file_patch 成功，file_assert 看到新文案、旧文案消失。
+id: edit-001
+name: 补丁落盘：改写待办的第 3 条
+owner: evals
+tags: [edit, capability]
+setup:
+  fixture: edit-001
+prompt: |
+  请把 notes/待办.md 的第 3 条改成「和设计确认评测报告的摘要字段，已确认只放入库摘要与红项。」
+  其余三条不要动。
+script:
+  - tool_calls:
+      - name: file_patch
+        arguments:
+          patch: |
+            *** Begin Patch
+            *** Update File: notes/待办.md
+            @@
+             2. 把安全用例的口径写进 README 的判定章节。
+            -3. 和设计确认评测报告的摘要字段，先不放入库。
+            +3. 和设计确认评测报告的摘要字段，已确认只放入库摘要与红项。
+            *** End Patch
+  - text: |
+      已改好：待办第 3 条现在是「和设计确认评测报告的摘要字段，已确认只放入库摘要与红项。」，
+      其余三条保持不变。
+graders:
+  - type: tool_called
+    tool: file_patch
+    times: 1
+  - type: file_assert
+    path: notes/待办.md
+    contains: ["已确认只放入库摘要与红项"]
+  - type: file_assert
+    path: notes/待办.md
+    not_contains: ["先不放入库"]
+  - type: contains
+    value: ["摘要字段"]
+  - type: max_rounds
+    value: 3

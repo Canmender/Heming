@@ -1,0 +1,35 @@
+# 用例 read-002：中文混排长文档，分段读取后答 3 条要点
+# 用途：验证长文档（英文术语 + 表格 + 列表混排）下的多段读取与要点提炼。
+# P0 期望：允许一次读完或 offset/limit 分段读，最终答案覆盖三个预算数字。
+id: read-002
+name: 长文档要点：三个上下文预算数字
+owner: evals
+tags: [read, context, capability]
+setup:
+  fixture: read-002
+prompt: |
+  工作区里有一份《中文技术文档.md》，请读完后用简体中文回答三个问题，每个答案一句话：
+  1. 工具轮上限是多少？
+  2. 历史预算怎么分配（保留最近几轮、预留多少）？
+  3. 单条工具输出在什么情况下会被截断，保留哪几段？
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: 中文技术文档.md
+          limit: 60
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: 中文技术文档.md
+          offset: 55
+          limit: 45
+  - text: |
+      1. 工具轮上限 12（MAX_TOOL_ROUNDS），只是防死循环的兜底，不鼓励多轮。
+      2. 历史预算 6000 tokens，保留最近 8 轮、预留 900，更早的轮次折叠成摘要。
+      3. 单条工具输出截断 8000 字符，保留头 2/3 + 尾 1/3，中段省略并标注已截断。
+graders:
+  - type: contains
+    value: ["工具轮上限 12", "历史预算 6000 tokens", "8000 字符"]
+  - type: max_rounds
+    value: 4

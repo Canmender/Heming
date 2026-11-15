@@ -9,6 +9,9 @@ import {
   last30DaysTotals,
   heatLevel,
   byProfileModel,
+  recordsForConversation,
+  recordsForStream,
+  totalsOf,
 } from "./tokenUsage.js";
 
 const rec = (model: string, tokens: number, at: string) => ({ model, tokens, at });
@@ -254,5 +257,57 @@ describe("tokenUsage：逐连接用量（d.48）", () => {
       ["m2", 20],
       ["m1", 11],
     ]);
+  });
+});
+
+describe("tokenUsage：会话/回合归因（P0-T2）", () => {
+  beforeEach(() => {
+    localStorage.removeItem("heming.tokenUsage");
+    useTokenUsageStore.getState().reset();
+  });
+
+  it("record 把 conversationId/streamId 一起落盘，读回不丢", () => {
+    useTokenUsageStore
+      .getState()
+      .record("m1", 500, "2026-11-15T01:00:00.000Z", {
+        input: 400,
+        output: 100,
+        conversationId: "c1",
+        streamId: "s1",
+      });
+    const stored = useTokenUsageStore.getState().records[0];
+    expect(stored).toMatchObject({ conversationId: "c1", streamId: "s1", input: 400, output: 100 });
+  });
+
+  it("recordsForConversation / recordsForStream 只认显式归因，老记录不串到任何会话", () => {
+    const records = [
+      { model: "m1", tokens: 100, at: "2026-11-15T01:00:00.000Z", conversationId: "c1", streamId: "s1" },
+      { model: "m1", tokens: 200, at: "2026-11-15T01:01:00.000Z", conversationId: "c1", streamId: "s2" },
+      { model: "m1", tokens: 300, at: "2026-11-15T01:02:00.000Z", conversationId: "c2", streamId: "s3" },
+      // 老记录：没有归因字段
+      { model: "m1", tokens: 400, at: "2026-11-15T01:03:00.000Z" },
+    ];
+    expect(recordsForConversation(records, "c1").map((r) => r.streamId)).toEqual(["s1", "s2"]);
+    expect(recordsForStream(records, "s3").map((r) => r.tokens)).toEqual([300]);
+    expect(recordsForConversation(records, "c9")).toEqual([]);
+    // 空 id 不匹配任何记录（不能把「不知道」当成「全会话」）。
+    expect(recordsForConversation(records, "")).toEqual([]);
+    expect(recordsForStream(records, "")).toEqual([]);
+  });
+
+  it("totalsOf 把已上报与未上报分开算，不拿 0 冒充未上报", () => {
+    const records = [
+      { model: "m1", tokens: 100, at: "2026-11-15T01:00:00.000Z", input: 80, output: 20 },
+      { model: "m1", tokens: null, at: "2026-11-15T01:01:00.000Z" },
+      { model: "m1", tokens: 50, at: "2026-11-15T01:02:00.000Z", input: 40, output: 10 },
+    ];
+    expect(totalsOf(records)).toEqual({
+      total: 150,
+      input: 120,
+      output: 30,
+      runs: 3,
+      unreported: 1,
+    });
+    expect(totalsOf([])).toEqual({ total: 0, input: 0, output: 0, runs: 0, unreported: 0 });
   });
 });

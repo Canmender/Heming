@@ -102,12 +102,12 @@ describe("rollout v2：seq 与版本兼容", () => {
     expect(log.read("s1").map((it) => it.seq)).toEqual([0, 1, 2, 3]);
   });
 
-  it("写入的是 v2：版本号进存储，读取端据此判断可分叉", () => {
+  it("写入的是当前版本：版本号进存储，读取端据此判断可分叉", () => {
     const { log, storage } = makeLog();
     log.append({ type: "turn_start", conversationId: "c1", streamId: "s1", agentId: "a1", userText: "hi" });
     const stored = JSON.parse(storage.getItem("heming.rollout.v1.s1") ?? "{}") as { version?: number };
-    expect(stored.version).toBe(2);
-    expect(log.readStream("s1")).toMatchObject({ version: 2, count: 1 });
+    expect(stored.version).toBe(3);
+    expect(log.readStream("s1")).toMatchObject({ version: 3, count: 1 });
   });
 
   it("v1 日志可读不可分叉：缺 seq 用数组下标补齐，版本仍是 1", () => {
@@ -194,5 +194,94 @@ describe("rollout v2：seq 与版本兼容", () => {
       log.append({ type: "tool_call", streamId: "s1", id: `t${i}`, name: "x", args: "{}" });
     }
     expect(log.read("s1").map((it) => it.seq)).toEqual([2, 3]);
+  });
+});
+
+describe("rollout v3：回合用量与工具耗时（P0-T1）", () => {
+  it("turn_end 的 usage 原样往返：拆分、缓存的 0 也要保留", () => {
+    const { log } = makeLog();
+    log.append({
+      type: "turn_end",
+      streamId: "s1",
+      status: "ok",
+      usage: { input: 1200, output: 340, cacheRead: 900, cacheWrite: 0, rounds: 3 },
+    });
+    const end = log.read("s1")[0];
+    expect(end).toMatchObject({
+      type: "turn_end",
+      usage: { input: 1200, output: 340, cacheRead: 900, cacheWrite: 0, rounds: 3 },
+    });
+  });
+
+  it("没有 usage 的老回合照旧：不写这个字段，读回也没有", () => {
+    const { log } = makeLog();
+    log.append({ type: "turn_end", streamId: "s1", status: "ok" });
+    const end = log.read("s1")[0]!;
+    expect(end.type).toBe("turn_end");
+    expect((end as { usage?: unknown }).usage).toBeUndefined();
+  });
+
+  it("坏 usage 不拖垮整条记录：rounds 不合法就整块丢掉，回合状态仍在", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 3,
+        items: [
+          { type: "turn_end", seq: 0, at: fixedNow(), streamId: "s1", status: "ok", usage: { rounds: "3" } },
+          { type: "turn_end", seq: 1, at: fixedNow(), streamId: "s1", status: "error", usage: { rounds: 0 } },
+          { type: "turn_end", seq: 2, at: fixedNow(), streamId: "s1", status: "ok", usage: { rounds: 2, input: -5 } },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const items = log.read("s1");
+    expect(items.every((it) => it.type === "turn_end")).toBe(true);
+    expect((items[0] as { usage?: unknown }).usage).toBeUndefined();
+    expect((items[1] as { usage?: unknown }).usage).toBeUndefined();
+    // 负数不是合法计数：这一项被省略，其余字段保留（宁可少列，不写负值）。
+    expect((items[2] as { usage?: unknown }).usage).toEqual({ rounds: 2 });
+  });
+
+  it("tool_result 的 ms 往返；负数/NaN 不认", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 3,
+        items: [
+          { type: "tool_result", seq: 0, at: fixedNow(), streamId: "s1", id: "t1", name: "x", ok: true, text: "r", ms: 132 },
+          { type: "tool_result", seq: 1, at: fixedNow(), streamId: "s1", id: "t2", name: "x", ok: true, text: "r", ms: -1 },
+          { type: "tool_result", seq: 2, at: fixedNow(), streamId: "s1", id: "t3", name: "x", ok: true, text: "r" },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const items = log.read("s1") as { ms?: number }[];
+    expect(items[0].ms).toBe(132);
+    expect(items[1].ms).toBeUndefined();
+    expect(items[2].ms).toBeUndefined();
+  });
+
+  it("v2 老日志不需要迁移：读起来就是没有 usage/ms，别把兼容性写成错误", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      "heming.rollout.v1.s1",
+      JSON.stringify({
+        version: 2,
+        items: [
+          { type: "turn_start", seq: 0, at: fixedNow(), conversationId: "c1", streamId: "s1", agentId: "a1", userText: "hi" },
+          { type: "tool_result", seq: 1, at: fixedNow(), streamId: "s1", id: "t1", name: "x", ok: true, text: "r" },
+          { type: "turn_end", seq: 2, at: fixedNow(), streamId: "s1", status: "ok" },
+        ],
+      }),
+    );
+    const log = createRolloutLog({ storage, now: fixedNow });
+    const items = log.read("s1");
+    expect(items).toHaveLength(3);
+    expect((items[1] as { ms?: number }).ms).toBeUndefined();
+    expect((items[2] as { usage?: unknown }).usage).toBeUndefined();
+    // 旧数据回放后仍能继续追加（升级不要求用户清日志）。
+    expect(log.append({ type: "turn_end", streamId: "s1", status: "ok", usage: { rounds: 1 } })).toBe(true);
   });
 });

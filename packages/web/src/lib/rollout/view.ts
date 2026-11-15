@@ -137,3 +137,79 @@ export function rolloutExportFileName(streamId: string): string {
   const safe = streamId.replace(/[^\w.-]+/g, "_").slice(0, 80) || "rollout";
   return `rollout-${safe}.json`;
 }
+
+/* ----------------------------------------------------------- 用量与耗时 */
+
+/**
+ * 一回合的用量合计（v3 / P0-T1）。
+ *
+ * `reported` 是必需的：全 0 有两种含义——「真的没用 token」与「网关没上报」，
+ * 面板必须能区分，否则会把一条没数据的记录显示成「零消耗」。
+ */
+export interface RolloutUsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** 模型轮次数（工具循环里每轮 +1）。 */
+  rounds: number;
+  /** 有没有任何一条 `turn_end` 带 usage（false = 未上报，不是 0）。 */
+  reported: boolean;
+}
+
+/**
+ * 把一回合里所有 `turn_end.usage` 求和。
+ *
+ * 正常一回合只有一条 `turn_end`；这里仍然遍历求和，是因为日志可能被外部拼接
+ * （导出再导入、合并排查包），多一条就多算一条，不假设唯一性。
+ */
+export function streamUsageTotals(items: readonly RolloutItem[]): RolloutUsageTotals {
+  const totals: RolloutUsageTotals = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    rounds: 0,
+    reported: false,
+  };
+  for (const item of items) {
+    if (item.type !== "turn_end" || !item.usage) continue;
+    totals.reported = true;
+    totals.input += item.usage.input ?? 0;
+    totals.output += item.usage.output ?? 0;
+    totals.cacheRead += item.usage.cacheRead ?? 0;
+    totals.cacheWrite += item.usage.cacheWrite ?? 0;
+    totals.rounds += item.usage.rounds ?? 0;
+  }
+  return totals;
+}
+
+/** 一次工具调用的耗时行（v3）：没有记录耗时的条目 `ms` 为 undefined。 */
+export interface RolloutToolTiming {
+  id: string;
+  name: string;
+  ok: boolean;
+  denied: boolean;
+  /** 从发出到拿到结果的墙钟耗时；被拒/旧日志没有这个字段。 */
+  ms?: number;
+}
+
+/**
+ * 按调用顺序取出工具结果与耗时（面板「哪个工具慢」的直接数据源）。
+ *
+ * 只取 `tool_result`：`tool_call` 只是模型的决策，尚未执行，没有耗时可言。
+ */
+export function toolTimings(items: readonly RolloutItem[]): RolloutToolTiming[] {
+  const rows: RolloutToolTiming[] = [];
+  for (const item of items) {
+    if (item.type !== "tool_result") continue;
+    rows.push({
+      id: item.id,
+      name: item.name,
+      ok: item.ok,
+      denied: item.denied === true,
+      ...(item.ms !== undefined ? { ms: item.ms } : {}),
+    });
+  }
+  return rows;
+}

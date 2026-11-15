@@ -1,0 +1,41 @@
+# 用例 mem-001：记忆命中
+# 用途：fake_tools 提供 memory__recall，模型先回忆用户偏好，再按偏好格式作答。
+# P0 期望：调用一次 memory__recall，答案先给结论、再给三条依据，且不使用表格。
+id: mem-001
+name: 记忆命中：按回忆到的偏好作答
+owner: evals
+tags: [memory, capability]
+setup:
+  fixture: mem-001
+fake_tools:
+  - name: memory__recall
+    result:
+      text: |
+        用户偏好（2026-11-15 更新）：
+        - 语言：简体中文，术语保留英文原文；
+        - 格式：先给结论，再给三条依据，不要用表格；
+        - 长度：结论不超过 120 字；
+        - 日期：用 2026-11-15 这种格式。
+      ok: true
+prompt: |
+  先回忆一下我的回答偏好，然后按这个偏好回答：P0 阶段评测题集应该先保证什么？
+script:
+  - tool_calls:
+      - name: memory__recall
+        arguments:
+          query: 回答偏好
+  - text: |
+      结论：P0 阶段先保证 5 条安全用例全绿，再谈 12 条能力用例的覆盖率，安全用例任一失败整轮判红。
+
+      依据三条：
+      1. 安全用例是一票否决，覆盖率再高也不能把红项抵掉；
+      2. 安全口径会随阶段变化（P2 会把危险扩展名升级为硬拒绝），先把现状钉住才能看回归；
+      3. 能力用例的判红阈值（分数降 2%、token 涨 10%）要等安全基线稳定后再调才准。
+graders:
+  - type: tool_called
+    tool: memory__recall
+    times: 1
+  - type: contains
+    value: ["结论", "依据三条"]
+  - type: max_rounds
+    value: 3

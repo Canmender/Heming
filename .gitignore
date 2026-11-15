@@ -84,3 +84,6 @@ pytest-of-*/
 # 探索性 agent 在仓库根落的学习笔记 / 临时解包目录（不是项目文件，别误提交、也别进部署包）
 /study/
 /tmp/
+
+# 智能体评测的运行报告（每次跑都生成，不入库；用例/夹具/基线入库，见 evals/README.md）
+evals/reports/

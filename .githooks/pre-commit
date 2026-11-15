@@ -1,0 +1,200 @@
+#!/bin/sh
+# =============================================================================
+# 和鸣 · 分层 CI · L0 pre-commit（本地提交前快检）
+# -----------------------------------------------------------------------------
+# 层级：L0（最便宜的一层）              目标时长：< 30 秒（只查「受影响包」）
+# 触发：git commit
+#
+# 为什么这么分层（ADR-1，见 docs/research/2026-11-15-agent-tuning-execution-plan.md §7）：
+#   通行做法是「便宜的在 PR 卡、贵的在夜里跑」。这一层只做「这次改动影响到的
+#   workspace 包」的 lint + typecheck：
+#     · 全量 typecheck / @heming/web 单测  → L1 pre-push（3–8 分钟）
+#     · 构建 + 全量单测 + 确定性 eval      → L2 PR CI（15–25 分钟）
+#     · 真实模型 eval + design:audit      → L3 nightly（30–60 分钟）
+#   提交是频率最高的动作，所以这一层必须快；一旦它超过 30 秒，开发者就会习惯性
+#   加 --no-verify，门禁等于没有——这是分层的目的，不是偷懒。
+#
+# 本层刻意不做：
+#   · 不跑 `pnpm eval:agent`（属 L2/L3，分钟级且要假网关/真模型）
+#   · 不跑根脚本 `pnpm typecheck`（它会先 `pnpm -r build`，远超 30 秒）
+#   · 不跑测试（@heming/web 单测在 L1）
+#   · 不改动暂存内容、不做格式化（避免工作树与索引打架）
+#
+# 本地如何跑（想手动复现某个包）：
+#   pnpm --filter @heming/web typecheck
+#   pnpm --filter @heming/web build      # 需要产物时
+#
+# 绕过（仅紧急时）：git commit --no-verify
+#   注意：L1 `git push` 仍会跑 `pnpm typecheck` + @heming/web 单测，
+#   所以 --no-verify 只是延后检查，不是免除检查。
+# =============================================================================
+set -eu
+
+# ---- 定位仓库根（钩子从仓库根运行，但显式取一次更稳） -----------------------
+if ! ROOT=$(git rev-parse --show-toplevel 2>/dev/null); then
+  printf '[L0 pre-commit] 警告：当前目录不是 git 工作区，跳过检查。\n' >&2
+  exit 0
+fi
+cd "$ROOT"
+
+# ---- 取暂存文件：ACMR = 新增/修改/复制/改名（删除不需要检查） ---------------
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR || true)
+if [ -z "$STAGED" ]; then
+  printf '[L0 pre-commit] 没有待提交的新增/修改文件，放行。\n'
+  exit 0
+fi
+
+# ---- 纯文档放行：只有 Markdown 变更时不涉及任何包 ---------------------------
+NON_DOC=$(printf '%s\n' "$STAGED" | grep -v -E '\.md$' || true)
+if [ -z "$NON_DOC" ]; then
+  printf '[L0 pre-commit] 只有 Markdown 变更，无需 lint/typecheck，放行。\n'
+  exit 0
+fi
+
+# ---- 按路径映射到 workspace 包 ---------------------------------------------
+# 工作区范围见 pnpm-workspace.yaml：`packages/*` + `plugin-kit/plugins/pet-widget`。
+# 用 "|包名:包目录|" 拼接集合（POSIX sh 没有数组，也不想起子 shell/临时文件）。
+PACKAGES=""
+add_package() {
+  case "$PACKAGES" in
+    *"|$1:"*) : ;;                          # 已记录，去重（记录格式是 |包名:包目录|）
+    *) PACKAGES="$PACKAGES|$1:$2|" ;;
+  esac
+}
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  case "$file" in
+    packages/web/*)                  add_package "@heming/web" "packages/web" ;;
+    packages/server/*)               add_package "@heming/server" "packages/server" ;;
+    packages/shared/*)               add_package "@heming/shared" "packages/shared" ;;
+    packages/desktop/*)              add_package "@heming/desktop" "packages/desktop" ;;
+    packages/setup/*)                add_package "@heming/setup" "packages/setup" ;;
+    plugin-kit/plugins/pet-widget/*) add_package "@heming/pet-widget" "plugin-kit/plugins/pet-widget" ;;
+    packages/*/*)
+      # 未显式映射的 packages/<dir>：运行时读 package.json 的 name，
+      # 这样将来新增 workspace 包不必回来改钩子（漏检才是真风险）。
+      candidate=${file#packages/}
+      candidate=${candidate%%/*}
+      if [ -f "packages/$candidate/package.json" ]; then
+        name=$(node -p "require('./packages/$candidate/package.json').name" 2>/dev/null || printf '')
+        if [ -n "$name" ]; then
+          add_package "$name" "packages/$candidate"
+        fi
+      fi
+      ;;
+    # 根配置 / scripts/ / .github/ / docs / 其它插件源码（非 workspace 包）：
+    # L0 不处理。根 package.json、pnpm-lock.yaml、tsconfig 的改动交给
+    # L1 的 `pnpm typecheck` 兜底。
+    *) : ;;
+  esac
+done <<EOF
+$NON_DOC
+EOF
+
+if [ -z "$PACKAGES" ]; then
+  printf '[L0 pre-commit] 改动不落在任何 workspace 包内（文档/脚本/CI 配置），放行。\n'
+  printf '                注意：根 package.json / pnpm-lock.yaml / 根 tsconfig 的改动\n'
+  printf '                不在 L0 范围，push 时 L1 会用 `pnpm typecheck` 验证。\n'
+  exit 0
+fi
+
+# ---- 小工具 -----------------------------------------------------------------
+# 包是否声明了某个 scripts 条目。直接读 package.json 而不是 `pnpm run`：
+# 缺脚本时 pnpm 的行为随版本变化（退化找同名 bin / 报错），清单判定才是确定的。
+has_script() {
+  grep -q "\"$2\"[[:space:]]*:" "$1" 2>/dev/null
+}
+
+report_failure() {
+  pkg="$1"
+  script="$2"
+  printf '\n[L0 pre-commit] ✗ 未通过：pnpm --filter %s %s\n' "$pkg" "$script" >&2
+  printf '\n  怎么处理：\n' >&2
+  printf '    1) 按上面的报错修代码，然后重新 git add + git commit；\n' >&2
+  printf '    2) 想单独复现：pnpm --filter %s %s\n' "$pkg" "$script" >&2
+  printf '    3) 仅紧急时（线上故障 / 必须立刻落提交）才用：git commit --no-verify\n' >&2
+  printf '       —— 跳过后请在提交说明里写明原因，并尽快补跑门禁；\n' >&2
+  printf '       L1 `git push` 仍会跑 `pnpm typecheck` + @heming/web 单测，不会真的漏网。\n\n' >&2
+}
+
+run_script() {
+  pkg="$1"
+  script="$2"
+  printf '\n[L0] ▶ pnpm --filter %s %s\n' "$pkg" "$script"
+  if pnpm --filter "$pkg" "$script"; then
+    return 0
+  fi
+  report_failure "$pkg" "$script"
+  exit 1
+}
+
+# ---- 前置：pnpm 必须在 PATH 里（Git Bash 下 `command -v pnpm` 应有输出） -----
+if ! command -v pnpm >/dev/null 2>&1; then
+  printf '\n[L0 pre-commit] ✗ 找不到 pnpm。\n' >&2
+  printf '  请确认 Node ≥24 与 pnpm 已安装且在 PATH 里（Git Bash 里 `command -v pnpm`）。\n' >&2
+  printf '  仅紧急时可用：git commit --no-verify\n' >&2
+  exit 1
+fi
+
+# ---- 前置：shared 的类型产物 -------------------------------------------------
+# web/server 通过 workspace 链接引用 @heming/shared，其 .d.ts 在 shared/dist 里。
+# 干净克隆或刚清过 dist 时，单独跑 web/server 的 tsc 会报「找不到模块」——
+# 那种红是环境问题，不是本次改动的问题。这里补一次 shared 构建（秒级），
+# 只在确实受影响且产物缺失时才做，不拖慢常规提交。
+case "$PACKAGES" in
+  *"|@heming/web:"*|*"|@heming/server:"*)
+    if [ ! -d "packages/shared/dist" ]; then
+      printf '[L0] packages/shared/dist 缺失，先构建 shared（web/server 的类型来源）…\n'
+      if ! pnpm --filter @heming/shared build; then
+        printf '\n[L0 pre-commit] ✗ shared 构建失败，先修好它（pnpm --filter @heming/shared build）。\n' >&2
+        exit 1
+      fi
+    fi
+    ;;
+esac
+
+START=$(date +%s 2>/dev/null || printf '0')
+CHECKED=0
+
+# PACKAGES 形如 "|@heming/web:packages/web|@heming/server:packages/server|"，
+# 转空格后按词切分（包名里没有空格，安全）。
+for entry in $(printf '%s' "$PACKAGES" | tr '|' ' '); do
+  pkg=${entry%%:*}
+  dir=${entry#*:}
+
+  if [ -z "$pkg" ] || [ -z "$dir" ] || [ ! -f "$dir/package.json" ]; then
+    printf '[L0] ! %s：找不到包目录或 package.json，跳过（请更新 .githooks/pre-commit 映射）。\n' "$pkg"
+    continue
+  fi
+
+  printf '\n[L0] 受影响包：%s（%s）\n' "$pkg" "$dir"
+
+  # lint：截至 2026-11-15，根与 6 个 package.json 都**没有** lint 脚本
+  # （根只有 plugin:lint，那是插件清单校验，不是代码 lint）。
+  # 这里保持「有就跑、没有就明说」，不硬编码 `pnpm lint`——否则每次提交都会
+  # 报「命令不存在」，把一个真缺口变成噪音。是否引入 ESLint 由 T6 后续决定。
+  if has_script "$dir/package.json" lint; then
+    run_script "$pkg" lint
+    CHECKED=$((CHECKED + 1))
+  else
+    printf '[L0]   lint：该包未声明 lint 脚本，跳过（仓库当前无代码 lint）。\n'
+  fi
+
+  if has_script "$dir/package.json" typecheck; then
+    run_script "$pkg" typecheck
+    CHECKED=$((CHECKED + 1))
+  else
+    printf '[L0]   typecheck：该包未声明 typecheck 脚本，跳过。\n'
+  fi
+done
+
+END=$(date +%s 2>/dev/null || printf '0')
+ELAPSED=$((END - START))
+
+printf '\n[L0 pre-commit] ✓ 通过（%s 个检查，约 %s 秒；目标 < 30 秒）。\n' "$CHECKED" "$ELAPSED"
+if [ "$ELAPSED" -ge 30 ]; then
+  printf '[L0] 提示：本次超过 30 秒。若持续偏慢，把昂贵检查下移到 L1/L2——\n'
+  printf '     让开发者习惯 --no-verify 比分层的收益大得多。\n'
+fi
+exit 0

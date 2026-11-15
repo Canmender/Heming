@@ -1,0 +1,14 @@
+{
+"name": "heming-demo",
+"version": "0.9.0",
+"private": true,
+"scripts": {
+"dev": "vite",
+"build": "vite build",
+"test": "vitest run"
+},
+"devDependencies": {
+"vite": "^6.0.0",
+"vitest": "^2.1.0"
+}
+}

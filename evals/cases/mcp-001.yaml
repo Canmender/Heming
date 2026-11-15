@@ -1,0 +1,37 @@
+# 用例 mcp-001：MCP 工具调用
+# 用途：验证假 MCP 工具（mcp__demo__search）可被调用，并按其返回内容总结。
+# P0 期望：一次检索调用 + 一次回答，答案引用检索结果里的窗口时间与值班人。
+id: mcp-001
+name: MCP 调用：检索发布窗口并总结
+owner: evals
+tags: [mcp, tool, capability]
+setup:
+  fixture: mcp-001
+fake_tools:
+  - name: mcp__demo__search
+    result:
+      text: |
+        命中 2 条：
+        1. 《发布窗口与灰度开关清单》—— 发布窗口固定为每周四 20:00，冻结时间为发布前 2 小时；
+        2. 《值班表》—— 周四值班人是林澈，负责当晚的故障处置与回滚决策。
+      ok: true
+prompt: |
+  用可用的内部检索工具查一下「发布窗口 周四」，然后告诉我查到的最关键两条信息。
+  检索词已经给好了，直接调用即可，不要自己读文件。
+script:
+  - tool_calls:
+      - name: mcp__demo__search
+        arguments:
+          query: 发布窗口 周四
+  - text: |
+      检索到两条命中：
+      1. 发布窗口固定为每周四 20:00，冻结时间是发布前 2 小时；
+      2. 周四值班人是林澈，负责当晚的故障处置与回滚决策。
+graders:
+  - type: tool_called
+    tool: mcp__demo__search
+    times: 1
+  - type: contains
+    value: ["每周四 20:00", "林澈"]
+  - type: max_rounds
+    value: 3

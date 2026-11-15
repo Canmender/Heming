@@ -1,0 +1,119 @@
+# =============================================================================
+# 和鸣 · 分层 CI · L2 verify（PR / push 的「确定性」门禁）
+# -----------------------------------------------------------------------------
+# 层级：L2                        目标时长：15–25 分钟（超时上限 30 分钟）
+# 触发：push 到 main / refactor/**、PR、手动 dispatch
+#
+# 为什么这么分层（ADR-1，见 docs/research/2026-11-15-agent-tuning-execution-plan.md §7）：
+#   L0 pre-commit 只查受影响包（<30s），L1 pre-push 查类型 + web 单测（3–8min），
+#   这一层才做「构建 + 全部包的单测 + 插件清单 + 确定性 eval」。
+#   模型评测又贵又抖，**不进 PR**——这里跑的 eval 只用假网关与确定性断言，
+#   真实模型 eval 在 L3 nightly。这样 PR 的红绿只反映代码事实，不会被模型抖动污染。
+#
+# 关键约定：
+#   · 测试并发不按核数放大：packages/web/vite.config.ts 的 maxWorkers:8 是踩坑
+#     调出来的（满并发会饿死动态 import，门禁不可复现），此处不加 --maxWorkers。
+#   · 失败必须留下可下载现场（ADR-1）：报告与 .tmp 日志走 artifact。
+#   · 本工作流不需要任何 secret，`permissions: contents: read` 就够。
+#
+# 本地如何跑（等价于本文件的主体）：
+#   pnpm install --frozen-lockfile
+#   pnpm typecheck
+#   pnpm --filter @heming/web test
+#   pnpm --filter @heming/server test && pnpm --filter @heming/shared test
+#   pnpm --filter @heming/desktop test
+#   pnpm build && pnpm plugin:check
+#   pnpm eval:agent -- --json evals/reports/ci.json
+# =============================================================================
+name: verify
+
+on:
+  push:
+    branches:
+      - main
+      - "refactor/**"
+  pull_request:
+  workflow_dispatch:
+
+# 只读仓库内容：本工作流不写回任何东西（报告走 artifact）。
+permissions:
+  contents: read
+
+# 同一分支/PR 的新提交取消旧运行，避免排队烧分钟数。
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  # 全量 vitest + tsc 在 2 核 runner 上容易吃满默认堆，给到 4G。
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  verify:
+    name: L2 确定性门禁（typecheck + 全量单测 + build + plugin:check + 确定性 eval）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # pnpm 版本：优先取根 package.json 的 packageManager 字段；
+      # 本仓库当前**没有**该字段（2026-11-15 核对），所以固定 10（本机实测 pnpm 10.33.2）。
+      # 若将来补上 packageManager，可改成 `version: ${{ ... }}` 或直接删掉 version 让它自动读。
+      - name: 安装 pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Node 24 并缓存 pnpm store
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖（锁文件必须一致）
+        run: pnpm install --frozen-lockfile
+
+      # 根脚本是 `pnpm -r build && pnpm -r typecheck`：先构建被引用的包（shared 的 dist
+      # 是 web/server 的类型来源），再做类型检查。所以这一步本身已经覆盖了一次 build。
+      - name: 类型检查（六个项目）
+        run: pnpm typecheck
+
+      - name: 单测 · web（vitest run，并发固定 maxWorkers:8）
+        run: pnpm --filter @heming/web test
+
+      - name: 单测 · server
+        run: pnpm --filter @heming/server test
+
+      - name: 单测 · shared
+        run: pnpm --filter @heming/shared test
+
+      - name: 单测 · desktop（node --check + node --test 全套）
+        run: pnpm --filter @heming/desktop test
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 插件清单校验
+        run: pnpm plugin:check
+
+      # 确定性 eval：假网关、固定夹具、无第三方调用，所以不需要 secret，
+      # 结果可复现（ADR-1：模型评测不进 PR）。脚本与题目由 T3/T4 提供，
+      # 根 package.json 的 eval:agent 由 T7 添加。
+      - name: 确定性 eval（假网关，不接真实模型）
+        run: |
+          mkdir -p evals/reports
+          pnpm eval:agent -- --json evals/reports/ci.json
+
+      # ADR-1：CI 失败必须产出可下载 artifact。always() 让失败/取消也上传。
+      - name: 上传报告与日志（失败现场）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-reports
+          path: |
+            evals/reports/
+            .tmp/
+          if-no-files-found: ignore
+          retention-days: 14

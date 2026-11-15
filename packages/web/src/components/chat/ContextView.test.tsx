@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
 import { useChatStore } from "../../store/chat.js";
+import { useTokenUsageStore } from "../../store/tokenUsage.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
 import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
 
@@ -34,6 +35,8 @@ function message(id: string, text: string, extra: Record<string, unknown> = {}):
 
 beforeEach(() => {
   useChatStore.setState({ messages: {} });
+  localStorage.removeItem("heming.tokenUsage");
+  useTokenUsageStore.getState().reset();
 });
 
 afterEach(() => cleanup());
@@ -103,5 +106,65 @@ describe("ContextView · 上下文预算", () => {
     expect(within(detail).getByText("消息").parentElement).toHaveTextContent("1 条");
     const bar = screen.getByRole("progressbar", { name: "上下文预算" });
     expect(bar).toHaveAttribute("aria-valuenow", String(estimateTokens("本会话") + ROW_TOKEN_OVERHEAD));
+  });
+});
+
+describe("ContextView · 本会话消耗（P0-T2）", () => {
+  const rec = (tokens: number | null, extra: Record<string, unknown> = {}) => ({
+    model: "m1",
+    tokens,
+    at: "2026-11-15T01:00:00.000Z",
+    ...extra,
+  });
+
+  it("只认显式归到本会话的记账：别的会话与未归因的老记录都不算进来", () => {
+    useTokenUsageStore.setState({
+      records: [
+        rec(100, { conversationId: "c1", streamId: "s1" }),
+        rec(50, { conversationId: "c1", streamId: "s2" }),
+        rec(900, { conversationId: "c2", streamId: "s3" }),
+        rec(777), // 老记录：没有归因
+      ] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    expect(screen.getByTestId("conversation-tokens")).toHaveTextContent("150 tokens");
+    const list = screen.getByRole("list", { name: "本会话消耗" });
+    expect(within(list).getByText("回合数").parentElement).toHaveTextContent("2 次");
+  });
+
+  it("未上报单独计数，不混进已上报合计", () => {
+    useTokenUsageStore.setState({
+      records: [
+        rec(100, { conversationId: "c1", streamId: "s1" }),
+        rec(null, { conversationId: "c1", streamId: "s2" }),
+      ] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    expect(screen.getByTestId("conversation-tokens")).toHaveTextContent("100 tokens");
+    const list = screen.getByRole("list", { name: "本会话消耗" });
+    expect(within(list).getByText("回合数").parentElement).toHaveTextContent("2 次（1 次未上报）");
+  });
+
+  it("回合明细按 stream 列出：模型名 + token 数，未上报写明「未上报」", () => {
+    useTokenUsageStore.setState({
+      records: [
+        rec(100, { conversationId: "c1", streamId: "s1" }),
+        rec(null, { conversationId: "c1", streamId: "s2" }),
+      ] as never,
+    });
+    render(<ContextView conversationId="c1" />);
+    const turns = screen.getByRole("list", { name: "回合消耗明细" });
+    const rows = within(turns).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    // 最新的回合排前面（s2 后写）
+    expect(rows[1]).toHaveTextContent("100 tokens");
+    expect(rows[0]).toHaveTextContent("未上报");
+    expect(rows[0]).toHaveTextContent("m1");
+  });
+
+  it("没有可归因记录时明说「还没有」，不显示 0 冒充真实消耗", () => {
+    render(<ContextView conversationId="c1" />);
+    expect(screen.getByText("这个会话还没有可归因的用量记录。")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-tokens")).toHaveTextContent("0 tokens");
   });
 });

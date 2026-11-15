@@ -1,0 +1,158 @@
+# =============================================================================
+# 和鸣 · 分层 CI · L3 eval-nightly（真实模型评测 + 设计审计，夜里跑）
+# -----------------------------------------------------------------------------
+# 层级：L3                        目标时长：30–60 分钟（超时上限 90 分钟）
+# 触发：每天 UTC 02:00（= 北京时间 10:00）+ 手动 workflow_dispatch
+#
+# 为什么这么分层（ADR-1，见 docs/research/2026-11-15-agent-tuning-execution-plan.md §7）：
+#   真实模型 eval 又贵又抖（n=3 取中位仍会有波动），design:audit 要起 server + web +
+#   headless Chrome 跑几十个视图——这两类都不该塞进 PR 卡红绿。
+#   通行做法就是「便宜的进 PR、贵的进夜里」：PR 上的确定性门禁（L2 verify.yml）
+#   保证代码事实，这一层只回答「今天模型质量与视觉有没有退化」，产出报告 artifact
+#   供次日对照基线（ADR-2：报告不入库，artifact 保留）。
+#
+# 没有 secret 时的行为（硬要求）：
+#   `secrets.HEMING_EVAL_API_KEY` 未配置 → 模型评测 job 必须 **skipped（灰）**，
+#   而不是「跑了个空评测然后绿」。实现方式见下方 guard job 的注释——
+#   注意 GitHub 的 job 级 `if` **拿不到 secrets 上下文**，直接写
+#   `if: ${{ secrets.X != '' }}` 会因 "Unrecognized named-value: 'secrets'" 直接红/无效，
+#   所以先用一个极轻的 guard job 把「有没有 key」变成 output，再在 job 级 if 里判断。
+#
+# 安全：
+#   · secret 只在真正需要它的 step 上以 env 注入，绝不 `echo`、绝不开 `set -x`；
+#   · 日志里只会出现变量名，不会出现值；
+#   · 顶层 `permissions: contents: read`，不需要写仓库。
+#
+# 本地如何跑（对应各步）：
+#   pnpm eval:agent -- --repeat 3 --real --json evals/reports/nightly.json
+#   pnpm eval:agent -- --filter ctx --repeat 3 --real --json evals/reports/nightly-ctx.json
+#   pnpm design:audit -- --json evals/reports/audit-light.json --shots evals/reports/shots-light
+#   pnpm design:audit -- --json evals/reports/audit-dark.json --shots evals/reports/shots-dark --theme dark
+# =============================================================================
+name: eval-nightly
+
+on:
+  schedule:
+    # UTC 02:00 = 北京时间（UTC+8）10:00：避开白天 PR 高峰与发布窗口。
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 不在执行中取消：一次真实模型 eval 跑到一半被掐掉等于白烧钱，
+# 且报告缺失会让「今天到底退化没有」无法回答。
+concurrency:
+  group: eval-nightly
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # guard：唯一职责是把「secret 到底配没配」变成一个 job output。
+  # 不用 `if: ${{ secrets.X != '' }}` 的原因：GitHub 的 job 级 if 不支持 secrets
+  # 上下文（会报 Unrecognized named-value: 'secrets'），必须借助一个 step 先落地。
+  # 这一步不打印值，只用 `-n` 判空，因此 secret 不会进日志。
+  # ---------------------------------------------------------------------------
+  guard:
+    name: 检查 secret 是否配置（决定是否需要跑 L3）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_key: ${{ steps.check.outputs.has_key }}
+    steps:
+      - name: 判断 HEMING_EVAL_API_KEY 是否为空
+        id: check
+        env:
+          HEMING_EVAL_API_KEY: ${{ secrets.HEMING_EVAL_API_KEY }}
+        run: |
+          if [ -n "${HEMING_EVAL_API_KEY}" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+            echo "已检测到 secrets.HEMING_EVAL_API_KEY：本轮会跑真实模型评测。"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=L3 模型评测已跳过::未配置 secrets.HEMING_EVAL_API_KEY，eval-nightly 的评测 job 会显示为 skipped（灰色），不是绿。配置方法见 docs/HANDOFF.md §7。"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # nightly：真实模型 eval（n=3）+ design:audit 亮/暗 + 长会话/压缩专项。
+  # `needs.guard.outputs.has_key != 'true'` 时整个 job 直接 skipped —— 满足
+  # 「没 secret 不许假绿」的硬要求。
+  # ---------------------------------------------------------------------------
+  nightly:
+    name: L3 真实模型 eval + design:audit（无 secret 时 skipped）
+    needs: guard
+    if: ${{ needs.guard.outputs.has_key == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # pnpm 版本：根 package.json 当前无 packageManager 字段（2026-11-15 核对），固定 10。
+      - name: 安装 pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Node 24 并缓存 pnpm store
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖（锁文件必须一致）
+        run: pnpm install --frozen-lockfile
+
+      # design:audit 需要 packages/server/dist 已构建（脚本自己起 server + web + Chrome）；
+      # 同时把环境版本写进日志，便于按报告里的 env 对照基线（§8.4 要求记录 node/pnpm/模型 id）。
+      - name: 构建（design:audit 依赖 server 产物）
+        run: pnpm build
+
+      - name: 记录环境版本（对照基线用，不含任何密钥）
+        run: |
+          node --version
+          pnpm --version
+          google-chrome --version
+
+      # 真实模型 eval：n=3 取中位（§8.3 抖动控制）。secret 只注入到需要的 step。
+      - name: 真实模型 eval（n=3，报告写 evals/reports/nightly.json）
+        timeout-minutes: 45
+        env:
+          HEMING_EVAL_API_KEY: ${{ secrets.HEMING_EVAL_API_KEY }}
+        run: |
+          mkdir -p evals/reports
+          pnpm eval:agent -- --repeat 3 --real --json evals/reports/nightly.json
+
+      # 长会话 / 压缩专项：题集里 tag 为 context 的用例（T3 的 ctx-001/ctx-002）。
+      - name: 长会话 / 压缩专项（--filter ctx）
+        timeout-minutes: 20
+        env:
+          HEMING_EVAL_API_KEY: ${{ secrets.HEMING_EVAL_API_KEY }}
+        run: |
+          pnpm eval:agent -- --filter ctx --repeat 3 --real --json evals/reports/nightly-ctx.json
+
+      # design:audit 亮色：脚本自起 server + web + headless Chrome，视口固定
+      # （1440×900 / 1280×800 / 1024×768），用托管 runner 自带的 Chrome，
+      # 避免跨机抖动（ADR-1 关键约定）。
+      - name: design:audit 浅色（固定视口）
+        timeout-minutes: 20
+        run: pnpm design:audit -- --json evals/reports/audit-light.json --shots evals/reports/shots-light
+
+      - name: design:audit 深色（固定视口）
+        timeout-minutes: 20
+        run: pnpm design:audit -- --json evals/reports/audit-dark.json --shots evals/reports/shots-dark --theme dark
+
+      # ADR-2：报告是易变产物，不入库，作为 artifact 保留 90 天看趋势。
+      # always() 保证即使某个 eval step 红了也能拿到已产出的报告与截图。
+      - name: 上传报告与截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-nightly-reports
+          path: evals/reports/
+          if-no-files-found: ignore
+          retention-days: 90

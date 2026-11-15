@@ -117,7 +117,7 @@ describe("checkFork 前置条件", () => {
   });
 
   it("未来版本：拒绝且不猜结构", () => {
-    const check = checkFork(healthyTurn(), { targetSeq: 4, version: 3 });
+    const check = checkFork(healthyTurn(), { targetSeq: 4, version: 4 });
     expect(check.ok).toBe(false);
     expect(check.rejections.map((r) => r.code)).toContain("unknown_version");
   });

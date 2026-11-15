@@ -9,6 +9,7 @@ import {
   type ForkRejectCode,
 } from "../rollout/fork.js";
 import type { RolloutItem } from "../rollout/types.js";
+import { ROLLOUT_VERSION } from "../rollout/types.js";
 import type { TaskForkedFrom, TaskRecord } from "./store.js";
 
 /**
@@ -179,12 +180,12 @@ export function resolveForkRun(
       notice: "分叉来源的回合日志读不到（可能已被清理），本次按普通重跑执行。",
     };
   }
-  if (view.version !== 2) {
+  if (view.version < 2 || view.version > ROLLOUT_VERSION) {
     return {
       forkedFrom,
       degraded: "legacy_version",
       notice:
-        view.version > 2
+        view.version > ROLLOUT_VERSION
           ? "分叉来源由更新版本的日志记录，本版本无法重建前缀，本次按普通重跑执行。"
           : "分叉来源是旧版本日志（没有序号），本次按普通重跑执行。",
     };

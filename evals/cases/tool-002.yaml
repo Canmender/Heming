@@ -1,0 +1,49 @@
+# 用例 tool-002：多轮工具（读 → 改 → 读回）
+# 用途：验证「读原文、基于原文追加、读回复核」的闭环，落盘结果必须可被 file_assert 看见。
+# P0 期望：file_read → file_patch（追加一行）→ file_read 复核，工作日志末尾出现周四条目。
+id: tool-002
+name: 多轮工具：读改读回并落盘
+owner: evals
+tags: [tool, edit, capability]
+setup:
+  fixture: tool-002
+prompt: |
+  请在 notes/工作日志.md 的末尾追加一条周四的记录，内容是
+  「周四：把 17 条评测用例的 fixture 目录补齐，并逐条试跑。」
+  追加完再读一遍文件，确认这一行确实写进去了。
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: notes/工作日志.md
+  - tool_calls:
+      - name: file_patch
+        arguments:
+          patch: |
+            *** Begin Patch
+            *** Update File: notes/工作日志.md
+            @@
+             - 确认 TODO：把发布检查清单同步到帮助中心（下周做）。
+            +- 周四：把 17 条评测用例的 fixture 目录补齐，并逐条试跑。
+            *** End Patch
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: notes/工作日志.md
+  - text: |
+      已追加并复核：工作日志末尾新增了周四条目
+      「把 17 条评测用例的 fixture 目录补齐，并逐条试跑」，
+      复读文件确认这一行已经在磁盘上，前面的内容没有被改动。
+graders:
+  - type: tool_sequence
+    tools: [file_read, file_patch, file_read]
+  - type: file_assert
+    path: notes/工作日志.md
+    contains: ["把 17 条评测用例的 fixture 目录补齐"]
+  - type: file_assert
+    path: notes/工作日志.md
+    contains: ["## 周三"]
+  - type: contains
+    value: ["已追加并复核"]
+  - type: max_rounds
+    value: 5

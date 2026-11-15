@@ -71,6 +71,16 @@ export interface UsageTotals {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /**
+   * 前缀缓存**命中**的输入 token（读完就便宜的那部分）。
+   *
+   * 口径来自网关透传：Anthropic 形状 `cache_read_input_tokens`、
+   * OpenAI 形状 `prompt_tokens_details.cached_tokens`。两个都没有 = 该网关不报缓存，
+   * 一律留 undefined（不按 0 计，否则面板会把「没报」显示成「缓存一次没命中」）。
+   */
+  cacheReadTokens?: number;
+  /** 前缀缓存**写入**的输入 token（Anthropic 形状 `cache_creation_input_tokens`）。 */
+  cacheWriteTokens?: number;
 }
 
 /**
@@ -249,14 +259,28 @@ export async function streamChat(
       prompt_tokens?: unknown;
       completion_tokens?: unknown;
       total_tokens?: unknown;
+      cache_read_input_tokens?: unknown;
+      cache_creation_input_tokens?: unknown;
+      prompt_tokens_details?: { cached_tokens?: unknown } | null;
     };
-    const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) ? v : undefined;
+    // 缓存命中两种形状都认（见 UsageTotals 注释）；都没有就不写这个字段。
+    const details = r.prompt_tokens_details;
+    const cachedInDetails =
+      details && typeof details === "object" ? num((details as { cached_tokens?: unknown }).cached_tokens) : undefined;
     const u: UsageTotals = {
       inputTokens: num(r.prompt_tokens),
       outputTokens: num(r.completion_tokens),
       totalTokens: num(r.total_tokens),
+      cacheReadTokens: num(r.cache_read_input_tokens) ?? cachedInDetails,
+      cacheWriteTokens: num(r.cache_creation_input_tokens),
     };
-    return u.inputTokens !== undefined || u.outputTokens !== undefined || u.totalTokens !== undefined
+    return u.inputTokens !== undefined ||
+      u.outputTokens !== undefined ||
+      u.totalTokens !== undefined ||
+      u.cacheReadTokens !== undefined ||
+      u.cacheWriteTokens !== undefined
       ? u
       : null;
   };
@@ -267,6 +291,8 @@ export async function streamChat(
     if (u.inputTokens !== undefined) usage.inputTokens = u.inputTokens;
     if (u.outputTokens !== undefined) usage.outputTokens = u.outputTokens;
     if (u.totalTokens !== undefined) usage.totalTokens = u.totalTokens;
+    if (u.cacheReadTokens !== undefined) usage.cacheReadTokens = u.cacheReadTokens;
+    if (u.cacheWriteTokens !== undefined) usage.cacheWriteTokens = u.cacheWriteTokens;
   };
   const emitUsage = (): void => {
     if (opts.onUsage && Object.keys(usage).length > 0) opts.onUsage({ ...usage });
