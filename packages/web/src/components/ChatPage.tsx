@@ -87,7 +87,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
@@ -99,12 +99,6 @@ import { conversationTitle } from "./assistant/conversationTitle.js";
 import { ProgressPanel } from "./ProgressPanel.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
-import {
-  buildConversationJson,
-  buildConversationMarkdown,
-  conversationFileName,
-  type ExportMessage,
-} from "../lib/export/conversation.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
@@ -212,7 +206,7 @@ const hitlGate = createHitlGate({
 });
 
 /**
- * 智能体会话 → 显示名与头像（标题栏、导出文件名、任务区嵌入态共用）。
+ * 智能体会话 → 显示名与头像（侧栏会话列表与标题栏共用）。
  * d.54 起会话只剩「用户 ↔ 智能体」一种，三态联合已成历史。
  */
 export function convLabel(c: Conversation): { name: string; avatar?: string; group: boolean } {
@@ -528,7 +522,7 @@ function AudioBubble({
  *
  * d.147 外壳重构后它只被 `AssistantPage` 以「整页」形态挂载：顶部一条细栏里
  * 是返回（清空当前会话）与对话标题（h2，喂给读屏与设计审计的第二级标题），
- * 右侧是通道状态与导出入口。
+ * 右侧是通道状态、会话进度开关与搜索入口（导出与「选择消息」已随 d.147.4.89.11 移除）。
  */
 export function ChatPage({
   // 待确认超时可注入：生产用 60 分钟，测试用它把「超时 → 拒绝 + 留痕」跑到，
@@ -662,7 +656,6 @@ export function ChatPage({
   useEffect(() => {
     setPendingFiles([]);
   }, [convId]);
-  const [exportOpen, setExportOpen] = useState(false);
   /**
    * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
    *
@@ -672,18 +665,10 @@ export function ChatPage({
   const [progressOpen, setProgressOpen] = useState(false);
   /** 提示位「还有 N 条」的展开状态；提示数量变化时复位（见下方 effect）。 */
   const [noticeExpanded, setNoticeExpanded] = useState(false);
-  /**
-   * 多选导出：勾出若干条，只导出这些。
-   * 选择状态是本会话的临时视图状态（切会话即清），不落盘——
-   * 导出的原料（明文消息）本来就在本机，没必要再存一份勾选。
-   */
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /** 会话内搜索：只在打开时占用 header 下方一条，不常驻挤压消息区。 */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
-  const exportRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   /** WS 三态：首次连接 / 通道已连接 / 通道断开（用于标题与横幅，不用 connected 二元冒充）。 */
   const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
@@ -882,7 +867,6 @@ export function ChatPage({
 
   // d.54：会话只剩「用户 ↔ 智能体」一种，标题恒为智能体名。
   const conv = conversations.find((c) => c.id === convId);
-  const headerTitle = conv ? conv.agent.name : "会话";
 
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
   const toolTraceRef = useRef<Record<string, ToolTrace[]>>({});
@@ -970,85 +954,6 @@ export function ChatPage({
       ...(tools.length > 0 ? { tools } : {}),
     };
   };
-  /**
-   * 导出（本机生成）：只导出本机已解密的明文，解不开的信封直接跳过，
-   * 不用占位符冒充内容。附件只带元信息，避免把文档正文再抄一份。
-   *
-   * @param onlyIds 传入时只导出这些消息（多选导出）；不传导出整段会话。
-   */
-  const exportConversation = (format: "md" | "json", onlyIds?: string[]) => {
-    const source = onlyIds
-      ? messages.filter((m) => onlyIds.includes(m.id))
-      : messages;
-    const rows: ExportMessage[] = [];
-    for (const m of source) {
-      let text = "";
-      let file: { id?: string; name: string; mime: string; size: number } | undefined;
-      if (m.enc === "e2e") {
-        const p = plainOf[m.id];
-        if (!p) continue; // 解不开的信封：直接跳过，不用占位符冒充内容
-        if (p.kind !== "text" && p.kind !== "file") continue; // chaindist/chunk/error 等控制帧
-        text = p.text ?? "";
-        file = p.file;
-      } else {
-        text = m.payload.text;
-        file = m.payload.file;
-      }
-      if (!text && !file) continue;
-      rows.push({
-        id: m.id,
-        role: m.senderType === "user" ? "user" : "assistant",
-        sender: displaySenderName(m) || "成员",
-        at: m.createdAt,
-        text,
-        ...(file
-          ? {
-              attachment: {
-                ...(file.id ? { id: file.id } : {}),
-                name: file.name,
-                mime: file.mime,
-                size: file.size,
-              },
-            }
-          : {}),
-      });
-    }
-
-    if (rows.length === 0) {
-      setSendNotice(onlyIds ? "所选消息里没有可导出的明文" : "没有可导出的明文消息");
-      setExportOpen(false);
-      return;
-    }
-    const input = {
-      id: convId,
-      title: headerTitle,
-      exportedAt: Date.now(),
-      messages: rows,
-    };
-    const content =
-      format === "md" ? buildConversationMarkdown(input) : buildConversationJson(input);
-    const name = conversationFileName(headerTitle, input.exportedAt, format);
-    try {
-      const url = URL.createObjectURL(
-        new Blob([content], {
-          type: format === "md" ? "text/markdown;charset=utf-8" : "application/json;charset=utf-8",
-        }),
-      );
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-      setSendNotice(`已导出 ${rows.length} 条消息（仅本机明文）`);
-    } catch {
-      setSendNotice("导出失败，请检查浏览器下载权限", "error");
-    }
-    setExportOpen(false);
-  };
-
   /** 通知：任务收尾进通知中心（用户常在发起任务后切去别处）。 */
   const notifyTaskSettled = (
     taskId: string,
@@ -1067,16 +972,6 @@ export function ChatPage({
       ...(task ? { conversationId: task.conversationId } : {}),
     });
   };
-
-  // 导出菜单的「点外面关闭」：临时监听器只在打开时挂，避免常驻。
-  useEffect(() => {
-    if (!exportOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [exportOpen]);
 
   /**
    * 本次要触发的智能体：一对一里「跟谁说话」已由会话本身确定，固定为会话的 agent。
@@ -1415,14 +1310,6 @@ export function ChatPage({
     prevScrollHeightRef.current = null;
     el.scrollTop += el.scrollHeight - prev;
   }, [windowCount]);
-  /** 多选：勾/去勾一条（顺序按点击顺序记录，导出仍按消息原始顺序取）。 */
-  const toggleSelected = (id: string) =>
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  const selectAllVisible = () => setSelectedIds(visibleMessages.map((m) => m.id));
-  const exitSelectMode = () => {
-    setSelectMode(false);
-    setSelectedIds([]);
-  };
   /**
    * 会话内搜索的数据源：只取本机明文。未解开的信封不参与——
    * 搜索需要展示/跳转原文，而密文既搜不到也不该被当成空消息。
@@ -2045,9 +1932,6 @@ export function ChatPage({
     setListening(false);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
-    // 多选状态同为会话级：A 会话勾的 id 在 B 会话里不存在，留着只会导出空文件
-    setSelectMode(false);
-    setSelectedIds([]);
     convIdRef.current = convId;
   }, [convId]);
 
@@ -2357,7 +2241,7 @@ export function ChatPage({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (draft.trim() !== "") return;
-      if (emojiOpen || voiceMenu || exportOpen || searchOpen) {
+      if (emojiOpen || voiceMenu || searchOpen) {
         return;
       }
       abortRuns();
@@ -2366,7 +2250,7 @@ export function ChatPage({
     return () => document.removeEventListener("keydown", onKey);
     // abortRuns 每帧重建；本 effect 只关心「是否该接 Esc」的门槛状态
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLocal.length, draft, emojiOpen, voiceMenu, exportOpen, searchOpen]);
+  }, [activeLocal.length, draft, emojiOpen, voiceMenu, searchOpen]);
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 多行输入框：Enter 发送、Shift+Enter 换行（输入法组词中不拦，否则中文选词会被当成发送）
@@ -3118,60 +3002,6 @@ export function ChatPage({
           icon={<SearchIcon width={18} height={18} />}
           onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
         />
-        {/* 多选导出：进入勾选态后，消息行左侧出复选框，header 下方出工具条。 */}
-        <IconButton
-          label="选择消息导出"
-          title="选择若干条消息单独导出"
-          aria-pressed={selectMode}
-          className={selectMode ? "bg-subtle-3 text-ink" : ""}
-          icon={<SelectIcon width={18} height={18} />}
-          onClick={() => {
-            if (selectMode) {
-              exitSelectMode();
-            } else {
-              setSelectMode(true);
-              setSelectedIds([]);
-            }
-          }}
-        />
-        {/* 导出：只读本机已解密密文，生成 Markdown / JSON 下载（不经过服务端）。 */}
-        <div ref={exportRef} className="relative">
-          <IconButton
-            label="导出会话"
-            title="导出整段会话（只含本机可解密的明文）"
-            aria-haspopup="menu"
-            aria-expanded={exportOpen}
-            icon={<DownloadIcon width={18} height={18} />}
-            onClick={() => setExportOpen((v) => !v)}
-          />
-          {exportOpen && (
-            <div
-              role="menu"
-              aria-label="导出会话"
-              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-line-soft bg-surface p-1 ui-overlay-shadow"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
-                onClick={() => exportConversation("md")}
-              >
-                导出 Markdown
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="w-full rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
-                onClick={() => exportConversation("json")}
-              >
-                导出 JSON
-              </button>
-              <p className="px-2 pb-1 pt-0.5 ui-body-sm text-muted">
-                仅包含本机可解密的明文
-              </p>
-            </div>
-          )}
-        </div>
       </header>
       {connState === "closed" && (
         <div
@@ -3230,45 +3060,6 @@ export function ChatPage({
           />
         </div>
       )}
-      {/* 多选导出工具条：与搜索条同层（header 下方一条），不常驻挤压消息区。 */}
-      {selectMode && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-subtle-2 px-chat-gutter py-2 text-ui-sm">
-          <span className="shrink-0 text-muted">已选 {selectedIds.length} 条</span>
-          <Button size="sm" variant="ghost" className="shrink-0" onClick={selectAllVisible}>
-            全选
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="shrink-0"
-            disabled={selectedIds.length === 0}
-            onClick={() => setSelectedIds([])}
-          >
-            清空
-          </Button>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selectedIds.length === 0}
-              onClick={() => exportConversation("md", selectedIds)}
-            >
-              导出所选 Markdown
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selectedIds.length === 0}
-              onClick={() => exportConversation("json", selectedIds)}
-            >
-              导出所选 JSON
-            </Button>
-            <Button size="sm" variant="ghost" onClick={exitSelectMode}>
-              退出选择
-            </Button>
-          </div>
-        </div>
-      )}
       {/* 消息区：左右用 --chat-gutter（24px，窄屏 12px）与 composer 同一条竖线——
           d.126-C 删掉头像列后这里不再有额外内边距。py 上 24 / 下 20 的差是刻意留的
           「呼吸位」——完全等距时第一条消息会顶着 header 底线，视觉上像被切掉一截。 */}
@@ -3280,9 +3071,9 @@ export function ChatPage({
         onDrop={onMessagesDrop}
         className="flex-1 overflow-y-auto px-chat-gutter pb-5 pt-6"
       >
-        {/* 消息列 760 居中——宽屏下中文长行的可读宽度；滚动容器保持在外层。
-            输入区/工具栏用同一宽度档（视觉上是同一根竖线）。 */}
-        <div className="mx-auto w-full max-w-[760px]">
+        {/* 消息列宽度自适应：宽屏最宽 960，窄屏跟视口走（左右由 px-chat-gutter 兜底）；
+            滚动容器保持在外层。输入区/工具栏用同一宽度档（视觉上是同一根竖线）。 */}
+        <div className="mx-auto w-full max-w-[min(100%,960px)]">
         {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
             但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
         {visibleMessages.length > windowCount && (
@@ -3403,21 +3194,6 @@ export function ChatPage({
                     : ""
                 }`}
               >
-                {/* 多选态：勾选列放在最左（含自己的消息），保证一列对齐、好连点 */}
-                {selectMode && (
-                  <label
-                    className="mt-1.5 flex shrink-0 cursor-pointer items-center justify-center"
-                    title="选择这条消息"
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
-                      checked={selectedIds.includes(m.id)}
-                      onChange={() => toggleSelected(m.id)}
-                      className="h-3.5 w-3.5 cursor-pointer accent-ink"
-                    />
-                  </label>
-                )}
                 <div
                   data-message-bubble=""
                   className={`min-w-0 text-ui-md leading-relaxed ${
@@ -3501,8 +3277,8 @@ export function ChatPage({
         </button>
       ) : null}
       <form onSubmit={send} className="relative shrink-0 px-chat-gutter pb-4 pt-2">
-        {/* 输入区与消息列同宽（760 居中）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
-        <div className="mx-auto w-full max-w-[760px]">
+        {/* 输入区与消息列同宽（宽屏最宽 960 自适应）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
+        <div className="mx-auto w-full max-w-[min(100%,960px)]">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
         {!subtleOk && (
           <p

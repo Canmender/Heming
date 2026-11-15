@@ -460,25 +460,26 @@ describe("ChatPage", () => {
     await waitFor(() => expect(rows()).toHaveLength(DEFAULT_WINDOW * 2));
   });
 
-  it("d.62：消息列 760 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
+  it("d.62 / d.147.4.90：消息列 960 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
     mockMessagesFetch([msg("l1", "布局检查", "2026-10-14T00:00:00.000Z")]);
     render(<ChatPage />);
     await waitFor(() => expect(screen.getByText("布局检查")).toBeInTheDocument());
 
+    const columnSelector = '[class*="max-w-[min(100%,960px)]"]';
     const scroller = screen.getByTestId("message-list");
-    const column = scroller.querySelector('[class*="max-w-[760px]"]');
+    const column = scroller.querySelector(columnSelector);
     expect(column).not.toBeNull();
     expect(column!.className).toContain("mx-auto");
     expect(column!.className).toContain("w-full");
-    // 消息行确实在 760 列内部（不是直接挂在滚动容器上）
+    // 消息行确实在 960 列内部（不是直接挂在滚动容器上）
     expect(column!.querySelector('[id^="msg-l1"]')).not.toBeNull();
 
     // 输入区、工具栏、快捷键提示共用同一宽度档
     const form = document.querySelector("form");
-    const composerWrap = form?.querySelector('[class*="max-w-[760px]"]');
+    const composerWrap = form?.querySelector(columnSelector);
     expect(composerWrap).not.toBeNull();
-    expect(screen.getByLabelText("消息输入框").closest('[class*="max-w-[760px]"]')).not.toBeNull();
-    expect(screen.getByLabelText("输入快捷键提示").closest('[class*="max-w-[760px]"]')).not.toBeNull();
+    expect(screen.getByLabelText("消息输入框").closest(columnSelector)).not.toBeNull();
+    expect(screen.getByLabelText("输入快捷键提示").closest(columnSelector)).not.toBeNull();
   });
 
   it("会话内搜索命中窗口外的老消息：自动扩窗后高亮（d.33）", async () => {
@@ -530,106 +531,6 @@ describe("ChatPage", () => {
     expect(await screen.findByText("还没有消息")).toBeInTheDocument();
     expect(screen.getByText("发送第一条消息，开始这段对话。")).toBeInTheDocument();
   });
-
-  it("导出会话：本机明文生成 Markdown 并触发下载", async () => {
-    const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
-    const m2 = { ...msg("m2", "回答", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const };
-    mockMessagesFetch([m1, m2]);
-    let clicked: HTMLAnchorElement | null = null;
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(function (this: HTMLAnchorElement) {
-        clicked = this;
-      });
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "导出会话" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "导出 Markdown" }));
-
-    expect(clickSpy).toHaveBeenCalled();
-    expect(clicked!.download).toMatch(/^和鸣-和小鸣-.*\.md$/);
-    const urlArg = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
-    const content = new TextDecoder().decode(await urlArg.arrayBuffer());
-    expect(content).toContain("# 会话：和小鸣");
-    expect(content).toContain("第一条");
-    expect(content).toContain("回答");
-    expect(await screen.findByText(/已导出 2 条消息/)).toBeInTheDocument();
-  });
-
-  it("多选导出：只导出勾选的那几条，未勾选的不进文件", async () => {
-    const m1 = msg("m1", "要留的", "2026-10-14T01:00:00.000Z");
-    const m2 = { ...msg("m2", "不要的", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const };
-    mockMessagesFetch([m1, m2]);
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => undefined);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("要留的")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
-    const boxes = screen.getAllByRole("checkbox");
-    expect(boxes).toHaveLength(2);
-    fireEvent.click(boxes[0]);
-
-    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "导出所选 Markdown" }));
-
-    expect(clickSpy).toHaveBeenCalledTimes(1);
-    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
-    const content = new TextDecoder().decode(await blob.arrayBuffer());
-    expect(content).toContain("要留的");
-    expect(content).not.toContain("不要的");
-    expect(content).toContain("- 消息数：1");
-    expect(await screen.findByText(/已导出 1 条消息/)).toBeInTheDocument();
-  });
-
-  it("多选导出：全选后导出 JSON，退出选择后勾选态清空", async () => {
-    mockMessagesFetch([
-      msg("m1", "第一条", "2026-10-14T01:00:00.000Z"),
-      { ...msg("m2", "第二条", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const },
-    ]);
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
-    fireEvent.click(screen.getByRole("button", { name: "全选" }));
-    expect(screen.getByText("已选 2 条")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "导出所选 JSON" }));
-    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
-    const doc = JSON.parse(new TextDecoder().decode(await blob.arrayBuffer()));
-    expect(doc.messages.map((x: { text: string }) => x.text)).toEqual(["第一条", "第二条"]);
-
-    // 勾选保留（同一次选择里可能还要导另一种格式），退出选择才清
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: "退出选择" }));
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByText("已选 2 条")).not.toBeInTheDocument();
-  });
-
-  it("多选导出：一条没勾时导出按钮禁用；清空撤掉全部勾选", async () => {
-    mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
-
-    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "清空" })).toBeDisabled();
-
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
-    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeEnabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "清空" }));
-    expect(screen.getByText("已选 0 条")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeDisabled();
-  });
-
 
   it("挂载后收到 message_new：append 到消息列表", async () => {
     mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
@@ -799,12 +700,6 @@ describe("ChatPage", () => {
   });
 
 
-
-
-
-
-
-
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);
@@ -896,29 +791,11 @@ describe("ChatPage", () => {
   });
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   /** 在助手会话里发出指定文本（流式用例共用前奏）。 */
   async function pickAndSend(text: string) {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
   }
-
-
 
 
   it("生成中提示行点中断：abortAll → finish(partial) + aborted 错误行可重试", async () => {
@@ -2361,8 +2238,6 @@ describe("ChatPage", () => {
   // —— 二期 IM Task 4：消息转发 ——
 
 
-
-
   // —— 二期 IM Task 5：语音消息（录音 → 上传 → audio 气泡） ——
 
   /**
@@ -2794,10 +2669,7 @@ describe("ChatPage", () => {
   // —— 二期 IM Task 6：表情回应 UI ——
 
 
-
-
   // —— 二期 IM Task 7：重连补已读 · 群头像 · 定时清扫 ——
-
 
 
   it("定时清扫：15s 后过期他机流变 error 行（阈值内不动）", async () => {
@@ -3459,7 +3331,6 @@ describe("ChatPage", () => {
   });
 
 
-
   it("d.83 刷新/切回会话恢复上次阅读位置；写盘只记位置不记内容", async () => {
     const many = Array.from({ length: 120 }, (_, i) =>
       msg(`s${i}`, `行 ${i}`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
@@ -3501,14 +3372,6 @@ describe("ChatPage", () => {
   });
 
   // —— d.37 连续性对抗用例（adversarial QA 2026-10-28）——
-
-
-
-
-
-
-
-
 
 
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
@@ -3773,22 +3636,6 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("A9 info 提示 3 秒自动消失", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    vi.useFakeTimers();
-
-    fireEvent.click(screen.getByRole("button", { name: "导出会话" }));
-    fireEvent.click(screen.getByText("导出 Markdown"));
-    expect(screen.getByRole("status")).toHaveTextContent("没有可导出的明文消息");
-
-    act(() => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
   it("A10 空草稿发送禁用；无浮层无草稿时 Esc 停止生成", async () => {
     const send = await setupAgentChat();
     bindAssistant();
@@ -3946,7 +3793,6 @@ describe("ChatPage", () => {
 
 
 });
-
 
 
 describe("输入栏高度（clampComposerHeight）", () => {
@@ -4881,5 +4727,25 @@ describe("UX-A 未绑定模型与对话空态", () => {
     await waitFor(() =>
       expect(screen.queryByRole("complementary", { name: "会话进度" })).toBeNull(),
     );
+  });
+
+  /**
+   * d.147.4.90：导出/下载整条链删除（导出文件与平台能力重叠，且会暴露明文落盘）。
+   * 会话语义只保留「在会话内搜索」。
+   */
+  it("导出/下载链已删除：没有导出入口、没有消息多选工具条，会话内搜索保留", async () => {
+    mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
+    render(<ChatPage />);
+    // 栏头标题会回落成首条用户消息，所以「第一条」会出现两次（栏头 + 消息体）。
+    await screen.findAllByText("第一条");
+
+    expect(screen.queryByRole("button", { name: "导出会话" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "选择消息导出" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /导出/ })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText(/已导出/)).toBeNull();
+
+    // 会话内搜索不是导出，保留
+    expect(screen.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();
   });
 });

@@ -2,6 +2,38 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.147.4.89.11（2026-11-15）— 导航回到侧栏、会话页去掉导出、右侧进度栏可调宽
+
+导航只留一个入口：页面菜单从顶栏退场，插件 / 团队 / 模型 / 知识库回到常驻侧栏顶部，装出来的插件页接在知识库下面，设置与账户落在栏底。会话页做减法——导出与多选整套退场，消息列与输入区从固定 760px 放宽到最宽 960px 自适应。右侧「会话进度」栏补上拖拽调宽：240–560px、键盘可调、宽度记在本机。默认仍是「会话」页。
+
+**侧栏导航（packages/web）**
+- `components/assistant/ConversationRail.tsx`：删 `collapsed` state、`max-width: 900px` 的自动收起媒体查询、「收起会话列表」/「展开会话列表」两个按钮与 60px 头像分支；栏常驻 268px、不可折叠。props 由 `renderFooter?: (collapsed: boolean) => ReactNode` 改为 `topNav?: ReactNode` + `footer?: ReactNode`（栏顶导航 / 栏底设置与账户），栏头仍是单行「会话列表 + 数量」。
+- 新增 `components/SidebarNav.tsx`：`<nav aria-label="主导航">`，自上而下 插件 → 团队 → 模型 → 知识库，再接 `usePluginPageEntries()` 里 `available` 的插件页（装/卸即时增减）；行样式 `sidebarRowClass(active)` 导出复用，当前页 `aria-current="page"`，点击 `setPage`。
+- `components/Sidebar.tsx`：传 `topNav={<SidebarNav />}`；`footer` = 栏底「设置」行（`GearIcon`、`aria-current`）在 `<AccountMenu />` 之上。
+- `components/AccountMenu.tsx`：去掉 `collapsed` 变体，只保留「头像 + 名字」整行（栏不再有收起态）。
+- `components/TopBar.tsx`：删 `PageMenu` 与 import，只留手写标志、命令面板、快捷键帮助与通知中心；`components/PageMenu.tsx` 删除。页面导航唯一入口在侧栏，命令面板与 `Alt+数字` 仍可切页。
+
+**会话页（packages/web）**
+- `components/ChatPage.tsx`：删掉「选择消息导出」「导出会话」两颗按钮、导出菜单、多选勾选工具条、消息行复选框，以及 `exportOpen` / `selectMode` / `selectedIds` / `exportRef` state、`exportConversation()` 与 `DownloadIcon` / `SelectIcon` 导入；会话内搜索保留。
+- 消息列与输入区宽度 `max-w-[760px]` → `mx-auto w-full max-w-[min(100%,960px)]`（宽屏最宽 960、窄屏随视口，左右仍由 `px-chat-gutter` 兜底）；`components/AssistantPage.tsx` 空态 `max-w-[360px]` → `max-w-[440px]`。
+
+**会话进度栏可调宽（packages/web）**
+- `components/ProgressPanel.tsx`：左缘加 8px 拖拽手柄（`role="separator"`、`aria-orientation="vertical"`、`aria-label="调整会话进度栏宽度"`、`aria-valuemin/max/now`、`tabIndex=0`、`data-testid="progress-resize-handle"`；视觉上是一条 1px 竖线，悬停 / 聚焦 / 拖拽时变强调色）。
+- 宽度 240–560px（`MIN_WIDTH` / `MAX_WIDTH` / `DEFAULT_WIDTH = 280`）；上限随视口收敛为 `min(560, floor(视口宽 / 2))` 且不低于 240；宽度走内联 `style={{ width }}`，`shrink-0` 保留。
+- 鼠标：`pointerdown` 后 `setPointerCapture`，move / up 挂 window，拖拽期间 body 切 `cursor: col-resize` 并禁选中，松手才落盘；键盘：← 加宽 / → 收窄各 16px（`WIDTH_STEP`）、Home 到 240、End 到当前上限，每次调整即落盘。
+- 持久化 `localStorage` 键 `heming.progress.width.v1`：非法值（空串 / NaN / 存储被禁用）回落 280 再 clamp；只收敛显示值、不覆盖用户偏好——宽窗拖到 560 再缩窗，窗口拉宽后宽度自动回到 560。
+
+**设计审计脚本（scripts/design-audit.mjs）**
+- `goPage` 改两级：先在 `nav[aria-label="主导航"]` 里点同名行（「设置」在栏底 footer，用完全相等文案匹配）；主页 / 会话 / 协作不在侧栏，退回 `Alt+数字`（1 / 2 / 5 / 6 / 8 / 0，与 `App.tsx` 的 `SHORTCUT_PAGES` 对应），派发前先点 body 收焦点、必要时 Escape 关残留弹窗；失败信息带「试过侧栏与快捷键」；点侧栏后先等 `aria-current="page"` 确认再等 `main` 有文本。`PAGES` / 阈值 / 视口 / `setTheme` 未动。
+
+**验证（d.147.4.89.11，verifier 独立复跑，全 exit 0，日志 `.tmp/verify4-*.log`）**
+- `cd packages/shared && pnpm run build`：0；`pnpm typecheck`：0（6 个项目全 Done）。
+- 测试：web `vitest run` 299 files / 4323 tests passed（85.12s）；server 15 files / 271 tests；shared 8 files / 119 tests；desktop 853 pass / 0 fail。
+- `pnpm build`：0（仅 chunk>500kB 警告）；`pnpm plugin:check`：0（清单 6/6、pet-widget 源码 1/1、examples 5/5，schema 最新）。
+- `node scripts/design-audit.mjs --json .tmp/audit4.json --shots .tmp/shots4`（浅色）与 `--theme dark --json .tmp/audit4-dark.json --shots .tmp/shots4-dark`（深色）：各 0，各 57 条（19 子页/页签 × 3 断点），`failures: []`；横向溢出、对比度、11px 正文、命中区 <32、无名字可点五项全 0；chat 页标题 `h1`「会话」+ `h2`「开始新会话」；截图 24 + 24 = 48 张。重写后的 `goPage`（先侧栏主导航同名行、设置走栏底，没有入口的页面退回 `Alt+1/2/5/6/8/0`，失败信息「页面入口不存在（试过侧栏与快捷键）」）零切页失败。
+- 截图目检：`.tmp/shots4/chat-1440-sidebar.png` 左栏 nav 顺序为 插件 / 团队 / 模型 / 知识库（未装插件页故无追加项），栏底「设置」+ 账户「d / design」，无任何收起 / 折叠按钮；顶栏无「页面」下拉，右侧只有命令面板 / 快捷键帮助 / 通知中心三个图标；会话 header 按钮只有 返回 / 会话进度 / 搜索会话（无导出）。`.tmp/shots4/chat-1440-panel480.png` 右栏 480px（panelLeft 960–1440）、主区 1172、输入框 546×124、`docOverflowX = 0`。
+- 未真机复验：① 桌面端（Electron）标题栏拖拽与 ≤1024 窄窗的实际观感；② 拖拽调宽在真实指针设备上的手感（自动化只覆盖 pointer 事件与键盘 / 持久化）。
+
 ## d.147.4.88.11（2026-11-15）— 外壳做减法、会话页补位：账户回会话栏，右侧进度栏接入真实数据
 
 本轮不是新功能堆叠，是「减法 + 补位」：顶栏继续瘦身，账户头像与账户菜单搬回会话栏左下角；会话栏删掉底部隐私小字、栏头两行并成一行；会话页顶部标题从产品名换成当前会话名，右上角多一颗「会话进度」按钮，把上一版留白的右侧栏接上真实数据（本轮进度、动态流程图、任务步骤与工具调用）。默认仍是「会话」页，导航与页面结构不变。

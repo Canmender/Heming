@@ -105,10 +105,11 @@ describe("App 认证门禁", () => {
 
     render(<App />);
 
-    // 新外壳：顶栏常驻 + 常驻会话侧栏，原左侧图标导航轨已删除
+    // 新外壳：顶栏常驻 + 常驻会话侧栏；导航在侧栏顶部，顶栏不再有「页面」下拉
     const topbar = await screen.findByTestId("topbar");
     expect(topbar).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开页面菜单" })).not.toBeInTheDocument();
     // 顶栏左侧换成手写「Heming」标志，不再有文字品牌 span
     expect(within(topbar).getByRole("img", { name: "Heming" })).toBeInTheDocument();
     expect(topbar.textContent).not.toContain("和鸣");
@@ -225,7 +226,8 @@ describe("App 导航快捷键与隐藏态", () => {
     // 顶栏常驻：Ctrl+\ 不再折叠任何东西
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    // d.147.4.89：导航常驻侧栏顶部，不再有可折叠的图标轨
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
   });
 
   it("焦点在输入框 / 未登录时，Alt+数字 不切页", async () => {
@@ -374,7 +376,8 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(useUiStore.getState().page).toBe("chat");
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "会话列表" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    // 导航常驻在侧栏里（切到会话页也不消失）
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
   });
 });
 

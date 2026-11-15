@@ -1,4 +1,9 @@
-import type { ReactNode } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConversationProgress } from "../lib/progress/useConversationProgress.js";
 import { ToolTraceList, toolSummaryLabel } from "./AgentStreamBubble.js";
 import { TaskIcon, XIcon } from "./icons.js";
@@ -7,6 +12,71 @@ import { StepsList } from "./progress/StepsList.js";
 import { PHASE_TONES } from "./progress/status.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { IconButton } from "./ui/IconButton.js";
+
+/** 宽度刻度：240px 是四段内容还能读的下限（再窄流程图标签要碎成两字一行），
+ *  560px 是「再宽就不像侧栏了」的上限；默认 280px 保持历来的观感。 */
+const MIN_WIDTH = 240;
+const MAX_WIDTH = 560;
+const DEFAULT_WIDTH = 280;
+const WIDTH_STEP = 16;
+/** localStorage 键带 `.v1`：以后如果改成「按比例存」或存偏好的展开状态，可以另起一版，
+ *  而不是猜旧数据是什么格式。 */
+const STORAGE_KEY = "heming.progress.width.v1";
+
+function clampWidth(px: number, max: number): number {
+  return Math.min(Math.max(Math.round(px), MIN_WIDTH), max);
+}
+
+/**
+ * 视口允许的最大宽度：min(560, 视口宽的一半)。
+ *
+ * 为什么跟着视口收敛而不是写死 560：1024 的窄窗里 560 的侧栏会吃掉主区一半以上，
+ * 会话流被压到无法阅读。上限随视口走，任何窗口下「拖到最宽」都还留得下正文。
+ * 再用 Math.max(MIN_WIDTH, …) 兜底：极端窄窗里 max 不能小于 min，否则 clamp 的上下界翻转，
+ * 宽度会被夹成 min 而 max 形同虚设。
+ */
+function viewportMaxWidth(): number {
+  if (typeof window === "undefined") return MAX_WIDTH;
+  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(window.innerWidth * 0.5)));
+}
+
+/**
+ * 读本地偏好：非法值一律回落默认宽度。
+ *
+ * 为什么不直接把 Number(raw) 交给 clamp：`Number("")` 是 0、`Number("280px")` 是 NaN，
+ * 0 会被夹成 240（看起来像「用户设过」），NaN 会让 style.width 失效、面板直接塌掉。
+ * 显式判 NaN 并回落 280，坏数据的表现才是「回到默认」而不是「样式坏了」。
+ */
+function readStoredWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? clampWidth(parsed, MAX_WIDTH) : DEFAULT_WIDTH;
+  } catch {
+    // localStorage 被禁用（隐私模式/嵌入式 webview）时面板仍然可用，只是不记忆宽度。
+    return DEFAULT_WIDTH;
+  }
+}
+
+function persistWidth(px: number): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, String(px));
+  } catch {
+    // 同 readStoredWidth：存不下就只是刷新后回默认，不打扰用户。
+  }
+}
+
+/** 视口宽度是「外部状态」：窗口变窄时要重新收敛上限，用 resize 订阅而不是只在首帧算一次。 */
+function useViewportMaxWidth(): number {
+  const [max, setMax] = useState<number>(viewportMaxWidth);
+  useEffect(() => {
+    const sync = () => setMax(viewportMaxWidth());
+    sync(); // 首帧后补算一次：读数发生在窗口尺寸稳定前时，这里把它校正过来
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
+  return max;
+}
 
 /**
  * 右侧「会话进度」面板（d.147.4.88）：把这一轮的三件事摊开——走到哪一步（阶段与进度条）、
@@ -19,6 +89,9 @@ import { IconButton } from "./ui/IconButton.js";
  * 为什么数据由 props 传入会话 id、而不是订阅 activeConversationId：面板只挂在 ChatPage
  * 内，由右上角按钮开合，切页/换会话时随组件卸载；自己读全局 store 会在卸载边界上
  * 多一份「面板看到的会话」与「页面正在看的会话」不一致的可能。
+ *
+ * 为什么宽度走内联 style 而不是 Tailwind 类：可拖拽宽度的取值是连续量，动态类名
+ * （`w-[${px}px]`）会被 Tailwind 的静态提取漏掉、生产构建里直接失效；内联 style 没有这个问题。
  */
 export function ProgressPanel({
   conversationId,
@@ -33,11 +106,136 @@ export function ProgressPanel({
   const toolCount = progress.tools.length;
   const toolSummary = toolSummaryLabel(progress.tools);
 
+  const maxWidth = useViewportMaxWidth();
+  const [width, setWidth] = useState<number>(readStoredWidth);
+  // widthRef 是「当前宽度」的同步镜像：拖拽的 pointermove 监听器注册在 window 的 effect 里，
+  // 闭包拿不到最新 state，靠它才不会按下后第一帧就跳回初始值。
+  const widthRef = useRef(width);
+  const maxRef = useRef(maxWidth);
+  useEffect(() => {
+    maxRef.current = maxWidth;
+  }, [maxWidth]);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+
+  // 渲染用「实际宽度」：偏好可能超过当前视口能容忍的上限（宽窗拖到 560 再缩窗），
+  // 这时只收敛显示值、不覆盖用户偏好——窗口再拉宽时宽度会自动回到 560。
+  const effectiveWidth = clampWidth(width, maxWidth);
+
+  /** 应用一次宽度变更：夹到当前区间、同步镜像、写回状态。返回最终值便于调用方落盘。 */
+  const applyWidth = (next: number): number => {
+    const clamped = clampWidth(next, maxRef.current);
+    widthRef.current = clamped;
+    setWidth(clamped);
+    return clamped;
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // 只响应主键：中键/右键不该开始拖拽。`typeof` 判断是为了容错——合成事件/无 PointerEvent
+    // 的环境里 button 可能是 undefined，那种情况按「主键」处理，不能因此让拖拽完全失灵。
+    if (typeof event.button === "number" && event.button !== 0) return;
+    event.preventDefault(); // 阻止浏览器默认的「按下即开始选区」，否则整页文字会被拖蓝
+    // preventDefault 会连焦点一起拦掉，这里补一次 focus：点完手柄直接按 ←/→ 应该就能调。
+    event.currentTarget.focus({ preventScroll: true });
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: effectiveWidth };
+    // pointer capture 让指针移出手柄（甚至移出窗口）后事件仍回到这条手柄。
+    // jsdom / 老浏览器没有该 API，判一下再调，免得拖拽在非浏览器环境一按就抛错。
+    if (typeof event.currentTarget.setPointerCapture === "function") {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    setDragging(true);
+  };
+
+  // 拖拽的 move/up 挂在 window 上：指针一旦离开手柄，元素自身的监听就收不到了。
+  // 计算只依赖 dragRef 里的起始值（startWidth + 位移），重复触发也不会累积误差。
+  useEffect(() => {
+    if (!dragging) return;
+    const bodyStyle = document.body.style;
+    const previousCursor = bodyStyle.cursor;
+    const previousUserSelect = bodyStyle.userSelect;
+    // 拖拽期间光标停在正文上也保持 col-resize，并禁止选中：否则拖快一点会顺手把对话选中。
+    bodyStyle.cursor = "col-resize";
+    bodyStyle.userSelect = "none";
+
+    const move = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      // 手柄在面板左缘：指针左移（clientX 变小）意味着面板变宽，所以位移取反后叠加。
+      applyWidth(drag.startWidth + (drag.startX - event.clientX));
+    };
+    const end = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      dragRef.current = null;
+      setDragging(false);
+      // 松手才落盘：拖拽过程中每帧写 localStorage 既没有意义，也让同步 API 卡住动画。
+      persistWidth(widthRef.current);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      bodyStyle.cursor = previousCursor;
+      bodyStyle.userSelect = previousUserSelect;
+    };
+  }, [dragging]);
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // 手柄在面板左缘：← 把分隔条往左推 = 面板变宽，与鼠标拖拽方向一致；→ 反之。
+    // Home/End 一步到最窄/最宽，省得按十几次。
+    const base = Math.min(widthRef.current, maxRef.current);
+    let next: number;
+    switch (event.key) {
+      case "ArrowLeft":
+        next = base + WIDTH_STEP;
+        break;
+      case "ArrowRight":
+        next = base - WIDTH_STEP;
+        break;
+      case "Home":
+        next = MIN_WIDTH;
+        break;
+      case "End":
+        next = maxRef.current;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault(); // 否则 ←/→ 会把页面滚走、Home/End 会跳到文档首尾
+    // 键盘没有「松手」这个时机，每次调整即落盘。
+    persistWidth(applyWidth(next));
+  };
+
   return (
     <aside
       aria-label="会话进度"
-      className="relative flex w-[280px] shrink-0 flex-col border-l border-line-soft bg-subtle"
+      style={{ width: effectiveWidth }}
+      className="relative flex shrink-0 flex-col border-l border-line-soft bg-subtle"
     >
+      {/*
+        调宽手柄：8px 宽的透明带正好压在左边界上（-left-1 + w-2），
+        中间用 ::after 画 1px 竖线，悬停/聚焦/拖拽时变成强调色——这样既不抢视觉，
+        又有足够宽的抓取区（真正的 1px 线很难点中）。
+      */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整会话进度栏宽度"
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={maxWidth}
+        aria-valuenow={effectiveWidth}
+        tabIndex={0}
+        data-testid="progress-resize-handle"
+        onPointerDown={handlePointerDown}
+        onKeyDown={handleKeyDown}
+        className={`absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none select-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent after:transition-colors after:duration-fast focus-visible:outline-2 focus-visible:outline-ink hover:after:bg-accent focus-visible:after:bg-accent ${
+          dragging ? "after:bg-accent" : ""
+        }`}
+      />
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line-soft px-3">
         <h2 className="ui-section-title min-w-0 flex-1 truncate">会话进度</h2>
         <IconButton label="关闭会话进度" icon={<XIcon />} onClick={onClose} />

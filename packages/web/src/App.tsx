@@ -119,7 +119,7 @@ export function PageFallback() {
 }
 
 /**
- * Alt+数字键目标页。页面入口现在只有命令面板与顶栏「页面」菜单两处，
+ * Alt+数字键目标页。页面入口现在只有侧栏「主导航」与命令面板两处，
  * 数字键口径与 `lib/palette/pages.ts` 的 `PALETTE_PAGES.digit` 严格对应
  * （命令面板/快捷键帮助直接读那份正表，这里只是键盘监听用的映射）。
  * 1 主页、2 团队（承接原团队看板）、5 协作（和鸣 + 本机智能体）、6 设置、
@@ -578,8 +578,8 @@ function AppShell({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface">
-      {/* 顶栏是唯一常驻的全局控件条：手写标志兼作桌面拖拽区，右侧是页面菜单/命令面板/
-          快捷键帮助/通知。会话进度开关与账户头像各有归属（会话页 header / 会话栏左下角）。 */}
+      {/* 顶栏是唯一常驻的全局控件条：手写标志兼作桌面拖拽区，右侧是命令面板/
+          快捷键帮助/通知。页面导航与账户各有归属（会话侧栏顶部 / 侧栏左下角）。 */}
       <TopBar onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* 会话侧栏常驻：所有页面左侧都保持会话入口（导航轨删除后的主要导航面）。 */}

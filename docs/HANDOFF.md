@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-12（按 d.140.3.54.10 回填）
-- 当前版本：`d.147.4.88.11`
-- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.88.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面入口只留顶栏「页面」菜单与命令面板（Ctrl+K），打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
+- 当前版本：`d.147.4.89.11`
+- 本轮标签：**极简外壳：删掉左侧导航轨，顶栏页面菜单 + 命令面板接管页面导航**（分支 `refactor/minimal-app`，版本 d.147.4.86.11 → d.147.4.89.11）。外壳收成「顶栏 + 常驻会话侧栏 + 内容区」：左侧图标导航轨整体移除，页面导航最终回到侧栏顶部（顶栏「页面」菜单已删），命令面板（Ctrl+K）与 Alt+数字保留，打开应用默认进「会话」页；设置页「导航」页签与导航状态一并简化。上一轮（d.147.4.85.11）做的是：①会话页按 ChatGPT/Claude 官方极简风重做（左侧只有会话列表 + 主按钮「新对话」，右侧消息居中、助手无气泡、输入框收成大圆角容器）；②删除记忆页，短期/长期/个人知识库三个开关固定全开、全部后台运行；③恢复多智能体协作能力，但拆成独立的「协作」页（参与者固定「和小鸣」，可并入本机 Claude Code / Codex）。
 - 历史（旧版标签，保留备查）：**d.69 体验自检与优化（六轮，分支 `feat/d69-ux-round`）**——从 `d.68.2.26.0` 的 main 拉出，用 headless Edge + CDP 真实浏览器逐轮找问题并修：①登录说人话（英文错误按状态码翻译、改输入即清错、账号来源提示、CapsLock）；②30+ 处用户可见内部术语出清；③假状态换真数据（首页文件可写目录、信息中枢浏览器页头、设置版本号回落构建版本）；④命令面板焦点环（含内联 outline:none 的高对比回归，复审后改透明 2px + 面板 `has-[:focus-visible]`）；⑤接本机假网关把对话真正跑通（流式/停止生成/供应商失败按分类翻译/图表工具链）；⑥本机假 MCP 服务把人工确认（HITL）点通（允许/拒绝/真实工具执行）；⑦任务区运行、插件安装与差异更新、设置搜索实测；⑧复审驱动的收尾（工具名统一 `服务 · 工具`、CHANGELOG 折行解析、恢复登录中文、登录焦点不抢）。规格：`docs/superpowers/specs/2026-11-04-d69-ux-round.md`。上轮 d.68.2.26 自检见 CHANGELOG。历史：**d.67.2.25 桌宠拖拽/导航合并 / d.66.2.25 自动化执行内核 / d.65.2.24 签名信任、贡献级停用、暗色、窄窗响应式**
 - 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**） → d.66.2.25.0 自动化执行内核（本分支 port/d66 合入）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
@@ -111,6 +111,26 @@
   头像）；会话栏栏头单行「会话列表」，底部是头像/名字账户入口（隐私小字已移除）；会话区空态 `h2`「开始新会话」，
   右侧「会话进度」栏默认不显示，会话内 header 的 `h2` 是会话名、右上第一颗按钮是「会话进度」。
   **未真机复验**：桌面端标题栏拖拽；1024 窄窗打开右侧「会话进度」栏后输入区的挤压表现。
+
+**后续修订（d.147.4.89.11）**
+- 侧栏导航常驻：删掉会话栏折叠（`collapsed` state、`max-width: 900px` 自动收起媒体查询、「收起会话列表」/「展开会话列表」按钮与 60px 头像分支），栏固定 268px；`ConversationRail` 的 `renderFooter` 插槽换成 `topNav` + `footer` 两个。新增 `components/SidebarNav.tsx`：`nav[aria-label="主导航"]` 自上而下 插件 → 团队 → 模型 → 知识库，再接 `usePluginPageEntries()` 里 `available` 的插件页（装/卸即时增减）；行样式与 `aria-current="page"` 复用导出的 `sidebarRowClass`。`Sidebar.tsx` 传 `topNav={<SidebarNav />}`，footer 里「设置」行（`GearIcon`）在 `<AccountMenu />` 之上；`AccountMenu` 去掉 `collapsed` 变体（栏不再有收起态）。
+- 顶栏删页面菜单：`components/TopBar.tsx` 只留手写标志、命令面板、快捷键帮助与通知中心，删 `PageMenu` 与 import；`components/PageMenu.tsx` 删除。页面入口只剩侧栏，命令面板与 `Alt+1/2/5/6/8/0` 仍可切页。
+- 会话页删导出：`ChatPage.tsx` 去掉「选择消息导出」「导出会话」两颗按钮、导出菜单、多选勾选工具条、消息行复选框，以及 `exportOpen` / `selectMode` / `selectedIds` / `exportRef` state、`exportConversation()` 与 `DownloadIcon` / `SelectIcon` 导入；会话内搜索保留。消息列与输入区 `max-w-[760px]` → `mx-auto w-full max-w-[min(100%,960px)]`（宽屏最宽 960、窄屏随视口）；`AssistantPage.tsx` 空态 `max-w-[440px]`。
+- 会话进度栏可调宽：`ProgressPanel.tsx` 左缘 8px 手柄（`role="separator"`、`aria-orientation="vertical"`、`aria-label="调整会话进度栏宽度"`、`aria-valuemin/max/now`、`tabIndex=0`、`data-testid="progress-resize-handle"`）；宽度 240–560（默认 280，`MIN_WIDTH` / `MAX_WIDTH` / `DEFAULT_WIDTH` / `WIDTH_STEP=16`），上限随视口收敛为 `min(560, floor(视口宽 / 2))` 且不低于 240；鼠标 `pointerdown` + `setPointerCapture`、move/up 挂 window、拖拽时 body `cursor: col-resize` 并禁选中、松手才落盘；键盘 ← 加宽 / → 收窄 / Home=240 / End=上限。持久化 `localStorage` 键 `heming.progress.width.v1`：非法值回落 280 再 clamp，只收敛显示值、不覆盖用户偏好。
+- 设计审计脚本：`scripts/design-audit.mjs` 的 `goPage` 改为「先侧栏主导航同名行（设置走栏底）→ 没有入口的页面退回 `Alt+1/2/5/6/8/0`」：
+  先点 `nav[aria-label="主导航"]` 内同名行（「设置」在栏底 footer 按完全相等文案匹配），主页 / 会话 / 协作不在侧栏时退回 `Alt+数字`
+  （1 / 2 / 5 / 6 / 8 / 0，对应 `App.tsx` 的 `SHORTCUT_PAGES`），派发前先点 body 收焦点、必要时 Escape 关残留弹窗；点侧栏后先等
+  `aria-current="page"` 再等 `main` 有文本；失败信息「页面入口不存在（试过侧栏与快捷键）」。`PAGES` / 阈值 / 视口 / `setTheme` 未动。
+- 验证（d.147.4.89.11，verifier 独立复跑，全 exit 0，日志 `.tmp/verify4-*.log`）：`shared` build 0；`pnpm typecheck` 0（6 个项目全 Done）；
+  web `vitest run` 299 files / 4323 tests passed（85.12s）；server 15 files / 271 tests；shared 8 files / 119 tests；desktop 853 pass / 0 fail；
+  `pnpm build` 0（仅 chunk>500kB 警告）；`pnpm plugin:check` 0（清单 6/6 + pet-widget 1/1 + examples 5/5，schema 最新）；
+  `pnpm design:audit` 浅色 + `--theme dark` 各 57 条（19 子页/页签 × 3 断点）、`failures: []`，横向溢出 / 对比度 / 11px 正文 /
+  命中区 <32 / 无名字可点五项全 0，chat 标题 `h1`「会话」+ `h2`「开始新会话」，截图 24 + 24 = 48 张（`.tmp/shots4`、`.tmp/shots4-dark`）；
+  重写后的 `goPage`（侧栏 + Alt 键位兜底）零切页失败。截图目检：左栏 nav 顺序 插件 / 团队 / 模型 / 知识库（未装插件页故无追加项），
+  栏底「设置」+ 账户「d / design」，无收起 / 折叠按钮；顶栏无「页面」下拉，右侧只有命令面板 / 快捷键帮助 / 通知中心三个图标；
+  会话 header 按钮只有 返回 / 会话进度 / 搜索会话（无导出）；`.tmp/shots4/chat-1440-panel480.png` 右栏 480px、主区 1172、
+  输入框 546×124、`docOverflowX = 0`。
+  **未真机复验**：① 桌面端（Electron）标题栏拖拽与 ≤1024 窄窗的实际观感；② 拖拽调宽在真实指针设备上的手感（自动化只覆盖 pointer 事件与键盘 / 持久化）。
 
 ## 0-历史. 2026-11-14 会话极简 + 记忆页退场 + 协作独立页（分支 `refactor/single-agent`，版本 d.147.4.85.11）
 

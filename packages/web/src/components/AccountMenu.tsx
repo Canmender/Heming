@@ -7,14 +7,14 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 /**
  * 用户头像 + 账户菜单（d.147.4.88）。
  *
- * 为什么从顶栏搬到会话栏底部：顶栏右侧是「页面级动作」（页面菜单/命令面板/通知），
+ * 为什么从顶栏搬到会话栏底部：顶栏右侧是「页面级动作」（命令面板/快捷键/通知），
  * 「我是谁」不属于动作区。放到左下角之后，视线起点是身份、终点是内容，
  * 和 Codex 这类桌面智能体一致，也把顶栏右端让给真正的操作。
  *
- * 菜单**向上**弹：它贴着窗口底边，向下弹会被裁掉。收起态（60px 窄栏）只留头像，
- * 菜单起点跟着对齐到左边缘，避免浮层从栏外飘进来。
+ * 菜单**向上**弹：它贴着窗口底边，向下弹会被裁掉。侧栏常驻（d.147.4.89 起不再
+ * 可折叠），所以这里只保留「头像 + 名字」一种排法，不再分叉收起态。
  */
-export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
+export function AccountMenu() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const setPage = useUiStore((s) => s.setPage);
@@ -41,7 +41,7 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
   }, [menuOpen]);
 
   return (
-    <div ref={rootRef} className={collapsed ? "relative" : "relative w-full"}>
+    <div ref={rootRef} className="relative w-full">
       <button
         type="button"
         aria-label={`账户：${displayName}`}
@@ -49,11 +49,7 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
         aria-expanded={menuOpen}
         title={displayName}
         onClick={() => setMenuOpen((v) => !v)}
-        className={
-          collapsed
-            ? "mx-auto flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-subtle-3 text-ui-sm font-semibold text-body transition-colors hover:bg-subtle-4"
-            : "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-subtle-2"
-        }
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-subtle-2"
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-subtle-3 text-ui-sm font-semibold text-body">
           {user?.avatar ? (
@@ -62,17 +58,13 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
             displayName.slice(0, 1)
           )}
         </span>
-        {collapsed ? null : (
-          <span className="min-w-0 flex-1 truncate text-ui-sm text-body">{displayName}</span>
-        )}
+        <span className="min-w-0 flex-1 truncate text-ui-sm text-body">{displayName}</span>
       </button>
       {menuOpen ? (
         <div
           role="menu"
           aria-label="账户菜单"
-          className={`absolute bottom-full z-50 mb-1 w-40 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow ${
-            collapsed ? "left-0" : "left-0 right-0 w-auto"
-          }`}
+          className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
         >
           <button
             type="button"

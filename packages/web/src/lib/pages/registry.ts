@@ -126,7 +126,7 @@ export function pluginNavPages(entries: readonly PluginPageEntry[]): PluginPageI
  * 把可用插件页面追加到页面清单末尾（宿主 8 项顺序原样不动）。
  *
  * 同一口径：插件入口是「装出来的」，不写进会话态、不参与排序——
- * 否则同一份清单在不同安装状态下含义会变。d.147 起消费方是顶栏「页面」菜单与命令面板。
+ * 否则同一份清单在不同安装状态下含义会变。d.147.4.89 起消费方是侧栏「主导航」与命令面板。
  */
 export function withPluginNav<T extends string>(
   order: readonly T[],

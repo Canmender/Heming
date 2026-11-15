@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Conversation, Message } from "@heming/shared";
-import { Avatar } from "../Avatar.js";
 import { EmptyState } from "../ui/EmptyState.js";
-import { ChevronIcon, MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
+import { MoreIcon, PlusIcon, SearchIcon } from "../icons.js";
 import { formatClock } from "../../lib/formatTime.js";
 import { hasDraft, subscribeDrafts } from "../../lib/drafts.js";
 import { conversationTitle } from "./conversationTitle.js";
@@ -19,7 +18,8 @@ import { Button } from "../ui/Button.js";
  * - 顶部：「会话」+ 数量；动作行「新建会话」+「搜索」；
  * - 列表按最近活跃排序；当前会话高亮（`aria-current`），有草稿的会话带「草稿」标识；
  * - 搜索只匹配会话标题；
- * - 可折叠成头像窄栏，把横向空间让给对话；整个列表保持 Tab 可达。
+ * - 常驻不可折叠（d.147.4.89）：折叠会把会话入口藏起来，而侧栏同时承担导航；
+ * - 栏顶与栏底各留一个插槽（主导航 / 设置 + 账户），由 `Sidebar` 组装。
  *
  * 会话名优先用服务端 `title`（d.128）；没有标题时由 `conversationTitle` 从已加载消息推导，
  * 未加载消息的会话回落为最后活跃时间。悬停行尾「更多」可改名/删除（删除由调用方二次确认）。
@@ -47,13 +47,19 @@ export interface ConversationRailProps {
   loadingMore?: boolean;
   onLoadMore?: () => void;
   /**
-   * 栏底常驻插槽（d.147.4.88）：账户头像与菜单挂在这里。
+   * 栏顶插槽（d.147.4.89）：常驻主导航（插件/团队/模型/知识库/插件页）挂在这里。
    *
-   * 为什么是函数而不是 ReactNode：收起态（60px 窄栏）与展开态（268px）要的
-   * 是同一份身份的两种排法（只头像 / 头像 + 名字），而「是不是收起态」只有
-   * rail 自己知道。交给调用方一个 `collapsed` 参数，比让调用方猜状态更稳。
+   * 放插槽而不是搬进 rail：会话列表是「数据」，导航是「外壳」；两者都由
+   * `Sidebar` 组装，rail 只负责给它们排位置，不反过来知道有哪些页面。
    */
-  renderFooter?: (collapsed: boolean) => ReactNode;
+  topNav?: ReactNode;
+  /**
+   * 栏底常驻插槽：设置入口 + 账户头像与菜单挂在这里。
+   *
+   * 栏不再可折叠，所以这里直接收一个节点——不再需要按「收起态/展开态」
+   * 给调用方两种排法（d.147.4.88 的 `renderFooter(collapsed)` 已退场）。
+   */
+  footer?: ReactNode;
 }
 
 /** 最近活跃排序键：没有消息的排最后。 */
@@ -75,21 +81,9 @@ export function ConversationRail({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
-  renderFooter,
+  topNav,
+  footer,
 }: ConversationRailProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  // 极窄视口（≤900）自动收起成头像栏：264px 固定宽在 375 视口下会把对话区挤成一条缝。
-  // 只在「进入窄视口」时自动收；用户手动展开仍然生效，不做反向强制。
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia("(max-width: 900px)");
-    if (mq.matches) setCollapsed(true);
-    const onChange = (e: MediaQueryListEvent) => {
-      if (e.matches) setCollapsed(true);
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -313,76 +307,17 @@ export function ConversationRail({
     );
   };
 
-  if (collapsed) {
-    return (
-      <aside className="flex w-[60px] shrink-0 flex-col border-r border-line-soft bg-subtle">
-        <header className="flex items-center justify-center py-2">
-          <button
-            type="button"
-            aria-label="展开会话列表"
-            title="展开会话列表"
-            onClick={() => setCollapsed(false)}
-            className="ui-hit flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink"
-          >
-            <ChevronIcon width={14} height={14} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {sorted.map((conv) => {
-            const active = conv.id === activeConversationId;
-            const title = titleOf(conv);
-            return (
-              <button
-                key={conv.id}
-                type="button"
-                title={title}
-                aria-label={`打开会话：${title}`}
-                aria-current={active ? "true" : undefined}
-                onClick={() => onOpen(conv.id)}
-                className={`mb-1 flex w-full justify-center rounded-lg p-1 transition-colors ${
-                  active ? "bg-subtle-3" : "hover:bg-subtle-2"
-                }`}
-              >
-                <Avatar
-                  user={{ displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined }}
-                  size={26}
-                />
-              </button>
-            );
-          })}
-        </div>
-        <button
-          type="button"
-          aria-label="新建会话"
-          title="新建会话"
-          disabled={opening}
-          onClick={onNewConversation}
-          className="ui-hit mx-auto mb-2 flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-subtle-4 hover:text-ink disabled:opacity-50"
-        >
-          <PlusIcon width={14} height={14} />
-        </button>
-        {/* 收起态也留身份入口：60px 宽只放头像，菜单从栏内向上弹。 */}
-        {renderFooter ? <div className="mt-auto flex justify-center pb-2">{renderFooter(true)}</div> : null}
-      </aside>
-    );
-  }
-
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-line-soft bg-subtle">
-      <header className="flex items-center gap-2 px-3 pb-1 pt-3">
-        {/* 栏头只留「会话列表」+ 数量 + 收起：产品名已经在顶栏的手写标志里，
-            这里再排一行「和鸣」等于同一句话说两遍，还挤掉了会话本身的位置。 */}
+      {/* 栏顶：常驻主导航（由 Sidebar 组装；插件页接在知识库之后）。 */}
+      {topNav}
+
+      <header className="flex items-center gap-2 px-3 pb-1 pt-2">
+        {/* 栏头只留「会话列表」+ 数量：产品名已经在顶栏的手写标志里，
+            这里再排一行「和鸣」等于同一句话说两遍，还挤掉了会话本身的位置。
+            折叠按钮也已退场（d.147.4.89）：侧栏常驻，不再有「收起」这条路径。 */}
         <h2 className="min-w-0 flex-1 truncate text-ui-sm font-medium text-muted">会话列表</h2>
         <span className="ui-micro text-muted">{sorted.length}</span>
-        <button
-          type="button"
-          aria-label="收起会话列表"
-          title="收起会话列表"
-          onClick={() => setCollapsed(true)}
-          className="ui-hit flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-subtle-2 hover:text-ink"
-        >
-          <ChevronIcon width={14} height={14} className="rotate-180" aria-hidden="true" />
-        </button>
       </header>
 
       {/* 主操作：整行圆角「新对话」按钮（这一栏唯一的高饱和大按钮）。 */}
@@ -467,10 +402,10 @@ export function ConversationRail({
           {error}
         </p>
       )}
-      {/* 栏底：账户（头像 + 菜单）。原来这里是一行「本机运行 · Key 与记忆不出设备」的
-          隐私声明——按用户要求去掉正文，位置让给身份入口。 */}
-      {renderFooter ? (
-        <div className="shrink-0 border-t border-line-soft p-1.5">{renderFooter(false)}</div>
+      {/* 栏底：设置入口 + 账户（头像 + 菜单）。原来这里是一行「本机运行 · Key 与
+          记忆不出设备」的隐私声明——按用户要求去掉正文，位置让给身份与设置。 */}
+      {footer ? (
+        <div className="shrink-0 border-t border-line-soft p-1.5">{footer}</div>
       ) : null}
     </aside>
   );

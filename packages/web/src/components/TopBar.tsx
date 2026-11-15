@@ -1,14 +1,14 @@
 import { IconButton } from "./ui/IconButton.js";
 import { KeyboardIcon, SearchIcon } from "./icons.js";
-import { PageMenu } from "./PageMenu.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { Wordmark } from "./Wordmark.js";
 
 /**
  * 顶栏（d.147.4.86 起是唯一常驻的全局控件条；d.147.4.88 再瘦一圈）。
  *
- * 现在只留四件事：品牌（手写标志，兼桌面拖拽带）、页面菜单、命令面板、快捷键帮助
- * 与通知中心。原来挂在这里的两颗按钮各自回到自己的归属：
+ * 现在只留三件事：品牌（手写标志，兼桌面拖拽带）、命令面板与快捷键帮助、通知中心。
+ * 页面菜单在 d.147.4.89 退场——导航搬回常驻侧栏（插件/团队/模型/知识库/插件页）
+ * 之后，顶栏再排一次同样的页面名只会让入口分叉。原来挂在这里的按钮各自回归属：
  * - 「会话进度」→ 会话页 header（Codex 式：面板开关挨着它要开的那个面板）；
  * - 账户头像 → 会话栏左下角（见 `AccountMenu`）。
  *
@@ -50,7 +50,6 @@ export function TopBar({
         <Wordmark width={78} className="shrink-0 text-ink" />
 
         <div data-testid="topbar-actions" className="app-no-drag ml-auto flex items-center gap-1">
-          <PageMenu />
           <IconButton
             label="打开命令面板"
             icon={<SearchIcon width={16} height={16} />}

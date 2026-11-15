@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ProgressPanel } from "./ProgressPanel.js";
 import { useChatStore } from "../store/chat.js";
 import type { AgentStreamState } from "../store/chat.js";
@@ -28,6 +28,13 @@ function setStream(patch: Partial<AgentStreamState> = {}): void {
 
 beforeEach(() => {
   useChatStore.setState({ streaming: {}, messages: {} });
+  // 宽度上限跟视口走：固定 1024（jsdom 默认值）让断言不依赖别的用例。
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: 1024,
+  });
+  localStorage.clear();
 });
 
 afterEach(() => cleanup());
@@ -101,5 +108,117 @@ describe("ProgressPanel · 有数据", () => {
     expect(within(panel).getAllByText("调用 read_file").length).toBeGreaterThanOrEqual(2);
     expect(within(panel).getByTestId("progress-counts")).toHaveTextContent("工具 1 次");
     expect(within(panel).queryByRole("heading", { level: 2, name: "这一轮还没有进度" })).toBeNull();
+  });
+});
+
+/**
+ * d.147.4.90：面板左缘可拖拽调宽（240–560，且不超过视口一半），宽度记在 localStorage。
+ *
+ * 方向约定：手柄在面板左缘，所以 ←/左拖 = 面板变宽；→/右拖 = 变窄。
+ */
+const STORAGE_KEY = "heming.progress.width.v1";
+
+function panelBox(): HTMLElement {
+  return screen.getByRole("complementary", { name: "会话进度" });
+}
+
+function resizeHandle(): HTMLElement {
+  return screen.getByRole("separator", { name: "调整会话进度栏宽度" });
+}
+
+describe("ProgressPanel · 拖拽调宽", () => {
+  it("默认宽 280：面板 style.width 与手柄的 separator/aria 值同步", () => {
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+
+    expect(panelBox().style.width).toBe("280px");
+    const handle = resizeHandle();
+    expect(handle).toBe(screen.getByTestId("progress-resize-handle"));
+    expect(handle).toHaveAttribute("aria-valuemin", "240");
+    expect(handle).toHaveAttribute("aria-valuenow", "280");
+    // min(560, floor(1024 / 2)) = 512
+    expect(handle).toHaveAttribute("aria-valuemax", "512");
+  });
+
+  it("键盘：← 加宽 16 / → 变窄 16，Home/End 到两端，每次调整即落盘", () => {
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+    const handle = resizeHandle();
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(panelBox().style.width).toBe("296px");
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "296");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("296");
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(panelBox().style.width).toBe("280px");
+
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(panelBox().style.width).toBe("512px");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("512");
+
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(panelBox().style.width).toBe("240px");
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "240");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("240");
+  });
+
+  it("上限随视口放宽：1440 宽窗口里 End 到 560", () => {
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+
+    act(() => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: 1440,
+      });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(resizeHandle()).toHaveAttribute("aria-valuemax", "560");
+    fireEvent.keyDown(resizeHandle(), { key: "End" });
+    expect(panelBox().style.width).toBe("560px");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("560");
+  });
+
+  it("拖拽：左移加宽、右移变窄；拖拽期间光标记 col-resize，松手才落盘", () => {
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+    const handle = resizeHandle();
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 });
+    expect(document.body.style.cursor).toBe("col-resize");
+
+    // 指针左移 40px → 面板宽 +40
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 460 });
+    expect(panelBox().style.width).toBe("320px");
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // 再右移 60px（相对起点 +60）→ 面板窄 60
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 520 });
+    expect(panelBox().style.width).toBe("260px");
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 520 });
+    expect(document.body.style.cursor).toBe("");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("260");
+
+    // 松手后再移动指针不应继续改宽度
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400 });
+    expect(panelBox().style.width).toBe("260px");
+  });
+
+  it("刷新沿用存值；坏数据回落 280，超上限的值按视口收敛", () => {
+    localStorage.setItem(STORAGE_KEY, "320");
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+    expect(panelBox().style.width).toBe("320px");
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "320");
+
+    cleanup();
+    localStorage.setItem(STORAGE_KEY, "280px");
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+    expect(panelBox().style.width).toBe("280px");
+
+    cleanup();
+    localStorage.setItem(STORAGE_KEY, "9999");
+    render(<ProgressPanel conversationId={null} onClose={() => {}} />);
+    // 存值被夹到 560，再按 1024 视口的上限 512 收敛显示
+    expect(panelBox().style.width).toBe("512px");
   });
 });

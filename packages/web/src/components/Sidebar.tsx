@@ -7,7 +7,9 @@ import { startNewConversation } from "../lib/newConversation.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { conversationTitle } from "./assistant/conversationTitle.js";
 import { AccountMenu } from "./AccountMenu.js";
+import { SidebarNav, sidebarRowClass } from "./SidebarNav.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { GearIcon } from "./icons.js";
 import { Button } from "./ui/Button.js";
 
 /**
@@ -25,6 +27,8 @@ export function Sidebar() {
   const messages = useChatStore((s) => s.messages);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const openConversation = useUiStore((s) => s.openConversation);
+  const page = useUiStore((s) => s.page);
+  const setPage = useUiStore((s) => s.setPage);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
@@ -123,7 +127,22 @@ export function Sidebar() {
             );
           });
         }}
-        renderFooter={(collapsed) => <AccountMenu collapsed={collapsed} />}
+        topNav={<SidebarNav />}
+        footer={
+          <div className="flex flex-col gap-0.5">
+            {/* 设置固定在栏底、账户之上：用户要的「设置放左下角」。 */}
+            <button
+              type="button"
+              aria-current={page === "settings" ? "page" : undefined}
+              onClick={() => setPage("settings")}
+              className={sidebarRowClass(page === "settings")}
+            >
+              <GearIcon width={16} height={16} aria-hidden="true" className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">设置</span>
+            </button>
+            <AccountMenu />
+          </div>
+        }
       />
       {deleteTarget ? (
         <ConfirmDialog

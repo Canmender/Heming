@@ -33,7 +33,7 @@ const EDIT_ROWS: ShortcutRow[] = [
 /**
  * 导航组：从 `PALETTE_PAGES` 里取「有 Alt 数字」的页面。
  *
- * 顺序直接用 `PALETTE_PAGES` 的数组顺序——顶栏「页面」菜单、命令面板与这里读的是同一份正表，
+ * 顺序直接用 `PALETTE_PAGES` 的数组顺序——侧栏「主导航」、命令面板与这里读的是同一份正表，
  * 三处顺序天然一致，不再二次排序（此前按数字值排会得到 1、2、5、6、8、0 这种对不上号的顺序）。
  */
 function navRows(): ShortcutRow[] {

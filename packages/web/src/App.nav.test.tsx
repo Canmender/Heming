@@ -1,9 +1,9 @@
 /**
- * 新外壳（顶栏 + 常驻会话侧栏 + 页面菜单）：替换旧的「Ctrl+B 导航栏」测试（d.68 → 精简外壳）。
+ * 新外壳（顶栏 + 常驻会话侧栏）：替换旧的「Ctrl+B 导航栏」测试（d.68 → 精简外壳）。
  *
- * 覆盖 REFACTOR-BRIEF 的 T3 口径 1-5：
- *   1. 已登录壳里没有 nav[aria-label="主导航"] / .w-14 图标轨；
- *   2. header[data-testid="topbar"] 存在；「打开页面菜单」→ role=menu「页面菜单」→ 点「设置」后 h1 是设置；
+ * d.147.4.89 起导航回到侧栏最顶部（顶栏「页面」下拉已删除），覆盖口径：
+ *   1. 已登录壳里 nav[aria-label="主导航"] 常驻在会话侧栏里，没有界面级折叠；
+ *   2. header[data-testid="topbar"] 存在；顶栏不再有「打开页面菜单」；侧栏导航点「设置」切页；
  *      且无 sessionStorage 时默认页是会话（chat）；
  *   3. Sidebar 常驻：aria-label「新建会话」+ h2「会话列表」，点「新对话」进入会话页；
  *   4. 浏览器（无 window.heming）TopBar 也渲染且类含 h-10；桌面根节点类含 desktop-titlebar；
@@ -105,8 +105,8 @@ afterEach(() => {
   delete (window as unknown as Record<string, unknown>).heming;
 });
 
-describe("新外壳：顶栏 + 常驻会话侧栏 + 页面菜单", () => {
-  it("默认页是会话（无 sessionStorage），壳里没有导航轨", async () => {
+describe("新外壳：顶栏 + 常驻会话侧栏 + 侧栏导航", () => {
+  it("默认页是会话（无 sessionStorage），主导航常驻在侧栏里", async () => {
     // 本文件第一条用例：initialPage 是 ui.ts 模块初始化时的 page（早于任何 setState）。
     expect(initialPage).toBe("chat");
     useUiStore.setState({ page: initialPage });
@@ -117,55 +117,60 @@ describe("新外壳：顶栏 + 常驻会话侧栏 + 页面菜单", () => {
     await screen.findByTestId("topbar");
     // 默认页 = 会话：AssistantPage 的 sr-only h1。
     expect(await screen.findByRole("heading", { level: 1, name: "会话" })).toBeInTheDocument();
-    // 旧的左侧图标导航轨已被删除。
-    expect(container.querySelector('nav[aria-label="主导航"]')).toBeNull();
+    // d.147.4.89：导航回到侧栏顶部，常驻且不可折叠（不再有左侧图标轨）。
+    const nav = screen.getByRole("navigation", { name: "主导航" });
+    expect(nav).toBeInTheDocument();
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((b) => b.textContent?.trim() ?? ""),
+    ).toEqual(["插件", "团队", "模型", "知识库"]);
     expect(container.querySelector(".w-14")).toBeNull();
     // 空会话列表 → 主区是新建会话空态（不挂 ChatPage）。
     expect(await screen.findByText("开始新会话")).toBeInTheDocument();
   });
 
-  it("顶栏存在；页面菜单只有一个真源、点「设置」切页", async () => {
+  it("侧栏顶部主导航：顺序固定、点页切页并标 aria-current；顶栏不再有页面菜单", async () => {
     useUiStore.setState({ page: "home" });
     render(<App />);
 
     expect(await screen.findByTestId("topbar")).toBeInTheDocument();
-    // 旧图标轨的入口也不应存在
-    expect(screen.queryByRole("navigation", { name: "主导航" })).toBeNull();
+    // 顶栏「页面」下拉随导航回侧栏而删除
+    expect(screen.queryByRole("button", { name: "打开页面菜单" })).toBeNull();
+    expect(screen.queryByRole("menu", { name: "页面菜单" })).toBeNull();
 
-    const trigger = screen.getByRole("button", { name: "打开页面菜单" });
-    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    const aside = screen
+      .getByRole("heading", { level: 2, name: "会话列表" })
+      .closest("aside") as HTMLElement;
+    const nav = within(aside).getByRole("navigation", { name: "主导航" });
+    // 固定顺序：插件 → 团队 → 模型 → 知识库（插件页排在知识库之后，本用例未装插件）
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((b) => b.textContent?.trim() ?? ""),
+    ).toEqual(["插件", "团队", "模型", "知识库"]);
 
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    const menu = await screen.findByRole("menu", { name: "页面菜单" });
-    expect(menu).toBeInTheDocument();
+    const team = within(nav).getByRole("button", { name: "团队" });
+    fireEvent.click(team);
+    await waitFor(() => expect(useUiStore.getState().page).toBe("team"));
+    expect(team).toHaveAttribute("aria-current", "page");
 
-    // 菜单项 = PALETTE_PAGES 的页面集合（未装插件页时恰好 8 项，文字就是页面名）。
-    const labels = within(menu)
-      .getAllByRole("menuitem")
-      .map((item) => item.textContent?.trim() ?? "");
-    expect(labels.sort()).toEqual(
-      ["主页", "团队", "会话", "插件", "协作", "知识库", "模型", "设置"].sort(),
-    );
-    // 当前页有 aria-current="page"
-    expect(within(menu).getByRole("menuitem", { name: "主页" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "设置" }));
+    // 栏底「设置」行（在账户按钮之上）
+    const settings = within(aside).getByRole("button", { name: "设置" });
+    fireEvent.click(settings);
     await waitFor(() => expect(useUiStore.getState().page).toBe("settings"));
+    expect(settings).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { level: 1, name: "设置" })).toBeInTheDocument();
   });
 
-  it("右侧动作区：命令面板入口仍在（aria-label 由导航轨的「全局搜索 Ctrl K」改为「打开命令面板」）", async () => {
+  it("顶栏右侧动作区：命令面板 / 快捷键帮助仍在；页面菜单入口已随导航回侧栏删除", async () => {
     useUiStore.setState({ page: "home" });
     render(<App />);
 
     await screen.findByTestId("topbar");
     expect(screen.getByRole("button", { name: "打开命令面板" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "快捷键帮助" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开页面菜单" })).toBeNull();
   });
 
   it("会话侧栏常驻：h2「会话列表」+「新建会话」；点「新对话」进入会话页", async () => {

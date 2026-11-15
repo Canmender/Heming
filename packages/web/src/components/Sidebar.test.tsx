@@ -6,11 +6,19 @@ import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 
 /**
+ * 插件页入口由 SidebarNav 从 `usePluginPageEntries()` 读；测试里替换成可控数组，
+ * 其余 store（pluginStore/widgets）不参与，避免用例之间互相污染。
+ */
+const pluginPages = vi.hoisted(() => ({ entries: [] as Array<Record<string, unknown>> }));
+vi.mock("../lib/pages/usePluginPages.js", () => ({
+  usePluginPageEntries: () => pluginPages.entries,
+}));
+
+/**
  * 常驻会话侧栏（Sidebar）。
  *
- * 精简外壳把 ConversationRail 从会话页搬到全局 Sidebar：数据与动作仍由 store 提供，
- * 所以原先 AssistantPage.test 里的 rail 行为（新建/改名/删除/搜索/分页/高亮）与
- * 「命令面板 new-session 意图」用例迁到这里；AssistantPage 只保留页面标题与主区。
+ * d.147.4.89：导航回到侧栏最顶部（插件/团队/模型/知识库 + 已装插件页），
+ * 折叠已彻底删除；栏底是「设置」行 + 账户行（账户菜单里仍有设置/退出登录）。
  */
 const systemAgent = {
   id: "system-assistant",
@@ -74,6 +82,8 @@ beforeEach(() => {
   localStorage.clear();
   window.sessionStorage.clear();
   vi.restoreAllMocks();
+  // 未装任何插件页时，主导航只有固定四项。
+  pluginPages.entries = [];
   // 栏底账户入口读真实 auth store（名字进 aria-label / 菜单文案）。
   useAuthStore.setState({
     token: "t1",
@@ -292,9 +302,8 @@ describe("Sidebar · 搜索与分页", () => {
 /**
  * d.147.4.88：身份从顶栏搬进侧栏左下角。
  *
- * 栏头只留「会话列表」（产品名在顶栏手写标志里），栏底原来的隐私文案换成账户入口；
- * 收起态（60px 窄栏）只留头像，名字留给展开态——窄栏连会话名都显示不下，
- * 再塞一个名字会把头像挤变形。
+ * 栏头只留「会话列表」（产品名在顶栏手写标志里），栏底原来的隐私文案换成账户入口。
+ * d.147.4.89 起折叠被彻底删除（没有 60px 收起态），账户行始终是「头像 + 名字」整行。
  */
 describe("Sidebar · 栏头与账户入口", () => {
   it("栏头只有一行「会话列表」：不再复读「和鸣」，也没有隐私文案", () => {
@@ -333,15 +342,121 @@ describe("Sidebar · 栏头与账户入口", () => {
     expect(screen.queryByRole("dialog", { name: "退出登录" })).toBeNull();
   });
 
-  it("收起态只留头像（按钮内不显示名字），「展开会话列表」恢复名字", () => {
+  it("折叠已彻底删除：没有收起/展开按钮，栏宽固定为展开态", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "收起会话列表" }));
 
-    const collapsedAccount = screen.getByRole("button", { name: "账户：爱丽丝" });
-    expect(collapsedAccount.textContent).not.toContain("爱丽丝");
-    expect(screen.getByRole("button", { name: "展开会话列表" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "收起会话列表" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开会话列表" })).toBeNull();
+    const aside = screen
+      .getByRole("heading", { level: 2, name: "会话列表" })
+      .closest("aside") as HTMLElement;
+    expect(aside.className).toContain("w-[268px]");
+  });
+});
 
-    fireEvent.click(screen.getByRole("button", { name: "展开会话列表" }));
-    expect(screen.getByRole("button", { name: "账户：爱丽丝" }).textContent).toContain("爱丽丝");
+/** 侧栏顶部导航区（d.147.4.89）：插件 → 团队 → 模型 → 知识库 →（已装插件页）。 */
+function sideNav(): HTMLElement {
+  return screen.getByRole("navigation", { name: "主导航" });
+}
+
+function asideOfSidebar(): HTMLElement {
+  return screen
+    .getByRole("heading", { level: 2, name: "会话列表" })
+    .closest("aside") as HTMLElement;
+}
+
+function navLabels(): string[] {
+  return within(sideNav())
+    .getAllByRole("button")
+    .map((button) => button.textContent?.trim() ?? "");
+}
+
+describe("Sidebar · 侧栏导航", () => {
+  it("导航顺序固定：插件 → 团队 → 模型 → 知识库；位于 aside 顶部（会话列表之前）", () => {
+    render(<Sidebar />);
+
+    expect(navLabels()).toEqual(["插件", "团队", "模型", "知识库"]);
+    const aside = asideOfSidebar();
+    const nav = within(aside).getByRole("navigation", { name: "主导航" });
+    // 导航在栏头「会话列表」之前（DOM 顺序 = 视觉顺序）
+    const heading = within(aside).getByRole("heading", { level: 2, name: "会话列表" });
+    expect(
+      nav.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("点导航项各自 setPage，当前页标 aria-current=\"page\"", async () => {
+    useUiStore.setState({ page: "team" });
+    render(<Sidebar />);
+
+    expect(within(sideNav()).getByRole("button", { name: "团队" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(sideNav()).getByRole("button", { name: "插件" })).not.toHaveAttribute(
+      "aria-current",
+    );
+
+    const pages: Array<[string, string]> = [
+      ["插件", "plugins"],
+      ["模型", "model"],
+      ["知识库", "vault"],
+    ];
+    for (const [label, page] of pages) {
+      fireEvent.click(within(sideNav()).getByRole("button", { name: label }));
+      await waitFor(() => expect(useUiStore.getState().page).toBe(page));
+      expect(within(sideNav()).getByRole("button", { name: label })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    }
+  });
+
+  it("栏底「设置」行在账户按钮之上；点它切到设置页并标 aria-current", async () => {
+    render(<Sidebar />);
+
+    const aside = asideOfSidebar();
+    const settings = within(aside).getByRole("button", { name: "设置" });
+    const account = within(aside).getByRole("button", { name: "账户：爱丽丝" });
+    // 设置行在上、账户行在下
+    expect(
+      settings.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(settings);
+    await waitFor(() => expect(useUiStore.getState().page).toBe("settings"));
+    expect(within(aside).getByRole("button", { name: "设置" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    // 账户菜单仍保留「设置」「退出登录」两个入口
+    fireEvent.click(within(aside).getByRole("button", { name: "账户：爱丽丝" }));
+    const menu = await screen.findByRole("menu", { name: "账户菜单" });
+    expect(within(menu).getByRole("menuitem", { name: "设置" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
+  });
+
+  it("已装插件页入口排在知识库之后，点击进入 plugin: 路由", async () => {
+    pluginPages.entries = [
+      {
+        pageId: "plugin:acme.page-kit",
+        pluginId: "acme.page-kit",
+        title: "采集看板",
+        icon: "chart",
+        source: "declarative",
+        installedAt: "2026-11-09T03:00:00.000Z",
+        available: true,
+      },
+    ];
+    render(<Sidebar />);
+
+    expect(navLabels()).toEqual(["插件", "团队", "模型", "知识库", "采集看板"]);
+
+    fireEvent.click(within(sideNav()).getByRole("button", { name: "采集看板" }));
+    await waitFor(() => expect(useUiStore.getState().page).toBe("plugin:acme.page-kit"));
+    expect(within(sideNav()).getByRole("button", { name: "采集看板" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 });

@@ -78,7 +78,7 @@ export function AssistantPage() {
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
           <EmptyState
-            className="max-w-[360px]"
+            className="max-w-[440px]"
             titleAs="h2"
             title="开始新会话"
             desc="每段会话彼此独立保存；也可以从左侧会话列表继续历史会话。"

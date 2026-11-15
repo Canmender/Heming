@@ -453,32 +453,74 @@ async function ensureLogin(cdp, sid, base) {
   await sleep(900);
 }
 
+/**
+ * 页面名 → Alt+数字键（与 `packages/web/src/App.tsx` 的 `SHORTCUT_PAGES` 对应）。
+ *
+ * d.147.4.89 起导航只在侧栏：插件 / 团队 / 模型 / 知识库 + 已装插件页，设置落在栏底。
+ * 主页、会话、协作不占侧栏行，只能退回键盘捷径；模型 / 知识库 / 插件页没有键位，
+ * 必须靠上面那层侧栏点击。两边都失败才算这个页面进不去。
+ */
+const SHORTCUT_KEYS = {
+  主页: "1",
+  团队: "2",
+  协作: "5",
+  设置: "6",
+  会话: "8",
+  插件: "0",
+};
+
 async function goPage(cdp, sid, label) {
-  // 新外壳没有左侧导航轨：页面入口收进顶栏的「页面」菜单。先点开菜单，再按页面名点菜单项。
-  const opened = await evalJs(
+  // 侧栏是唯一常驻的页面入口（顶栏「页面」菜单已随 d.147.4.89 退场）。
+  // 先在 nav[aria-label="主导航"] 里找同名一行；「设置」不在 nav 内，落在栏底 footer。
+  const sidebarClicked = await evalJs(
     cdp,
     sid,
     `(() => {
-      const trigger = document.querySelector('button[aria-label="打开页面菜单"]');
-      if (!trigger) return false;
-      trigger.click();
-      return true;
+      const wanted = ${JSON.stringify(label)};
+      const clickable = (el) => !!el && el.getAttribute("aria-disabled") !== "true";
+      const rows = [...document.querySelectorAll('nav[aria-label="主导航"] button, nav[aria-label="主导航"] a')];
+      const inNav = rows.find((el) => clickable(el) && el.innerText.trim() === wanted);
+      if (inNav) { inNav.click(); return "nav"; }
+      // 栏底「设置」在 aside 里、nav 之外：文案完全相等才算，避免误点会话行里的按钮。
+      const inFooter = [...document.querySelectorAll("aside button, aside a")].find(
+        (el) => clickable(el) && el.innerText.trim() === wanted && !el.closest('nav[aria-label="主导航"]'),
+      );
+      if (inFooter) { inFooter.click(); return "footer"; }
+      return "";
     })()`,
   );
-  if (!opened) throw new Error(`页面菜单按钮不存在：${label}`);
-  // 菜单是受控浮层，点开后要等 React 下一拍挂上 [role=menu]，否则查不到菜单项。
-  await waitFor(cdp, sid, `!!document.querySelector('[role="menu"]')`, 8000, "页面菜单");
-  const clicked = await evalJs(
-    cdp,
-    sid,
-    `(() => {
-      const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.innerText.trim() === ${JSON.stringify(label)});
-      if (!item) return false;
-      item.click();
-      return true;
-    })()`,
-  );
-  if (!clicked) throw new Error(`页面菜单项不存在：${label}`);
+
+  if (sidebarClicked) {
+    // 页内有同名按钮（如设置页的某个动作）时，点完不一定真的切页；
+    // 用侧栏的当前页标记确认（`aria-current="page"`），再等正文渲染。
+    await waitFor(
+      cdp,
+      sid,
+      `[...document.querySelectorAll('[aria-current="page"]')].some((el) => el.innerText.trim() === ${JSON.stringify(label)})`,
+      8000,
+      `导航高亮：${label}`,
+    );
+  } else {
+    const key = SHORTCUT_KEYS[label];
+    if (!key) throw new Error(`页面入口不存在（试过侧栏与快捷键）：${label}`);
+    // Alt+数字键的监听器在 App.tsx：要求 Alt+数字、焦点不在输入框、且没有打开中的弹窗，
+    // 所以先点 body 把焦点从搜索/输入框收回；万一还挂着弹窗，先 Escape 掉再派发。
+    await evalJs(
+      cdp,
+      sid,
+      `(() => {
+        document.body.click();
+        if (document.querySelector('[role="dialog"]')) {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        }
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, altKey: true, bubbles: true }),
+        );
+        return true;
+      })()`,
+    );
+  }
+
   await waitFor(cdp, sid, `(() => { const m = document.querySelector('main'); return !!m && m.innerText.trim().length > 10; })()`, 15000, label);
   await sleep(500);
 }

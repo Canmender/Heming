@@ -103,6 +103,9 @@ describe("没有会话：空态与新建入口", () => {
     expect(screen.getByText("开始新会话")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeInTheDocument();
     expect(screen.queryByTestId("chat-page")).toBeNull();
+    // d.147.4.90：空态收在 440px 列宽里（与消息列 960 的宽松留白区分开）
+    const empty = screen.getByRole("heading", { level: 2, name: "开始新会话" }).closest(".ui-empty");
+    expect(empty?.className).toContain("max-w-[440px]");
   });
 
   it("点新建会话 → 直接建 fresh 会话（单智能体，不再选人）并打开", async () => {

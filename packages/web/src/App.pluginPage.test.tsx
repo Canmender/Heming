@@ -1,6 +1,6 @@
 /**
- * 插件页面（d.124）在真实 App 壳里的接线（精简外壳后入口在顶栏「页面菜单」）：
- *   1. 装一个带 `contributions.page` 的声明式插件 → 页面菜单里出现入口；
+ * 插件页面（d.124）在真实 App 壳里的接线（导航回侧栏后入口在侧栏「主导航」末尾）：
+ *   1. 装一个带 `contributions.page` 的声明式插件 → 侧栏导航里出现入口（排在知识库之后）；
  *   2. 点入口 → 路由进入插件页面（渲染宿主按 blocks 渲染的声明式页）；
  *   3. 卸载后入口消失、停在页上时拨回主页。
  */
@@ -95,30 +95,24 @@ afterEach(() => {
   useUiStore.setState({ page: "home" });
 });
 
-/** 打开顶栏「页面菜单」，返回菜单节点。 */
-async function openPageMenu(): Promise<HTMLElement> {
-  fireEvent.click(await screen.findByRole("button", { name: "打开页面菜单" }));
-  return screen.findByRole("menu", { name: "页面菜单" });
+/** 侧栏「主导航」。插件页入口渲染在固定四项（插件/团队/模型/知识库）之后。 */
+function sideNav(): HTMLElement {
+  return screen.getByRole("navigation", { name: "主导航" });
 }
 
-describe("插件页面接线（d.124，入口在顶栏页面菜单）", () => {
-  it("装好带页面的插件后页面菜单出现入口，点进去渲染声明式页面", async () => {
+describe("插件页面接线（d.124，入口在侧栏导航）", () => {
+  it("装好带页面的插件后侧栏出现入口，点进去渲染声明式页面", async () => {
     render(<App />);
     await screen.findByTestId("topbar");
+    await screen.findByRole("navigation", { name: "主导航" });
 
-    // 先确认没装时菜单里没有入口
-    const before = await openPageMenu();
-    expect(within(before).queryByRole("menuitem", { name: "采集看板" })).toBeNull();
-    // Esc 关闭菜单（菜单容器接键，冒泡到 window 的实现同样生效）
-    fireEvent.keyDown(before, { key: "Escape" });
-    await waitFor(() =>
-      expect(screen.queryByRole("menu", { name: "页面菜单" })).toBeNull(),
-    );
+    // 先确认没装时导航里没有入口；顶栏「页面菜单」也已随导航回侧栏删除
+    expect(within(sideNav()).queryByRole("button", { name: "采集看板" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开页面菜单" })).toBeNull();
 
     pluginStore.install(JSON.stringify(PAGE_MANIFEST));
 
-    const menu = await openPageMenu();
-    fireEvent.click(await within(menu).findByRole("menuitem", { name: "采集看板" }));
+    fireEvent.click(await within(sideNav()).findByRole("button", { name: "采集看板" }));
 
     await waitFor(() => expect(useUiStore.getState().page).toBe(`plugin:${PAGE_PLUGIN_ID}`));
     // 页面内容来自清单 blocks（标题/统计块）
@@ -131,16 +125,15 @@ describe("插件页面接线（d.124，入口在顶栏页面菜单）", () => {
     pluginStore.install(JSON.stringify(PAGE_MANIFEST));
     render(<App />);
     await screen.findByTestId("topbar");
-    const menu = await openPageMenu();
-    fireEvent.click(await within(menu).findByRole("menuitem", { name: "采集看板" }));
+    fireEvent.click(await within(sideNav()).findByRole("button", { name: "采集看板" }));
     await waitFor(() => expect(useUiStore.getState().page).toBe(`plugin:${PAGE_PLUGIN_ID}`));
 
     pluginStore.remove(PAGE_PLUGIN_ID);
 
     await waitFor(() => expect(useUiStore.getState().page).toBe("home"));
-    expect(screen.queryByRole("menuitem", { name: "采集看板" })).toBeNull();
-    // 重新打开菜单：入口确实没了
-    const after = await openPageMenu();
-    expect(within(after).queryByRole("menuitem", { name: "采集看板" })).toBeNull();
+    // 导航入口确实没了（留在导航里会点出一个空页面）
+    await waitFor(() =>
+      expect(within(sideNav()).queryByRole("button", { name: "采集看板" })).toBeNull(),
+    );
   });
 });
