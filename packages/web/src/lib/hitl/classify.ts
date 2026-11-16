@@ -79,9 +79,16 @@ const EXACT_RISK: Record<string, RiskLevel> = {
   // 任务清单（d.154）：只写会话级计划状态，不碰文件与配置 → read（不弹确认卡）。
   // 必须显式登记：名字里带 `write`，否则会命中 DANGER_WORDS 变成 danger，永远绕不过确认。
   todo_write: "read",
+  // 读回被截断的完整输出（d.181）：只读内存里已有的文本，不碰磁盘、无副作用。
+  tool_output_read: "read",
   // 本机命令（d.164）：能做的事没有边界（删库、改系统、发请求都在一条命令之内），
   // 因此固定 danger：既不能被「记住允许」放行，也不受 floor 影响，每条都要人看一眼。
   run_command: "danger",
+  // 后台作业（d.180）：读输出 / 列作业只读；停作业会杀进程树，按写处理
+  // （不按 danger：它改的是自己起的作业，不碰文件系统与用户目录）。
+  command_output: "read",
+  command_list: "read",
+  command_kill: "write",
   // 只读子代理（d.162）：子代理只能读文件，自己不起副作用 → read。
   // 注意它不是「免检」：子代理在子会话里调用的工具仍然过主桥的白名单（只读三件），
   // 主对话这一层看到的就是一次只读调用，弹确认卡只会打断「翻资料」这种正常动作。
@@ -230,8 +237,12 @@ const DISPLAY_NAMES: Record<string, string> = {
   file_image: "查看图片",
   file_undo: "撤销上次写入",
   todo_write: "更新任务清单",
+  tool_output_read: "读取完整输出",
   agent_task: "派子代理",
   run_command: "运行命令",
+  command_output: "读取后台输出",
+  command_list: "列出后台命令",
+  command_kill: "停止后台命令",
   self_memory_list: "列出记忆",
   self_memory_write: "写入记忆",
   self_memory_remove: "删除记忆",
@@ -516,9 +527,19 @@ function fileToolSummary(args: Record<string, unknown>): string | null {
  * 只要参数里出现「像密钥的字段名」（api_key / token / password …），
  * 整条摘要就退化成 `***`——此时无法确定哪个字段是「目标」，
  * 与其猜错把密钥摆到界面上，不如什么都不显示。
+ *
+ * `name` 可选：部分工具的参数（如后台作业的 `job_id`）需要工具名才能给出
+ * 「读作业 X 的输出」这种人话摘要，不能只靠字段名猜。
  */
-export function summarizeArgs(argsJson: string): string {
+export function summarizeArgs(argsJson: string, name?: string): string {
   const args = parseArgs(argsJson);
+  // 后台作业（d.180）：摘要只放作业 id / 规模，输出正文（可能含敏感信息）不进确认卡。
+  if (name === "command_list") return "列出后台作业";
+  if (name === "command_output" || name === "command_kill") {
+    const jobId = typeof args.job_id === "string" ? args.job_id.trim() : "";
+    if (name === "command_output") return jobId ? `读作业 ${jobId} 的输出` : "读作业输出";
+    return jobId ? `停止作业 ${jobId}` : "停止作业";
+  }
   // 补丁参数先单独处理：整份补丁既敏感又不是用户想看的信息
   const patch = patchSummary(args);
   if (patch) return patch;
@@ -617,7 +638,7 @@ export function classifyCall(
     argsJson: argsJson ?? "",
     displayName: displayNameOf(name, hints),
     risk: resolveRisk(name, hints),
-    summary: summarizeArgs(argsJson),
+    summary: summarizeArgs(argsJson, name),
     source: source ?? sourceOf(name),
   };
 }

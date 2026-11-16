@@ -8,6 +8,7 @@ import {
   selfProvider,
   shellProvider,
   todoProvider,
+  toolOutputProvider,
   toneProvider,
   vaultProvider,
   webToolsProvider,
@@ -38,6 +39,7 @@ export const capabilityRegistry = new CapabilityRegistry()
   .register(filesProvider)
   .register(shellProvider)
   .register(todoProvider)
+  .register(toolOutputProvider)
   .register(webToolsProvider)
   .register(infohubProvider)
   .register(pluginMarketProvider)
@@ -56,6 +58,7 @@ export {
   shellProvider,
   teamProvider,
   todoProvider,
+  toolOutputProvider,
   toneProvider,
   vaultProvider,
   webToolsProvider,

@@ -53,6 +53,8 @@ export function initSchema(db: DatabaseSyncType): void {
       payload TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL, recalled_at TEXT,
       enc TEXT NOT NULL DEFAULT 'plain', cipher TEXT, chain_kid TEXT, n INTEGER
     );
+    -- d.197：会话内容搜索按 conv_id 扫最近若干条；没有这条索引时每个会话都要全表扫。
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conv_id, created_at);
     CREATE TABLE IF NOT EXISTS message_reads (
       conv_id TEXT NOT NULL, user_id TEXT NOT NULL, read_at TEXT NOT NULL,
       PRIMARY KEY (conv_id, user_id)

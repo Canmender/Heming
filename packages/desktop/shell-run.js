@@ -15,6 +15,11 @@
  *    自己解析命令行只会多出一层「解释器差异」的漏洞，而用户已经在 HITL 上看过原文。
  *
  * 渲染层拿不到 pid、也不能指定解释器或环境变量——它只能给「根清单 + 工作目录 + 命令 + 超时」。
+ *
+ * d.180 追加「后台作业」：长命令（构建、装依赖、跑全量测试）不能靠前台 120s 超时去等，
+ * 于是多了一条 `shell:run` 的 `background:true` 分支与 `shell:jobs` / `shell:job-output` /
+ * `shell:job-kill` 三个通道。信任模型与前缀完全一致：同一套可写根校验、同一个 fail-closed
+ * 来源检查；区别只在「结果怎么取」——后台作业的输出先缓在内存里，由渲染层按需增量拉取。
  */
 
 const { spawn } = require("node:child_process");
@@ -33,6 +38,20 @@ const MAX_COMMAND_CHARS = 2000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 1_000;
+
+/* ─────────────────────────── 后台作业常量（d.180） ─────────────────────────── */
+
+/** 已完成作业的保留上限：只留最近 20 个，避免长会话里 jobs 表无限增长（每个最多 1MB 输出）。 */
+const MAX_BACKGROUND_JOBS = 20;
+
+/** 单个作业的未读输出上限：超出后丢最旧字节并累计 dropped（后台作业不能像前台那样「超了就杀」）。 */
+const MAX_JOB_BYTES = 512 * 1024;
+
+/** 作业硬上限 30 分钟：到点杀进程树并标记结束，避免忘记收尾的作业在后台跑一整天。 */
+const MAX_JOB_MS = 30 * 60 * 1000;
+
+/** `shell:job-output` 的最长等待：渲染层可以等到作业结束，但一次调用最多挂 30s。 */
+const MAX_JOB_WAIT_MS = 30_000;
 
 /** 一次只跑一条命令：并发命令的输出交错在 HITL 与 UI 上都难以解释，也让超时语义变乱。 */
 let runQueue = Promise.resolve();
@@ -164,6 +183,40 @@ function killTree(child) {
 }
 
 /**
+ * 校验命令文本（前台与后台共用）。
+ *
+ * 为什么抽出来：后台作业只是「换一种等待方式」，不能因为不等结果就让非法命令
+ * 绕过主进程的校验——渲染层的校验永远只算提示，主进程必须再判一次。
+ *
+ * @param {object} params
+ * @returns {{ok:true,command:string}|{ok:false,code:string,error:string}}
+ */
+function normalizeCommand(params) {
+  const command = typeof (params && params.command) === "string" ? params.command.trim() : "";
+  if (!command) return fail("invalid-command", "命令不能为空");
+  if (command.includes("\0")) return fail("invalid-command", "命令里含非法字符（NUL）");
+  if (command.length > MAX_COMMAND_CHARS) {
+    return fail("invalid-command", `命令过长（${command.length} 字符，上限 ${MAX_COMMAND_CHARS}）`);
+  }
+  return { ok: true, command };
+}
+
+/**
+ * 取本次调用的 runId：渲染层会给（用于 `shell:cancel` 定向取消），缺省时自己造一个。
+ *
+ * 为什么后台也要它：`pendingCancel` 的「校验目录期间被取消」语义对后台同样成立——
+ * 后台没有串行队列，取消窗口只有 resolveWorkingDir 的那几毫秒，但存在就得处理。
+ *
+ * @param {object} params
+ * @returns {string}
+ */
+function deriveRunId(params) {
+  return typeof (params && params.runId) === "string" && params.runId.trim()
+    ? params.runId.trim()
+    : `local-${Date.now().toString(36)}-${localSeq++}`;
+}
+
+/**
  * 执行一条命令。
  *
  * @param {object} params
@@ -177,18 +230,11 @@ function killTree(child) {
  */
 async function runCommand(params, spawnImpl = spawn) {
   const roots = normalizeRoots(params && params.roots);
-  const command = typeof (params && params.command) === "string" ? params.command.trim() : "";
-  if (!command) return fail("invalid-command", "命令不能为空");
-  if (command.includes("\0")) return fail("invalid-command", "命令里含非法字符（NUL）");
-  if (command.length > MAX_COMMAND_CHARS) {
-    return fail("invalid-command", `命令过长（${command.length} 字符，上限 ${MAX_COMMAND_CHARS}）`);
-  }
+  const checked = normalizeCommand(params);
+  if (!checked.ok) return checked;
+  const command = checked.command;
 
-  // 渲染层会给 runId；缺省时自己造一个（老调用方/测试），只是无法被 cancel 定向取消。
-  const runId =
-    typeof (params && params.runId) === "string" && params.runId.trim()
-      ? params.runId.trim()
-      : `local-${Date.now().toString(36)}-${localSeq++}`;
+  const runId = deriveRunId(params);
 
   const rawTimeout = params && params.timeoutMs;
   const timeoutMs =
@@ -314,6 +360,317 @@ async function runCommand(params, spawnImpl = spawn) {
   );
 }
 
+/* ─────────────────────────── 后台命令作业（d.180） ─────────────────────────── */
+
+/**
+ * 后台作业表：jobId → job（字段见契约 typedef）。
+ *
+ * 为什么放在模块级：一个作业的生命周期跨越多条 IPC（启动 / 轮询 / 杀掉），
+ * 渲染层只在启动时拿到 jobId，之后每次调用都靠它回表；没有这张表，
+ * 后台作业就只能靠「一条 invoke 一直挂着」，那又退化成前台调用了。
+ */
+const jobs = new Map();
+
+let jobSeq = 0;
+
+/**
+ * 生成 jobId。
+ *
+ * 为什么不复用 runId：前台 runId 由渲染层给、可以重复；作业表的键必须由主进程发，
+ * 且不能与历史 job 撞车（否则轮询会读到别人的输出）。
+ */
+function makeJobId() {
+  jobSeq += 1;
+  return `job-${Date.now().toString(36)}-${jobSeq.toString(36)}`;
+}
+
+/** 当前未读缓冲里某条流的字节数（chunk 数很少，线性求和足够）。 */
+function bufferedBytes(job, stream) {
+  let total = 0;
+  for (const buf of job[stream]) total += buf.length;
+  return total;
+}
+
+/**
+ * 把未读缓冲裁到 MAX_JOB_BYTES 以内。
+ *
+ * 为什么丢「最旧」而不是「拒绝新数据」：后台作业没人等结果，拒绝新数据会让用户
+ * 永远看不到最后（也是最关心的报错）；丢开头只是损失历史，并在 dropped 里如实记账。
+ * stdout/stderr 是两条管道、没有可靠的全局先后，所以每轮先丢当前更大的那条流的最旧
+ * chunk（必要时 subarray 部分丢弃），保证总内存一定收敛到上限。
+ */
+function trimJobBuffer(job) {
+  while (job.captured > MAX_JOB_BYTES) {
+    const outBytes = bufferedBytes(job, "stdout");
+    const errBytes = bufferedBytes(job, "stderr");
+    const stream = outBytes >= errBytes ? "stdout" : "stderr";
+    const list = job[stream];
+    if (list.length === 0) break;
+    const overflow = job.captured - MAX_JOB_BYTES;
+    const first = list[0];
+    const drop = Math.min(first.length, overflow);
+    if (drop >= first.length) list.shift();
+    else list[0] = first.subarray(drop);
+    job.captured -= drop;
+    job.dropped += drop;
+    job.truncated = true;
+  }
+}
+
+/**
+ * 收一块输出：追加进未读缓冲、记账、按上限裁剪。
+ *
+ * 「未读缓冲」是后台作业增量的核心：读走的部分直接从数组里拿掉并清零 captured，
+ * 所以 `shell:job-output` 天然只返回「自上次读取以来」的字节——不需要额外维护读游标，
+ * 也不会因为重复读把同一段输出再回放一遍。
+ */
+function appendJobChunk(job, stream, data) {
+  if (!job.running) return;
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+  if (buf.length === 0) return;
+  job[stream].push(buf);
+  job.produced += buf.length;
+  job.captured += buf.length;
+  trimJobBuffer(job);
+}
+
+/** 唤醒所有正在等「作业结束」的调用（readJobOutput 的 waitMs 分支）。 */
+function wakeJobWaiters(job) {
+  for (const wake of Array.from(job.waiters)) {
+    try {
+      wake();
+    } catch {
+      /* 单个等待者出错不影响其它人 */
+    }
+  }
+}
+
+/**
+ * 等作业结束，最多 waitMs 毫秒。
+ *
+ * 为什么是「登记一个唤醒函数 + 定时器」而不是每作业一个常驻 Promise：
+ * 每次 `shell:job-output` 都可能带自己的 waitMs，登记/摘除最省状态，
+ * 也不会出现等待者泄漏（超时分支必须自己清理）。
+ */
+function waitForJobFinish(job, waitMs) {
+  if (!job.running) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer = null;
+    const wake = () => {
+      job.waiters.delete(wake);
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    job.waiters.add(wake);
+    // 这个定时器不能 unref：等待方正依赖它把 Promise 叫醒，unref 后若无别的句柄，
+    // Node 会直接退出，等待永远不落定。
+    timer = setTimeout(wake, waitMs);
+  });
+}
+
+/**
+ * 收尾一个作业：置结束状态、清硬上限定时器、唤醒等待者、按需淘汰旧作业。
+ *
+ * 为什么幂等：`close`、`error`、30 分钟硬超时三条路径都可能先到，谁先到谁收尾，
+ * 后来者直接返回——否则 exitCode/finishedAt 会被后到的信号覆盖。
+ */
+function finishJob(job, exitCode, signal) {
+  if (!job.running) return;
+  job.running = false;
+  job.finishedAt = Date.now();
+  job.exitCode = typeof exitCode === "number" ? exitCode : null;
+  if (signal) job.signal = signal;
+  job.child = null;
+  if (job.lifespan) {
+    clearTimeout(job.lifespan);
+    job.lifespan = null;
+  }
+  wakeJobWaiters(job);
+  evictFinishedJobs();
+}
+
+/**
+ * 淘汰已完成作业：按 finishedAt 从旧到新删，只留最近 MAX_BACKGROUND_JOBS 个。
+ *
+ * 为什么不动在跑的：跑着的作业正在被轮询，删掉会让用户突然拿到 unknown-job。
+ */
+function evictFinishedJobs() {
+  const finished = [];
+  for (const job of jobs.values()) if (!job.running) finished.push(job);
+  if (finished.length <= MAX_BACKGROUND_JOBS) return;
+  finished.sort((a, b) => (a.finishedAt || 0) - (b.finishedAt || 0));
+  for (let i = 0; i < finished.length - MAX_BACKGROUND_JOBS; i += 1) {
+    jobs.delete(finished[i].id);
+  }
+}
+
+/**
+ * 启动一条后台作业并立刻返回。
+ *
+ * 为什么**不进 `enqueue` 串行队列**：串行队列是给前台命令用的——前台一次一条，
+ * 是为了超时语义清楚、输出不交错；后台作业恰恰要在用户继续用应用时跑，如果也排进
+ * 同一个队列，一条 10 分钟的构建会把之后所有前台命令堵死。更关键的是：enqueue 的
+ * Promise 要等到 close 才 settle，前台 `shell:run` 就会等后台作业结束才返回，
+ * 「后台」就变成了「更慢的前台」。所以这里 spawn 完立即 resolve，
+ * 生命周期完全交给 jobs 表与三个作业通道。
+ *
+ * 校验与前台完全一致（命令文本、可写根、pendingCancel）：后台不是绕过校验的后门。
+ *
+ * @param {object} params 与 runCommand 同形（command/cwd/roots/runId）
+ * @param {Function} [spawnImpl] 测试注入
+ * @returns {Promise<object>} 成功 {ok:true,jobId,pid,cwd}；失败与前台同 code
+ */
+async function startBackground(params, spawnImpl = spawn) {
+  const roots = normalizeRoots(params && params.roots);
+  const checked = normalizeCommand(params);
+  if (!checked.ok) return checked;
+  const command = checked.command;
+  const runId = deriveRunId(params);
+
+  const dir = await resolveWorkingDir(roots, params && params.cwd);
+  if (!dir.ok) return dir;
+
+  if (pendingCancel.delete(runId)) return fail("aborted", "命令在执行前被取消");
+
+  const cwd = dir.cwd.replace(/\\/g, "/");
+  let child = null;
+  try {
+    child = spawnImpl(command, {
+      cwd: dir.cwd,
+      windowsHide: true,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: true,
+    });
+  } catch (e) {
+    return fail("spawn-failed", `无法启动命令解释器：${e && e.message ? e.message : String(e)}`);
+  }
+
+  const job = {
+    id: makeJobId(),
+    command,
+    cwd,
+    child,
+    startedAt: Date.now(),
+    finishedAt: null,
+    exitCode: null,
+    running: true,
+    stdout: [],
+    stderr: [],
+    captured: 0,
+    produced: 0,
+    dropped: 0,
+    truncated: false,
+    timedOut: false,
+    // 契约里的 timer 预留给「每作业超时」；当前硬超时由 lifespan 承担，这里保持形状一致。
+    timer: null,
+    lifespan: null,
+    waiters: new Set(),
+  };
+  jobs.set(job.id, job);
+
+  // 30 分钟硬上限。unref 掉：不让一个 30 分钟的定时器拖住测试/退出；
+  // 作业还在跑时子进程句柄本来就会让事件循环活着，不存在「unref 后提前退出」。
+  job.lifespan = setTimeout(() => {
+    job.timedOut = true;
+    killTree(job.child);
+    finishJob(job, null, "SIGKILL");
+  }, MAX_JOB_MS);
+  if (typeof job.lifespan.unref === "function") job.lifespan.unref();
+
+  const collect = (stream) => (data) => appendJobChunk(job, stream, data);
+  if (child.stdout) child.stdout.on("data", collect("stdout"));
+  if (child.stderr) child.stderr.on("data", collect("stderr"));
+  child.on("error", (e) => {
+    job.error = e && e.message ? e.message : String(e);
+    finishJob(job, null, null);
+  });
+  child.on("close", (code, signal) => finishJob(job, code, signal));
+
+  return { ok: true, jobId: job.id, pid: child && child.pid, cwd };
+}
+
+/**
+ * 增量读取一个作业的输出。
+ *
+ * 为什么「读一次就把缓冲交出去并清空」：后台作业没有唯一的结果回调（用户可能轮询很多次），
+ * 未读缓冲是最直接的增量实现——读走即消费，下一次只拿到新产生的字节，也不需要单独的
+ * 读游标字段。代价是同一段输出不会重复返回，调用方要自己拼接完整日志。
+ *
+ * waitMs 的语义：作业还在跑时可以等它结束，但一次最多等 MAX_JOB_WAIT_MS；
+ * 超时就把当前增量先返回，渲染层下一轮再拉，这样 IPC 不会无限挂住。
+ *
+ * @param {string} jobId
+ * @param {number} [waitMs] 0..MAX_JOB_WAIT_MS
+ * @returns {Promise<object>}
+ */
+async function readJobOutput(jobId, waitMs) {
+  const id = typeof jobId === "string" ? jobId.trim() : "";
+  const job = jobs.get(id);
+  if (!job) return fail("unknown-job", "没有这个作业（可能已被清理）");
+
+  const rawWait = typeof waitMs === "number" && Number.isFinite(waitMs) ? waitMs : 0;
+  const bounded = Math.min(Math.max(Math.floor(rawWait), 0), MAX_JOB_WAIT_MS);
+  if (bounded > 0 && job.running) await waitForJobFinish(job, bounded);
+
+  const stdoutChunks = job.stdout;
+  const stderrChunks = job.stderr;
+  job.stdout = [];
+  job.stderr = [];
+  job.captured = 0;
+
+  return {
+    ok: true,
+    jobId: job.id,
+    running: job.running,
+    exitCode: job.exitCode,
+    stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+    stderr: Buffer.concat(stderrChunks).toString("utf8"),
+    truncated: job.truncated,
+    droppedBytes: job.dropped,
+  };
+}
+
+/**
+ * 列出作业（所有在跑的 + 最近 MAX_BACKGROUND_JOBS 个已完成的，按登记顺序）。
+ *
+ * bytes 用「累计产出」而不是「当前未读字节」：列表关心这条命令一共产了多少输出，
+ * 未读字节只影响下一次读取能拿到多少。
+ */
+function listJobs() {
+  return Array.from(jobs.values()).map((job) => ({
+    id: job.id,
+    command: job.command,
+    cwd: job.cwd,
+    running: job.running,
+    exitCode: job.exitCode,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    bytes: job.produced,
+    dropped: job.dropped,
+  }));
+}
+
+/**
+ * 杀掉一个后台作业（与前台超时/取消共用同一套 `killTree`，Windows 上是 taskkill /t /f）。
+ *
+ * 为什么只认 jobId 不认 pid：pid 一旦来自渲染层就等于「任意进程终止」权限；
+ * 必须由主进程按自己登记过的 id 查表。返回值里的 killed 只表示「本次调用发出了停止」，
+ * 不代表已经 close——taskkill 与 close 在 Windows 上是异步竞态，调用方要以
+ * `shell:job-output` 的 running 字段为准。
+ *
+ * @param {string} jobId
+ * @returns {object}
+ */
+function killJob(jobId) {
+  const id = typeof jobId === "string" ? jobId.trim() : "";
+  const job = jobs.get(id);
+  if (!job) return fail("unknown-job", "没有这个作业（可能已被清理）");
+  if (!job.running) return { ok: true, jobId: job.id, killed: false, alreadyFinished: true };
+  killTree(job.child);
+  return { ok: true, jobId: job.id, killed: true, alreadyFinished: false };
+}
+
 /**
  * 注册 `shell:run`。
  *
@@ -330,7 +687,10 @@ function registerShellIpc(ipcMain, deps) {
   ipcMain.handle("shell:run", async (event, payload) => {
     if (!isTrustedSender(event)) return untrusted;
     try {
-      return await runCommand(payload || {}, spawnImpl);
+      const body = payload && typeof payload === "object" ? payload : {};
+      // 后台分支：同一个入口、同一套校验，只是「不等结果」而不是「换一个信任模型」。
+      if (body.background === true) return await startBackground(body, spawnImpl);
+      return await runCommand(body, spawnImpl);
     } catch (e) {
       return fail("io", `命令执行失败：${e && e.message ? e.message : String(e)}`);
     }
@@ -346,6 +706,38 @@ function registerShellIpc(ipcMain, deps) {
       return fail("io", `取消失败：${e && e.message ? e.message : String(e)}`);
     }
   });
+
+  // 后台作业列表：只读快照，不包含输出正文（输出统一走 shell:job-output）。
+  ipcMain.handle("shell:jobs", (event) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      return { ok: true, jobs: listJobs() };
+    } catch (e) {
+      return fail("io", `读取作业列表失败：${e && e.message ? e.message : String(e)}`);
+    }
+  });
+
+  // 增量读输出：带 waitMs 时在作业结束时提前返回，不必让渲染层 busy-poll。
+  ipcMain.handle("shell:job-output", async (event, payload) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      const body = payload && typeof payload === "object" ? payload : {};
+      return await readJobOutput(body.jobId, body.waitMs);
+    } catch (e) {
+      return fail("io", `读取作业输出失败：${e && e.message ? e.message : String(e)}`);
+    }
+  });
+
+  // 杀掉一个作业：只认本进程登记过的 jobId（不接受 pid）。
+  ipcMain.handle("shell:job-kill", (event, payload) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      const body = payload && typeof payload === "object" ? payload : {};
+      return killJob(body.jobId);
+    } catch (e) {
+      return fail("io", `终止作业失败：${e && e.message ? e.message : String(e)}`);
+    }
+  });
 }
 
 module.exports = {
@@ -354,8 +746,16 @@ module.exports = {
   cancelRun,
   resolveWorkingDir,
   killTree,
+  startBackground,
+  readJobOutput,
+  killJob,
+  listJobs,
   MAX_CAPTURE_BYTES,
   MAX_COMMAND_CHARS,
   DEFAULT_TIMEOUT_MS,
   MAX_TIMEOUT_MS,
+  MAX_BACKGROUND_JOBS,
+  MAX_JOB_BYTES,
+  MAX_JOB_MS,
+  MAX_JOB_WAIT_MS,
 };

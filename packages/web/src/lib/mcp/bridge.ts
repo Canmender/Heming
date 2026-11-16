@@ -1,6 +1,7 @@
 import type { HttpMcpClient } from "./httpClient.js";
 import type { McpToolRef } from "./types.js";
 import { failureResult, type ToolFailure } from "../toolError.js";
+import { spillText } from "../spill/store.js";
 
 /**
  * 把 MCP 工具桥接成模型能看懂的「函数调用」。
@@ -136,6 +137,13 @@ export interface ToolExecutionResult {
    */
   images?: ToolImage[];
   /**
+   * 本回合真的起了哪些后台作业（d.182）。
+   *
+   * 让编排层知道「还有活没干完」：后台作业不会被 await，模型这一轮可能先收口，
+   * 界面上要能显示「作业还在跑 / 已跑完」。不记这个结构字段，界面就只能从文案里抠 jobId。
+   */
+  jobs?: string[];
+  /**
    * 失败契约（P2-T9）：`ok=false` 时带机器可读的错误码与重试建议。
    *
    * 文本里同样的信息也在（契约行追加在末尾），这里是给上层统计/归因用的结构字段。
@@ -183,13 +191,24 @@ const TRUNCATE_HEAD_RATIO = 2 / 3;
  * ★ 标记必须让模型看得见「这里被截断了」——否则它会基于残文下结论，
  * 而我们拿到的是一个自信的错误答案。标记里带被省略的字符数，模型据此判断要不要换策略。
  */
-export function truncateToolResult(text: string, maxChars: number = MAX_TOOL_RESULT_CHARS): string {
+export function truncateToolResult(
+  text: string,
+  maxChars: number = MAX_TOOL_RESULT_CHARS,
+  /** 估算 token 时只要长度，不该再往溢出存储里塞一份（否则同一条结果被存两次）。 */
+  options: { spill?: boolean } = {},
+): string {
   const raw = String(text ?? "");
   if (raw.length <= maxChars) return raw;
   const head = Math.floor(maxChars * TRUNCATE_HEAD_RATIO);
   const tail = maxChars - head;
-  const dropped = raw.length - maxChars;
-  return `${raw.slice(0, head)}\n\n…（工具结果过长，中间省略 ${dropped} 字符；如需完整内容，请缩小参数范围或到对应服务里查看）…\n\n${raw.slice(-tail)}`;
+  const dropped = raw.length - head - tail;
+  // d.181：超限不再「丢掉中间那一段」，而是整份留在溢出存储里，只把头尾 + handle 交给模型。
+  // 长任务的失败大多发生在中段（一次 build 几千行日志、一次 grep 命中几百条），
+  // 丢掉中段等于让模型只能凭头尾猜；有了 handle，它可以用 tool_output_read 精确读回。
+  const spilled = options.spill === false ? { id: "（未保存）" } : spillText(raw);
+  return `${raw.slice(0, head)}\n\n…（工具结果过长：共 ${raw.length} 字符，中间省略 ${dropped} 字符；完整内容已保存为 ${
+    spilled.id
+  }，用 tool_output_read 按 offset/limit 分段读回，比重新调用一次工具更省）…\n\n${raw.slice(-tail)}`;
 }
 
 /** 执行一次工具调用的可选控制项。 */

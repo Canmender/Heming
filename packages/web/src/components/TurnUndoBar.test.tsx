@@ -63,4 +63,63 @@ describe("TurnUndoBar（d.176）", () => {
     const { container } = render(<TurnUndoBar paths={[]} onUndo={vi.fn()} onDismiss={vi.fn()} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("展开清单后每个文件一行，点「撤回」只回传那一个路径（d.185）", () => {
+    const onUndoOne = vi.fn();
+    render(
+      <TurnUndoBar
+        paths={["D:/work/src/a.ts", "D:/work/docs/说明.md"]}
+        onUndo={vi.fn()}
+        onUndoOne={onUndoOne}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("list", { name: "本轮改动的文件" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+
+    const list = screen.getByRole("list", { name: "本轮改动的文件" });
+    expect(list.querySelectorAll("li")).toHaveLength(2);
+    // 文件名给一眼看得出的那部分，目录放在旁边（完整路径在 title 里）。
+    expect(list.textContent).toContain("a.ts");
+    expect(list.textContent).toContain("D:/work/docs");
+
+    fireEvent.click(screen.getByRole("button", { name: "撤回 说明.md" }));
+    expect(onUndoOne).toHaveBeenCalledWith("D:/work/docs/说明.md");
+  });
+
+  it("展开/收起是同一个按钮，aria-expanded 跟着变（d.185）", () => {
+    render(<TurnUndoBar paths={["D:/a.ts"]} onUndo={vi.fn()} onUndoOne={vi.fn()} onDismiss={vi.fn()} />);
+    const toggle = screen.getByRole("button", { name: "看清单" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "收起清单" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "收起清单" }));
+    expect(screen.queryByRole("list", { name: "本轮改动的文件" })).toBeNull();
+  });
+
+  it("正在撤某一个时只禁那一行，并写「撤回中…」（d.185）", () => {
+    const onUndoOne = vi.fn();
+    render(
+      <TurnUndoBar
+        paths={["D:/a.ts", "D:/b.ts"]}
+        busyPath="D:/a.ts"
+        onUndo={vi.fn()}
+        onUndoOne={onUndoOne}
+        onDismiss={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+
+    const rowUndo = screen.getByRole("button", { name: "撤回 a.ts" });
+    expect(rowUndo).toBeDisabled();
+    fireEvent.click(rowUndo);
+    expect(onUndoOne).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "撤回 b.ts" })).not.toBeDisabled();
+  });
+
+  it("没给 onUndoOne 时不显示「看清单」（老调用方行为不变）", () => {
+    render(<TurnUndoBar paths={["D:/a.ts"]} onUndo={vi.fn()} onDismiss={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "看清单" })).toBeNull();
+  });
 });

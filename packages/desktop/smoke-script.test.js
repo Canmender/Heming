@@ -164,3 +164,14 @@ test("pre-push（L1）必须包含桌面桥冒烟，且保留逃生口", () => {
     "hook 里要写明跳过方式，否则没有窗口的机器会卡在这里反复失败",
   );
 });
+
+// d.180：后台作业是「长任务跑得动」的地基，冒烟必须在真机里跑完整条链
+// （起作业 → 读增量 → 列表 → 杀进程），否则这四件只有单测、没有真 IPC。
+test("冒烟必须覆盖后台作业的完整链路（起 / 读 / 列 / 杀）", () => {
+  const src = readText("smoke/main.js");
+  assert.ok(src.includes("background: true"), "要用 background:true 起后台作业");
+  assert.ok(src.includes("shell.jobOutput("), "要读后台作业输出");
+  assert.ok(src.includes("shell.jobs()"), "要列出后台作业");
+  assert.ok(src.includes("shell.jobKill("), "要能杀掉在跑的作业");
+  assert.ok(src.includes("unknown-job"), "未知作业 id 的错误码也要验");
+});

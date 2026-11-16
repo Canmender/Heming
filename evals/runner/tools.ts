@@ -13,6 +13,7 @@ import type { FileFsBridge } from "../../packages/web/src/lib/fileEdit/bridge.js
 import { buildFileToolBridge } from "../../packages/web/src/lib/fileEdit/tools.js";
 import { mergeToolBridges } from "../../packages/web/src/lib/selfEdit/merge.js";
 import { buildTodoToolBridge } from "../../packages/web/src/lib/todo/tool.js";
+import { buildToolOutputBridge } from "../../packages/web/src/lib/spill/tool.js";
 import { buildShellToolBridgeIfAvailable } from "../../packages/web/src/lib/shell/tool.js";
 import { createEvalShellBridge } from "./shellBridge.js";
 import type { FakeTool } from "./types.js";
@@ -97,6 +98,9 @@ export function createEvalToolBridge(options: EvalToolBridgeOptions): ToolBridge
   // `todo_write` 只在用例声明了会话 id 时才挂（没挂的用例工具清单保持原样，
   // 不会因为「评测顺带多一件工具」而改变既有用例的提示词与轮次）。
   const todo = options.conversationId ? buildTodoToolBridge({ conversationId: options.conversationId }) : null;
+  // d.181：长输出截断后的「再读」工具在真实运行里始终注入，评测也必须一致，
+  // 否则「spill handle + tool_output_read」这条链在评测里根本不存在。
+  const output = buildToolOutputBridge();
 
   // `run_command` 只在用例声明 `shell: true` 时挂（同上：不改变既有用例的工具清单）。
   const shell = options.shell
@@ -106,5 +110,5 @@ export function createEvalToolBridge(options: EvalToolBridgeOptions): ToolBridge
       })
     : null;
 
-  return mergeToolBridges(mergeToolBridges(base, shell) ?? base, todo) ?? base;
+  return mergeToolBridges(mergeToolBridges(mergeToolBridges(base, shell) ?? base, todo) ?? base, output) ?? base;
 }

@@ -46,6 +46,6 @@ graders:
     path: notes/工作日志.md
     contains: ["## 周三"]
   - type: contains_any
-    value: [已追加, 追加了, 写入, 读回, 复核]
+    value: [已追加, 追加完成, 追加了, 新增了一行, 写入, 读回, 复核, 重新读取]
   - type: max_rounds
     value: 5

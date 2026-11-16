@@ -13,6 +13,15 @@ import {
   type WorkspaceGroup,
 } from "../../lib/workspace/group.js";
 import { WorkspaceDialog, type WorkspaceDialogMode } from "./WorkspaceDialog.js";
+import { UnfinishedTurnBadge } from "../UnfinishedTurnBadge.js";
+import type { ConversationContentHit, ConversationContentSearchResult } from "../../lib/api.js";
+import {
+  CONTENT_SEARCH_DEBOUNCE_MS,
+  contentSearchErrorText,
+  hitsByConversation,
+  hitsOutsideList,
+  shouldSearchContent,
+} from "../../lib/conversationSearch.js";
 
 /**
  * 会话左栏（单智能体 · 会话模式，对齐 Codex / Claude Code）。
@@ -58,6 +67,13 @@ export interface ConversationRailProps {
   error?: string;
   onOpen: (conversationId: string) => void;
   /**
+   * d.198：点搜索命中时打开会话并**落到那条消息**。
+   *
+   * 给了它，点带内容命中的行 / 「更早的会话里也有命中」条目就会走这里（而不是只 `onOpen`）；
+   * 不给 = 老行为（只打开会话，停在最新处）。搜索命中自带 `messageId`，所以能精确落点。
+   */
+  onOpenMessage?: (conversationId: string, messageId: string) => void;
+  /**
    * 新建一段 fresh 会话并落到指定工作区（`null` = 未分组）。
    *
    * 主按钮用「当前活动会话所在工作区 → 刚新建的工作区 → 未分组」；
@@ -83,6 +99,11 @@ export interface ConversationRailProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /**
+   * 内容搜索（d.197）：给了它，搜索就不只匹配会话名，还会问服务端「哪些会话的**消息正文**
+   * 里有这个词」。不给 = 只按会话名过滤（老行为；测试/评测里不必造请求）。
+   */
+  onSearchContent?: (query: string) => Promise<ConversationContentSearchResult>;
   /**
    * 栏顶插槽（d.147.4.89）：常驻主导航（插件/团队/模型/知识库/插件页）挂在这里。
    *
@@ -118,6 +139,7 @@ export function ConversationRail({
   opening = false,
   error = "",
   onOpen,
+  onOpenMessage,
   onNewConversation,
   newSessionRequest = 0,
   onRename,
@@ -128,6 +150,7 @@ export function ConversationRail({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
+  onSearchContent,
   topNav,
   footer,
 }: ConversationRailProps) {
@@ -150,13 +173,71 @@ export function ConversationRail({
     () => [...conversations].sort((a, b) => lastActivityOf(b) - lastActivityOf(a)),
     [conversations],
   );
-  /** 扁平列表 + 只按会话名过滤（单智能体：工作区/智能体名都不参与搜索）。 */
+  const hasQuery = query.trim() !== "";
+
+  /**
+   * 内容搜索（d.197）：会话名匹配是本地过滤，消息正文匹配要问服务端。
+   *
+   * 三条纪律：
+   * - **防抖**：逐字发请求等于把搜索打成按键级流量（250ms 停顿后才发）；
+   * - **作废在途响应**：`contentSeq` 自增，晚到的旧响应直接丢，不然打字快时列表会跳；
+   * - **失败不装作没搜**：`contentState="error"` 时栏底明说「当前只按会话名匹配」。
+   */
+  const [contentHits, setContentHits] = useState<ConversationContentHit[]>([]);
+  const [contentState, setContentState] = useState<"idle" | "searching" | "done" | "error">("idle");
+  const [contentTruncated, setContentTruncated] = useState(false);
+  const [contentError, setContentError] = useState("");
+  const contentSeq = useRef(0);
+  useEffect(() => {
+    const q = query.trim();
+    if (!onSearchContent || !shouldSearchContent(q)) {
+      contentSeq.current += 1;
+      setContentHits([]);
+      setContentState("idle");
+      setContentTruncated(false);
+      setContentError("");
+      return;
+    }
+    const seq = contentSeq.current + 1;
+    contentSeq.current = seq;
+    setContentState("searching");
+    const timer = setTimeout(() => {
+      onSearchContent(q)
+        .then((result) => {
+          if (contentSeq.current !== seq) return;
+          setContentHits(result.hits ?? []);
+          setContentTruncated(Boolean(result.truncated));
+          setContentState("done");
+          setContentError("");
+        })
+        .catch((err) => {
+          if (contentSeq.current !== seq) return;
+          setContentHits([]);
+          setContentTruncated(false);
+          setContentState("error");
+          setContentError(contentSearchErrorText(err));
+        });
+    }, CONTENT_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, onSearchContent]);
+
+  /** 会话 id → 命中（同一个会话只留一条）。 */
+  const contentHitMap = useMemo(() => hitsByConversation(contentHits), [contentHits]);
+  /** 命中落在「当前这一页之外」的会话：没法分组渲染，单独列一节，不能默默丢。 */
+  const knownConversationIds = useMemo(() => new Set(sorted.map((c) => c.id)), [sorted]);
+  const outsideHits = useMemo(
+    () => hitsOutsideList(contentHits, knownConversationIds),
+    [contentHits, knownConversationIds],
+  );
+
+  /** 扁平列表 + 过滤：会话名（本地）或消息正文（服务端命中）任一匹配即保留。 */
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sorted;
-    return sorted.filter((conv) => titleOf(conv).toLowerCase().includes(q));
-  }, [sorted, query, titleOf]);
-  const hasQuery = query.trim() !== "";
+    return sorted.filter(
+      (conv) => titleOf(conv).toLowerCase().includes(q) || contentHitMap.has(conv.id),
+    );
+  }, [sorted, query, titleOf, contentHitMap]);
 
   /** 组 → 会话（未分组永远最后；清单里的空组也显示）。 */
   const groups = useMemo(() => groupConversations(visible, workspaces), [visible, workspaces]);
@@ -335,6 +416,8 @@ export function ConversationRail({
     const active = conv.id === activeConversationId;
     const title = titleOf(conv);
     const draft = hasDraft(conv.id);
+    /** d.197：这条会话的消息正文里有搜索词时，行下补一行命中片段。 */
+    const hit = contentHitMap.get(conv.id);
 
     if (renamingId === conv.id) {
       return (
@@ -379,51 +462,53 @@ export function ConversationRail({
     }
 
     return (
-      <div
-        key={conv.id}
-        className={`group relative mb-0.5 ml-5 flex items-center rounded-lg transition-colors ${
-          active ? "bg-subtle-3" : "hover:bg-subtle-2"
-        }`}
-      >
-        <button
-          type="button"
-          title={draft ? `${title}（有草稿）` : title}
-          aria-label={`打开会话：${title}`}
-          aria-current={active ? "true" : undefined}
-          onClick={() => onOpen(conv.id)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2.5 py-2 text-left"
-        >
-          <span className={`min-w-0 flex-1 truncate text-ui-sm ${active ? "text-ink" : "text-body"}`}>
-            {title}
-          </span>
-          {draft ? (
-            <span className="ui-chip shrink-0" title="有未发送的草稿">
-              草稿
-            </span>
-          ) : null}
-          {conv.lastMessageAt ? (
-            <span className="shrink-0 text-ui-xs tabular-nums text-muted">
-              {formatClock(conv.lastMessageAt)}
-            </span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          aria-label={`会话操作：${title}`}
-          aria-haspopup="menu"
-          aria-expanded={menuFor === conv.id}
-          onClick={() => setMenuFor((cur) => (cur === conv.id ? null : conv.id))}
-          className={`mr-1 rounded-md p-1 text-muted transition-opacity hover:bg-subtle-3 hover:text-ink focus:opacity-100 ${
-            menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      <div key={conv.id} className="mb-0.5">
+        <div
+          className={`group relative ml-5 flex items-center rounded-lg transition-colors ${
+            active ? "bg-subtle-3" : "hover:bg-subtle-2"
           }`}
         >
-          <MoreIcon width={14} height={14} aria-hidden="true" />
-        </button>
-        {menuFor === conv.id ? (
-          <div
-            role="menu"
-            data-conv-menu
-            className="absolute right-1 top-full z-30 mt-1 w-40 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
+          <button
+            type="button"
+            title={draft ? `${title}（有草稿）` : title}
+            aria-label={`打开会话：${title}`}
+            aria-current={active ? "true" : undefined}
+            onClick={() => (hit && onOpenMessage ? onOpenMessage(conv.id, hit.messageId) : onOpen(conv.id))}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2.5 py-2 text-left"
+          >
+            <span className={`min-w-0 flex-1 truncate text-ui-sm ${active ? "text-ink" : "text-body"}`}>
+              {title}
+            </span>
+            {draft ? (
+              <span className="ui-chip shrink-0" title="有未发送的草稿">
+                草稿
+              </span>
+            ) : null}
+            {/* d.196：这一轮没跑完（关窗/崩溃/用户停下），进来就能接着做。 */}
+            <UnfinishedTurnBadge conversationId={conv.id} />
+            {conv.lastMessageAt ? (
+              <span className="shrink-0 text-ui-xs tabular-nums text-muted">
+                {formatClock(conv.lastMessageAt)}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            aria-label={`会话操作：${title}`}
+            aria-haspopup="menu"
+            aria-expanded={menuFor === conv.id}
+            onClick={() => setMenuFor((cur) => (cur === conv.id ? null : conv.id))}
+            className={`mr-1 rounded-md p-1 text-muted transition-opacity hover:bg-subtle-3 hover:text-ink focus:opacity-100 ${
+              menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            }`}
+          >
+            <MoreIcon width={14} height={14} aria-hidden="true" />
+          </button>
+          {menuFor === conv.id ? (
+            <div
+              role="menu"
+              data-conv-menu
+              className="absolute right-1 top-full z-30 mt-1 w-40 rounded-lg border border-line bg-surface p-1 text-ui-sm ui-overlay-shadow"
           >
             <button
               type="button"
@@ -454,6 +539,28 @@ export function ConversationRail({
               删除
             </button>
           </div>
+        ) : null}
+        </div>
+        {hit ? (
+          <p
+            data-testid="rail-content-hit-snippet"
+            title={hit.snippet}
+            className="ml-5 truncate pl-2.5 pr-2 text-ui-xs text-muted"
+          >
+            {/* d.198：片段本身也可点——用户看到的是这句话，想去的也是这句话。 */}
+            {onOpenMessage ? (
+              <button
+                type="button"
+                aria-label={`跳到命中消息：${hit.snippet}`}
+                className="max-w-full truncate text-left hover:text-body hover:underline"
+                onClick={() => onOpenMessage(conv.id, hit.messageId)}
+              >
+                {hit.snippet}
+              </button>
+            ) : (
+              hit.snippet
+            )}
+          </p>
         ) : null}
       </div>
     );
@@ -550,7 +657,9 @@ export function ConversationRail({
   };
 
   /** 无会话且无工作区 → 纯空态；否则始终渲染组（刚建的空工作区不能凭空消失）。 */
-  const showEmptyState = (sorted.length === 0 && workspaces.length === 0) || (hasQuery && visible.length === 0);
+  const showEmptyState =
+    (sorted.length === 0 && workspaces.length === 0) ||
+    (hasQuery && visible.length === 0 && outsideHits.length === 0);
 
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-line-soft bg-subtle">
@@ -698,8 +807,39 @@ export function ConversationRail({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {showEmptyState ? renderEmpty() : groups.map(renderGroup)}
-        {hasQuery && visible.length > 0 ? (
-          <p className="ui-caption px-2 py-1">{visible.length} 条匹配</p>
+        {/* d.197：命中落在「当前这一页之外」的会话——不能默默丢，单独列出来可点。 */}
+        {hasQuery && outsideHits.length > 0 ? (
+          <div data-testid="rail-outside-hits" className="mt-1">
+            <p className="px-2 pb-0.5 pt-1 text-ui-xs text-muted">更早的会话里也有命中</p>
+            {outsideHits.map((h) => (
+              <button
+                key={h.conversationId}
+                type="button"
+                onClick={() =>
+                  onOpenMessage ? onOpenMessage(h.conversationId, h.messageId) : onOpen(h.conversationId)
+                }
+                title={h.snippet}
+                className="block w-full rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-subtle-2"
+              >
+                <span className="block truncate text-ui-sm text-body">
+                  {h.conversationTitle?.trim() ? h.conversationTitle : "未命名会话"}
+                </span>
+                <span className="block truncate text-ui-xs text-muted">{h.snippet}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {hasQuery && (visible.length > 0 || outsideHits.length > 0) ? (
+          <p className="ui-caption px-2 py-1">
+            {visible.length + outsideHits.length} 条匹配
+            {contentState === "searching" ? "（正在搜消息内容…）" : ""}
+            {contentState === "done" && contentTruncated ? "（只搜了最近的消息）" : ""}
+          </p>
+        ) : null}
+        {contentError ? (
+          <p role="status" className="ui-caption px-2 py-1">
+            {contentError}
+          </p>
         ) : null}
         {hasMore && !hasQuery ? (
           <Button

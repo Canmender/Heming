@@ -548,6 +548,16 @@ contextBridge.exposeInMainWorld("__heming_shell", {
    * 只认 runId，不认命令内容——取消不该成为「杀掉任意进程」的入口。
    */
   cancel: (runId) => ipcRenderer.invoke("shell:cancel", runId),
+  /**
+   * 后台作业（d.180）：`run` 带上 `background: true` 会立刻回 jobId，
+   * 长命令（构建 / 装依赖 / 跑全量测试）不再撞前台 120s 超时。
+   * 三个转发都只传主进程需要的字段，渲染层依旧拿不到 pid 之外的进程控制权。
+   */
+  jobs: () => ipcRenderer.invoke("shell:jobs"),
+  /** 增量读输出；{ jobId, waitMs? }，读走即消费，waitMs 最多 30s。 */
+  jobOutput: (payload) => ipcRenderer.invoke("shell:job-output", payload),
+  /** 终止一个作业；只认 jobId（不认 pid），主进程按登记表杀进程树。 */
+  jobKill: (payload) => ipcRenderer.invoke("shell:job-kill", payload),
 });
 
 // —— 信息中枢 · InfoHub 本机桥（d.45）——

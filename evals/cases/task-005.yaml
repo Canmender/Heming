@@ -1,0 +1,31 @@
+id: task-005
+name: 真实长任务：按规格修好三个函数并跑验收脚本到全绿
+owner: lead
+tags:
+  - task
+  - shell
+  - long-task
+real_only: true
+shell: true
+allow_danger: true
+setup:
+  fixture: task-005
+prompt: |
+  `spec.md` 是三个函数的行为规格，`test/run.js` 是验收脚本（现在跑不过）。
+  请：先读规格和验收脚本，找出 `lib/calc.js` 里的实现与规格不一致的地方，改到
+  `node test/run.js` 打印「全部通过（3/3）」为止。
+  约束：只能改 `lib/calc.js`，不要动 `test/run.js`。
+  最后说明你改了哪些地方、验证命令是什么、有没有遗留问题。
+graders:
+  - type: tool_called
+    tool: run_command
+  - type: shell_check
+    command: node test/run.js
+    stdout_contains: 全部通过（3/3）
+  - type: evidence
+    files:
+      - lib/calc.js
+    evidence_commands:
+      - test/run.js
+  - type: max_rounds
+    value: 24

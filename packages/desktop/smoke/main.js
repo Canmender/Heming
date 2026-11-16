@@ -90,6 +90,21 @@ function rendererScript() {
     out.undoOutside = typeof files.undo === "function" ? await files.undo({ roots, path: abs("../根外.md") }) : { ok: false, code: "missing" };
     out.listAfter = typeof files.backups === "function" ? await files.backups({ roots }) : { ok: false, code: "missing" };
     out.listUntrusted = null;
+    // 后台作业（d.180）：起一条 1.5 秒后输出、约 2 秒结束的命令，轮询到它结束；
+    // 再起一条 10 秒的命令立刻杀掉——两条路径合起来才证明「能等」和「能停」。
+    out.jobStart = await shell.run({ runId: "smoke-job-1", roots, command: "node slow.js", cwd: ${root}, background: true });
+    if (out.jobStart && out.jobStart.jobId) {
+      out.jobFirst = await shell.jobOutput({ jobId: out.jobStart.jobId, waitMs: 0 });
+      out.jobWaited = await shell.jobOutput({ jobId: out.jobStart.jobId, waitMs: 20000 });
+      out.jobList = await shell.jobs();
+    }
+    out.jobKillStart = await shell.run({ runId: "smoke-job-2", roots, command: "node hang.js", cwd: ${root}, background: true });
+    if (out.jobKillStart && out.jobKillStart.jobId) {
+      out.jobKill = await shell.jobKill({ jobId: out.jobKillStart.jobId });
+      await new Promise((r) => setTimeout(r, 800));
+      out.jobKilled = await shell.jobOutput({ jobId: out.jobKillStart.jobId, waitMs: 5000 });
+      out.jobUnknown = await shell.jobOutput({ jobId: "no-such-job", waitMs: 0 });
+    }
     out.cmdOutside = await shell.run({ runId: "smoke-2", roots, command: "echo hi", cwd: "C:/Windows", timeoutMs: 20000 });
     return out;
   })()`;
@@ -317,6 +332,10 @@ function pageProbeScript() {
 async function run() {
   await fs.mkdir(ROOT, { recursive: true });
   await fs.writeFile(path.join(ROOT, "seed.txt"), "hello seed\n", "utf8");
+  // 后台作业（d.180）要一条「会跑一会儿」的命令：写成脚本文件，命令里就没有引号，
+  // 免得在模板字面量里再嵌一层引号转义（那层转义最容易写错、也最难看出错在哪）。
+  await fs.writeFile(path.join(ROOT, "slow.js"), 'setTimeout(() => console.log("bg-ok"), 1500);\n', "utf8");
+  await fs.writeFile(path.join(ROOT, "hang.js"), 'setTimeout(() => {}, 10000);\n', "utf8");
   // 读图（d.168）：渲染层写不了二进制，所以由主进程种一张真 PNG 进根目录。
   const pngBytes = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
@@ -433,6 +452,29 @@ async function run() {
   check("同一份备份只能用一次：再撤销回 no-backup", result.undoAgain && result.undoAgain.ok === false && result.undoAgain.code === "no-backup", result.undoAgain);
   check("撤销：根外路径被主进程拒绝", result.undoOutside && result.undoOutside.ok === false, result.undoOutside);
   check("越界工作目录被主进程拒绝", result.cmdOutside && result.cmdOutside.ok === false, result.cmdOutside);
+  check(
+    "后台作业：启动立即返回 jobId（不阻塞回合）",
+    result.jobStart && result.jobStart.ok === true && typeof result.jobStart.jobId === "string",
+    result.jobStart,
+  );
+  check(
+    "后台作业：轮询能等到输出并看到进程结束",
+    result.jobWaited && result.jobWaited.ok === true && result.jobWaited.running === false && String(result.jobWaited.stdout || "").includes("bg-ok"),
+    result.jobWaited && result.jobWaited.ok ? { running: result.jobWaited.running, out: String(result.jobWaited.stdout || "").slice(0, 80) } : result.jobWaited,
+  );
+  check("后台作业：waitMs 0 的首次读取立即返回", result.jobFirst && result.jobFirst.ok === true, result.jobFirst);
+  check(
+    "后台作业：列表里能查到刚起的作业",
+    result.jobList && result.jobList.ok === true && (result.jobList.jobs || []).some((j) => j.id === result.jobStart.jobId),
+    result.jobList && result.jobList.ok ? (result.jobList.jobs || []).length : result.jobList,
+  );
+  check("后台作业：能杀掉还在跑的命令", result.jobKill && result.jobKill.ok === true && result.jobKill.alreadyFinished === false, result.jobKill);
+  check("后台作业：杀完之后状态不再是运行中", result.jobKilled && result.jobKilled.ok === true && result.jobKilled.running === false, result.jobKilled);
+  check(
+    "后台作业：未知作业 id 回 unknown-job",
+    result.jobUnknown && result.jobUnknown.ok === false && result.jobUnknown.code === "unknown-job",
+    result.jobUnknown,
+  );
 
   // 磁盘上的事实：真的写了文件（不是只在内存里说成功）
   const onDisk = await fs.readFile(path.join(ROOT, "notes", "a.md"), "utf8").catch(() => null);

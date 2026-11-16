@@ -379,3 +379,34 @@ describe("file_undo 的风险等级与显示名（d.170）", () => {
     expect(displayNameOf("file_undo")).toBe("撤销上次写入");
   });
 });
+
+describe("后台作业工具的风险与摘要（d.180）", () => {
+  it("读输出 / 列作业是 read，停作业是 write（名字里的 kill 不能把它顶成 danger）", () => {
+    expect(resolveRisk("command_output")).toBe("read");
+    expect(resolveRisk("command_list")).toBe("read");
+    expect(resolveRisk("command_kill")).toBe("write");
+    // DANGER_WORDS 里有 kill；显式表必须压住它，否则「停掉自己刚起的作业」也要按危险工具逐条确认。
+    expect(classifyCall("command_kill", '{"job_id":"job-1"}').risk).toBe("write");
+  });
+
+  it("显示名是中文动作，摘要只放作业 id（输出正文不进确认卡）", () => {
+    expect(displayNameOf("command_output")).toBe("读取后台输出");
+    expect(displayNameOf("command_list")).toBe("列出后台命令");
+    expect(displayNameOf("command_kill")).toBe("停止后台命令");
+    expect(summarizeArgs('{"job_id":"job-1"}', "command_output")).toBe("读作业 job-1 的输出");
+    expect(summarizeArgs('{"job_id":"job-1"}', "command_kill")).toBe("停止作业 job-1");
+    expect(summarizeArgs("{}", "command_list")).toBe("列出后台作业");
+  });
+
+  it("classifyCall 把工具名带进摘要（不带的话 job_id 只会退化成 JSON 截断）", () => {
+    expect(classifyCall("command_output", '{"job_id":"job-9"}').summary).toBe("读作业 job-9 的输出");
+    expect(classifyCall("command_kill", '{"job_id":"job-9"}').summary).toBe("停止作业 job-9");
+  });
+});
+
+describe("tool_output_read（d.181）", () => {
+  it("只读内存里的文本：风险 read、显示名与摘要都按文件/输出类给", () => {
+    expect(riskOfName("tool_output_read")).toBe("read");
+    expect(displayNameOf("tool_output_read")).toBe("读取完整输出");
+  });
+});

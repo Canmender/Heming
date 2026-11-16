@@ -11,6 +11,7 @@ import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
 import { buildShellToolBridgeIfAvailable } from "../shell/tool.js";
 import { buildTodoToolBridge } from "../todo/tool.js";
+import { buildToolOutputBridge } from "../spill/tool.js";
 import { buildToneToolBridge } from "../tone/tools.js";
 import { buildVaultToolBridge } from "../vault/tools.js";
 import { buildWebToolsBridgeIfAvailable } from "../webtools/tools.js";
@@ -179,4 +180,16 @@ export const shellProvider: CapabilityProvider = {
     buildShellToolBridgeIfAvailable({
       roots: () => fileRootsFor(ctx.workspace),
     }),
+};
+
+/**
+ * 长输出的「再读」入口（d.181）。
+ *
+ * 只要模型能拿到工具，就一定可能撞上 8000 字符截断；所以这个工具无条件注入，
+ * 不像文件工具那样需要可写根。它的存在本身也在提示词里说明（见 runtimePrompt）。
+ */
+export const toolOutputProvider: CapabilityProvider = {
+  id: "tool-output",
+  origin: "builtin",
+  build: () => buildToolOutputBridge(),
 };

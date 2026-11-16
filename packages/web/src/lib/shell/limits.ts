@@ -23,3 +23,12 @@ export const SHELL_MAX_OUTPUT_CHARS = 20_000;
 
 /** 主进程侧的硬上限：超过这个量直接拒绝，不把它读进内存。 */
 export const SHELL_MAX_CAPTURE_BYTES = 512 * 1024;
+
+/** `command_output` 单次最多等多久（毫秒）。一次工具调用不该把一轮对话挂更久。 */
+export const SHELL_JOB_MAX_WAIT_MS = 30_000;
+
+/**
+ * 单个后台作业保留的输出上限。超出的早期内容会被丢掉，
+ * 模型必须知道「它看到的不是全部」——所以 `command_output` 会明确写出来。
+ */
+export const SHELL_JOB_MAX_CAPTURE_BYTES = 512 * 1024;

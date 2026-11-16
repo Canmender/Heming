@@ -467,3 +467,37 @@ describe("默认页与会话恢复（精简外壳后默认进会话）", () => {
     expect(mod.useUiStore.getState().page).toBe("plugin:acme.page-kit");
   });
 });
+
+/**
+ * d.198：「跳到某条消息」是一次性投递槽，与 `paletteIntent` 同口径（token 自增、消费即清）。
+ *
+ * 为什么需要它：左栏（Sidebar → ConversationRail）拿不到 ChatPage 的滚动容器与窗口化状态，
+ * 只能把「去哪一段的哪一条」交给 ChatPage 消费。
+ */
+describe("消息跳转投递槽（d.198）", () => {
+  beforeEach(() => {
+    useUiStore.setState({ activeConversationId: null, messageJump: null });
+  });
+
+  it("requestMessageJump 带上会话与消息 id，连点两次也各触发一次（token 自增）", () => {
+    useUiStore.getState().requestMessageJump("c1", "m1");
+    const first = useUiStore.getState().messageJump;
+    expect(first).toMatchObject({ conversationId: "c1", messageId: "m1" });
+
+    useUiStore.getState().requestMessageJump("c1", "m1");
+    expect(useUiStore.getState().messageJump!.token).toBe(first!.token + 1);
+  });
+
+  it("consumeMessageJump 消费即清", () => {
+    useUiStore.getState().requestMessageJump("c1", "m1");
+    useUiStore.getState().consumeMessageJump();
+    expect(useUiStore.getState().messageJump).toBeNull();
+  });
+
+  it("手动 openConversation 丢掉上一次没落位的跳转意图（免得下次进来乱跳）", () => {
+    useUiStore.getState().requestMessageJump("c1", "m1");
+    useUiStore.getState().openConversation("c2");
+    expect(useUiStore.getState().messageJump).toBeNull();
+    expect(useUiStore.getState().activeConversationId).toBe("c2");
+  });
+});

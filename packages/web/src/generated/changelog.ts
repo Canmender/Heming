@@ -12,6 +12,483 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.198.4.105.12",
+    "date": "2026-11-16",
+    "title": "搜到之后能落到那句话上：点命中直接跳进会话并高亮",
+    "bullets": [
+      "`packages/web/src/store/ui.ts`：新增一次性投递槽 `messageJump`（`{ conversationId, messageId, token }`）与 `requestMessageJump` / `consumeMessageJump`；token 自增保证「同一个命中连点两次」也各触发一次。侧栏拿不到 ChatPage 的滚动容器与窗口化状态，只能把「去哪一段的哪一条」交给它消费；`openConversation` 会顺手丢掉上一次没落位的意图，避免下次进来莫名其妙滚一段。",
+      "`packages/web/src/components/assistant/ConversationRail.tsx`：新增 `onOpenMessage?`；点**带正文命中的会话行**、点**命中片段本身**、点「更早的会话里也有命中」条目，都走它并带上 `messageId`；没接这个回调时退回老行为（只打开会话）。",
+      "`packages/web/src/components/Sidebar.tsx`：`openMessage(conversationId, messageId)` = 先 `openConversation` 再 `requestMessageJump`（顺序不能反，前者会清槽）。",
+      "`packages/web/src/components/ChatPage.tsx`：消费槽的 effect 按顺序做三件事——①消息还在加载就等；②那条不在当前窗口里就先把窗口扩到包含它（留上下文），扩窗后自动再跑一次；③**只滚消息容器**（理由同本会话内搜索：`scrollIntoView` 会把祖先的 `overflow-hidden` 一起滚起来，整页抬高），落位后高亮 `JUMP_HIGHLIGHT_MS = 2400` 毫秒再自动熄灭。加载完仍找不到这条消息时，清掉意图并如实提示「那条消息已经不在这个会话里了（可能被删除或被清理）。」——不静默跳个空。",
+      "新增测试 10 例：`ui.test.ts` 3 例（投递槽 id 与 token 自增、消费即清、手动开会话清掉残留）、`ConversationRail.test.tsx` 4 例（行走 `onOpenMessage`、片段可点、页外命中带 id、没接回调时退回 `onOpen` 且片段不可点）、`ChatPage.test.tsx` 3 例（落位并高亮只点亮那一条、消息已删时如实提示并清槽、投给别的会话的意图不在本会话乱跳）。",
+      "`packages/web` 全量 **356 files / 5200 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（tokens/pass 2589、p95 85ms）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.197 让左栏能搜消息正文，但命中之后只做了一件事：打开那个会话——**还是停在最新一条**。用户看到片段、点进去，还得自己往上翻找那句话；会话越长，翻回去越难，等于「搜到了却还是看不见」。",
+      "改了什么",
+      "验证",
+      "未做",
+      "1. 不做「在会话内也高亮这个词」（那是会话内搜索的事，两套高亮不叠加）；2. 不做跨会话跳转的图片/附件类命中（只落到消息本身，不展开附件预览）；3. 不做跳转历史/回退（点完就是一次落位，没有「返回上一处」）。"
+    ]
+  },
+  {
+    "version": "d.197.4.105.12",
+    "date": "2026-11-16",
+    "title": "左栏搜索也能搜消息内容：记得「那句话说过」就找得到",
+    "bullets": [
+      "只在**我所在的会话**里找（`listConversations` 已按成员关系收口，不额外放权限口子）；",
+      "只回**命中片段**（前后各留一小段、压掉换行），不回整条消息：侧栏要的是「哪段会话说过」，点进去再看原文；",
+      "同一会话只回**最新一条**命中，列表上一行一个会话不重复；",
+      "扫描有上限（最多 200 个会话、每个会话最近 200 条、总量 4000 条），到顶时回 `truncated: true`，前端必须如实说明「只搜了最近的消息」；",
+      "E2E 加密消息出站时 `payload.text` 已是空占位，天然搜不到，不额外报错；",
+      "查询词少于 2 个字符、超过 80 个字符、或没带 `q` 一律 400。",
+      "输入停顿 250ms 才发请求（`CONTENT_SEARCH_DEBOUNCE_MS`），逐字发请求等于把搜索打成按键级流量；",
+      "少于 2 个字符不发请求——1 个字符几乎能命中所有消息；",
+      "在途响应用自增序号作废：打字快时晚到的旧结果直接丢，列表不会跳；",
+      "命中会话如果不在当前这一页（左栏是分页拉的），单独列在**「更早的会话里也有命中」**一节，可点开——不能默默丢掉，否则用户会以为没搜到；",
+      "内容搜索失败时栏里明说「当前只按会话名匹配」，不装作搜过了。",
+      "服务端 `app.test.ts` 新增 7 例：命中并回片段、同会话只回最新、搜不到别人的会话、limit 截断、E2E 消息不命中、入参校验（401/400）、`searchSnippet` 压空白与大小写；",
+      "渲染层 `ConversationRail.test.tsx` 新增 5 例（正文命中、短词不发请求、页外命中单列并可点、截断说明、失败说明）+ `conversationSearch.test.ts` 5 例（纯逻辑）+ `api.test.ts` 2 例（query 串编码）；",
+      "服务端全量 **16 files / 336 passed**；web 全量 **356 files / 5190 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（tokens/pass 2589、p95 84ms）。",
+      "**不做分词/模糊匹配**：就是子串匹配（大小写不敏感）。中文分词要词典，误召回比漏召回更烦。",
+      "**不搜「我不在的会话」**：搜索范围与左栏列表同源。",
+      "**不跳转到具体消息位置**：点开是会话，不是那条消息；要做得先给消息列表加「锚点定位」。",
+      "**不分页翻更旧**：扫描到上限就停，并明说「只搜了最近的消息」。"
+    ],
+    "paragraphs": [
+      "为什么做这个",
+      "左栏的搜索过去**只匹配会话名**。长任务跑几十轮之后，用户记得的往往不是标题，而是「那句话在哪个会话里说过」——比如「上次那条 `全部通过` 的输出在哪」，标题里根本不会有。会话名搜索在这种情况下等于没搜。",
+      "改了什么",
+      "**服务端**：新增 `GET /api/conversations/search?q=&limit=`。",
+      "数据库补了 `idx_messages_conversation(conv_id, created_at)`：没有它，按会话取最近消息要全表扫。",
+      "**渲染层**：左栏搜索从「本地按会话名过滤」扩成「会话名（本地）或消息正文（服务端）任一命中」。",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.196.4.105.12",
+    "date": "2026-11-16",
+    "title": "侧栏标出「哪个会话还没跑完」",
+    "bullets": [
+      "`packages/web/src/lib/agentRuntime/resumePoint.ts`：从「只存最近一条」改成**按会话存**（键还是 `heming.resumePoint.v1`，值变成 `{ [conversationId]: ResumePoint }`，`RESUME_MAX_POINTS = 20` 封顶、按开始时间淘汰最旧）；新增 `listResumePoints()` 与 `subscribeResumePoints(listener)`，`clearTurnRunning(conversationId?)` 支持只清一个会话；`loadResumePoint()` 兼容 d.189 的**单条旧格式**并自动升级成 map（升级不丢已有标记）；map 里全是坏条目时顺手清掉脏数据；过期清理时也会通知订阅者。",
+      "`packages/web/src/lib/agentRuntime/useResumePoint.ts`（新）：`useResumePoint(conversationId)` —— 首帧读一次、挂载后补读一次并订阅变化，退订跟随组件卸载。",
+      "`packages/web/src/components/UnfinishedTurnBadge.tsx`（新）：本会话有标记时渲染一个 `ui-chip`「未跑完」，`title` 写明「打开会话可以点『继续』」；只说明没跑完，不猜进度、不催。",
+      "`packages/web/src/components/assistant/ConversationRail.tsx`：会话行在「草稿」徽标之后渲染 `<UnfinishedTurnBadge conversationId={conv.id} />`。",
+      "`packages/web/src/components/ChatPage.tsx`：`onRunSettled` 里的 `clearTurnRunning()` 改为 `clearTurnRunning(convId)` —— 收口只清当前会话，别的会话里没跑完的活不该被顺手抹掉。",
+      "`resumePoint.test.ts` 由 6 例扩到 **11 例**：多会话各留一条、只清一个会话、上限淘汰最旧（按开始时间）、旧单条格式升级、坏条目清理、订阅通知开始/收口/过期清理、退订后不通知（用例里的时间戳必须相对 `Date.now()` 取，写死 `1_000` 会被 24 小时过期规则当陈旧数据丢掉——首跑就栽在这）。",
+      "新建 `UnfinishedTurnBadge.test.tsx` **5 例**：无标记不渲染、有标记显示「未跑完」并带 `title`、别的会话不串、收口后消失、挂载后新开始的标记也会出现。",
+      "`ConversationRail.test.tsx` 新增 1 例：两个会话里只有标记过的那个带徽标。",
+      "`packages/web` 全量 **355 files / 5178 passed**（exit 0）；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` 39/39。"
+    ],
+    "paragraphs": [
+      "问题",
+      "d.189 让「没跑完的一轮」可以继续，但它只在**你打开那个会话时**才出现一条「继续」。多个会话来回看的时候，「哪一段活还没做完」完全看不见——长任务最怕的正是「我以为它做完了」「我忘了还有一半没跑」。",
+      "而且 d.189 的存档只存**最近一条**：切到另一个会话并开始新一轮，就会覆盖掉上一个会话的标记，等于把上一个会话的「没跑完」直接扔掉。",
+      "改了什么",
+      "测试",
+      "未做",
+      "1. 不做「正在跑」的实时徽标（那要跨组件树的运行态，和断点标记是两件事）；2. 徽标不带时间（不显示「2 小时前停下」）；3. 不做清理入口（过期 24 小时自动消失，手动清在设置里清本机数据）。"
+    ]
+  },
+  {
+    "version": "d.195.4.105.12",
+    "date": "2026-11-16",
+    "title": "换个模型不用离开对话",
+    "bullets": [
+      "新增 `packages/web/src/components/ModelSwitcher.tsx`：一个 `Dialog`（读屏名「切换模型」），列出全部可用来源（连接名 + `provider · model`），当前绑定带 ✓ 与 `aria-checked=\"true\"`；一个来源都没有时明说「先去设置 → 模型里配置网关与模型」，不给空列表；底栏「取消」与「更多设置…」。",
+      "`packages/web/src/components/ChatPage.tsx`：模型徽标的 `onClick` 从 `setPage(\"model\")` 改成打开弹窗；新增 `modelSwitcherOpen` state 与 `pickModel(profileId)`——写回 `setBinding(agentId, profileId)`、关窗、提示「已切换到 X，下一轮对话生效」；「更多设置…」仍然去设置页（真的要改网关/Key 时才需要离开）。",
+      "三条口径：①切换只写绑定，不动历史、不动本机文件；②生效时机写在提示里（下一轮），不让用户以为这一轮会中途换模型；③找不到标签时也只说「已切换」，不编一个模型名。",
+      "新建 `packages/web/src/components/ModelSwitcher.test.tsx` 5 例：列出可选来源且当前绑定带勾选态、点选回传 id、无来源时给出去哪配、`更多设置…` 交回调用方、`open=false` 不渲染（不占焦点）。",
+      "`packages/web/src/components/ChatPage.test.tsx`：新增 I3q（点模型名 → 弹窗 → 选第二个来源 → 绑定变为 `p2`、出现「已切换到 二号模型，下一轮对话生效」、没有离开对话、弹窗关闭）；同时把原来「点击去模型页」的用例改成断言弹窗出现且 `page !== \"model\"`。"
+    ],
+    "paragraphs": [
+      "问题",
+      "点输入框右下角的模型名，之前等于**跳到设置页的「模型」**：想切一次模型得离开对话、翻到模型页、切完再回来，回来还得重新找回刚才那段上下文。长任务里「这一段换个更便宜的模型接着跑」是很常见的动作，codex / Claude Code 都是就地切换。",
+      "改了什么",
+      "测试",
+      "未做",
+      "1. 不显示每个来源的单价、延迟、上下文窗口（要显示就得保证数据是真的，不能估）；2. 不能在这个弹窗里新建来源（网关与 Key 的编辑仍在设置页）；3. 不做「按任务类型自动选模型」。"
+    ]
+  },
+  {
+    "version": "d.194.4.105.12",
+    "date": "2026-11-16",
+    "title": "输入框 ↑ 调出上一条：长任务里「接着说」不用重打",
+    "bullets": [
+      "新增 `packages/web/src/lib/agentRuntime/inputHistory.ts`：",
+      "— `historyFrom(texts, max)`：去空、去相邻重复、丢掉本地命令、只留最近 `MAX_INPUT_HISTORY = 50` 条，顺序保持「旧 → 新」；",
+      "— `isLocalCommand(text)`：精确等于某条 `/命令`（`/compact`、`/plan`、`/status`、`/help` 由面板清单推导，不另抄一份）；",
+      "— `stepHistory(history, index, direction, draft)`：`index === -1` 表示不在回溯里；↑ 从最新一条开始，到顶停在最早一条不越界；↓ 走到底把**进入回溯前的草稿**原样放回去（不是清空——用户可能打了一半）。",
+      "`packages/web/src/components/ChatPage.tsx`：`historyIndex` state + `draftStashRef`；`inputHistory` 由本会话用户消息派生（**不新开存储**：会话就是历史，另存一份会与「删消息/清空会话」漂移）；",
+      "`inputHistory.test.ts` 7 例（去重/过滤命令/上限 50/↑ 前进与到顶/↓ 还原草稿/无历史不动）；",
+      "`ChatPage.test.tsx` 新增 I3p（历史两条 → ↑↑↓↓ 走一遍、到顶不越界、有文字时不劫持）→ 158 例；",
+      "`packages/web` 全量、`pnpm -w typecheck`、确定性 `pnpm eval:agent` 见下。"
+    ],
+    "paragraphs": [
+      "问题",
+      "长任务最常用的三句话是「接着说」「不对，重来」「照刚才那样再来一遍」——每一句都要用户把上一条重新打一遍。codex / Claude Code 都是空输入框按 ↑ 调回上一条，和鸣没有这个动作。",
+      "改法键盘处理放在「Enter 发送」之后、命令面板分支之外——只接管「空输入框按 ↑」和「已在回溯里」两种情况，多行草稿里的光标上下移动不受影响；`onDraftChange` 手打即退出回溯；切会话清空回溯位置。",
+      "两条口径",
+      "1. **本地命令不进历史**：`/compact`、`/status` 这类调出来再发一次没有意义（重复压缩、把状态命令当消息发）。2. **不劫持多行编辑**：只有空框按 ↑ 才进入回溯；有文字时 ↑ 仍然是光标上移。",
+      "验证",
+      "未做",
+      "1. 没有「跨会话」的全局历史（只回溯当前会话）；2. 不支持 `↑` 后编辑再继续往回走（编辑即退出回溯，这是刻意的，避免「改过的草稿被别条替换」）；3. 没有 `Ctrl+R` 搜索历史。"
+    ]
+  },
+  {
+    "version": "d.193.4.105.12",
+    "date": "2026-11-16",
+    "title": "`/status` 一条命令说清环境：模型、可写目录、预算、清单、作业",
+    "bullets": [
+      "新增 `packages/web/src/lib/agentRuntime/statusReport.ts`：`buildStatusReport(input)`（纯函数）与`buildSlashHelp()`。自检文本一次列 11 项：应用版本、桌面桥是否连通、模型（窗口/读图）、工作区、",
+      "`packages/web/src/lib/agentRuntime/slashCommands.ts`：新增 `STATUS_COMMAND=\"/status\"`、`HELP_COMMAND=\"/help\"` 并登记进面板（`/help` 直接把面板里的命令列全，避免两处漂移）。",
+      "`packages/web/src/components/ChatPage.tsx`：`buildSelfStatus()` 攒快照 + `submitMessage` 里的两条本地分支。",
+      "`statusReport.test.ts` 8 例、`slashCommands.test.ts` 6 例（含「面板里能发现 /status 与 /help」）；",
+      "`ChatPage.test.tsx` 新增 I3o（`/status` 不发请求、不落库、列出环境）→ 157 例；",
+      "`packages/web` 全量、`pnpm -w typecheck`、确定性 `pnpm eval:agent` 见下。"
+    ],
+    "paragraphs": [
+      "问题：能力一件件补上了，状态却散在七八个地方",
+      "d.153 以来陆续加了工作区根（含默认工作区）、计划模式、任务清单、后台作业、可撤回改动、上下文用量、中断续跑。但用户要回答「它现在为什么不动手」「为什么看不见那个目录」「还剩多少预算」，只能挨个卡片点过去，或者根本不知道有这些状态。codex 有 `/status`，这里对齐这件事。",
+      "改法可写目录（数量 + 前三条 + 只读几个）、计划模式、上下文用量（≥80% 追加「可以发 /compact」）、任务清单进度、后台作业在跑几条、本轮可撤回改动数、有没有没跑完的一轮、这一轮注入的工具数（含核心常驻几个）、是否正在跑。",
+      "三条口径",
+      "1. **取数与各处同源，不另算一套**：根走 `fileRootsFor(workspace)`（与工具注入同一个函数）、计划模式走 `loadPlanMode(convId)`（与按钮同源）、清单走 `getTodos`（与提示词同源）、工具数取「本轮真的注入的那批」而不是目录里全部。2. **没绑定模型也能查**：两条命令放在「未绑定模型」拦截之前——最需要自检的时刻，往往正是它不动手的时候。3. **每行都必须能被核对**：不写「一切正常」；空清单写「空」、无作业写「无」、无写根直接写「没有可写根，写类工具不会被注入」（对应用户最初的投诉）；长路径中间省略。",
+      "验证",
+      "未做",
+      "1. 没做 `/status` 的「结构化导出」（现在是一段等宽文本，方便粘贴但不方便机器读）；2. 没列 MCP 服务连接状态（`/status` 只给工具数，服务级别的失败仍要去设置页看）；3. 没做「一键复制自检」按钮（用户得自己选中文本）。"
+    ]
+  },
+  {
+    "version": "d.192.4.105.12",
+    "date": "2026-11-16",
+    "title": "任务清单回灌进提示词：压缩、重启、隔天接着做时都知道做到哪了",
+    "bullets": [
+      "上下文压缩（`prepareHistory`）会把早期的工具结果折成摘要，清单那条可能就没了；",
+      "关窗重启后点「继续」（d.189），历史重新读出来，清单在存储里但不在模型视野里；",
+      "隔天接着做、或者用户直接说「继续」，模型只能靠摘要里的只言片语猜进度——于是从中间重做，或者漏掉最后一步。",
+      "`packages/web/src/lib/agentRuntime/runtimePrompt.ts`：`RuntimeSectionInput` 新增`todos?: readonly RuntimeTodoInfo[]`（`{content,status:\"pending\"|\"in_progress\"|\"completed\"}`，",
+      "`packages/web/src/components/ChatPage.tsx`：`buildRuntimeSection({... todos: getTodos(convId)})`，**从存储读而不是从界面 state 读**：`useTodos` 只是投影，同一 tick 里点完清单立刻发送时 state 还没落。",
+      "`runtimePrompt.test.ts` +**3 例**（列出进度与三条状态 + 基线口径；空/未传/空白条目不出现；超过 20 条只列前 20 并写明「另有 3 项未列出」）→ 28 例全绿；",
+      "`ChatPage.test.tsx` 新增 I3n：预置三条清单 → 发送 → 断言这一轮 system 提示词里含`## 当前任务清单（1/3 已完成，1 项进行中）` 与三条 `[x]/[>]/[ ]` → 156 例全绿；",
+      "`packages/web` 全量 **351 files / 5144 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（基线未改）。"
+    ],
+    "paragraphs": [
+      "问题：清单存下来了，模型却看不见",
+      "d.155 起有 `todo_write`，清单存在本机（`lib/todo/store.ts`），界面（`TodoPanel`）也一直显示。但模型能「看见」这条清单只有两种时刻：**它自己刚调用过 `todo_write`**，或者**历史里那条工具结果还没被压缩掉**。",
+      "长任务里这两条都不牢靠：",
+      "改法：每轮把当前清单写进运行环境段与 `lib/todo/store.ts` 的 `TodoItem` 同形但不反向依赖）；新增 `MAX_TODOS_IN_PROMPT = 20`。有清单时在「计划模式」之后、「长任务怎么处理」之前插入：`## 当前任务清单（1/3 已完成，1 项进行中）` + 每条 `[x]/[>]/[ ]` + 一句基线口径（「已经完成的不要再做一遍；接着做进行中的那一项；清单和事实不一致时先更新清单再继续」）。空清单 / 只有空白条目时不写这段——普通对话不该多一句。",
+      "验证",
+      "未做",
+      "1. 清单只回灌「内容 + 状态」，没有回灌「为什么改、依赖什么」这类上下文；2. 清单仍是每会话一份（`MAX_STORED_LISTS=50`），多会话并行长任务时各自独立、不能合并；3. 提示词里的清单是快照，模型这一轮中途改了清单，要等下一轮才反映到提示词（界面上是实时的）。"
+    ]
+  },
+  {
+    "version": "d.191.4.105.12",
+    "date": "2026-11-16",
+    "title": "工具一多，本地能力也不会被挤没",
+    "bullets": [
+      "用户说「帮我查下笔记」，检索命中的是 `notes__*` 和一串 `srv__*`，第一轮可能看不见`file_write` / `run_command`；",
+      "而这两样恰恰是长任务走到一半必须有的（写完要跑测试、跑完要再改）。模型这时只有两条路：先猜着调一次 `tool_search`，或者干脆停下说「我做不到」。",
+      "`CORE_TOOL_NAMES`：15 个本地能力的**精确名字** —— `file_read/write/edit/patch/undo/glob/grep/image`、`run_command/command_output/command_list/command_kill`、`todo_write`、`agent_task`、`tool_output_read`；",
+      "`coreToolNames(catalog)`：按目录原顺序挑出这些名字（目录里没有的跳过，重复只留一次）；",
+      "`isCoreTool(name)`：给「解锁名额挤掉谁」的判断用。",
+      "新增 `packages/web/src/lib/agentRuntime/coreTools.test.ts` **5 例**（认得出 15 个本地工具、MCP/前缀不算、按目录序挑、重名去重、空目录）；",
+      "`packages/web/src/lib/agentStream.tools.test.ts` 新增 1 例：20 个 MCP 工具（名字全命中查询词）+ 5 个本地核心工具 = 25 个，断言首轮 21 个声明里**包含全部 5 个核心工具 + `tool_search`**，",
+      "`packages/web` 全量 **351 files / 5140 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（基线未改）。"
+    ],
+    "paragraphs": [
+      "问题：装了几个 MCP 服务后，第一轮里可能根本没有 `file_write`",
+      "工具目录超过 20 个时会切到「按需发现」（对应 Codex 的 `tool_search`）：只把 20 个工具塞进请求，其余靠检索解锁。名额按「与用户这句话的相关度」排序——这对 MCP 服务是好事，但对**本地能力**是坏事：",
+      "上一版把「按用户原话排序」补上了（d.184 之前那条修复），但只解决了「MCP 工具排太后」，没解决「本地工具被相关度挤出名额」。",
+      "改法：核心工具常驻",
+      "新增 `packages/web/src/lib/agentRuntime/coreTools.ts`：",
+      "`packages/web/src/lib/agentStream.ts` 的发现模式改成：**先给常驻名单占名额，剩下的名额再按相关度与目录序补齐**（`pinnedOrder`），总量仍是 `MAX_VISIBLE_TOOLS`；`revealTools()` 淘汰「解锁过多」的工具时跳过常驻名单，避免它们被后续检索挤出去。",
+      "只认精确名字、不认 `file_` 前缀：MCP 工具名形如 `服务__工具`，按前缀匹配容易把无关的第三方`file_*` 也钉死，反而挤掉真正的本地工具。",
+      "验证且最靠后的 MCP 工具仍被藏起来（没退回「全量塞回」）；",
+      "未做",
+      "1. 常驻名单是硬编码的 15 个名字，新增内置工具时要记得同步（已写在注释里）；2. 系统提示词里的工具清单仍按「桥里全部工具」渲染，与「本轮请求实际可见的 20 个」不完全一致；3. 没做「按用户显式要求临时拓宽名额」。"
+    ]
+  },
+  {
+    "version": "d.190.4.105.12",
+    "date": "2026-11-16",
+    "title": "被截断的长输出，重启后还能读回来",
+    "bullets": [
+      "新增 `SPILL_PERSIST_KEY = \"heming.spill.v1\"`、`SPILL_PERSIST_MAX_CHARS = 600_000`；",
+      "`spillText()` 每次写入后把内存里**最新的一段**（新→旧，直到 600K 字符）序列化到本机；",
+      "首次 `readSpill` / `listSpills` / `spillText` 前 `hydrate()` 一次，把本机那份读回内存；",
+      "读回时**按旧→新插入**（本机是「新→旧」存的）——`prune()` 用 `entries.keys().next()` 当最旧那条，顺序反了会变成「先淘汰最新的」，这是实现时真实踩到的坑，已写成注释并加用例盯住；",
+      "本机那份坏了/结构不对 → 丢掉并清键，不阻断功能；写不进去（配额满）→ 只退化成内存，不抛异常；",
+      "读不到的 handle 文案同步改口径：「内存里只保留最近 40 条；本机重启后只保留最近 600K 字符的溢出」，仍然明确「别在这里重试」。",
+      "`packages/web/src/lib/spill/persist.test.ts`（新，**6 例**，用 `vi.resetModules()` + 重新 `import()`模拟真正的重启——`resetSpills()` 会连本机那份一起删，模拟不了）：",
+      "`packages/web` 全量 **350 files / 5134 passed**；`pnpm -w typecheck` 六包 Done。"
+    ],
+    "paragraphs": [
+      "问题：`spill-3` 活不过一次重启",
+      "d.181 给长任务补了「溢出内容可读回」：工具结果超过 8000 字时不再只留头尾，完整文本留在进程里，模型拿到一个 `spill-N` 的 handle，需要中段就用 `tool_output_read` 分段读。",
+      "但它只在内存里。而 d.189 之后，**重启后续跑**成了正常路径：用户关窗、第二天打开、看到「上次这一轮没有跑完」→ 点「继续」→ 历史被重新读出来，里面有若干条「完整内容已保存为 spill-3」——**spill-3 已经不在了**。模型这时要么重跑一次工具、要么以为自己读过、要么按头尾猜。d.181 对此的处理是「如实报错」，但报错本身意味着这一轮的信息缺口。",
+      "改法：最近一段落本机，够对上历史里的引用",
+      "`packages/web/src/lib/spill/store.ts`：",
+      "为什么是 600K 而不是全量：localStorage 只有几 MB，一次会话的溢出可能远超；而会话尾部正是「刚被截断、下一步就要用」的部分。",
+      "验证重启后能读回并读到尾部内容；新 handle 序号从已有最大值继续（不撞号）；只保最近 600K（更早的如实报`spill-not-found` 且文案含「别在这里重试」）；本机数据坏了不影响功能；重启后继续写入时淘汰的仍是最旧那条；配额满只退化成内存。",
+      "未做",
+      "1. 没有按会话隔离存储（一个键、最近一段），多会话同时跑长任务时只保最后写的那段；2. 600K 是拍的常量，没有按实际可用配额动态调整；3. 溢出的完整文本仍不进搜索/索引，只能按 handle 按段读。"
+    ]
+  },
+  {
+    "version": "d.189.4.105.12",
+    "date": "2026-11-16",
+    "title": "一轮没跑完，回来还能接着做",
+    "bullets": [
+      "**用户自己点了停止**——比如想看看到哪一步了、或者发现方向不对。以前停止之后这一轮就彻底断了：没有「接着做」的入口，只能自己回忆着重新打一遍，而重新打一遍会把工具再跑一次。",
+      "**窗口被关掉 / 应用崩了 / 机器睡过去**——长任务一跑十几分钟，这段时间里用户很可能切走。回来之后只看到一个停住的对话，**没有任何地方记得刚才在做什么**。",
+      "— **只记录、不 replay**：存的是「哪一轮、谁、何时开始」，不是聊天内容——历史本来就在会话里，重放会把工具再跑一遍；",
+      "— **不假装知道进度**：不报百分比；",
+      "— **过期即忘**：超过 24 小时当作陈旧标记丢掉。2. 新增 `packages/web/src/components/ResumeBar.tsx`：`role=\"status\"` 的提示条，「继续」+「收起」。两种文案——`aborted` 说「这一轮被你停下了，任务可能还没做完」，`interrupted` 说「上次这一轮没有跑完（窗口关闭或应用重启过）」。",
+      "— `onStart` 里 `markTurnRunning(...)`，`onRunSettled` 第一行 `clearTurnRunning()`（成功/失败/停止都清）；",
+      "— `aborted` 收口 → 记 `resumeState`，点「继续」复用 `retryStream`（清旧流、任务区记录回到「进行中」）；",
+      "— 打开/切换会话时 `loadResumePoint(convId)`，命中即说明「上次没收口」，点「继续」直接发续写口令（重启后 `streamMeta` 是空的，只能走这条路）。",
+      "— 两条路都**不重发原提问**：重发会让历史里出现两条一样的用户消息、把已跑过的工具再跑一遍。4. **不自动续跑**：续跑会立刻产生一次真实请求和一堆工具调用，用户可能只是想停下看看。这里只给入口，按一下才动。",
+      "`resumePoint.test.ts` 6 例（标记/读取、会话不匹配、24 小时过期并清除、坏 JSON 与结构不对、只留最近一条）、`ResumeBar.test.tsx` 5 例（两种文案、单次回调、可选「收起」、是 status 不是 alert）；",
+      "`ChatPage.test.tsx` 新增 2 例：点「停止生成」→ 出现「这一轮被你停下了」→ 点「继续」→ 真的又跑一轮且上行的是续写口令；以及预置一个未收口标记 → 挂载后出现「上次这一轮没有跑完」→ 点「继续」发出续写口令、提示消失；",
+      "全量：`packages/web` **349 files / 5125 passed**；`pnpm -w typecheck` 六包 Done；确定性评测 `pnpm eval:agent` **39/39**。"
+    ],
+    "paragraphs": [
+      "问题：长任务最怕「断在半路」",
+      "d.157 起，一轮能自己续跑 3 段共 36 轮工具调用；d.167 起，轮次到顶和预算到顶都会给一次「继续」。但这些都建立在**这一轮还在跑**的前提下。真实使用里还有两种更常见的中断：",
+      "`agentStream` 其实已经会以 `RunSettled.status === \"aborted\"` 收口，但界面此前没有处理这个状态。",
+      "改了什么",
+      "1. 新增 `packages/web/src/lib/agentRuntime/resumePoint.ts`：一轮开始时把 `{conversationId, streamId, agentId, agentName, startedAt}` 写进本机（`heming.resumePoint.v1`），收口时清掉。读到解析不了/结构不对/超过 24 小时的标记时顺手清理。三条口径写进了文件头注释：3. `packages/web/src/components/ChatPage.tsx`：",
+      "验证",
+      "未做",
+      "1. 没有「继续时跳过已完成的步骤」——模型看到历史里的工具结果，自己判断，没有做步骤级去重；2. 标记只有一个（最近一轮），没有按会话保存多条历史断点；3. 真机 Electron 里「关窗 → 重开 → 点继续」还没手测过（单元与集成测试覆盖，但窗口生命周期只有真机能验）。"
+    ]
+  },
+  {
+    "version": "d.188.4.105.12",
+    "date": "2026-11-16",
+    "title": "用真实模型把「完成任务」再量一遍",
+    "bullets": [
+      "**新增 `task-005`**（`evals/cases/task-005.yaml` + `evals/fixtures/task-005/`，`real_only`）：多步修 bug 长任务——`spec.md` 给三个函数的行为规格，`test/run.js` 是按函数分组的验收脚本",
+      "`evals/README.md`：用例数 48 → **49**（39 可回放 + 10 `real_only`），补 `task-005` 的说明与「为什么要它」（比 task-002 多「先读规格、再自证」两步）。",
+      "确定性回放：**39/39**（tokens/pass 2589、p95 89ms，**基线未改**）。",
+      "真实模型全量：**45/45 通过（pass@1 100%）**，tokens/pass **19758**，缓存读 **72.5%**，p95 19852ms。",
+      "— 45 = 49 条减 4 条 `real_skip`（`cmd-004` / `cmd-006` / `long-001` / `subagent-002`，时间敏感）。",
+      "— `task-005`：8 回合 / 47206 tokens；单独跑时 10 回合 / 59689 tokens（token 高是因为真读规格 + 多轮验证，属预期）。",
+      "— 之前每一轮单独跑的 `task-001`～`task-004` 也都在这次全量里通过。",
+      "结论：d.180–d.187 的十二处改动**没有破坏真实模型的任务完成能力**；工具从 8 个涨到 12 个之后，模型仍能在提示词的「本轮可用工具」清单里正确挑工具。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.180–d.187 连着改了十二件事：后台作业、作业唤醒、spill 溢出读回、`/compact`、`/` 面板、按文件撤回、工具超时、上下文用量……**这些全在确定性评测里绿**，但确定性评测用的是脚本化的假模型——它不会「另一种写法解同一道题」，也不会在十几轮工具调用后改变策略。",
+      "上一次真实模型全量是 d.180 那一轮（43/43），之后十二件事一件也没在真模型上验过。目标是「比肩 codex 的好用智能体」，「真实模型能不能把任务做完」才是唯一的判据。",
+      "是什么（全绿才打印「全部通过（3/3）」），`lib/calc.js` 埋了**三处**与规格不一致的实现。模型要先读规格与验收脚本、定位三处偏差、改完跑验收自证。断言只看**最终行为**：`shell_check`（真跑 `node test/run.js` 并要求 stdout 含「全部通过（3/3）」）+ `evidence`，不判工具调用次数与措辞。",
+      "验证（实跑，deepseek-flash）",
+      "没做",
+      "1. 真实模式下仍不重冻 `evals/baselines/latest.json`（需人工批准 + 多次取样）。2. 只用 `deepseek-flash` 一个模型跑；没有跨模型对照（`deepseek-chat` 上次 17/37，属于另一条线，不混用）。3. `task-005` 的 token 成本偏高，没有做「更省 token 的等价验收脚本」（会削弱「自证」这一步的意义）。"
+    ]
+  },
+  {
+    "version": "d.187.4.105.12",
+    "date": "2026-11-16",
+    "title": "让用户看见「上下文快满了」",
+    "bullets": [
+      "`packages/web/src/lib/agentContext/contextMeter.ts`（新）：`contextMeter(used, budget)` 返回`{used, budget, ratio, level, text}`。",
+      "— **安静档**：低于预算 30%（或总量不到 1500 tokens）→ 整条不渲染。短对话里加一行数字是噪音。",
+      "— **正常档**：`上下文 ≈ 12.4K / 25.9K（48%）`。",
+      "— **警告档（≥80%）**：追加「可以发 `/compact` 压一次」。",
+      "— **满档（≥100%）**：追加「下一轮会压缩早期内容」。",
+      "— `formatTokens()` 只负责显示（`850` / `12.4K` / `1.2M`），`used/budget` 归一为整数，负数与 NaN 变 0。",
+      "`packages/web/src/components/ContextMeter.tsx`（新）：`role=\"status\" aria-label=\"上下文用量\"`，`text-warn` / `text-danger` 只在对应档出现；安静档 `return null`（不占输入区高度）。",
+      "`packages/web/src/components/ChatPage.tsx`：",
+      "— 抽出 `contextRowsOf(msgs, plainOf)`——`/compact` 与用量指标**共用同一个消息 → 上下文行口径**（e2e 解不开的不算、文档正文拼进同一条、空内容不算）。任何一处单独改口径，用量数字就会和真正发出去的内容对不上。",
+      "— `contextUsage` state + `refreshContextUsage()`：`used` 取 `estimateRowsTokens(rows)`（与压缩链同一个估算器），`budget` 取 `applyModelBudget(loadContextSettings(), caps)`——**界面上写的预算必须就是运行时用的预算**。",
+      "— 刷新时机：消息变化 / 模型绑定变化 / 回合收尾 / 切换会话。读的是已加载的 `messages`，不额外调 `loadMessages`（历史上那会多打一次请求，把「历史加载失败 → 重试」的状态机时序打乱，A1 用例实测被带红）。",
+      "— 渲染在任务清单（`<TodoPanel>`）之后、输入区之前。",
+      "`contextMeter.test.ts` 7 例（阈值边界、`formatTokens`、budget=0、负数/小数归一）",
+      "`ContextMeter.test.tsx` 4 例（安静档不渲染、正常/警告/满档文案与配色、是 `status` 不是 `alert`）",
+      "`ChatPage.test.tsx` +2 例（短对话不出现指标；12 条各 2400 汉字的早期消息 → 指标出现且带百分比）→ 153 例全绿",
+      "web 全量 347 files / 5113 passed（上一版 345 / 5102）",
+      "`pnpm -w typecheck` 六包 + plugin-kit Done；确定性评测 39/39（基线未改）"
+    ],
+    "paragraphs": [
+      "为什么",
+      "长任务的失败常常**静默**：历史越攒越大，某一轮起模型开始「忘事」——用户看不到任何信号，只会觉得它变笨了。d.160 起预算按模型窗口自动分配、d.183 起可以 `/compact`，但这两件事**都不显示「现在用了多少」**：既不知道该不该压，也判断不出「它为什么突然忘了」。",
+      "Codex 的做法是常驻一行余量；这一版把同一件事补上，口径是「估算 + 只在有意义时出现」。",
+      "是什么",
+      "验证",
+      "没做（下一轮候选）",
+      "1. 不显示**每条消息**的 token 占用（要改渲染层，代价大于收益）。2. 不做自动 `/compact` 建议弹窗（主动打断比「一行可忽略的字」更烦）。3. 数字是估算：`estimateRowsTokens` 与真实计费有偏差，界面上不冒充精确值。"
+    ]
+  },
+  {
+    "version": "d.186.4.105.12",
+    "date": "2026-11-16",
+    "title": "工具卡住不再把整轮对话拖死",
+    "bullets": [
+      "`agentStream.test.ts` 新增 1 例（假时钟推进 181 秒）：执行一个永不返回的工具，断言**下一轮请求里 `role: \"tool\"` 的消息含「超过 180 秒没有返回」**、没有 `agent_error`、",
+      "`agentStream.test.ts` + `agentStream.tools.test.ts` **132 passed**；",
+      "`pnpm -w typecheck` 六包 Done；web 全量 5101 → 见状态表；",
+      "确定性评测 **39/39**（基线未改）。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "工具是外部世界（MCP 服务、浏览器桥、命令、网络），**没有哪一处保证一定返回**。一个不返回的调用会让整轮对话一直挂着：界面一直显示「正在调用 X」，用户只能手点停止，而模型此时什么信息都没拿到，也不知道该换路。d.180 加了后台作业以后，长任务更多地依赖外部服务，这个洞只会更容易被踩到。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | 新增 `TOOL_CALL_TIMEOUT_MS = 180_000` 与 `withToolTimeout()`：每次 `bridge.execute` 都套一层兜底超时 |",
+      "超时后回给模型的是一条**能照做的失败文案**，而不是空结果：",
+      "> 工具 X 超过 180 秒没有返回，已经中止这次等待。这不算任务失败：可以换一种做法> （例如换成后台作业、缩小范围、或先确认外部服务的状态）再继续。",
+      "三条口径",
+      "1. **为什么不直接 abort**：底层那次调用可能仍在跑（stdio/HTTP 只能「不再等」），所以文案写「已中止这次等待」而不是「已杀掉」，不让模型误以为外部状态已经干净了。2. **为什么是 180 秒**：`run_command` 自己的硬上限是 120 秒，后台作业立刻返回 jobId；能超过 180 秒还没返回的，基本可以判定挂死，而不是「正常但慢」。3. **这一轮是成功收口**：超时只让这一次调用失败（`ok: false`，轨迹里标红），回合继续，不是 `agent_error`，也不影响后续轮次。",
+      "验证回合正常结束。",
+      "未做",
+      "1. 不做重试（同一个工具超时后自动再试一次会造成双写风险，交给模型决定）。2. 超时上限不可配置（`run_command`/`file_*` 都没有暴露这个旋钮）。3. 不统计「哪些工具最常超时」——要等真实使用数据再决定是否加埋点。"
+    ]
+  },
+  {
+    "version": "d.185.4.105.12",
+    "date": "2026-11-16",
+    "title": "改错了只撤那一个文件",
+    "bullets": [
+      "`TurnUndoBar.test.tsx` 5 → **9 例**（清单两行、只回传被点的那一个、展开/收起 `aria-expanded`、正在撤的行单独禁用、不给 `onUndoOne` 就不出现「看清单」）。",
+      "`ChatPage.test.tsx` 新增 **I3m**：一轮写两个文件 → 展开清单 → 只撤 `a.md` → `file:undo` 只收到那一个路径、提示「其它改动保留」、清单里 `a.md` 消失而 `b.md` 还在。",
+      "`pnpm -w typecheck` 六包 Done；web 全量 5096 → 见状态表。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.176 的「本轮改动可撤回」只有**全部撤回**这一个动作。真实场景是：一轮改了五个文件、只有两个不对——全部撤回等于把对的也扔了，用户只能再让模型写一遍（还可能写出不一样的东西）。codex 的审阅体验是按文件看、按文件改；和鸣至少要做到按文件撤。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/components/TurnUndoBar.tsx` | 新增「看清单/收起清单」：每行一个文件（文件名 + 所在目录 + 各自的「撤回」）；新增 `busyPath` 让正在撤的那一行单独显示「撤回中…」 || `packages/web/src/components/ChatPage.tsx` | 新增 `undoingPath` state 与 `undoTurnFile(path)`：走同一个 `file:undo` 通道，成功后把该路径从清单里移除，其余保留 |",
+      "口径（与「全部撤回」一致，没有另开路径）",
+      "1. 仍然逐个文件走 `file_undo`，**一份备份只能用一次**——所以同一个文件连点两次，第二次会明确说「没有可用的旧版本」，而不是假装成功。2. 失败不改清单：撤失败的文件仍留在列表里，用户能重试或手工处理。3. 不传 `onUndoOne` 时行为与 d.176 完全一致（老调用方不受影响）。",
+      "验证",
+      "未做",
+      "1. 清单里不显示 diff（只有文件名与目录），要看内容仍走 `file_read`。2. 不支持「撤回某个文件里的某一段改动」——备份粒度是整份文件。3. 清单不跨轮累积（只记最近一轮，与 d.176 一致）。"
+    ]
+  },
+  {
+    "version": "d.184.4.105.12",
+    "date": "2026-11-16",
+    "title": "打一个 `/` 就能看见能做什么",
+    "bullets": [
+      "`slashCommands.test.ts` 6 例：只打 `/` 列全部、前缀过滤且大小写不敏感、路径/分数/多行/尾随空格都不触发、每条命令都有标题与说明。",
+      "`SlashCommandMenu.test.tsx` 4 例：空列表不渲染、列出命令与选中态、高亮越界收口、点选回传命令。",
+      "`ChatPage.test.tsx` 新增 I3l：输入 `/` 出现命令面板 → Enter 补全为 `/compact` 且面板收起 → 再 Enter 执行压缩、提示出现且**命令没有变成用户消息**。",
+      "`pnpm -w typecheck` 六包 Done；web 全量 5085 → 见状态表；确定性评测 39/39 不受影响。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.183 加了 `/compact`，但用户得先知道有这串字符——输入框里没有任何「发现」它的入口。codex / Claude Code 都是打 `/` 就列出可用命令；和鸣此前是「文档里写了，界面上没有」。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/slashCommands.ts`（新） | 命令注册表 `SLASH_COMMANDS`（`/compact`、`/plan`）、`PLAN_COMMAND`、`slashQuery()`、`matchSlashCommands()` || `packages/web/src/components/SlashCommandMenu.tsx`（新） | `role=\"listbox\"` 面板：命令名 + 标题 + 说明，`aria-selected` 跟随高亮；只负责显示与点选 || `packages/web/src/components/ChatPage.tsx` | 输入框键盘接管 ↑↓ / Enter / Esc（面板打开时），`/plan` 本地切换计划模式；`/compact` 仍走 d.183 的本地压缩 |",
+      "三条判定口径（都是为了「别抢正常输入」）",
+      "1. **只认「以 `/` 开头、单行、且还没打完」**：`1/2 的平均值`、`看一下 /docs 目录` 都不弹面板。2. **打完命令就不再弹**：`/compact` 打全或带尾随空格时面板收起，下一次 Enter 直接执行——面板留着会挡住「执行」这个动作本身。3. **进入面板就不抢发送**：面板打开时 Enter 是「补全/执行选中项」，不是「把半截命令发出去」。",
+      "验证",
+      "未做",
+      "1. 面板里没有参数/子命令（例如 `/compact 60` 只压前 60 条）。2. 不做历史补全（↑ 取上一条已发消息）。3. 快捷键固定为 ↑↓/Enter/Esc，没有可配置键位。"
+    ]
+  },
+  {
+    "version": "d.183.4.105.12",
+    "date": "2026-11-16",
+    "title": "上下文可以手动压一次，压了多少也说得清",
+    "bullets": [
+      "`packages/web/src/lib/agentContext/compact.test.ts` 新增 7 例：强制折叠条数、短历史原样、空历史、LLM 摘要 + 缓存命中不再调用、模型返回空串回落确定性摘要、缓存按会话隔离、",
+      "`packages/web/src/components/ChatPage.test.tsx` 新增 I3k：输入 `/compact` 后**不产生用户消息**、出现「已压缩 N 条早期消息」、`heming.contextManual.v1` 里写到该会话。",
+      "`pnpm -w typecheck` 通过；web 全量套件通过；`pnpm eval:agent` 确定性基线 39/39 不受影响。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "自动压缩只在**预算撞墙**时发生：长任务跑到中段，用户没有任何办法主动把上下文变轻；而且压缩之后看不到发生了什么——省了多少、折叠了几条、摘要顶替了哪一段，全是隐式的。于是「它怎么突然忘了前面」成了一团无法解释的现象，用户能做的只有重新交代一遍。",
+      "对照 DSH 与 codex / opencode：它们都给了显式的压缩入口（`/compact`），并在动作前后说明结果。和鸣此前缺的不是压缩能力（`prepareHistory` 早就在做摘要 + 折叠 + 缓存），缺的是**手动入口与可见性**。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentContext/history.ts` | `PrepareHistoryDeps.force`；新增 `compactNow()`：`force` 折叠「除最后一轮以外的全部」，算 `beforeTokens`/`afterTokens`，`afterTokens >= beforeTokens` 时如实回「不划算」、不替换原始消息；`conversationId` 存在时把手动摘要正文写回 || `packages/web/src/lib/agentContext/manualCompact.ts`（新） | `COMPACT_COMMAND=\"/compact\"`、`heming.contextManual.v1`、`setManualSummary` / `takeManualSummary`（读出即删、一次性）/ `clearManualSummaries` || `packages/web/src/lib/agentContext/index.ts` | 导出 `manualCompact` || `packages/web/src/components/ChatPage.tsx` | `runCompactCommand()`：取本会话最近 120 条历史 → 转成 user/assistant 文本行（e2e 解不开的跳过、文档拼接正文、空内容跳过）→ `compactNow`；`submitMessage` 命中 `/compact` 时本地处理、不落库、不发给模型；结果通过 `notice` 回到提示位（`resetComposer` 会清提示，所以在它之后落位） |",
+      "为什么手动摘要不用 `SummaryCache`：`/compact` 在发送路径上只有简化文本行（没有工具配对），算出来的指纹与下一轮真实请求对不上，写进去也命中不了——用户点完还得再等一次摘要。一次性覆盖保证「点完就生效」，而且用过即删，不会变成陈旧事实。",
+      "三条边界",
+      "1. **不划算就不换**：短对话强行折叠，摘要本身占的地方比省下的还多，而且真实原文被换成了转述——此时回「压缩没有更省（现在约 N tokens），保持原样」，不动历史。2. **摘要是「一次性」的**：下一次真正发请求时被取走并用掉，同一轮不会重复生效，也不会在之后某轮突然拿一份过期摘要顶替真实历史。3. **太短直说**：不足 4 条消息时回「这段对话还太短，没有可以压缩的早期内容」，不做无意义动作。",
+      "验证`prepareHistory` 不 force 时不折叠。",
+      "未做",
+      "1. 输入框里手打 `/` 才有命令面板——还没做「/ 触发命令列表」。2. 摘要只能看到「压缩了几条、省了多少」；摘要正文本身不可查看 / 编辑。3. 手动摘要只存本机（`localStorage`），换设备不同步。"
+    ]
+  },
+  {
+    "version": "d.182.4.105.12",
+    "date": "2026-11-16",
+    "title": "后台作业跑完，回来叫一声",
+    "bullets": [
+      "`packages/web/src/lib/shell/jobWatch.test.ts` 9 例、`packages/web/src/components/JobReadyBar.test.tsx` 6 例、`packages/web/src/lib/shell/tool.test.ts` 补 1 条断言（后台启动回 `jobs`）。",
+      "定向：`src/lib/shell` + `JobReadyBar` + `ChatPage` → **194 passed**。",
+      "web 全量 vitest、`pnpm -w typecheck`、确定性评测 39/39 见本轮收尾记录。",
+      "真机冒烟仍覆盖「起 / 读增量 / 列 / 杀」四件事（d.180 的 49/49），本版没有新增桌面通道。"
+    ],
+    "paragraphs": [
+      "**为什么**：d.180 让智能体能起后台命令，但它不会 `await` 一个后台作业——模型起完作业、说一句「已经启动了」就收口，之后**没有任何东西再叫它**。用户等十分钟回来问「好了没」，才发现作业早就结束了。d.181 解决了「长输出读得回来」，这一版解决「跑完了谁来接着做」。",
+      "**改了什么**：",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/mcp/bridge.ts` | `ToolExecutionResult` 加 `jobs?: string[]`：让编排层知道「这轮起过后台作业」，界面不必从文案里抠 jobId || `packages/web/src/lib/shell/tool.ts` | 后台启动结果带上 `jobs: [jobId]` || `packages/web/src/lib/agentStream.ts` | 收集本轮所有 `jobs`，收口时随 `RunSettled.jobs` 交出去 || `packages/web/src/lib/shell/jobWatch.ts`（新） | `watchJobs` 轮询 `jobOutput` 到全部结束（串行、可中断、超时 30 分钟）；`summarizeWatchedJobs`、`jobContinuePrompt`、`runningJobs` || `packages/web/src/components/JobReadyBar.tsx`（新） | 输入区上方的作业条：说清哪几个作业、退出码，「继续」/「查看进展」 || `packages/web/src/components/ChatPage.tsx` | 收口时有作业就开盯；点「继续」发一条**不重发原提问**的续写口令（复用 `submitMessage` + `retryStream` 的同一口径） |",
+      "**三条「不能假装完成」的约束**（都在 `jobWatch.ts` 的注释里写明）：",
+      "1. **读失败不算完成**：`jobOutput` 抛错或超时，作业保持 `running` 并标 `timedOut`，绝不当成「已结束」。2. **退出码拿不到就写「未知」**：桌面端清理过作业会回 `unknown-job`，记「已结束（退出码未知）」，不写 0。3. **只给入口，不偷偷烧 token**：跑完不自动发消息，由用户点「继续」；只起作业那一轮不会因为「还有作业在跑」被无限延长。",
+      "**验证**：",
+      "**未做**：",
+      "1. 作业仍在跑时**不自动**唤醒（`busy` 注入下一步、`idle` 唤醒一轮——DSH 的 `completionDelivery: wakeup`），需要先解决「自动烧 token」的授权问题。2. 关闭应用后作业丢失（作业注册表在主进程内存里），没有 `jobs` 的持久化。3. `command_kill` 仍是 `write` 风险：计划模式里会被拦，作业照跑。"
+    ]
+  },
+  {
+    "version": "d.181.4.105.12",
+    "date": "2026-11-16",
+    "title": "被截断的工具输出可以按需读回来了",
+    "bullets": [
+      "`pnpm eval:agent`：**39/39 全绿**（新增 `spill-001`；tokens/pass 2589、缓存读 2.4%、p95 87ms，`evals/baselines/latest.json` 未改）",
+      "`src/lib/{spill,agentStream.tools.test,mcp/toolResult,capability/providers,hitl/classify,agentRuntime/runtimePrompt}` 定向全过；**web 全量 340 files / 5062 tests 全绿**（exit 0）",
+      "`pnpm -w typecheck` 六包 + plugin-kit 全 Done",
+      "关键回归证据：`agentStream` 里让工具返回 9000 字符，收口后溢出存储里能按 `spill-N` + offset 读回正中间的 `NEEDLE-42`——这正是「中段不再凭空消失」"
+    ],
+    "paragraphs": [
+      "问题：长任务里「答案在中段，但中段被扔掉」",
+      "`truncateToolResult`（`packages/web/src/lib/mcp/bridge.ts`）对超过 8000 字符的工具结果只保留**头 2/3 + 尾 1/3**，中间塞一句「中间省略 N 字符」。这条策略本身没错——工具结果会原样进入下一轮请求，不封顶就会把上下文预算一次占满。",
+      "但在长任务里它有个致命副作用：**被省略的那一段永久消失，且模型没有任何办法拿回来**。一次 `pnpm build` 的几千行日志、一次全仓 `grep` 的几百条命中、一个解析大 JSON 的工具返回——答案常常就在中段。模型只能拿着头尾猜，或者为了看中段把整个工具**再调一次**（真实模型确实会这么做，于是同一段内容被重复读进上下文，预算反而更早爆）。",
+      "对照 DSH：`packages/spill`/`spill-local`/`spill-policy` 把超大输出落到会话私有文件，只把预览和定位交给模型。和鸣这一轮按同样的语义补上，但**不落到工作区**——见下面第 2 条。",
+      "改了什么",
+      "| 位置 | 改动 ||---|---|| `packages/web/src/lib/spill/store.ts`（新） | 进程内溢出存储：`spillText(text)` 分号（`spill-1`、`spill-2`…）、保留 40 条 / 400 万字符上限、按最旧淘汰；`readSpill(id, offset, limit)` 分段读回（默认 8000、单次最多 40000），越界与坏参数都明确报错 || `packages/web/src/lib/spill/tool.ts`（新） | 新工具 `tool_output_read`（只读）：按 `offset`/`limit` 读回，回「第 a–b 字符 / 共 N 字符」并指路下一段；handle 不存在时明说「别在这里重试，重新调一次工具」 || `packages/web/src/lib/mcp/bridge.ts` | `truncateToolResult` 超限时把**完整原文**存进溢出存储，提示改成「共 N 字符，中间省略 X 字符；完整内容已保存为 `spill-K`，用 `tool_output_read` 按 offset/limit 分段读回」；新增 `spill: false` 选项——估算 token 时只量长度，不重复存一份（否则同一条结果被存两次，40 条上限被白白吃掉） || `packages/web/src/lib/capability/{providers,index}.ts` | 新增 `toolOutputProvider`（`id: \"tool-output\"`，注册在 `todo` 之后、`webtools` 之前）——注册顺序就是重名优先级，所以位置固定并被单测钉住 || `packages/web/src/lib/hitl/classify.ts` | `tool_output_read` 归 `read`（读的是内存里已有的文本，不碰磁盘、不产生新副作用），显示名「读取完整输出」 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 仅当该工具注入时，在「长任务怎么处理」里加一行：超长结果会给 `spill-<数字>` 的 handle，要看中段就用 `tool_output_read`，**不要为了同样的内容把工具再调一次** || `evals/runner/tools.ts` | 评测工具桥也合并 `buildToolOutputBridge()`——真实运行里它始终注入，评测不一致就等于这条链在评测里不存在 || `evals/cases/spill-001.yaml` + `evals/fixtures/spill-001/build.log` | 646 行 / 25042 字节的构建日志（`NEEDLE-777` 在第 15000 字符处），断言 `file_read` 被调用、系统提示词里注入了 `tool_output_read` |",
+      "三条刻意的取舍",
+      "1. **不落工作区**：溢出内容放在进程内存里，不写用户的目录。写盘会把「读文件」变成「产生文件」——`file_glob` 会把它们当源文件列出来，撤回列表也会多出莫名其妙的条目。2. **代价写清楚**：重启后 handle 失效。这种情况下 `readSpill` 回 `spill-not-found` 并提示「重新调一次工具」，**绝不返回空串**——空串会被模型当成「我读过了，里面什么都没有」，比报错危险得多。3. **有上限且会淘汰**：40 条 / 400 万字符，超了从最旧开始丢；这是「方便读回」而不是「无限缓存」，否则一个循环调用的长任务能把桌面端内存吃穿。",
+      "验证",
+      "未做",
+      "1. **不跨重启**：handle 只在本次进程有效，重启后要重新调用工具（要持久化就得落盘，落盘涉及清理策略与隐私，另开一轮）。2. **按字符分窗，不按行**：读回可能把一行切成两半（模型能拼起来，但不如按行读舒服）。3. **没有 `/compact` 式的主动整理**：溢出存储只被动淘汰，不做「把散落的小 handle 合并成一个摘要」。"
+    ]
+  },
+  {
+    "version": "d.180.4.105.12",
+    "date": "2026-11-16",
+    "title": "长任务的地基：命令可以在后台跑",
+    "bullets": [
+      "起作业仍然是 `danger`，**每次都要用户在确认卡上点允许**；`command_kill` 记 `write`。",
+      "工作目录仍必须在可写根内（复用 `resolveWorkingDir`），后台化不绕过这道闸。",
+      "输出上限 512KB（超出丢弃并计数，`command_output` 会把「已丢弃 N 字节」写出来，模型不会以为输出完整）；单作业最长 30 分钟；同时登记作业上限 20 条，结束的按 `finishedAt` 淘汰最旧的。",
+      "老安装包（没有 job 通道）不会假装能起作业：工具层只注入 `run_command`，`background: true` 直接回`bridge-missing` 并说明原因。",
+      "`pnpm smoke:desktop` **49/49**（上一版 42）：在真实 Electron 里起两条后台命令，一条轮询到 `bg-ok` 才结束、一条 `jobKill` 后确认 `running: false`，再验未知 `jobId` 回 `unknown-job`——这是「真 IPC + 真进程」的证据。",
+      "desktop 全量 **973 用例 / 972 pass / 1 skip（环境不允许建软链）/ 0 fail**；web 全量 **338 files / 5042 passed**。",
+      "评测新增 `task-004`（`real_only`）：让真实模型「起一条 4 秒后才打印 `bg-done` 的后台命令并轮询」——`deepseek-flash` 用 **4 回合 / 7218ms** 做成。",
+      "确定性回放 **38/38**（4 条 `real_only` 打印跳过），`evals/baselines/latest.json` 未改。",
+      "真实 deepseek-flash 全量 **43/43**（pass@1 100%，tokens/pass 16011，缓存读 72.7%，p95 16767ms）；两条原本只错在措辞的用例（search-001 的「3 个 .ts 文件」带反引号、\tool-002 的「已经追加完成 / 新增了一行」）把同义词表补上，事实断言未放宽。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "用户这一轮的指令是「在全量优化智能体，重点优化长任务。可以对比 dsh 看看功能差距」。",
+      "先把 DSH 里跟「长任务」有关的包逐个读了一遍（`packages/jobs`、`spill`、`compaction`、`guard`、`subagent`、`goal`、`plan-mode`），再逐条对照和鸣，差距表写在 `docs/HANDOFF.md` 的本轮小节里。其中**最挡路的一条**是：",
+      "> `run_command` 是同步的，硬超时 120 秒。",
+      "真实工程里的长命令——`pnpm build`、`npm run test:e2e`、`docker build`、`cargo test`——动辄几分钟到几十分钟。同步跑法只有两种结局：要么整轮对话卡在一次等待里（用户看到的是「它不动了」），要么到 120 秒被杀掉（前面的输出也一起没了）。前十二版把「改文件 / 派帮手 / 记清单 / 会续跑」都做完了，但**最典型的长时间工程动作仍然跑不了**，所以这一版把「命令」从「一次调用一次等待」改造成「可以起一个作业、稍后回来看」。",
+      "是什么",
+      "四个动作，对应四个工具：",
+      "| 工具 | 风险 | 做什么 || --- | --- | --- || `run_command` 的 `background: true` | `danger` | 立刻返回 `jobId`，命令在后台跑，**不进入前台串行队列**（否则一条后台作业会把后面所有命令堵死） || `command_output` | `read` | 读「自上次读取以来」的增量输出；`wait_ms` 最多等 30 秒再返回，模型不用自己空转轮询 || `command_list` | `read` | 列出本主进程登记过的作业（含刚结束的），带 `running` / `exitCode` / 已产字节 / 丢弃字节 || `command_kill` | `write` | 按 `jobId` 停一个在跑的作业（杀进程树，不是只杀父进程） |",
+      "安全口径与 d.164 一致、没有放宽：",
+      "怎么验证的",
+      "未做（下一轮候选，按差距表的优先级）",
+      "1. **作业完成通知 / 唤醒**：DSH 在作业结束时会把结果注入下一步，空闲时甚至唤醒一轮；和鸣这版要模型自己想起来轮询。2. **spill**：超大工具输出落会话私有文件、只回预览——现在仍是「保头 70% + 保尾」，中段永久丢失。3. **压缩摘要 / `/compact`**：只有按预算的窗口截断，没有摘要式压缩。4. 子代理仍只读、无 `spawn/control` 工具、无并发；通用超时策略仍只覆盖 shell。"
+    ]
+  },
+  {
     "version": "d.179.4.105.12",
     "date": "2026-11-16",
     "title": "发版门禁不再被并行测试的随机崩溃卡住",

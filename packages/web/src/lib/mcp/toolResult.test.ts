@@ -10,6 +10,7 @@ import {
   truncateToolResult,
 } from "./bridge.js";
 import type { HttpMcpClient } from "./httpClient.js";
+import { readSpill, resetSpills } from "../spill/store.js";
 
 /** 一台假客户端：只实现 callTool，其余方法给最小实现（测试不碰网络）。 */
 function fakeClient(callTool: HttpMcpClient["callTool"]): HttpMcpClient {
@@ -52,6 +53,19 @@ describe("truncateToolResult", () => {
     expect(out).not.toContain("MMMM");
   });
 
+  it("超限时把完整内容留在溢出存储里，并给出可读回的 handle（d.181）", () => {
+    const middle = "NEEDLE-42";
+    const text = "A".repeat(5000) + middle + "Z".repeat(5000);
+    const out = truncateToolResult(text, 3000);
+    // 预览里不该出现中段内容（否则等于没截断），但必须留下 handle
+    expect(out).not.toContain(middle);
+    const match = /spill-(\d+)/.exec(out);
+    expect(match).not.toBeNull();
+    // 按 handle 读回，中段内容必须还在——这是「不再永久丢失」的直接证据
+    const back = readSpill(`spill-${match![1]}`, 4000, 4000);
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.text).toContain(middle);
+  });
   it("默认上限是公开常量（8000 字符量级）", () => {
     expect(MAX_TOOL_RESULT_CHARS).toBe(8000);
     expect(truncateToolResult("x".repeat(8000))).toHaveLength(8000);

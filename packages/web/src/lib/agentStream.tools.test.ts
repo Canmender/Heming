@@ -10,6 +10,7 @@ import {
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 import { toHitlCall } from "./hitl/classify.js";
+import { listSpills, readSpill, resetSpills } from "./spill/store.js";
 
 /**
  * 工具执行层的行为契约（G1/G3/G5）。
@@ -569,6 +570,28 @@ describe("按需工具发现（tool_search）", () => {
     expect(firstNames).toHaveLength(MAX_VISIBLE_TOOLS + 1);
   });
 
+  it("核心工具常驻：装了 MCP、工具超过阈值，file_write / run_command 仍在首轮可见", async () => {
+    // 20 个 MCP 工具（名字都命中查询词）+ 5 个本地核心工具 = 25，进入发现模式
+    const mcpNames = Array.from({ length: 20 }, (_, i) => `srv__t${String(i).padStart(2, "0")}`);
+    const core = ["file_write", "file_read", "run_command", "todo_write", "agent_task"];
+    const { deps, toolOptions } = makeDeps([{ text: "答案", calls: [] }], {
+      toolNames: [...mcpNames, ...core],
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "t0 t1 t2", deps);
+
+    const firstNames = (toolOptions[0] ?? []).map(
+      (t) => (t as { function: { name: string } }).function.name,
+    );
+    // 相关度命中把 srv__* 排在前面也不影响：核心工具先占名额
+    for (const name of core) expect(firstNames).toContain(name);
+    expect(firstNames).toContain(TOOL_SEARCH_NAME);
+    expect(firstNames).toHaveLength(MAX_VISIBLE_TOOLS + 1);
+    // 海量 MCP 工具里靠后的那些仍然被藏起来（不是把全量塞回去）
+    expect(firstNames).not.toContain(mcpNames[mcpNames.length - 1]);
+  });
+
   it("用户原话不命中任何工具时按目录顺序取，行为与以前一致", async () => {
     const { deps, toolOptions } = makeDeps([{ text: "答案", calls: [] }], {
       toolNames: manyNames,
@@ -931,5 +954,32 @@ describe("本轮落盘清单（d.176）", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
     expect(settled.at(-1)?.writes).toBeUndefined();
+  });
+});
+
+describe("长输出截断后仍可读回（d.181）", () => {
+  it("超限的工具结果会把完整内容留进溢出存储，中段不再凭空消失", async () => {
+    const middle = "NEEDLE-42";
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "1", name: "srv__big" }] },
+      { text: "看完了", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async () => ({ text: "A".repeat(5800) + middle + "Z".repeat(3191), ok: true }),
+    });
+
+    resetSpills();
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 这是「不再永久丢失」的可观察证据：溢出存储里有这一份，且中段原文完整在
+    const items = listSpills();
+    expect(items).toHaveLength(1);
+    const stored = readSpill(items[0]!.id, 5000, 2000);
+    expect(stored.ok).toBe(true);
+    if (stored.ok) {
+      expect(stored.text).toContain(middle);
+      expect(stored.total).toBe(9000);
+    }
   });
 });

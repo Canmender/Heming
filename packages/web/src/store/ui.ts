@@ -216,6 +216,19 @@ export interface PaletteIntent {
   data?: PaletteIntentData;
 }
 
+/**
+ * 「跳到某条消息」的一次性投递槽（d.198）。
+ *
+ * 左栏搜索命中后要的是「打开那个会话并落到那句话上」，而侧栏拿不到 ChatPage 的
+ * 滚动容器与窗口化状态——用一个进程内投递槽把意图交过去，ChatPage 消费时按
+ * `conversationId` 认领，token 自增保证「同一个命中连点两次」也各触发一次。
+ */
+export interface MessageJumpRequest {
+  conversationId: string;
+  messageId: string;
+  token: number;
+}
+
 interface UiState {
   page: Page;
   /**
@@ -319,6 +332,15 @@ interface UiState {
   setPaletteIntent: (kind: PaletteIntentKind, data?: PaletteIntentData) => void;
   /** 消费意图（消费端调用后立即清空）。 */
   consumePaletteIntent: () => void;
+  /**
+   * d.198：左栏搜索命中 → 跳到某条消息的投递槽（null=无）。
+   * 只到「落到那条消息并高亮」为止；ChatPage 认领即清，避免残留导致下次打开会话乱跳。
+   */
+  messageJump: MessageJumpRequest | null;
+  /** 请求跳到某条消息（token 自增；只带定位 id，不含正文）。 */
+  requestMessageJump: (conversationId: string, messageId: string) => void;
+  /** 消费跳转请求（ChatPage 落位后调用）。 */
+  consumeMessageJump: () => void;
   /** 打开某个助手会话并进入助手页。 */
   openConversation: (id: string) => void;
   /**
@@ -356,6 +378,11 @@ interface UiState {
  * 每次投递 +1，消费端用 token 判断「这是一次新的点击」。
  */
 let paletteIntentToken = 0;
+/**
+ * d.198：「跳到某条消息」的自增序号（模块级，理由同 `paletteIntentToken`：
+ * 进程内瞬态，不需要跨实例同步）。
+ */
+let messageJumpToken = 0;
 
 /** 知识库动作意图的自增序号：日记/新建连点两次也要各消费一次。 */
 let vaultIntentToken = 0;
@@ -479,6 +506,12 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ paletteIntent: { kind, token: paletteIntentToken, ...(data ? { data } : {}) } });
   },
   consumePaletteIntent: () => set({ paletteIntent: null }),
+  messageJump: null,
+  requestMessageJump: (conversationId, messageId) => {
+    messageJumpToken += 1;
+    set({ messageJump: { conversationId, messageId, token: messageJumpToken } });
+  },
+  consumeMessageJump: () => set({ messageJump: null }),
   setPage: (page, view) => {
     const route = resolvePage(page, view);
     set({
@@ -639,6 +672,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       activeConversationId: id,
       taskDraft: null,
       automationFocusId: null,
+      // d.198：手动打开会话时丢掉上一次没落位的跳转意图，免得下次进来莫名其妙滚一段。
+      messageJump: null,
     workflowFocusId: null,
       infohubIntent: null,
       pluginPageIntent: null,

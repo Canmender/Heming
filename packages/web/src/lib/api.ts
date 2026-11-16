@@ -249,6 +249,40 @@ export const updateConversationTitle = (convId: string, title: string) =>
   });
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
+
+/** 会话内容搜索的一条命中（d.197）：只带片段，不带整条正文。 */
+export interface ConversationContentHit {
+  conversationId: string;
+  conversationTitle: string | null;
+  lastMessageAt: string | null;
+  messageId: string;
+  senderType: string;
+  createdAt: string;
+  snippet: string;
+}
+
+/** 会话内容搜索的响应：`truncated` 表示「会话/消息太多，只搜了最近的一部分」。 */
+export interface ConversationContentSearchResult {
+  hits: ConversationContentHit[];
+  truncated: boolean;
+  scanned: number;
+}
+
+/**
+ * 按消息正文搜会话（d.197）。
+ *
+ * 服务端只在「我所在的会话」里找，且只回命中片段——侧栏要的是「哪段会话说过」，
+ * 点进去再看原文。搜索词少于 2 个字符时服务端 400，调用方应先自行短路。
+ */
+export const searchConversationContent = (
+  query: string,
+  options: { limit?: number } & ApiRequestOptions = {},
+) => {
+  const params = new URLSearchParams({ q: query });
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  return api<ConversationContentSearchResult>(`/api/conversations/search?${params.toString()}`, {}, options);
+};
+
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
 
 /**

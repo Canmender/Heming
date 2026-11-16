@@ -25,6 +25,7 @@ import {
   createTeamTask,
   updateTeamTask,
   deleteTeamTask,
+  searchConversationContent,
 } from "./api.js";
 import { hasSubtle, fromB64, toB64 } from "./e2eCrypto.js";
 
@@ -750,5 +751,57 @@ describe("团队动向（/api/team/activities）", () => {
     await expect(
       fetchTeamActivities({ limit: 10 }, { signal: ac.signal }),
     ).rejects.toMatchObject({ status: 0, message: "操作已取消" });
+  });
+});
+
+describe("searchConversationContent（d.197 左栏内容搜索）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("GET /api/conversations/search：查询词与 limit 都进 query 串，响应原样返回", async () => {
+    const payload = {
+      hits: [
+        {
+          conversationId: "c1",
+          conversationTitle: "周会纪要",
+          lastMessageAt: "2026-11-15T09:00:00.000Z",
+          messageId: "m1",
+          senderType: "user",
+          createdAt: "2026-11-15T08:00:00.000Z",
+          snippet: "…全部通过…",
+        },
+      ],
+      truncated: false,
+      scanned: 7,
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const got = await searchConversationContent("全部 通过", { limit: 20 });
+
+    expect(got).toEqual(payload);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url] = fetchSpy.mock.calls[0]!;
+    const parsed = new URL(String(url), "http://localhost");
+    expect(parsed.pathname).toBe("/api/conversations/search");
+    expect(parsed.searchParams.get("q")).toBe("全部 通过");
+    expect(parsed.searchParams.get("limit")).toBe("20");
+  });
+
+  it("不传 limit 时 query 串里不出现 limit", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ hits: [], truncated: false, scanned: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await searchConversationContent("key");
+    const [url] = fetchSpy.mock.calls[0]!;
+    expect(new URL(String(url), "http://localhost").searchParams.has("limit")).toBe(false);
   });
 });

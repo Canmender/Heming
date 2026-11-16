@@ -1,13 +1,19 @@
+import { useState } from "react";
 import { Button } from "./ui/Button.js";
 
 /**
- * 本轮改动可撤回（d.176）。
+ * 本轮改动可撤回（d.176；d.185 起可以逐个文件撤）。
  *
  * ## 为什么要有这一条
  *
  * d.170 给了 `file_undo`，d.171 又在设置里加了「最近改动（可回滚）」列表——但两处都要求用户
  * **先意识到要撤、再找到入口、再翻路径**。真正会出事的时刻是「它刚写完，我看不对」：那一步
  * 应当就在眼前。这一条把「撤回」放到刚出结果的位置，点一次就行。
+ *
+ * ## 为什么还要逐个撤（d.185）
+ *
+ * 一轮改了五个文件、只有两个不对时，「全部撤回」等于把对的也扔了，用户只能再让模型写一遍。
+ * 所以清单可以展开：每行一个文件、各自一个「撤回」，撤掉的从清单里消失。
  *
  * ## 口径
  *
@@ -20,38 +26,87 @@ import { Button } from "./ui/Button.js";
 export function TurnUndoBar({
   paths,
   busy,
+  busyPath,
   onUndo,
+  onUndoOne,
   onDismiss,
 }: {
   /** 本轮落盘的绝对路径（正斜杠）。 */
   paths: readonly string[];
   busy?: boolean;
+  /** 正在单独撤回的那一个文件（正斜杠绝对路径）。 */
+  busyPath?: string | null;
   onUndo: () => void;
+  /** 只撤这一个文件；不传就不展示清单（老调用方行为不变）。 */
+  onUndoOne?: (path: string) => void;
   onDismiss: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   if (paths.length === 0) return null;
   const names = paths.map((path) => path.split("/").pop() ?? path);
   const preview = names.slice(0, 3).join("、");
   const more = names.length > 3 ? ` 等 ${names.length} 个` : "";
+  const expandable = onUndoOne !== undefined && paths.length > 0;
 
   return (
     <div
       role="status"
       aria-live="polite"
-      className="mx-4 mb-1 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle-2 px-3 py-1.5 text-ui-sm text-ink"
+      className="mx-4 mb-1 rounded-lg border border-line bg-subtle-2 px-3 py-1.5 text-ui-sm text-ink"
     >
-      <span className="min-w-0 truncate" title={paths.join("\n")}>
-        本轮改了 {preview}
-        {more}——改错了可以撤回。
-      </span>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        <Button variant="ghost" size="sm" onClick={onDismiss} disabled={busy}>
-          保留
-        </Button>
-        <Button size="sm" onClick={onUndo} disabled={busy}>
-          {busy ? "正在撤回…" : "撤回本轮改动"}
-        </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 truncate" title={paths.join("\n")}>
+          本轮改了 {preview}
+          {more}——改错了可以撤回。
+        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {expandable ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+              disabled={busy}
+            >
+              {open ? "收起清单" : "看清单"}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="sm" onClick={onDismiss} disabled={busy}>
+            保留
+          </Button>
+          <Button size="sm" onClick={onUndo} disabled={busy}>
+            {busy ? "正在撤回…" : "撤回本轮改动"}
+          </Button>
+        </div>
       </div>
+      {open && expandable ? (
+        <ul aria-label="本轮改动的文件" className="mt-1.5 space-y-0.5 border-t border-line pt-1.5">
+          {paths.map((path) => {
+            const name = path.split("/").pop() ?? path;
+            const rowBusy = busyPath === path;
+            return (
+              <li key={path} className="flex items-center gap-2">
+                <span className="min-w-0 truncate font-mono text-ui-xs" title={path}>
+                  {name}
+                </span>
+                <span className="min-w-0 truncate text-ui-xs text-muted" title={path}>
+                  {path.slice(0, path.length - name.length).replace(/\/$/, "")}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  aria-label={`撤回 ${name}`}
+                  onClick={() => onUndoOne?.(path)}
+                  disabled={busy || rowBusy}
+                >
+                  {rowBusy ? "撤回中…" : "撤回"}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 }

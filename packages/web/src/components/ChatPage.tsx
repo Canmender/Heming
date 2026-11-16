@@ -77,7 +77,10 @@ import { MAX_TOOL_ROUNDS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerD
 import { recordRollout, rolloutLog } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
+  COMPACT_COMMAND,
   applyModelBudget,
+  compactNow,
+  estimateRowsTokens,
   loadContextSettings,
   prepareHistory as prepareAgentHistory,
   summaryCache,
@@ -106,6 +109,7 @@ import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import { fileRootsFor, setActiveWorkspace } from "../lib/fileEdit/roots.js";
 import { getFileBridge, hasFileBridge } from "../lib/fileEdit/bridge.js";
+import { getShellBridge, hasJobRuntime } from "../lib/shell/bridge.js";
 import {
   buildRuntimeSection,
   describePlatform,
@@ -115,7 +119,17 @@ import { resolveBasePrompt } from "../lib/agentRuntime/defaultPrompt.js";
 import { collectProjectRules } from "../lib/agentRuntime/projectRules.js";
 import { collectFileRefs } from "../lib/fileEdit/fileRefs.js";
 import { FileRefPicker } from "./FileRefPicker.js";
+import { ModelSwitcher } from "./ModelSwitcher.js";
 import { TurnUndoBar } from "./TurnUndoBar.js";
+import { JobReadyBar } from "./JobReadyBar.js";
+import { ContextMeter } from "./ContextMeter.js";
+import { ResumeBar, type ResumeReason } from "./ResumeBar.js";
+import {
+  clearTurnRunning,
+  loadResumePoint,
+  markTurnRunning,
+} from "../lib/agentRuntime/resumePoint.js";
+import { jobContinuePrompt, watchJobs, type WatchedJob } from "../lib/shell/jobWatch.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
 import { PLAN_EXECUTE_PROMPT, loadPlanMode, savePlanMode, withPlanMode } from "../lib/agentRuntime/planMode.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
@@ -141,9 +155,15 @@ import { ErrorState } from "./ui/ErrorState.js";
 import { ComposerHints } from "./ux/ComposerHints.js";
 // d.158：任务清单渲染（`todo_write` 的可见落点），放在输入栏上方
 import { TodoPanel } from "./TodoPanel.js";
+import { getTodos } from "../lib/todo/store.js";
 // d.167.4.103：轮次打满后的「继续」入口（不再让用户自己打「继续」）
 import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
+import { SlashCommandMenu } from "./SlashCommandMenu.js";
+import { PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { buildSlashHelp, buildStatusReport } from "../lib/agentRuntime/statusReport.js";
+import { historyFrom, stepHistory } from "../lib/agentRuntime/inputHistory.js";
+import { coreToolNames } from "../lib/agentRuntime/coreTools.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
 import { Button } from "../components/ui/Button.js";
@@ -273,6 +293,13 @@ export function clampComposerHeight(n: number): number {
  * 留 80px 余量是因为滚动条末端的 1~2px 抖动不该被当成「用户上滑了」。
  */
 const STICK_BOTTOM_PX = 80;
+
+/**
+ * d.198：从左栏搜索跳过来的那条消息高亮多久（毫秒）。
+ *
+ * 2.4 秒：够眼睛跟过去、认出是哪一句；再长就会让人以为这条消息「被选中了」。
+ */
+const JUMP_HIGHLIGHT_MS = 2400;
 
 /**
  * 「继续生成」发出去的续写指令（不是重发原提问）。
@@ -542,6 +569,26 @@ function AudioBubble({
 }
 
 /**
+ * 消息 → 上下文行（d.187）：`/compact` 与上下文用量指示必须用同一口径。
+ *
+ * 为什么抽成函数：两处都要「e2e 解不开的不算（与提示词同口径）、文档正文拼进同一条、
+ * 空内容不算」。任何一处单独改口径，用户看到的用量数字就会与真正发出去的内容对不上。
+ */
+function contextRowsOf(msgs: Message[], plainOf: Record<string, unknown>): ChatMessage[] {
+  const rows: ChatMessage[] = [];
+  for (const m of msgs) {
+    if (m.enc === "e2e" && !plainOf[m.id]) continue;
+    const docText = m.payload.file?.text;
+    const content = docText
+      ? `${m.payload.text}\n\n${docFileBlock(m.payload.file!.name, docText)}`
+      : m.payload.text;
+    if (!String(content ?? "").trim()) continue;
+    rows.push({ role: m.senderType === "user" ? "user" : "assistant", content });
+  }
+  return rows;
+}
+
+/**
  * 极简对话页。
  *
  * d.147 外壳重构后它只被 `AssistantPage` 以「整页」形态挂载：顶部一条细栏里
@@ -557,6 +604,9 @@ export function ChatPage({
   const leave = useUiStore((s) => s.leaveConversation);
   const taskDraft = useUiStore((s) => s.taskDraft);
   const consumeTaskDraft = useUiStore((s) => s.consumeTaskDraft);
+  /** d.198：左栏搜索命中投递的「跳到某条消息」意图（null=无）。 */
+  const messageJump = useUiStore((s) => s.messageJump);
+  const consumeMessageJump = useUiStore((s) => s.consumeMessageJump);
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages[convId] ?? EMPTY_MESSAGES);
   /** A1：历史三态（加载中 / 失败 / 加载成功且为空）按会话分桶读。 */
@@ -580,8 +630,7 @@ export function ChatPage({
   const sweepStaleStreams = useChatStore((s) => s.sweepStaleStreams);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
-  const [draft, setDraft] = useState("");
-  /** 最新草稿的只读镜像：重试成功后判断「用户有没有在这期间改过字」。 */
+  const [draft, setDraft] = useState("");  /** 最新草稿的只读镜像：重试成功后判断「用户有没有在这期间改过字」。 */
   const draftRef = useRef(draft);
   useEffect(() => {
     draftRef.current = draft;
@@ -630,6 +679,8 @@ export function ChatPage({
   useEffect(() => {
     flushDraftSave();
     setDraft(getDraft(convId));
+    // 换会话时退出回溯：上一条会话的历史不该在这里被调出来（d.194）。
+    setHistoryIndex(-1);
     return () => {
       // 切走/卸载时把最后几百毫秒的输入补上，别丢字
       flushDraftSave();
@@ -641,6 +692,16 @@ export function ChatPage({
    * 存 streamId 而不是布尔：点「继续」要复用 `retryStream(streamId)`（清旧流、带原 agent 续写）。
    */
   const [roundLimitStreamId, setRoundLimitStreamId] = useState<string | null>(null);
+  /** 命令面板（d.184）当前高亮的行；面板项变化时按长度收口，不越界。 */
+  const [slashIndex, setSlashIndex] = useState(0);
+  /**
+   * 输入框历史回溯位置（d.194）：`-1` = 不在回溯里（框里是用户自己的草稿）。
+   * `draftStashRef` 存进入回溯前的那半句草稿，一路按 ↓ 走到头要原样放回去。
+   */
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  /** 模型切换弹窗（d.195）：点输入区右下角的模型名打开。 */
+  const [modelSwitcherOpen, setModelSwitcherOpen] = useState(false);
+  const draftStashRef = useRef("");
   /*
    * 为什么给「继续」（d.176.4.105）：轮次到顶和预算到顶都会让答案停在半路，
    * 但说明不同——前者是「工具调用次数用完」，后者是「这一轮上下文塞满了」。
@@ -648,6 +709,17 @@ export function ChatPage({
   const [continueReason, setContinueReason] = useState<ContinueReason>("rounds");
   /** 计划模式下这一轮「只给方案」结束了：给一次「接受计划，开始执行」（d.173）。 */
   const [planReadyStreamId, setPlanReadyStreamId] = useState<string | null>(null);
+  /**
+   * 后台作业盯梢（d.182）：作业不会被 await，这一轮收口后由这里接着盯。
+   *
+   * - `watchedJobs` 只是**投影**：状态来自主进程，界面不自己推断「大概跑完了」；
+   * - `jobWatchRef` 持有当前轮询的 AbortController：切会话/下一轮开始要停掉，
+   *   否则旧会话的作业条会盖在新会话上；
+   * - `jobMetaRef` 记住「是哪条流的作业」，点「继续」时要用同一个 agent 发续写口令。
+   */
+  const [watchedJobs, setWatchedJobs] = useState<WatchedJob[]>([]);
+  const jobWatchRef = useRef<AbortController | null>(null);
+  const jobMetaRef = useRef<{ agentId: string; name: string; taskId?: string } | null>(null);
   /**
    * 计划模式（d.173）：本轮只读、先出方案。
    *
@@ -718,6 +790,11 @@ export function ChatPage({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
+  /**
+   * d.198：从左栏搜索命中跳过来时要落位的消息 id（落位后短暂高亮，再自动熄灭）。
+   * 与 `activeSearchId` 分开：那个是「本会话内搜索」的当前命中，两者互不覆盖。
+   */
+  const [jumpedMessageId, setJumpedMessageId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   /** WS 三态：首次连接 / 通道已连接 / 通道断开（用于标题与横幅，不用 connected 二元冒充）。 */
   const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
@@ -757,6 +834,30 @@ export function ChatPage({
    */
   const [turnWrites, setTurnWrites] = useState<string[]>([]);
   const [undoing, setUndoing] = useState(false);
+  /**
+   * 上下文用量（d.187）：`{used, budget}`，按当前模型窗口估算。
+   *
+   * 只在这里存一份快照，渲染交给 `ContextMeter`（安静档自己隐掉）。
+   * 为什么不每帧算：`loadMessages` 是异步的，且用户打字时不需要重算。
+   */
+  const [contextUsage, setContextUsage] = useState<{ used: number; budget: number }>({
+    used: 0,
+    budget: 0,
+  });
+  /** 正在单独撤回的那个文件（d.185；与「全部撤回」互斥的进度显示）。 */
+  const [undoingPath, setUndoingPath] = useState<string | null>(null);
+  /**
+   * 「这一轮没跑完」的续跑入口（d.189）。
+   *
+   * 两个来源：用户点了停止（`aborted`，带 streamId，能复用 retryStream），
+   * 以及应用重启/关窗后发现上一轮的标记还在（`interrupted`，只能重发续写口令）。
+   */
+  const [resumeState, setResumeState] = useState<{
+    reason: ResumeReason;
+    streamId?: string;
+    agentId: string;
+    agentName: string;
+  } | null>(null);
   /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
   const [listening, setListening] = useState(false);
   /** 语音双选项浮层（mic 按钮弹出：转文字 / 录音），会话级清理。 */
@@ -952,6 +1053,23 @@ export function ChatPage({
   // 计划模式是「按会话」的意图开关（d.173）：切会话要跟着换，别把上一个会话的只读带过来。
   useEffect(() => {
     setPlanMode(loadPlanMode(convId));
+  }, [convId]);
+  /*
+   * d.189：打开会话时看一眼「有没有一轮没跑完」。
+   *
+   * 正常收口会清掉标记，所以这里读到东西基本只有两种可能：应用被关掉/崩掉过，
+   * 或者那一轮还在跑（同一窗口内的重挂载）。两种情况都值得给一次「继续」——
+   * 但**不自动发**，续跑会产生真实请求和工具调用，用户可能只是想回来看看。
+   */
+  useEffect(() => {
+    const point = loadResumePoint(convId);
+    if (!point) return;
+    setResumeState({
+      reason: "interrupted",
+      streamId: point.streamId,
+      agentId: point.agentId,
+      agentName: point.agentName,
+    });
   }, [convId]);
 
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
@@ -1239,6 +1357,90 @@ export function ChatPage({
     }
   };
 
+  /**
+   * 只撤回这一轮里的某一个文件（d.185）。
+   *
+   * 为什么需要它：一轮改了五个文件、只有两个不对时，「全部撤回」等于把对的也扔了。
+   * 口径与 `undoTurnWrites` 完全一致（同一个 `file_undo` 通道、同一份备份只能用一次），
+   * 只是撤成功后把它从清单里去掉，其余保留。
+   */
+  const undoTurnFile = async (path: string) => {
+    const bridge = getFileBridge();
+    if (!bridge?.undo) {
+      setSendNotice("当前桌面端版本不支持撤回（没有 file:undo 通道）。", "info");
+      return;
+    }
+    const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
+    const name = path.split("/").pop() ?? path;
+    setUndoingPath(path);
+    try {
+      const res = await bridge.undo({ roots: fileRootsFor(workspace), path });
+      if (res.ok) {
+        setTurnWrites((current) => current.filter((item) => item !== path));
+        setSendNotice(`已撤回 ${name}，本轮其它改动保留。`, "info");
+      } else {
+        const code = "code" in res ? res.code : undefined;
+        setSendNotice(
+          code === "no-backup" || code === "no-backup-dir"
+            ? `撤回 ${name} 失败：没有可用的旧版本（可能之前已撤销过，或这轮是新建）。`
+            : `撤回 ${name} 失败：${"error" in res ? res.error : "未知原因"}`,
+          "info",
+        );
+      }
+    } catch {
+      setSendNotice(`撤回 ${name} 失败：桌面端没有响应。`, "info");
+    } finally {
+      setUndoingPath(null);
+    }
+  };
+
+  /**
+   * 开始盯后台作业（d.182）。
+   *
+   * 只在**收口时**接管：作业还在跑就继续轮询，跑完停下并把状态交给 `JobReadyBar`。
+   * 读失败/超时都不写「已结束」——作业条宁可显示「还在跑」，也不能让用户以为完成了。
+   */
+  const startJobWatch = (
+    jobIds: string[],
+    meta: { agentId: string; name: string; taskId?: string },
+  ) => {
+    const bridge = getShellBridge();
+    const jobOutput = bridge?.jobOutput;
+    if (!bridge || typeof jobOutput !== "function" || jobIds.length === 0) {
+      setWatchedJobs([]);
+      return;
+    }
+    jobWatchRef.current?.abort();
+    const controller = new AbortController();
+    jobWatchRef.current = controller;
+    jobMetaRef.current = meta;
+    setWatchedJobs(jobIds.map((jobId) => ({ jobId, running: true, exitCode: null, stdout: "", stderr: "" })));
+    void watchJobs({
+      bridge: { jobOutput },
+      jobIds,
+      signal: controller.signal,
+      onTick: (states) => setWatchedJobs(states),
+    }).then((result) => {
+      if (controller.signal.aborted) return;
+      setWatchedJobs(result.jobs);
+    });
+  };
+
+  /** 点「继续」：作业结束后发一条续写口令，不重发原提问（同 `retryStream` 口径）。 */
+  const continueAfterJobs = () => {
+    const meta = jobMetaRef.current;
+    const jobs = watchedJobs;
+    jobWatchRef.current?.abort();
+    jobWatchRef.current = null;
+    setWatchedJobs([]);
+    if (!meta || jobs.length === 0) return;
+    void submitMessage(jobContinuePrompt(jobs), [{ agentId: meta.agentId, name: meta.name }], meta.taskId).then(
+      (result) => {
+        if (!result.ok) setSendNotice(result.error, "error");
+      },
+    );
+  };
+
   const executePlan = () => {
     const streamId = planReadyStreamId;
     setPlanReadyStreamId(null);
@@ -1382,6 +1584,16 @@ export function ChatPage({
    * effect 反复触发（尤其是 scrollIntoView）。
    */
   const visibleMessages = useMemo(() => messages, [messages]);
+  /**
+   * 输入框 ↑ 回溯用的历史（d.194）：只取本会话用户发过的文本。
+   *
+   * 不新开存储——会话就是历史；另存一份会与「删消息 / 清空会话」漂移。
+   * 本地命令（`/compact` 等）由 `historyFrom` 过滤掉，调出来再发一次没有意义。
+   */
+  const inputHistory = useMemo(
+    () => historyFrom(messages.filter((m) => m.senderType === "user").map((m) => m.payload.text)),
+    [messages],
+  );
   /**
    * 消息列表窗口化（d.33 · P2-2）：只渲染最近 `windowCount` 条。
    *
@@ -1544,6 +1756,63 @@ export function ChatPage({
     const max = Math.max(0, list.scrollHeight - list.clientHeight);
     list.scrollTop = Math.max(0, Math.min(centered, max));
   }, [searchOpen, activeSearchId, visibleMessages, windowCount]);
+
+  /**
+   * d.198：左栏搜索命中 → 落到那条消息。
+   *
+   * 按顺序做三件事：①消息还在加载就等；加载完仍找不到这条，说明它已被删除或被清理，
+   * 如实说一句再消费掉意图（不静默跳个空）；②它在窗口之外就先把窗口扩到包含它（并留上下文），
+   * 扩窗后本 effect 会因 `windowCount` 变化再跑一次；③只滚消息容器（理由同本会话内搜索，
+   * 绝不用 `scrollIntoView`），落位后高亮 2.4 秒再熄灭。
+   */
+  useEffect(() => {
+    if (!messageJump || messageJump.conversationId !== convId) return;
+    if (messagesLoading) return;
+    const index = visibleMessages.findIndex((m) => m.id === messageJump.messageId);
+    if (index < 0) {
+      consumeMessageJump();
+      setSendNotice("那条消息已经不在这个会话里了（可能被删除或被清理）。", "error");
+      return;
+    }
+    const needed = countToInclude(index, visibleMessages.length, windowCount);
+    if (needed > windowCount) {
+      setWindowCount(needed);
+      return;
+    }
+    const list = scrollRef.current;
+    const node = document.getElementById(`msg-${messageJump.messageId}`);
+    if (!list || !node) return;
+    const listRect = list.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const centered =
+      list.scrollTop +
+      (nodeRect.top - listRect.top) -
+      Math.max(0, (list.clientHeight - nodeRect.height) / 2);
+    const max = Math.max(0, list.scrollHeight - list.clientHeight);
+    list.scrollTop = Math.max(0, Math.min(centered, max));
+    setJumpedMessageId(messageJump.messageId);
+    consumeMessageJump();
+  }, [
+    messageJump,
+    convId,
+    messagesLoading,
+    visibleMessages,
+    windowCount,
+    consumeMessageJump,
+    setSendNotice,
+  ]);
+
+  // 高亮自灭：只用来回答「落到了哪一条」，看到就够了，久留反而看不清正文。
+  useEffect(() => {
+    if (!jumpedMessageId) return;
+    const timer = setTimeout(() => setJumpedMessageId(null), JUMP_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [jumpedMessageId]);
+
+  // 切会话时清掉高亮：跳转是「这一眼」的事，不该跟着换到另一段对话里。
+  useEffect(() => {
+    setJumpedMessageId(null);
+  }, [convId]);
 
   const closeSearch = () => {
     setSearchOpen(false);
@@ -1780,6 +2049,19 @@ export function ChatPage({
       },
       onStart: (streamId, mention) => {
         streamMeta.current[streamId] = { ...mention, text, attachment };
+        /*
+         * d.189：把「这一轮开始了」记到本机。收口时会清掉，所以只有**真中断**
+         * （关窗、崩溃、机器睡死）才会留下这条标记，下次打开才知道要提示「接着做」。
+         * 写失败不影响发送——它只是个提示位。
+         */
+        markTurnRunning({
+          conversationId: convId,
+          streamId,
+          agentId: mention.agentId,
+          agentName: mention.name,
+          startedAt: Date.now(),
+        });
+        setResumeState(null);
         // 新一轮开始：上一条「轮次打满」提示已完成使命（继续/改主意都算），清掉；
         // 「计划就绪」同理——新一轮要么在计划里接着聊，要么已经动手了。
         setRoundLimitStreamId(null);
@@ -1901,8 +2183,12 @@ export function ChatPage({
             tools: runtimeToolsFromSpecs(tools, (name) => toolMetaOf(name, agentId)),
             toolSearchAvailable: tools.length > TOOL_SEARCH_THRESHOLD,
             maxToolRounds: MAX_TOOL_ROUNDS,
+            // 后台作业（d.180）：老安装包没有作业通道时不承诺「能后台跑」。
+            hasBackgroundJobs: hasJobRuntime(getShellBridge()),
             // 同理读存储：界面 state 可能还没落，提示词不能说错这一轮是不是只读。
             planMode: loadPlanMode(convId),
+            // 任务清单（d.192）：从存储读，界面的 `useTodos` 只是投影，压缩/重启后模型要靠这条基线。
+            todos: getTodos(convId),
           });
         } catch {
           runtimeSection = "";
@@ -2100,6 +2386,11 @@ export function ChatPage({
       // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
       // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
       onRunSettled: (streamId, result) => {
+        // d.189：这一轮收口了（成功/失败/用户停止都算），清掉「没跑完」的标记。
+        // 注意必须在下面「aborted 分支」之前清——标记的语义是「应用没机会收口」，
+        // 而不是「这一轮结果不好」。
+        // d.196：只清当前会话——别的会话里没跑完的活不该被顺手抹掉（侧栏徽标要用）。
+        clearTurnRunning(convId);
         // 引用只对这一轮有效（d.175）：回合收尾就清掉，避免下一次无意的发送带上旧文件。
         fileRefsRef.current = [];
         setFileRefs([]);
@@ -2117,6 +2408,36 @@ export function ChatPage({
         }
         // 这一轮改过文件就给一次点击的「撤回」（d.176），没改就清掉上一条。
         setTurnWrites(result.writes ?? []);
+        // 回合收尾刷新上下文用量（d.187）：刚发出去的那一轮才是真实占用。
+        refreshContextUsage();
+        // 后台作业（d.182）：作业不会被 await，收口后由界面接着盯，跑完给一次「继续」。
+        const watchMeta = streamMeta.current[streamId] ?? { agentId: "system-assistant", name: "和小鸣" };
+        /*
+         * 用户点了停止（d.189）：以前停止之后这一轮就彻底断了，只能自己重新打一遍。
+         * 这里给一次「接着做」——用同一个 streamId，走 retryStream 的续写路径
+         * （不重发原提问，历史里也不会多一条重复的用户消息）。
+         */
+        setResumeState(
+          result.status === "aborted"
+            ? {
+                reason: "aborted",
+                streamId,
+                agentId: watchMeta.agentId,
+                agentName: watchMeta.name,
+              }
+            : null,
+        );
+        if (result.jobs?.length) {
+          startJobWatch(result.jobs, {
+            agentId: watchMeta.agentId,
+            name: watchMeta.name,
+            ...(streamTaskRef.current[streamId] ? { taskId: streamTaskRef.current[streamId] } : {}),
+          });
+        } else {
+          jobWatchRef.current?.abort();
+          jobWatchRef.current = null;
+          setWatchedJobs([]);
+        }
         const taskId = streamTaskRef.current[streamId];
         if (!taskId) return;
         delete streamTaskRef.current[streamId];
@@ -2210,6 +2531,33 @@ export function ChatPage({
 
   /** 错误行重试：清掉旧项，按原触发文本重新跑该单个 mention（新 streamId 重新登记）。 */
   /**
+   * 「接着做」入口（d.189）：用户点了停止、或者应用重启后发现上一轮没跑完。
+   *
+   * 两种情况走不同的路：
+   * - `aborted`：流对象还在（同一窗口内），复用 `retryStream`——它会清掉旧流、按续写
+   *   口令重跑，且任务区的记录会回到「进行中」；
+   * - `interrupted`：进程已经重启过，`streamMeta` 是空的、`retryStream` 无从下手，
+   *   只能直接发续写口令（历史里那一轮的半截回答还在，模型据此接得上）。
+   *
+   * 两条路都**不重发原提问**：重发会让历史里出现两条一样的用户消息、并把已跑过的
+   * 工具再跑一遍。
+   */
+  const continueResume = () => {
+    const state = resumeState;
+    if (!state) return;
+    setResumeState(null);
+    if (state.reason === "aborted" && state.streamId && streamMeta.current[state.streamId]) {
+      retryStream(state.streamId);
+      return;
+    }
+    void submitMessage(CONTINUE_PROMPT, [
+      { agentId: state.agentId, name: state.agentName },
+    ]).then((result) => {
+      if (!result.ok) setSendNotice(result.error, "error");
+    });
+  };
+
+  /**
    * 「继续生成」：接着上一轮往下写，**不重发原提问**。
    *
    * 以前这里用 `meta.text` 整轮重跑，带来两个真实问题：
@@ -2256,10 +2604,18 @@ export function ChatPage({
     setRoundLimitStreamId(null);
     // 计划就绪提示也是会话级：A 会话的方案提示不能出现在 B 会话
     setPlanReadyStreamId(null);
+    // 上下文用量也是会话级（d.187）：按新会话重算，别把上一个会话的用量带过来。
+    refreshContextUsage();
     convIdRef.current = convId;
     // 视图也是会话级：换会话回到「对话」，不要停在上一个会话的轨迹页。
     setView("chat");
   }, [convId]);
+
+  // 消息/模型绑定变了就重算上下文用量（d.187）：换模型会换预算，来新消息会换用量。
+  useEffect(() => {
+    refreshContextUsage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, llmBindings, llmProfiles]);
 
   // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
   // 对端 fetchPeerKeys 恒 null：chaindist 永不发出、消息全 defer）。声明位置在 WS 效果
@@ -2543,6 +2899,8 @@ export function ChatPage({
   };
 
   const onDraftChange = (value: string) => {
+    // 手打就退出回溯（d.194）：改过的文字不该再被 ↑ 覆盖，除非重新从空框开始。
+    if (historyIndex >= 0) setHistoryIndex(-1);
     setDraft(value);
     scheduleDraftSave(convId, value);
   };
@@ -2578,11 +2936,65 @@ export function ChatPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLocal.length, draft, emojiOpen, voiceMenu, searchOpen, attachOpen]);
 
+  // 命令面板（d.184）：只在「以 / 开头、单行」时出现——正常消息里的斜杠（路径、日期）不弹。
+  const slashItems = matchSlashCommands(draft);
+  const slashOpen = slashItems.length > 0;
+  const pickSlashCommand = (command: string) => {
+    setDraft(command);
+    setSlashIndex(0);
+    composerRef.current?.focus();
+  };
+
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashOpen && !e.nativeEvent.isComposing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        setSlashIndex((prev) => (prev + delta + slashItems.length) % slashItems.length);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const picked = slashItems[Math.min(slashIndex, slashItems.length - 1)];
+        if (!picked) return;
+        // 已经打完整命令时，再按一次 Enter 就直接执行（面板不再弹）；否则先补全。
+        if (draft.trim() === picked.command) {
+          e.currentTarget.form?.requestSubmit();
+          return;
+        }
+        pickSlashCommand(picked.command);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDraft("");
+        setSlashIndex(0);
+        return;
+      }
+    }
     // 多行输入框：Enter 发送、Shift+Enter 换行（输入法组词中不拦，否则中文选词会被当成发送）
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       e.currentTarget.form?.requestSubmit();
+      return;
+    }
+    /**
+     * ↑/↓ 调出本会话发过的消息（d.194）。
+     *
+     * 只在「空输入框按 ↑」或「已经在回溯里」时接管——否则多行草稿里的光标上下移动会被劫持。
+     * 命令面板打开时由上面的分支处理，走不到这里。
+     */
+    if (!e.nativeEvent.isComposing && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const navigating = historyIndex >= 0;
+      if (!navigating && !(e.key === "ArrowUp" && draft.trim() === "")) return;
+      const stash = navigating ? draftStashRef.current : draft;
+      const step = stepHistory(inputHistory, historyIndex, e.key === "ArrowUp" ? "up" : "down", stash);
+      if (step.index === historyIndex && step.text === draft) return;
+      e.preventDefault();
+      if (!navigating) draftStashRef.current = draft;
+      setHistoryIndex(step.index);
+      setDraft(step.text);
+      return;
     }
   };
 
@@ -2595,6 +3007,142 @@ export function ChatPage({
   };
 
   /**
+   * 刷新上下文用量（d.187）。
+   *
+   * 估算口径必须与真正发出去的内容一致，所以复用 `contextRowsOf`（与 `/compact` 同一条路）。
+   * 预算取 `applyModelBudget` 的结果：自动档按模型窗口算、手动档按用户填的值算——
+   * 界面上写的预算必须就是运行时用的预算，否则这行数字会骗人。
+   *
+   * 读的是**已加载的消息**（`messages`），不再触发 `loadMessages`：历史上那会多打一次
+   * 请求，把「历史加载失败 → 重试」这类状态机的时序打乱（A1 用例实测被带红）。
+   */
+  function refreshContextUsage(): void {
+    try {
+      const plainOf = useChatStore.getState().plainById[convId] ?? {};
+      const rows = contextRowsOf(messages.slice(-HISTORY_MESSAGE_WINDOW), plainOf);
+      const profile = resolveProfile(conv?.agent.id ?? "system-assistant");
+      const settings = applyModelBudget(
+        loadContextSettings(),
+        profile ? resolveCapability(profile) : null,
+      );
+      setContextUsage({ used: estimateRowsTokens(rows), budget: settings.budgetTokens });
+    } catch {
+      /* 指标失败静默：它是提示，不是功能；拿不到就不显示，别影响发送 */
+    }
+  }
+
+  /**
+   * 手动压缩（d.183）：输入 `/compact` 时立刻把这段历史压成摘要。
+   *
+   * 为什么要有它：自动压缩只在**预算撞墙**时发生，用户在此之前没有办法主动让上下文
+   * 变轻；而且压缩之后看不到发生了什么（省了多少、摘要说了什么），长任务里
+   * 「它怎么突然忘了前面」就成了不可解释的现象。这里把动作和结果都摆到面前。
+   *
+   * 走的是 `compactNow`（force 分支）：即使历史本来放得下也折——这是用户明确要求，
+   * 不是猜预算；但压缩后不比原来省就如实回「不划算」，不拿摘要换掉真实内容。
+   */
+  async function runCompactCommand(
+    mentions: { agentId: string; name: string }[],
+  ): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> {
+    const agentId = mentions[0]?.agentId ?? "system-assistant";
+    const profile = resolveBoundProfile(agentId);
+    let rows: ChatMessage[] = [];
+    try {
+      const msgs = (await useChatStore.getState().loadMessages(convId)).slice(-HISTORY_MESSAGE_WINDOW);
+      const plainOf = useChatStore.getState().plainById[convId] ?? {};
+      rows = contextRowsOf(msgs, plainOf);
+    } catch (err) {
+      return { ok: false, error: `读取历史失败：${(err as Error).message}` };
+    }
+    if (rows.length < 4) {
+      // 提示由 send() 在 resetComposer 之后落位：这里直接设会被清掉（d.183 实测）。
+      return { ok: true, notice: "这段对话还太短，没有可以压缩的早期内容。" };
+    }
+    const settings = applyModelBudget(
+      loadContextSettings(),
+      profile ? resolveCapability(profile) : null,
+    );
+    const result = await compactNow(rows, {
+      settings,
+      cache: summaryCache,
+      conversationId: convId,
+      summarize: profile
+        ? async (messages) => {
+            if (!messages.length) return null;
+            try {
+              let collected = "";
+              // 摘要请求独立于生成的中断（此时没有在跑的流）；失败回落确定性摘要。
+              const text = await streamChatRouted(profile, messages, {
+                signal: new AbortController().signal,
+                onDelta: (d) => {
+                  collected += d;
+                },
+              });
+              return text || collected || null;
+            } catch {
+              return null;
+            }
+          }
+        : undefined,
+    });
+    if (!result.compacted) {
+      return { ok: true, notice: `压缩没有更省（现在约 ${result.beforeTokens} tokens），保持原样。` };
+    }
+    return {
+      ok: true,
+      notice: `已压缩 ${result.foldedCount} 条早期消息（约 ${result.beforeTokens} → ${result.afterTokens} tokens），下一轮对话起生效。`,
+    };
+  }
+
+  /**
+   * `/status` 的快照（d.193）：只读——从已有 state 与 store 取，不发请求、不改状态。
+   *
+   * 取数口径刻意与各处一致而不是另算一套：根走 `fileRootsFor(workspace)`（与工具注入同源）、
+   * 计划模式走 `loadPlanMode(convId)`（与按钮同源）、清单走 `getTodos`（与提示词同源）。
+   * 工具数取「本轮真的注入的那批」，不是目录里全部——用户问的是「这一轮它能用什么」。
+   */
+  function buildSelfStatus(): string {
+    const profile = conv ? resolveProfile(conv.agent.id) : undefined;
+    const caps = profile ? resolveCapability(profile) : null;
+    const roots = fileRootsFor(conv?.workspace);
+    const bridge = conv ? toolBridgeRef.current.get(conv.agent.id) : undefined;
+    const specs = (bridge?.tools ?? []) as { type?: string; function?: { name?: string } }[];
+    const names = specs
+      .map((spec) => spec.function?.name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
+    const jobsRunning = watchedJobs.filter((job) => job.running).length;
+    return buildStatusReport({
+      version: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "",
+      model: profile?.label ?? "",
+      modelWindow: caps?.contextWindow,
+      vision: caps?.supportsVision,
+      workspace: conv?.workspace ?? "",
+      roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
+      planMode: loadPlanMode(convId),
+      context: contextUsage,
+      todos: getTodos(convId),
+      jobs: { running: jobsRunning, total: watchedJobs.length },
+      writes: turnWrites.length,
+      resumePending: loadResumePoint(convId) !== null,
+      busy: activeLocal.length > 0,
+      tools: { count: names.length, core: coreToolNames(names).length },
+      desktop: hasFileBridge() || getShellBridge() !== null,
+    });
+  }
+
+  /**
+   * 就地换模型（d.195）：写回 llm store 的绑定，下一轮生效；历史与本机文件不受影响。
+   * 找不到标签时仍照实说「已切换」，不编一个模型名。
+   */
+  function pickModel(profileId: string): void {
+    if (!conv) return;
+    const label = llmProfiles.find((item) => item.id === profileId)?.label ?? "该模型";
+    setAgentBinding(conv.agent.id, profileId);
+    setModelSwitcherOpen(false);
+    setSendNotice(`已切换到 ${label}，下一轮对话生效。`, "info");
+  }
+
+  /**
    * 发送一条消息（聊天输入栏与任务区自动执行共用；附件入口带 attachment 走同一条）。
    *
    * 返回失败原因而不是只设提示：任务区自动执行失败时要把任务收口成「失败」，
@@ -2605,9 +3153,24 @@ export function ChatPage({
     mentions: { agentId: string; name: string }[],
     taskId?: string,
     attachment?: TurnAttachment,
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+  ): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> => {
     const text = rawText.trim();
     if (!text) return { ok: false, error: "消息为空" };
+    // 只对用户手打的单条命令生效：`/compact` 不落库、不发给模型，本地压缩完给结果。
+    if (text === COMPACT_COMMAND) return await runCompactCommand(mentions);
+    if (text === PLAN_COMMAND) {
+      const next = !loadPlanMode(convId);
+      togglePlanMode();
+      return {
+        ok: true,
+        notice: next
+          ? "已开启计划模式：这一轮只给只读工具，会先把方案给你看。"
+          : "已退出计划模式：接下来可以改文件了。",
+      };
+    }
+    // 自检与帮助同样本地完成：没有模型绑定也要能问「为什么它不动手」。
+    if (text === STATUS_COMMAND) return { ok: true, notice: buildSelfStatus() };
+    if (text === HELP_COMMAND) return { ok: true, notice: buildSlashHelp() };
     /**
      * MCP 懒预检（用户要求：工具要自动识别并加载）。
      *
@@ -2733,6 +3296,9 @@ export function ChatPage({
       });
     }
     resetComposer();
+    // 本地命令（如 `/compact`）不产生消息，但它的结果要留在这条「提示位」上：
+    // resetComposer 会清 sendNotice，所以在它之后再落位。
+    if (result.notice) setSendNotice(result.notice, "info");
   };
 
   // 任务区投递：把目标写进输入区并排队自动发送（连接可能还没就绪，见下一个 effect）。
@@ -3530,7 +4096,7 @@ export function ChatPage({
               <div
                 id={`msg-${m.id}`}
                 className={`group relative mb-6 flex items-start gap-2${mine ? " justify-end" : ""}${
-                  searchOpen && activeSearchId === m.id
+                  (searchOpen && activeSearchId === m.id) || jumpedMessageId === m.id
                     ? " rounded-lg bg-warn-soft ring-1 ring-warn-line"
                     : ""
                 }`}
@@ -3618,6 +4184,7 @@ export function ChatPage({
         </button>
       ) : null}
       <form onSubmit={send} className="relative shrink-0 px-chat-gutter pb-4 pt-2">
+        <SlashCommandMenu items={slashItems} activeIndex={slashIndex} onPick={pickSlashCommand} />
         {/* 输入区与消息列同宽（宽屏最宽 960 自适应）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
         <div className="mx-auto w-full max-w-[min(100%,960px)]">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
@@ -3766,6 +4333,16 @@ export function ChatPage({
         {/* 任务清单（d.158）：模型写过多步计划才出现，空清单不占位。
             位置在拖动把手上方——它跟输入区一起随窗口收缩，不会被消息流挤走。 */}
         <TodoPanel conversationId={convId} />
+        {/* 上下文用量（d.187）：安静档自己隐掉；到 80% 提醒可以 /compact。 */}
+        <ContextMeter used={contextUsage.used} budget={contextUsage.budget} />
+        {/* 「接着做」（d.189）：用户点了停止、或应用重启后发现上一轮没收口。不自动发。 */}
+        {resumeState ? (
+          <ResumeBar
+            reason={resumeState.reason}
+            onContinue={continueResume}
+            onDismiss={() => setResumeState(null)}
+          />
+        ) : null}
         {/* 引用的文件（d.175）：显示在输入区上方，可逐个删掉。 */}
         {fileRefs.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 px-4 pt-1" aria-label="本轮引用的文件">
@@ -3808,6 +4385,23 @@ export function ChatPage({
             }}
           />
         ) : null}
+        {/* 就地换模型（d.195）：点输入区右下角的模型名弹这个，不跳设置页。 */}
+        <ModelSwitcher
+          open={modelSwitcherOpen}
+          agentName={conv?.agent.name ?? "内置智能体"}
+          choices={llmProfiles.map((item) => ({
+            id: item.id,
+            label: item.label,
+            hint: item.provider ? `${item.provider}${item.model ? ` · ${item.model}` : ""}` : item.model,
+          }))}
+          boundId={conv ? (llmBindings[conv.agent.id] ?? null) : null}
+          onPick={pickModel}
+          onClose={() => setModelSwitcherOpen(false)}
+          onOpenSettings={() => {
+            setModelSwitcherOpen(false);
+            useUiStore.getState().setPage("model");
+          }}
+        />
         {/* 轮次打满（d.167.4.103）：这一轮被 36 轮上限截断时，给一次点击的「继续」。
             走 `retryStream`——续写指令作为一条用户消息落库，不重发原提问。 */}
         {/* 计划就绪（d.173）：计划模式下这一轮只给了方案，一键「接受并执行」。 */}
@@ -3816,8 +4410,23 @@ export function ChatPage({
           <TurnUndoBar
             paths={turnWrites}
             busy={undoing}
+            busyPath={undoingPath}
             onUndo={() => void undoTurnWrites()}
+            onUndoOne={(path) => void undoTurnFile(path)}
             onDismiss={() => setTurnWrites([])}
+          />
+        ) : null}
+        {/* 后台作业跑完（d.182）：作业不会被 await，收口后由这里接着盯，跑完给一次点击的「继续」。 */}
+        {watchedJobs.length > 0 ? (
+          <JobReadyBar
+            jobs={watchedJobs}
+            pending={watchedJobs.some((job) => job.running)}
+            onContinue={continueAfterJobs}
+            onDismiss={() => {
+              jobWatchRef.current?.abort();
+              jobWatchRef.current = null;
+              setWatchedJobs([]);
+            }}
           />
         ) : null}
         {planReadyStreamId && planMode ? (
@@ -4016,12 +4625,12 @@ export function ChatPage({
             <span aria-hidden="true">{planMode ? "◉" : "○"}</span>
             <span>计划</span>
           </button>
-          {/* 当前模型徽标：点它去模型页换来源（与未绑定提示同一个解析器，不另造状态）。 */}
+          {/* 当前模型徽标：点它就地换模型（d.195），「更多设置…」仍可去模型页。 */}
           <button
             type="button"
             aria-label={`当前模型：${composerModelLabel}`}
             title={composerModelLabel}
-            onClick={() => useUiStore.getState().setPage("model")}
+            onClick={() => setModelSwitcherOpen(true)}
             className={`inline-flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-ui-sm transition-colors hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
           >
             <span

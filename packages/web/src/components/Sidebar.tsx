@@ -3,6 +3,8 @@ import type { Conversation } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { clearDraft } from "../lib/drafts.js";
+import { searchConversationContent } from "../lib/api.js";
+import { CONTENT_SEARCH_LIMIT } from "../lib/conversationSearch.js";
 import { startNewConversationIn } from "../lib/newConversation.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { conversationTitle } from "./assistant/conversationTitle.js";
@@ -48,6 +50,7 @@ export function Sidebar() {
   const addWorkspace = useChatStore((s) => s.addWorkspace);
   const moveConversation = useChatStore((s) => s.moveConversation);
   const openConversation = useUiStore((s) => s.openConversation);
+  const requestMessageJump = useUiStore((s) => s.requestMessageJump);
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
@@ -104,6 +107,31 @@ export function Sidebar() {
     [opening],
   );
 
+  /**
+   * d.197：会话内容搜索的请求入口。
+   *
+   * 必须是 `useCallback`：rail 的搜索 effect 以它为依赖，每次渲染都换新函数会让
+   * 防抖定时器被反复重建（打字时永远发不出去，或者一发就重复发）。
+   */
+  const searchContent = useCallback(
+    (query: string) => searchConversationContent(query, { limit: CONTENT_SEARCH_LIMIT }),
+    [],
+  );
+
+  /**
+   * d.198：左栏搜索命中 → 打开会话并落到那条消息。
+   *
+   * 先 `openConversation`（它会顺手清掉上一次没落位的跳转意图），再投递本次跳转；
+   * 顺序反了会被那次清理抹掉。真正滚动与高亮由 ChatPage 消费投递槽后完成。
+   */
+  const openMessage = useCallback(
+    (conversationId: string, messageId: string) => {
+      openConversation(conversationId);
+      requestMessageJump(conversationId, messageId);
+    },
+    [openConversation, requestMessageJump],
+  );
+
   // 命令面板「新建会话」意图的消费点：侧栏常驻，所以任意页面点都能立刻建。
   // token 变化即触发（同一种意图连点两次也各自消费）；正有一段在新建时先不消费，
   // 等 `opening` 落回 false 后这个 effect 再跑一次，否则意图会被「这次新建」吞掉。
@@ -153,6 +181,7 @@ export function Sidebar() {
         opening={opening}
         error={error}
         onOpen={openConversation}
+        onOpenMessage={openMessage}
         onNewConversation={(workspace) => void startNew(workspace)}
         newSessionRequest={newSessionPickerRequest}
         onRename={(id, title) => renameConversationTitle(id, title)}
@@ -162,6 +191,7 @@ export function Sidebar() {
         onError={setError}
         hasMore={conversationsHasMore}
         loadingMore={conversationsLoadingMore}
+        onSearchContent={searchContent}
         onLoadMore={() => {
           void loadMoreConversations().catch((err) => {
             setError(

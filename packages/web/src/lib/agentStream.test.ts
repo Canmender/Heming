@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS, MAX_TOOL_ROUNDS } from "./agentStream.js";
+﻿import { describe, it, expect, vi } from "vitest";
+import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS, MAX_TOOL_ROUNDS, TOOL_CALL_TIMEOUT_MS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
-import type { ChatMessage } from "./llmClient.js";
+import type { ChatMessage, StreamChatOpts } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { LONG_TASK_MAX_ROUNDS } from "./agentRuntime/longTask.js";
@@ -2487,4 +2487,47 @@ describe("只读工具并行上限（P4/T19）", () => {
     expect(peak).toBeGreaterThan(1);
     expect(MAX_PARALLEL_READS).toBe(3);
   });
+
+  it("工具超过兜底超时：不让对话一直挂着，回一条模型能照做的失败文案（d.186）", async () => {
+    vi.useFakeTimers();
+    try {
+      let round = 0;
+      const { send, deps } = makeDeps({
+        getTools: () => ({
+          tools: [{ type: "function", function: { name: "srv__hang", description: "x" } }],
+          meta: () => ({ risk: "read" as const }),
+          // 永不返回：模拟 MCP 服务端卡死
+          execute: () => new Promise<{ text: string; ok: boolean }>(() => {}),
+        }),
+        streamChat: vi.fn(async (_p: LlmProfile, _msgs: ChatMessage[], o: StreamChatOpts) => {
+          round += 1;
+          if (round === 1) {
+            o.onToolCalls?.([{ id: "t1", type: "function", function: { name: "srv__hang", arguments: "{}" } }]);
+            return "";
+          }
+          return "换个办法试试。";
+        }),
+      });
+
+      const run = runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "跑一下", deps);
+      // 推进到超过兜底超时（真等 180 秒不可能，所以用假时钟）
+      await vi.advanceTimersByTimeAsync(TOOL_CALL_TIMEOUT_MS + 1000);
+      await run;
+
+      expect(TOOL_CALL_TIMEOUT_MS).toBe(180_000);
+      // 模型真的看到了这条失败原因（否则它只能猜）
+      const second = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[1]?.[1] as ChatMessage[];
+      const toolMsg = second.find((row) => row.role === "tool");
+      expect(toolMsg?.content).toContain("超过 180 秒没有返回");
+      expect(toolMsg?.content).toContain("不");
+      // 这一轮是「成功收口」，不是错误气泡
+      const frames = send.mock.calls.map((c: unknown[]) => c[0] as { type: string; text?: string });
+      expect(frames.some((f) => f.type === "agent_error")).toBe(false);
+
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
+

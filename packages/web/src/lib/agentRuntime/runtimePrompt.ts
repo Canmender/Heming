@@ -20,6 +20,9 @@ import { LONG_TASK_MAX_ROUNDS, LONG_TASK_MAX_SEGMENTS } from "./longTask.js";
 /** 工具清单最多逐条列出的数量：再多就折成「还有 N 个，可用 tool_search 检索」。 */
 export const MAX_LISTED_TOOLS = 12;
 
+/** 清单回灌上限（与 `lib/todo/store.ts` 的 `MAX_TODOS` 对齐；这里写死是为了不反向依赖）。 */
+export const MAX_TODOS_IN_PROMPT = 20;
+
 /** 段标题：与记忆段（`## 长期记忆（语义）`）同层级，方便模型把整段当一个区块读。 */
 export const RUNTIME_HEADING = "## 运行环境（本机）";
 
@@ -65,6 +68,28 @@ export interface RuntimeSectionInput {
    * 而不是干活。用户要的是「先读清楚再给计划」，不是一段道歉。
    */
   planMode?: boolean;
+  /**
+   * 本轮命令桥是否可用后台作业通道（d.180，`hasJobRuntime`）。
+   *
+   * 缺省 false：缺省时输出必须与加这个字段之前**逐字相同**（老桌面端没有作业通道，
+   * 提示词里教它 `background: true` 只会换来一串 bridge-missing）。
+   */
+  hasBackgroundJobs?: boolean;
+  /**
+   * 本会话当前的任务清单（d.192）。
+   *
+   * 为什么要把清单回灌进提示词：清单存在本机（`lib/todo/store.ts`），但模型能「看见」它只有
+   * 两种时刻——自己刚调用过 `todo_write`，或者历史里那条工具结果还没被压缩掉。长任务里
+   * 上下文压缩、关窗重启续跑（d.189）、隔天接着做，都会让「我答应过要做什么」从视野里消失，
+   * 于是模型从中间开始重做、或者漏掉最后一步。
+   */
+  todos?: readonly RuntimeTodoInfo[];
+}
+
+/** 提示词里回灌的清单条目（与 `lib/todo/store.ts` 的 `TodoItem` 同形，避免反向依赖）。 */
+export interface RuntimeTodoInfo {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
 }
 
 /** 把 UA 翻成一句人话；认不出就退化成「未知系统」，绝不猜。 */
@@ -190,6 +215,26 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
     );
   }
 
+  // 当前任务清单（d.192）：写在长任务说明之前，让模型先知道「已经答应过什么、做到哪了」，
+  // 再谈这一轮怎么干。空清单不写这段——没有清单时多说一句只会让提示词变长。
+  const todos = (input.todos ?? []).filter((t) => t && typeof t.content === "string" && t.content.trim());
+  if (todos.length) {
+    const done = todos.filter((t) => t.status === "completed").length;
+    const doing = todos.filter((t) => t.status === "in_progress").length;
+    lines.push("");
+    lines.push(`## 当前任务清单（${done}/${todos.length} 已完成${doing ? `，${doing} 项进行中` : ""}）`);
+    for (const todo of todos.slice(0, MAX_TODOS_IN_PROMPT)) {
+      const mark = todo.status === "completed" ? "[x]" : todo.status === "in_progress" ? "[>]" : "[ ]";
+      lines.push(`- ${mark} ${todo.content.trim()}`);
+    }
+    if (todos.length > MAX_TODOS_IN_PROMPT) {
+      lines.push(`- 另有 ${todos.length - MAX_TODOS_IN_PROMPT} 项未列出（清单上限 ${MAX_TODOS_IN_PROMPT} 条）。`);
+    }
+    lines.push(
+      "- 以这条清单为进度基线：已经完成的不要再做一遍；接着做进行中的那一项，别从中间另起炉灶。清单和事实不一致时（例如文件已经改好了），先更新清单再继续。",
+    );
+  }
+
   lines.push("");
   lines.push("## 长任务怎么处理");
   lines.push(
@@ -200,6 +245,13 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   if (hasTodoTool(input.tools)) {
     lines.push(
       "- 多步任务（三步以上）开工前先用 `todo_write` 把步骤列出来，每完成一步就更新状态：这条清单会被保存下来，之后你能读回自己答应过什么，用户也能看到进度。",
+    );
+  }
+  // 长输出的「再读」（d.181）：截断是常态（一次 build 几千行日志、一次 grep 命中几百条），
+  // 不给模型一条明确的「怎么读回」的路，它只会重复调用同一个工具，把预算烧在同一件事上。
+  if (hasToolOutputTool(input.tools)) {
+    lines.push(
+      "- 工具结果过长时会被截断，返回文本里会给一个 `spill-<数字>` 的 handle：需要看中段就用 `tool_output_read` 按 offset/limit 分段读回，不要为了同样的内容把工具再调一次。",
     );
   }
   if (input.maxToolRounds && input.maxToolRounds > 0) {
@@ -242,6 +294,13 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   if (hasShellTool(input.tools)) {
     lines.push(
       "- 需要装依赖、跑测试、看 git 状态或端口、构建时用 `run_command`：一条命令只做一件事；命令执行前会请用户确认（查数据的只读命令也要），所以看到等待就说明在等人，不要重复发；非零退出码先读错误输出再决定下一步，不要原样重跑同一条命令。",
+    );
+  }
+  // 后台作业（d.180）：只有桥真的能起/读/列/停作业时才教它用。
+  // 120 秒是前台命令的硬上限，长任务必须走后台，否则模型只有「超时」一条路。
+  if (hasShellTool(input.tools) && input.hasBackgroundJobs) {
+    lines.push(
+      "- 构建、装依赖、跑整套测试这类可能超过两分钟的命令，用 `run_command` 的 `background: true` 起成后台作业，再用 `command_output` 轮询（可 wait_ms），别让一条命令卡在 120 秒超时上；作业跑完再读一次拿收尾输出。",
     );
   }
   lines.push(
@@ -333,4 +392,10 @@ export function runtimeToolsFromSpecs(
     out.push({ name, title: meta?.displayName, ...(risk ? { risk } : {}) });
   }
   return out;
+}
+
+/** 这一轮是否注入了「读回被截断输出」的工具（d.181）。 */
+function hasToolOutputTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
+  if (!tools) return false;
+  return tools.some((tool) => tool.name === "tool_output_read");
 }

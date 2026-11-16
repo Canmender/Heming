@@ -15,6 +15,11 @@ import type { FileRoot } from "../../packages/web/src/lib/fileEdit/paths.js";
 import type {
   ShellBridge,
   ShellCancelResponse,
+  ShellJobFailureCode,
+  ShellJobKillResponse,
+  ShellJobOutputResponse,
+  ShellJobStartResponse,
+  ShellJobSummary,
   ShellRunRequest,
   ShellRunResponse,
 } from "../../packages/web/src/lib/shell/bridge.js";
@@ -28,6 +33,41 @@ interface DesktopShell {
     | { ok: false; code: string; error: string }
   >;
   cancelRun: (runId: string) => { ok: boolean; error?: string };
+  /** d.180：后台作业（长命令不阻塞回合）。评测同样跑桌面真实实现。 */
+  startBackground: (params: {
+    runId?: string;
+    roots: FileRoot[];
+    cwd?: string;
+    command: string;
+  }) => Promise<{ ok: true; jobId: string; pid?: number; cwd: string } | { ok: false; code: string; error: string }>;
+  readJobOutput: (
+    jobId: string,
+    waitMs?: number,
+  ) => Promise<
+    | {
+        ok: true;
+        jobId: string;
+        running: boolean;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        truncated: boolean;
+        droppedBytes: number;
+      }
+    | { ok: false; code: string; error: string }
+  >;
+  killJob: (jobId: string) => { ok: true; jobId: string; killed: boolean; alreadyFinished: boolean } | { ok: false; code: string; error: string };
+  listJobs: () => Array<{
+    id: string;
+    command: string;
+    cwd: string;
+    running: boolean;
+    exitCode: number | null;
+    startedAt: number;
+    finishedAt: number | null;
+    bytes: number;
+    dropped: number;
+  }>;
 }
 
 const requireDesktop = createRequire(import.meta.url);
@@ -59,7 +99,25 @@ function toResponse(
   return { ok: false, code: result.code as never, error: result.error };
 }
 
-/** 真实桌面实现包装成 `ShellBridge`（供 `buildShellToolBridge` 注入）。 */
+/** 桌面端的作业错误码只有几种，评测里归一成 web 侧同一套稳定码。 */
+function jobCode(code: string): ShellJobFailureCode {
+  switch (code) {
+    case "unknown-job":
+    case "untrusted-sender":
+    case "io":
+    case "no-roots":
+    case "outside-roots":
+    case "spawn-failed":
+    case "invalid-command":
+      return code;
+    case "path-escape":
+    case "invalid-path":
+      return "outside-roots";
+    default:
+      return "io";
+  }
+}
+
 export function createEvalShellBridge(options: EvalShellBridgeOptions): ShellBridge {
   return {
     async run(request: ShellRunRequest) {
@@ -76,6 +134,61 @@ export function createEvalShellBridge(options: EvalShellBridgeOptions): ShellBri
     async cancel(runId: string): Promise<ShellCancelResponse> {
       const result = desktopShell.cancelRun(runId);
       return result.ok ? { ok: true } : { ok: false, code: "unknown-run", error: result.error };
+    },
+    // d.180：后台作业四件（起 / 读增量 / 列 / 停）。评测也走桌面真实实现，
+    // 否则「起得来、轮询得到、杀得掉」这三件事只有单测证明。
+    async start(request): Promise<ShellJobStartResponse> {
+      const result = await desktopShell.startBackground({
+        runId: options.runId?.() || `eval-job-${Date.now()}-${seq++}`,
+        roots: request.roots,
+        command: request.command,
+        ...(request.cwd ? { cwd: request.cwd } : {}),
+      });
+      if (!result.ok) {
+        return { ok: false, code: jobCode(result.code), error: result.error };
+      }
+      return {
+        ok: true,
+        jobId: result.jobId,
+        ...(typeof result.pid === "number" ? { pid: result.pid } : {}),
+        cwd: result.cwd,
+      };
+    },
+    async jobOutput(request): Promise<ShellJobOutputResponse> {
+      const result = await desktopShell.readJobOutput(request.jobId, request.waitMs);
+      if (!result.ok) {
+        return { ok: false, code: jobCode(result.code), error: result.error };
+      }
+      return {
+        ok: true,
+        jobId: result.jobId,
+        running: result.running,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        truncated: result.truncated,
+        droppedBytes: result.droppedBytes,
+      };
+    },
+    async jobs(): Promise<ShellJobSummary[]> {
+      return desktopShell.listJobs().map((job) => ({
+        id: job.id,
+        command: job.command,
+        cwd: job.cwd,
+        running: job.running,
+        exitCode: job.exitCode,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        bytes: job.bytes,
+        dropped: job.dropped,
+      }));
+    },
+    async jobKill(request): Promise<ShellJobKillResponse> {
+      const result = desktopShell.killJob(request.jobId);
+      if (!result.ok) {
+        return { ok: false, code: jobCode(result.code), error: result.error };
+      }
+      return { ok: true, jobId: result.jobId, killed: result.killed, alreadyFinished: result.alreadyFinished };
     },
   };
 }

@@ -93,6 +93,44 @@ function cors(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+/** 会话内容搜索：查询词长度下限（1 个字符会把几乎所有消息都搜出来，等于没有搜索）。 */
+const SEARCH_QUERY_MIN = 2;
+
+/** 会话内容搜索：查询词长度上限（再长就是粘贴整段文档，不是搜索）。 */
+const SEARCH_QUERY_MAX = 80;
+
+/** 会话内容搜索：一次最多回多少条命中。 */
+const SEARCH_LIMIT_DEFAULT = 20;
+const SEARCH_LIMIT_MAX = 50;
+
+/**
+ * 会话内容搜索的扫描边界（单用户本机应用，不引 FTS 索引）。
+ *
+ * 这里刻意用「扫最近若干个会话 × 每个会话最近若干条」的朴素做法：命中全部由
+ * `listMessages` 的既有口径（内存/SQLite 两实现一致）算出来，不再新增 Store 方法、
+ * 也不改任何写路径。代价是更老的消息搜不到——所以响应里带 `truncated`，前端要如实
+ * 告诉用户「只搜了最近这么多」。
+ */
+const SEARCH_MAX_CONVERSATIONS = 200;
+const SEARCH_MAX_MESSAGES = 4000;
+const SEARCH_MESSAGES_PER_CONVERSATION = 200;
+
+/**
+ * 命中片段：把消息正文压成一行，截匹配位置前后一小段。
+ *
+ * 必须压空白：工具输出/代码里大量换行与缩进，原样回给侧栏会把行高撑成一屏。
+ * 返回 `null` 表示「这条不该算命中」（正文为空，或只有 E2E 加密后的空占位）。
+ */
+export function searchSnippet(text: string, query: string, pad = 30): string | null {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (!flat) return null;
+  const at = flat.toLowerCase().indexOf(query.toLowerCase());
+  if (at < 0) return null;
+  const start = Math.max(0, at - pad);
+  const end = Math.min(flat.length, at + query.length + pad * 2);
+  return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
+}
+
 export interface CreateAppOptions {
   /** 覆盖注册开关（优先于 HEMING_ALLOW_REGISTER），测试注入用；缺省读环境变量。 */
   allowRegister?: boolean;
@@ -1119,6 +1157,83 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       const msg = (e as Error).message;
       res.status(msg === "forbidden" ? 403 : msg === "conversation not found" ? 404 : 400).json({ error: msg });
     }
+  });
+
+  /**
+   * d.197：会话内容搜索。
+   *
+   * 左栏原来的搜索只匹配会话名——长任务跑几十轮之后，用户记得的是「那句话在哪个会话
+   * 里说过」，而不是会话标题。这里按消息正文搜，只搜「你所在的会话」（`listConversations`
+   * 已按成员关系收口），不区分发送方。
+   *
+   * 三条口径：
+   * - 只回**命中片段**，不回整条消息：侧栏要的是「哪段会话说过」，点进去再看原文；
+   * - E2E 加密消息的 `payload.text` 在出站时已是空占位，天然搜不到，不额外报错；
+   * - 扫描有上限，`truncated=true` 时前端必须说明「只搜了最近的部分」。
+   */
+  app.get("/api/conversations/search", authOnly, (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (q.length < SEARCH_QUERY_MIN) {
+      res.status(400).json({ error: `搜索词至少 ${SEARCH_QUERY_MIN} 个字符` });
+      return;
+    }
+    if (q.length > SEARCH_QUERY_MAX) {
+      res.status(400).json({ error: `搜索词最多 ${SEARCH_QUERY_MAX} 个字符` });
+      return;
+    }
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(SEARCH_LIMIT_MAX, Math.max(1, Math.trunc(rawLimit)))
+      : SEARCH_LIMIT_DEFAULT;
+
+    const conversations = [...store.listConversations(userId(req))]
+      .sort((a, b) => {
+        const at = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+        const bt = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+        return bt - at;
+      })
+      .slice(0, SEARCH_MAX_CONVERSATIONS);
+
+    const hits: {
+      conversationId: string;
+      conversationTitle: string | null;
+      lastMessageAt: string | null;
+      messageId: string;
+      senderType: string;
+      createdAt: string;
+      snippet: string;
+    }[] = [];
+    let scanned = 0;
+    let truncated = false;
+
+    outer: for (const conv of conversations) {
+      const messages = store.listMessages(conv.id, SEARCH_MESSAGES_PER_CONVERSATION);
+      // 会话内从新往旧找：同一会话里只回一条（最新那条），列表上一行一个会话才不重复。
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        scanned += 1;
+        if (scanned > SEARCH_MAX_MESSAGES) {
+          truncated = true;
+          break outer;
+        }
+        const message = messages[i];
+        const text = typeof message.payload?.text === "string" ? message.payload.text : "";
+        const snippet = searchSnippet(text, q);
+        if (!snippet) continue;
+        hits.push({
+          conversationId: conv.id,
+          conversationTitle: conv.title ?? null,
+          lastMessageAt: conv.lastMessageAt ?? null,
+          messageId: message.id,
+          senderType: message.senderType,
+          createdAt: message.createdAt,
+          snippet,
+        });
+        if (hits.length >= limit) break outer;
+        break;
+      }
+    }
+
+    res.json({ hits, truncated, scanned });
   });
 
   app.get("/api/conversations/:id/messages", authOnly, (req, res) => {

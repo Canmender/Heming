@@ -3,7 +3,7 @@ import request from "supertest";
 import type { Conversation } from "@heming/shared";
 import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
-import { createApp } from "./app.js";
+import { createApp, searchSnippet } from "./app.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -839,5 +839,92 @@ describe("工作区 API（d.147.4.91.11）", () => {
       .set("Authorization", `Bearer ${a.token}`)
       .send({ path: "" });
     expect(bad.status).toBe(400);
+  });
+});
+
+describe("会话内容搜索（d.197）", () => {
+  let store: ReturnType<typeof createMemoryStore>;
+  let app: App;
+  let a: { token: string; user: { id: string; username: string } };
+  let b: { token: string; user: { id: string; username: string } };
+  let convA: string;
+
+  const search = (token: string, q: string, extra = "") =>
+    request(app)
+      .get(`/api/conversations/search?q=${encodeURIComponent(q)}${extra}`)
+      .set("Authorization", `Bearer ${token}`);
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    app = createApp(store, { allowRegister: true });
+    a = await register(app, "alice");
+    b = await register(app, "bob");
+    convA = store.createAgentConversation(a.user.id, SYSTEM_AGENT_ID).id;
+    store.addMessage(convA, "user", a.user.id, { text: "把 evals 的用例都跑一遍" });
+    store.addMessage(convA, "agent", SYSTEM_AGENT_ID, { text: "跑完了，32 条全部通过。" });
+  });
+
+  it("命中消息正文并回片段（不回整条正文）", async () => {
+    const res = await search(a.token, "全部通过");
+    expect(res.status).toBe(200);
+    expect(res.body.hits).toHaveLength(1);
+    const hit = res.body.hits[0];
+    expect(hit.conversationId).toBe(convA);
+    expect(hit.snippet).toContain("全部通过");
+    expect(hit.senderType).toBe("agent");
+    expect(typeof hit.messageId).toBe("string");
+    expect(res.body.truncated).toBe(false);
+  });
+
+  it("同一会话多条命中只回最新一条", async () => {
+    store.addMessage(convA, "user", a.user.id, { text: "再跑一遍全部通过看看" });
+    const res = await search(a.token, "全部通过");
+    expect(res.body.hits).toHaveLength(1);
+    expect(res.body.hits[0].snippet).toContain("再跑一遍");
+  });
+
+  it("搜不到别的用户的会话（只搜自己所在的会话）", async () => {
+    const res = await search(b.token, "全部通过");
+    expect(res.status).toBe(200);
+    expect(res.body.hits).toEqual([]);
+  });
+
+  it("limit 截断 + truncated 字段", async () => {
+    const conv2 = store.createAgentConversation(a.user.id, SYSTEM_AGENT_ID, { fresh: true }).id;
+    store.addMessage(conv2, "user", a.user.id, { text: "另一个会话也提到全部通过" });
+    const limited = await search(a.token, "全部通过", "&limit=1");
+    expect(limited.body.hits).toHaveLength(1);
+    const all = await search(a.token, "全部通过");
+    expect(all.body.hits).toHaveLength(2);
+  });
+
+  it("E2E 加密消息（出站正文为空占位）不会命中", async () => {
+    const conv = store.createAgentConversation(a.user.id, SYSTEM_AGENT_ID, { fresh: true }).id;
+    const msg = store.addMessage(conv, "user", a.user.id, { text: "机密关键词在这里" });
+    const put = await request(app)
+      .put(`/api/messages/${msg.id}/reencrypt`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 1 });
+    expect(put.status).toBe(200);
+    expect(store.listMessages(conv)[0].payload).toEqual({ text: "" });
+    const res = await search(a.token, "机密关键词");
+    expect(res.body.hits).toEqual([]);
+  });
+
+  it("入参校验：未登录 401、词太短/太长 400、缺 q 400", async () => {
+    expect((await request(app).get("/api/conversations/search?q=ab")).status).toBe(401);
+    expect((await search(a.token, "a")).status).toBe(400);
+    expect((await search(a.token, "x".repeat(81))).status).toBe(400);
+    const noQ = await request(app)
+      .get("/api/conversations/search")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(noQ.status).toBe(400);
+  });
+
+  it("searchSnippet：大小写不敏感、压空白、空正文返回 null", () => {
+    expect(searchSnippet("Hello   WORLD\n\nsecond line", "world")).toContain("WORLD");
+    expect(searchSnippet("line1\nline2\ntarget here", "target")).toBe("line1 line2 target here");
+    expect(searchSnippet("   \n  ", "x")).toBeNull();
+    expect(searchSnippet("正文里没有这个词", "absent")).toBeNull();
   });
 });

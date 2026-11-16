@@ -216,3 +216,80 @@ describe("计划模式（d.173）", () => {
     expect(buildRuntimeSection({ tools: readOnly, planMode: false })).not.toContain("## 计划模式");
   });
 });
+
+describe("后台作业提示（d.180）", () => {
+  const shell = [{ name: "run_command", risk: "write" as const }];
+
+  it("桥有后台通道时才教 background:true（老桌面端只会回 bridge-missing）", () => {
+    const withJobs = buildRuntimeSection({ tools: shell, hasBackgroundJobs: true });
+    expect(withJobs).toContain("`background: true`");
+    expect(withJobs).toContain("command_output");
+    expect(withJobs).toContain("120 秒超时");
+    // 没注入 run_command 时也不能凭 hasBackgroundJobs 就写这一段
+    expect(buildRuntimeSection({ tools: [], hasBackgroundJobs: true })).not.toContain("`background: true`");
+  });
+
+  it("不传 / false 时逐字不变（老安装包的提示词不能因为升级代码而改）", () => {
+    const baseline = buildRuntimeSection({ tools: shell });
+    expect(buildRuntimeSection({ tools: shell, hasBackgroundJobs: false })).toBe(baseline);
+    expect(baseline).not.toContain("command_output");
+    expect(baseline).not.toContain("background");
+  });
+});
+
+describe("当前任务清单回灌（d.192）", () => {
+  const base = { now: new Date("2026-11-16T00:00:00Z"), timeZone: "UTC" };
+
+  it("有清单时列出进度与每条状态，并说明「以这条为基线」", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      todos: [
+        { content: "读三份文档", status: "completed" },
+        { content: "改 config.md", status: "in_progress" },
+        { content: "跑测试", status: "pending" },
+      ],
+    });
+    expect(text).toContain("## 当前任务清单（1/3 已完成，1 项进行中）");
+    expect(text).toContain("- [x] 读三份文档");
+    expect(text).toContain("- [>] 改 config.md");
+    expect(text).toContain("- [ ] 跑测试");
+    expect(text).toContain("以这条清单为进度基线");
+    expect(text).toContain("已经完成的不要再做一遍");
+  });
+
+  it("清单为空/没传时完全不出现这一段（普通对话不该多一句）", () => {
+    expect(buildRuntimeSection(base)).not.toContain("当前任务清单");
+    expect(buildRuntimeSection({ ...base, todos: [] })).not.toContain("当前任务清单");
+    // 只有空白内容的条目等于没有
+    expect(buildRuntimeSection({ ...base, todos: [{ content: "  ", status: "pending" }] })).not.toContain(
+      "当前任务清单",
+    );
+  });
+
+  it("超过上限时只列前 20 条，并说明还有几项", () => {
+    const todos = Array.from({ length: 23 }, (_, i) => ({
+      content: `步骤 ${i + 1}`,
+      status: "pending" as const,
+    }));
+    const text = buildRuntimeSection({ ...base, todos });
+    expect(text).toContain("0/23 已完成");
+    expect(text).toContain("- [ ] 步骤 20");
+    expect(text).not.toContain("步骤 21");
+    expect(text).toContain("另有 3 项未列出");
+  });
+});
+
+describe("长输出再读（d.181）", () => {
+  it("注入了 tool_output_read 才提 spill handle；没注入时不提", () => {
+    const base = { now: new Date("2026-11-16T00:00:00Z"), timeZone: "UTC" };
+    const withTool = buildRuntimeSection({
+      ...base,
+      tools: [{ name: "tool_output_read", risk: "read" as const }],
+    });
+    expect(withTool).toContain("spill-<数字>");
+    expect(withTool).toContain("tool_output_read");
+
+    const without = buildRuntimeSection({ ...base, tools: [{ name: "file_read", risk: "read" as const }] });
+    expect(without).not.toContain("spill-<数字>");
+  });
+});

@@ -24,6 +24,7 @@ import {
   longTaskVerdict,
   unfinishedTodoCount,
 } from "./agentRuntime/longTask.js";
+import { coreToolNames } from "./agentRuntime/coreTools.js";
 import { buildTurnEvidence } from "./rollout/evidence.js";
 import type { RolloutEvidence, RolloutInput, RolloutTurnFailure, RolloutUsage } from "./rollout/types.js";
 import type { ToolFailure } from "./toolError.js";
@@ -126,6 +127,8 @@ export interface RunSettled {
    * 界面拿它做「撤回本轮改动」的入口；为空/缺省 = 这一轮没改东西。
    */
   writes?: string[];
+  /** d.182：这个回合起了哪些后台作业（界面据此在收口后继续盯是否跑完）。 */
+  jobs?: string[];
 }
 
 /** 工具结果里附带的一条来源（如知识库页面、本机归档消息）。 */
@@ -184,6 +187,42 @@ export const MAX_SOURCES = 8;
  * 写工具不受这个限制——它们由调用处的写队列（`writeChain`）串行，顺序不可乱。
  */
 export const MAX_PARALLEL_READS = 3;
+
+/**
+ * 单次工具调用的兜底超时（d.186）。
+ *
+ * 为什么要有：工具是外部世界（MCP 服务、浏览器桥、命令、网络），**没有哪一处保证一定返回**。
+ * 一个不返回的调用会让整轮对话一直挂着——用户看到「正在调用 X」转圈，只能手点停止；
+ * 而模型此时拿不到任何信息，也不知道该换路。
+ *
+ * 为什么是 180 秒：`run_command` 自己的硬上限是 120 秒（见 `shell/limits.ts`），后台作业是
+ * 立刻返回 jobId；能超过 180 秒还没返回的，基本可以判定为挂死，而不是「正常但慢」。
+ *
+ * 代价：超时后底层那次调用**可能仍在跑**（stdio/HTTP 只能「不再等」），所以文案写「已中止这次
+ * 等待」而不是「已杀掉」，不让模型误以为外部状态干净了。
+ */
+export const TOOL_CALL_TIMEOUT_MS = 180_000;
+
+/** 给一次工具调用加兜底超时；超时回一条模型能照做的失败文案（不抛异常）。 */
+function withToolTimeout<T extends { text: string; ok: boolean }>(
+  promise: Promise<T>,
+  toolName: string,
+): Promise<T | { text: string; ok: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ text: string; ok: false }>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({
+        text:
+          `工具 ${toolName} 超过 ${Math.round(TOOL_CALL_TIMEOUT_MS / 1000)} 秒没有返回，已经中止这次等待。` +
+          "这不算任务失败：可以换一种做法（例如换成后台作业、缩小范围、或先确认外部服务的状态）再继续。",
+        ok: false,
+      });
+    }, TOOL_CALL_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
 
 /** 限流器：最多 `limit` 个任务同时跑，排队者按提交顺序启动。 */
 function createLimiter(limit: number): <T>(job: () => Promise<T>) => Promise<T> {
@@ -270,6 +309,8 @@ export interface ToolBridge {
      * 反推出错就是「撤回撤错文件」——这是把用户的文件改坏，比没这个功能更糟。
      */
     writes?: string[];
+    /** d.182：本回合起的后台作业 id。 */
+    jobs?: string[];
     /**
      * 失败契约（P2-T9）：`ok=false` 时带稳定错误码与重试建议（见 lib/toolError.ts）。
      *
@@ -894,6 +935,8 @@ export function runAgentMentions(
   let budgetHit = false;
   /** 本回合真正落盘的文件（d.176）：撤回落在这个集合上，收口时一并带出去。 */
   const turnWrites = new Set<string>();
+  /** 本回合起的后台作业（d.182）：收口时带出去，界面接着盯它们跑完。 */
+  const turnJobs = new Set<string>();
         /**
          * 完成证据的原料（v5 / P3-T15）：本回合成功执行过的调用 + 结果。
          * 放在 attempt 作用域里重置：溢出重试的废尝试不该出现在「这次完成」的凭据里。
@@ -1184,8 +1227,20 @@ export function runAgentMentions(
           for (const tool of [...relevantSpecs, ...allSpecs]) {
             if (!rankedNames.includes(tool.name)) rankedNames.push(tool.name);
           }
+          /**
+           * 核心工具常驻（d.191）：相关度排序对 MCP 友好，但会把本地能力挤下去。
+           *
+           * 用户这句话里没提「文件」「命令」时，`file_write` / `run_command` 可能在
+           * 第一轮就不可见——长任务走到一半要写要跑时，模型只能先猜着调 `tool_search`，
+           * 或者直接说做不到。所以先给常驻名单占名额，剩下的名额再按相关度与目录序补齐。
+           */
+          const coreNames = coreToolNames(rankedNames);
+          const coreSet = new Set(coreNames);
+          const pinnedOrder = useDiscovery
+            ? [...coreNames, ...rankedNames.filter((name) => !coreSet.has(name))]
+            : rankedNames;
           /** 当前可调用（模型看得见）的工具名。检索命中会往里加，下一轮即生效。 */
-          const pinnedNames = useDiscovery ? rankedNames.slice(0, MAX_VISIBLE_TOOLS) : rankedNames;
+          const pinnedNames = useDiscovery ? pinnedOrder.slice(0, MAX_VISIBLE_TOOLS) : rankedNames;
           const visible = new Set<string>(pinnedNames);
           /**
            * 检索「解锁」的工具，按揭晓顺序排队。
@@ -1204,7 +1259,11 @@ export function runAgentMentions(
               revealed.push(name);
             }
             while (pinnedNames.length + revealed.length > MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT && revealed.length > 0) {
-              const victim = revealed.shift();
+              // 常驻工具不会被「解锁名额」挤掉（d.191）：它们本来就在 `pinnedNames` 里，
+              // 这里只是保护同名的重复揭示路径不再把它移出可见集合。
+              const victimAt = revealed.findIndex((name) => !coreSet.has(name));
+              if (victimAt < 0) break;
+              const victim = revealed.splice(victimAt, 1)[0];
               if (victim) visible.delete(victim);
             }
           };
@@ -1451,7 +1510,7 @@ export function runAgentMentions(
              */
             const riskOf = (name: string) => bridge?.meta?.(name)?.risk ?? "write";
             const settled: (
-              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[]; writes?: string[] }
+              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[]; writes?: string[]; jobs?: string[] }
               | undefined
             )[] =
               new Array(calls.length);
@@ -1498,11 +1557,14 @@ export function runAgentMentions(
                         : deniedText(outcome.call, outcome.reason);
                   return { text, ok: false };
                 }
-                return bridge!.execute(
-                  { name: call.function.name, arguments: call.function.arguments },
-                  // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
-                  // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
-                  { signal: controller.signal },
+                return withToolTimeout(
+                  bridge!.execute(
+                    { name: call.function.name, arguments: call.function.arguments },
+                    // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
+                    // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
+                    { signal: controller.signal },
+                  ),
+                  call.function.name,
                 );
               })();
               const callKey = `${call.function.name}\u0000${call.function.arguments}`;
@@ -1582,6 +1644,10 @@ export function runAgentMentions(
               // 落盘路径同样只认「成功」的结果：失败/被拒的条目没有真的写过文件。
               if (result.ok && result.writes?.length) {
                 for (const path of result.writes) turnWrites.add(path);
+              }
+              // 后台作业：收口后仍在跑的要让界面知道（d.182）。
+              if (result.ok && result.jobs?.length) {
+                for (const jobId of result.jobs) turnJobs.add(jobId);
               }
             }
             // 拿到结果后补 end（成功/失败 + 文本）
@@ -1670,7 +1736,7 @@ export function runAgentMentions(
             toolTokens += calls.reduce(
               (sum, _call, i) =>
                 sum +
-                estimateTokens(truncateToolResult(String(results[i]?.text ?? ""))) +
+                estimateTokens(truncateToolResult(String(results[i]?.text ?? ""), undefined, { spill: false })) +
                 // 与预算层同一个口径（图片不便宜，别按 800 凑合）
                 (results[i]?.images?.length ?? 0) * IMAGE_TOKEN_COST,
               0,
@@ -1819,6 +1885,8 @@ export function runAgentMentions(
               ...(budgetHit ? { budgetStop: true } : {}),
               // 本轮改过哪些文件（d.176）：界面据此给「撤回本轮改动」，不让用户去记忆里翻路径。
               ...(turnWrites.size > 0 ? { writes: [...turnWrites] } : {}),
+              // 本回合起的后台作业（d.182）：界面在收口后继续盯，跑完给「继续」。
+              ...(turnJobs.size > 0 ? { jobs: [...turnJobs] } : {}),
             });
           } else {
             settle({ status: "error", error: "端到端加密失败，回复未发送" });

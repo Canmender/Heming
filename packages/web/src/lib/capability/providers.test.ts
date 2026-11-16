@@ -28,6 +28,7 @@ describe("内置能力提供者", () => {
       ["files", "builtin"],
       ["shell", "builtin"],
       ["todo", "builtin"],
+      ["tool-output", "builtin"],
       ["webtools", "builtin"],
       ["infohub", "builtin"],
       ["plugin-market", "plugin"],

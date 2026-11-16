@@ -56,7 +56,41 @@ test("preload 暴露 __heming_shell.run 并转发到 shell:run（d.164）", () =
   assert.ok(m, "preload 必须暴露 __heming_shell");
   assert.ok(m[1].includes('invoke("shell:run"'), "__heming_shell.run 必须转发到 shell:run");
   assert.ok(m[1].includes('invoke("shell:cancel"'), "__heming_shell.cancel 必须转发到 shell:cancel（d.165）");
+  assert.ok(m[1].includes('invoke("shell:jobs"'), "__heming_shell.jobs 必须转发到 shell:jobs（d.180）");
+  assert.ok(m[1].includes('invoke("shell:job-output"'), "__heming_shell.jobOutput 必须转发到 shell:job-output（d.180）");
+  assert.ok(m[1].includes('invoke("shell:job-kill"'), "__heming_shell.jobKill 必须转发到 shell:job-kill（d.180）");
   assert.ok(!m[1].includes("ipcRenderer.send("), "不允许用单向 send 跑命令（拿不到退出码与输出）");
+});
+
+test("__heming_shell.jobs / jobOutput / jobKill 三个后台作业转发（d.180）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "shell:jobs": () => ({ ok: true, jobs: [] }),
+        "shell:job-output": (payload) => ({ ok: true, jobId: payload.jobId, stdout: "x" }),
+        "shell:job-kill": (payload) => ({ ok: true, jobId: payload.jobId, killed: true }),
+      },
+    },
+  );
+  const shell = exposed.__heming_shell;
+  assert.equal(typeof shell.jobs, "function");
+  assert.equal(typeof shell.jobOutput, "function");
+  assert.equal(typeof shell.jobKill, "function");
+  assert.deepEqual(await shell.jobs(), { ok: true, jobs: [] });
+  assert.deepEqual(await shell.jobOutput({ jobId: "job-1", waitMs: 500 }), {
+    ok: true,
+    jobId: "job-1",
+    stdout: "x",
+  });
+  assert.deepEqual(await shell.jobKill({ jobId: "job-1" }), { ok: true, jobId: "job-1", killed: true });
+  assert.deepEqual(invoked, [
+    ["shell:jobs", undefined],
+    ["shell:job-output", { jobId: "job-1", waitMs: 500 }],
+    ["shell:job-kill", { jobId: "job-1" }],
+  ]);
 });
 
 test("__heming_files.glob / grep 分别转发到 file:glob / file:grep", async () => {

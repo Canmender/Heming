@@ -4,6 +4,7 @@ import { estimateRowsTokens } from "./tokens.js";
 import { planTurnBudget } from "./turnBudget.js";
 import { SUMMARY_HEADER, SUMMARY_NOTICE, buildSummaryPrompt, deterministicSummary } from "./summary.js";
 import { normalizeContextSettings, type ContextSettings } from "./settings.js";
+import { setManualSummary, takeManualSummary } from "./manualCompact.js";
 import type { SummaryCache } from "./store.js";
 
 /**
@@ -20,6 +21,12 @@ export interface PrepareHistoryDeps {
   summarize?: (messages: ChatMessage[]) => Promise<string | null>;
   /** 溢出重试级别：1 = 半预算/半轮数，2 = 四分之一预算/2 轮（设计 §3.4）。 */
   aggressive?: 1 | 2;
+  /**
+   * 强制折叠（d.183，手动 `/compact`）：即使历史「本来就放得下」也把除最后一轮以外的
+   * 全部压成摘要。`aggressive` 是为了让**重试的那次请求真的变短**，`force` 是为了让
+   * **用户主动要压缩时立刻生效**——目标相同（变短），触发理由不同，所以拆成两个开关。
+   */
+  force?: boolean;
   /**
    * 摘要缓存的会话分桶键。计划 Task A 的签名未含此项（可选、缺省空串），
    * 不加也能跑；由触发端传入才能让「每会话 20 条」真正按会话隔离。
@@ -101,7 +108,7 @@ export async function prepareHistory(
       // ★ 溢出重试的真实痛点：如果历史本来就全放得下，`older` 为空 → 原样返回 →
       // 重试发出去的请求和上一次**一模一样**，必然再撞同一个 400（纯浪费一次调用）。
       // 重试轮必须真的变短：强制只留最后一轮原文，其余全部压成摘要。
-      if (!deps.aggressive || source.length <= 2) return source;
+      if (!deps.force && (!deps.aggressive || source.length <= 2)) return source;
       let lastUser = source.length - 1;
       while (lastUser > 0 && source[lastUser].role !== "user") lastUser -= 1;
       const recent = source.slice(lastUser);
@@ -125,7 +132,13 @@ export async function prepareHistory(
     const cache = deps.cache;
     const conversationId = deps.conversationId ?? "";
     const fingerprint = cache ? cache.fingerprint(conversationId, plan.older) : "";
-    let summary = (cache ? cache.get(conversationId, fingerprint) : "") ?? "";
+    /**
+     * 手动压缩（d.183）：用户在 `/compact` 里生成的那段摘要优先用掉，且**只用一次**。
+     * 它不走指纹缓存的原因见 `manualCompact.ts`——发送路径上的行没有工具配对，
+     * 指纹对不上会让「点完压缩下一轮照样重新摘要」，白等一次。
+     */
+    const manual = conversationId ? takeManualSummary(conversationId) : "";
+    let summary = manual || (cache ? cache.get(conversationId, fingerprint) : "") || "";
 
     if (!summary && effective.llmSummary && deps.summarize) {
       try {
@@ -146,4 +159,70 @@ export async function prepareHistory(
   } catch {
     return source;
   }
+}
+
+/** 手动压缩（d.183）的返回：消息 + 给用户/界面看的统计。 */
+export interface CompactResult {
+  /** 压缩后真正要发出去的 messages（未压缩时与入参同序）。 */
+  messages: ChatMessage[];
+  /** 是否真的折叠了东西（只有一轮、或全是系统消息时为 false）。 */
+  compacted: boolean;
+  /** 摘要正文（含固定骨架标题与背景声明；未压缩时为空串）。 */
+  summary: string;
+  /** 被折叠进摘要的原始消息条数。 */
+  foldedCount: number;
+  beforeTokens: number;
+  afterTokens: number;
+}
+
+/**
+ * 手动压缩（d.183）：把当前历史的**除最后一轮以外**全部折叠成一段摘要。
+ *
+ * 与自动压缩的关系：自动压缩由预算触发（`prepareHistory` 的 `older` 非空才折），
+ * 这里由**用户按需触发**（输入 `/compact`），所以走 `force`——即使历史本来放得下也折，
+ * 让「我现在就想让它轻一点」成为可执行的动作，而不是只能等预算撞墙。
+ *
+ * 摘要写进同一个 `SummaryCache`：下一轮真实请求命中缓存，不会再花一次摘要调用。
+ */
+export async function compactNow(
+  rows: ChatMessage[],
+  deps: PrepareHistoryDeps = {},
+): Promise<CompactResult> {
+  const source = Array.isArray(rows) ? rows : [];
+  const messages = await prepareHistory(source, { ...deps, force: true });
+  const head = messages[0];
+  const compacted =
+    head?.role === "system" &&
+    typeof head.content === "string" &&
+    head.content.startsWith(SUMMARY_HEADER);
+  const beforeTokens = estimateRowsTokens(source);
+  const afterTokens = estimateRowsTokens(messages);
+  /**
+   * 压缩本身也要占地方：摘要 + 背景声明约几百 token。对话还短的时候强行折叠，
+   * 结果是**发出去的内容反而更多**，而且真实信息被换成摘要——纯亏。
+   * 所以「压缩完不比原来省」就当没发生：如实回 `compacted: false` 并带上两个数字，
+   * 由界面告诉用户「这段还短，压了不划算」，而不是悄悄把他刚说的话换掉。
+   */
+  const worthwhile = compacted && afterTokens < beforeTokens;
+  const conversationId = String(deps.conversationId ?? "").trim();
+  if (worthwhile && conversationId) {
+    /**
+     * 存**正文**而不是整条消息：`prepareHistory` 会重新加骨架标题与背景声明，
+     * 存渲染后的整条会变成「标题 + 正文 + 声明 + 声明」两份声明（实测抓到的重复）。
+     */
+    const body = bodyOf(String(messages[0]?.content ?? ""))
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("> "))
+      .join("\n")
+      .trim();
+    if (body) setManualSummary(conversationId, body);
+  }
+  return {
+    messages: worthwhile ? messages : source,
+    compacted: worthwhile,
+    summary: worthwhile ? String(messages[0]?.content ?? "") : "",
+    foldedCount: worthwhile ? Math.max(0, source.length - (messages.length - 1)) : 0,
+    beforeTokens,
+    afterTokens: worthwhile ? afterTokens : beforeTokens,
+  };
 }
