@@ -1,0 +1,41 @@
+# 用例 write-001：整份写入新文件（d.153 file_write）
+# 用途：验证模型用 file_write 一次创建带内容的新文件（不依赖补丁语法）。
+# P0 期望：一次 file_write 成功，tool_result 含「已创建 notes/新说明.md」，
+#         file_assert 看到写入内容，且没有多余轮次。
+id: write-001
+name: 整份写入：新建 notes/新说明.md
+owner: evals
+tags: [write, capability]
+setup:
+  fixture: write-001
+prompt: |
+  在工作区里新建 notes/新说明.md，内容写下面两行，其他文件都不要动：
+  # 评测说明
+
+  这是评测写入的文件。
+script:
+  - tool_calls:
+      - name: file_write
+        arguments:
+          path: notes/新说明.md
+          content: |
+            # 评测说明
+
+            这是评测写入的文件。
+  - text: |
+      已创建 notes/新说明.md，标题是「# 评测说明」，正文是「这是评测写入的文件。」，
+      其他文件没有改动。
+graders:
+  - type: tool_called
+    tool: file_write
+    times: 1
+  - type: contains
+    value: ["已创建 notes/新说明.md"]
+    in: tool_result
+  - type: file_assert
+    path: notes/新说明.md
+    contains: ["这是评测写入的文件"]
+  - type: evidence
+    files: ["notes/新说明.md"]
+  - type: max_rounds
+    value: 3

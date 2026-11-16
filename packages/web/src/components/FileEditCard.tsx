@@ -1,41 +1,67 @@
 import { useState } from "react";
-import { getFileBridge, type FileFsBridge } from "../lib/fileEdit/bridge.js";
+import { getDefaultRootPath, getFileBridge, type FileFsBridge } from "../lib/fileEdit/bridge.js";
 import {
   MAX_FILE_ROOTS,
+  DEFAULT_WORKSPACE_ROOT_NAME,
   FileRootsStore,
+  activeWorkspace,
   fileRootsStore,
   type FileRootsConfig,
 } from "../lib/fileEdit/roots.js";
 import { MAX_FILE_BYTES, MAX_FILES_PER_PATCH, MAX_PATCH_BYTES } from "../lib/fileEdit/limits.js";
 import { isFileEditTool } from "../lib/fileEdit/ruleTargets.js";
+import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { Button } from "../components/ui/Button.js";
+import { RollbackList } from "./RollbackList.js";
+import { useChatStore } from "../store/chat.js";
+import { useUiStore } from "../store/ui.js";
 
 /**
  * 设置区 · 文件编辑卡。
  *
  * 三件事：
- * 1. **可写根**（增删 + read/write 切换）——这是文件编辑能力的唯一开关，
- *    没有根时 `file_patch` / `file_read` 对模型根本不可见；
+ * 1. **额外授权根**（增删 + read/write 切换）。会话工作区已经自动成为可写根
+ *    （产品决策：用户明确要求工作区默认可读写），所以这里**不再是**「文件能力的唯一开关」——
+ *    它管的是「工作区之外还想授权哪些目录」；
  * 2. **越界处理**（问 / 直接拒绝）；
  * 3. **展示**已记住的目录授权规则（来自确认卡「记住本次选择」，按目录前缀）。
  *
- * 与 MCP「装完默认全关」同口径：这里默认一条根都没有，必须用户显式添加。
- * 浏览器端没有文件桥，整卡显示「仅桌面端可用」而不是给一个假的添加按钮。
+ * 自动工作区根**不落 localStorage**、也不在本卡列表里（它是会话属性，跟着会话走：
+ * 换会话就换根，删会话就失效）。浏览器端没有文件桥，整卡显示「仅桌面端可用」，
+ * 不说「自动可写」——没有桥却宣称可写就是假能力。
  */
 export function FileEditCard({
   rootsStore,
   policyStore,
   bridge,
+  workspace,
 }: {
   rootsStore?: FileRootsStore;
   policyStore?: HitlPolicyStore;
   /** 测试注入；缺省读 `window.__heming_files`。 */
   bridge?: FileFsBridge | null;
+  /**
+   * 当前会话工作区（绝对路径）。缺省从「当前活动会话」读；
+   * 设置页没有活动会话时为空——那时只展示通用说明，不编造一个路径。
+   */
+  workspace?: string;
 }) {
   const store = rootsStore ?? fileRootsStore;
   const policy = policyStore ?? new HitlPolicyStore();
   const fileBridge = bridge === undefined ? getFileBridge() : bridge;
+
+  const activeConversationId = useUiStore((state) => state.activeConversationId);
+  const conversationWorkspace = useChatStore((state) => {
+    const conv = state.conversations.find((c) => c.id === activeConversationId);
+    return conv?.workspace ?? "";
+  });
+  // 数据源优先级：显式 prop（测试/调用方）→ 聊天页当前会话 → roots 模块记下的活动工作区。
+  // 第三级是必要的：设置页会清空 activeConversationId（store/ui 的 setPage），只看会话列表
+  // 会把「工作区自动可写」显示成「没有工作区」，和闸门实际口径对不上。
+  const autoWorkspace = (workspace ?? conversationWorkspace ?? activeWorkspace() ?? "").trim();
+  // 未分组会话的兜底写根（桌面端 preload 同步下发的「文档\和鸣」；老安装包没有 → null）。
+  const defaultRoot = getDefaultRootPath();
 
   const [config, setConfig] = useState<FileRootsConfig>(() => store.get());
   const [path, setPath] = useState("");
@@ -92,14 +118,70 @@ export function FileEditCard({
   // 已记住的文件编辑规则（由确认卡「记住本次选择」按目录前缀写入）
   const rules = policy.rules().filter((rule) => isFileEditTool(rule.tool));
 
+  /*
+   * 规则是直接读 localStorage 的（没有订阅），所以撤销后必须手动触发一次重渲染，
+   * 否则界面还显示着刚被删掉的那条——用户会以为撤销没生效，再点一次。
+   */
+  const [ruleVersion, bumpRuleVersion] = useState(0);
+  const [clearArmed, setClearArmed] = useState(false);
+
+  const revokeRule = (rule: (typeof rules)[number]) => {
+    const removed = policy.removeRule(rule);
+    bumpRuleVersion(ruleVersion + 1);
+    setClearArmed(false);
+    setError(removed ? null : "撤销失败：这条规则可能已被其它页面删除，刷新后重试。");
+    setStatus(removed ? "已撤销该目录授权，之后该目录内的改动会重新逐次询问" : null);
+  };
+
+  const clearAllRules = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      setStatus(null);
+      return;
+    }
+    policy.clearRules();
+    bumpRuleVersion(ruleVersion + 1);
+    setClearArmed(false);
+    setError(null);
+    setStatus("已清空全部记住的规则");
+  };
+
     return (
     <section aria-label="文件编辑" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <div className="ui-section-title">文件编辑</div>
       </div>
       <div className="mt-1 ui-caption">
-        默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；至少一条可写根才会出现 `file_patch`。
+        {fileBridge ? (
+          <>
+            会话工作区会自动成为可写根（无需手动添加）；这里配置的根用于额外授权工作区之外的目录。
+          </>
+        ) : (
+          <>
+            默认没有任何可写根。添加后 `file_read` 才会出现在智能体工具里；至少一条可写根才会出现 `file_patch`。
+          </>
+        )}
       </div>
+
+      {fileBridge && autoWorkspace && (
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
+          工作区（自动）：<span className="break-all font-mono">{autoWorkspace}</span>
+          <span className="text-muted"> · 无需手动添加</span>
+        </div>
+      )}
+
+      {fileBridge && !autoWorkspace && defaultRoot && (
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
+          {DEFAULT_WORKSPACE_ROOT_NAME}（自动）：<span className="break-all font-mono">{defaultRoot}</span>
+          <span className="text-muted"> · 未分组的会话也可直接读写，无需手动添加</span>
+        </div>
+      )}
+
+      {fileBridge && !autoWorkspace && !defaultRoot && (
+        <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
+          未分组的会话没有自动可写目录：给它选一个工作区，或在下面添加一条可写根。
+        </div>
+      )}
 
       {!fileBridge ? (
         <div className="mt-2 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
@@ -118,7 +200,7 @@ export function FileEditCard({
             </div>
             {config.roots.length === 0 ? (
               <div className="mt-1 rounded-lg border border-line-soft bg-subtle-2 px-3 py-2 ui-caption">
-                还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录（例如 Obsidian 库的某个子目录），不要选整个盘。
+                还没有额外配置的可写根。会话工作区里的文件智能体已经可以读写；想授权工作区之外的目录，在下面添加。建议选一个你希望它维护的目录（例如 Obsidian 库的某个子目录），不要选整个盘。
               </div>
             ) : (
               <ul className="mt-1 flex flex-col gap-1">
@@ -219,50 +301,75 @@ export function FileEditCard({
             </span>
           </label>
 
-          <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="ui-body-sm font-semibold text-ink">
-              已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
-            </div>
-            {rules.length === 0 ? (
-              <div className="mt-1 ui-caption">
-                还没有。在确认弹窗里勾选「记住本次选择」会按目标文件所在目录授权
-                （如 `D:/Obsidian/学院事务/`），之后该目录内的改动不再逐次询问。
-              </div>
-            ) : (
-              <ul className="mt-1 flex flex-col gap-1">
-                {rules.map((rule) => (
-                  <li
-                    key={`${rule.tool}-${rule.resource}-${rule.at}`}
-                    className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
+            <div className="mt-3 border-t border-line-soft pt-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="ui-body-sm font-semibold text-ink">
+                  已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
+                </div>
+                {rules.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={clearAllRules}
+                    className={`rounded-sm px-2 py-0.5 text-ui-xs ui-hit ${FOCUS_RING} ${
+                      clearArmed ? "bg-danger-soft text-danger" : "text-muted hover:text-ink"
+                    }`}
+                    aria-label={clearArmed ? "确认清空全部记住的目录授权" : "清空全部记住的目录授权"}
                   >
-                    <span
-                      className={`rounded-sm px-1 ${
-                        rule.effect === "deny"
-                          ? "bg-danger-soft text-danger"
-                          : "bg-success-soft text-success"
-                      }`}
+                    {clearArmed ? "再点一次确认清空" : "全部清空"}
+                  </button>
+                ) : null}
+              </div>
+              {rules.length === 0 ? (
+                <div className="mt-1 ui-caption">
+                  还没有。在确认弹窗里勾选「记住本次选择」会按目标文件所在目录授权
+                  （如 `D:/Obsidian/学院事务/`），之后该目录内的改动不再逐次询问。
+                </div>
+              ) : (
+                <ul className="mt-1 flex flex-col gap-1">
+                  {rules.map((rule) => (
+                    <li
+                      key={`${rule.tool}-${rule.resource}-${rule.at}`}
+                      className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-ui-xs"
                     >
-                      {rule.effect === "deny" ? "拒绝" : "允许"}
-                    </span>
-                    <span className="font-mono text-body">{rule.tool}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-muted" title={rule.resource}>
-                      {rule.resource}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-1 text-ui-xs text-muted">
-              拒绝优先于允许；文件编辑只能按目录前缀授权，不能放行整个工具。
-              规则可在「工具调用确认」卡里一键清空。
+                      <span
+                        className={`rounded-sm px-1 ${
+                          rule.effect === "deny"
+                            ? "bg-danger-soft text-danger"
+                            : "bg-success-soft text-success"
+                        }`}
+                      >
+                        {rule.effect === "deny" ? "拒绝" : "允许"}
+                      </span>
+                      <span className="font-mono text-body">{rule.tool}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-muted" title={rule.resource}>
+                        {rule.resource}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => revokeRule(rule)}
+                        className={`rounded-sm px-1.5 py-0.5 ui-hit text-muted hover:text-danger ${FOCUS_RING}`}
+                        aria-label={`撤销 ${rule.effect === "deny" ? "拒绝" : "允许"}规则：${rule.tool} ${rule.resource}`}
+                      >
+                        撤销
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-1 text-ui-xs text-muted">
+                拒绝优先于允许；文件编辑只能按目录前缀授权，不能放行整个工具。
+                撤销一条只影响那一条目录，其它授权不受影响。
+              </div>
             </div>
-          </div>
 
           <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
             上限：单文件 {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB、单次补丁{" "}
             {Math.round(MAX_PATCH_BYTES / 1024 / 1024)} MB、单次最多 {MAX_FILES_PER_PATCH} 个文件；
             只处理 UTF-8 文本，软链/硬链接与二进制文件一律拒绝。
           </div>
+
+          {/* d.171：把 d.170 的 file_undo 从「只有模型会调」变成用户能点的入口 */}
+          <RollbackList bridge={fileBridge} />
         </>
       )}
     </section>

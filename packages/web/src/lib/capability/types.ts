@@ -18,6 +18,17 @@ export interface CapabilityContext {
    * 因此由接线层传入，注册表不自建实例——自建会让两个 ChatPage 共享预算。
    */
   selfEdit?: { policy: SelfEditStore; budget: SelfEditBudget };
+  /**
+   * 当前会话的工作区（本机文件夹绝对路径，用户建会话/移动会话时选的）。
+   *
+   * d.153 起它**参与文件工具的权限判断**：文件提供者把它派生成一条隐式写根
+   * （见 `fileEdit/roots.ts` 的 `mergeWorkspaceRoot`），这样新装用户不必先去
+   * 设置区加根，智能体就能在用户已经选好的文件夹里读写——默认零根等于
+   * 「智能体完全没有文件能力」，用户报的正是这个。
+   *
+   * 缺省/空 = 没有工作区（未分组会话），此时只剩设置区里手动加的根。
+   */
+  workspace?: string;
 }
 
 /** 一个能力提供者：一类工具来源。 */

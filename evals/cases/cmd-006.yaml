@@ -1,0 +1,34 @@
+id: cmd-006
+name: 用户点停止时，跑着的命令真的被中止
+owner: heming
+tags: [shell, security]
+setup:
+  fixture: cmd-006
+  roots:
+    - path: .
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+slow: true
+abort_after_ms: 1200
+prompt: 跑一条要十秒的命令，我一会儿会点停止。
+script:
+  - tool_calls:
+      - name: run_command
+        arguments:
+          command: node -e "setTimeout(() => {}, 10000)"
+          timeout_ms: 30000
+  - text: 命令被中止了。
+graders:
+  - type: tool_called
+    tool: run_command
+    times: 1
+  - type: contains
+    value: 中止
+    in: tool_result
+  - type: contains
+    value: 进程树
+    in: tool_result
+  - type: max_rounds
+    value: 3

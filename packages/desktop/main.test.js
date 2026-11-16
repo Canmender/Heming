@@ -395,9 +395,9 @@ const IPC_UNGUARDED_BY_DESIGN = [
   "app:version", // preload 顶层 sendSync 取版本：任何窗口的 preload 都要能问
 ];
 const IPC_WIDGET_PREFIX = "widget:"; // widget 窗口控制通道由 plugin-host.js 内部按 sender 自校验
-// file-fs 的三个通道用自己的 `isTrustedSender`（fail-closed）收口，不走 secureIpc 门面；
+// file-fs 的文件通道用自己的 `isTrustedSender`（fail-closed）收口，不走 secureIpc 门面；
 // 下面的断言同时钉住 file-fs 里确实还有那两道 sender 校验，防止重构时把守卫丢成裸 handler。
-const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root"];
+const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root", "file:glob", "file:grep", "file:image", "file:undo", "file:backups", "file:default-root", "shell:run", "shell:cancel"];
 
 function channelsIn(source, pattern) {
   const out = new Set();
@@ -471,15 +471,38 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
     assert.ok(ok, `preload 暴露了既不在 TRUSTED_CHANNELS 也不在白名单的通道：${ch}`);
   }
 
-  // file-fs 自守卫通道必须仍在 file-fs.js 里带 fail-closed 的 sender 校验（不是裸 handler）
-  const fileFsSrc = fs.readFileSync(path.join(__dirname, "file-fs.js"), "utf8");
+  // 自守卫通道必须仍在各自模块里带 fail-closed 的 sender 校验（不是裸 handler）。
+  // 文件通道在 file-fs.js，本机命令通道在 shell-run.js（d.164 拆开：命令执行与文件读写
+  // 的生命周期差太多，混在一个模块里会让「文件写队列」和「命令串行队列」互相等待）。
+  const selfGuardedModules = ["file-fs.js", "shell-run.js"].map((file) => ({
+    file,
+    src: fs.readFileSync(path.join(__dirname, file), "utf8"),
+  }));
   for (const ch of IPC_SELF_GUARDED) {
-    assert.ok(fileFsSrc.includes(`"${ch}"`), `file-fs.js 应注册 ${ch}`);
+    const owner = selfGuardedModules.find((m) => m.src.includes(`"${ch}"`));
+    assert.ok(owner, `自守卫通道没有任何模块注册：${ch}`);
+
+  // d.166 不变量：preload 里用 sendSync 问的通道，主进程必须用 ipcMain.on 注册。
+  // sendSync 只认同步监听者（event.returnValue），用 ipcMain.handle 注册会让渲染进程
+  // 永远等不到返回——表现是**窗口一直加载不出来**。d.166 的桌面桥冒烟就是这么抓到的。
+  const desktopSources = fs
+    .readdirSync(__dirname)
+    .filter((file) => file.endsWith(".js") && !file.endsWith(".test.js"))
+    .map((file) => ({ file, src: fs.readFileSync(path.join(__dirname, file), "utf8") }));
+  for (const ch of channelsIn(preloadSrc, /ipcRenderer\.sendSync\(\s*["'\x60]([^"'\x60]+)["'\x60]/g)) {
+    const syncOwner = desktopSources.find((m) => m.src.includes(`on("${ch}"`));
+    assert.ok(syncOwner, `preload 用 sendSync 问 ${ch}，但没有模块用 ipcMain.on 同步注册它（会卡住窗口加载）`);
+    const asyncOwner = desktopSources.find((m) => m.src.includes(`handle("${ch}"`));
+    assert.ok(!asyncOwner, `${ch} 不能再用 ipcMain.handle 注册：sendSync 通道必须同步回值`);
   }
-  assert.ok(
-    /isTrustedSender\s*=\s*\(deps\s*&&\s*deps\.isTrustedSender\)\s*\|\|\s*\(\(\)\s*=>\s*false\)/.test(fileFsSrc),
-    "file-fs.js 的 sender 校验必须保持 fail-closed 默认（没接线 = 拒绝）",
-  );
+  }
+  // 两个自守卫模块的 sender 校验都必须保持 fail-closed 默认（没接线 = 拒绝）
+  for (const mod of selfGuardedModules) {
+    assert.ok(
+      /isTrustedSender\s*=\s*\(deps\s*&&\s*deps\.isTrustedSender\)\s*\|\|\s*\(\(\)\s*=>\s*false\)/.test(mod.src),
+      `${mod.file} 的 sender 校验必须保持 fail-closed 默认（没接线 = 拒绝）`,
+    );
+  }
 
   // widget 窗口通道按设计不进能力守卫（由 plugin-host 按 sender 自校验），
   // 但必须全部是 `widget:` 前缀，防止夹带 `widgets:`（主窗专用）或别的能力。

@@ -65,3 +65,43 @@ export function createScriptedChat(usage?: CaseUsage): ScriptedChat {
     },
   };
 }
+
+/**
+ * 子代理的脚本化对话（d.163）：按序消费用例的 `subagent_script`。
+ *
+ * 为什么要单独一份：确定性模式下子代理没有模型绑定（`resolveBoundProfile` 读的是应用内
+ * localStorage 绑定表），子会话必须由脚本驱动；而且它的回合不能算进主用例的 `rounds`，
+ * 否则 `max_rounds` / `min_rounds` 会被子会话的轮次污染。
+ */
+export function createScriptedSubagentChat(turns: ScriptTurn[] | undefined): {
+  chat: (
+    messages: ChatMessage[],
+    tools: unknown[],
+    signal: AbortSignal | undefined,
+    onToolCalls: (calls: { id?: string; name: string; arguments: string }[]) => void,
+  ) => Promise<string>;
+  rounds: () => number;
+} {
+  const queue = [...(turns ?? [])];
+  let rounds = 0;
+
+  const chat = async (
+    _messages: ChatMessage[],
+    _tools: unknown[],
+    _signal: AbortSignal | undefined,
+    onToolCalls: (calls: { id?: string; name: string; arguments: string }[]) => void,
+  ): Promise<string> => {
+    rounds += 1;
+    const turn = queue.shift();
+    const text = turn?.text ?? "";
+    const calls = (turn?.tool_calls ?? []).map((call, index) => ({
+      id: `sub_${rounds}_${index}`,
+      name: call.name,
+      arguments: JSON.stringify(call.arguments ?? {}),
+    }));
+    if (calls.length > 0) onToolCalls(calls);
+    return text;
+  };
+
+  return { chat, rounds: () => rounds };
+}

@@ -69,5 +69,12 @@ run_gate "pnpm typecheck" pnpm typecheck
 #    不要在这里或 CI 里按核数覆盖。
 run_gate "pnpm --filter @heming/web test" pnpm --filter @heming/web test
 
+
+# 3) 桌面桥真机冒烟（约 15s）：用真 Electron 加载真 preload，走一遍文件与命令 IPC。
+#    为什么放在 L1：它是唯一能抓住「窗口直接起不来」的检查，而这种 bug 只要漏到
+#    用户手里就是「双击没反应」。跳过方式（无窗口系统的机器才用）：
+#      HEMING_SKIP_SMOKE=1 git push
+run_gate "pnpm smoke:desktop" pnpm smoke:desktop
+
 printf '\n[L1 pre-push] ✓ 全部通过，可以推送。\n'
 exit 0

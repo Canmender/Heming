@@ -1,0 +1,34 @@
+# 用例 search-001：通配符找文件（d.153 file_glob）
+# 用途：验证模型用 file_glob 列源码文件，而不是猜路径逐个 file_read。
+# P0 期望：一次 file_glob 成功，命中 3 个 .ts（src/a.ts、src/b.ts、src/deep/c.ts）；
+#         node_modules 里的 y.ts 必须被跳过，所以是 3 不是 4。
+id: search-001
+name: 通配符找文件：**/*.ts 只返回源码
+owner: evals
+tags: [search, capability]
+setup:
+  fixture: search-001
+prompt: |
+  列出工作区里所有 .ts 文件。只要路径清单，不要读文件内容。
+script:
+  - tool_calls:
+      - name: file_glob
+        arguments:
+          pattern: "**/*.ts"
+  - text: |
+      工作区里共有 3 个 .ts 文件：src/a.ts、src/b.ts、src/deep/c.ts。
+      node_modules 下的依赖文件被跳过，docs 里是 Markdown 不算。
+graders:
+  - type: tool_called
+    tool: file_glob
+    times: 1
+  - type: contains
+    value: ["命中 3 个文件"]
+    in: tool_result
+  - type: contains
+    value: ["src/a.ts"]
+    in: tool_result
+  - type: contains
+    value: ["3 个 .ts 文件"]
+  - type: max_rounds
+    value: 3

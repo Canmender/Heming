@@ -117,3 +117,33 @@ jobs:
             .tmp/
           if-no-files-found: ignore
           retention-days: 14
+
+  # 真机冒烟：用真 Electron 加载真 preload，把文件桥 / 命令桥的 IPC 从头走一遍。
+  # 为什么单独一个 job 且只在 Windows：Electron 需要窗口系统，ubuntu runner 上
+  # 只能靠 xvfb 硬凑，一旦凑不上就会变成「永远 skip 的绿」——那比没有更危险
+  # （d.162 的「窗口打不开」就是这样静默了四个版本）。Windows 也是本产品的事实平台。
+  smoke-desktop:
+    name: 桌面桥真机冒烟（真 Electron + 真 preload + 真 IPC）
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Node 24 并缓存 pnpm store
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖（锁文件必须一致）
+        run: pnpm install --frozen-lockfile
+
+      # 冒烟只依赖 packages/desktop（Electron 已在 devDependencies），不需要先全量构建。
+      - name: 桌面桥冒烟（13 项断言，任一失败即红）
+        run: pnpm smoke:desktop

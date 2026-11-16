@@ -29,6 +29,36 @@ describe("风险分类", () => {
     expect(riskOfName("self_mcp_remove_server")).toBe("danger");
   });
 
+  it("todo_write 名字带 write，但只改本会话清单，必须是 read（d.154）", () => {
+    // 兜底表不登记就会落进 DANGER_WORDS 的 write 分支变成 danger，
+    // 结果是每次列计划都弹确认，用户会直接关掉清单工具。
+    expect(riskOfName("todo_write")).toBe("read");
+    expect(displayNameOf("todo_write")).toBe("更新任务清单");
+    expect(
+      summarizeArgs(
+        JSON.stringify({
+          todos: [
+            { content: "a", status: "completed" },
+            { content: "b", status: "in_progress" },
+            { content: "c", status: "pending" },
+          ],
+        }),
+      ),
+    ).toBe("任务清单：共 3 条，已完成 1，进行中 1");
+  });
+
+  it("agent_task 是只读：子代理只能读文件，不该因为「派活」弹确认（d.162）", () => {
+    expect(riskOfName("agent_task")).toBe("read");
+    expect(displayNameOf("agent_task")).toBe("派子代理");
+    // 摘要只放任务目标，且截断——子会话里的文件清单不进确认卡
+    const summary = summarizeArgs(
+      JSON.stringify({ task: "在 docs/ 里找出所有提到限流的文件并总结各文件说法", max_rounds: 4 }),
+    );
+    expect(summary.startsWith("子代理任务：")).toBe(true);
+    expect(summary).toContain("提到限流");
+    expect(summary.length).toBeLessThanOrEqual(80);
+  });
+
   it("图表与去 AI 味是只读（纯计算，不写任何存储）", () => {
     expect(riskOfName("chart_render")).toBe("read");
     expect(riskOfName("chart_types")).toBe("read");
@@ -118,6 +148,17 @@ describe("风险分类", () => {
     expect(resolveRisk("some_unknown_tool", { readOnlyHint: true })).toBe("write");
   });
 
+  it("文件读写新工具的风险显式表压过危险词（file_write 含 write 但不能是 danger）", () => {
+    // DANGER_WORDS 里有 write / move 这类词，新增写工具若只靠名字启发会被升成 danger，
+    // 于是永远要人工确认——显式表就是用来钉住这一点的。
+    expect(riskOfName("file_write")).toBe("write");
+    expect(riskOfName("file_edit")).toBe("write");
+    expect(riskOfName("file_glob")).toBe("read");
+    expect(riskOfName("file_grep")).toBe("read");
+    expect(classifyCall("file_write", "{}").risk).toBe("write");
+    expect(classifyCall("file_edit", "{}").risk).toBe("write");
+  });
+
   it("工具来源按名字推断", () => {
     expect(sourceOf("self_memory_write")).toBe("self");
     expect(sourceOf("chart_render")).toBe("chart");
@@ -175,6 +216,47 @@ describe("团队工具的展示名与参数摘要（d.109 D1）", () => {
     expect(call.risk).toBe("write");
     expect(call.source).toBe("team");
     expect(call.summary).toBe("写落地页");
+  });
+});
+
+describe("文件工具的展示名与参数摘要", () => {
+  it("六个文件工具都有中文动作名（不再落到「文件操作」兜底/外部工具）", () => {
+    expect(displayNameOf("file_patch")).toBe("修改文件");
+    expect(displayNameOf("file_read")).toBe("读取文件");
+    expect(displayNameOf("file_write")).toBe("写入文件");
+    expect(displayNameOf("file_edit")).toBe("编辑文件");
+    expect(displayNameOf("file_glob")).toBe("查找文件");
+    expect(displayNameOf("file_grep")).toBe("搜索内容");
+  });
+
+  it("file_write 摘要只给路径 + 行数/字节数，绝不回显正文", () => {
+    const content = "第一行\n第二行";
+    const summary = summarizeArgs(JSON.stringify({ path: "notes/a.md", content }));
+
+    expect(summary).toBe(`notes/a.md（2 行 · ${new TextEncoder().encode(content).length} 字节）`);
+    expect(summary).not.toContain("第一行");
+  });
+
+  it("file_edit 摘要只给目标与替换规模，不回显替换内容", () => {
+    const summary = summarizeArgs(
+      JSON.stringify({ path: "notes/a.md", old_string: "旧", new_string: "新\n新2" }),
+    );
+    expect(summary).toBe("notes/a.md（替换 1 行 → 2 行）");
+    expect(summary).not.toContain("旧");
+    expect(summary).not.toContain("新2");
+  });
+
+  it("file_glob / file_grep 摘要以 pattern 为主（path / include 作为范围补充）", () => {
+    expect(summarizeArgs('{"pattern":"**/*.md"}')).toBe("**/*.md");
+    expect(summarizeArgs('{"pattern":"TODO","include":"*.ts"}')).toBe("TODO（include: *.ts）");
+    expect(summarizeArgs('{"pattern":"TODO","path":"src"}')).toBe("TODO（在 src 内）");
+    expect(summarizeArgs('{"pattern":"TODO","path":"src","include":"*.ts"}')).toBe(
+      "TODO（在 src 内）（include: *.ts）",
+    );
+  });
+
+  it("pattern 命中敏感特征时同样屏蔽", () => {
+    expect(summarizeArgs('{"pattern":"sk-abcdefghijklmnop"}')).toBe("***");
   });
 });
 
@@ -271,5 +353,29 @@ describe("规则资源标识", () => {
 
   it("超长资源截断，避免把长文本写进 localStorage", () => {
     expect(ruleResource(JSON.stringify({ path: "a".repeat(500) }))).toHaveLength(200);
+  });
+});
+
+describe("file_image（d.168：读图不该每次弹确认）", () => {
+  it("风险是 read：只把根内图片读成 base64，不改磁盘", () => {
+    expect(riskOfName("file_image")).toBe("read");
+    expect(classifyCall("file_image", JSON.stringify({ path: "截图/home.png" })).risk).toBe("read");
+  });
+
+  it("显示名与摘要：动作叫「查看图片」，摘要给路径而不是整段 base64", () => {
+    expect(displayNameOf("file_image")).toBe("查看图片");
+    const summary = summarizeArgs(JSON.stringify({ path: "截图/home.png", base64: "iVBORw0KGgo=" }));
+    expect(summary).toBe("截图/home.png");
+    expect(summary).not.toContain("iVBOR");
+  });
+});
+
+describe("file_undo 的风险等级与显示名（d.170）", () => {
+  it("撤销会改文件内容，必须按 write 走确认（不能像只读那样放行）", () => {
+    expect(resolveRisk("file_undo")).toBe("write");
+  });
+
+  it("显示名直接说「撤销」，不让用户猜这个工具在干什么", () => {
+    expect(displayNameOf("file_undo")).toBe("撤销上次写入");
   });
 });

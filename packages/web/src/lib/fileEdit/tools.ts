@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 智能体侧的文件编辑工具：`file_patch`（写）与 `file_read`（读）。
  *
  * 为什么两个工具而不是 `read/write/delete` 三个（规格 §2）：
@@ -17,14 +17,21 @@
 import type { ToolBridge, ToolSource } from "../agentStream.js";
 import type { RiskLevel } from "../hitl/types.js";
 import { kindsSummary, planPatch, type PatchIo, type ReadResult } from "./apply.js";
-import { getFileBridge, type FileFsBridge } from "./bridge.js";
-import { READ_MAX_CHARS, READ_MAX_LINES } from "./limits.js";
+import { getFileBridge, hasImageBridge, hasSearchBridge, hasUndoBridge, type FileFsBridge } from "./bridge.js";
+import {
+  EDIT_MAX_NEW_CHARS,
+  EDIT_MAX_OLD_CHARS,
+  MAX_FILE_BYTES,
+  READ_MAX_CHARS,
+  READ_MAX_LINES,
+} from "./limits.js";
 import { parsePatch } from "./parse.js";
-import { fileRootsStore } from "./roots.js";
+import { currentFileRoots } from "./roots.js";
 import { OUT_OF_ROOT_HINT, assessPatchSafety } from "./safety.js";
-import { relFromRoot, resolveInsideRoot, type FileRoot } from "./paths.js";
-import { isPatchError, pickRoot } from "./resolve.js";
+import { relFromRoot, resolveInsideRoot, utf8Bytes, type FileRoot } from "./paths.js";
+import { isPatchError, pickRoot, resolvePatchPath } from "./resolve.js";
 import { isFileEditTool, parseToolArgs } from "./ruleTargets.js";
+import { runEdit, runGlob, runGrep, runImage, runWrite, runUndo } from "./toolOps.js";
 import type { FileChange, PatchError } from "./types.js";
 import {
   appendFailure,
@@ -45,12 +52,19 @@ export interface FileToolSpec {
 const prop = (description: string) => ({ type: "string" as const, description });
 
 /**
- * 工具清单。`file_patch` 是写、`file_read` 是读，风险由 `meta` 声明给 HITL/编排层。
+ * 工具清单（七个）。风险由 `meta` 声明给 HITL/编排层：读写两类。
  *
  * ★ 说明文字按「schema 也是每轮输入」来写（P2-T14）：每请求都带工具清单，
  * 描述里的每个字都按 token 计费，也会占据前缀缓存的头部。所以只保留
  * **模型必须照做的格式约定**，把解释性长句砍掉（格式行一个都不能省）。
  * `tools.test.ts` 有体积上限，防止以后又悄悄写胖。
+ *
+ * 为什么是这七个（对齐 DSH 的文件工具面）：
+ * - 读：`file_read`（带行号，可切片）、`file_glob`（找文件）、`file_grep`（搜内容）、
+ *   `file_image`（看图片——截图/设计稿/图表，模型自己看图，而不是让用户描述）；
+ * - 写：`file_write`（整份建/覆盖）、`file_edit`（精确串替换）、`file_patch`（多文件锚点补丁）。
+ * 只给 file_patch 时模型没法「从零建一个文件」（补丁要先有锚点上下文），
+ * 也没法「整份重写」——这是用户报「不能用」的另一半原因。
  */
 export const FILE_TOOLS: FileToolSpec[] = [
   {
@@ -84,7 +98,125 @@ export const FILE_TOOLS: FileToolSpec[] = [
       required: ["path"],
     },
   },
+  {
+    name: "file_write",
+    riskHint: "write",
+    description:
+      "整份写本机文本文件：不存在则创建、存在则覆盖（content 为空串＝建空文件），缺失的父目录自动创建。" +
+      "路径须根内相对。只改少量内容时优先 file_edit / file_patch——整份覆盖会丢掉没读到的部分。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: prop("根内相对路径。"),
+        content: prop("文件全文（UTF-8）。"),
+        root: prop("可选：根名。"),
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "file_edit",
+    riskHint: "write",
+    description:
+      "精确替换本机文件里的一段原文：old_string 必须与原文逐字一致（含缩进）且默认只能出现一次，" +
+      "否则加长上下文或用 replace_all。改前先 file_read。路径须根内相对。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: prop("根内相对路径。"),
+        old_string: prop("要被替换的原文，须逐字一致。"),
+        new_string: prop("替换成的新文本（可为空串＝删除这段）。"),
+        replace_all: { type: "boolean", description: "true＝替换全部出现。" },
+        root: prop("可选：根名。"),
+      },
+      required: ["path", "old_string", "new_string"],
+    },
+  },
+  {
+    name: "file_glob",
+    riskHint: "read",
+    description:
+      "按通配符找文件（如 **/*.ts、src/**、*.md）：返回根内相对路径，修改时间新的在前；" +
+      "只列文件不列目录，自动跳过 node_modules / .git 等。",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: prop("通配符，支持 * ? ** {a,b} [abc]。"),
+        path: prop("可选：根内相对目录（缺省＝根）。"),
+        root: prop("可选：根名。"),
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "file_image",
+    riskHint: "read",
+    description:
+      "看根内一张图片（PNG/JPEG/GIF/WebP，≤5MB）：截图、设计稿、图表、报错截图都行。" +
+      "图片会随结果一起给你，直接看图回答，不要凭文件名猜内容；取不到就说没看到，别编。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: prop("根内相对路径，例如 screenshots/home.png。"),
+        root: prop("可选：根名。"),
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "file_grep",
+    riskHint: "read",
+    description:
+      "按正则搜文件内容，返回「相对路径:行号: 内容」；include 用通配限定文件（如 *.ts）。" +
+      "自动跳过二进制与 node_modules / .git 等。",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: prop("正则（JavaScript 语法，不分大小写）。"),
+        path: prop("可选：根内相对目录（缺省＝根）。"),
+        include: prop("可选：文件通配，如 *.ts。"),
+        root: prop("可选：根名。"),
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "file_undo",
+    riskHint: "write",
+    description:
+      "把根内某个文件回滚到「上一次写之前」的内容（改错了、覆盖错了、误删了用）。" +
+      "每次覆盖/删除前桌面端都会留一份备份，这里恢复最新那份；一份备份只能用一次。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: prop("根内相对路径，例如 src/config.md。"),
+        root: prop("可选：根名。"),
+      },
+      required: ["path"],
+    },
+  },
 ];
+
+/**
+ * 写类工具：需要「至少一条可写根」才可见。
+ *
+ * 单独导出是为了让 HITL / 设置区 / 提示词三处共用一份名单——
+ * 「哪些工具会写盘」散着写，漏一个就是安全隐患（会话内整工具授权会漏到写工具上）。
+ */
+export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(["file_patch", "file_write", "file_edit", "file_undo"]);
+
+/** 读类工具：有任意根（read 或 write）即可见。 */
+export const FILE_READ_TOOLS: ReadonlySet<string> = new Set([
+  "file_read",
+  "file_glob",
+  "file_grep",
+  "file_image",
+]);
+
+/** 是不是本模块支持的工具名（`execute` 的未知工具判断用）。 */
+export function isKnownFileTool(name: string): boolean {
+  return FILE_WRITE_TOOLS.has(name) || FILE_READ_TOOLS.has(name);
+}
 
 /**
  * 工具桥依赖（测试可注入假桥与假根）。
@@ -107,11 +239,32 @@ export interface FileToolDeps {
   visibleTools?: ReadonlySet<string>;
 }
 
-/** 工具可见性判据（唯一实现，provider 与测试共用）。 */
+/**
+ * 工具可见性判据（唯一实现，provider 与测试共用）。
+ *
+ * - 读类（`file_read` / `file_glob` / `file_grep` / `file_image`）只需「桥存在 + 任意一条根」
+ *   （read 或 write）——只读根本身就有意义：让智能体读用户圈定的资料；
+ * - 写类（`file_patch` / `file_write` / `file_edit` / `file_undo`）必须「桥存在 + 至少一条
+ *   **write** 根」——没有写根就写不进去，注入了只会让模型反复失败；
+ * - `file_glob` / `file_grep` 还要求桥提供 `glob` / `grep`、`file_image` 要求 `image`
+ *   （老安装包只有读写）：
+ *   这一步在 `buildFileToolBridgeIfAvailable` 里按桥的能力再收一次，
+ *   这里不接收 `bridge` 参数是为了保持「可见性只看根」的可测性。
+ */
 export function visibleFileTools(roots: FileRoot[]): Set<string> {
   const visible = new Set<string>();
-  if (roots.length > 0) visible.add("file_read");
-  if (roots.some((root) => root.mode === "write")) visible.add("file_patch");
+  if (roots.length > 0) {
+    visible.add("file_read");
+    visible.add("file_glob");
+    visible.add("file_grep");
+    visible.add("file_image");
+  }
+  if (roots.some((root) => root.mode === "write")) {
+    visible.add("file_patch");
+    visible.add("file_write");
+    visible.add("file_edit");
+    visible.add("file_undo");
+  }
   return visible;
 }
 
@@ -158,33 +311,51 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       const roots = deps.roots();
       try {
         // 先认名字再看可见性：未知工具必须回 unknown-tool，不能误报成「没有根」。
-        if (call.name !== "file_patch" && call.name !== "file_read") {
+        if (!isKnownFileTool(call.name)) {
           return failureResult("未知工具", call.name, {
             error_code: "unknown-tool",
-            hint: "只支持 file_read / file_patch；不要臆造工具名",
+            hint: "只支持 file_read / file_patch / file_write / file_edit / file_undo / file_glob / file_grep / file_image；不要臆造工具名",
           });
         }
         if (!visible.has(call.name)) {
-          return call.name === "file_patch"
-            ? failureResult(
-                "file_patch 当前不可用",
-                "还没有可写根。目标不在可写根内；如需写入，请先在「设置 → 文件编辑」添加该目录为写根。",
-                {
-                  error_code: "no-write-root",
-                  hint: "没有可写根时 file_patch 不会成功；读文件用 file_read，写盘要先让用户加根",
-                },
-              )
-            : failureResult("工具当前不可用", `${call.name}：还没有配置任何根目录。`, {
-                error_code: "no-roots",
-                hint: "没有配置根目录，文件工具无法使用；不要重试",
-              });
+          if (FILE_WRITE_TOOLS.has(call.name)) {
+            return failureResult(
+              `${call.name} 当前不可用`,
+              "还没有可写根。目标不在可写根内；给会话选一个工作区，或在「设置 → 文件编辑」添加该目录为写根。",
+              {
+                error_code: "no-write-root",
+                hint: `没有可写根时 ${call.name} 不会成功；读文件用 file_read，写盘要先让用户给会话选工作区或加根`,
+              },
+            );
+          }
+          return failureResult("工具当前不可用", `${call.name}：还没有配置任何根目录。`, {
+            error_code: "no-roots",
+            hint: "没有配置根目录，文件工具无法使用；不要重试",
+          });
         }
-        if (call.name === "file_patch") return await runPatch(args, roots);
-        if (call.name === "file_read") return await runRead(args, roots);
-        return failureResult("未知工具", call.name, {
-          error_code: "unknown-tool",
-          hint: "只支持 file_read / file_patch",
-        });
+        switch (call.name) {
+          case "file_patch":
+            return await runPatch(args, roots);
+          case "file_read":
+            return await runRead(args, roots);
+          case "file_write":
+            return await runWrite({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          case "file_edit":
+            return await runEdit({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          case "file_glob":
+            return await runGlob({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          case "file_grep":
+            return await runGrep({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          case "file_image":
+            return await runImage({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          case "file_undo":
+            return await runUndo({ bridge: deps.bridge, roots, ...(deps.outOfRoot ? { outOfRoot: deps.outOfRoot } : {}) }, args);
+          default:
+            return failureResult("未知工具", call.name, {
+              error_code: "unknown-tool",
+              hint: "只支持 file_read / file_patch / file_write / file_edit / file_undo / file_glob / file_grep / file_image",
+            });
+        }
       } catch (e) {
         // 永不抛：工具失败不该让整轮对话崩掉（与 wiki/chart 工具同口径）
         return appendFailure(`文件操作失败：${e instanceof Error ? e.message : String(e)}`, {
@@ -199,7 +370,7 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
   async function runPatch(
     args: Record<string, unknown>,
     roots: FileRoot[],
-  ): Promise<{ text: string; ok: boolean; error?: ToolFailure }> {
+  ): Promise<{ text: string; ok: boolean; writes?: string[]; error?: ToolFailure }> {
     if (roots.length === 0) {
       return failureResult("尚未配置可写根", OUT_OF_ROOT_HINT, {
         error_code: "no-roots",
@@ -266,7 +437,12 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       };
     }
 
-    return { text: successText(planned.changes, planned.notes), ok: true };
+    return {
+      text: successText(planned.changes, planned.notes),
+      ok: true,
+      // 补丁改了什么，界面就要能撤回什么（含删除：撤销会把旧内容写回来）。
+      writes: planned.changes.map((change) => change.abs),
+    };
   }
 
   /** `file_read` 的执行：解析根 → 读盘 → 按行区间切片。 */
@@ -497,17 +673,28 @@ export function formatPatchError(error: PatchError): string {
  *
  * 可见性判据（Lead 定稿）：
  * - 桌面桥存在是前提；
- * - `file_read`：任意一条根（read 或 write）即可见——只读根也有意义（读用户圈定的资料）；
- * - `file_patch`：至少一条 **write** 根才可见——没有写根注入了也只会反复失败。
+ * - 读类（`file_read` / `file_glob` / `file_grep` / `file_image`）：任意一条根（read 或 write）即可见——
+ *   只读根也有意义（读用户圈定的资料）；
+ * - 写类（`file_patch` / `file_write` / `file_edit`）：至少一条 **write** 根才可见——
+ *   没有写根注入了也只会反复失败；
+ * - `file_glob` / `file_grep` 还要桥提供 `glob` / `grep`、`file_image` 要 `image`：老安装包只有 read/write/pickRoot，
+ *   缺方法时**按工具降级隐藏**，而不是让模型调用后拿到 `undefined is not a function`。
  *
- * 两者都不可见时返回 null（浏览器端 / 未配置根时一个工具都不给）。
+ * 全部不可见时返回 null（浏览器端 / 未配置根时一个工具都不给）。
  */
 export function buildFileToolBridgeIfAvailable(deps?: Partial<FileToolDeps>): ToolBridge | null {
   const bridge = deps?.bridge ?? getFileBridge();
   if (!bridge) return null;
-  const rootsOf = deps?.roots ?? (() => fileRootsStore.roots());
+  const rootsOf = deps?.roots ?? (() => currentFileRoots());
   const visible = visibleFileTools(rootsOf());
   if (visible.size === 0) return null;
+  if (!hasImageBridge(bridge)) visible.delete("file_image");
+  if (!hasUndoBridge(bridge)) visible.delete("file_undo");
+  if (!hasSearchBridge(bridge)) {
+    visible.delete("file_glob");
+    visible.delete("file_grep");
+    if (visible.size === 0) return null;
+  }
   return buildFileToolBridge({
     bridge,
     roots: rootsOf,

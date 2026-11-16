@@ -22,6 +22,15 @@ export interface ContextSettings {
   keepRecentTurns: number;
   /** 关 = 只用零成本确定性摘要（不发额外请求）。 */
   llmSummary: boolean;
+  /**
+   * 按当前模型的上下文窗口自动分配预算（d.160，默认开）。
+   *
+   * 开 = `budgetTokens`/`keepRecentTurns` 由窗口算出（见 `modelBudget.ts`），手填值保留但不生效；
+   * 关 = 完全按手填值（仍会收敛到窗口允许的上限，超窗只会换来 400）。
+   * 历史存量设置里没有这个键，`normalizeContextSettings` 按 `true` 补——这正是想要的行为：
+   * 老用户升级后，长对话不再被 6K 预算切碎。
+   */
+  autoBudget: boolean;
 }
 
 export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
@@ -29,6 +38,7 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   budgetTokens: DEFAULT_BUDGET_TOKENS,
   keepRecentTurns: DEFAULT_KEEP_RECENT_TURNS,
   llmSummary: true,
+  autoBudget: true,
 };
 
 /** 默认存储惰性单例：避免每次读取都写探针；localStorage 不可用时自动降级纯内存。 */
@@ -51,6 +61,7 @@ export function normalizeContextSettings(raw: unknown): ContextSettings {
     budgetTokens: positiveInt(raw.budgetTokens, DEFAULT_CONTEXT_SETTINGS.budgetTokens),
     keepRecentTurns: positiveInt(raw.keepRecentTurns, DEFAULT_CONTEXT_SETTINGS.keepRecentTurns),
     llmSummary: typeof raw.llmSummary === "boolean" ? raw.llmSummary : DEFAULT_CONTEXT_SETTINGS.llmSummary,
+    autoBudget: typeof raw.autoBudget === "boolean" ? raw.autoBudget : DEFAULT_CONTEXT_SETTINGS.autoBudget,
   };
 }
 
@@ -81,6 +92,7 @@ export function saveContextSettings(
   const next: ContextSettings = { ...current };
   if (typeof patch?.enabled === "boolean") next.enabled = patch.enabled;
   if (typeof patch?.llmSummary === "boolean") next.llmSummary = patch.llmSummary;
+  if (typeof patch?.autoBudget === "boolean") next.autoBudget = patch.autoBudget;
   if (typeof patch?.budgetTokens === "number" && Number.isFinite(patch.budgetTokens) && patch.budgetTokens >= 1) {
     next.budgetTokens = Math.floor(patch.budgetTokens);
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+﻿import { describe, it, expect, beforeEach } from "vitest";
 import { DEFAULT_HITL_POLICY, FLOORS, HITL_KEY, HITL_RULES_KEY, HitlPolicyStore, type HitlPolicy } from "./policy.js";
 import type { HitlCall, HitlMode } from "./types.js";
 
@@ -332,5 +332,76 @@ describe("记住的规则", () => {
     const rules = store.rules();
     expect(rules).toHaveLength(200);
     expect(rules[0].resource).toBe("r204");
+  });
+});
+
+describe("撤销单条记住的规则（d.166.4.103）", () => {
+  let storage: FakeStorage;
+  let store: HitlPolicyStore;
+  const withPath = (call: HitlCall, path: string): HitlCall => ({
+    ...call,
+    argsJson: JSON.stringify({ path }),
+  });
+
+  beforeEach(() => {
+    storage = new FakeStorage();
+    store = new HitlPolicyStore(storage);
+  });
+
+  it("撤销一条只影响那一条：其它目录的规则仍在", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "allow");
+    store.rememberRule(writeCall.name, "docs/b.md", "allow");
+    expect(store.ruleFor(withPath(writeCall, "notes/a.md"))).toBe("allow");
+
+    // 用 rules() 里那条真实规则去撤，模拟设置区列表里的行
+    const target = store.rules().find((rule) => rule.resource === "notes/a.md");
+    expect(target).toBeTruthy();
+    expect(store.removeRule(target!)).toBe(true);
+
+    expect(store.ruleFor(withPath(writeCall, "notes/a.md"))).toBeNull();
+    expect(store.ruleFor(withPath(writeCall, "docs/b.md"))).toBe("allow");
+    expect(store.rules()).toHaveLength(1);
+  });
+
+  it("拒绝规则也能撤销（撤销后回到「照常询问」而不是「变成允许」）", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "deny");
+    const target = store.rules()[0];
+    expect(store.removeRule(target)).toBe(true);
+    expect(store.rules()).toHaveLength(0);
+    expect(store.ruleFor(withPath(writeCall, "notes/a.md"))).toBeNull();
+  });
+
+  it("撤不存在的规则返回 false，且不动已有规则", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "allow");
+    expect(store.removeRule({ tool: writeCall.name, resource: "notes/b.md", effect: "allow" })).toBe(false);
+    // effect 不匹配也算不存在：允许规则不能用「删拒绝」撤掉
+    expect(store.removeRule({ tool: writeCall.name, resource: "notes/a.md", effect: "deny" })).toBe(false);
+    expect(store.rules()).toHaveLength(1);
+  });
+
+  it("按智能体作用域撤销：只删指定智能体的那条", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "allow", { id: "agent-a", name: "甲" });
+    store.rememberRule(writeCall.name, "notes/a.md", "allow", { id: "agent-b", name: "乙" });
+    expect(store.rules()).toHaveLength(2);
+
+    expect(store.removeRule({ tool: writeCall.name, resource: "notes/a.md", effect: "allow", agentId: "agent-a" })).toBe(true);
+    const left = store.rules();
+    expect(left).toHaveLength(1);
+    expect(left[0].agentId).toBe("agent-b");
+  });
+
+  it("撤销会真的落盘：同一份存储新建实例也看不到那条", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "allow");
+    store.removeRule({ tool: writeCall.name, resource: "notes/a.md", effect: "allow" });
+    const reopened = new HitlPolicyStore(storage);
+    expect(reopened.rules()).toHaveLength(0);
+  });
+
+  it("存不下时返回 false，不假装撤销成功", () => {
+    store.rememberRule(writeCall.name, "notes/a.md", "allow");
+    storage.setItem = () => {
+      throw new Error("quota");
+    };
+    expect(store.removeRule({ tool: writeCall.name, resource: "notes/a.md", effect: "allow" })).toBe(false);
   });
 });

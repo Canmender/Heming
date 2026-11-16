@@ -8,6 +8,7 @@ export * from "./tokens.js";
 export * from "./budget.js";
 export * from "./summary.js";
 export * from "./settings.js";
+export * from "./modelBudget.js";
 export * from "./store.js";
 export * from "./history.js";
 

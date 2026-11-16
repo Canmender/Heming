@@ -5,6 +5,7 @@ import {
   infohubProvider,
   selfProvider,
   teamProvider,
+  todoProvider,
   vaultProvider,
   webToolsProvider,
 } from "./index.js";
@@ -25,12 +26,24 @@ describe("内置能力提供者", () => {
       ["wiki", "builtin"],
       ["vault", "builtin"],
       ["files", "builtin"],
+      ["shell", "builtin"],
+      ["todo", "builtin"],
       ["webtools", "builtin"],
       ["infohub", "builtin"],
       ["plugin-market", "plugin"],
       ["team", "builtin"],
       ["self", "self"],
     ]);
+  });
+
+  it("todo 提供者：任何环境都注入任务清单，按会话隔离（d.154）", () => {
+    const bridge = todoProvider.build({ agentId: "a", conversationId: "c" });
+    expect(bridge).not.toBeNull();
+    const names = (bridge!.tools as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).toEqual(["todo_write"]);
+    expect(bridge!.meta?.("todo_write")?.risk).toBe("read");
+    // 没有会话 id 就没有清单可写（不落到全局桶）
+    expect(todoProvider.build({ agentId: "a", conversationId: "" })).toBeNull();
   });
 
   it("vault 提供者默认注入三个知识库工具（读优先 + 受限写）", () => {

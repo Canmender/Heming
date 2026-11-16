@@ -1,19 +1,123 @@
 {
   "model": "eval-offline",
-  "date": "2026-11-15",
+  "date": "2026-11-16",
   "env": {
     "node": "v24.15.0",
     "pnpm": "10.33.2"
   },
   "totals": {
-    "cases": 18,
-    "passed": 18,
+    "cases": 38,
+    "passed": 38,
     "pass@1": 1,
-    "tokens_per_pass": 2607,
-    "cache_read_ratio": 0.050724637681159424,
-    "p95_ms": 26
+    "tokens_per_pass": 2604,
+    "cache_read_ratio": 0.024054982817869417,
+    "p95_ms": 110,
+    "p95_samples": 36,
+    "p95_excluded": 2
   },
   "cases": [
+    {
+      "id": "cmd-001",
+      "tags": [
+        "shell"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 119,
+      "failures": []
+    },
+    {
+      "id": "cmd-002",
+      "tags": [
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 4,
+      "failures": []
+    },
+    {
+      "id": "cmd-003",
+      "tags": [
+        "shell",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 5,
+      "failures": []
+    },
+    {
+      "id": "cmd-004",
+      "tags": [
+        "shell",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 1032,
+      "slow": true,
+      "failures": []
+    },
+    {
+      "id": "cmd-005",
+      "tags": [
+        "shell",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 110,
+      "failures": []
+    },
+    {
+      "id": "cmd-006",
+      "tags": [
+        "shell",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 1220,
+      "slow": true,
+      "failures": []
+    },
     {
       "id": "ctx-001",
       "tags": [
@@ -28,7 +132,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 26,
+      "durationMs": 16,
       "failures": []
     },
     {
@@ -46,7 +150,24 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 15,
+      "durationMs": 16,
+      "failures": []
+    },
+    {
+      "id": "ctx-003",
+      "tags": [
+        "context",
+        "prompt"
+      ],
+      "passed": true,
+      "rounds": 1,
+      "tokens": {
+        "input": 900,
+        "output": 120,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 1,
       "failures": []
     },
     {
@@ -63,7 +184,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 10,
+      "durationMs": 14,
       "failures": []
     },
     {
@@ -81,7 +202,24 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 18,
+      "durationMs": 13,
+      "failures": []
+    },
+    {
+      "id": "edit-003",
+      "tags": [
+        "edit",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 10,
       "failures": []
     },
     {
@@ -102,6 +240,74 @@
       "failures": []
     },
     {
+      "id": "img-001",
+      "tags": [
+        "image",
+        "tool"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 14,
+      "failures": []
+    },
+    {
+      "id": "img-002",
+      "tags": [
+        "image",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 10,
+      "failures": []
+    },
+    {
+      "id": "img-003",
+      "tags": [
+        "image",
+        "vision"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 8,
+      "failures": []
+    },
+    {
+      "id": "long-001",
+      "tags": [
+        "context",
+        "long-task"
+      ],
+      "passed": true,
+      "rounds": 14,
+      "tokens": {
+        "input": 12600,
+        "output": 1680,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 26,
+      "failures": []
+    },
+    {
       "id": "mcp-001",
       "tags": [
         "mcp",
@@ -116,7 +322,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 5,
+      "durationMs": 7,
       "failures": []
     },
     {
@@ -168,7 +374,41 @@
         "cacheRead": 2100,
         "cacheWrite": 0
       },
-      "durationMs": 5,
+      "durationMs": 7,
+      "failures": []
+    },
+    {
+      "id": "search-001",
+      "tags": [
+        "search",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 21,
+      "failures": []
+    },
+    {
+      "id": "search-002",
+      "tags": [
+        "search",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 18,
       "failures": []
     },
     {
@@ -184,7 +424,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 4,
+      "durationMs": 5,
       "failures": []
     },
     {
@@ -201,7 +441,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 3,
+      "durationMs": 6,
       "failures": []
     },
     {
@@ -218,7 +458,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 3,
+      "durationMs": 5,
       "failures": []
     },
     {
@@ -235,7 +475,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 4,
+      "durationMs": 7,
       "failures": []
     },
     {
@@ -251,7 +491,23 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 3,
+      "durationMs": 6,
+      "failures": []
+    },
+    {
+      "id": "sec-006",
+      "tags": [
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 5,
       "failures": []
     },
     {
@@ -268,7 +524,59 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 6,
+      "durationMs": 8,
+      "failures": []
+    },
+    {
+      "id": "subagent-001",
+      "tags": [
+        "context",
+        "subagent"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 10,
+      "failures": []
+    },
+    {
+      "id": "subagent-002",
+      "tags": [
+        "context",
+        "subagent",
+        "security"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 5,
+      "failures": []
+    },
+    {
+      "id": "todo-001",
+      "tags": [
+        "context",
+        "todo"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 7,
       "failures": []
     },
     {
@@ -285,7 +593,7 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 7,
+      "durationMs": 9,
       "failures": []
     },
     {
@@ -303,13 +611,47 @@
         "cacheRead": 0,
         "cacheWrite": 0
       },
-      "durationMs": 9,
+      "durationMs": 13,
       "failures": []
     },
     {
       "id": "tool-003",
       "tags": [
         "tool",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 11,
+      "failures": []
+    },
+    {
+      "id": "write-001",
+      "tags": [
+        "write",
+        "capability"
+      ],
+      "passed": true,
+      "rounds": 2,
+      "tokens": {
+        "input": 1800,
+        "output": 240,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "durationMs": 7,
+      "failures": []
+    },
+    {
+      "id": "write-002",
+      "tags": [
+        "write",
         "capability"
       ],
       "passed": true,

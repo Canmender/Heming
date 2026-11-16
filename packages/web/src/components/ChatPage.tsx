@@ -73,10 +73,11 @@ import {
   type HistoryRow,
   type VisionImageSlot,
 } from "../lib/vision/history.js";
-import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
+import { MAX_TOOL_ROUNDS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { recordRollout, rolloutLog } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
+  applyModelBudget,
   loadContextSettings,
   prepareHistory as prepareAgentHistory,
   summaryCache,
@@ -103,6 +104,20 @@ import { ContextView } from "./chat/ContextView.js";
 import { useConversationProgress } from "../lib/progress/useConversationProgress.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
+import { fileRootsFor, setActiveWorkspace } from "../lib/fileEdit/roots.js";
+import { getFileBridge, hasFileBridge } from "../lib/fileEdit/bridge.js";
+import {
+  buildRuntimeSection,
+  describePlatform,
+  runtimeToolsFromSpecs,
+} from "../lib/agentRuntime/runtimePrompt.js";
+import { resolveBasePrompt } from "../lib/agentRuntime/defaultPrompt.js";
+import { collectProjectRules } from "../lib/agentRuntime/projectRules.js";
+import { collectFileRefs } from "../lib/fileEdit/fileRefs.js";
+import { FileRefPicker } from "./FileRefPicker.js";
+import { TurnUndoBar } from "./TurnUndoBar.js";
+import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
+import { PLAN_EXECUTE_PROMPT, loadPlanMode, savePlanMode, withPlanMode } from "../lib/agentRuntime/planMode.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
@@ -124,6 +139,11 @@ import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTi
 import { ChatEmptyState } from "./ux/ChatEmptyState.js";
 import { ErrorState } from "./ui/ErrorState.js";
 import { ComposerHints } from "./ux/ComposerHints.js";
+// d.158：任务清单渲染（`todo_write` 的可见落点），放在输入栏上方
+import { TodoPanel } from "./TodoPanel.js";
+// d.167.4.103：轮次打满后的「继续」入口（不再让用户自己打「继续」）
+import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
+import { PlanReadyBar } from "./PlanReadyBar.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
 import { Button } from "../components/ui/Button.js";
@@ -617,6 +637,25 @@ export function ChatPage({
   }, [convId, flushDraftSave]);
   const [sendNotice, setSendNoticeState] = useState<SendNotice | null>(null);
   /**
+   * 轮次打满的那条流（d.167.4.103）：有值 = 输入区上方显示「这一轮用满了 36 轮」+ 继续。
+   * 存 streamId 而不是布尔：点「继续」要复用 `retryStream(streamId)`（清旧流、带原 agent 续写）。
+   */
+  const [roundLimitStreamId, setRoundLimitStreamId] = useState<string | null>(null);
+  /*
+   * 为什么给「继续」（d.176.4.105）：轮次到顶和预算到顶都会让答案停在半路，
+   * 但说明不同——前者是「工具调用次数用完」，后者是「这一轮上下文塞满了」。
+   */
+  const [continueReason, setContinueReason] = useState<ContinueReason>("rounds");
+  /** 计划模式下这一轮「只给方案」结束了：给一次「接受计划，开始执行」（d.173）。 */
+  const [planReadyStreamId, setPlanReadyStreamId] = useState<string | null>(null);
+  /**
+   * 计划模式（d.173）：本轮只读、先出方案。
+   *
+   * 存在会话上而不是全局：同一个用户可能「这个会话只想让它在旁边看」，另一个会话
+   * 又要它直接改。切换会话时重新读一次；脏数据当作关闭（它不是安全边界，只是意图开关）。
+   */
+  const [planMode, setPlanMode] = useState<boolean>(() => loadPlanMode(convId));
+  /**
    * 分叉降级提示（d.56）：来源日志重建不出前缀时，本次按普通重跑执行。
    *
    * 为什么单独占一行、不并进 `sendNotice`：输入区提示会在发送成功后被清空，
@@ -701,6 +740,23 @@ export function ChatPage({
   const [emojiOpen, setEmojiOpen] = useState(false);
   /** 「更多操作」浮层开关（d.147.4.90：左下角圆形 + 号把表情/图片/文件/语音收进一个菜单）。 */
   const [attachOpen, setAttachOpen] = useState(false);
+  /*
+   * 引用工作区文件（d.175）：用户点选的文件路径（绝对、正斜杠）。
+   *
+   * 用 ref 同步一份给 `buildSystemPrompt` 读：那个回调是 useCallback 闭包，
+   * 点选后立刻发送时 state 还没落到闭包里，读 ref 才不会把「刚选的文件」漏掉。
+   * 一回合结束（onRunSettled）清空——引用是「这一轮」的输入，不是长期订阅。
+   */
+  const [fileRefs, setFileRefs] = useState<string[]>([]);
+  const fileRefsRef = useRef<string[]>([]);
+  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  /*
+   * 本轮落盘的文件（d.176）：来自 `onRunSettled` 的 `writes`，由工具桥显式返回。
+   *
+   * 不解析工具结果文案——文案会为了可读性调整，反推出错就是撤错文件。
+   */
+  const [turnWrites, setTurnWrites] = useState<string[]>([]);
+  const [undoing, setUndoing] = useState(false);
   /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
   const [listening, setListening] = useState(false);
   /** 语音双选项浮层（mic 按钮弹出：转文字 / 录音），会话级清理。 */
@@ -879,6 +935,24 @@ export function ChatPage({
 
   // d.54：会话只剩「用户 ↔ 智能体」一种，标题恒为智能体名。
   const conv = conversations.find((c) => c.id === convId);
+
+  /*
+   * 会话工作区 = 本会话智能体的可写根（d.153.4.95.11）。
+   *
+   * 文件工具（capability/providers）、HITL 闸门（policy 的 roots 口径）、确认卡预览
+   * （patchPreview / preview）都通过 `currentFileRoots()` 读这一份状态。这里不写，
+   * 只设了工作区的会话就会出现「工具能写、闸门以为越界」的分裂。
+   *
+   * 依赖写成 `conv?.workspace`：切到未分组会话（undefined）时也要把状态清空，
+   * 否则上一个项目的工作区会继续被当成当前会话的写根。
+   */
+  useEffect(() => {
+    setActiveWorkspace(conv?.workspace);
+  }, [conv?.workspace]);
+  // 计划模式是「按会话」的意图开关（d.173）：切会话要跟着换，别把上一个会话的只读带过来。
+  useEffect(() => {
+    setPlanMode(loadPlanMode(convId));
+  }, [convId]);
 
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
   const toolTraceRef = useRef<Record<string, ToolTrace[]>>({});
@@ -1078,13 +1152,109 @@ export function ChatPage({
   const buildToolsFor = (agentId: string) => {
     const cached = toolBridgeRef.current.get(agentId);
     if (cached !== undefined) return cached;
+    // 会话工作区参与文件权限（d.153）：文件提供者会把它派生出一条隐式写根。
+    // 直接读 store 而不是用上面那个 `conv`（它可能还没刷新），缓存到 onStart 清空。
+    const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
     const bridge = capabilityRegistry.build({
       agentId,
       conversationId: convId,
       selfEdit: selfEditRef.current!,
+      ...(workspace ? { workspace } : {}),
     });
-    toolBridgeRef.current.set(agentId, bridge);
-    return bridge;
+    // 只读子代理（d.162）：在缓存桥外面包一层 `agent_task`。包在这里而不是做成
+    // provider，是因为子代理要「用当前这个智能体绑定的模型」跑子会话，而模型绑定
+    // 是按 agentId 查的——provider 拿不到 agentId 对应的路由，也不知道会话工作区。
+    // 没有桥（这一轮零工具）时不包：凭空多一个能派子代理的工具会让模型以为有检索能力。
+    const wrapped = bridge ? withSubagentTool(bridge, { agentId, conversationId: convId }) : null;
+    // 计划模式（d.173）：只留只读工具，执行层再拦一次。
+    // 这是**产品意图**不是安全边界——真正的写权限仍由可写根与 HITL 决定。
+    // 以**存储**为准，不用渲染闭包里的 `planMode`：`executePlan` 在同一个 tick 里
+    // 先写存储再发消息，state 还没落下去；读闭包会拿上一轮的 true，把这一轮的写工具又摘掉。
+    const planOn = loadPlanMode(convId);
+    const finalBridge = wrapped && planOn ? withPlanMode(wrapped) : wrapped;
+    toolBridgeRef.current.set(agentId, finalBridge);
+    return finalBridge;
+  };
+
+  /**
+   * 开关计划模式（d.173）。
+   *
+   * 三个动作缺一不可：改 state（提示词与本轮工具立刻变）、落存储（切回来还在）、
+   * 清桥缓存（不复用上一轮的写工具桥——缓存是按 agentId 存的，不清理会出现
+   * 「界面显示只读、模型手里还是写桥」）。
+   */
+  const togglePlanMode = () => {
+    const next = !planMode;
+    setPlanMode(next);
+    savePlanMode(convId, next);
+    toolBridgeRef.current.clear();
+  };
+
+  /**
+   * 接受计划、开始执行（d.173）。
+   *
+   * 两件事必须一起做，缺一件都会让用户觉得「点了没反应」：
+   * 1. 关掉计划模式（改 state + 落存储 + 清桥缓存，见 togglePlanMode 的注释）；
+   * 2. 发一条用户消息让它照刚才的计划动手——不重发原提问（同 retryStream 的理由：
+   *    重发会让模型看到同一问题被问两次、已执行的工具再跑一遍）。
+   *
+   * 顺序上先落状态再发消息：发送路径会重建工具桥，晚一步就会带着只读桥跑这一轮。
+   */
+  /**
+   * 撤回本轮改动（d.176）：逐个文件走 `file_undo`。
+   *
+   * 为什么逐个而不是批量：主进程的撤销通道是「一个路径一份备份」，批量要么新增 IPC，
+   * 要么在渲染层循环——后者失败时能准确说出「哪几个没撤回」，用户才知道要手工处理什么。
+   */
+  const undoTurnWrites = async () => {
+    const bridge = getFileBridge();
+    if (!bridge?.undo) {
+      setSendNotice("当前桌面端版本不支持撤回（没有 file:undo 通道）。", "info");
+      return;
+    }
+    const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
+    const roots = fileRootsFor(workspace);
+    const targets = [...turnWrites];
+    setUndoing(true);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const path of targets) {
+      try {
+        const res = await bridge.undo({ roots, path });
+        if (res.ok) ok += 1;
+        else failed.push(path.split("/").pop() ?? path);
+      } catch {
+        failed.push(path.split("/").pop() ?? path);
+      }
+    }
+    setUndoing(false);
+    setTurnWrites([]);
+    if (failed.length === 0) {
+      setSendNotice(`已撤回本轮改动的 ${ok} 个文件，已回到改动前的样子。`, "info");
+    } else {
+      setSendNotice(
+        `已撤回 ${ok} 个文件；${failed.join("、")} 没有可用的旧版本（可能之前已撤销过，或这轮是新建）。`,
+        "info",
+      );
+    }
+  };
+
+  const executePlan = () => {
+    const streamId = planReadyStreamId;
+    setPlanReadyStreamId(null);
+    if (!streamId) return;
+    const meta = streamMeta.current[streamId];
+    if (planMode) togglePlanMode();
+    if (!meta) return;
+    // 必须等 React 把 planMode=false 落下去再发：系统提示词是在发送路径里即时拼的，
+    // 同一 tick 里发出去，这一轮还会带着「## 计划模式」——界面关了、模型以为还只读。
+    window.setTimeout(() => {
+      void submitMessage(PLAN_EXECUTE_PROMPT, [{ agentId: meta.agentId, name: meta.name }]).then(
+        (result) => {
+          if (!result.ok) setSendNotice(result.error, "error");
+        },
+      );
+    }, 0);
   };
 
   /**
@@ -1428,7 +1598,7 @@ export function ChatPage({
     setForkNotice(forkRun.notice ?? null);
     const deps: TriggerDeps = {
       getProfile: resolveProfile,
-      getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
+      getPrompt: (agentId) => resolveBasePrompt(useLlmStore.getState().prompts[agentId]),
       fetchHistory: async (historyProfile) => {
         // spec §3：提示词只带近 30 条历史；E2E 信封经 loadMessages 合并
         // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤）。
@@ -1610,6 +1780,11 @@ export function ChatPage({
       },
       onStart: (streamId, mention) => {
         streamMeta.current[streamId] = { ...mention, text, attachment };
+        // 新一轮开始：上一条「轮次打满」提示已完成使命（继续/改主意都算），清掉；
+        // 「计划就绪」同理——新一轮要么在计划里接着聊，要么已经动手了。
+        setRoundLimitStreamId(null);
+    setTurnWrites([]);
+        setPlanReadyStreamId(null);
         if (taskId) {
           streamTaskRef.current[streamId] = taskId;
           useTaskStore.getState().bindStream(taskId, streamId);
@@ -1630,16 +1805,117 @@ export function ChatPage({
           lastAt: Date.now(),
         });
       },
-      // 系统提示词：原提示词 + 三层记忆 + 命中技能（本机拼装，不出设备）。
+      // 系统提示词：原提示词 + 运行环境 + 三层记忆 + 命中技能（本机拼装，不出设备）。
       // 组装失败（记忆/技能读写异常）回落原提示词，绝不阻断生成。
       buildSystemPrompt: async (agentId, text) => {
-        const basePrompt = useLlmStore.getState().prompts[agentId] ?? "";
+        // d.156：用户没写自定义提示词时用内置人设兜底（只兜底、不拼接；写了就全按用户的）。
+        const basePrompt = resolveBasePrompt(useLlmStore.getState().prompts[agentId]);
+        /*
+         * 运行环境段（d.154）：内置智能体默认没有系统提示词，工具又是单独下发的，
+         * 模型因此不知道自己在桌面端、几点、工作区在哪、这轮有几件工具、轮次有上限。
+         * 这一段只写**这一轮确认过的物理事实**：桥在哪、根有哪些、工具清单来自同一份
+         * capability 桥（与 HITL 判风险的那份同源，提示词和闸门不会各说一套）。
+         *
+         * 失败只丢这一段（`runtimeSection` 留空），不拖累记忆/技能与生成。
+         */
+        /*
+         * 项目约定段（d.174）：工作区里的 `AGENTS.md` 一族。
+         *
+         * 模型知道「有哪些工具」不等于知道「这个仓库怎么做」——命令用 pnpm 还是 npm、
+         * 改完跑哪套测试、哪些文件是生成的。DSH / Claude Code / opencode 都读这份文件，
+         * 这是「像团队里的人」和「像通用聊天机器人」的分界。
+         *
+         * 失败只丢这一段：读不到就是这一轮没有约定，绝不阻断生成、也不留半句残话。
+         */
+        let rulesSection = "";
+        try {
+          const rulesWorkspace = useChatStore
+            .getState()
+            .conversations.find((c) => c.id === convId)?.workspace;
+          rulesSection = (
+            await collectProjectRules({
+              bridge: getFileBridge(),
+              roots: fileRootsFor(rulesWorkspace),
+              workspace: rulesWorkspace,
+            })
+          ).section;
+        } catch {
+          rulesSection = "";
+        }
+
+        /*
+         * 本轮引用文件段（d.175）：用户点选的工作区文件内容。
+         *
+         * 为什么放在提示词里而不是让模型自己读：用户说「就针对这几个文件」时，
+         * 让它去猜路径等于多一轮工具调用，猜错还要再来一轮。内容随这一轮给出，
+         * 它第一句就能针对文件回答。
+         *
+         * 读失败只丢这一段：引用不等于授权，根外/读不到的文件由 `fileRefs.ts`
+         * 写进「没读到」清单，绝不阻断这一轮。
+         */
+        let filesSection = "";
+        try {
+          const refs = fileRefsRef.current;
+          if (refs.length > 0) {
+            const refsWorkspace = useChatStore
+              .getState()
+              .conversations.find((c) => c.id === convId)?.workspace;
+            filesSection = (
+              await collectFileRefs({
+                bridge: getFileBridge(),
+                roots: fileRootsFor(refsWorkspace),
+                paths: refs,
+              })
+            ).section;
+          }
+        } catch {
+          filesSection = "";
+        }
+
+        let runtimeSection = "";
+        try {
+          const workspace = useChatStore
+            .getState()
+            .conversations.find((c) => c.id === convId)?.workspace;
+          const bridge = buildToolsFor(agentId);
+          const tools = bridge?.tools ?? [];
+          let timeZone: string | undefined;
+          try {
+            timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          } catch {
+            timeZone = undefined; // 老渲染层拿不到时区就只写本地时间，不编一个。
+          }
+          runtimeSection = buildRuntimeSection({
+            desktop: hasFileBridge(),
+            platform: describePlatform(
+              typeof navigator === "undefined" ? "" : navigator.userAgent,
+            ),
+            now: new Date(),
+            ...(timeZone ? { timeZone } : {}),
+            workspace,
+            roots: fileRootsFor(workspace).map((root) => ({
+              name: root.name,
+              path: root.path,
+              mode: root.mode,
+            })),
+            tools: runtimeToolsFromSpecs(tools, (name) => toolMetaOf(name, agentId)),
+            toolSearchAvailable: tools.length > TOOL_SEARCH_THRESHOLD,
+            maxToolRounds: MAX_TOOL_ROUNDS,
+            // 同理读存储：界面 state 可能还没落，提示词不能说错这一轮是不是只读。
+            planMode: loadPlanMode(convId),
+          });
+        } catch {
+          runtimeSection = "";
+        }
         try {
           const built = buildAgentContext({
             agentId,
             conversationId: convId,
             userText: text,
             basePrompt,
+            rules: rulesSection,
+            runtime: runtimeSection,
+            files: filesSection,
             memory: memoryStore,
             skills: skillPool,
             // 个性化加权（d.28）：被疑似引用过的记忆在同等相关度下排前面；读不到账本就退化成不加权。
@@ -1824,6 +2100,23 @@ export function ChatPage({
       // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
       // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
       onRunSettled: (streamId, result) => {
+        // 引用只对这一轮有效（d.175）：回合收尾就清掉，避免下一次无意的发送带上旧文件。
+        fileRefsRef.current = [];
+        setFileRefs([]);
+        // 轮次打满（d.167.4.103）：成功收口但被上限截断 → 输入区上方给一次「继续」。
+        // 放在任务区判断之前：普通聊天流不建档，同样需要这个入口。
+        if (result.maxRounds) setRoundLimitStreamId(streamId);
+        // 计划模式（d.173）：这一轮只给了方案。入口留给用户点，而不是让它自作主张开写。
+        if (planMode) setPlanReadyStreamId(streamId);
+        // 预算收口（d.176.4.105）：与轮次到顶共用「继续」入口，但说明不同。
+        if (!result.maxRounds && result.budgetStop) {
+          setContinueReason("budget");
+          setRoundLimitStreamId(streamId);
+        } else {
+          setContinueReason("rounds");
+        }
+        // 这一轮改过文件就给一次点击的「撤回」（d.176），没改就清掉上一条。
+        setTurnWrites(result.writes ?? []);
         const taskId = streamTaskRef.current[streamId];
         if (!taskId) return;
         delete streamTaskRef.current[streamId];
@@ -1845,8 +2138,15 @@ export function ChatPage({
       prepareHistory: async (rows, agentId, opts) => {
         try {
           const profile = resolveProfile(agentId);
+          // d.160：预算按**这个模型真实的上下文窗口**算（见 agentContext/modelBudget.ts）。
+          // 之前固定 6000，64K/128K/200K 的模型也在第 8 轮就把前面压成摘要——
+          // 长任务做到一半就「失忆」，这是用户说「像网页端」的一部分。
+          const settings = applyModelBudget(
+            loadContextSettings(),
+            profile ? resolveCapability(profile) : null,
+          );
           return await prepareAgentHistory(rows, {
-            settings: loadContextSettings(),
+            settings,
             cache: summaryCache,
             conversationId: convId,
             aggressive: opts?.aggressive,
@@ -1952,6 +2252,10 @@ export function ChatPage({
     setListening(false);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
+    // 轮次打满提示同为会话级：A 会话的「继续」按钮不能出现在 B 会话的输入区
+    setRoundLimitStreamId(null);
+    // 计划就绪提示也是会话级：A 会话的方案提示不能出现在 B 会话
+    setPlanReadyStreamId(null);
     convIdRef.current = convId;
     // 视图也是会话级：换会话回到「对话」，不要停在上一个会话的轨迹页。
     setView("chat");
@@ -3459,6 +3763,77 @@ export function ChatPage({
             待发附件 {pendingFiles.length} 个
           </p>
         ) : null}
+        {/* 任务清单（d.158）：模型写过多步计划才出现，空清单不占位。
+            位置在拖动把手上方——它跟输入区一起随窗口收缩，不会被消息流挤走。 */}
+        <TodoPanel conversationId={convId} />
+        {/* 引用的文件（d.175）：显示在输入区上方，可逐个删掉。 */}
+        {fileRefs.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 px-4 pt-1" aria-label="本轮引用的文件">
+            <span className="text-ui-sm text-muted">引用：</span>
+            {fileRefs.map((path) => (
+              <span
+                key={path}
+                className="inline-flex max-w-[240px] items-center gap-1 rounded-md border border-line bg-subtle-2 px-2 py-0.5 text-ui-sm text-ink"
+                title={path}
+              >
+                <span className="truncate">{path.split("/").pop()}</span>
+                <button
+                  type="button"
+                  aria-label={`取消引用 ${path.split("/").pop()}`}
+                  className="ui-hit rounded-sm text-muted hover:text-ink"
+                  onClick={() => {
+                    const next = fileRefs.filter((item) => item !== path);
+                    fileRefsRef.current = next;
+                    setFileRefs(next);
+                  }}
+                >
+                  <XIcon width={12} height={12} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {refPickerOpen ? (
+          <FileRefPicker
+            bridge={getFileBridge()}
+            roots={fileRootsFor(
+              useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace,
+            )}
+            selected={fileRefs}
+            onClose={() => setRefPickerOpen(false)}
+            onConfirm={(paths) => {
+              fileRefsRef.current = paths;
+              setFileRefs(paths);
+              setRefPickerOpen(false);
+            }}
+          />
+        ) : null}
+        {/* 轮次打满（d.167.4.103）：这一轮被 36 轮上限截断时，给一次点击的「继续」。
+            走 `retryStream`——续写指令作为一条用户消息落库，不重发原提问。 */}
+        {/* 计划就绪（d.173）：计划模式下这一轮只给了方案，一键「接受并执行」。 */}
+        {/* 本轮改动可撤回（d.176）：刚写完就是最需要这条的时候。 */}
+        {turnWrites.length > 0 && !planMode ? (
+          <TurnUndoBar
+            paths={turnWrites}
+            busy={undoing}
+            onUndo={() => void undoTurnWrites()}
+            onDismiss={() => setTurnWrites([])}
+          />
+        ) : null}
+        {planReadyStreamId && planMode ? (
+          <PlanReadyBar onExecute={executePlan} onDismiss={() => setPlanReadyStreamId(null)} />
+        ) : null}
+        {roundLimitStreamId ? (
+          <RoundLimitHint
+            reason={continueReason}
+            onContinue={() => {
+              const streamId = roundLimitStreamId;
+              setRoundLimitStreamId(null);
+              retryStream(streamId);
+            }}
+            onDismiss={() => setRoundLimitStreamId(null)}
+          />
+        ) : null}
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div
           role="separator"
@@ -3598,6 +3973,19 @@ export function ChatPage({
                     <FileIcon width={16} height={16} aria-hidden="true" />
                     文件（≤6MB）
                   </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!hasFileBridge()}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                      onClick={() => {
+                        setAttachOpen(false);
+                        setRefPickerOpen(true);
+                      }}
+                    >
+                      <FileIcon width={16} height={16} aria-hidden="true" />
+                      工作区文件（引用内容，不上传）
+                    </button>
                   <button
                     type="button"
                     role="menuitem"
@@ -3615,6 +4003,19 @@ export function ChatPage({
               </>
             )}
           </div>
+          {/* 计划模式（d.173）：本轮只读、先出方案。按钮常驻在输入区，
+              开着时高亮并带 aria-pressed——读屏能听出「已按下」，颜色不是唯一信号。 */}
+          <button
+            type="button"
+            aria-label="计划模式：本轮只读，先把方案给你看"
+            aria-pressed={planMode}
+            title={planMode ? "计划模式已开启：这一轮不会改文件" : "开启计划模式：先看方案，不改文件"}
+            onClick={togglePlanMode}
+            className={`ui-hit inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-ui-sm transition-colors ${planMode ? "bg-subtle-3 text-heming-accent" : "text-muted hover:bg-subtle-2"} ${FOCUS_RING_TIGHT}`}
+          >
+            <span aria-hidden="true">{planMode ? "◉" : "○"}</span>
+            <span>计划</span>
+          </button>
           {/* 当前模型徽标：点它去模型页换来源（与未绑定提示同一个解析器，不另造状态）。 */}
           <button
             type="button"

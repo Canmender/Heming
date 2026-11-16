@@ -1,0 +1,38 @@
+# 用例 cmd-001：允许时命令真的执行，输出回到模型手里
+# 用途：验证 `run_command` 在「用例显式允许危险工具」时走真实桌面实现（shell-run.js），
+#       stdout 被捕获并作为 tool_result 回灌，模型据此收口。
+# 命令选 `node -e` 打印一行字：无副作用、可复现、在 Windows/Unix 上都是同一条。
+id: cmd-001
+name: 命令执行：允许时跑通并把 stdout 带回上下文
+owner: evals
+tags:
+  - shell
+setup:
+  fixture: cmd-001
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  用 run_command 在 work 根里执行一条命令，让它打印 hello-from-shell，然后把输出告诉我。
+script:
+  - tool_calls:
+      - name: run_command
+        arguments:
+          command: "node -e \"console.log('hello-from-shell')\""
+          timeout_ms: 20000
+  - text: |
+      命令执行完了，stdout 是 hello-from-shell，退出码 0。
+graders:
+  - type: tool_called
+    tool: run_command
+    times: 1
+  - type: contains
+    value: ["hello-from-shell"]
+    in: tool_result
+  - type: contains
+    value: ["hello-from-shell"]
+  - type: max_rounds
+    value: 3

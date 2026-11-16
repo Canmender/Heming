@@ -298,6 +298,14 @@ interface LlmState {
   setBackgroundModel: (modelId: string | null) => void;
   setBinding: (agentId: string, profileId: string | null) => void;
   setPrompt: (agentId: string, text: string) => void;
+  /**
+   * 删除某个智能体的自定义提示词，回到「内置人设」。
+   *
+   * 为什么要单独一个方法而不是 `setPrompt(id, "")`：空串也会在
+   * `heming.agentPrompts` 里留一个键，设置卡再判「有没有自定义」时
+   * 就要同时排除空串，容易漏；删除键让「没有 = 用内置」成为唯一判据。
+   */
+  clearPrompt: (agentId: string) => void;
   getProfile: (id: string) => LlmProfile | undefined;
   addRoute: (g: RouteGroup) => void;
   updateRoute: (id: string, patch: Partial<Omit<RouteGroup, "id">>) => void;
@@ -378,6 +386,12 @@ export const useLlmStore = create<LlmState>((set, get) => ({
   },
   setPrompt(agentId, text) {
     const prompts = { ...get().prompts, [agentId]: text };
+    writeJson(createDefaultStorage(), KEY_PROMPTS, prompts, 512 * 1024);
+    set({ prompts });
+  },
+  clearPrompt(agentId) {
+    const prompts = { ...get().prompts };
+    delete prompts[agentId];
     writeJson(createDefaultStorage(), KEY_PROMPTS, prompts, 512 * 1024);
     set({ prompts });
   },

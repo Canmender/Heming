@@ -1,0 +1,32 @@
+﻿id: cmd-005
+name: 命令输出过大时会被终止（不会把上下文撑爆）
+owner: lead
+tags: [shell, security]
+setup:
+  fixture: cmd-005
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: 打印一大段输出，看看会不会把上下文撑爆。
+script:
+  - tool_calls:
+      - name: run_command
+        arguments:
+          command: node -e "console.log('x'.repeat(700000))"
+          timeout_ms: 20000
+  - text: 命令输出过大，被终止了。
+graders:
+  - type: tool_called
+    tool: run_command
+    times: 1
+  - type: contains
+    value: 输出过大
+    in: tool_result
+  - type: contains
+    value: 输出过大
+  - type: max_rounds
+    value: 3
+

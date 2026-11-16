@@ -172,7 +172,7 @@ test("后台常驻页：宿主环境/设置/数据/跳转/主题这些既有能�
 
 test("widget-preload 不暴露 secrets / mcp / files / 会话类桥（后台页共用同一最小面）", () => {
   const { bridge } = loadWidgetBridge({ background: true });
-  for (const banned of ["__heming_secrets", "__mcp_stdio", "__heming_files", "__heming_wiki", "__heming_infohub"]) {
+  for (const banned of ["__heming_secrets", "__mcp_stdio", "__heming_files", "__heming_shell", "__heming_wiki", "__heming_infohub"]) {
     assert.equal(bridge[banned], undefined, `不应暴露 ${banned}`);
   }
   assert.equal(typeof bridge.list, "undefined");

@@ -59,7 +59,7 @@ describe("ContextSettingsCard 上下文预算", () => {
     render(<ContextSettingsCard />);
     fireEvent.click(screen.getByRole("switch", { name: "启用上下文预算" }));
 
-    expect(stored()).toEqual({ enabled: false, budgetTokens: 6000, keepRecentTurns: 8, llmSummary: true });
+    expect(stored()).toEqual({ enabled: false, budgetTokens: 6000, keepRecentTurns: 8, llmSummary: true, autoBudget: true });
     expect(screen.getByRole("switch", { name: "启用上下文预算" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText(/按原样发送/)).toBeInTheDocument();
     // 即时落盘：卡片不提供保存按钮
@@ -119,7 +119,8 @@ describe("ContextSettingsCard 上下文预算", () => {
   });
 
   it("非预设值（手改过的 5000 / 6）仍如实显示，不被静默改写", () => {
-    seed(JSON.stringify({ enabled: true, budgetTokens: 5000, keepRecentTurns: 6, llmSummary: true }));
+    // 自动档会把手填值换成窗口算出来的值；要看「手填值原样显示」，必须关掉自动档。
+    seed(JSON.stringify({ enabled: true, budgetTokens: 5000, keepRecentTurns: 6, llmSummary: true, autoBudget: false }));
     render(<ContextSettingsCard />);
 
     expect(screen.getByLabelText("预算")).toHaveValue("5000");
@@ -128,19 +129,32 @@ describe("ContextSettingsCard 上下文预算", () => {
     expect(stored().keepRecentTurns).toBe(6);
   });
 
-  // —— 预算按模型上下文窗口钳制（T05）——
+  // —— 预算按模型上下文窗口钳制（T05 / d.160 自动档）——
 
-  it("已知模型：显示当前预算与模型上限，超限的选项不再列出", () => {
+  it("已知模型 + 自动档：预算按窗口算出来，超窗的预设不再列出", () => {
     useLlmStore.setState({
       profiles: [{ id: "p1", label: "小窗", provider: "openai", apiKey: "k", model: "moonshot-v1-8k" }],
     });
     render(<ContextSettingsCard />);
-    // moonshot-v1-8k 窗口 8192 → 60% = 4915 → 4000 可选，6000 以上超限
-    expect(screen.getByText(/当前预算 4915 \/ 模型上限 4915 token/)).toBeInTheDocument();
+    // moonshot-v1-8k 窗口 8192 → 60% = 4915（低于 6000 下限，不越窗）→ 4000 可选，6000 以上超限
+    expect(screen.getByLabelText("预算")).toHaveValue("4915");
+    expect(screen.getByText(/生效预算 4915 \/ 模型上限 4915 token/)).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "6000 token" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "4000 token" })).toBeInTheDocument();
-    // 超限时给出提示
-    expect(screen.getByText("已超出上限，下面的选择会被收敛到上限")).toBeInTheDocument();
+    // 自动档下预算不超上限，所以不该出现告警
+    expect(screen.queryByText(/已超出上限/)).not.toBeInTheDocument();
+  });
+
+  it("手填预算超窗：显示告警并如实显示被收敛后的值", () => {
+    useLlmStore.setState({
+      profiles: [{ id: "p1", label: "小窗", provider: "openai", apiKey: "k", model: "moonshot-v1-8k" }],
+    });
+    seed(JSON.stringify({ enabled: true, budgetTokens: 12000, keepRecentTurns: 8, llmSummary: true, autoBudget: false }));
+    render(<ContextSettingsCard />);
+
+    // 12000 > 4915 → 收敛到 4915，并明确告诉用户为什么
+    expect(screen.getByLabelText("预算")).toHaveValue("4915");
+    expect(screen.getByText("已超出上限，会收敛到上限")).toBeInTheDocument();
   });
 
   it("未知模型：不做钳制（不猜窗口），照常列出全部预设", () => {
@@ -151,4 +165,32 @@ describe("ContextSettingsCard 上下文预算", () => {
     expect(screen.getByRole("option", { name: "12000 token" })).toBeInTheDocument();
     expect(screen.queryByText(/模型上限/)).not.toBeInTheDocument();
   });
+
+  // —— d.160 自动档开关 ——
+
+  it("默认开启自动档：说明按窗口算，关掉后改为按手填值", () => {
+    render(<ContextSettingsCard />);
+    const autoSwitch = screen.getByRole("switch", { name: "按模型上下文窗口自动分配" });
+    expect(autoSwitch).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/当前没有可用模型，先用默认 6000 token \/ 8 轮/)).toBeInTheDocument();
+
+    fireEvent.click(autoSwitch);
+    expect(stored().autoBudget).toBe(false);
+    expect(screen.getByRole("switch", { name: "按模型上下文窗口自动分配" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByText(/已关闭：完全按下面手填的预算与轮数/)).toBeInTheDocument();
+  });
+
+  it("手选预算即让位给手动档（不静默保留自动值）", () => {
+    render(<ContextSettingsCard />);
+    // 自动档下手选 4000：预算落 4000，且自动档被关掉——否则用户改了却看不到效果
+    fireEvent.change(screen.getByLabelText("预算"), { target: { value: "4000" } });
+
+    expect(stored().budgetTokens).toBe(4000);
+    expect(stored().autoBudget).toBe(false);
+    expect(screen.getByLabelText("预算")).toHaveValue("4000");
+  });
 });
+

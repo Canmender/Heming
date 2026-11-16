@@ -27,6 +27,11 @@ import { sealMessage } from "../lib/e2eSession.js";
 import { migrateMsgCache, msgCache, openMessage } from "../lib/e2eSession.js";
 import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
 import { formatClock, formatDayClock } from "../lib/formatTime.js";
+// d.158：任务清单面板的接线用例（清单来自 todo store，渲染在输入栏上方）
+import { TODOS_KEY, clearTodos, resetTodoStore, setTodos } from "../lib/todo/store.js";
+// d.173：计划模式的接线用例（存储 + 提示词 + 按钮 aria 同源）
+import { PLAN_MODE_KEY, loadPlanMode, resetPlanMode } from "../lib/agentRuntime/planMode.js";
+import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
@@ -1018,11 +1023,109 @@ describe("ChatPage", () => {
     // 窗口是 120 条 → 35 条全在；末条不等于发送文本故不被剔除
     // （bindAssistant 的系统提示词 unshift 在最前 + 本条 user 轮追加在尾 → 37 条）
     expect(seen).toHaveLength(37);
-    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" });
+    // d.154 起系统提示词 = 原提示词 + 运行环境段（桌面/时间/工具清单），原提示词仍必须在最前。
+    expect(seen![0].role).toBe("system");
+    expect(seen![0].content.startsWith("你是和小鸣")).toBe(true);
+    expect(seen![0].content).toContain("## 运行环境（本机）");
+    // 运行环境段里的工具清单来自**这一轮真正的 capability 桥**（不是理论目录），
+    // 至少要有「共 N 个」这一行——这是「它知道自己现在能调什么」的证据。
+    expect(seen![0].content).toMatch(/## 本轮可用工具（共 \d+ 个）/);
+    // d.154 起注入任务清单工具：它在清单里，长任务协议也会点名它（否则模型不会用）
+    expect(seen![0].content).toContain("todo_write");
+    expect(seen![0].content).toContain("多步任务");
+    // d.162 起再挂一件只读子代理：它必须真的出现在这一轮的工具清单里，
+    // 提示词也要说明「翻很多文件时用它、别把原文拉进主对话」。
+    expect(seen![0].content).toContain("agent_task");
+    expect(seen![0].content).toContain("只读子代理");
     expect(seen![1]).toEqual({ role: "user", content: "历史1" }); // 第 31 条以前的原话不再被丢
     expect(seen![35]).toEqual({ role: "user", content: "历史35" });
     expect(seen![36]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
   });
+
+  it("I3e 用户没写过提示词时用内置人设兜底，而不是空串（d.156）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    // 首次安装的真实状态：prompts 是空记录，用户从没编辑过提示词
+    useLlmStore.setState({ prompts: {} });
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 帮我看看这个目录里有什么");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    // 底座不是空串：内置人设的第一句必须在最前，运行环境段与清单要求跟在后面
+    expect(seen![0].role).toBe("system");
+    expect(seen![0].content.startsWith("你是和小鸣，和鸣（Heming）的桌面智能体")).toBe(true);
+    expect(seen![0].content).toContain("## 运行环境（本机）");
+    expect(seen![0].content).toContain("todo_write");
+  });
+
+  it("I3f 轮次打满时输入区给「继续」，点一下就以续写口令接着做（d.167.4.103）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    localStorage.clear();
+    resetTodoStore();
+
+    // 每轮都只要工具（清单全是 completed → 不自动续跑，第 12 轮就撞上限收口）
+    let round = 0;
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages, opts) => {
+      seen.push(messages);
+      round += 1;
+      opts.onToolCalls?.([
+        {
+          id: `call-${round}`,
+          type: "function",
+          function: {
+            name: "todo_write",
+            arguments: JSON.stringify({ todos: [{ content: "已完成的一步", status: "completed" }] }),
+          },
+        },
+      ]);
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 帮我跑一个很长的任务");
+
+    // 收口后：不是「错误行」，而是一条说明 + 一次点击。
+    const hint = await screen.findByText(/这一轮已用满 36 轮工具调用/, undefined, { timeout: 15_000 });
+    expect(hint).toBeInTheDocument();
+    // 说明里要带真实上限（12 轮 × 3 段 = 36），用户才知道点一下还能跑多久
+    expect(hint).toHaveTextContent("3 段");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    const callsBefore = seen.length;
+    expect(callsBefore).toBeGreaterThanOrEqual(1);
+    // 续写这一轮正常收口（否则它又会撞上限、提示重新出现——那是正确行为，不是本用例要验的）
+    let continuedMessages: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      continuedMessages = messages;
+      return "好，接着做完了";
+    });
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+
+    // 续写指令作为一条用户消息发出去（不重发原提问）
+    await waitFor(() => expect(continuedMessages).toBeDefined());
+    expect(
+      continuedMessages!.some((m) => m.content.includes("接着上一轮往下写")),
+    ).toBe(true);
+    // 续写这一轮不能把原提问再发一遍（历史里重复用户消息会让模型自我重复）：
+    // 末条 user 行必须是续写口令本身。
+    const userRows = continuedMessages!.filter((m) => m.role === "user");
+    expect(userRows[userRows.length - 1].content).toContain("接着上一轮往下写");
+    // 点过之后提示消失，不留在输入区
+    await waitFor(() =>
+      expect(screen.queryByText(/这一轮已用满 36 轮工具调用/)).toBeNull(),
+    );
+    // 清单是本用例主动写的（待办面板会在别的用例里多出一个 role=status），用完必须清干净
+    localStorage.removeItem(TODOS_KEY);
+    resetTodoStore();
+    // 12 个工具轮 + 一次续写，jsdom 里比默认 5 秒慢
+  }, 30_000);
 
   it("I3b fetchHistory 带回上一轮工具链：tool_calls 与 role=tool 严格配对", async () => {
     type SentRow = {
@@ -1490,6 +1593,8 @@ describe("ChatPage", () => {
       "表情",
       "图片（≤6MB）",
       "文件（≤6MB）",
+      // d.175：引用工作区文件（读内容，不是上传）。
+      "工作区文件（引用内容，不上传）",
       "语音输入",
     ]);
 
@@ -2917,7 +3022,10 @@ describe("ChatPage", () => {
 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })); // 消息照发
     await waitFor(() => expect(seen).toBeDefined());
-    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" }); // 组装失败 → 原提示词（零注入）
+    // 记忆层抛错只丢记忆段；运行环境段（d.154）不依赖记忆，仍应注入，原提示词排最前。
+    expect(seen![0].role).toBe("system");
+    expect(seen![0].content.startsWith("你是和小鸣")).toBe(true);
+    expect(seen![0].content).not.toContain("长期记忆");
     // finish 同走信封（帧上 text 置空），故按信封内明文断言「回复全文已上行」
     await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
     expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "你好" });
@@ -2962,7 +3070,7 @@ describe("ChatPage", () => {
 
   it("上下文预算开启：历史按预算切分，早期对话以摘要 system 段前置（确定性摘要 = 零额外请求）", async () => {
     await setupLongHistoryChat(6);
-    setContextSettings({ keepRecentTurns: 2 }); // 只保留近 2 轮：历史1..4 进 older
+    setContextSettings({ keepRecentTurns: 2, autoBudget: false }); // 手动档：只保留近 2 轮，历史1..4 进 older
 
     let seen: Parameters<typeof streamChat>[1] | undefined;
     vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
@@ -2985,9 +3093,30 @@ describe("ChatPage", () => {
     expect(seen!.map((r) => r.content)).not.toContain("历史4"); // 早期原文不直发
   });
 
+  it("d.160 自动档：默认设置下历史预算按模型窗口分配，短历史不会被提前压缩", async () => {
+    await setupLongHistoryChat(6);
+    // 不设置任何预算项 = 默认自动档（autoBudget: true）
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    // 1 条合并后的 system + 6 条历史 + 本条 user；一条都没被压进摘要
+    expect(seen).toHaveLength(8);
+    expect(seen![0].role).toBe("system");
+    expect(seen![0].content).toContain("你是和小鸣");
+    expect(seen![0].content).not.toContain("【早期对话摘要】");
+    expect(seen!.map((row) => row.content)).toContain("历史1");
+  });
+
   it("LLM 摘要：用该 agent 绑定的 profile 调 streamChat（提示词为摘要骨架），结果作背景段且不上行", async () => {
     const send = await setupLongHistoryChat(6);
-    setContextSettings({ keepRecentTurns: 2, llmSummary: true });
+    setContextSettings({ keepRecentTurns: 2, llmSummary: true, autoBudget: false });
 
     const calls: { profile: LlmProfile; messages: Parameters<typeof streamChat>[1] }[] = [];
     vi.mocked(streamChat).mockImplementation(async (profile, messages, o) => {
@@ -4993,4 +5122,234 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(again).toHaveValue("草稿：明天再发");
     expect(document.getElementById("chat-view-panel-chat")!.className).not.toContain("hidden");
   });
+
+  it("任务清单渲染在输入栏上方：模型写入后立刻出现，清空后消失（d.158）", async () => {
+    await setup();
+    localStorage.removeItem(TODOS_KEY);
+    resetTodoStore();
+    expect(screen.queryByRole("region", { name: "任务清单" })).toBeNull();
+
+    // 流式过程中写清单：不重新挂载组件，靠订阅刷新（长任务时用户当场就能看见进度）。
+    act(() => {
+      setTodos("c1", [
+        { content: "读一遍现有实现", status: "completed" },
+        { content: "改三个文件", status: "in_progress" },
+        { content: "跑测试", status: "pending" },
+      ]);
+    });
+    const panel = await screen.findByRole("region", { name: "任务清单" });
+    expect(within(panel).getByText("改三个文件")).toBeInTheDocument();
+    expect(within(panel).getByRole("status").textContent).toBe("已完成 1/3 · 进行中 1");
+    // 位置在输入框之前（DOM 顺序），不是浮在消息流里
+    const input = screen.getByPlaceholderText("输入消息…");
+    expect(panel.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    act(() => clearTodos("c1"));
+    expect(screen.queryByRole("region", { name: "任务清单" })).toBeNull();
+    localStorage.removeItem(TODOS_KEY);
+    resetTodoStore();
+  });
+
+  it("I3g 计划模式默认关闭：普通对话的系统提示词不能写成只读（d.173）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    localStorage.clear();
+    resetPlanMode();
+
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen.push(messages);
+      return "";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 先别改，看看现状" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(seen.length).toBe(1));
+    expect(seen[0][0].content).not.toContain("## 计划模式");
+    expect(screen.getByRole("button", { name: /计划模式/ })).toHaveAttribute("aria-pressed", "false");
+    localStorage.removeItem(PLAN_MODE_KEY);
+    resetPlanMode();
+  });
+
+  it("I3g2 计划模式开启：这一轮的系统提示词写明只读，按钮 aria 与存储同步（d.173）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    localStorage.clear();
+    resetPlanMode();
+
+    const toggle = screen.getByRole("button", { name: /计划模式/ });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    expect(loadPlanMode("c1")).toBe(true);
+
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen.push(messages);
+      return "";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 那就先出方案" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(seen.length).toBe(1));
+    expect(seen[0][0].content).toContain("## 计划模式（本轮只读，不改东西）");
+    expect(seen[0][0].content).toContain("不是权限坏了，是用户选的");
+
+    // 关掉：存储清掉、aria 复位（提示词形态由 runtimePrompt 的单测覆盖）
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "false"));
+    expect(loadPlanMode("c1")).toBe(false);
+    localStorage.removeItem(PLAN_MODE_KEY);
+    resetPlanMode();
+  });
+  it("I3h 计划就绪：一键「接受计划，开始执行」会关掉计划模式并发出执行口令（d.173）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    localStorage.clear();
+    resetPlanMode();
+
+    // 先开计划模式（真实按钮：state / 存储 / 桥缓存三处一起变）
+    const toggle = screen.getByRole("button", { name: /计划模式/ });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(loadPlanMode("c1")).toBe(true));
+
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen.push(messages);
+      return "计划：先改 A，再跑测试。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 给个改法计划" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 这一轮只给方案 → 输入区上方出现「计划模式：这一轮只给了方案」
+    const bar = await screen.findByText(/这一轮只给了方案/, undefined, { timeout: 5000 });
+    expect(bar).toBeInTheDocument();
+    expect(seen[0][0].content).toContain("## 计划模式");
+
+    // 点执行：计划模式关掉、存储清掉，并作为一条新用户消息发出执行口令
+    fireEvent.click(screen.getByRole("button", { name: "接受计划，开始执行" }));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "false"));
+    expect(loadPlanMode("c1")).toBe(false);
+    await waitFor(() => expect(seen.length).toBe(2));
+    const lastUser = seen[1].filter((row) => row.role === "user").at(-1);
+    expect(lastUser?.content).toBe(PLAN_EXECUTE_PROMPT);
+    // 执行口令的这一轮不再是只读：提示词里没有计划模式那一段
+    expect(seen[1][0].content).not.toContain("## 计划模式");
+    await waitFor(() => expect(screen.queryByText(/这一轮只给了方案/)).toBeNull());
+
+    localStorage.removeItem(PLAN_MODE_KEY);
+    resetPlanMode();
+  });
+
+
+  it("I3j 预算收口也给「继续」，但说了原因（d.176.4.105）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    // 一条可读根 + 假桌面桥：两次 file_read 各回 13000 字，累计超单轮预算。
+    localStorage.setItem(
+      "heming.fileEdit.roots.v1",
+      JSON.stringify({ roots: [{ name: "评测区", path: "D:/评测区", mode: "read" }], outOfRoot: "ask" }),
+    );
+    const big = "字".repeat(13000);
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: async ({ path }: { path: string }) => ({
+        ok: true as const,
+        content: big,
+        bytes: big.length * 3,
+        path,
+      }),
+      write: async () => ({ ok: false as const, error: "测试不写" }),
+      pickRoot: async () => null,
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          { id: "r1", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "a.md" }) } },
+          { id: "r2", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "b.md" }) } },
+        ]);
+        return "";
+      }
+      return "先给结论。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 看看这两个文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    const hint = await screen.findByText(/工具返回的内容太多/, undefined, { timeout: 8000 });
+    expect(hint).toBeInTheDocument();
+    // 同一条入口：仍然有「继续」可点。
+    expect(screen.getByRole("button", { name: "继续" })).toBeInTheDocument();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  });
+
+  it("I3i 本轮改过文件就出现「撤回本轮改动」，点一下真的走 file:undo（d.176）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    // 一条可写根 + 假桌面桥：让文件工具真的被注入、真的被调用。
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    const undo = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      path,
+      restoredFrom: "2026-11-16T00:00:00.000Z",
+      bytes: 3,
+    }));
+    const write = vi.fn(async ({ ops }: { ops: { path: string; content?: string }[] }) => ({
+      ok: true as const,
+      results: ops.map((op) => ({ path: op.path, ok: true })),
+      written: ops.length,
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: async ({ path }: { path: string }) => ({
+        ok: false as const,
+        code: "not-found" as const,
+        error: "文件不存在",
+      }),
+      write,
+      undo,
+      pickRoot: async () => null,
+    };
+
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages, opts) => {
+      seen.push(messages);
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          {
+            id: "w1",
+            type: "function",
+            function: { name: "file_write", arguments: JSON.stringify({ path: "notes/新.md", content: "你好\n" }) },
+          },
+        ]);
+        return "";
+      }
+      return "写好了。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 建个说明文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    const bar = await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
+    expect(bar).toBeInTheDocument();
+    expect(write).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "撤回本轮改动" }));
+    await waitFor(() => expect(undo).toHaveBeenCalledTimes(1));
+    expect(undo.mock.calls[0][0]).toMatchObject({ path: "D:/评测区/notes/新.md" });
+    await waitFor(() => expect(screen.queryByText(/改错了可以撤回/)).toBeNull());
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  });
 });
+
+

@@ -134,6 +134,18 @@ describe("llm store · magpie 网关与模型档案", () => {
     expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).not.toHaveProperty("agent-1");
   });
 
+  it("clearPrompt 删掉键（回到内置人设），不留空串", () => {
+    useLlmStore.getState().setPrompt("agent-1", "自定义");
+    useLlmStore.getState().setPrompt("agent-2", "另一个");
+    useLlmStore.getState().clearPrompt("agent-1");
+    expect(useLlmStore.getState().prompts).not.toHaveProperty("agent-1");
+    expect(useLlmStore.getState().prompts["agent-2"]).toBe("另一个");
+    expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)).not.toHaveProperty("agent-1");
+    // 删不存在的键也不炸
+    useLlmStore.getState().clearPrompt("agent-404");
+    expect(useLlmStore.getState().prompts).not.toHaveProperty("agent-404");
+  });
+
   it("桌面端反代地址：source=desktop 时自动采用并落盘；manual 永不覆盖", () => {
     useLlmStore.getState().setModels(MODELS);
     useLlmStore.setState({ gateway: { ...DEFAULT_GATEWAY, source: "desktop" } });

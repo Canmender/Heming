@@ -43,6 +43,23 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
   },
 
   {
+    id: "agent-persona",
+    title: "智能体人设",
+    keywords: [
+      "人设",
+      "提示词",
+      "prompt",
+      "system prompt",
+      "人格",
+      "性格",
+      "怎么做事",
+      "行为",
+      "默认人设",
+      "恢复默认",
+    ],
+    section: "model",
+  },
+  {
     id: "key-storage",
     title: "密钥存储",
     keywords: ["安全存储", "密钥", "key", "加密", "safestorage", "本机"],

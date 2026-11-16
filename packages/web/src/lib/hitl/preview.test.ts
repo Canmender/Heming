@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FILE_WRITE_TOOL } from "../fileEdit/ruleTargets.js";
 import { PREVIEW_MAX_LINES, buildChangePreview, changeCountLabel } from "./preview.js";
 
 const args = (value: unknown) => JSON.stringify(value);
@@ -56,5 +57,66 @@ describe("HITL 变更预览", () => {
     expect(preview.lines).toHaveLength(PREVIEW_MAX_LINES);
     expect(preview.added).toBe(PREVIEW_MAX_LINES + 10);
     expect(changeCountLabel(preview)).toBe(`+${PREVIEW_MAX_LINES + 10} −0`);
+  });
+
+  it("file_write：拿不到旧内容时降级为「将写入 N 行」，不当成整份新增的 +N −0", () => {
+    const preview = buildChangePreview(
+      FILE_WRITE_TOOL,
+      args({ path: "notes/c.md", content: "a\nb" }),
+    )!;
+
+    expect(preview).toMatchObject({
+      kind: "write",
+      path: "notes/c.md",
+      added: 2,
+      removed: 0,
+      fallback: true,
+    });
+    expect(changeCountLabel(preview)).toBe("将写入 2 行");
+  });
+
+  it("file_write：能读到旧内容就展示覆盖前后的行级 diff", () => {
+    const preview = buildChangePreview(
+      FILE_WRITE_TOOL,
+      args({ path: "notes/a.md", content: "第一行\n第二行（改）\n第三行" }),
+      { readBefore: (path) => (path === "notes/a.md" ? "第一行\n第二行\n第三行" : null) },
+    )!;
+
+    expect(preview).toMatchObject({ kind: "write", path: "notes/a.md", added: 1, removed: 1 });
+    expect(preview.fallback).toBeUndefined();
+    expect(preview.lines.map((l) => `${l.kind}:${l.text}`)).toEqual([
+      "ctx:第一行",
+      "del:第二行",
+      "add:第二行（改）",
+      "ctx:第三行",
+    ]);
+    expect(changeCountLabel(preview)).toBe("+1 −1");
+  });
+
+  it("读旧内容抛错也不抛：确认卡不能因为预览读盘失败而白屏", () => {
+    const argsJson = args({ path: "notes/a.md", content: "x" });
+    const preview = buildChangePreview(FILE_WRITE_TOOL, argsJson, {
+      readBefore: () => {
+        throw new Error("读盘失败");
+      },
+    })!;
+
+    expect(preview).toMatchObject({ kind: "write", added: 1, fallback: true });
+    expect(changeCountLabel(preview)).toBe("将写入 1 行");
+  });
+
+  it("file_edit：按替换点做 diff（不展示整份文件）", () => {
+    const preview = buildChangePreview(
+      "file_edit",
+      args({ path: "notes/a.md", old_string: "旧", new_string: "新" }),
+    )!;
+
+    expect(preview).toMatchObject({ kind: "edit", path: "notes/a.md", added: 1, removed: 1 });
+    expect(preview.lines.map((l) => `${l.kind}:${l.text}`)).toEqual(["del:旧", "add:新"]);
+  });
+
+  it("file_glob / file_grep 没有变更内容 → null（pattern 展示交给参数摘要）", () => {
+    expect(buildChangePreview("file_glob", args({ pattern: "**/*.md" }))).toBeNull();
+    expect(buildChangePreview("file_grep", args({ pattern: "TODO", include: "*.ts" }))).toBeNull();
   });
 });

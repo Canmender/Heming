@@ -1,12 +1,13 @@
-﻿/**
- * 文件编辑原语（`file_patch` / `file_read`）的对外出口。
+/**
+ * 本机文件工具（`file_read` / `file_write` / `file_edit` / `file_glob` / `file_grep` /
+ * `file_patch`）的对外出口。
  *
  * 分层（自下而上，依赖单向）：
  * - `types` / `limits` / `paths`：纯类型与路径口径
  * - `parse` / `match`：补丁协议与三级匹配（纯函数）
  * - `resolve` / `apply`：目标解析与干跑（唯一读盘处，IO 注入）
- * - `safety` / `roots`：三态安全判定与可写根存储
- * - `bridge` / `tools`：桌面桥与工具定义
+ * - `safety` / `roots`：三态安全判定与可写根存储（`roots` 负责「会话工作区 → 写根」）
+ * - `bridge` / `toolOps` / `tools`：桌面桥、六个工具的执行体、工具定义
  * - `ruleTargets` / `remember`：给 HITL 的路径目标与前缀规则
  * - `patchPreview`：确认卡的行级 diff
  */
@@ -48,9 +49,31 @@ export {
   normalizeRootsConfig,
   isAcceptableRootPath,
   defaultRootName,
+  mergeWorkspaceRoot,
+  mergeDefaultRoot,
+  WORKSPACE_ROOT_NAME,
+  DEFAULT_WORKSPACE_ROOT_NAME,
+  setActiveWorkspace,
+  activeWorkspace,
+  currentFileRoots,
+  fileRootsFor,
   type FileRootsConfig,
 } from "./roots.js";
-export { getFileBridge, hasFileBridge, type FileFsBridge, type FileWriteOp } from "./bridge.js";
+export {
+  getFileBridge,
+  hasFileBridge,
+  hasImageBridge,
+  hasSearchBridge,
+  getDefaultRootPath,
+  type FileFsBridge,
+  type FileWriteOp,
+  type FileGlobResponse,
+  type FileGrepMatch,
+  type FileImageResponse,
+  type FileGrepResponse,
+} from "./bridge.js";
+export { runEdit, runGlob, runGrep, runImage,
+  runUndo, runWrite, type FileOpsDeps } from "./toolOps.js";
 export {
   FILE_TOOLS,
   buildFileToolBridge,

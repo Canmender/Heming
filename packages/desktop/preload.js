@@ -480,18 +480,74 @@ contextBridge.exposeInMainWorld("__heming_plugins", {
   },
 });
 
-// —— 文件编辑桥（d.55 · file_patch）——
-// 只暴露三件事：读一个文件、写一批变更、让用户选一个可写根目录。
+// —— 文件编辑桥（d.55 · file_patch；搜索补全局/正则；默认工作区补未分组会话）——
+// 暴露七件事：读一个文件、写一批变更、让用户选一个可写根目录、按 glob 找文件、按正则搜内容，
+// 以及默认工作区路径（同步字段 + 异步方法）。
 // 路径判定（夹在根内、挡软链/硬链）、上限、tmp+rename 原子写全部由主进程
-// file-fs.js 兜底；渲染层传进来的只有「根清单 + 目标绝对路径 + 内容」。
-// 浏览器端没有这个桥，web 侧据此**不注入** file_patch / file_read（见 lib/fileEdit/bridge.ts）。
+// file-fs.js 兜底；渲染层传进来的只有「根清单 + 目标绝对路径 + 内容/模式」。
+// 浏览器端没有这个桥，web 侧据此**不注入**文件工具（见 lib/fileEdit/bridge.ts）；
+// 老安装包没有 glob/grep，web 侧按定位（path）缺失降级——所以这两个方法可以缺席。
+//
+// defaultRootPath 是「未分组会话的默认工作区」，只是**路径下发**：主进程固定给
+// ~/文档/和鸣，拿到路径不等于拿到权限，真正写盘仍要经过 roots + 根内校验。
+// 加载时同步问一次；sendSync 不存在（旧 Electron / 测试桩）或通道未注册时一律 null，
+// 绝不因为拿不到默认工作区就把 preload 炸掉。
+const defaultRootPath = (() => {
+  if (typeof ipcRenderer.sendSync !== "function") return null;
+  try {
+    const r = ipcRenderer.sendSync("file:default-root");
+    return r && r.ok === true && typeof r.path === "string" ? r.path : null;
+  } catch {
+    return null;
+  }
+})();
 contextBridge.exposeInMainWorld("__heming_files", {
   /** 读一个文件；返回 { ok, content?, bytes?, code?, error? }。 */
   read: (payload) => ipcRenderer.invoke("file:read", payload),
-  /** 批量写入/删除；返回 { ok, results?, written?, deleted?, error? }。 */
+  /** 批量写入/删除；`createParents` 为真时允许主进程补建缺失父目录。 */
   write: (payload) => ipcRenderer.invoke("file:write", payload),
   /** 系统目录选择器；取消返回 null。 */
   pickRoot: () => ipcRenderer.invoke("file:pick-root"),
+  /** 按 glob 模式找文件；返回 { ok, root?, paths?, truncated?, code?, error? }。 */
+  glob: (payload) => ipcRenderer.invoke("file:glob", payload),
+  /** 按正则搜文件内容；返回 { ok, root?, matches?, truncated?, code?, error? }。 */
+  grep: (payload) => ipcRenderer.invoke("file:grep", payload),
+  /**
+   * 撤销上一次写入：把最新一份备份写回该文件。
+   * 返回 { ok, path?, restoredFrom?, bytes?, code?, error? }；一份备份只能用一次。
+   */
+  undo: (payload) => ipcRenderer.invoke("file:undo", payload),
+  /** 最近可回滚的改动（设置区列表）；返回 { ok, items: [{ path, at, bytes }] }。 */
+  backups: (payload) => ipcRenderer.invoke("file:backups", payload),
+  /**
+   * 读一张图片（base64）；返回 { ok, mime?, bytes?, base64?, code?, error? }。
+   *
+   * 与 read 分开是不让「读文本」的调用方有机会拿到 base64 大块，
+   * 也让两条上限（2MB 文本 / 5MB 图片）能分别讲清楚。
+   */
+  image: (payload) => ipcRenderer.invoke("file:image", payload),
+  /** 默认工作区绝对路径（未分组会话的落点）；拿不到为 null，不授予额外权限。 */
+  defaultRootPath,
+  /** 再问一次默认工作区（异步兜底；路径不变，主要给错过同步时机的老代码用）。 */
+  defaultRoot: () => ipcRenderer.invoke("file:default-root"),
+});
+
+// —— 本机命令桥（d.164 · run_command）——
+// 单独一个命名空间：文件桥的语义是「写哪个文件」，命令桥的语义是「在这台机器上做一件事」。
+// 混在一个对象里，任何「有文件桥 ⇒ 能跑命令」的误判都会变成任意代码执行。
+// 渲染层只能给「根清单 + 绝对工作目录 + 命令 + 超时」；工作目录必须落在可写根内、
+// 命令有长度上限与超时、输出有采集上限——全部由主进程 shell-run.js 兜底。
+// 没有这个桥（浏览器端、老安装包）时 web 侧不注入 run_command，点了没反应的按钮不会出现。
+contextBridge.exposeInMainWorld("__heming_shell", {
+  /** 执行一条命令；返回 { ok, exitCode?, stdout?, stderr?, truncated?, durationMs?, code?, error? }。 */
+  run: (payload) => ipcRenderer.invoke("shell:run", payload),
+  /**
+   * 取消一条在跑/排队中的命令（d.165）。
+   *
+   * `invoke` 没有 abort，用户点「停止」时只能靠这条通道让主进程杀进程树；
+   * 只认 runId，不认命令内容——取消不该成为「杀掉任意进程」的入口。
+   */
+  cancel: (runId) => ipcRenderer.invoke("shell:cancel", runId),
 });
 
 // —— 信息中枢 · InfoHub 本机桥（d.45）——

@@ -50,11 +50,139 @@ test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
   assert.ok(src.includes('invoke("export:info"'));
 });
 
+test("preload 暴露 __heming_shell.run 并转发到 shell:run（d.164）", () => {
+  // 独立命名空间：命令执行与文件读写是两套权限，混在一起会让「有文件桥」被误读成「能跑命令」
+  const m = src.match(/exposeInMainWorld\(\s*["']__heming_shell["']\s*,\s*\{([\s\S]*?)\}\s*\)/);
+  assert.ok(m, "preload 必须暴露 __heming_shell");
+  assert.ok(m[1].includes('invoke("shell:run"'), "__heming_shell.run 必须转发到 shell:run");
+  assert.ok(m[1].includes('invoke("shell:cancel"'), "__heming_shell.cancel 必须转发到 shell:cancel（d.165）");
+  assert.ok(!m[1].includes("ipcRenderer.send("), "不允许用单向 send 跑命令（拿不到退出码与输出）");
+});
+
+test("__heming_files.glob / grep 分别转发到 file:glob / file:grep", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:glob": (payload) => ({ ok: true, paths: [`/库/${payload.pattern}`] }),
+        "file:grep": (payload) => ({ ok: true, matches: [{ path: "/库/a.md", line: 1, text: payload.pattern }] }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.glob, "function", "桌面端应暴露 glob");
+  assert.equal(typeof bridge.grep, "function", "桌面端应暴露 grep");
+  assert.deepEqual(await bridge.glob({ pattern: "*.ts" }), { ok: true, paths: ["/库/*.ts"] });
+  assert.deepEqual(await bridge.grep({ pattern: "needle" }), {
+    ok: true,
+    matches: [{ path: "/库/a.md", line: 1, text: "needle" }],
+  });
+  assert.deepEqual(invoked, [
+    ["file:glob", { pattern: "*.ts" }],
+    ["file:grep", { pattern: "needle" }],
+  ]);
+});
+
+test("__heming_files.image 转发到 file:image（与 read 分开：图片是 base64 大块）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:image": (payload) => ({ ok: true, mime: "image/png", bytes: 3, base64: "AAAA", path: payload.path }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.image, "function", "桌面端应暴露 image");
+  assert.deepEqual(await bridge.image({ path: "D:/库/a.png" }), {
+    ok: true,
+    mime: "image/png",
+    bytes: 3,
+    base64: "AAAA",
+    path: "D:/库/a.png",
+  });
+  assert.deepEqual(invoked, [["file:image", { path: "D:/库/a.png" }]]);
+});
+
+test("__heming_files.undo 转发到 file:undo（撤销上一次写入）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:undo": (payload) => ({ ok: true, path: payload.path, restoredFrom: "2026-11-16T05:00:00.000Z", bytes: 12 }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.undo, "function", "桌面端应暴露 undo");
+  assert.deepEqual(await bridge.undo({ path: "D:/库/a.md" }), {
+    ok: true,
+    path: "D:/库/a.md",
+    restoredFrom: "2026-11-16T05:00:00.000Z",
+    bytes: 12,
+  });
+  assert.deepEqual(invoked, [["file:undo", { path: "D:/库/a.md" }]]);
+});
+
+test("__heming_files.backups 转发到 file:backups（最近改动列表）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:backups": () => ({ ok: true, items: [{ path: "D:/库/a.md", at: "2026-11-16T05:00:00.000Z", bytes: 9 }] }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.backups, "function", "桌面端应暴露 backups");
+  const list = await bridge.backups({ roots: [] });
+  assert.equal(list.ok, true);
+  assert.equal(list.items.length, 1);
+  assert.deepEqual(invoked, [["file:backups", { roots: [] }]]);
+});
+
+test("__heming_files.defaultRootPath：加载时同步取默认工作区；取不到为 null 且不抛", () => {
+  const withSync = loadExposed({ "file:default-root": () => ({ ok: true, path: "D:/文档/和鸣" }) });
+  assert.equal(withSync.__heming_files.defaultRootPath, "D:/文档/和鸣");
+
+  // 老 Electron / 测试桩没有 sendSync：preload 必须照常加载，字段为 null
+  const noSync = loadExposed({}, { noSendSync: true });
+  assert.equal(typeof noSync.__heming_files.defaultRoot, "function");
+  assert.equal(noSync.__heming_files.defaultRootPath, null);
+
+  // 主进程拒绝（非可信来源）或返回值形状不对：同样按「没有」处理
+  const denied = loadExposed({ "file:default-root": () => ({ ok: false, error: "untrusted-sender" }) });
+  assert.equal(denied.__heming_files.defaultRootPath, null);
+  const malformed = loadExposed({ "file:default-root": () => ({ ok: true, path: 42 }) });
+  assert.equal(malformed.__heming_files.defaultRootPath, null);
+});
+
+test("__heming_files.defaultRoot() 转发到 file:default-root", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    { invoked, invokeResults: { "file:default-root": () => ({ ok: true, path: "D:/文档/和鸣" }) } },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.defaultRoot, "function");
+  assert.deepEqual(await bridge.defaultRoot(), { ok: true, path: "D:/文档/和鸣" });
+  assert.deepEqual(invoked, [["file:default-root", undefined]]);
+});
+
 // 行为测试：stub electron 模块的 contextBridge + ipcRenderer，真实执行 preload.js，
 // 验证 contextBridge 暴露的对象上 __onBootReady/__startBootWave 为可调用函数。
 // 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_secrets 等），
 // 此处按 key 收集而非「最后一次即 heming」。
-// ipcRenderer.sendSync 必须在桩里存在：preload 顶层会同步问一次密钥桥可用性。
+// ipcRenderer.sendSync 默认在桩里提供：preload 顶层会同步问密钥桥可用性与默认工作区路径；
+// sink.noSendSync 用于模拟老 Electron 没有同步桥，验证 preload 仍能加载。
 // sink.listeners：channel → Set<listener>，用于断言订阅注册/取消；
 // sink.sent：ipcRenderer.send 的调用记录，用于断言 system 通知请求；
 // sink.invokeResults：channel → fn(payload)，给异步通道（secret:bootstrap 等）返回结果；
@@ -74,7 +202,9 @@ function loadExposed(ipc = {}, sink = {}) {
     },
   };
   const stubIpc = {
-    sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined),
+    ...(sink.noSendSync
+      ? {}
+      : { sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined) }),
     invoke: async (channel, payload) => {
       invoked.push([channel, payload]);
       const handler = invokeResults[channel];

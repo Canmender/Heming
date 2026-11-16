@@ -12,7 +12,8 @@
  */
 
 import type { StorageLike } from "../memory/types.js";
-import { foldSegments, isAbsolutePath, type FileRoot } from "./paths.js";
+import { getDefaultRootPath } from "./bridge.js";
+import { compareKey, foldSegments, isAbsolutePath, type FileRoot } from "./paths.js";
 
 /** 存储键（带版本后缀，便于将来迁移）。 */
 export const FILE_ROOTS_KEY = "heming.fileEdit.roots.v1";
@@ -84,6 +85,54 @@ export function defaultRootName(absPath: string): string {
   const last = segs[segs.length - 1] ?? "";
   // 盘符形如 "d:" 时不拿它当名字
   return /^[A-Za-z]:$/.test(last) ? "根目录" : last.slice(0, MAX_ROOT_NAME) || "根目录";
+}
+
+/** 会话工作区派生根的名字（模型参数 `root` 与设置区展示共用这一个）。 */
+export const WORKSPACE_ROOT_NAME = "工作区";
+
+/**
+ * 未分组会话兜底写根的名字（桌面端 `文档\和鸣`）。
+ *
+ * 为什么还要兜底：大部分既有会话是「未分组」（没选工作区），只靠工作区派生根的话，
+ * 用户问「帮我建个文件」仍然会得到「没有可写根」——投诉等于没修好。
+ */
+export const DEFAULT_WORKSPACE_ROOT_NAME = "默认工作区";
+
+/**
+ * 把「当前会话的工作区」并进根清单 —— 工作区自动可读写（d.153）。
+ *
+ * 为什么需要它：和鸣默认不预置任何根（`DEFAULT_FILE_ROOTS.roots = []`），
+ * 于是新装用户的智能体一个文件工具都没有（用户投诉的正是这件事）。会话工作区
+ * 是用户**已经显式选过**的文件夹（建会话时选的，或「移动到工作区」选的），
+ * 把它当作隐式写根，既符合直觉也不必让用户再去设置区配一遍。
+ *
+ * 三条口径（实现时别改）：
+ * 1. **只派生、不落盘**：不写 localStorage，用户打开设置区仍看到「手动根」列表原样；
+ *    workspace 是会话属性，跟着会话走，删会话/挪分组就自然失效。
+ * 2. **手动配置优先**：同路径已有配置根时原样保留（用户可能特意把它设成只读，
+ *    自动根不能把只读悄悄升级成可写）。
+ * 3. **排第一位**：工具 `root` 缺省取「第一条可写根」/「第一条根」，工作区排第一
+ *    才能让「不写 root」的调用默认落在用户当前的工作区里。
+ *
+ * 非法/空/盘符根（`isAcceptableRootPath` 拒绝）→ 原样返回，绝不因为工作区路径怪
+ * 就吞掉用户已配好的根。
+ */
+export function mergeWorkspaceRoot(roots: FileRoot[], workspace?: string | null): FileRoot[] {
+  const raw = String(workspace ?? "").trim();
+  if (!raw || !isAcceptableRootPath(raw)) return roots;
+  const path = foldSegments(raw);
+  const key = compareKey(path);
+  if (roots.some((root) => compareKey(root.path) === key)) return roots;
+
+  let name = WORKSPACE_ROOT_NAME;
+  let n = 2;
+  while (roots.some((root) => root.name.trim().toLowerCase() === name.toLowerCase())) {
+    name = `${WORKSPACE_ROOT_NAME}-${n}`;
+    n += 1;
+  }
+  // 派生根允许比配置上限多一条：配置上限约束的是用户手填，不能让「工作区」把
+  // 用户第 20 条根挤掉（那一跳会静默丢配置，比多一条根危险得多）。
+  return [{ name: name.slice(0, MAX_ROOT_NAME), path, mode: "write" }, ...roots];
 }
 
 /** 规整一条根；非法返回 null（坏条目逐条丢弃，不清空全部）。 */
@@ -227,3 +276,74 @@ export class FileRootsStore {
 
 /** 应用默认实例（ChatPage / 设置区 / 闸门共用同一份配置）。 */
 export const fileRootsStore = new FileRootsStore();
+
+/**
+ * 「当前会话的工作区」——模块级可变状态，ChatPage 切会话/开流时写入。
+ *
+ * 为什么不放进 `fileRootsStore`（localStorage）：工作区是**会话的属性**，不是一条设置。
+ * 落盘会带来两个后果：换会话后上一个项目的目录仍留在根清单里（下次用它得先想「这条是谁加的」），
+ * 以及删会话后根还在。所以这里只放内存：进程结束即忘，`mergeWorkspaceRoot` 每次现场派生。
+ *
+ * 读不到（未分组会话 / 浏览器端）就是 `undefined`＝不自动开放任何目录。
+ */
+let activeWorkspacePath: string | undefined;
+
+/** 记下当前会话的工作区（`null`/空串 = 未分组会话，清空状态）。 */
+export function setActiveWorkspace(workspace?: string | null): void {
+  const trimmed = typeof workspace === "string" ? workspace.trim() : "";
+  activeWorkspacePath = trimmed || undefined;
+}
+
+/** 当前会话的工作区（未分组 / 未设置时 `undefined`）。 */
+export function activeWorkspace(): string | undefined {
+  return activeWorkspacePath;
+}
+
+/**
+ * 当前生效的全部根 = 手动配置根 + 会话工作区派生根（工作区排第一）。
+ *
+ * 这是「文件工具、HITL 闸门、确认卡预览、记住授权」四处唯一的根口径：
+ * 各模块若各自读 `fileRootsStore.roots()`，只设工作区的会话就会被判成「没有根」——
+ * 出现「工具能写、闸门以为越界」的分裂。
+ */
+export function currentFileRoots(): FileRoot[] {
+  return fileRootsFor(activeWorkspacePath);
+}
+
+/**
+ * 指定工作区下的根清单（`currentFileRoots` 的显式参数版）。
+ *
+ * 为什么留这个入口：capability provider 拿得到 `ctx.workspace`（会话数据），
+ * 不该依赖「ChatPage 的 effect 先把模块状态写好」这个时序——两条来源都要能工作，
+ * 且合并/兜底逻辑只写一遍。
+ */
+export function fileRootsFor(workspace?: string | null): FileRoot[] {
+  const merged = mergeWorkspaceRoot(fileRootsStore.roots(), workspace ?? activeWorkspacePath);
+  if (merged.length > 0) return merged;
+  // 未分组会话的兜底：用户没选工作区、也没手动配任何根时，才把桌面端的「默认工作区」
+  // （文档\和鸣）当作写根。只要用户配过根（哪怕只有只读根），就尊重他的配置——
+  // 悄悄加一个可写目录会把「我只让它读」的策略放开，这类越权比不能写更糟。
+  return mergeDefaultRoot(merged, getDefaultRootPath());
+}
+
+/**
+ * 把「默认工作区」并进根清单（只在根清单为空时由 `currentFileRoots` 调用）。
+ *
+ * 与 `mergeWorkspaceRoot` 的区别：它排在末尾（此刻是唯一一条）、名字不同，
+ * 且**只有完全没有根时**才生效，避免和手动配置打架。
+ */
+export function mergeDefaultRoot(roots: FileRoot[], defaultPath?: string | null): FileRoot[] {
+  const raw = String(defaultPath ?? "").trim();
+  if (!raw || !isAcceptableRootPath(raw)) return roots;
+  const path = foldSegments(raw);
+  const key = compareKey(path);
+  if (roots.some((root) => compareKey(root.path) === key)) return roots;
+
+  let name = DEFAULT_WORKSPACE_ROOT_NAME;
+  let n = 2;
+  while (roots.some((root) => root.name.trim().toLowerCase() === name.toLowerCase())) {
+    name = `${DEFAULT_WORKSPACE_ROOT_NAME}-${n}`;
+    n += 1;
+  }
+  return [...roots, { name: name.slice(0, MAX_ROOT_NAME), path, mode: "write" }];
+}

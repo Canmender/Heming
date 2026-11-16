@@ -9,7 +9,6 @@ const { attachSplashLifecycle } = require("./splash-lifecycle");
 const {
   cspHeadersFor,
   normalizeCspMode,
-  parseCspViolation,
   DEFAULT_API_ORIGIN,
   INDEX_FILE,
   resolveRequest,
@@ -25,6 +24,7 @@ const { createWidgetHost } = require("./plugin-host");
 const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
 const { WIDGET_SCHEME } = require("./plugin-window");
 const { appVersion } = require("./app-version");
+const { attachCspReporter, createCspReporter } = require("./csp-report.js");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
 const { createChildReclaimer } = require("./child-kill");
 const { createMagpieHost, resolveBinaryPath } = require("./magpie-host");
@@ -79,6 +79,7 @@ const { registerVaultIpc, readRegistry, defaultRegistryFile, ensureStandardVault
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
+const { registerShellIpc } = require("./shell-run");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
 const { createPluginNotifier } = require("./plugin-notify");
@@ -353,12 +354,6 @@ function isAllowedNavigation(url, appUrl) {
 // 2. 给 app:// 的响应挂 CSP 头；
 // 3. 把渲染层的 CSP 违例 console 消息收进本机日志（限长 + 去重 + 只记元数据）。
 
-/** 违例日志上限：超过就清空重来（CSP 违例通常只有少数几种，无需长期累积）。 */
-const CSP_REPORT_LOG_MAX_BYTES = 256 * 1024;
-/** 去重表上限：超过后不再记新种类，防止被刷爆磁盘。 */
-const CSP_REPORT_MAX_DEDUPE = 500;
-const cspSeenViolations = new Set();
-
 /** 灰度模式：`HEMING_CSP_MODE=off|report|enforce`，**默认 report**（先收集违例）。 */
 function cspMode() {
   return normalizeCspMode(process.env.HEMING_CSP_MODE);
@@ -391,7 +386,10 @@ function cspOptions() {
   };
 }
 
-/** 违例日志目录：`~/Heming/logs`（与崩溃日志同根，但**不是崩溃日志**）。 */
+// 上报器本体在 csp-report.js（可单测 + 冒烟复用同一份实现），这里只给「文件在哪」。
+let cspReporter = null;
+
+/** 违例日志文件：`~/Heming/logs/csp-report.log`（HEMING_CRASH_DIR 可覆盖）。 */
 function cspReportFile() {
   const override = String(process.env.HEMING_CRASH_DIR || "").trim();
   return override
@@ -400,50 +398,13 @@ function cspReportFile() {
 }
 
 /**
- * 追加一条违例（去重 + 限长）。
- *
- * ★ 只写 `directive / blocked / source` 三个字段：绝不写页面内容、绝不写整条 console 消息
- * （内联样式/脚本的违例消息可能夹带片段）。
- */
-function appendCspReport(violation) {
-  const key = `${violation.directive}|${violation.blockedUri}|${violation.source}`;
-  if (cspSeenViolations.has(key)) return;
-  if (cspSeenViolations.size >= CSP_REPORT_MAX_DEDUPE) return;
-  cspSeenViolations.add(key);
-  try {
-    const file = cspReportFile();
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    try {
-      if (fs.statSync(file).size > CSP_REPORT_LOG_MAX_BYTES) fs.writeFileSync(file, "");
-    } catch {
-      /* 文件还不存在：第一次写入 */
-    }
-    const line =
-      `[${new Date().toISOString()}] directive=${violation.directive} ` +
-      `blocked=${violation.blockedUri} source=${violation.source || "inline"}:${violation.line}
-`;
-    fs.appendFileSync(file, line, "utf8");
-  } catch {
-    /* 日志失败绝不影响界面：CSP 本身仍生效 */
-  }
-}
-
-/**
  * 给窗口挂 CSP 违例收集（仅 `console-message` 里的 CSP 消息）。
- *
- * Electron 45 起 console-message 是 `(event, details)`；为兼容旧签名，
- * 对第二个参数做对象判断，两种形状都能取到 message/sourceId/line。
+ * `mode === "off"` 时不挂：关闭了 CSP 就没有违例可收。
  */
 function attachCspReportLogger(win) {
   if (cspMode() === "off") return;
-  win.webContents.on("console-message", (_event, detailsOrLevel, legacyMessage) => {
-    const isDetails = !!detailsOrLevel && typeof detailsOrLevel === "object";
-    const message = isDetails ? detailsOrLevel.message : legacyMessage;
-    const sourceId = isDetails ? detailsOrLevel.sourceId || "" : "";
-    const line = isDetails ? detailsOrLevel.lineNumber || 0 : 0;
-    const violation = parseCspViolation(message, sourceId, line);
-    if (violation) appendCspReport(violation);
-  });
+  if (!cspReporter) cspReporter = createCspReporter({ file: cspReportFile() });
+  attachCspReporter(win.webContents, cspReporter);
 }
 
 /**
@@ -1482,6 +1443,21 @@ app.whenReady().then(() => {
     registerFileIpc(ipcMain, {
       dialog,
       getMainWindow: () => mainWindow,
+      // 未分组会话的默认工作区：桌面端固定给 ~/文档/和鸣，主进程建目录后把路径下发；
+      // 渲染层只能拿到这一个路径，不能指定别处（file-fs.js 的 file:default-root 不接受参数）。
+      defaultRootDir: path.join(app.getPath("documents"), "和鸣"),
+      // 写入备份目录（d.170）：撤销上一次写入靠它。放 userData 下而不是工作区里——
+      // 备份是应用自己的账，不该出现在用户的文件树里（也避免被 file_glob 当成源文件）。
+      backupDir: path.join(app.getPath("userData"), "backups"),
+      isTrustedSender: (event) => {
+        if (!mainWindow) return false;
+        return BrowserWindow.fromWebContents(event.sender) === mainWindow;
+      },
+    });
+    // 本机命令桥（d.164 · run_command）：能做的事没有边界，因此与文件桥分开一个通道、
+    // 只认主窗口、工作目录必须落在可写根内；超时/输出上限/杀进程树在 shell-run.js 里。
+    // 每条命令仍然要过渲染层的 HITL 确认（run_command 的风险等级是 danger，不会被「记住允许」）。
+    registerShellIpc(ipcMain, {
       isTrustedSender: (event) => {
         if (!mainWindow) return false;
         return BrowserWindow.fromWebContents(event.sender) === mainWindow;

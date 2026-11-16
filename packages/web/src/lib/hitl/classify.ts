@@ -63,9 +63,29 @@ export interface HitlRiskHints {
  * → 改动 self 工具的风险等级时，两处一起改。
  */
 const EXACT_RISK: Record<string, RiskLevel> = {
-  // 文件编辑（d.55）：写盘与读盘，风险由桥的 meta 声明，这张表是「没有桥时」的兜底
+  // 文件编辑（d.55/d.153）：写盘与读盘，风险由桥的 meta 声明，这张表是「没有桥时」的兜底。
+  // 新增的四个工具必须显式列出：`file_write` 里的 `write` 会命中 DANGER_WORDS，
+  // 显式表让它是 write 而不是 danger（危险工具恒问，不该被一次「记住」放行）。
   file_patch: "write",
   file_read: "read",
+  file_write: "write",
+  file_edit: "write",
+  file_glob: "read",
+  file_grep: "read",
+  // 读图（d.168）：只把根内图片读成 base64，不改磁盘 → read（不该每次都弹确认）。
+  file_image: "read",
+  // 撤销也是写：它会把文件内容换成旧版本，不能当只读放行
+  file_undo: "write",
+  // 任务清单（d.154）：只写会话级计划状态，不碰文件与配置 → read（不弹确认卡）。
+  // 必须显式登记：名字里带 `write`，否则会命中 DANGER_WORDS 变成 danger，永远绕不过确认。
+  todo_write: "read",
+  // 本机命令（d.164）：能做的事没有边界（删库、改系统、发请求都在一条命令之内），
+  // 因此固定 danger：既不能被「记住允许」放行，也不受 floor 影响，每条都要人看一眼。
+  run_command: "danger",
+  // 只读子代理（d.162）：子代理只能读文件，自己不起副作用 → read。
+  // 注意它不是「免检」：子代理在子会话里调用的工具仍然过主桥的白名单（只读三件），
+  // 主对话这一层看到的就是一次只读调用，弹确认卡只会打断「翻资料」这种正常动作。
+  agent_task: "read",
   // 记忆
   self_memory_list: "read",
   self_memory_write: "write",
@@ -203,6 +223,15 @@ const SOURCE_PREFIX: { prefix: string; source: HitlSource }[] = [
 const DISPLAY_NAMES: Record<string, string> = {
   file_patch: "修改文件",
   file_read: "读取文件",
+  file_write: "写入文件",
+  file_edit: "编辑文件",
+  file_glob: "查找文件",
+  file_grep: "搜索内容",
+  file_image: "查看图片",
+  file_undo: "撤销上次写入",
+  todo_write: "更新任务清单",
+  agent_task: "派子代理",
+  run_command: "运行命令",
   self_memory_list: "列出记忆",
   self_memory_write: "写入记忆",
   self_memory_remove: "删除记忆",
@@ -419,10 +448,69 @@ function patchSummary(args: Record<string, unknown>): string | null {
   return `补丁（${parts.join("、") || "无操作"}${root}）`;
 }
 
+/** 行数统计（与预览侧口径一致：去掉末尾多余空行，空内容算 0 行）。 */
+function countLines(text: string): number {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  if (!normalized) return 0;
+  const parts = normalized.split("\n");
+  if (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
+  return parts.length;
+}
+
+/** 取第一个非 undefined 的字符串参数（兼容 snake/camel 两种 schema 写法）。 */
+function firstStringArg(args: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    if (typeof args[key] === "string") return args[key] as string;
+  }
+  return null;
+}
+
+/**
+ * 文件类新工具的参数摘要：只给「目标 + 规模」，**绝不回显内容**。
+ *
+ * 为什么必须单独处理：
+ * - `file_write` 的 `content` 是整份文件正文（用户笔记/代码），走兜底 JSON 摘要
+ *   会把开头 80 字符摆到确认弹窗与日志上——隐私问题，也不是用户想看的；
+ * - `file_edit` 的 `old_string` / `new_string` 同理；用户要看的是「改哪个文件、换几行」；
+ * - `file_glob` / `file_grep` 的 `pattern` 才是这一行的重点（兜底字段表第一个是 path，
+ *   有 path 时会把 pattern 藏掉）。
+ *
+ * 命中敏感特征时照旧退化成 `***`（与字段表的敏感判定同一口径）。
+ */
+function fileToolSummary(args: Record<string, unknown>): string | null {
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (path && isSensitive("path", path)) return "***";
+
+  const content = typeof args.content === "string" ? args.content : null;
+  if (path && content !== null) {
+    const bytes = new TextEncoder().encode(content).length;
+    return `${path}（${countLines(content)} 行 · ${bytes} 字节）`;
+  }
+
+  const oldString = firstStringArg(args, "old_string", "oldString");
+  const newString = firstStringArg(args, "new_string", "newString");
+  if (oldString !== null && newString !== null) {
+    const target = path || "目标文件";
+    return `${target}（替换 ${countLines(oldString)} 行 → ${countLines(newString)} 行）`;
+  }
+
+  const pattern = typeof args.pattern === "string" ? args.pattern.trim() : "";
+  if (pattern) {
+    if (isSensitive("pattern", pattern)) return "***";
+    const include = typeof args.include === "string" ? args.include.trim() : "";
+    const scope = path ? `（在 ${path} 内）` : "";
+    const inc = include ? `（include: ${include}）` : "";
+    return `${pattern}${scope}${inc}`;
+  }
+
+  return null;
+}
+
 /**
  * 参数摘要（一行）。
  *
- * 规则：优先取 `path` / `file` / `url` / `query` / `name` / `server` 字段；
+ * 规则：补丁与文件类工具先走专用摘要（不回显正文）；否则优先取
+ * `path` / `file` / `url` / `query` / `name` / `server` 字段；
  * 命中敏感特征的字段值替换成 `***`；一个已知字段都没有时给截断后的 JSON。
  *
  * 只要参数里出现「像密钥的字段名」（api_key / token / password …），
@@ -434,6 +522,34 @@ export function summarizeArgs(argsJson: string): string {
   // 补丁参数先单独处理：整份补丁既敏感又不是用户想看的信息
   const patch = patchSummary(args);
   if (patch) return patch;
+  // 任务清单：只报进度（几条完成/进行中），不回显整份内容——摘要栏放不下，也没必要。
+  const todos = args.todos;
+  if (Array.isArray(todos)) {
+    let done = 0;
+    let doing = 0;
+    for (const item of todos) {
+      if (!item || typeof item !== "object") continue;
+      const status = (item as { status?: unknown }).status;
+      if (status === "completed") done += 1;
+      else if (status === "in_progress") doing += 1;
+    }
+    return `任务清单：共 ${todos.length} 条，已完成 ${done}，进行中 ${doing}`;
+  }
+  // 只读子代理（d.162）：摘要只放「让它去查什么」，子会话里的具体文件清单不进摘要。
+  const subagentTask = args.task;
+  if (typeof subagentTask === "string" && subagentTask.trim()) {
+    const text = subagentTask.trim();
+    return `子代理任务：${text.length > 60 ? `${text.slice(0, 60)}…` : text}`;
+  }
+  // 本机命令（d.164）：摘要只放命令本身。整条命令可能很长，截断成一行；
+  // 工作目录不放进摘要（确认卡上另有展示），避免摘要在窄栏里被挤成两行。
+  const shellCommand = args.command;
+  if (typeof shellCommand === "string" && shellCommand.trim()) {
+    const text = shellCommand.trim().replace(/\s+/g, " ");
+    return "命令：" + (text.length > 70 ? text.slice(0, 70) + "…" : text);
+  }
+  // 文件类新工具的专用摘要（file_write / file_edit / file_glob / file_grep）
+  const fileTool = fileToolSummary(args);  if (fileTool) return fileTool;
   for (const field of SUMMARY_FIELDS) {
     const value = args[field];
     if (typeof value === "string" && value.trim()) {

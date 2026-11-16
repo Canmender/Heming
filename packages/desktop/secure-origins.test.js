@@ -105,7 +105,22 @@ test("denyValueFor：同步桥返回 null（preload 按不可用处理），其�
   assert.equal(denyValueFor("secret:decryptAsync"), null);
   assert.equal(denyValueFor("update:state"), null);
   assert.equal(denyValueFor("runtime:probe"), null);
-  for (const ch of ["wiki:write", "file:write", "export:write", "chart:export", "notify:message", "mcp:stdio:request"]) {
+  for (const ch of [
+    "wiki:write",
+    "file:write",
+    "file:glob",
+    "file:grep",
+    "file:image",
+    "file:undo",
+    "file:backups",
+    "file:default-root",
+    "shell:run",
+    "shell:cancel",
+    "export:write",
+    "chart:export",
+    "notify:message",
+    "mcp:stdio:request",
+  ]) {
     assert.deepEqual(denyValueFor(ch), IPC_UNTRUSTED, ch);
   }
   assert.deepEqual(denyValueFor(undefined), IPC_UNTRUSTED);

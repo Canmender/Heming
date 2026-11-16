@@ -31,6 +31,35 @@ export interface BuildContextInput {
   userText: string;
   /** 原系统提示词：作为最终提示词的前缀，原文不改。 */
   basePrompt: string;
+  /**
+   * 运行环境段（d.154，`agentRuntime/runtimePrompt.ts` 产出）。
+   *
+   * 为什么放在记忆/技能之前：它是这一轮的「物理事实」——在不在桌面端、几点、工作区在哪、
+   * 哪几个目录可写、这轮注入了几件工具、工具轮次上限。记忆/技能是可选增强，
+   * 事实段应该紧跟人设，且**不参与召回预算**（召回只裁记忆/技能自己的条目）。
+   *
+   * 缺省 = 不注入（保持 `systemPrompt === basePrompt` 的旧契约，独立测试与
+   * CLI 复用路径不受影响）。
+   */
+  runtime?: string;
+  /**
+   * 项目约定段（d.174，gentRuntime/projectRules.ts 产出）。
+   *
+   * 来源是工作区里的 AGENTS.md 一族文件，排在人设之后、运行环境之前：
+   * 它是「这个仓库怎么做事」的规矩，比「现在几点、有哪些根」更贴近人设。
+   *
+   * 缺省 = 不注入（与 runtime 一样，保持 systemPrompt === basePrompt 的旧契约）。
+   */
+  rules?: string;
+  /**
+   * 本轮引用的工作区文件（d.175，`fileEdit/fileRefs.ts` 产出）。
+   *
+   * 它是**这一轮的输入**而不是环境事实：用户点选了「就针对这几个文件」，内容随本轮给出，
+   * 所以排在运行环境之后、记忆之前——记忆是可选增强，用户明确给的材料应当在前。
+   *
+   * 缺省 = 不注入（`systemPrompt === basePrompt` 的旧契约不变）。
+   */
+  files?: string;
   /** 缺省表示不接记忆（零注入）；记忆总开关关闭时同样零注入。 */
   memory?: MemoryStore;
   /** 缺省表示不接技能池（零注入）；池内无命中同样零注入。 */
@@ -91,8 +120,14 @@ export interface RecalledMemory {
 export type { MemoryObservability };
 
 export interface BuiltContext {
-  /** 最终系统提示词：basePrompt + 记忆段 + 技能段（无注入时严格等于 basePrompt）。 */
+  /** 项目约定段原文（空串 = 这一轮没有约定文件）。 */
+  rulesSection: string;
+  /** 本轮引用文件的段原文（空串 = 这一轮没有引用）。 */
+  filesSection: string;
+  /** 最终系统提示词：basePrompt + 项目约定段 + 运行环境段 + 记忆段 + 技能段（无注入时严格等于 basePrompt）。 */
   systemPrompt: string;
+  /** 本轮的运行环境段（未注入时为空串；与 `systemPrompt` 里那段逐字相同）。 */
+  runtimeSection: string;
   recalled: RecalledMemory;
   /** 本次注入的技能（含命中理由/分数），空数组表示未注入。 */
   skills: SkillMatch[];
@@ -237,13 +272,19 @@ function collectSkills(
  */
 export function buildAgentContext(input: BuildContextInput): BuiltContext {
   const base = typeof input.basePrompt === "string" ? input.basePrompt : "";
+  const rules = typeof input.rules === "string" ? input.rules.trim() : "";
+  const files = typeof input.files === "string" ? input.files.trim() : "";
+  const runtime = typeof input.runtime === "string" ? input.runtime.trim() : "";
   const memory = collectMemory(input, input.memory);
   const skills = collectSkills(input, input.skills);
 
   const extras = skills.error ? { skillsError: skills.error } : {};
-  if (!memory.section && !skills.section) {
+  if (!rules && !files && !runtime && !memory.section && !skills.section) {
     return {
       systemPrompt: base,
+      rulesSection: "",
+      filesSection: "",
+      runtimeSection: "",
       recalled: memory.recalled,
       skills: skills.matches,
       recallTrace: memory.trace,
@@ -251,7 +292,13 @@ export function buildAgentContext(input: BuildContextInput): BuiltContext {
     };
   }
   return {
-    systemPrompt: [base, memory.section, skills.section].filter(Boolean).join(SECTION_SEPARATOR),
+    // 顺序：人设 → 项目约定 → 运行环境 → 本轮引用 → 记忆 → 技能。
+    // 约定是「这个仓库的规矩」，比环境事实更贴近人设；引用是用户这一轮明确给的材料，
+    // 排在记忆/技能之前——用户点选的东西不该被召回的条目挤到后面。
+    systemPrompt: [base, rules, runtime, files, memory.section, skills.section].filter(Boolean).join(SECTION_SEPARATOR),
+    rulesSection: rules,
+    filesSection: files,
+    runtimeSection: runtime,
     recalled: memory.recalled,
     skills: skills.matches,
     recallTrace: memory.trace,

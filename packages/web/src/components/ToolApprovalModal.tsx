@@ -7,6 +7,7 @@ import {
   type PatchPreview,
 } from "../lib/fileEdit/patchPreview.js";
 import { canRememberCall, prefixesOfCall } from "../lib/fileEdit/remember.js";
+import { isFileWriteTool } from "../lib/fileEdit/ruleTargets.js";
 import { toolNameLabel } from "../lib/toolName.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Button } from "./ui/Button.js";
@@ -84,11 +85,12 @@ export function ToolApprovalModal({
     ? [...new Set(calls.flatMap((call) => prefixesOfCall(call)))]
     : [];
   /*
-   * 本批里有 file_patch 时不提供「本会话内允许此工具」：
-   * 那是**整个工具**的授权，而文件编辑只接受按目录前缀的授权（规格 §7）。
-   * 留着这个按钮就是「点了没反应」——比不显示更糟。
+   * 本批里有文件写工具（file_patch / file_write / file_edit）时不提供
+   * 「本会话内允许此工具」：那是**整个工具**的授权，而文件编辑只接受按目录前缀的
+   * 授权（规格 §7）。留着这个按钮就是「点了没反应」——比不显示更糟。
+   * 用 isFileWriteTool 而不是逐个工具名：新增写工具时不会漏掉这条红线。
    */
-  const hasPatch = calls.some((call) => call.name === "file_patch");
+  const hasPathWrite = calls.some((call) => isFileWriteTool(call.name));
 
   const toggle = (id: string) =>
     setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -153,7 +155,7 @@ export function ToolApprovalModal({
         <Button ref={denyRef} variant="ghost" onClick={denyAll}>
           全部拒绝
         </Button>
-        {!hasPatch && (
+        {!hasPathWrite && (
           <Button
             variant="ghost"
             disabled={checkedCount === 0}
@@ -199,6 +201,8 @@ export function ToolApprovalModal({
         )}
         {calls.length === 0 && <div className="text-ui-md text-muted">没有待确认的调用。</div>}
         {calls.map((call) => {
+          // file_patch 的补丁要读多份真实文件，走异步预览面板；
+          // file_write / file_edit 的参数里已带新内容/替换点，同步预览就够（不读盘）。
           const isPatch = call.name === "file_patch";
           const preview = isPatch ? null : buildChangePreview(call.name, call.argsJson);
           return (
@@ -306,7 +310,8 @@ export function ToolApprovalModal({
         {/*
           「记住本次选择」：
           - 普通工具按「工具 + 资源」记；
-          - file_patch / file_read 只能按**目录前缀**记（整工具放行是红线），
+          - 文件工具（file_patch / file_write / file_edit / file_read / file_glob / file_grep）
+            只能按**目录前缀**记（整工具放行是红线），
             且目标不在可写根内时**不显示**这个复选框——勾了也不会生效。
         */}
         {rememberable ? (
@@ -333,8 +338,9 @@ export function ToolApprovalModal({
           </label>
         ) : (
           <div className="mt-1 rounded-lg border border-line-soft bg-subtle-2 px-2.5 py-1.5 text-ui-xs text-muted">
-            这次改动无法按目录记住（目标不在可写根内），本次不会落任何授权规则。
-            想让某个目录以后都免问，请先到设置区「文件编辑」把它加成可写根。
+            这次改动无法按目录记住（目标不在已配置的可写根内），本次不会落任何授权规则。
+            「会话工作区」里的文件默认仍可读写；若想在这个目录以后都免问，请到设置区「文件编辑」
+            把它加成可写根。
           </div>
         )}
       </div>

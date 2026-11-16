@@ -1049,7 +1049,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(row);
   });
 
-  // d.147.4.91.11：左栏工作区（本机文件夹）。分组只存路径；d.153.4.96.11 起这个路径
+  // d.147.4.91.11：左栏工作区（本机文件夹）。分组只存路径；d.153.4.95.11 起这个路径
   // 在渲染层同时被当作该会话智能体的可写根（服务端仍只做分组，不做任何读写）。
   app.get("/api/workspaces", authOnly, (req, res) => {
     res.json(store.listWorkspaces(userId(req)));

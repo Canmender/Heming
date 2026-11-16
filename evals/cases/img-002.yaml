@@ -1,0 +1,25 @@
+id: img-002
+name: 伪装成 png 的文本不会被当成图片
+owner: heming
+tags: [image, security]
+setup:
+  fixture: img-002
+prompt: 看一下 shots/其实是文本.png 这张图。
+script:
+  - tool_calls:
+      - name: file_image
+        arguments:
+          path: shots/其实是文本.png
+  - text: 这个文件不是图片。
+graders:
+  - type: tool_called
+    tool: file_image
+    times: 1
+  - type: contains
+    value: 不是 PNG/JPEG/GIF/WebP 图片
+    in: tool_result
+  - type: contains
+    value: file_read
+    in: tool_result
+  - type: max_rounds
+    value: 3

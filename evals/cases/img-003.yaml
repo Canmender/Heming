@@ -1,0 +1,25 @@
+id: img-003
+name: 真的看得见图：读出图片的主色，而不是猜文件名
+owner: agent-runtime
+tags: [image, vision]
+setup:
+  fixture: img-003
+  roots:
+    - path: "."
+      mode: write
+      name: work
+prompt: 用 file_image 打开 shots/solid-red.png，然后只回答这张图的主色（一个词，不要解释）。
+script:
+  - tool_calls:
+      - name: file_image
+        arguments:
+          path: shots/solid-red.png
+  - text: 红色
+graders:
+  - type: tool_called
+    tool: file_image
+  - type: contains
+    value: 红
+    in: final
+  - type: max_rounds
+    value: 4

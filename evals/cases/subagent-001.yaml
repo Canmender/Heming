@@ -1,0 +1,36 @@
+id: subagent-001
+name: 只读子代理：自己读文件、只把结论带回主对话
+owner: eval
+tags:
+  - context
+  - subagent
+setup:
+  fixture: subagent-001
+prompt: |
+  用 agent_task 派一个只读子代理，读 docs 下的说明文件，用一句话概括它讲什么。
+subagent_script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - text: 结论：docs/a.md 讲的是安装步骤（下载、双击、选模型）。
+script:
+  - tool_calls:
+      - name: agent_task
+        arguments:
+          task: 读 docs 目录下的说明文件，用一句话概括它讲什么
+          max_rounds: 2
+  - text: 子代理读完了，结论见上。
+graders:
+  - type: tool_called
+    tool: agent_task
+    times: 1
+  - type: contains
+    in: tool_result
+    value: 安装步骤
+  - type: contains
+    value: 子代理
+  - type: min_rounds
+    value: 2
+  - type: max_rounds
+    value: 3

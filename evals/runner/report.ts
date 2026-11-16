@@ -18,6 +18,8 @@ export interface ReportCase {
   rounds: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   durationMs: number;
+  /** 天生慢的用例（故意等超时/等取消）：不参与 p95 延迟红线（d.167）。 */
+  slow?: boolean;
   failures: { grader: string; detail: string }[];
 }
 
@@ -32,6 +34,9 @@ export interface EvalReport {
     tokens_per_pass: number;
     cache_read_ratio: number;
     p95_ms: number;
+    /** p95 的样本量与被排除的 slow 用例数（可选，老基线没有）。 */
+    p95_samples?: number;
+    p95_excluded?: number;
   };
   cases: ReportCase[];
 }
@@ -73,6 +78,7 @@ export function buildReport(runs: CaseRunResult[], meta: { model: string; pnpm: 
     rounds: run.obs.rounds,
     tokens: run.obs.tokens,
     durationMs: run.obs.durationMs,
+    ...(run.case.slow ? { slow: true } : {}),
     failures: run.results.filter((r) => !r.ok).map((r) => ({ grader: r.grader.type, detail: r.detail })),
   }));
 
@@ -80,6 +86,8 @@ export function buildReport(runs: CaseRunResult[], meta: { model: string; pnpm: 
   const totals = cases.reduce((sum, c) => sum + c.tokens.input + c.tokens.output, 0);
   const cacheRead = cases.reduce((sum, c) => sum + c.tokens.cacheRead, 0);
   const input = cases.reduce((sum, c) => sum + c.tokens.input, 0);
+  const fast = cases.filter((c) => !c.slow);
+  const latencySamples = (fast.length > 0 ? fast : cases).map((c) => c.durationMs);
   return {
     model: meta.model,
     date: new Date().toISOString().slice(0, 10),
@@ -91,7 +99,12 @@ export function buildReport(runs: CaseRunResult[], meta: { model: string; pnpm: 
       // 分母为 0（全红）时记 0：不能因为除零把「一题都没过」写成「效率完美」。
       tokens_per_pass: passed === 0 ? 0 : Math.round(totals / passed),
       cache_read_ratio: input === 0 ? 0 : cacheRead / input,
-      p95_ms: Math.round(percentile(cases.map((c) => c.durationMs), 0.95)),
+      // 「天生慢」的用例（等超时/等取消）不进延迟样本：它们验证的是「会不会挂住」，
+      // 不是「整体快不快」。全体都慢时（比如全是 cmd-*）仍会算，不会变成空样本。
+      p95_ms: Math.round(percentile(latencySamples, 0.95)),
+      /** p95 实际基于多少条样本（排除了几条 slow 用例）。 */
+      p95_samples: latencySamples.length,
+      p95_excluded: cases.length - latencySamples.length,
     },
     cases,
   };

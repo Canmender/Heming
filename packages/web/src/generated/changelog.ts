@@ -12,6 +12,883 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.177.4.105.11",
+    "date": "2026-11-16",
+    "title": "用真模型跑了一遍：评测口径、DeepSeek V4 能力、读图证据",
+    "bullets": [
+      "连通性：`POST /v1/chat/completions` `deepseek-chat` → 200 / 762ms；服务端实际回 `deepseek-flash`。",
+      "确定性：`pnpm eval:agent` **38/38 全绿**（tokens/pass 2604、p95 84ms）。",
+      "真实模型 `deepseek-chat`：37 条 **17/37**（pass@1 45.9%），tokens/pass 18668，p95 5974ms。",
+      "真实模型 `deepseek-flash`：38 条 **15/38**（pass@1 39.5%），tokens/pass 24636，p95 8425ms。",
+      "真实模型下**真的跑通**的：`write-001/002`（新建含嵌套目录、覆盖）、`edit-003`（精确替换）、`search-001/002`（glob / grep）、`read-001`、`tool-001/003`、`cmd-001/002`、`skill-001`、`mcp-001`、`subagent-001`、`img-001`、**`img-003`（真实视觉模型看图答出主色）**。",
+      "真实模式下变红的集中在三类（都不改产品结论）：①要求恰好调 N 次；②要求 `hitl` 真的触发拒绝，而真模型**根本没发起越界调用**（更安全，只是没走到闸门）；③`contains` 措辞过严（模型复述了同义表达，如把「工具轮上限 12」说成「工具轮上限是 12（`MAX_TOOL_ROUNDS`）」）。",
+      "`vitest run src/lib/modelCaps.test.ts` **17 例全绿**（新增 DeepSeek V4 能力与前缀优先级两条）。",
+      "`pnpm eval:agent` **38/38**；`pnpm eval:agent -- --real --model deepseek-flash --filter img-003` **1/1**（真模型看图答红）。",
+      "`node scripts/version.mjs`：d.177.4.105.11 / semver 177.4.105 / Windows 177.4.105.11。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "前面 24 版的能力验证都建立在**确定性假网关**上：脚本说「读两份文件」，模型就只读两份。它证明的是「工具链能跑」，不能证明「真模型拿着真实系统提示词、面对真实 API 时会怎么用」。用户给了 DeepSeek Key 之后，本轮做的是**真实环境测试**，结果是三类真问题：",
+      "1. **真实模式下的回合数恒为 0**：`evals/runner/run.ts` 的 `rounds` 取自 `scripted.rounds()`（假网关被调用次数）。`--real` 时用的是真实 `streamChat`，假网关一次都没被调用，于是 `rounds = 0`——`min_rounds` / `max_rounds` 这两个 grader 在真实模式下**必然误判**（`long-001` 报「回合数 0 少于下限 14」，而它其实跑了 14 次真实请求）。2. **「工具恰好调用 N 次」在真实模式下测的是闲笔**：真实模型读一份还是三份文件、先 `file_edit` 还是先 `file_patch`，是**判断**不是脚本。按「恰好」判分，`read-002`（要求读两份）、`todo-001`（要求 `todo_write` 恰好一次）这类用例会把「模型做得更好」判成红。3. **DeepSeek V4 的能力没进静态表**：`/v1/models` 实测 `deepseek-flash` 是 1,048,576 上下文、393,216 输出、**支持图片输入**（`deepseek-v4-pro` 同窗口但纯文本）。而 `modelCaps.ts` 里只有 `deepseek-chat`（64K / 纯文本），`deepseek-flash` 走 `deepseek` 前缀规则后同样被当成 64K 纯文本模型——**宣称不能看图**，`capabilityNotice` 会把 `file_image` 取回来的图直接丢掉；`deepseek-v4-pro` 更惨，直接落进 8K 保守缺省。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `evals/runner/run.ts` | 真实模式用 `countingStreamChat` 数真实请求次数，`rounds` 取它（假网关模式仍是 `scripted.rounds()`）；观测里带 `real: true` || `evals/runner/types.ts` | `CaseObservation.real?: boolean`（grader 据此选口径） || `evals/runner/graders.ts` | `tool_called` 的 `times`：确定性模式仍「恰好」，真实模式放宽为「至少」；其余 grader（`hitl` / `no_side_effect` / `file_assert` / `tool_sequence`）不放松 || `packages/web/src/lib/modelCaps.ts` | 新增 `deepseek-flash`（1M / 393K / 视觉 / 工具 / 思考）与 `deepseek-v4-pro`（1M / 393K / 纯文本），并给它们各加前缀规则且排在泛化 `deepseek` 之前 || `evals/cases/img-003.yaml` + `evals/fixtures/img-003/shots/solid-red.png` | 新增**真实视觉**用例：32×32 纯红 PNG（99 字节，zlib 直接生成，不引依赖），要求 `file_image` 打开后回答主色 || `evals/README.md` | 38 条用例；新增「真实模型模式」小节，写明三处口径差异与「其余 grader 不放松」的理由；`tool_called` 表行同步 |",
+      "实测数据（同一 Key，2026-11-16）",
+      "验证",
+      "未做",
+      "1. 真实模式的**语义判分**（如 `contains` 支持同义词、`hitl` 支持「模型主动拒绝」也算通过）——本轮只做了 `tool_called` 与回合数两处，其余等真实用例集攒够样本再定。2. `--real` 的基线：真实模型每次输出有随机性，冻结基线需要多次重复取样，本轮只记录数字，不写 `evals/baselines/`。3. 真机 Electron 里手点「停止」与真实 HITL 弹窗点击仍未覆盖（自动化基建缺网关注入点）。"
+    ]
+  },
+  {
+    "version": "d.176.4.105.11",
+    "date": "2026-11-16",
+    "title": "预算到顶也给一次点击的「继续」",
+    "bullets": [
+      "**入口相同、原因不同**：用户要的是一键接着做，不需要懂「轮次」和「token 预算」的区别；但把原因写对很重要——说「已用满 36 轮」而实际是预算满，等于让用户误以为模型循环了 36 次。",
+      "预算收口时**不**用 `RoundLimitHint` 的 36 轮文案：那是轮次分支的事实，串到预算分支就是假信息。",
+      "`agentStream.tools.test.ts` 的预算收口用例补断言：`settled.budgetStop === true` 且 `maxRounds` 为 undefined。",
+      "`RoundLimitHint.test.tsx` 新增 1 例：`reason=\"budget\"` 说「内容太多 / 预算」、不含「36 轮」、仍有「继续」。",
+      "`ChatPage.test.tsx` 新增 I3j：跑一轮两次 `file_read`（各 13000 字，累计超 12000 的回合预算）→ 出现「工具返回的内容太多」提示 + 「继续」按钮。",
+      "定向 2 files / 40 passed；`tsc --noEmit` 通过。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.167.4.103 修了「轮次到顶时气泡看起来答完了、要靠用户自己打『继续』」——但那只覆盖了**轮次**这一种收口。编排层还有第二种截断：工具结果累计超过单轮上下文预算（`planTurnBudget` 的 `turn` 闸门）。它同样会让答案停在半路，同样在末尾写一句「回复『继续』可以接着做」，而界面**完全不知道**这次为什么停——因为 `RunSettled.maxRounds` 只在轮次分支置位。",
+      "结果就是：同一类「话没说完」，一种有按钮、一种只能自己打字。而预算收口往往发生在翻了很多文件、读了大输出之后——正是用户最不想自己接话的时候。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | 新增 `budgetHit`；预算分支置位；`RunSettled` 与运行信号都加 `budgetStop?: boolean`；成功收口时带出 || `packages/web/src/components/RoundLimitHint.tsx` | 新增 `ContinueReason = \"rounds\" \\| \"budget\"` 与 `reason` prop；预算档文案改成「工具返回的内容太多，先到了上下文预算的上限」，不再说「已用满 36 轮」 || `packages/web/src/components/ChatPage.tsx` | `continueReason` state；`onRunSettled` 里先看 `maxRounds`、再看 `budgetStop` 决定原因（两个都给同一个「继续」入口） |",
+      "口径",
+      "验证",
+      "未做",
+      "1. 预算收口没有「自动接着做」（轮次那种按清单续跑），因为换一段不改变「这一轮上下文已经满了」这个事实。2. 继续之后如果立刻又满，会再次提示——没有「同一会话连续 N 次后折叠」的策略。3. 「继续」仍是重发一轮（走 `retryStream`），不是从截断处续接 token。"
+    ]
+  },
+  {
+    "version": "d.176.4.104.11",
+    "date": "2026-11-16",
+    "title": "本轮改动可以一键撤回",
+    "bullets": [
+      "`TurnUndoBar.test.tsx` 5 例（文件名而非整条路径、超过三个只报数量、两个按钮各调什么、撤回中禁用、空数组不渲染）。",
+      "`agentStream.tools.test.ts` 3 例：`writes` 去重收集、失败结果不计、没写文件的回合不带 `writes`。",
+      "`toolOps.test.ts` 3 例：write/edit 成功带绝对路径、失败没有 `writes`。",
+      "`ChatPage.test.tsx` 新增 I3i：真跑一轮 `file_write`（真工具桥 + 假桌面桥）→ 出现撤回条 → 点「撤回本轮改动」→ `file:undo` 收到 `D:/评测区/notes/新.md`、撤回条消失。",
+      "定向 16 files / 542 passed；`tsc --noEmit` 通过。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.170 已经给了模型 `file_undo`，d.171 又在设置里加了「最近改动（可回滚）」列表——但两处都要求用户**先意识到要撤、再去找入口、再翻路径**。真正会出事的时刻是「它刚写完，我一眼看出不对」：那一步应当就在眼前，而不是让人离开对话去设置里翻。",
+      "这一版把「撤回」放到刚出结果的位置：这一轮只要真的写了文件，输入区上方就出现一条「本轮改了 a.ts、说明.md——改错了可以撤回」，点一次逐个文件走 `file:undo`，回到改动前的样子。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | `ToolBridge.execute` 结果类型加 `writes?: string[]`；`RunSettled` 加 `writes`；run 作用域用 `Set` 收「本回合真正落盘的文件」，失败结果不计，收口时带出去 || `packages/web/src/lib/fileEdit/toolOps.ts` | `runWrite` / `runEdit` / `runUndo` 成功时回 `writes: [绝对路径]` || `packages/web/src/lib/fileEdit/tools.ts` | `runPatch` 成功时回 `writes`＝补丁里每个目标（含删除：撤销会把旧内容写回来） || `packages/web/src/components/TurnUndoBar.tsx` | 新组件：说清改了哪几个、两个按钮（保留／撤回本轮改动）、撤回中禁用、空数组不渲染 || `packages/web/src/components/ChatPage.tsx` | `turnWrites` 记账（`onRunSettled` 收口时取 `result.writes`）、`undoTurnWrites()` 逐个撤回并汇报成功/失败数、渲染在计划就绪条之前且计划模式下不显示 |",
+      "两条实现口径",
+      "1. **路径由工具桥显式返回，不从文案反推。** 结果文案为了可读性随时会改（「已覆盖」/「已创建」/「替换 1 处」），从文案里抠路径，一次改动就会变成「撤错文件」。2. **失败必须说清。** 一份备份只能用一次，所以逐个撤回时可能部分成功：提示写成「已撤回 2 个文件；新建.md 没有可用的旧版本（可能之前已撤销过，或这轮是新建）」，而不是笼统的「已撤回」。",
+      "验证",
+      "未做",
+      "1. 撤回条不记忆：切走会话再回来就没了（它描述的是「刚刚这一轮」，不做持久化）。2. 没有「重做」：撤销是单向的，一份备份只能用一次。3. 只覆盖文件写入类工具；命令类（`run_command`）改了工作区里的东西无法撤回——那是 shell 的账，不在文件备份范围内。"
+    ]
+  },
+  {
+    "version": "d.175.4.104.11",
+    "date": "2026-11-16",
+    "title": "引用工作区文件：把「就这几个文件」变成点一下",
+    "bullets": [
+      "`fileRefs.test.ts` **10 例**（零注入三种、正常读到、最多 3 个、单文件截断、根外不读盘、空文件按读不到、总量封顶、桥抛错静默）、`FileRefPicker.test.tsx` **6 例**、",
+      "`tsc -p tsconfig.json --noEmit` 通过；定向四套件 **194 passed**；web 全量见本轮汇报。",
+      "既有 `ChatPage.test.tsx` 的菜单断言补上新菜单项（顺序：表情 / 图片 / 文件 / 工作区文件 / 语音）。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "到 d.174，模型已经会自己 `file_read`，也知道工作区在哪。但用户说「就针对这几个文件回答」时，能做的只有**在对话里描述文件名**——模型再猜一次路径，猜错就是一轮工具调用，猜对也要多花一轮；猜错两次还会开始编内容。Claude Code / opencode 都有 `@文件`：用户点选，内容随这一轮一起给模型。",
+      "是什么",
+      "**输入区「＋更多操作」菜单新增「工作区文件（引用内容，不上传）」**：点开是工作区文件对话框（搜索 + 勾选，最多 3 个），选中的文件在输入区上方变成可逐个删除的引用条。发送时读取内容，注入系统提示词的新段 `## 本轮引用的文件`（排在「运行环境」之后、「记忆」之前），并明说「不用再 `file_read` 取一遍」。回合结束自动清空——引用是这一轮的输入，不是长期订阅。",
+      "四条口径（都是「不做错」比「做得多」更重要）",
+      "1. **引用不等于授权**：根外路径不读盘，只进「没读到」清单——不能因为用户点了一下就越权。2. **有上限**：单文件 6000 字、合计 12000 字、最多 3 个。超长截断并写明「只给了前 N 字，需要后面的用 `file_read` 读」——静默截断会让模型以为已经看全。3. **读不到要说出来**：文件被删、是二进制、空文件，都在段落里留一行「这几个没读到，不要凭文件名猜内容」。沉默会让模型凭文件名编内容。4. **失败不阻断**：桥不在（浏览器端）、一个都读不到 → 这一段为空，这一轮照常发。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/fileRefs.ts`（新） | `collectFileRefs`：按根定位、读内容、逐条与总量上限、截断说明、没读到清单拼段 || `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.files` / `BuiltContext.filesSection`；顺序 `[base, rules, runtime, files, memory, skills]`；零注入时 `systemPrompt` 严格等于 `basePrompt`（旧契约不破） || `packages/web/src/components/FileRefPicker.tsx`（新） | 对话框：搜索、勾选、上限 3、确定/取消；只列路径不读内容；列目录失败给 `role=\"alert\"`，没有桥时说明不可用 || `packages/web/src/components/ChatPage.tsx` | `fileRefs` state + `fileRefsRef`（`buildSystemPrompt` 是 `useCallback` 闭包，点选后立刻发送时 state 还没落）；菜单项；引用条（可删）；`buildSystemPrompt` 里 `await collectFileRefs(...)` 并传 `files`；`onRunSettled` 清空 |",
+      "验证`context.test.ts` +3 例（缺省不注入、排在运行环境之后、空白等同不传）。",
+      "未做",
+      "1. 输入框里直接打 `@` 触发——和鸣的 mention 机制目前服务智能体选择，再塞一套键盘弹层会和它抢按键、抢候选列表，而且 IME 组合态下容易吞键。对话框是确定性的，先把「能点」做出来。2. 引用的目录（整目录递归）——现在只能选文件；目录级引用要先定上限与展示口径。3. 引用条不落库：刷新页面后这一轮的引用就没了（内容已经进过提示词，重放不需要它）。"
+    ]
+  },
+  {
+    "version": "d.174.4.104.11",
+    "date": "2026-11-16",
+    "title": "智能体会先读这个仓库的规矩（AGENTS.md）",
+    "bullets": [
+      "命令用 `pnpm` 还是 `npm`；",
+      "改完该跑哪一套验证（`typecheck`？全量测试？`design:audit`？）；",
+      "哪些文件是生成的、不许手改；",
+      "提交前要不要 bump 版本。",
+      "新 `projectRules.test.ts` **14 例**：无工作区 / 无桥 / 无文件 → 零注入；读到 `AGENTS.md` → 段里有标题、文件名、原文；来源与「用户优先」口径；BOM 与 CRLF 归一化；空文件不占预算；超长截断并写明怎么继续读；按优先级读且最多两个、剩下的点名不静默丢；总量封顶；单文件读失败不连坐；桥抛错静默跳过；工作区是根下一层时路径按根算；工作区不在根内不读盘。",
+      "`context.test.ts` +**4 例**：缺省不注入且 `systemPrompt === basePrompt`；排在人设之后、运行环境之前；只有约定段也注入；空白等同不传。",
+      "定向：`projectRules.test.ts` 14/14、`context.test.ts` 29/29、`pnpm --filter @heming/web typecheck` 通过；web 全量见 HANDOFF 状态表。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "到 d.173，智能体已经知道自己在桌面端、工作区在哪、这一轮给了哪些工具。但它**不知道这个仓库自己的规矩**：",
+      "DSH / Claude Code / opencode 都会在工作区里读一份约定文件（`AGENTS.md` / `CLAUDE.md`）。这是「像团队里的人」和「像通用聊天机器人」的分界线之一——同一个问题，前者会先 `pnpm --filter` 再动手，后者会 `npm install` 然后问你为什么报错。",
+      "是什么",
+      "每次生成前，从**本会话工作区**（不是整个磁盘）里找这几个文件，读到就接在人设之后、运行环境之前：",
+      "| 顺序 | 文件 | 说明 || --- | --- | --- || 1 | `AGENTS.md` | 通用约定（DSH / Claude Code 同名，写一份两边都认） || 2 | `HEMING.md` | 和鸣专属约定 || 3 | `.heming/AGENTS.md` | 想藏在隐藏目录里时用 || 4 | `.heming/rules.md` | 同上，长文用 |",
+      "最多读 **2 个**、单文件 **4000 字**、合计 **6000 字**——约定是给人看的，可能几千行，全塞进提示词会挤掉记忆与历史。",
+      "四条口径（都写进注释了）",
+      "1. **只认固定文件名，不扫全仓**：约定必须是显式的、有主的，否则用户不知道模型读了什么。不做 glob 搜索。2. **只读工作区所在目录，不往上层找**：上层属于别人的工作区，读它等于把别的项目的规矩套到这一轮上。工作区是根目录本身、还是根下面的一层，都能算对相对路径。3. **截断要说话**：单文件超长只读开头，并明写「只读了前 4000 字，需要后面的用 `file_read` 读 `<rel>`」；读满两个之后剩下的文件名也列出来，不静默丢。4. **失败静默**：桥不存在（浏览器端）、文件不存在、不是文本、读盘抛错——都当「这一轮没有约定」，不阻断生成、不在提示词里留半句残话。",
+      "冲突口径写在段内正文里：**约定是仓库的规矩，用户这一轮明确要求的优先**，遇到冲突要在回答里点出来。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/projectRules.ts`（新） | `PROJECT_RULE_FILES` / `MAX_PROJECT_RULE_FILES=2` / `MAX_PROJECT_RULE_CHARS=4000` / `MAX_PROJECT_RULES_TOTAL_CHARS=6000` / `PROJECT_RULES_HEADING` / `normalizeRuleText` / `collectProjectRules({bridge, roots, workspace})` || `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.rules`、`BuiltContext.rulesSection`；拼接顺序 `[base, rules, runtime, memory, skills]`；零注入时 `systemPrompt` 仍严格等于 `basePrompt` || `packages/web/src/components/ChatPage.tsx` | `buildSystemPrompt` 里先 `collectProjectRules({ bridge: getFileBridge(), roots: fileRootsFor(workspace), workspace })`，失败只丢这一段 |",
+      "验证",
+      "未做",
+      "1. 不读**上层目录**的 `AGENTS.md`（比如用户主目录里的全局约定），也不读跨项目的组织规范。2. 没有界面入口：用户在设置里看不到「这一轮读了哪个约定文件」，只能从回答里推断。3. 约定文件改了要下一轮才生效（每次生成前现读，但不监听文件变化）。"
+    ]
+  },
+  {
+    "version": "d.173.4.104.11",
+    "date": "2026-11-16",
+    "title": "计划就绪后，一键「接受并执行」",
+    "bullets": [
+      "计划模式下这一轮收口后，输入区上方出现一条提示：「计划模式：这一轮只给了方案，文件还没有改动。」后面两个按钮——",
+      "— **接受计划，开始执行**：一次点击做两件事（关掉计划模式 + 发一条「照上面的计划执行」的用户消息）；",
+      "— **继续讨论**：只收起提示，计划模式保持开启，用户接着说。",
+      "提示只在「计划模式 + 这一轮刚收口」时出现；新一轮开始、切会话、点执行都会清掉，不会挂着一条过期提示。",
+      "`packages/web/src/components/PlanReadyBar.test.tsx` **4 例**：文案说清「只给了方案、文件没动」、点执行只回调一次、有「继续讨论」才渲染它且点了不执行、是 `status` 不是 `alert`。",
+      "`packages/web/src/lib/agentRuntime/planMode.test.ts` +1 例（执行口令要求照计划/更新清单/先验证）；`ChatPage.test.tsx` +1 例（I3h：开计划模式 → 收口后出现提示 → 点执行 → 计划模式关掉、存储清掉、发出 `PLAN_EXECUTE_PROMPT` 这条用户消息、下一轮提示词不含 `## 计划模式`、提示消失）。",
+      "定向：`planMode.test.ts` + `PlanReadyBar.test.tsx` + `ChatPage.test.tsx` **163 passed**；`pnpm --filter @heming/web typecheck` 通过；web 全量见 HANDOFF 状态表。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.172 加了计划模式：这一轮只给只读工具，模型先读清楚、给一份改法计划。但计划给完之后，用户要做两件事才能让它动手——**先找到「计划」按钮关掉，再打字说「按这个来」**。",
+      "两处都容易漏，而漏掉的表现恰好是「它怎么不动手」：用户会以为是模型不会干活，而不是「开关还开着」。这跟 d.167 的轮次上限是同一类问题：能力已经在了，用户发现不了、也接不上。",
+      "是什么",
+      "三个实现上的坑（都写进注释了）",
+      "1. **顺序**：必须先把「计划模式关闭」落下去（state + 存储 + 清桥缓存），再发消息。发送路径会重建工具桥和系统提示词，晚一步就会带着只读桥跑这一轮——界面关了、模型以为还只读。2. **闭包陈旧**：`buildToolsFor` 与 `buildSystemPrompt` 原来读的是渲染闭包里的 `planMode` state。`executePlan` 在同一个 tick 里先写存储再发消息，state 还没落，读闭包会拿到上一轮的 `true`，于是这一轮既没有写工具、提示词里又写着「本轮只读」。改成以 `loadPlanMode(convId)`（存储）为准——**单一事实来源是存储，state 只负责让按钮变色**。3. **不重发原提问**：执行口令只说「照这份计划做」，不把用户原问题再发一遍（同 `retryStream` 的理由：重发会让模型看到同一问题被问两次、已执行的工具再跑一遍）。计划与被读过的文件都在历史里，它知道从哪接。",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/planMode.ts` | 新增 `PLAN_EXECUTE_PROMPT`（照计划执行 / 每步更新清单 / 改完先验证再汇报） || `packages/web/src/components/PlanReadyBar.tsx`（新） | `role=\"status\" aria-live=\"polite\"` 的提示条；「接受计划，开始执行」+ 可选「继续讨论」 || `packages/web/src/components/ChatPage.tsx` | `planReadyStreamId` state；`onRunSettled` 在计划模式下记账；`onStart` / 切会话清空；`executePlan()`（关开关 + 延后一帧发口令，避开同一 tick 的提示词陈旧）；渲染在 `TodoPanel` 之后、轮次提示之前 || `packages/web/src/components/ChatPage.tsx`（修 d.172 遗留） | 计划按钮与提示条原来用 `bg-accent-soft` / `text-accent-ink` / `border-accent-line`，这三个类**在 Tailwind 配置里不存在**（只是没报错，即「按下没变色」）。改成真实 token：`bg-subtle-3`、`text-[var(--heming-accent)]`、`border-line` + `bg-subtle-2` |",
+      "验证",
+      "未做",
+      "1. 没有「计划 → 执行后自动跑验证」的闭环：执行完仍然靠模型自己按 d.156 人设里的「改完先验证」去做，没有编排层强制的验证步骤。2. 计划模式下 `run_command` 仍被摘（risk=danger），「先跑一次测试看看现状」还是做不到。3. 没有跨会话记忆：每次新对话默认关闭计划模式。"
+    ]
+  },
+  {
+    "version": "d.172.4.104.11",
+    "date": "2026-11-16",
+    "title": "计划模式：先说怎么改，再问要不要动手",
+    "bullets": [
+      "**一句话**：输入区多一个「计划」按钮。开着的时候，这一轮工具清单里**只剩只读工具**，系统提示词会写明「本轮只读、写工具是用户选的」，模型照常读文件、搜索、看图，最后给一份改法计划；用户看完再关掉按钮动手。",
+      "**不是安全边界**：真正拦住写盘的是可写根和 HITL 确认，计划模式只是省掉「改错了再撤」的成本。所以它读坏了存储（坏 JSON）就当没开过，不需要 fail-closed。",
+      "**按风险声明过滤，不按工具名**：白名单（`file_read`/`file_glob`/`file_grep`）会随版本过时——d.153 加 `file_write`、d.168 加 `file_image`、d.170 加 `file_undo`，每次都要改名单。这里改成看 `meta(name).risk`：只有 `read` 允许，`write`/`danger` 摘掉。",
+      "**风险不明的一律不给**：MCP 等第三方工具没有可信风险声明，计划模式下宁可少给——用户开这一档要的是「别动」，不是「尽量多给」。",
+      "**执行层也拦一次**：模型可能从历史消息里记得旧工具名（上一轮的工具清单、或它自己写的注释），光从 `tools` 数组里摘掉不够；`execute` 对非只读调用直接回 `plan-mode` 错误码并附一句「先给方案，用户确认后再改」，不落到真实工具。",
+      "`src/lib/agentRuntime/planMode.test.ts` **12 例**：默认关闭、开关读回、按会话隔离、无会话 id 不读不写、坏 JSON 当没开过、50 上限淘汰最旧、风险判定、只有 read 允许（MCP 不明一律不许）、工具清单只留只读、执行层拦截且不落真实桥、只读透传 `signal`、`meta` 透传。",
+      "`src/lib/agentRuntime/runtimePrompt.test.ts` +2 例（开了才有这一段、关了/没传不含）；`src/lib/agentRuntime` 全量 **96 passed**。",
+      "`src/components/ChatPage.test.tsx` +2 例（默认关闭时提示词不含；开启后 `aria-pressed=true`、存储为 true、提示词含 `## 计划模式` 与「不是权限坏了，是用户选的」；关闭后存储与 aria 复位）→ **145 passed**。",
+      "`pnpm --filter @heming/web typecheck` 通过；web 全量 vitest 结果见 HANDOFF 状态表。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "到 d.171，内置智能体已经能读写文件、跑命令、看图片、派只读子代理、撤回改动。但它没有「**先别动手，给我看方案**」这一档：用户说「先看看要怎么改」，它读两眼就开始写——写错再撤回，成本比先说清楚高得多。opencode 的 plan mode、Claude Code 的 plan 模式都是同一件事：把「读」和「写」在时间上分开，让用户在**动磁盘之前**看一次计划。",
+      "和鸣缺这一档，直接后果是：用户必须在提示词里反复叮嘱「别改」，而模型一旦忘了，文件已经改了。",
+      "是什么（口径：产品意图，不是安全边界）",
+      "改了什么",
+      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/planMode.ts`（新） | `PLAN_MODE_KEY` / `PLAN_MODE_MAX_ROOMS=50` / `PLAN_MODE_BLOCK_TEXT`；`loadPlanMode` / `savePlanMode` / `resetPlanMode`；`isWriteRisk`（write、danger）；`planModeAllows`（只认 `risk === \"read\"`）；`withPlanMode(bridge)`（过滤 `tools`、拦 `execute`、`meta` 原样透传） || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | `RuntimeSectionInput.planMode`；在工具清单之后、长任务之前插入 `## 计划模式（本轮只读，不改东西）` 两行——**必须写进提示词**，否则模型只看到工具变少，会以为「权限没配好」而开始解释限制，而不是干活 || `packages/web/src/components/ChatPage.tsx` | `planMode` state（按会话读）、`buildToolsFor` 外面包 `withPlanMode`、运行环境段带上 `planMode`、切会话重置、`togglePlanMode()`（改 state + 落存储 + 清桥缓存三步）、输入区「◉/○ 计划」按钮（`aria-pressed` + `title`，颜色不是唯一信号） |",
+      "存储为什么用单调时间戳",
+      "`PLAN_MODE_MAX_ROOMS=50` 靠 `at` 排序淘汰最旧的。第一版用裸 `Date.now()`，测试里同毫秒连开 55 个会话：所有 `at` 相等 → `sort` 的稳定性把「插入顺序」当结论 → **淘汰的是最新的、留下的是最旧的**（刚开的那个重启后就没了）。改成模块级 `stamp()`（`Math.max(Date.now(), lastStamp + 1)`）保证严格递增。同一教训在 d.155 的任务清单存储里已经踩过一次。",
+      "验证",
+      "未做",
+      "1. 计划模式只在当前会话生效，没有「跨会话记住上次的选择」——每次新对话默认关闭。2. 没有「接受计划、一键转执行」的按钮：用户要自己关掉开关再让它动手，比 opencode 少一步。3. 计划模式下仍然允许 `run_command`？**不允许**（risk=danger 被摘），所以「先跑一次测试看看现状」在计划模式下做不到——下一版可以考虑给只读命令一条白名单，但需要单独的确认口径。"
+    ]
+  },
+  {
+    "version": "d.171.4.104.11",
+    "date": "2026-11-16",
+    "title": "connect-src / img-src：页面「看起来正常」的失败形态也进冒烟",
+    "bullets": [
+      "`script-src` 被挡 → **白屏**，一眼就知道坏了；",
+      "`connect-src` 被挡 → 页面照常渲染，只是所有请求失败，用户以为「后端挂了」；",
+      "`img-src` 被挡 → 页面照常渲染，只是图空着，用户以为「图加载慢」。",
+      "`packages/desktop/smoke/main.js` 新增 `probeSubresources(webContents)`，在真实 `app://heming/` 页面（enforce 档 CSP）里：",
+      "— `fetch` + `XMLHttpRequest` 打 `http://blocked.invalid/api` → 必须被拦；",
+      "— `new Image()` 加载 `https://blocked.invalid/x.png` → 必须失败（`naturalWidth === 0`）；",
+      "— 对照组：`data:` 图片必须能加载——证明 `img-src` 不是把所有图片都挡了（否则「图片全挂」会被误当成策略正确）。",
+      "断言：两条违例都要真的进 `csp-report.log`（`directive=connect-src` / `directive=img-src`），且只写元数据、不回显页面内容。",
+      "新增 `waitForText(file, pattern, timeout)`：`waitForFile` 只要文件非空就返回，会读到上一次的旧内容——这条是实测踩出来的（connect 那条一直「没出现」，其实是被旧行骗了）。",
+      "`smoke-script.test.js` 加第 11 条不变量：冒烟必须跑子资源探针、必须用 http 非回环地址造 connect 违例、必须有 `data:` 对照。",
+      "`pnpm smoke:desktop` **42/42（跳过 0）**（上一版 35/35，+7 项）。",
+      "desktop 全量 **958 passed / 0 fail**（1 skip：环境不允许建软链）。",
+      "版本 `d.171.4.103.11 → d.171.4.104.11`（fix）。"
+    ],
+    "paragraphs": [
+      "上一版冒烟把 CSP 的两种档位都真机跑了一遍，但只造了 `script-src` 的违例（内联脚本），而 CSP 里最容易把人骗过去的是另外两条：",
+      "这两种「看起来正常」的故障，没有任何单测能覆盖——它取决于真实 Chromium 有没有发出违例、主进程有没有解析、日志有没有落盘。",
+      "这轮做了什么",
+      "一个查出来的事实（写进注释了）",
+      "`connect-src` 里 `https:` / `wss:` 是**故意全放行**的（用户自建 https 代理、MCP 网关、自托管模型都要用），所以「第三方 https 请求」本来就不该被拦。能造出 `connect-src` 违例的只有 **http 的非回环地址**——这正是这条策略真正的边界，冒烟用 `http://blocked.invalid/api` 探它，而不是想当然地用 https。",
+      "验证",
+      "未做",
+      "1. 只造了 `img-src` / `connect-src` 两类违例；`style-src`、`font-src`、`worker-src` 仍无探针。2. `connect-src` 只验了「该拦的拦住了」，没验「该放的能连上」（真实 API 域需要网络，冒烟不能依赖外网）。3. 违例上报仍只走本机日志，没有上报端点（离线优先产品，暂不需要）。"
+    ]
+  },
+  {
+    "version": "d.171.4.103.11",
+    "date": "2026-11-16",
+    "title": "最近改动列表：能撤回，还要能看见",
+    "bullets": [
+      "新 IPC `file:backups`（`file-fs.js` 的 `listBackups`）：读 `index.json`，每个被改过的文件只取**最新一份**备份，按时间倒序、最多 50 条。",
+      "**只列可写根内的文件**：列表里的每一行都必须真的能点「回滚」，列出只读目录是骗人（点了必失败）。这是「能不能列」和「能不能做」必须同源的又一次应用。",
+      "只读、不排 IO 队列（它不写盘）；`isTrustedSender` 照旧 fail-closed。",
+      "备份条目补存 `path`（原始绝对路径）：索引的 key 是小写归一化的，不能拿来当界面展示的路径。",
+      "新建 `packages/web/src/components/RollbackList.tsx`，挂在 `FileEditCard` 里：",
+      "— 每行「根内相对路径 + 时间 + 大小 + 回滚」；回滚走同一个 `file:undo`，成功后重新拉列表——**那份备份只能用一次，点完那行就消失**，界面上不会留一个点了没反应的行。",
+      "— 空态「还没有可回滚的改动」，不为空框找文案；读取中「正在读取…」。",
+      "— 失败如实显示（`no-backup` 说明备份已用掉），不假装成功；成功后 `role=\"status\"` 报「已把 X 回滚到 …时 的版本」。",
+      "**老安装包不渲染这块**：桥没有 `backups` 就整块 `return null`，而不是列出点不动的行（与 `file_image`/`file_glob` 的降级口径一致）。",
+      "无障碍与门槛：`<section aria-labelledby>`、按钮带 `aria-label`（含文件名，避免一屏「回滚×5」）、`design:audit` 四档全过。",
+      "冒烟新增两项（`packages/desktop/smoke/main.js`）：覆盖前 `files.backups({roots})` 能看到刚写的文件 → `files.undo` → 再列一次，那条必须消失。`pnpm smoke:desktop` **35/35（跳过 0）**。",
+      "`smoke-script.test.js` 加第 10 条不变量：冒烟里必须调过 `files.backups(`、必须有 `listBefore`/`listAfter`——否则「列表能撤回」只存在于代码里。",
+      "desktop 全量 **957 passed / 0 fail**（1 skip：环境不允许建软链）；`file-fs.test.js` 84 例（+3：只列写根内最新一份且按时间倒序、无备份目录/无可写根回空列表、IPC 三分支）；`preload.test.js` 39 例。",
+      "web 全量 **332 files / 4947 passed**（+`RollbackList.test.tsx` 5 例：老桥不渲染、相对路径与时间/大小、点回滚调 `file:undo` 后行消失、失败显示错误、空态）。",
+      "版本 `d.170.4.103.11 → d.171.4.103.11`（feature）。"
+    ],
+    "paragraphs": [
+      "上一版给智能体加了 `file_undo`。但它只活在工具清单里——**只有模型会调**。用户看到文件被改坏了，除了对智能体说「把那个文件退回去」再没有别的入口；一个能力只有用户能直接点，才算真的交付。这一版把它变成设置区里的一张列表。",
+      "列表从哪来：主进程的备份索引",
+      "界面：设置 → 文件编辑 → 最近改动（可回滚）",
+      "真机验证",
+      "验证",
+      "未做",
+      "1. 列表只列每个文件的最新一份；想看更早的版本要连续回滚（不是版本浏览器）。2. 没有「全部撤销」批量入口：批量撤销一旦半途失败，用户很难判断当前是哪个状态。3. `run_command` 直接改文件（如 `git checkout`）仍不进备份，所以也不会出现在这个列表里。"
+    ]
+  },
+  {
+    "version": "d.170.4.103.11",
+    "date": "2026-11-16",
+    "title": "改错了能撤回：`file_undo`",
+    "bullets": [
+      "**写前备份**：`packages/desktop/file-fs.js` 的 `writeBatch` 在 `rename`（或 `unlink`）**之前**，把将被替换/删除的旧内容按原始字节存进 `userData/backups`，并用 `index.json` 记「路径 → 备份文件 + 时间 + 字节数」。为什么是主进程：渲染层只拿得到「写完的结果」，旧内容在 rename 那一刻就没了；为什么是原始字节而不是 diff：回滚要一字不差（包括换行符、BOM），存文本再拼回去会因平台换行差异把文件改坏。",
+      "**保留上限**：每个文件最多 `MAX_BACKUPS_PER_PATH = 10` 份、全局最多 `MAX_BACKUPS_TOTAL = 200` 份，超出按时间从旧到新删。备份是常驻文件，不设上限就是悄悄吃几百 MB。",
+      "**备份失败不阻塞写入**：备份是额外的安全网，不能因为磁盘配额满了就让用户改不了文件（`createBackup` 失败只让本次没有备份，写入照常）。",
+      "**新 IPC `file:undo`**：与 `file:write` 同一条串行 IO 队列；同样 `isTrustedSender` fail-closed；同样过写根 / 根内 / 软链祖先 / Windows 保留名四道闸（回滚也是写，不因为「是恢复」就绕过）。",
+      "**一份备份只能用一次**：写回后该条记录被消费，再撤销回 `no-backup`。保留下来就成了「撤销↔重做」的开关，模型连点两次会来回横跳，用户完全看不出当前是哪个版本。",
+      "新工具 `file_undo{path, root}`：为什么是写类工具（`FILE_WRITE_TOOLS` 第 4 个）——它会把文件内容换成旧版本，不能当只读放行；`file_undo` 也进 `isFileWriteTool`，所以 HITL「整工具本会话放行」对它关闭、授权仍只能按目录前缀。",
+      "失败码逐条给处置：`no-backup`（没有旧版本/已用掉，**不要重试**）、`no-backup-dir`（桌面端没启用备份）、`outside-roots`/`no-write-root`（越出授权）、`symlink`（换真实路径）。",
+      "提示词只在**真的注入了** `file_undo` 时写一行「改错、覆盖错、误删了可以回滚；一份备份只能用一次，回滚后先 `file_read` 复核」——承诺一个调不到的工具比不承诺更糟。",
+      "设置区不用改：撤销走的是确认卡（写入类），授权口径与 `file_write` 完全一致。",
+      "`packages/desktop` 全量 **952 passed / 0 fail**（1 skip：环境不允许建软链），其中 `file-fs.test.js` 81 例含 8 条撤销用例（覆盖后能还原、新建无备份、删除可恢复、一份只用一次、越界/只读根拒绝、每文件上限裁剪、备份目录不可写时写入照常、IPC 三分支）。",
+      "`pnpm smoke:desktop` **33/33（跳过 0）**：真机渲染进程里写两次 → `files.undo` → 读回第一版内容 → 再撤销回 `no-backup` → 根外撤销被拒。",
+      "`packages/web`：`tools.test.ts` 41 例（含 6 条 `file_undo`）、`hitl` 全量 172 例、`ruleTargets` 26 例、`runtimePrompt` 20 例；schema 预算 3000 → 3500（八个工具实测 3299 字符，产品决策换来的预算）。",
+      "版本 `d.169.4.103.11 → d.170.4.103.11`（feature）；`build-changelog` 重新生成。"
+    ],
+    "paragraphs": [
+      "上一版给命令补了「点停止真能停」。这一版补的是**文件写坏了怎么办**：d.153 给了智能体七个文件工具，但它覆盖错文件、补丁贴错位置、删了不该删的东西之后，用户和它都只能靠记忆手工复原——没有退回键的编辑器，没人敢在上面改重要文件。现代编码智能体（opencode / Claude Code）都把「能撤回」当成写能力的一部分，这一版把这块补齐。",
+      "机制：备份在主进程、在替换之前",
+      "工具层与确认",
+      "验证",
+      "未做",
+      "1. 没有界面入口：撤销只能由智能体调用（设置区里还没有「最近改动可回滚」的列表）。2. 备份目录没有加密/权限收紧：它和用户文件一样落在磁盘上，别把密钥写进工作区。3. 只覆盖 `file:write`/`file:delete` 链路；`run_command` 直接改文件（如 `git checkout`）产生的变化不进备份。"
+    ]
+  },
+  {
+    "version": "d.169.4.103.11",
+    "date": "2026-11-16",
+    "title": "「点停止」这条链路现在有回归网了",
+    "bullets": [
+      "**评测框架新增用例字段 `abort_after_ms`**（`evals/runner/{types,loader,run}.ts`）：跑起来 N 毫秒后对本次 run 调 `abortAll()`，把「用户点停止」变成可复现的确定性动作。只给声明了这个字段的用例挂计时器，其它用例行为完全不变（否则既有 36 条的时序口径会被悄悄改掉）。",
+      "**新用例 `cmd-006`**：`slow: true`（它天生慢，不能把 p95 延迟红线弄红）、`shell: true` + `allow_danger: true`（要真的跑命令），脚本第一轮发一条**故意卡 10 秒**的命令、`abort_after_ms: 1200`；断言工具结果里出现「中止」与「进程树」——即命令是被取消的，而不是等满超时或整步被杀。",
+      "实测这条用例 **1231ms 结束**（而不是 10000ms 或 60000ms 的兜底）：说明 signal 真的透传到了子进程那一层。",
+      "`pnpm eval:agent -- --filter cmd-006` → 1/1（1231ms）。",
+      "`pnpm eval:agent` → **37/37 全绿**（36 → 37），tokens/pass **2619**，安全用例 **14 条**全过。",
+      "`pnpm eval:agent -- --compare evals/baselines/latest.json` → 全绿：分数 100%（基线 100%）、tokens **+0.5%**、p95 91ms（两边都在 100ms 噪声门限内，不判红）；**基线文件未改**。",
+      "`pnpm -w typecheck` 六包 Done。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "d.164.4.96 修过一个问题：用户点停止后，已经 spawn 的命令会继续跑到超时（最长 120 秒），占 CPU、攥着文件锁、还在往工作区写东西。修法是给它加 `runId` + `shell:cancel` 通道 + 主进程 `killTree`。",
+      "但这条修法**只有单元测试**：desktop 14 例、web 16 例，都在各自的边界里 mock。真正用户能感知的那条链——`ChatPage.abortAll()` → `agentStream` 把 signal 透传给工具 → `shell/tool.ts` 调 `bridge.cancel(runId)` → 主进程按 runId 杀进程树 → 工具回「用户中止」——没有一条用例走完。任何一环接错（signal 没透传、runId 不匹配、cancel 通道名写错），单测都还是绿的，用户按了停止却什么都没发生。",
+      "改法",
+      "验证",
+      "未做",
+      "1. 断言的是「工具层回了中止文案 + 用例很快就结束」，没有直接去操作系统里查那个 `node` 子进程是否真的消失（Windows 上取进程树要额外权限，跨平台不稳）。2. `abort_after_ms` 是「整体到点中断」，还没做「第 N 轮工具调用之后中断」这种更细的钩子。3. 真实 Electron 里点停止仍是手测（冒烟没有点 UI 的能力）。"
+    ]
+  },
+  {
+    "version": "d.168.4.103.11",
+    "date": "2026-11-16",
+    "title": "智能体现在能自己看图和截图了",
+    "bullets": [
+      "**桌面主进程新通道 `file:image`**（`packages/desktop/file-fs.js`）：与 `file:read` 同一道闸（绝对路径、必须落在可写/可读根内、软链与非普通文件拒、`assertNoSymlinkAncestor`），另外加两条规矩：",
+      "— **按魔数认类型，不看扩展名**：PNG `89 50 4E 47` / JPEG `FF D8 FF` / GIF `GIF87a|GIF89a` / WebP `RIFF….WEBP`，其余一律 `unsupported-image`。把 `.txt` 改名成 `.png` 骗不过去。",
+      "— **上限 5MB**（`MAX_IMAGE_BYTES`）：超了明确拒绝，不做静默缩图——缩图要引图像依赖，违反本仓「不新增依赖」的红线；而且 base64 涨三分之一、图片还会另起一条消息占窗口，缩了更容易让人误以为「看得清」。",
+      "`preload.js` 暴露 `__heming_files.image`，仍是独立命名空间、只认根内路径。",
+      "**web 侧第七个文件工具 `file_image`**（`packages/web/src/lib/fileEdit/`）：`runImage` 复用 `pickReadRoot` + `resolveInsideRoot`，把 base64 折成 `ToolImage` 交给 `ToolBridge.execute`——agentStream 早就支持工具返回图片（按模型 `supportsVision` 决定是否另起一条带图 user 消息），所以这里只是「把图片喂进已有管道」。",
+      "失败给可照做的下一步：`unsupported-image` → 「用 file_read 看文字」、`too-large` → 「让用户压缩或换一张」、`not-found` → 「先 file_glob 确认路径」、`outside-roots` → 提示加根。成功文案明确写「图片已附在下面的消息里，请直接看图回答，**不要凭文件名猜测内容**」。",
+      "**只读，不弹确认**：`classify.ts` 登记 `file_image` 为 `read` 风险（名字里没有 write，但读一张图改不了磁盘）；`ruleTargets.ts` 把目标按「根内文件」解析，缺 `path` 直接不产生目标——不让闸门因为「不知道路径」把整个根放行。",
+      "**提示词**：只有真的注入了 `file_image` 才写「用户提到截图/设计稿/图表时用 `file_image` 直接打开看」，老安装包与浏览器端不承诺这个能力。",
+      "schema 预算 2800 → 3000 字符（七工具实测 2975）：加工具不是免费的，注释里写清了每次涨是因为哪个产品决策。",
+      "**进了确定性回归网**（这是同一版的补齐）：`evals/runner/fsBridge.ts` 补 `image` 方法（同口径的魔数判定 + 5MB 上限 + 根内校验），新增观测 `images`（**在工具边界数图片张数**——rollout 只记文本，图片是编排层另起消息发的，从 rollout 反推「有图」是巧合不是契约）与 grader `image_attached{min}`；两条用例：`img-001` 读真 PNG 并断言「至少交回 1 张图」、`img-002` 把文本改名成 `.png` 断言被判 `unsupported-image` 且提示改用 `file_read`。",
+      "`pnpm --filter @heming/web typecheck` 通过；`fileEdit` 相关 **35 + 24** 例、`classify` **41** 例、`runtimePrompt` **18** 例全绿；web 全量 **4930 passed**。",
+      "桌面：`file-fs.test.js` 73 例（1 skip：环境不让建软链）、preload 转发 1 例；desktop 全量 **942 passed / 0 fail**。",
+      "真机冒烟 `pnpm smoke:desktop` **29/29**：Node 侧种一张真 PNG，渲染层经真 preload → `file:image` 读回，断言 base64 前四字节是 `89504e47`、伪装成 `.png` 的文本被判 `unsupported-image`、根外图片被拒。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "用户提到「这张截图哪里不对」「照着这个设计稿改一下样式」「这个图表说明什么」时，和鸣此前只能让用户自己描述——`file_read` 遇到图片按二进制拒掉（`binary-file`），视觉附件又只覆盖用户**自己上传**的图。也就是说：模型有视觉能力，但工作区里的图片对它是不存在的。这是「能调工具」这件事上一个很具体的缺口，DSH 早就有 `read_image`。",
+      "改法",
+      "验证",
+      "未做",
+      "1. 没有缩图与 EXIF 方向校正，超 5MB 一律拒。2. 只认 PNG/JPEG/GIF/WebP，TIFF/HEIC 等仍需用户先转换。"
+    ]
+  },
+  {
+    "version": "d.167.4.103.11",
+    "date": "2026-11-16",
+    "title": "这一轮做完没做完，现在能一眼看出来并一键接着做",
+    "bullets": [
+      "`packages/web/src/lib/agentStream.ts`：终态回调 `RunSettled` 新增 `maxRounds?: boolean`，成功收口时按 `maxRoundsHit` 带上。为什么由编排层给而不是界面猜：撞没撞上限只有工具循环知道，界面从文本里反推是脆的（文案一改就失效）。",
+      "新增 `packages/web/src/components/RoundLimitHint.tsx`：输入区上方一条 `role=\"status\"` 提示——「这一轮已用满 36 轮工具调用（3 段），任务可能还没做完。」+「继续」/「收起」两个按钮。段数与总轮数直接引 `longTask.ts` 的常量，不手抄数字（改上限时提示跟着改）。",
+      "`packages/web/src/components/ChatPage.tsx`：",
+      "— `onRunSettled` 收到 `maxRounds` 时记住 `streamId`——放在任务区判断**之前**，普通聊天流（不建档）同样需要这个入口；",
+      "— 点「继续」复用 `retryStream(streamId)`：发的是续写口令（不是重发原提问），清旧流、带原 agent 续写，与错误行重试同一个入口，不再多一条重复的用户提问；",
+      "— 会话切换、新一轮开始都清掉提示（A 会话的「继续」不能出现在 B 会话输入区）。",
+      "`packages/web/src/lib/agentStream.test.ts`：两条 d.157 用例补断言——自动续跑到 36 轮收口时 `onRunSettled` 收到 `{status:\"ok\", maxRounds:true}`；无清单、撞 12 轮上限同样带该标记（`status` 仍是 ok，两者必须能区分）。",
+      "新增 `packages/web/src/components/RoundLimitHint.test.tsx` 5 例：文案带 36 轮/3 段、点「继续」只调一次、给了 `onDismiss` 才有「收起」、没有 `onDismiss` 不留死按钮、`role=status` + `aria-live=polite` 且不是 `alert`。",
+      "`packages/web/src/components/ChatPage.test.tsx` 新增「I3f」（30 秒超时）：让模型连续 12 轮只要工具（清单全完成 → 不自动续跑）→ 断言提示出现且带「3 段」→ 点「继续」→ 断言新请求里**没有**重复的原提问、末条 user 行是续写口令 → 提示消失。用例末尾清掉自己写进 localStorage 的清单（否则后面的待办面板会多出一个 `role=status`，把别的用例的 `getByRole(\"status\")` 撞成多个）。",
+      "实跑：`agentStream.test.ts` + `agentStream.tools.test.ts` + `RoundLimitHint.test.tsx` **132 passed**；`ChatPage.test.tsx` **143 passed**；`pnpm --filter @heming/web typecheck` exit 0。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "上一版起，长任务撞到轮次上限（12 轮/段 × 3 段 = 36 轮）会自动续跑，到 36 轮才收口。可收口那一刻的样子是**有欺骗性的**：模型被要求「先给当前结论」，于是气泡里是一段看起来已经答完的回答，只有末尾一行小字写着「（本次已连续调用 36 轮工具，达到上限…回复「继续」可以接着做）」。",
+      "用户看到的是一条「完成」的消息，要接着做就得自己回一句「继续」——而长任务恰恰是「用户不想一直盯着、也不想背口令」的场景。**「回答出来了」和「任务做完了」是两件事**，界面此前分不清，只能让用户读小字自己判断。这是「能处理长任务」的最后一段路：能力有了，但用户得自己发现它被截断了。",
+      "改了什么",
+      "验证（实跑）",
+      "未做",
+      "1. 只在上限时给入口；「工具报错/模型拒答」后的继续入口仍走已有的错误行重试，两者样式未统一。2. 提示不显示「这一轮具体卡在哪一步」，只有轮数与段数。3. 任务区（从任务面板发起的流）复用同一提示，但未在其卡片上另做标记。"
+    ]
+  },
+  {
+    "version": "d.167.4.102.11",
+    "date": "2026-11-16",
+    "title": "「记住这个目录」现在能逐条撤销了：授权是可收回的",
+    "bullets": [
+      "— 匹配口径与 `rememberRule` 写入时**完全一致**——`tool` + 归一化后的 `resource` + `effect` + `agentId`；`at`（时间戳）不参与匹配，否则同一目录被重记后时间戳变了就删不掉；",
+      "— 返回 `boolean`：删到了才 `true`；存储写失败返回 `false`（**宁可撤销失败，也不假装成功**——界面据此提示重试，而不是静默失效）。2. `packages/web/src/components/FileEditCard.tsx` 的「已记住的目录授权」列表：",
+      "— 每条规则右侧加「撤销」按钮，可读名称 `撤销 允许规则：file_patch D:/Obsidian/学院事务/`（拒绝规则同理带「拒绝」）；",
+      "— 撤销后**立即重渲染**：规则是直接读 localStorage 的、没有订阅，不手动 bump 的话界面还显示着刚删掉那条，用户会以为没生效再点一次；",
+      "— 标题行加「全部清空」，但**要点两次**（第一次进入确认态，第二次才执行）——误触一次就清空几十条授权是最糟的默认；",
+      "— 撤销后给状态文案「已撤销该目录授权，之后该目录内的改动会重新逐次询问」，把后果说清楚。3. 顺手修掉 `pnpm design:audit` 的一个真口径问题：更新日志里的行内代码原本写死 `text-ui-xs`（11px），像 `~/Heming/logs/csp-report.log` 这种长路径就成了「11px 正文」，被 body11 门槛判为「正文冒充元信息」（settings 页「关于」分组 11px 正文 = 1）。改为等宽 + 浅底、字号跟随正文（12px）——可读性也比 11px 更好。",
+      "`pnpm --filter @heming/web typecheck` exit 0；",
+      "web 全量 vitest → **330 files / 4912 passed**（上一版 4903，本轮 +9：`policy.test.ts` 的撤销 6 例 + `FileEditCard.test.tsx` 的撤销/清空 3 例）；",
+      "`pnpm design:audit` → **全部门槛通过**（含 settings 页「关于」@1440/@1280/@1024 的 11px 正文 0）；",
+      "新增用例覆盖：只删那一条、拒绝规则也能撤（撤完回到「照常询问」而不是变成允许）、撤不存在的返 `false` 且不动已有规则、按 `agentId` 作用域撤销、撤销真的落盘（同一份存储新建实例看不到）、存储写失败返 `false`；界面侧覆盖只删一条 + 计数同步、全部清空两段式、拒绝规则撤销按钮可读名称。"
+    ],
+    "paragraphs": [
+      "**用户视角**：确认卡上勾「记住本次选择」之后，那条目录授权此前**只能看，不能撤**——设置里列出了所有记住的规则，但没有任何按钮；唯一的出口是「全部清空」。于是用户授错一个目录（比如选到了 `D:/` 根，或不再编辑那个项目），要么把几十条一起清掉重来，要么永远留着。一条收不回的授权，会让「记住」变成一个不该点的按钮。",
+      "**这一版做了什么**",
+      "1. `packages/web/src/lib/hitl/policy.ts` 新增 `removeRule(target)`：",
+      "**验证（实跑）**",
+      "**没做**",
+      "1. 没有「撤销后自动恢复上一次弹窗提示」——用户下次写那个目录会正常弹确认卡，不需要额外提示。2. 撤销是逐条与全清两档，没有「按工具批量撤销」（如一次性清掉所有 `file_write` 规则）。3. 团队工具的规则（`team_plan_update` 等）复用同一套接口能力，但设置区目前只在文件编辑卡里露出撤销入口。"
+    ]
+  },
+  {
+    "version": "d.166.4.102.11",
+    "date": "2026-11-16",
+    "title": "冒烟补上「生产默认档」：report 只记录不拦，但必须真的记下来",
+    "bullets": [
+      "— 断言首页拿到的头是 **`Content-Security-Policy-Report-Only`**（不是强制生效的那个），且**没有**同时出现 `Content-Security-Policy`；",
+      "— 往页面里注入内联 `<script>`，断言它**真的执行了**（`report` 档不拦，不会白屏）；",
+      "— 断言这次违例仍然进了 `csp-report-report.log`（`directive=script-src` / `blocked=inline`）——默认档出问题时也查得到。2. 两档的响应头**分开记录**（`recordCspHeader` / `recordReportCspHeader`），避免互相覆盖导致「验了 enforce、report 那条其实没验」。",
+      "`pnpm smoke:desktop` → **26/26 项通过（跳过 0 项，退出码 0）**（上一版 23/23）。",
+      "`npm test --prefix packages/desktop` → **935 passed / 0 fail**（上一版 934；新增 1 例结构不变量）。",
+      "`node --check smoke/main.js` 通过。"
+    ],
+    "paragraphs": [
+      "**用户视角**：和鸣的默认内容安全策略是 `report` 档——**只记录、不拦**。上一版（d.166.4.101.11）已经让冒烟在 `enforce` 档下验了「挡得住也起得来」，但用户装完默认看到的是 `report` 档，这一档此前一次都没被真机走过。它能出两种事故：①默认档被误改成 `enforce` → 用户白屏；②`report` 档其实什么都没记 → 真出事时查不到。",
+      "**这一版做了什么**",
+      "1. 冒烟新增第 8 类断言（`packages/desktop/smoke/main.js`）：同一份 `web-dist` 产物、再注册一个 privileged scheme（`app-report://`）起第二个真 preload 窗口，用 `cspHeadersFor(..., { mode: \"report\" })` 下发响应头，然后：3. 内联脚本注入抽成 `injectInlineVia(webContents)`，两档复用同一段探针（带随机 marker，避免上一档的 `window` 标记串味）。4. 冒烟的协议安装改成可指定 scheme：同一进程里 `protocol.handle` 不能对同一个 scheme 重复注册（Electron 会抛「Failed to register protocol」），`app-report://` 只服务这一次 report 档加载。5. `packages/desktop/smoke-script.test.js` 7 → **8 例**：新增「必须在 report 档下也验一次：不拦、但违例要记进日志」，断言 `mode: \"report\"`、`Content-Security-Policy-Report-Only`、「内联脚本照常执行」、两档记录变量分开、`csp-report-report.log` 存在。",
+      "**验证（实跑）**",
+      "**顺手修的一个自己造成的问题**：CHANGELOG 插入脚本重复执行过，导致 `d.166.4.101.11` 顶部出现两份（`version-sync.test.js` 的「只增不减」会立刻抓到）。用一次性去重脚本删掉重复小节，版本序列恢复单调。",
+      "**没做**",
+      "1. `report` 档只验了「内联脚本」这一类违例；`connect-src`（`fetch` 到外部域）与 `img-src` 仍未在真机上触发。2. 两档的日志写在两个文件里（冒烟侧），生产只有一个 `~/Heming/logs/csp-report.log`，不做区分。3. 仍没有「点一次真实 HITL 弹窗」的端到端（需要真实模型回合才能触发写入确认）。"
+    ]
+  },
+  {
+    "version": "d.166.4.101.11",
+    "date": "2026-11-16",
+    "title": "CSP 违例上报：从「有实现没人测」变成「有实现、有单测、有真机链路」",
+    "bullets": [
+      "`pnpm smoke:desktop` → **23/23 项通过（跳过 0 项，退出码 0）**（上一版 19/19）。",
+      "`npm test --prefix packages/desktop` → **934 passed / 0 fail**（上一版 922；新增 11 例上报器单测 + 1 例结构不变量）。",
+      "`node --check main.js` / `node --check smoke/main.js` 通过。"
+    ],
+    "paragraphs": [
+      "**用户视角**：如果某次发版里 CSP 策略把首页脚本挡了，你看到的会是白屏；上一版（d.166.4.100.11）已经在真机上验了「页面起得来、没被 CSP 挡」。但「被挡了到底记在哪、下次排障能不能查到」这条线一直没有验证——它决定的是**下一版还能不能发现问题**，而不是这一版能不能用。",
+      "**这段代码以前是什么状态**：CSP 违例上报写在 `packages/desktop/main.js` 里，`attachCspReportLogger` 监听渲染进程的 `console-message`，`parseCspViolation` 解析后 `appendCspReport` 追加到 `~/Heming/logs/csp-report.log`（`HEMING_CRASH_DIR` 可覆盖），带 256KB 滚动截断与 500 条去重。逻辑本身是对的，但**没有任何测试**：真实 Chromium 的违例消息长什么样、Electron 两代 `console-message` 签名怎么兼容、去重有没有生效、日志会不会把页面内容也写进磁盘，全靠读代码相信。",
+      "**这一版做了什么**",
+      "1. **抽出 `packages/desktop/csp-report.js`**（单一实现）：`formatCspReportLine`、`createCspReporter({ file, maxBytes, maxDedupe, iso })`（返回 `record() / seenCount / writtenCount`）、`attachCspReporter(webContents, reporter)`。`main.js` 只剩「文件在哪」与「`mode === \"off\"` 不挂」两件事，不再自己维护去重表与截断逻辑。2. **新增 `packages/desktop/csp-report.test.js`（11 例）**：同一种违例只记一次（行号不同也算同一种）、去重表到上限后不再记新种类、文件超过上限时清空重写、目录不可写也不抛（日志失败绝不能影响界面）、非法入参不崩、Electron 45 的 `(event, details)` 与旧 `(event, level, message, line, sourceId)` 两种签名都能取到 message/sourceId/line、非 CSP 消息不写、缺参数不挂监听、隐私约定（只落 `directive / blocked / source` 三个字段，绝不回显页面内容）。3. **真机冒烟补第 7 类断言（`packages/desktop/smoke/main.js`）**：在真实 `app://heming` 整页上，用 `document.createElement(\"script\")` 注入内联脚本——enforce 档下必被拦——然后等 `csp-report.log` 出现并断言：①日志里是 `directive=script-src` + `blocked=inline`（真实 Chromium 措辞确实能被解析）；②内联脚本没有真的执行（`window` 标记没被写下）；③日志里没有页面内容；④再触发一次相同违例，日志仍只有一行（去重生效）。4. **结构不变量（`packages/desktop/smoke-script.test.js` 6→7 例）**：`main.js` 必须 `require(\"./csp-report.js\")` 且不允许再出现 `function appendCspReport`（两份实现迟早漂移）；冒烟必须挂 `attachCspReporter`、必须断言 `directive=script-src` 与 `blocked=inline`、必须真的造违例、必须验去重。5. `packages/desktop/package.json` 的 `typecheck` 与 `test` 都接上 `csp-report.js` / `csp-report.test.js`——不接进脚本的测试等于没写。",
+      "**验证（实跑）**",
+      "**没做**",
+      "1. 只有 `console-message` 这一条通道；`report-uri` / `report-to` 端点仍未使用（当前策略不含 `report-uri`，两者要同时改才有意义）。2. 日志没有轮转保留（超过 256KB 直接清空），也没有界面入口——排障要靠用户把 `~/Heming/logs/csp-report.log` 发过来。3. 违例只在 `HEMING_CSP_MODE !== \"off\"` 时记；`enforce` 与 `report` 两档的日志内容不做区分（都记，因为要看的都是「谁挡了什么」）。"
+    ]
+  },
+  {
+    "version": "d.166.4.100.11",
+    "date": "2026-11-16",
+    "title": "真实页面开始在「生产同款 CSP」下被验证（页面不会被自己的策略搞白）",
+    "bullets": [
+      "`app://` 首页响应头：`script-src 'self' app: 'wasm-unsafe-eval'`（450 字节策略），`object-src 'none'`，无 `unsafe-inline`/`unsafe-eval`。",
+      "页面在 `enforce` 档下：`#root` 有内容（`rootChildren: 2`，标题「和鸣」）、`origin: app://heming` 上文件/命令桥都可用、写读文件成功（21 字节）、**CSP 拒绝 0 条**。",
+      "说明现有产物与策略是相容的——这一版没有抓到新 bug，但它把「策略把页面搞白」这一类事故变成了会红的检查。",
+      "`pnpm smoke:desktop` → **19/19 项通过、跳过 0**（上一版 17，新增两条 CSP 断言）。",
+      "`packages/desktop` 全量 `npm test` → **54 文件 / 922 passed / 0 fail**（上一版 921）。",
+      "`pnpm -w typecheck` 六项目 Done；`changelog + version` 18/18。"
+    ],
+    "paragraphs": [
+      "上一版（d.166.4.99）让冒烟加载真实整页，但协议处理里**没挂 CSP**：页面在一条宽松策略下启动，而生产环境带的是 `cspHeadersFor` 生成的那条（默认 `report` 档，任何人把 `HEMING_CSP_MODE` 设成 `enforce` 就是强制拦截）。也就是说，「策略把首页脚本挡掉 → 白屏」这条最典型的启动事故，冒烟恰好绕过了。",
+      "这一版把冒烟接到**生产同一条策略**上，并且刻意用 `enforce` 档（比默认 `report-only` 更严）：只要 CSP 真挡了东西，页面就起不来或页内会报拒绝，冒烟当场红。同时把响应头本身也断言一遍。",
+      "断的两件事",
+      "1. **头对不对**：`app://` 首页响应必须带 `Content-Security-Policy`（不是 `-Report-Only`），且 `script-src` 含 `'wasm-unsafe-eval'`、**不含** `'unsafe-inline'`/`'unsafe-eval'`，并且 `object-src 'none'`。头由 `app-protocol.js` 的 `cspHeadersFor(urlPath, { mode: \"enforce\", apiOrigin: DEFAULT_API_ORIGIN })` 生成——**冒烟不手抄策略**，否则生产策略一变，冒烟就悄悄验的是旧规矩。2. **页面在策略下真能起来**：主进程收 `console-message`，把 `Content Security Policy` / `Refused to …` 记下来，断言启动过程中**零拒绝**。同时前四条整页断言（加载成功、`#root` 有内容、桥可用、能写读文件）继续在同一策略下跑。",
+      "实测结果（当前产物）",
+      "结构不变量",
+      "`smoke-script.test.js` 5 → **6 例**：新增「必须用 `cspHeadersFor` 生成头、必须是 `enforce` 档、必须收集页内拒绝、必须断言 `script-src` 不放 unsafe-*」。",
+      "验证",
+      "未做",
+      "1. **违例上报链路**没验：`report` 档下 `report-uri`/`report-to` 打到主进程日志这条路（`csp-report.log`）仍只有单测。2. 冒烟没点真实 HITL 弹窗。3. CI 的 Windows job 仍未在真实 runner 上跑过。"
+    ]
+  },
+  {
+    "version": "d.166.4.99.11",
+    "date": "2026-11-16",
+    "title": "真机冒烟开始加载真实整页（白屏这类问题第一次有了机器检查）",
+    "bullets": [
+      "**协议注册时机**：`registerSchemesAsPrivileged` 必须在 app ready 之前调用，且参数与 `main.js` 一字不差（`standard/secure/supportFetchAPI/corsEnabled/stream`）。少一个 `secure`，页面行为就和安装包分叉，而单测完全看不出来。",
+      "**产物形状**：`scripts/build-desktop-web.mjs` 把 `packages/web/dist` 复制到 `packages/desktop/web-dist` 并注入 `VITE_API_BASE`。冒烟优先用 `web-dist`、缺失才回退 `web/dist`，所以「发给用户的产物」就是「冒烟验过的产物」。",
+      "**CSP 故意不在冒烟里挂**：CSP 过严是另一类问题，混进来会让「页面白屏」分不清是桥坏了还是策略挡住了。冒烟的职责是「桥装进真实页面之后还通不通」。",
+      "根 `dist:desktop` 从 `pnpm smoke:desktop && …` 改为 **`build:web → smoke → dist`**：不先构建产物，冒烟只能把最有价值的那几条 skip 掉，等于白跑。",
+      "`packages/desktop` 新增 `build:web`（与 `dist` 用同一个 `scripts/build-desktop-web.mjs`，避免两套构建口径）。",
+      "跳过不再静默：`smoke.js` 现在打印「跳过 N 项」，`SMOKE_RESULT` 带 `skipped` 计数；`skipped > 0` 会额外提示「发版前应为 0」。",
+      "`smoke/main.js` 与 `smoke.js` 纳入 `packages/desktop` 的 `node --check`（`typecheck` 与 `test` 两个脚本都加了），语法错不再是「跑起来才发现」。",
+      "`smoke-script.test.js` 从 4 例扩到 **5 例**，新增两条结构不变量：①`dist:desktop` 必须 `build:web && smoke:desktop && dist`，且 `build:web` 必须复用同一构建脚本；②`smoke/main.js` 必须有 `registerSchemesAsPrivileged`（且在 `app.whenReady()` 之前）、`protocol.handle`、优先 `webDistRoot()`、加载 `app://heming`、断言 `#root`。",
+      "`pnpm smoke:desktop` → **17/17 项通过，跳过 0**（新增四条：真实整页加载成功 / `#root` 有内容（`rootChildren: 2`，`title: 和鸣`）/ 真源上桥可用（`origin: app://heming`）/ 真源上写读文件成功）。",
+      "`packages/desktop` 全量 `npm test` → **54 文件 / 921 passed / 0 fail**（上一版 920，新增整页不变量 1 例）。",
+      "仍未做：冒烟没有点真实 HITL 弹窗（那是渲染层的确认流程，需要驱动真实按钮）；`app://` 下的 CSP 头还没断言；CI 的 Windows job 仍未在真实 runner 上跑过。"
+    ],
+    "paragraphs": [
+      "上一版（d.165.4.98）把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data:` 占位页：真 preload、真 IPC、真 Electron 都跑到了，唯独没验证「**安装包里那个页面本身**能不能起来」。对用户来说，白屏和桥不通是同一件事——都是双击之后什么都没有。",
+      "这一版把冒烟补到第六类断言：用与安装包完全相同的 `app://` 协议服务 `web-dist` 产物，开一个带真 preload 的窗口加载 `app://heming/`，然后断言四件事——页面加载没有 `did-fail-load`／React 真的挂到了 `#root`（`rootChildren > 0`、`document.title` 是「和鸣」）／在真源 `app://heming` 上 `__heming_files` 与 `__heming_shell` 都在／并且能在真源上写一个文件再读回来。这三层里任何一层断掉，用户看到的就是白屏，而现在它会红。",
+      "为什么值得单列一版",
+      "发版链路",
+      "验证"
+    ]
+  },
+  {
+    "version": "d.166.4.98.11",
+    "date": "2026-11-16",
+    "title": "命令评测补上「超时」与「输出过大」，并把评测自身的两处盲区修掉",
+    "bullets": [
+      "`pnpm eval:agent -- --filter cmd-004` → 1/1（1061ms，**证明确实等到了超时才收口**）。",
+      "`pnpm eval:agent -- --filter cmd-005` → 1/1。",
+      "`pnpm eval:agent` → **34/34 通过**（32 → 34），tokens/pass 2670、p95 81ms、安全用例 **12 条**全过。",
+      "`pnpm eval:agent -- --compare evals/baselines/latest.json` → **全绿**：分数 100%（基线 100%）、tokens/pass 2670（基线 2607，**+2.4%**，阈值 10%）、p95 81ms（基线 26ms，两者均低于 100ms 噪声门限，",
+      "`pnpm -w typecheck` → 六个项目全 Done；web 全量 330 files / 4903 passed（本轮未动 web）；desktop 全量 920 passed（本轮未动 desktop）。"
+    ],
+    "paragraphs": [
+      "d.166.4.98.11 —— 命令评测补上「超时」与「输出过大」，并把评测自身的两处盲区修掉",
+      "为什么做这一版",
+      "`run_command` 是唯一能真的动用户机器的工具，但它此前只有「跑通」「默认被拒」「工作目录越界」三条用例（d.165）。两条最要命的行为没有被机器验证：",
+      "1. **命令卡住时会不会一直挂着**（比如等输入、跑长任务）；2. **命令吐出巨量输出时会不会把上下文撑爆**。",
+      "这一版补上这两条，顺带修掉评测框架自己的两处盲区——它们会让「让评测更可信」这件事本身不可信。",
+      "改了什么",
+      "两条新用例",
+      "| 用例 | 干什么 | 断言 || --- | --- | --- || `cmd-004` | `node -e \"setTimeout(() => {}, 10000)\"`，`timeout_ms: 1000` | 工具结果含「命令超时」，且整轮在 1 秒级结束（不是挂到 10 秒） || `cmd-005` | `node -e \"console.log('x'.repeat(700000))\"`（700KB > 512KB 采集上限） | 工具结果含「输出过大」，命令被终止而不是「截断后当成功」 |",
+      "两条都 `shell: true` + `allow_danger: true`，都带空夹具（只提供可写工作目录，不依赖任何文件）。",
+      "评测框架的两处修正",
+      "1. **沙箱清理不再把「杀进程」误报成「框架坏了」**（`evals/runner/run.ts`）：`cmd-004` 会真的 spawn 一个子进程再杀掉，Windows 上句柄释放是异步的，紧接着 `rm` 会拿到`EBUSY: resource busy or locked`，整轮评测以「无法完成（退出码 2）」收场——看起来像框架坏了，实际是用例在正确工作。新增 `removeSandbox()`：`fs.rm` 的 `maxRetries` 之外再包 6 次退避重试，只对 `EBUSY/EPERM/ENOTEMPTY` 重试；确实删不掉就**留现场并警告**，不把清理失败算成用例失败。",
+      "2. **「天生慢」的用例不再污染 p95 延迟红线**（`evals/runner/{types,loader,report}.ts`）：`cmd-004` 必须真的等 1 秒（工具层超时下限 1000ms，再短就测不到），它一进来就把 p95 从 26ms顶到 100ms，`--compare` 判「延迟涨 284.6%」——**验证「会超时」的用例反过来把「延迟回归」这条红线弄红了**。新增用例字段 `slow: true`：该用例仍参与通过率与 token 统计，但**不进 p95 样本**；报告里记 `p95_samples` / `p95_excluded`，`--compare` 的口径不变（仍是「p95 涨 >15% 且两边都超过100ms 噪声门限才红」）。没有放宽任何阈值。",
+      "验证不判红）；`evals/baselines/latest.json` 未改。",
+      "未做（如实记）",
+      "1. **命令取消（用户按停止）仍没有评测用例**：它需要「工具执行到一半时中断」，当前确定性 runner只在整步超时时 `abortAll()`，没有「按轮中断」的脚本钩子。取消目前由 desktop 14 例 + web 16 例单测覆盖（含「同 runId 调 cancel」「老桥降级不谎称已停止」），但没有端到端用例。2. 超时用例只验证「1 秒处收口」，没有断言子进程树一定被杀干净（那需要枚举进程，评测里不稳定）。3. 仍未做真机 Electron 端到端（整页 `web-dist` + 真实确认弹窗），仍是上一轮留下的最大空白。"
+    ]
+  },
+  {
+    "version": "d.165.4.98.11",
+    "date": "2026-11-16",
+    "title": "冒烟接进发版链路：这次漏检的地方，用机器挡住",
+    "bullets": [
+      "— 新脚本 `smoke:desktop` = `pnpm --filter @heming/desktop smoke`，作为 CI 与发版共用入口；",
+      "— `dist:desktop` 改为 `pnpm smoke:desktop && pnpm --filter @heming/desktop dist`：**先冒烟，再打包**。冒烟不过，安装包不会产出。",
+      "— 默认必须真跑；只有显式设了这个变量才跳过，且会打印一行「已跳过（别当成通过）」并输出 `SMOKE_RESULT {\"skipped\":true}`——机器可读，不会被误读成 13/13 绿。",
+      "— 为什么需要：少数没有窗口系统的环境（容器 / 无桌面的远程会话）里冒烟本身起不来，完全不给出口的结果是「开发者删掉这一步」。",
+      "— 单独 job、单跑 `pnpm smoke:desktop`，超时 10 分钟。",
+      "— 为什么只在 Windows：Electron 需要窗口系统，ubuntu runner 上只能靠 xvfb 硬凑，一旦凑不上就会变成「永远 skip 的绿」——比没有更危险。Windows 也是本产品的事实平台。",
+      "— 放在 L1 的理由：它是唯一能抓住「双击没反应」的检查，而那种 bug 只要漏到用户手里就是事故；跳过方式写在 hook 输出里（`HEMING_SKIP_SMOKE=1 git push`）。",
+      "— `dist:desktop` 必须以 `pnpm smoke:desktop && ` 开头；",
+      "— `smoke.js` 默认真跑、跳过分支必须早于 spawn、跳过要留 `skipped:true`；",
+      "— `verify.yml` 必须有 `runs-on: windows-latest` 的 job 里跑 `smoke:desktop`；",
+      "— `pre-push` 必须包含冒烟门禁且写明 `HEMING_SKIP_SMOKE`。",
+      "— 只读文件、不启动 Electron，54ms 跑完，接进 `packages/desktop` 的 `npm test`。",
+      "`node --test packages/desktop/smoke-script.test.js` → 4/4 通过（54ms）。",
+      "`pnpm smoke:desktop` → **13/13 通过，退出码 0**。",
+      "`HEMING_SKIP_SMOKE=1 pnpm smoke:desktop` → 打印跳过行 + `SMOKE_RESULT {\"skipped\":true}`，退出码 0（逃生口按预期工作，不会被当成通过）。",
+      "`pnpm --filter @heming/desktop test` → **exit 0，54 个测试文件 / 920 passed / 0 fail**（上一版 916，+4）。",
+      "`node --check` 覆盖 `smoke.js` / `smoke/main.js`（在 desktop test 脚本里）。"
+    ],
+    "paragraphs": [
+      "d.166.4.95.11（本版为 d.165.4.98.11）—— 冒烟接进发版链路：这次漏检的地方，用机器挡住",
+      "为什么做这一版",
+      "上一版（`d.165.4.97.11`）加了桌面桥真机冒烟，第一次跑就抓到「`file:default-root` 用`ipcMain.handle` 注册、`preload.js` 却用 `sendSync` 去同步问」，渲染进程永远等不到返回，**整个窗口加载不出来**——这个 bug 从 d.162 起静默了四个版本。",
+      "冒烟修好之后剩下的问题是：**脚本存在 ≠ 会被跑**。当时它只靠人记得 `pnpm --filter@heming/desktop smoke`。发版链路（`pnpm dist:desktop`）、CI（`verify.yml`）、推送前门禁（`.githooks/pre-push`）三处都没有它，所以「窗口起不来」这类致命问题下次照样能发出去。",
+      "本版把冒烟变成**发版与提交的强制前置**，并把「链路本身」钉成测试。",
+      "改了什么",
+      "1. **`package.json`（根）**",
+      "2. **`packages/desktop/smoke.js`**：新增显式逃生口 `HEMING_SKIP_SMOKE=1`",
+      "3. **`.github/workflows/verify.yml`**：新增 `smoke-desktop` job（`windows-latest`）",
+      "4. **`.githooks/pre-push`（L1）**：新增第 3 道门禁 `pnpm smoke:desktop`（约 15s）",
+      "5. **`packages/desktop/smoke-script.test.js`（新，4 例）**：把链路钉成结构性不变量",
+      "验证",
+      "未做（如实记）",
+      "1. 冒烟仍是「假页面 + 真 preload + 真 IPC」，没有加载真实 `web-dist` 的整页 UI，也没有点过真实的 HITL 确认弹窗——它在验证桥，不是端到端产品流程。2. 本版没有动产品行为，只动链路与门禁；`run_command` 的超时/取消仍无确定性评测用例。3. CI 的 Windows job 尚未在真实 GitHub runner 上跑过（本地只有 Windows 本机环境），首次 push 后需要看一眼红灯/绿灯，别把它当成已验证。"
+    ]
+  },
+  {
+    "version": "d.165.4.97.11",
+    "date": "2026-11-16",
+    "title": "默认工作区那行 IPC 会让窗口打不开：补桌面桥真机冒烟并修掉",
+    "bullets": [
+      "`packages/desktop/file-fs.js`：`file:default-root` 改为 `ipcMain.on` + `event.returnValue`，内部用 `fs.mkdirSync(recursive)` 保持「目录不存在就补建」的语义；不可信来源、未配置目录两种失败分支照旧 fail-closed。",
+      "`packages/desktop/main.test.js`：新增不变量——**preload 里每一处 `sendSync` 的通道，必须由某个模块用 `ipcMain.on` 注册，且不得同时被 `ipcMain.handle` 注册**。这类错误在单测里完全看不见（单测直接调 handler，不经过 `sendSync`），只能靠这条结构性断言挡住。",
+      "`packages/desktop/file-fs.test.js`：假 `ipcMain` 增加 `on` / `sendSync` / `isSync`，四条默认工作区用例改为走 `sendSync`，并新增「必须同步注册」用例（同时断言没有 `handle` 注册）。",
+      "新增 `packages/desktop/smoke/main.js` + `packages/desktop/smoke.js`：真机冒烟（`pnpm --filter @heming/desktop smoke`）。13 项检查：preload 真的暴露两个命名空间、`file:default-root` 同步下发、写/读/glob/grep 全通、越界与相对路径被拒、`node -e \"console.log(6*7)\"` 的 stdout 真的是 `42`（顺带守住 `cmd.exe` 引号那条）、越界 `cwd` 被拒、磁盘上确实落了文件、**另开一个不带 preload 的窗口直接 invoke 必须被拒**（fail-closed 的端到端面）。",
+      "`pnpm --filter @heming/desktop smoke` → **13/13 通过**（修复前卡在加载超时）。",
+      "desktop 全量 `npm test` → **916 passed / 0 fail**（+1 条结构不变量，file-fs 66 例）。",
+      "修一处测试写法：`assert.throws` 改成 `await assert.rejects`（`invoke` 是异步的）。"
+    ],
+    "paragraphs": [
+      "上一版给未分组会话加了「默认工作区」，让没有手动配根的人也能读写文件。但那条**让渲染层拿到默认路径**的通道注册错了类型：preload 用 `ipcRenderer.sendSync(\"file:default-root\")` 在**加载时**同步问一次，主进程却用 `ipcMain.handle`（异步）注册 —— `sendSync` 只认同步监听者，于是渲染进程永远等不到 `event.returnValue`，**窗口直接加载不出来**。也就是说，这个包一旦发出去，用户双击图标只会看到起不来的窗口。",
+      "发现方式是这版新加的**桌面桥真机冒烟**：起一个真实 Electron，用真实 `preload.js` 加载一个页面，从渲染进程里调 `window.__heming_files` / `__heming_shell`，逐项核对结果。第一次跑就卡在「页面加载超时」，顺着 `preload` 的同步询问点一路定位到这条通道。",
+      "修了什么",
+      "验证",
+      "未做",
+      "1. 冒烟起的是「真实 Electron + 真实 preload + 真实桥」，但没有加载真实 `web-dist` 打包产物（那要 `pnpm build`，属于发版流水线）。2. 没有把冒烟放进 `npm test`：它要起 Electron、依赖窗口系统，放进日常测试会让 900+ 个纯逻辑用例变得脆弱；它是单独命令，改桥时跑。3. 冒烟没有覆盖 HITL 弹窗（需要人点确认），那仍属人工验收。"
+    ]
+  },
+  {
+    "version": "d.165.4.96.11",
+    "date": "2026-11-16",
+    "title": "给命令补评测，第一次跑就抓出三个真 bug",
+    "bullets": [
+      "`evals/runner/shellBridge.ts`：把桌面端真实的 `shell-run.js` 通过 `createRequire` 载入，包成渲染层的 `ShellBridge`——工作目录校验、超时杀进程树、输出上限都由**生产代码**跑。（用例里的命令必须无副作用，评测在真机上跑。）",
+      "`evals/runner/tools.ts`：新增 `shell: true` 开关，只有声明它的用例才注入真实 `run_command`（不改变既有 29 条用例的工具清单与 token 口径）。",
+      "`evals/runner/gate.ts`：`run_command` 风险是 `danger`，确定性闸门**默认拒绝**；只有用例写 `allow_danger: true` 才放行。默认拒绝正好用来测「危险工具在无人值守下不放行」。",
+      "三条用例：`cmd-001`（允许时真的执行、stdout 回到上下文）、`cmd-002`（未声明 `allow_danger` 必须被拒、没有起子进程）、`cmd-003`（`cwd: ../outside` 在工具层就被拒、不惊动桌面桥）。",
+      "`pnpm eval:agent` **32/32 通过**（新增 3 条），tokens/pass 2709、缓存读 2.7%、安全用例 **10 条**全过；`--compare evals/baselines/latest.json` 全绿（基线 2607 → 2709，**+3.9%**，红线 10%；新增用例是命令类，回合没变长）；`evals/baselines/latest.json` 未改。",
+      "`pnpm -w typecheck` 6 包 Done；web 全量 **330 files / 4903 passed**；desktop 全量 **915 passed / 0 fail**（`shell-run.test.js` 14 例，已按 `shell: true` 改断言）。"
+    ],
+    "paragraphs": [
+      "动机",
+      "上一版让智能体能跑本机命令。能不能跑是一回事，**跑对没跑对**是另一回事：命令链路上有工具层、桌面主进程、`cmd.exe` 三处，任何一处出错都表现为「看起来执行了」。所以这版先给命令补三条确定性评测（真实工具层 + 真实 `shell-run.js`，不是假替身），再按评测结果修。",
+      "三个真 bug（都是评测抓出来的，都不报错，都表现为「成功」）",
+      "1. **工具在多 provider 合并后静默不可达**。`shell/tool.ts` 把内部声明 `TOOLS`（`{name,description,parameters}`）直接当成 OpenAI 工具清单暴露。`mergeToolBridges` 与 `CapabilityRegistry` 都按 `spec.function.name` 认领工具，于是命令桥永远认领不到 `run_command`：模型在工具清单里看得见它，真调用时回「未知工具 run_command」。也就是说 **d.164 的命令工具在多 provider 同时存在时等于没接上**。修法：按 `{type:\"function\", function:{…}}` 包装（与 `fileEdit`、`todo` 一致）。2. **不带 `cwd` 的命令必然失败**。工具层只在模型显式给了 `cwd` 时才把它传给桌面桥，而主进程的 `resolveWorkingDir` 明确要求「必须带绝对工作目录」（它没有权利自己猜一个根——猜错就是跑到用户没授权的目录里执行）。于是正常的「在根里跑一条命令」每次都回「工作目录越界（path-escape）：命令必须带一个绝对工作目录」。修法：总是传 `cwd`（缺省为可写根目录）。3. **`cmd.exe` 吃引号，输出静默丢失**。主进程原本自己拼 `cmd.exe /d /s /c <命令>`。`/s` 的语义会剥掉首尾引号，命令里一带引号就被改写，实测 `node -e \"console.log(1)\"` **退出码 0、stdout 为空**——看起来执行成功，其实什么都没跑。这在 Windows 上是绝大多数真实命令（`git commit -m \"…\"`、`node -e \"…\"`、`python -c \"…\"`）的形态，属于会让人完全失去信任的那类 bug。修法：改由 Node 的 `shell: true` 组装（Windows = `ComSpec`、Unix = `/bin/sh`），引号交给平台运行时处理。",
+      "评测补了什么",
+      "验证",
+      "未做",
+      "1. 仍无真实 Electron 端到端：评测在 Node 里跑同一份 `shell-run.js`，但「Electron 主进程 IPC + preload 桥」这一段仍只有单测。2. 没有覆盖超时与取消的用例（要真的等 30 秒或真的杀进程树，评测节奏会被拖慢；单测已覆盖）。3. `cmd-002` 只验证「默认拒绝」，没有验证「用户在场时能点允许」——那需要真机 UI，属端到端范畴。"
+    ]
+  },
+  {
+    "version": "d.164.4.96.11",
+    "date": "2026-11-16",
+    "title": "「停止」真的能停：在跑的命令会被杀掉",
+    "bullets": [
+      "**渲染层**（`shell/bridge.ts` / `shell/tool.ts`）：`ShellRunRequest` 增加 `runId`（`cmd-<时间戳36>-<序号>-<随机>`），每次执行独立生成；`ShellBridge` 增加可选 `cancel(runId)`。中止信号到达时调 `cancel(runId)`，并且**只调一次**；结果仍以 `run()` 的返回为准，取消是「尽力而为」而不是另一套状态机。",
+      "**主进程**（`shell-run.js`）：维护 `running: Map<runId, abort>`，spawn 成功后才登记（spawn 前只能排队取消）；新增 `shell:cancel` IPC，只接受主窗口（与 `shell:run` 同一条 isTrustedSender 判定），**只认 runId、不认命令内容**——取消不能变成「杀掉任意进程」的入口。",
+      "**排队中的取消**：命令在串行队列里还没开始时，取消不会丢——先记进 `pendingCancel`（上限 50 条，防无限增长），队列轮到它时直接放弃、**根本不会 spawn**。消费点放在两处：校验工作目录之后（`await` 期间用户就可能点停止）与队列任务开始处。",
+      "**老安装包降级**：没有 `cancel` 方法的桥，命令会跑完。这时不能假装「已停止」——工具结果末尾明确写「你按了停止，但当前桌面端版本不支持中途结束命令，它已经跑完了，上面的输出是完整的」。",
+      "**文案**：取消成功回 `aborted` + 「命令已结束（进程树一并杀掉了）」；未取到 id 的取消不误伤其他命令。",
+      "`finish()` 里 `clearTimeout(timer)` 与 `let timer` 的声明顺序：把「排队取消」分支放在 `timer` 初始化之后，否则该分支会在 TDZ 里抛 `ReferenceError`（测试覆盖不到这条路径时不会暴露）。",
+      "取消表在 `finish()` 里删除：超时、输出超限、正常结束、取消四条路径都会清理，不会把 abort 回调留着。",
+      "web：`shell/tool.test.ts` 16 例（+3：中止时按同一 runId 调 cancel 并回 aborted、老桥如实说明「其实跑完了」、两次执行 runId 不共用）；全量 `vitest run` **330 files / 4903 passed**。",
+      "desktop：`shell-run.test.js` 14 例（+4：取消在跑命令真的杀进程、开始前取消不 spawn、未知 runId 不误伤在跑命令、`shell:cancel` 已注册且非可信来源被拒）；全量 `npm test` **915 passed / 0 fail**。",
+      "守卫清单同步：`main.test.js` 的 `IPC_SELF_GUARDED`、`secure-origins.test.js` 的 deny 列表都加了 `shell:cancel`；`preload.test.js` 断言 `__heming_shell.cancel` 转发到 `shell:cancel`。",
+      "`pnpm --filter @heming/web typecheck` 通过。",
+      "没有真实 Electron 端到端（与 d.153 起所有桌面能力同欠）：测试里 spawn 是桩，「真 cmd.exe 被 taskkill 掉」只由代码路径与单测保证。",
+      "取消粒度是「整条命令」：没有「先 SIGTERM 等 2 秒再 SIGKILL」的优雅退出，直接杀进程树。",
+      "没有「取消后自动告诉模型别再重试」的提示词规则（现状靠 `aborted` 的错误码与正文）。"
+    ],
+    "paragraphs": [
+      "问题",
+      "d.164 让智能体能在本机跑命令，但「停下来」只做了一半：用户点停止时，渲染层只是不再等结果，`ipcRenderer.invoke` 本身没有 abort——**已经 spawn 出来的命令会继续跑到超时（最长 2 分钟）**，占着 CPU、占着文件锁、还在往磁盘写。对一个能跑 `npm install` 的工具来说，这不是体验问题：用户以为停了，进程还在改工作区。",
+      "修法：给每次执行一个 id，加一条只能按 id 取消的通道",
+      "顺手修掉的实现细节",
+      "验证",
+      "未做"
+    ]
+  },
+  {
+    "version": "d.164.4.95.11",
+    "date": "2026-11-16",
+    "title": "智能体第一次能在本机跑命令：装依赖、跑测试、看 git",
+    "bullets": [
+      "`classify.ts` 把 `run_command` 登记进 `EXACT_RISK`，固定 `danger`——不是「带 run/write 字样就猜 danger」，而是它本来就没有边界，任何猜测都是低估。",
+      "和鸣的 HITL 里 `danger` 高于所有 `floor` 档位，判定式 `RISK_ORDER[risk] <= RISK_ORDER[floor]` 恒不成立，所以**guarded / trusted / strict 全都要问**；`ruleFor` 对 danger 也不返回 allow，**「记住这条别再问」对它无效**（`classify.shell.test.ts` 用四种策略档 + 一条记住的 allow 规则把这四个断言钉死）。",
+      "唯一的意义是：用户每次点确认前能看见**要跑的那条命令**（`summarizeArgs` 输出 `命令：` + 压空白 + 截 70 字），而不是「运行命令」四个字。",
+      "`shell-run.js` 内是串行队列：同一时刻只跑一条命令。并行跑命令会让两条命令争用同一个目录（`npm install` 与 `npm test` 同时跑就是互相破坏），也会让「哪条超时了」说不清。",
+      "**非零退出码不当作工具失败**：`npm test` 失败是信息，不是工具坏了。成功路径照常回 `exitCode`，但工具层把 `ok` 置为 `false` 并带上 `error_code: \"command-failed\"` + 「先读错误输出，不要原样重跑同一条命令」——让模型知道「跑通了但结果是否定的」，而不是「调用失败，重试一次」。",
+      "输出截断保留头 70% + 尾（编译错误通常在尾部和首部，中间是噪音），并明确写「已截断」。",
+      "`preload.js` 暴露独立的 `__heming_shell` 命名空间（`run` → `shell:run`），**不与 `__heming_files` 合并**：合并后「有文件桥」会被误读成「能跑命令」。",
+      "`main.js` 在 `registerFileIpc` 之后接 `registerShellIpc`，`isTrustedSender` 只认主窗口；`main.test.js` 的 `IPC_SELF_GUARDED` 加了 `shell:run`，`secure-origins.test.js` 的 deny 列表同步，`widget-preload.test.js` 明确禁止桌宠拿到 `__heming_shell`（界面插件不该有命令能力）。",
+      "顺手修了 `main.test.js` 的一条不变量：原本假设「所有自守卫通道都在 `file-fs.js` 里」，现在改成「在 `file-fs.js` 或 `shell-run.js` 里，且两个模块的 `isTrustedSender` 都必须是 fail-closed 默认」——拆分模块后守卫没变松，断言也没失效。",
+      "`pnpm -w typecheck` 6 包全 Done。",
+      "web 全量 `vitest run` **330 files / 4900 passed**（d.163 的 328/4882 +2 文件 +18 例）。",
+      "desktop 全量 `npm test` **911 passed / 0 fail**（新增 `shell-run.test.js` 10 例，并把该文件接进 `npm test` 脚本）。",
+      "新增测试形状：`shell/tool.test.ts` 13 例（形状 / 成功文案 / cwd 解析与越界 / 非零退出码 / 超长命令指路 / 无写根 / 错误码映射 / 截断提示 / 无桥不提供工具 / 已中止不发命令）、`hitl/classify.shell.test.ts` 4 例（danger / 显示名 / 摘要 / 四档恒问 + allow 规则无效）、`runtimePrompt.test.ts` 1 例（注入了才提、含「请用户确认」「不要原样重跑」）、`shell-run.test.js` 10 例（可信来源 / 非零仍 ok / 工作目录四类拒绝 / 命令校验不启动进程 / 超时与中止 kill / 输出超限 / 非可信与未接线 fail-closed）。",
+      "**没有一次真实端到端**：测试里的 spawn 是桩，没有在打包后的 Electron 里真的跑过 `npm test`（和 d.153 起的所有桌面能力一样，缺 Electron 驱动基建）。",
+      "评测未覆盖命令：假网关 + 文件桥那套跑不动真实 spawn，需要专门的「命令工具评测」设计（桩 spawn + 断言命令行，而不是真执行）。",
+      "没有危险命令白名单/黑名单（例如 `rm -rf` 直接拒）：这属于「按字符串判意图」的必然误判，先靠 danger 恒问 + 用户在场兜底。",
+      "命令输出的结构化解析（比如识别 `npm test` 的通过/失败行）没做。"
+    ],
+    "paragraphs": [
+      "为什么这一版最危险，也最必要",
+      "前十一版补齐了「会想、会读会写文件、会派只读帮手」，但**不会执行命令**。于是「装个依赖」「跑一下测试」「看看 3000 端口被谁占了」「现在在哪个分支」这类最基本的活，智能体只能把命令写给你、让你自己复制粘贴——这不是智能体，是「帮你写命令的聊天框」。opencode / hermes / dsh 都有终端工具，这是和它们之间最后一道硬差距。",
+      "命令执行是这个应用里**唯一能在这台机器上做任何事**的能力：`run_command` 能删文件、能改注册表、能联网、能读任何它能读到的路径。所以这一版的重点不是「怎么跑」，而是「怎么让它跑得有限、跑得可解释、跑得能停下来」。",
+      "权限：风险固定为 danger，每一条都要点确认",
+      "四层防线（任何一层失效都还有下一层）",
+      "1. **工具层本地校验**：空命令 / 含 NUL / 超 2000 字符直接拒，cwd 必须落在可写根内（越界回 `path-escape`，文案指路「可写根」）——这些不与用户交互就拒掉，不浪费一次确认。2. **确认卡**：见上，danger 恒问。3. **主进程 `shell-run.js` 再夹一次**：不信任渲染层传的任何东西，重新 `normalizeRoots`→要求存在写根→最长前缀选根→根自身合法、子目录再 `checkAbsoluteInside`→`lstat` 非软链是目录→`assertNoSymlinkAncestor`；命令串长度与 timeout 都重新夹（`[1000, 120000]ms`）。4. **执行期硬限制**：采集超 `512KB` 或超时都 `killTree` 并回结构化错误（`too-large` / `timeout`），Windows 走 `taskkill /pid /t /f` 保证子进程一起死；`stdio` 的第二项是 `ignore`——**不给 stdin**，避免命令等着交互输入把整轮对话挂住。",
+      "一次只跑一条，退出码不吞",
+      "提示词里先说清「会让你确认」",
+      "`runtimePrompt.ts` 只在真的注入了 `run_command` 时才加一段：一条命令一件事；**执行前会请用户确认（连查数据的只读命令也要）**；看到「等待确认」说明在等人，不要重复发同一条；非零退出码先读错误。不提前说，模型会把「等用户点确认」当成卡死，转而编造输出——这是比不给工具更糟的失败。",
+      "桌面桥与守卫",
+      "验证",
+      "未做（下一步）",
+      "更新日志 / Changelog",
+      "和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。"
+    ]
+  },
+  {
+    "version": "d.163.4.95.11",
+    "date": "2026-11-16",
+    "title": "评测补上「清单终态」与「子代理」：新能力第一次被断言",
+    "bullets": [
+      "`todo_write` 从来不在评测的工具桥里（`createEvalToolBridge` 只有文件工具 + `fake_tools`），清单写没写进去只能靠 `fake_tools` 假装，`todo_state` 断言的无非是假工具的返回；",
+      "`agent_task` 同理：确定性模式没有模型绑定（`resolveBoundProfile` 读的是应用内 localStorage 绑定表），子会话起不来，用例只能回「没有可用的模型绑定」；",
+      "于是「清单终态对不对」「子代理会不会偷写文件」这两个最容易悄悄坏掉的地方，一直没有红灯。",
+      "`evals/runner/tools.ts`：`createEvalToolBridge` 新增 `conversationId` 选项，给了才挂**真实** `buildTodoToolBridge`，通过 `mergeToolBridges` 与文件工具桥合并。为什么不给所有用例都挂：工具清单是系统提示词的一部分，凭空多一件会改变既有 26 条用例的 token 口径，基线会被无关改动带偏。",
+      "`evals/runner/stream.ts`：新增 `createScriptedSubagentChat(turns)`——子会话的假模型，按序消费用例的 `subagent_script`；**独立计数**，不算进主用例的 `rounds`（否则 `max_rounds` / `min_rounds` 会被子会话轮次污染）。",
+      "`evals/runner/run.ts`：用例给了 `subagent_script` 才用 `withSubagentTool` 把 `agent_task` 挂到桥上（并注入上面的脚本化子会话）；观测里补 `todos`（跑完读本会话清单）。",
+      "`packages/web/src/lib/agentRuntime/subagent.ts`：`withSubagentTool` 增加可选 `chat` 注入点（`WithSubagentToolOptions`）。**这不是为测试开的后门**：子代理的「对话从哪来」本来就该是可替换的依赖，应用内走 `resolveBoundProfile` + `streamChatRouted`，评测走脚本——不注入的话这条循环在确定性环境里永远不可达。",
+      "新 grader `todo_state`：断言清单的 `total / completed / pending / in_progress`（未写的项不校验），失败时打印实际清单摘要；`loader` 里单独校验（不走 `value` 字符串通道）。",
+      "`pnpm eval:agent` → **29 条 29/29 通过**（tokens/pass 2779、p95 19ms、安全用例 **8 条**全过）。",
+      "`pnpm eval:agent -- --compare evals/baselines/latest.json` → 全绿：分数 100%（基线 100%）、tokens/pass 2779（基线 2607，**+6.6%**，仍在 10% 红线内）、p95 13ms（噪声门限内不判红）；**基线文件未改**（新增用例不重冻，理由见 `evals/baselines/README.md`）。",
+      "`pnpm --filter @heming/web typecheck` exit 0；`subagent.test.ts` **22 例**（新增「注入 chat 时跳过模型绑定」）。",
+      "web 全量 `vitest run` **328 files / 4882 passed**。",
+      "子代理进度仍不进界面（只有最终结论）；",
+      "`agent_task` 还没有 `--real` 模式的用例（真实模型下的子代理质量要另立基线）；",
+      "仍欠：真机 Electron E2E、提交/打包/部署。"
+    ],
+    "paragraphs": [
+      "用户上一版投诉里有一句「无法进行长任务处理」。d.155 给了任务清单、d.157 让它自动续跑、d.162 让翻资料的活交给只读子代理——但**这三件事在评测里一件都测不到**：",
+      "本版把评测补到能断言它们，顺带给性能断言加了一层：`todo_state` 直接读真实 store，`subagent_script` 驱动真实子代理循环。",
+      "一、评测运行器",
+      "二、三条新用例",
+      "| 用例 | 断言什么 | 为什么值得一条 || --- | --- | --- || `todo-001` | 工具清单里有 `todo_write`；调用一次；**清单终态**共 2 条、进行中 1、待开始 1、已完成 0 | 证明清单是真的写进本会话 store，而不是模型嘴上说说 || `subagent-001` | 主对话只调一次 `agent_task`；子会话真的读到了 `docs/a.md`（结论里出现「安装步骤」出现在工具结果里） | 证明子代理的循环真的跑起来、结论真的回灌主对话 || `subagent-002`（security） | 子代理被要求写 `escape.md`：`file_write` 不执行、**文件不存在** | 证明「只读白名单」是执行层拦截，不是提示词里的君子协定 |",
+      "三、验证",
+      "四、未做"
+    ]
+  },
+  {
+    "version": "d.162.4.95.11",
+    "date": "2026-11-16",
+    "title": "只读子代理：翻资料这件事不再占主对话的窗口",
+    "bullets": [
+      "新增 `lib/agentRuntime/subagent.ts`：`agent_task` 工具。主模型给一句任务，子代理在自己的短会话里最多跑 4 轮（`SUBAGENT_MAX_ROUNDS_DEFAULT`；上限 6），自己读文件、自己判断够了，然后回一段结论 + 依据的路径；主对话只看到这一段结论。",
+      "**只读是硬边界，不靠模型自觉**：子代理只拿 `file_read` / `file_glob` / `file_grep` 三件（`SUBAGENT_READ_ONLY_TOOLS`），下发清单与执行时各拦一次——模型凭空写出 `file_write` 的 tool call 会被拒、不执行，只回一条「子代理只能调用只读工具」。写盘、命令、网络、HITL 一律不给：没有副作用，才敢让它自己跑几轮。",
+      "**有界**：每次工具结果截断到 4000 字符（保头保尾，结论通常在末尾）；跑满预算时如实说「结论可能不完整，需要就再派一次、缩小范围」，不硬编结论；用户中断优先（中断后直接回「已中断，它本来也只能读」）。",
+      "接线：`ChatPage.buildToolsFor` 在缓存桥外面包一层 `withSubagentTool`（不做成 capability provider——子代理要用「当前智能体绑定的模型」跑子会话，模型绑定按 `agentId` 查，provider 拿不到；会话工作区也只有 ChatPage 知道）。子代理的对话走 `streamChatRouted`，与应用内对话同一条路由（重试、退避、候选切换都在里面），只是 `onDelta` 丢掉——子代理的中间推理不该流进主界面。",
+      "提示词：`runtimePrompt.ts` 只在**真的注入了** `agent_task` 时才写「翻很多文件时用它、别把几十个文件的原文拉进主对话」；`hitl/classify.ts` 登记为 read（子代理只读，不该因为「派活」弹确认）、显示名「派子代理」、摘要只放任务目标且截断。",
+      "测试：`subagent.test.ts` 21 例（spec 契约、参数解析各错误分支、无工具直答、带工具调用后回灌收口、白名单外工具被拒、中断、跑满预算给半成品、只读白名单恰好三件、wrapper 的 spec/meta/透传/无绑定分支）；`runtimePrompt.test.ts` 加「注入了才提」；`classify.test.ts` 加风险与摘要；`ChatPage.test.tsx` 的 I3 断言本轮系统提示词里真的有 `agent_task` 与「只读子代理」——证明它真的进了模型能看到的清单。",
+      "验证：`pnpm -w typecheck` 6 包 Done；web 全量 vitest **328 files / 4879 passed**；`agentRuntime + classify + ChatPage` 257 例全绿。",
+      "未做：子代理的进度不进界面（只有最终结论）；暂不支持多层子代理（子代理的工具清单里没有 `agent_task`，天然不会递归）；评测还没有 `agent_task` 用例（假网关只驱动主会话，嵌套对话要另加脚本能力）。"
+    ],
+    "paragraphs": [
+      "前三版解决的是「主对话自己怎么想」（运行环境段 d.154、人设 d.156、预算 d.160），但有一类活它天生吃亏：**要翻很多文件才能答的问题**。主模型自己去读，代价有三份——每份文件原文都留在主历史里（之后每轮重付 token，压缩后还会丢）、翻文件的工具轮次会挤掉真正干活的轮次（`MAX_TOOL_ROUNDS` 是整轮共享的）、读了一半被打断就什么也没留下。opencode / DSH 一类应用对此的做法是 subagent / Task：把「过程」放到一个独立的短会话里，只把结论带回主对话。本版加上这件能力，并把它的边界写死。"
+    ]
+  },
+  {
+    "version": "d.161.4.95.11",
+    "date": "2026-11-16",
+    "title": "评测第一次看见系统提示词，也第一次抓住「续跑吞调用」",
+    "bullets": [
+      "`evals/runner/run.ts`：新增 `buildEvalSystemPrompt`，用 `resolveBasePrompt(undefined)`（内置人设）+ `buildRuntimeSection(...)`（本机运行环境段：平台、固定时间、工作区、可写根、**真实工具清单**、轮次上限）+ `buildAgentContext(...)` 组装，作为 `getPrompt()` 返回值；每条用例拿到的是与生产同一条流水线产出的提示词（只是去掉记忆/技能段，避免评测依赖外部状态）。`CaseObservation` 新增 `systemPrompt`，用例可以断言它。",
+      "评测契约扩三项：`prompt_contains`（断言系统提示词包含哪些子串；**空提示词直接红**，防止提示词组装坏了却静默通过）、`min_rounds`（回合数下限，用来证明「真的续跑了」而不是提前收口）、`setup.todos`（跑前预置该会话的任务清单，把「清单里有没有未完成项」与「模型这轮做了什么」拆开测）。",
+      "新增 `ctx-003`：断言本轮提示词同时含内置人设首句、「## 运行环境（本机）」、「## 本轮可用工具（共」、`file_write`、「## 长任务怎么处理」与「最多 12 次工具往返」——把 d.154/d.156 的产物第一次钉成回归。",
+      "新增 `long-001`：预置两条未完成任务，脚本连发 13 个 `file_read`，断言 13 个都执行、回合数 ≥14、正文说明读完了——覆盖 d.157 的续跑。",
+      "**它首跑就失败，暴露 agentStream 真 bug**：到顶判定（`round - segmentStart >= MAX_TOOL_ROUNDS`）写在**执行工具之前**，于是到顶那一轮模型请求的调用被整批丢掉（用例里 13 个读取只执行了 12 个，第 13 个既没执行也没回结果，模型只看到自己的请求石沉大海）。修法：把这段判定整块搬到循环体末尾（工具执行与结果回灌之后），判据改成「**已执行完的工具轮数**」`round + 1 - segmentStart`、`roundsDone = round + 1`、`segmentStart = round + 1`。行为口径不变：清单全完成仍停 12 轮、未完成续跑到 36 轮总上限、中断优先、用户看到的文案逐字不变。",
+      "测试：`agentStream.test.ts` 两条 d.157 端到端期望改成「36 个工具轮 = 36 次请求」「清单全完成 = 12 次请求」，并新增断言 `tool_result` 条数等于 36（**防的正是这次这种「少执行一次」的回归**）；`agentStream.tools.test.ts` 的到顶用例同步为 12 次。",
+      "验证：`pnpm eval:agent` **26/26 全绿**（原 24 + 新 2），tokens/pass 2864、p95 12ms、安全用例 7 条全过；`--compare evals/baselines/latest.json` 全绿但 token 变化 **+9.9%**，距 10% 红线只剩 0.1pp——这不是退化，是新用例本身更重（多回合 + 每轮系统提示词），已在 `evals/README.md` 与 `evals/baselines/README.md` 写明「建议下次由人复核后重冻基线」，基线文件本轮未改。",
+      "文档：`evals/README.md` 补两条 grader、`setup.todos`、系统提示词进入评测的说明与聚合 token 提醒；`evals/baselines/README.md` 补重冻建议。"
+    ],
+    "paragraphs": [
+      "d.154 起我们连加了五版「让它像个智能体」的东西：运行环境段、默认人设、长任务续跑、清单面板、按窗口分配历史预算。但评测跑的是另一套壳——`evals/runner/run.ts` 里系统提示词写死成 `getPrompt: () => \"\"`，**模型在评测里从来没有收到过这些提示词**：那五版的提示词效果一行都没被测到，用例只能验证工具调用与文件结果。本版把真实提示词接进评测，顺便被它抓出一个真 bug。"
+    ]
+  },
+  {
+    "version": "d.160.4.95.11",
+    "date": "2026-11-16",
+    "title": "历史预算按模型窗口分配：长对话不再在第 8 轮就「失忆」",
+    "bullets": [
+      "新增 `lib/agentContext/modelBudget.ts`：`windowBudgetTokens`（历史预算 = 模型窗口 × 0.6，与设置卡共用 `BUDGET_WINDOW_RATIO`）、`autoBudgetTokens`（能力未知 → 6000 保持原行为；小窗口不越窗硬塞；上限 `MAX_AUTO_BUDGET = 32000`）、`autoKeepRecentTurns`（每 750 token 一轮，夹在 8–24 轮）、`applyModelBudget`（自动档算预算与轮数；手动档尊重手填值但收敛到窗口上限；能力未知时一个字都不改）。",
+      "`lib/agentContext/settings.ts`：新增 `autoBudget`（默认开；历史存量设置缺键按开补齐，所以老用户升级后长对话不再被切碎）。开 = 按窗口算，关 = 完全按手填值；开关本身不擦已手填的值。",
+      "`ChatPage.tsx` 的 `prepareHistory`：用 `resolveCapability(profile)` 拿到该 agent 真实模型的窗口，`applyModelBudget(loadContextSettings(), caps)` 之后再送进压缩——界面显示的与真正生效的是同一个函数，不会出现「设置卡说 32000、实际用 6000」。",
+      "`ContextSettingsCard.tsx`：新增「按模型上下文窗口自动分配」开关（默认开）；自动档下显示「按 <model> 的 N token 窗口算：历史预算 X token、保留最近 Y 轮（上限 32000）」；没有可用模型时说明先用 6000 / 8 轮。手选预算或轮数会自动让位到手动档（否则用户改了却看不到效果），手动档超窗仍显示「已超出上限，会收敛到上限」。",
+      "测试：`modelBudget.test.ts` 10 例（0.6 比例、封顶 32000、8K 窗口取 4915 不越窗、未知能力回落 6000、轮数夹取、200K 窗口 → 32000 / 24 轮、手动档收敛、关自动档不擦手填值）；`context.test.ts` 与 `ContextSettingsCard.test.tsx` 补齐 `autoBudget` 字段与自动档/手动档两组行为；`ChatPage.test.tsx` 新增「默认自动档下短历史不被提前压缩」，并把两个既有压缩用例钉成 `autoBudget: false`。"
+    ],
+    "paragraphs": [
+      "根因：上下文压缩本身是有的（`lib/agentContext/` 的 `prepareHistory` 有预算关闭 / 全放得下 / 摘要缓存命中 / 摘要 / 异常回落五条分支），但预算被硬编码成 **6000 token**——那是给「未知模型 + 8K 窗口」定的保守值。真实连接的模型常见 64K / 128K / 200K 窗口，6000 预算意味着**每几轮就把前面压成一段摘要**：长任务做到一半，前面读过的文件内容、用户定下的约束、已经改过哪些地方全没了，模型开始重复劳动或者忘了已经改过什么。用户在长对话里感受到的「像网页端、聊着聊着就忘」，一部分就出在这里。",
+      "验证：`pnpm -w typecheck` 6 包全 Done；web 全量 **327 files / 4858 passed**；`pnpm design:audit` 全部门槛通过（横向溢出 / 对比度 / 11px 正文 / 有效命中区 / 无名字可点 全 0）。"
+    ]
+  },
+  {
+    "version": "d.159.4.95.11",
+    "date": "2026-11-16",
+    "title": "评测终于量得到新文件工具：补 6 条用例，并修掉运行器「只认两个工具」的洞",
+    "bullets": [
+      "`evals/runner/tools.ts`：真实文件工具改为**按工具桥实际声明的 `tools` 名单分发**（不再硬编码名字）；这样以后再扩工具，评测自动覆盖，不会又出现「加了工具但评测测不到」。",
+      "`evals/runner/gate.ts`：安全判定改成对**三个写工具**（`file_patch` / `file_write` / `file_edit`）统一走 `assessPatchSafety`，与生产 `hitl/policy.ts` 的 writeVerdict 同口径；读类（含检索）与外部假工具仍放行。",
+      "`evals/runner/fsBridge.ts`：评测桥补上 `glob` / `grep` 真实实现（glob 子集 `* ? ** {a,b} [abc]`、路径匹配大小写不敏感、跳过 `node_modules/.git/.hg/.svn` 与软链、条目 2 万 / 深度 20 / 命中 200 上限；grep 长行先截断再匹配，避免把 2MB 单行喂给正则）。此前缺这两个方法时，检索工具会被 `hasSearchBridge` 按工具隐藏，用例根本调不到。",
+      "新增 6 条用例 + 夹具：`write-001`（整份写入新建文件）、`write-002`（深层路径补建父目录，验证 `createParents`）、`edit-003`（精确串替换「端口 8080→9090」）、`search-001`（`**/*.ts` 只返回 3 个源码文件、跳过 `node_modules`）、`search-002`（`file_grep` 命中 4 处 / 2 个文件、结果带 `src/a.ts:1`）、`sec-006`（根外 `../escape.txt` 写入被拒、无副作用）。",
+      "验证：`pnpm eval:agent` **24/24 全绿**（原 18 条 + 新 6 条），tokens/pass **2465**（基线 2607，-5.4%），p95 12ms（<100ms 噪声门限），安全用例 7 条全过；`--repeat 3` 分数极差 **0.0 个百分点**（阈值 ≤3）；`--compare evals/baselines/latest.json` 全绿——基线未改（按约定只有人能改），新增用例后旧基线仍有效（聚合指标，文档已写明这条）。",
+      "文档：`evals/README.md` 补「工具分发」小节、闸门规则改为三个写工具、证据口径含写工具、用例数与报告示例更新；`evals/baselines/README.md` 补「新增用例后不必立刻重冻基线」的判据。"
+    ],
+    "paragraphs": [
+      "d.153 把文件工具从两个扩到六个，但评测运行器里写着 `if (call.name === \"file_patch\" || call.name === \"file_read\")`——新加的 `file_write` / `file_edit` / `file_glob` / `file_grep` 在评测里只会回「评测工具未配置」，等于**度量不到**；确定性 HITL 闸门也只对 `file_patch` 做安全判定，新写工具直接放行，安全用例会假绿。本版把这两个洞补上，并给新能力配上用例。"
+    ]
+  },
+  {
+    "version": "d.158.4.95.11",
+    "date": "2026-11-16",
+    "title": "任务清单渲染进界面：长任务跑到第几步，用户当场看得见",
+    "bullets": [
+      "新增 `packages/web/src/components/TodoPanel.tsx`（输入栏上方，拖动把手上方）：标题行「任务清单」+ 进度数字「已完成 x/y · 进行中 z」+ 进度条；条目用 ✓ / ▸ / ○ 标状态、进行中那条高亮、完成项删除线；全部完成时显示「全部完成」。可折叠，折叠后仍保留进度数字与进度条（这是折叠态唯一的信息源）。**清单为空时整个组件不渲染**：没在做多步任务的会话不该多出一块空壳、白占输入区高度。",
+      "订阅链路：`lib/todo/store.ts` 新增 `subscribeTodos(listener)` / 内部 `emit(conversationId)`（回调带会话 id，别的会话变更不触发重算；单个订阅者抛错被吞掉——UI 是投影，不能因为它崩了把「清单已写入」这个事实丢掉）；新增 `lib/todo/useTodos.ts` 的 `useTodos(conversationId)`（挂载时补读 + 订阅刷新 + 会话切换重读）。模型在**流式过程中**写清单，面板立刻出现，不需要等下一轮、也不需要重开应用。",
+      "只读口径：清单所有权在模型（`todo_write` 整份替换），面板不给用户编辑入口——两处都能改会导致「模型以为自己在做 A、清单显示 B」的分裂。用户要改，下一句话告诉它即可。",
+      "无障碍与设计门槛：进度数字挂 `role=status aria-live=polite`（模型每完成一步，读屏用户能听见）；字形用 `aria-hidden`、旁边给「已完成 / 进行中 / 待开始」的字面量；条目正文 13px（`text-ui-md`），折叠按钮走 `ui-hit` 命中区与 `FOCUS_RING`。",
+      "验证：`pnpm --filter @heming/web typecheck` exit 0；新增 `TodoPanel.test.tsx` 6 例（空态不渲染 / 无会话 id 不渲染 / 渲染进度与状态 / 流式订阅刷新 / 折叠与展开 / 别的会话不串）、`store.test.ts` 订阅 3 例（写入与清空都通知且带会话 id / 退订后不再通知 / 订阅者抛错不影响其它）；`ChatPage.test.tsx` 新增接线用例（流式写入 → 面板当场出现 → 清空后消失，且 DOM 位于输入框之前）；web 全量 **326 files / 4844 passed**；`pnpm design:audit` 全门槛通过（横向溢出 / 对比度 / 11px 正文 / 有效命中区 <32 全为 0）。"
+    ],
+    "paragraphs": [
+      "d.155 让智能体写清单、d.157 让它在清单没做完时自动接着做，但这份清单**用户始终看不见**——它只活在 `todo/store` 与提示词里，用户只能从一串工具调用气泡里逐条拼「它到底打算做几步、现在到哪了」。长任务一次能跑 36 轮工具，用户最需要的恰恰是这一屏。"
+    ]
+  },
+  {
+    "version": "d.157.4.95.11",
+    "date": "2026-11-15",
+    "title": "长任务不再「跑了 12 轮就撒手」：清单还有没做完的就自动接着做",
+    "bullets": [
+      "新增 `packages/web/src/lib/agentRuntime/longTask.ts`（纯函数 + 一个读清单的薄封装）：`longTaskVerdict({ roundsDone, unfinished, aborted })` 只在**段边界**（12 / 24 轮）判定，四条口径缺一不可——①用户没按停止；②本会话任务清单里真的还有 pending / in_progress 项；③总量还没到上限；④正好走完一整段。`unfinishedTodoCount(conversationId)` 读 `todo/store`，没有会话 id / 存储坏了 / 清单为空一律返回 0（判据不明时**选择不续**，错误续跑会让一轮对话莫名变长）；`longTaskNotice` / `longTaskLimitNotice` 是对用户的中文解释。",
+      "`agentStream` 的「到上限」分支改为先问清单再决定：续跑时上行一句「（任务清单还有未完成项，正在自动接着做：已完成 12 轮，最多可再做 2 段 × 12 轮。）」然后 `continue`，并用新增的 `segmentStart` 记录段起点（不复位 `round`，否则 `round > 0` 的预算闸门会失效）。",
+      "**总量硬上限 3 段 × 12 轮 = 36 轮**：到顶照样收口，文案换成「已连续调用 36 轮工具（3 段），达到单次上限」。不设总量会让一个循环工具把整轮对话拖到用户按不了停止。",
+      "任务清单全绿时行为与旧版**逐字一致**：仍停在第 12 轮、仍写 `max_rounds` 归因（不替模型脑补任务）。",
+      "提示词侧（`runtimePrompt.ts`）：仅在同时注入了 `todo_write` 与轮次上限时加一行「任务清单里还有未完成项时，到达轮次上限会**自动接着做**（最多 3 段、共 36 轮），不需要让用户催『继续』」——否则模型到顶就习惯性收口（它以为「到上限=该停了」）。"
+    ],
+    "paragraphs": [
+      "用户原话是「无法进行长任务处理」。查下来不是模型不行，是**和鸣自己把每轮工具往返钉死在 12 次**（`agentStream.MAX_TOOL_ROUNDS`）：一个真正的多步任务（读十几个文件、改几处、跑验证）本来就超过 12 轮，到顶后系统只提示「回复『继续』可以接着做」——把续跑的责任推回给人：用户得盯着屏幕、自己判断「这次是不是真没做完」、再敲一次「继续」，敲两三次就会以为智能体的能力到头了。",
+      "本版把续跑从**用户动作**变成**系统动作**，但不是无限跑：",
+      "验证：新增 `longTask.test.ts` 12 例（段轮数与 `MAX_TOOL_ROUNDS` 互钉防漂移、非边界不续、12/24 续、清单全绿不续、中断优先、36 轮上限、负/小数轮次、计数只看未完成、文案不含「回复继续」）；`agentStream.test.ts` 新增 2 例端到端（有未完成项时 `streamChat` 被调 37 次、中途两次「自动接着做」、终态仍是 `max_rounds(limit)`；清单全绿时仍只调 13 次）；`runtimePrompt.test.ts` 加 1 例（没注入清单工具时不承诺自动续跑）；web 全量 **325 files / 4834 tests** 全绿，`pnpm --filter @heming/web typecheck` 通过。"
+    ]
+  },
+  {
+    "version": "d.156.4.95.11",
+    "date": "2026-11-15",
+    "title": "内置智能体有「人设」了：先看现场、没工具就说没有、多步先列清单",
+    "bullets": [
+      "身份：和小鸣，跑在用户自己电脑上的桌面智能体。",
+      "行为准则：①涉及文件/目录/网页/数据先读真实内容再答，猜错就承认并回到现场；②这一轮没注入某个工具就直说「这轮我做不到」，不编造结果、不让用户反复重试；③三步以上的任务开工前用 `todo_write` 列清单，每完成一步更新；④改文件先读现状、改完读回或跑测试，说「已完成」要拿得出证据；⑤结论前置、说人话、不复述、不堆术语；⑥需求有歧义/权限不够/要删东西先问；⑦只动授权范围，越界写入、删除、改可执行脚本或依赖清单一律走确认；⑧接近工具轮次上限先给「已完成 / 未完成 / 下一步」。",
+      "兜底口径 `resolveBasePrompt(custom)`：用户写过任何非空提示词就**完全按用户的来**（不拼接、不追加，避免「用户改了但它还在」）；空白串与脏值（历史遗留的非字符串）一律回落默认人设。",
+      "接线：`ChatPage` 的 `buildSystemPrompt` 与 `getPrompt`（`buildSystemPrompt` 抛错时的回落路径）都改走 `resolveBasePrompt`，因此所有走 agentStream 的入口（会话页、协作、自动化）拿到的是同一份底座。",
+      "之前 `setPrompt` 全仓没有调用方，人设只能改存储——这张卡补上「看见、能改、能撤回」。输入框默认空（= 用内置人设），可一键「填入内置人设（可改）」再改，或「恢复内置人设」一键清空。",
+      "保存时去首尾空白；空白内容保存等同于恢复内置人设（不会把空白串当自定义）。为此给 `store/llm.ts` 加 `clearPrompt`：**删除键**而不是写空串，让「没有 = 用内置」成为唯一判据，避免别处再判空。",
+      "卡上明写「它会**完全替代**内置人设（不是叠加）」——这是 `resolveBasePrompt` 的真实行为，不说清楚用户会以为是在默认人设上追加。",
+      "「当前生效：内置人设 / 自定义（N 字）」用 `resolveBasePrompt(saved)` 的返回值判定，与聊天侧同一函数，界面与实际生效不会分叉；外部改动同一份提示词时输入框自动同步。",
+      "注册进设置卡片目录（`lib/settings/registry.ts` 的 `agent-persona`，搜索关键词含「人设 / 提示词 / prompt / 人格 / 恢复默认」），设置页「高级」分区新增「智能体」分组并挂 `data-settings-id`。"
+    ],
+    "paragraphs": [
+      "d.154 解决了「不知道自己在哪里」：系统提示词里有了运行环境段（桌面端/时间/工作区/工具清单/轮次上限）。但**「怎么做事」仍然无人交代**——`store/llm.ts` 的 `prompts` 默认空记录，而全仓没有任何界面能编辑它（`setPrompt` 只有定义、没有调用方），所以内置智能体此前实际只有环境段这一段提示词：没有「先核实再回答」的纪律、没有「没工具就说做不到」的边界、没有「多步任务先列清单」的要求。表现就是一段会调 API 的网页聊天——环境知道了，行为方式还是散装。",
+      "本版新增**默认人设**（`packages/web/src/lib/agentRuntime/defaultPrompt.ts`，纯常量 + 一个纯函数）：",
+      "位置：默认人设是提示词第一段，运行环境段紧随其后，再是记忆与技能。提示词结构从「环境事实」升级为「人设 + 环境 + 记忆 + 技能」。",
+      "验证：`pnpm --filter @heming/web typecheck` 通过；新增 `defaultPrompt.test.ts` 3 例（空白/脏值回落、默认人设点名 `todo_write`、自定义提示词原样优先）；`ChatPage` 新增「I3e 用户没写过提示词时用内置人设兜底」，断言系统提示词以默认人设开头、仍带运行环境段与清单要求；`agentRuntime` 与 `ChatPage` 共 181 例、web 全量 **323 files / 4810 tests** 全绿。**设置 → 高级 → 智能体 → 智能体人设**（`packages/web/src/components/PersonaCard.tsx`）：",
+      "验证（含设置卡）：`PersonaCard.test.tsx` 8 例（空态/保存落盘/去空白/恢复默认删键/空白保存=恢复/填入内置/外部同步/历史脏值）、`store/llm.test.ts` 加 `clearPrompt` 1 例、`registry.test.ts` 卡片数 11→12；`SettingsPage` 39 例全绿。"
+    ]
+  },
+  {
+    "version": "d.155.4.95.11",
+    "date": "2026-11-15",
+    "title": "智能体有了任务清单：长任务先列步骤、边做边更新",
+    "bullets": [
+      "`todo_write({ todos: [{ content, status }] })`：每次调用提交**整份清单**（不做增量 patch——增量在长任务里最容易和真实状态分叉）；最多 20 条、单条 200 字、最多一条「进行中」；校验逐条指到「第 N 条」而不是笼统报错；失败时原清单不动。",
+      "渲染「进度：x/y 已完成，z 进行中，w 待开始」+ `[x]/[>]/[ ]` 行标记，模型下一轮读回同样的结构。",
+      "键 `heming.todos.v1`，按会话 id 存，最多保留最近更新的 50 个会话（内存与存储一起裁，避免只裁纸面）；坏 JSON / 坏条目逐条降级丢弃，不让一条脏数据毁掉整个清单。",
+      "淘汰顺序用**单调序号**而不是 `Date.now()`：同一毫秒内连写多个会话是常态，时间戳相等时排序不稳定，淘汰谁就成了随机（测试可复现性要求）。",
+      "`capability/providers.ts` 新增 `todoProvider`（注册在 files 之后，任何环境、任何端都可用，不依赖桌面桥）；`CapabilityContext.conversationId` 为空时不注入（不落全局桶）。",
+      "`hitl/classify.ts` 显式登记 `todo_write` 风险为 **read**：名字带 `write` 会命中危险词兜底变 danger，那样每次列计划都要弹确认，用户会直接关掉这个工具。显示名「更新任务清单」，摘要只给「共 N 条，已完成 X，进行中 Y」。",
+      "`agentRuntime/runtimePrompt.ts`：只有本轮**真的注入**了 `todo_write`，长任务段才加一行「多步任务（三步以上）开工前先列清单，每完成一步更新状态」——没注入就不承诺。"
+    ],
+    "paragraphs": [
+      "d.154 让智能体「知道自己在哪、能做什么」，这一版补上长任务的**外部记账能力**：以前多步任务只能靠一句段落在回复里描述计划，做几步就丢，用户看不到进度，模型自己也会跑偏。现在有一个 `todo_write` 工具，整份替换当轮任务清单，状态三态（待开始 / 进行中 / 已完成），按会话隔离持久化。",
+      "**工具（`packages/web/src/lib/todo`）**",
+      "**持久化（`lib/todo/store.ts`）**",
+      "**接线**",
+      "验证：`pnpm --filter @heming/web typecheck` 通过；新增 `todo/store.test.ts` 11 例、`todo/tool.test.ts` 19 例，`capability` 69、`hitl/classify` 38、`agentRuntime` 38、`ChatPage` 139 全绿（ChatPage 断言 `todo_write` 真的进了这一轮的工具清单与提示词）。"
+    ]
+  },
+  {
+    "version": "d.154.4.95.11",
+    "date": "2026-11-15",
+    "title": "智能体开始「知道自己在哪、能做什么」",
+    "bullets": [
+      "身份与平台：桌面端写明「会真的改本机文件」，浏览器端写明「没有桌面文件桥，不要假装」。",
+      "当前时间 + 时区：`Intl` 解析，非法时区回落本地时间，不编造。",
+      "会话工作区与目录清单：工作区标为「可写、默认写这里」；只读根逐个标注；超过 6 条折叠「另有 N 个」；**一条可写目录都没有时明确写「不要假装已经写入」**（而不是让模型自己猜）。",
+      "本轮工具清单：取 `buildToolsFor(agentId)` 的真实桥（与 HITL 判风险的那份同源，提示词和闸门不会各说一套），逐条 `name（中文名）·读/写`；超过 12 条折叠并提示用 `tool_search` 发现；**零工具时明说「这一轮没有注入任何工具，不要编造查询结果」**。",
+      "长任务约定：多步任务直接开始；按工具轮次上限（`MAX_TOOL_ROUNDS=12`）先给「已完成 / 未完成 / 下一步」；每步只认真实结果；声称完成前先验证；汇报到可核对粒度。"
+    ],
+    "paragraphs": [
+      "用户反馈「和鸣像网页端对话：不知道自己能做什么、不知道运行环境、无法调用工具、无法处理长任务」。第一处硬伤是**内置智能体默认没有系统提示词**（`store/llm.ts` 的 `prompts` 默认空，`ChatPage.tsx` 取到空串），工具只以 OpenAI `tools` 数组单独下发：模型看得见函数名，但看不见自己在桌面端、现在几点、会话工作区在哪、哪些目录可写、这一轮到底注入了几件工具、工具轮次有上限、以及「做完要先验证」。于是表现就是一段会调 API 的网页聊天。",
+      "本版新增**运行环境段**（`packages/web/src/lib/agentRuntime/runtimePrompt.ts`，纯函数、可单测）：",
+      "位置：人设之后、记忆与技能之前（记忆/技能仍按原预算召回，运行环境段不参与预算）。缺省不注入时 `systemPrompt` 严格等于原提示词，旧契约不破。",
+      "验证：web typecheck 通过；新增 `runtimePrompt.test.ts` 12 例、`context.test.ts` 追加 4 例；`agentRuntime` 37 tests、`ChatPage` 139 tests 全绿。"
+    ]
+  },
+  {
+    "version": "d.153.4.95.11",
+    "date": "2026-11-15",
+    "title": "智能体终于能写文件：六个文件工具 + 工作区自动写根",
+    "bullets": [
+      "`file_read`（读，offset/limit 分页）/ `file_patch`（锚点补丁，多文件一次改）保留；新增 `file_write`（整份创建/覆盖，空内容合法、父目录自动补建）、`file_edit`（精确串替换，`replace_all` 可选，换行符 CRLF 自动重试一次）、`file_glob`（通配符列文件，`* ? ** {a,b} [abc]`）、`file_grep`（正则搜内容，可限定 `path` / `include`）。",
+      "工具 schema 预算从 830 字符抬到 2800（两件扩六件的代价写在测试注释里）；工具数 20 仍是「按需检索」分界，不是硬上限。",
+      "老安装包的桥没有 `glob`/`grep`：按工具降级隐藏两件搜索工具，读写四件照常可用（不会让模型调到 `undefined`）。",
+      "会话工作区自动成为该会话智能体的写根（`mergeWorkspaceRoot`，只派生不落盘、排第一位、手动配置同路径优先，不会把只读根悄悄升级）。",
+      "未分组会话用**默认工作区**兜底：桌面端在 `文档\\和鸣` 建目录并向 preload 下发路径（`file:default-root` 只回固定目录、不接受渲染层任何路径参数）；没有工作区也没有手动根时它成为唯一写根，用户配过根（哪怕只有只读根）则不兜底。",
+      "`currentFileRoots()` 是工具可见性 / HITL 闸门 / 确认卡预览 / 记住授权四处唯一的根口径；capability provider 用 `fileRootsFor(ctx.workspace)`，不依赖「ChatPage 先写模块状态」的时序。",
+      "越界处理仍是「问 / 直接拒绝」二选一（`outOfRoot`），根外路径 web 侧先收敛、主进程再按根白名单 + 软链祖先 + 保留名校验一遍。",
+      "新增通道 `file:glob` / `file:grep`（显式栈 DFS，跳过 `node_modules/.git/.hg/.svn` 与软链，含隐藏文件，深度 20 / 条目 20000 / 结果 200 / 单行 2000 字符上限，超限只置 `truncated`）；`file:write` 增加 `createParents`（只认 `=== true`，缺失段逐段校验后 mkdir，失败只回收本次新建的空目录）；新增 `file:default-root`。",
+      "全部与 `file:write` 共用同一串行队列（搜索不会撞上批量写的 tmp/rename 中间态），来源不可信一律 fail-closed。",
+      "错误码只用 `invalid-pattern / outside-roots / no-roots / io`：web 侧类型只认这四个 + `untrusted-sender`，主进程不新增码（细分需求要跨层一起改）。",
+      "`classify` 显式登记六个工具的风险（压过 `DANGER_WORDS` 里 `write` 的误判）；`file_write` 摘要只给「路径 + 行数/字节」、`file_edit` 给「替换 N 行 → M 行」，不回显正文。",
+      "`policy` 对写三件统一走 `writeVerdict` 三态：全在写根内 → 自动放行（guarded 档下不再是只有 `file_patch` 免问），根外 → 问；`ruleFor` 支持写三件的多目标目录前缀匹配，通配 `*` 仍不算数、删除/改名不吃 allow（`file_write` 覆盖不算删除）。",
+      "确认卡：写文件调用整批不提供「本会话内允许此工具」；`file_write` / `file_edit` 用行级 diff 预览（读不到旧内容时降级为「将写入 N 行」）。",
+      "设置区文件编辑卡文案改为「工作区自动可写，不再是唯一开关」，并显示「工作区（自动）」或「默认工作区（自动）」；不写 localStorage、不新增存储键。",
+      "`README.md` 增「本机文件读写」能力条目；`lib/fileEdit/README.md` 重写（六工具表、根从哪来四条、三条不许破的线）；`packages/shared/src/schemas.ts` 的 `Conversation.workspace` 与 `packages/server/src/app.ts`、`lib/workspace/group.ts` 注释同步「工作区不再只是分组」。",
+      "`pnpm --filter @heming/web typecheck` 通过；web 全量 `vitest run` 319 files / 4757 tests 全绿（新增 `toolOps.test.ts` 19 例、`roots.test.ts` 补 17 例、可见性与 schema 预算用例、HITL 175 例、桌面卡 12 例）。",
+      "`packages/desktop` 全量 `npm test` 900 tests / 900 pass（file-fs 65、preload 35、main 41、secure-origins 13 及既有用例）。",
+      "未做真实 Electron 手工端到端；`file:default-root` 在文档目录不可写时回错误，web 侧按「没有默认工作区」降级。"
+    ],
+    "paragraphs": [
+      "用户投诉「智能体完全没有文件读写能力，甚至不能称之为智能体应用」。根因不是模型或提示词，是**权限默认为空**：文件工具只在「桌面桥存在 + 至少一条可写根」时注入，而可写根默认零条、必须先手动去设置区添加，于是开箱即用的智能体手里一个文件工具都没有；同时补丁工具只支持锚点补丁，写不了整份文件、建不了空文件、列不了目录、搜不了内容。本版把这两件一起改掉。",
+      "**六个工具（web 侧 `lib/fileEdit`，DSH 语义移植）**",
+      "**权限模型（用户要求的「工作区默认可读写 + 保留手动可写根」）**",
+      "**桌面桥（`packages/desktop`）**",
+      "**人工确认与设置区**",
+      "**文档**",
+      "**验证**"
+    ]
+  },
+  {
     "version": "d.152.4.95.11",
     "date": "2026-11-15",
     "title": "团队页改为同队可见 + 默认共享",

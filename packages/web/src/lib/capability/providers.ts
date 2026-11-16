@@ -1,4 +1,5 @@
 import { buildChartToolBridge } from "../charts/tools.js";
+import { fileRootsFor } from "../fileEdit/roots.js";
 import { buildFileToolBridgeIfAvailable } from "../fileEdit/tools.js";
 import { buildInfohubToolsIfConnected } from "../infohub/tools.js";
 import { buildToolBridge } from "../mcp/index.js";
@@ -8,6 +9,8 @@ import { buildPluginToolBridge } from "../plugins/tools.js";
 import { makePluginToolFilter } from "../plugins/toolCeiling.js";
 import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
+import { buildShellToolBridgeIfAvailable } from "../shell/tool.js";
+import { buildTodoToolBridge } from "../todo/tool.js";
 import { buildToneToolBridge } from "../tone/tools.js";
 import { buildVaultToolBridge } from "../vault/tools.js";
 import { buildWebToolsBridgeIfAvailable } from "../webtools/tools.js";
@@ -66,14 +69,25 @@ export const vaultProvider: CapabilityProvider = {
 };
 
 /**
- * 文件编辑工具（d.55 · file_patch / file_read）：只在**桌面桥存在且至少有一条可写根**时注入。
- * 浏览器端与未配置可写根时返回 null——绝不为了「能用」造一个内存假桥，
- * 那会让用户在浏览器里以为文件真被改了（产品决策，见 lib/fileEdit/tools.ts）。
+ * 文件工具（d.55 起 file_patch / file_read；d.153 扩到六个）。
+ *
+ * 注入条件（三条同时成立）：
+ * 1. 桌面桥存在（浏览器端返回 null——绝不为「能用」造内存假桥，那会让用户
+ *    以为文件真被改了）；
+ * 2. 至少一条根可用——**会话工作区也算一条**：`ctx.workspace` 被派生为隐式写根
+ *    （`mergeWorkspaceRoot`，只派生不落盘、手动配置的同路径根优先），
+ *    这样用户给会话选过文件夹就有文件能力，不必再跑一趟设置区；
+ * 3. 可见工具非空（有写根才有写工具；老安装包的桥没有 glob/grep 时按工具隐藏）。
  */
 export const filesProvider: CapabilityProvider = {
   id: "files",
   origin: "builtin",
-  build: () => buildFileToolBridgeIfAvailable(),
+  build: (ctx) =>
+    buildFileToolBridgeIfAvailable({
+      // 根口径只在 roots.ts 里实现一次（含未分组会话的默认工作区兜底）：
+      // ctx.workspace 优先，缺省才回落到 Chatter 记下的活动工作区。
+      roots: () => fileRootsFor(ctx.workspace),
+    }),
 };
 
 /**
@@ -137,4 +151,32 @@ export const selfProvider: CapabilityProvider = {
       { agentId: ctx.agentId, conversationId: ctx.conversationId },
     );
   },
+};
+/**
+ * 任务清单（	odo_write，d.154）。
+ *
+ * 唯一一个**不需要任何外部依赖就默认注入**的写类工具：它只改会话级的计划状态，
+ * 不碰文件、不碰配置、不出本机，因此浏览器端也有（长任务不该只有桌面端能做）。
+ * 计划按 conversationId 隔离，注册表每次 build 传进来的是当前会话。
+ */
+export const todoProvider: CapabilityProvider = {
+  id: "todo",
+  origin: "builtin",
+  build: (ctx) => buildTodoToolBridge({ conversationId: ctx.conversationId }),
+};
+
+/**
+ * 本机命令（`run_command`，d.164）。
+ *
+ * 与 files 并列而不是并进去：文件工具的语义是「改哪个文件」，命令的语义是「做一件事」，
+ * 两者的权限模型不同（前者按路径前缀授权，后者只能每次问）。没有桌面命令桥或没有可写根时
+ * 返回 null，注册表自动跳过——浏览器端永远不会出现一个点了没反应的「运行命令」。
+ */
+export const shellProvider: CapabilityProvider = {
+  id: "shell",
+  origin: "builtin",
+  build: (ctx) =>
+    buildShellToolBridgeIfAvailable({
+      roots: () => fileRootsFor(ctx.workspace),
+    }),
 };

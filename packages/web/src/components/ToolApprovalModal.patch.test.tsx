@@ -1,4 +1,4 @@
-﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { classifyCall } from "../lib/hitl/classify.js";
@@ -16,6 +16,11 @@ const patchCall = (root = "库") =>
     patch: ["*** Begin Patch", "*** Update File: notes/a.md", "@@", "-旧", "+新", "*** End Patch"].join("\n"),
     root,
   });
+
+/** 新写工具：file_write（整份覆盖）/ file_edit（精确替换）。 */
+const writeCall = (path = "notes/a.md") => call("file_write", { path, content: "新一行\n新二行" });
+const editCall = (path = "notes/a.md") =>
+  call("file_edit", { path, old_string: "旧一行", new_string: "新一行" });
 
 const preview: PatchPreview = {
   summary: "将修改 1 个文件（1 个修改）",
@@ -91,6 +96,33 @@ describe("确认卡 · file_patch 的行级 diff", () => {
       }),
     ]);
     expect(screen.getByText(/查看变更（\+1 −1）/)).toBeTruthy();
+  });
+});
+
+describe("确认卡 · 新写工具的预览与授权口径", () => {
+  it("file_write 显示「将写入 N 行」与内容（拿不到旧内容时不假装是 +N −0）", () => {
+    renderModal([writeCall()]);
+    expect(screen.getByText(/查看变更（将写入 2 行）/)).toBeTruthy();
+    expect(screen.getByText(/· notes\/a\.md/)).toBeTruthy();
+    expect(screen.getByText(/新一行/)).toBeTruthy();
+  });
+
+  it("file_edit 显示替换点 diff（只给改动行）", () => {
+    renderModal([editCall()]);
+    expect(screen.getByText(/查看变更（\+1 −1）/)).toBeTruthy();
+    expect(screen.getByText(/旧一行/)).toBeTruthy();
+    expect(screen.getByText(/新一行/)).toBeTruthy();
+  });
+
+  it("file_write / file_edit 都不给「本会话内允许此工具」（授权只能按目录前缀）", () => {
+    renderModal([writeCall()]);
+    expect(screen.queryByText(/本会话内允许/)).toBeNull();
+    expect(screen.getByRole("button", { name: /允许选中/ })).toBeTruthy();
+  });
+
+  it("同批里只要有一个写文件调用，整批都不提供「本会话内允许」", () => {
+    renderModal([call("file_read", { path: "notes/a.md" }, "c2"), writeCall()]);
+    expect(screen.queryByText(/本会话内允许/)).toBeNull();
   });
 });
 

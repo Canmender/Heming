@@ -17,7 +17,7 @@ import { kindsSummary, planPatch } from "./apply.js";
 import { getFileBridge, type FileFsBridge } from "./bridge.js";
 import { splitText } from "./match.js";
 import { parsePatch } from "./parse.js";
-import { fileRootsStore } from "./roots.js";
+import { currentFileRoots } from "./roots.js";
 import type { FileRoot } from "./paths.js";
 import { parseToolArgs } from "./ruleTargets.js";
 import { containsSensitive } from "../selfEdit/guards.js";
@@ -90,7 +90,7 @@ export async function buildPatchPreview(
 
   const bridge = deps?.bridge ?? getFileBridge();
   if (!bridge) return null;
-  const roots = deps?.roots ?? fileRootsStore.roots();
+  const roots = deps?.roots ?? currentFileRoots();
   const rootName = typeof args.root === "string" ? args.root : undefined;
 
   const parsed = parsePatch(patchText);

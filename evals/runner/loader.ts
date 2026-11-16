@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 用例装载：读 YAML → 结构校验 → 稳定排序。
  *
  * 校验原则：**宁可开局报错，也不要跑到一半才发现字段名写错**。
@@ -42,6 +42,10 @@ const GRADER_TYPES: GraderType[] = [
   "tool_called",
   "tool_sequence",
   "max_rounds",
+  "min_rounds",
+  "prompt_contains",
+  "todo_state",
+  "image_attached",
   "hitl",
   "no_side_effect",
   "evidence",
@@ -50,6 +54,7 @@ const GRADER_TYPES: GraderType[] = [
 
 const ROOT_MODES = ["read", "write"] as const;
 const OUT_OF_ROOT = ["ask", "reject"] as const;
+const TODO_STATUSES = ["pending", "in_progress", "completed"] as const;
 
 class CaseError extends Error {
   constructor(
@@ -129,11 +134,22 @@ function parseGraders(file: string, value: unknown): Grader[] {
       throw new CaseError(file, `${at}.type`, `未知 grader「${type}」（支持：${GRADER_TYPES.join(" / ")}）`);
     }
     const grader: Grader = { type };
+    // 图片张数阈值：缺省 1（「至少交回一张图」）。写在 min 上，与 min_rounds 同字段、不同语义。
+    if (type === "image_attached") {
+      const min = raw.min;
+      if (min !== undefined && (!Number.isInteger(min) || (min as number) < 1)) {
+        throw new CaseError(file, `${at}.min`, "image_attached.min 必须是 ≥1 的整数");
+      }
+      grader.min = typeof min === "number" ? min : 1;
+    }
     // `max_rounds` 的 value 是正整数（ctx-001 的 `value: 6`），不能走字符串校验，
     // 否则合法用例会被判成「value 必须是字符串或字符串数组」。它的校验在下面单独做。
-    if (type !== "max_rounds") {
+    if (type !== "max_rounds" && type !== "min_rounds" && type !== "todo_state" && type !== "image_attached") {
       const value_ = stringOrArray(file, `${at}.value`, raw.value);
       if (value_) grader.value = typeof raw.value === "string" ? value_[0] : value_;
+      if (type === "prompt_contains" && !value_) {
+        throw new CaseError(file, `${at}.value`, "prompt_contains 必须给 value（要出现在系统提示词里的片段）");
+      }
     }
     const contains = stringOrArray(file, `${at}.contains`, raw.contains);
     if (contains) grader.contains = contains;
@@ -174,6 +190,31 @@ function parseGraders(file: string, value: unknown): Grader[] {
       const n = typeof maxValue === "number" ? maxValue : Number(maxValue);
       if (!Number.isInteger(n) || n <= 0) throw new CaseError(file, `${at}.value`, "max_rounds 需要正整数");
       grader.max = n;
+    }
+    if (type === "min_rounds") {
+      const n = typeof maxValue === "number" ? maxValue : Number(maxValue);
+      if (!Number.isInteger(n) || n <= 0) throw new CaseError(file, `${at}.value`, "min_rounds 需要正整数");
+      grader.min = n;
+    }
+    if (type === "todo_state") {
+      // 各状态的数量：未写的项不校验（只断言关心的那几档）。
+      const counts: Array<keyof Pick<Grader, "total" | "completed" | "pending" | "in_progress">> = [
+        "total",
+        "completed",
+        "pending",
+        "in_progress",
+      ];
+      let seen = 0;
+      for (const key of counts) {
+        if (raw[key] === undefined) continue;
+        const n = raw[key];
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
+          throw new CaseError(file, `${at}.${key}`, "必须是非负整数");
+        }
+        grader[key] = n;
+        seen += 1;
+      }
+      if (seen === 0) throw new CaseError(file, at, "todo_state 至少要给 total/completed/pending/in_progress 之一");
     }
     if (raw.expect !== undefined) {
       const v = requireString(file, `${at}.expect`, raw.expect);
@@ -220,16 +261,33 @@ function parseCase(file: string, raw: unknown): EvalCase {
             return { path: p, mode: mode as "read" | "write", ...(rootName ? { name: rootName } : {}) };
           });
         }
+        let todos: { content: string; status: "pending" | "in_progress" | "completed" }[] | undefined;
+        if (s.todos !== undefined) {
+          if (!Array.isArray(s.todos)) throw new CaseError(file, "setup.todos", "必须是数组");
+          todos = s.todos.map((t, i) => {
+            const at = `setup.todos[${i}]`;
+            if (!isRecord(t)) throw new CaseError(file, at, "必须是对象");
+            const content = requireString(file, `${at}.content`, t.content);
+            const status = requireString(file, `${at}.status`, t.status);
+            if (!TODO_STATUSES.includes(status as (typeof TODO_STATUSES)[number])) {
+              throw new CaseError(file, `${at}.status`, "只能是 pending / in_progress / completed");
+            }
+            return { content, status: status as (typeof TODO_STATUSES)[number] };
+          });
+        }
         return {
           ...(fixture ? { fixture } : {}),
           ...(roots ? { roots } : {}),
           ...(outOfRoot ? { outOfRoot: outOfRoot as "ask" | "reject" } : {}),
+          ...(todos ? { todos } : {}),
         };
       })()
     : {};
 
   const prompt = optionalString(file, "prompt", raw.prompt);
   const script = parseScript(file, "script", raw.script);
+  // 子代理脚本（d.163）：形状与 script 相同（回合数组），只是喂给子会话。
+  const subagentScript = parseScript(file, "subagent_script", raw.subagent_script);
 
   let steps: EvalCase["steps"];
   if (raw.steps !== undefined) {
@@ -299,6 +357,20 @@ function parseCase(file: string, raw: unknown): EvalCase {
     setup,
     ...(prompt ? { prompt } : {}),
     ...(script ? { script } : {}),
+    ...(subagentScript ? { subagent_script: subagentScript } : {}),
+    ...(raw.todo !== undefined ? { todo: Boolean(raw.todo) } : {}),
+    ...(raw.shell !== undefined ? { shell: Boolean(raw.shell) } : {}),
+    ...(raw.allow_danger !== undefined ? { allow_danger: Boolean(raw.allow_danger) } : {}),
+    ...(raw.abort_after_ms !== undefined
+      ? (() => {
+          const n = raw.abort_after_ms;
+          if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) {
+            throw new CaseError(file, "abort_after_ms", "abort_after_ms 需要正整数毫秒");
+          }
+          return { abort_after_ms: n };
+        })()
+      : {}),
+  ...(raw.slow !== undefined ? { slow: Boolean(raw.slow) } : {}),
     ...(steps ? { steps } : {}),
     ...(fakeTools ? { fake_tools: fakeTools } : {}),
     ...(usage ? { usage } : {}),

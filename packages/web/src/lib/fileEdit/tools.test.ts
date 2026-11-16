@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FileFsBridge, FileReadResponse, FileWriteOp } from "./bridge.js";
 import type { FileRoot } from "./paths.js";
 import { MAX_FILE_BYTES } from "./limits.js";
-import { FILE_TOOLS, buildFileToolBridge, buildFileToolBridgeIfAvailable } from "./tools.js";
+import { FILE_TOOLS, buildFileToolBridge, buildFileToolBridgeIfAvailable, visibleFileTools } from "./tools.js";
 
 const ROOT: FileRoot = { name: "库", path: "D:/库", mode: "write" };
 const READ_ROOT: FileRoot = { name: "参考", path: "D:/参考", mode: "read" };
@@ -87,21 +87,45 @@ describe("工具可见性（产品决策：桌面桥 + 至少一条可写根）"
     expect(buildFileToolBridgeIfAvailable({ bridge: fakeBridge(), roots: () => [] })).toBeNull();
   });
 
-  it("有桥且有可写根时注入两个工具，风险分别是 write / read", () => {
+  it("有桥且有可写根时注入四个工具（读两个 + 写两个），风险分别是 write / read", () => {
     const bridge = buildFileToolBridgeIfAvailable({ bridge: fakeBridge(), roots: () => [ROOT] });
     expect(bridge).not.toBeNull();
     const names = (bridge!.tools as { function: { name: string } }[]).map((t) => t.function.name);
-    expect(names).toEqual(["file_patch", "file_read"]);
+    // 假桥只有 read/write（老安装包形状）：file_glob / file_grep 按工具隐藏，
+    // 而不是注入一个调用就报「不是函数」的工具。
+    expect(names).toEqual(["file_patch", "file_read", "file_write", "file_edit"]);
     expect(bridge!.meta?.("file_patch")?.risk).toBe("write");
     expect(bridge!.meta?.("file_read")?.risk).toBe("read");
+    expect(bridge!.meta?.("file_write")?.risk).toBe("write");
+    expect(bridge!.meta?.("file_edit")?.risk).toBe("write");
+  });
+
+  it("桥支持 glob/grep 时搜索工具才出现（老安装包按工具降级）", () => {
+    const bridge = buildFileToolBridgeIfAvailable({
+      bridge: { ...fakeBridge(), async glob() { return { ok: true, root: ROOT.path, paths: [], truncated: false }; },
+        async grep() { return { ok: true, root: ROOT.path, matches: [], truncated: false }; } },
+      roots: () => [ROOT],
+    });
+    expect(bridge).not.toBeNull();
+    const names = (bridge!.tools as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).toEqual(["file_patch", "file_read", "file_write", "file_edit", "file_glob", "file_grep"]);
+    expect(bridge!.meta?.("file_glob")?.risk).toBe("read");
+    expect(bridge!.meta?.("file_grep")?.risk).toBe("read");
   });
 });
 
 describe("工具说明体积（P2-T14：schema 也是每轮输入）", () => {
-  /** 上限 = P2-T14 瘦身后的实测值 + 一点余量；写胖了就会变红。 */
-  const SCHEMA_BUDGET_CHARS = 830;
 
-  it("两个工具的 schema 合计不超过预算（否则每轮输入都会变贵）", () => {
+  /**
+   * 七个工具的 schema 合计预算（实测 2975）。
+   *
+   * 从两个工具（830）一路涨到这里，每一次都必须是产品决策：d.153 六个工具 2629（用户投诉
+   * 「不能写文件」）、d.168 加上读图 2975（用户说「截图里哪里不对」时模型只能让用户描述）。
+   * 预算的意义是「再多一个工具就要有人解释为什么」，不是「随便调大」。
+   */
+  const SCHEMA_BUDGET_CHARS = 3500;
+
+  it("八个工具的 schema 合计不超过预算（否则每轮输入都会变贵）", () => {
     const spec = FILE_TOOLS.map((tool) => ({
       type: "function",
       function: { name: tool.name, description: tool.description, parameters: tool.parameters },
@@ -351,5 +375,147 @@ describe("工具失败契约（P2-T9）：结构化 error_code + 一次改对的
     const result = await bridge.execute({ name: "file_delete", arguments: "{}" });
     expect(result.ok).toBe(false);
     expect(result.error?.error_code).toBe("unknown-tool");
+  });
+});
+
+describe("file_image 执行（d.168）", () => {
+  /** 带 image 的桥：返回一小段伪 base64，只关心形状与文案。 */
+  const withImage = (impl?: (path: string) => unknown) => ({
+    ...fakeBridge(),
+    async image({ path }: { path: string }) {
+      const custom = impl?.(path);
+      if (custom) return custom as never;
+      return { ok: true as const, mime: "image/png", bytes: 2048, base64: "iVBORw0KGgo=" };
+    },
+  });
+
+  it("桥有 image 时 file_image 出现在清单末尾，且风险是 read", () => {
+    const bridge = buildFileToolBridgeIfAvailable({ bridge: withImage(), roots: () => [ROOT] });
+    expect(bridge).not.toBeNull();
+    const names = (bridge!.tools as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).toEqual(["file_patch", "file_read", "file_write", "file_edit", "file_image"]);
+    expect(bridge!.meta?.("file_image")?.risk).toBe("read");
+  });
+
+  it("老安装包没有 image 方法：按工具隐藏，不让模型调用后拿到 undefined", () => {
+    const bridge = buildFileToolBridgeIfAvailable({ bridge: fakeBridge(), roots: () => [ROOT] });
+    const names = (bridge!.tools as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).not.toContain("file_image");
+    // 隐藏不等于不可见：真的调了也要有明确失败文案，而不是崩
+    return run(bridge as ReturnType<typeof buildFileToolBridge>, "file_image", { path: "a.png" }).then((result) => {
+      expect(result.ok).toBe(false);
+      expect(result.error?.error_code).toBe("no-roots");
+    });
+  });
+
+  it("执行成功：文本只给可核对的元信息，图片走 images 字段", async () => {
+    const bridge = buildFileToolBridge({ bridge: withImage(), roots: () => [ROOT] });
+    const result = await run(bridge, "file_image", { path: "截图/home.png" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("已读取图片 截图/home.png（根：库）：image/png，2 KB");
+    expect(result.text).toContain("直接看图回答");
+    // 图在 images 里（由视觉消息原样交给模型），文本不描述图里内容
+    expect(result.images).toEqual([{ mimeType: "image/png", data: "iVBORw0KGgo=" }]);
+    expect(result.text).not.toContain("iVBORw0KGgo=");
+  });
+
+  it("路径必须是根内相对：绝对路径与 .. 都被挡住", async () => {
+    const bridge = buildFileToolBridge({ bridge: withImage(), roots: () => [ROOT] });
+    const abs = await run(bridge, "file_image", { path: "D:/别处/a.png" });
+    expect(abs.ok).toBe(false);
+    expect(abs.error?.error_code).toBe("path-escape");
+    const dotdot = await run(bridge, "file_image", { path: "../a.png" });
+    expect(dotdot.ok).toBe(false);
+    expect(dotdot.error?.error_code).toBe("path-escape");
+  });
+
+  it("不是图片：错误码 unsupported-image，并指到 file_read 看文字", async () => {
+    const bridge = buildFileToolBridge({
+      bridge: withImage(() => ({ ok: false, code: "unsupported-image", error: "这不是可读的图片" })),
+      roots: () => [ROOT],
+    });
+    const result = await run(bridge, "file_image", { path: "笔记.png" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("unsupported-image");
+    expect(result.text).toContain("file_read");
+  });
+
+  it("空 path：invalid-path 而不是让主进程猜", async () => {
+    const bridge = buildFileToolBridge({ bridge: withImage(), roots: () => [ROOT] });
+    const result = await run(bridge, "file_image", { path: "  " });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("invalid-path");
+  });
+});
+
+describe("file_undo（d.170 撤销上一次写入）", () => {
+  function undoBridge(undo: (payload: { roots: FileRoot[]; path: string }) => Promise<unknown>) {
+    return { ...fakeBridge(), undo } as unknown as FileFsBridge;
+  }
+
+  it("桥有 undo 时 file_undo 出现在写类清单里，且风险是 write", () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const bridge = undoBridge(async () => ({ ok: true, path: "D:/工作区/a.md", restoredFrom: "2026-11-16T00:00:00.000Z", bytes: 3 }));
+    const tool = buildFileToolBridge({ bridge, roots: () => roots, visibleTools: visibleFileTools(roots) });
+    const names = (tool.tools as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).toContain("file_undo");
+    expect(tool.meta?.("file_undo")?.risk).toBe("write");
+  });
+
+  it("老安装包没有 undo 方法：按工具隐藏，不让模型调用后拿到 undefined", () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const tool = buildFileToolBridgeIfAvailable({ bridge: fakeBridge(), roots: () => roots });
+    const names = ((tool?.tools ?? []) as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(names).not.toContain("file_undo");
+  });
+
+  it("执行成功：报「回滚到哪一刻」并提示备份已用掉", async () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const bridge = undoBridge(async () => ({
+      ok: true,
+      path: "D:/工作区/a.md",
+      restoredFrom: "2026-11-16T03:00:00.000Z",
+      bytes: 12,
+    }));
+    const tool = buildFileToolBridge({ bridge, roots: () => roots, visibleTools: visibleFileTools(roots) });
+    const result = await tool.execute({ name: "file_undo", arguments: JSON.stringify({ path: "a.md" }) });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("已把 a.md（根：工作区）回滚");
+    expect(result.text).toContain("12 字节");
+    expect(result.text).toContain("备份已经用掉");
+  });
+
+  it("没有备份：error_code=no-backup，并明确「不要重试」", async () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const bridge = undoBridge(async () => ({ ok: false, code: "no-backup", error: "没有「D:/工作区/a.md」的可撤销备份" }));
+    const tool = buildFileToolBridge({ bridge, roots: () => roots, visibleTools: visibleFileTools(roots) });
+    const result = await tool.execute({ name: "file_undo", arguments: JSON.stringify({ path: "a.md" }) });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("no-backup");
+    expect(result.text).toContain("不要重试");
+  });
+
+  it("空 path：invalid-path，不去问主进程", async () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const bridge = undoBridge(async () => {
+      throw new Error("不该被调用");
+    });
+    const tool = buildFileToolBridge({ bridge, roots: () => roots, visibleTools: visibleFileTools(roots) });
+    const result = await tool.execute({ name: "file_undo", arguments: JSON.stringify({}) });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("invalid-path");
+  });
+
+  it("绝对路径与 .. 都被挡住（撤销也只在根内）", async () => {
+    const roots: FileRoot[] = [{ name: "工作区", path: "D:/工作区", mode: "write" }];
+    const bridge = undoBridge(async () => {
+      throw new Error("不该被调用");
+    });
+    const tool = buildFileToolBridge({ bridge, roots: () => roots, visibleTools: visibleFileTools(roots) });
+    for (const bad of ["D:/工作区/a.md", "../外面.md"]) {
+      const result = await tool.execute({ name: "file_undo", arguments: JSON.stringify({ path: bad }) });
+      expect(result.ok).toBe(false);
+      expect(result.error?.error_code).toMatch(/path-invalid|path-escape/);
+    }
   });
 });

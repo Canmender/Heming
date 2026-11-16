@@ -51,6 +51,24 @@ describe("模型能力表", () => {
     expect(lookupCapability("openai", "deepseek-chat", storage)!.supportsReasoning).toBe(false);
   });
 
+  it("DeepSeek V4：flash 是 1M 窗口且支持图片，v4-pro 不支持图片", () => {
+    const flash = lookupCapability("openai", "deepseek-flash", storage)!;
+    expect(flash.contextWindow).toBe(1048576);
+    expect(flash.maxOutput).toBe(393216);
+    expect(flash.supportsVision).toBe(true);
+    expect(supportsLongContext(flash)).toBe(true);
+    const pro = lookupCapability("openai", "deepseek-v4-pro", storage)!;
+    expect(pro.contextWindow).toBe(1048576);
+    // text-only：宣称支持视觉会让 file_image 的图被发给一个看不懂的模型。
+    expect(pro.supportsVision).toBe(false);
+  });
+
+  it("DeepSeek V4 的前缀规则优先于泛化的 deepseek 家族", () => {
+    // deepseek-v4-pro-0711 这类带日期的型号会走前缀；不能掉回 64K/no-vision 的老条目。
+    expect(lookupCapability("openai", "deepseek-v4-pro-0711", storage)!.contextWindow).toBe(1048576);
+    expect(lookupCapability("openai", "deepseek-flash-2026", storage)!.supportsVision).toBe(true);
+  });
+
   it("家族启发：带 deepseek 的衍生型号也能命中", () => {
     expect(lookupCapability("openai", "deepseek-v3-0324", storage)).not.toBeNull();
   });

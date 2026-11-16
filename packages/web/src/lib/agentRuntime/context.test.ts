@@ -523,3 +523,91 @@ describe("buildAgentContext 个性化加权（d.28）", () => {
     expect(neutral.recallTrace.injected.map((item) => item.id)).toEqual([a, b]);
   });
 });
+
+describe("项目约定段（d.174）", () => {
+  const input = {
+    agentId: "a1",
+    conversationId: "c1",
+    userText: "改一下样式",
+    basePrompt: "你是和小鸣",
+  };
+  const rules = "## 项目约定（本工作区）\n### AGENTS.md\n\n命令用 pnpm。";
+  const runtime = "## 运行环境（本机）\n- 桌面端";
+
+  it("缺省不注入：rulesSection 为空串且 systemPrompt 严格等于 basePrompt", () => {
+    const out = buildAgentContext(input);
+    expect(out.rulesSection).toBe("");
+    expect(out.systemPrompt).toBe("你是和小鸣");
+  });
+
+  it("排在人设之后、运行环境之前（仓库规矩比环境事实更贴近人设）", () => {
+    const out = buildAgentContext({ ...input, rules, runtime });
+    expect(out.rulesSection).toBe(rules);
+    expect(out.systemPrompt.startsWith(`你是和小鸣\n\n${rules}`)).toBe(true);
+    expect(out.systemPrompt.indexOf(rules)).toBeLessThan(out.systemPrompt.indexOf(runtime));
+  });
+
+  it("只有约定段也注入（不是「零注入」特例）", () => {
+    expect(buildAgentContext({ ...input, rules }).systemPrompt).toBe(`你是和小鸣\n\n${rules}`);
+  });
+
+  it("空白 rules 等同不传", () => {
+    expect(buildAgentContext({ ...input, rules: "  " }).systemPrompt).toBe("你是和小鸣");
+  });
+});
+describe("运行环境段（d.154）", () => {
+  const input = {
+    agentId: "a1",
+    conversationId: "c1",
+    userText: "帮我建个文件",
+    basePrompt: "你是和小鸣",
+  };
+  const runtime = "## 运行环境（本机）\n- 你现在运行在「和鸣」桌面智能体里";
+
+  it("缺省不注入：systemPrompt 与 basePrompt 严格相等，runtimeSection 为空串", () => {
+    const out = buildAgentContext(input);
+    expect(out.systemPrompt).toBe("你是和小鸣");
+    expect(out.runtimeSection).toBe("");
+  });
+
+  it("排在 basePrompt 之后、记忆段之前（事实先于可选记忆）", () => {
+    const out = buildAgentContext({ ...input, runtime, memory: makeMemory() });
+    expect(out.runtimeSection).toBe(runtime);
+    expect(out.systemPrompt.startsWith("你是和小鸣\n\n## 运行环境（本机）")).toBe(true);
+  });
+
+  it("只有运行环境段、无记忆/技能时也注入（不是「零注入」特例）", () => {
+    const out = buildAgentContext({ ...input, runtime });
+    expect(out.systemPrompt).toBe(`你是和小鸣\n\n${runtime}`);
+  });
+
+  it("空白 runtime 等同不传，旧契约不破", () => {
+    expect(buildAgentContext({ ...input, runtime: "   " }).systemPrompt).toBe("你是和小鸣");
+  });
+});describe("本轮引用文件段（d.175）", () => {
+  const input = {
+    agentId: "a1",
+    conversationId: "c1",
+    userText: "就针对这几个文件回答",
+    basePrompt: "你是和小鸣",
+  };
+  const files = "## 本轮引用的文件\n\n### docs/a.md\n\n正文";
+
+  it("缺省不注入：systemPrompt 与 basePrompt 严格相等，filesSection 为空串", () => {
+    const out = buildAgentContext(input);
+    expect(out.systemPrompt).toBe("你是和小鸣");
+    expect(out.filesSection).toBe("");
+  });
+
+  it("排在运行环境之后、记忆之前（用户给的材料先于召回）", () => {
+    const runtime = "## 运行环境（本机）\n- 桌面端";
+    const out = buildAgentContext({ ...input, runtime, files, memory: makeMemory() });
+    expect(out.filesSection).toBe(files);
+    expect(out.systemPrompt.indexOf(runtime)).toBeLessThan(out.systemPrompt.indexOf(files));
+  });
+
+  it("只有引用段也注入，且空白等同不传", () => {
+    expect(buildAgentContext({ ...input, files }).systemPrompt).toBe(`你是和小鸣\n\n${files}`);
+    expect(buildAgentContext({ ...input, files: "  " }).systemPrompt).toBe("你是和小鸣");
+  });
+});

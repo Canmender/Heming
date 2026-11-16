@@ -1,0 +1,36 @@
+# 用例 write-002：父目录不存在也能建（createParents）
+# 用途：验证 file_write 在深层路径下会补建缺失的父目录（d.153 新增的唯一写盘例外）。
+# P0 期望：file_write 一次成功，整条目录链被建出来，文件内容落盘。
+id: write-002
+name: 整份写入：父目录不存在时自动补建
+owner: evals
+tags: [write, capability]
+setup:
+  fixture: write-002
+prompt: |
+  在工作区里新建 deep/嵌套/目录/配置.md（这些目录现在都不存在），
+  内容写一行「主题：评测」，目录请一并建好。
+script:
+  - tool_calls:
+      - name: file_write
+        arguments:
+          path: deep/嵌套/目录/配置.md
+          content: |
+            主题：评测
+  - text: |
+      已创建 deep/嵌套/目录/配置.md，中间缺失的 deep/嵌套/目录 都被补建，内容是「主题：评测」。
+graders:
+  - type: tool_called
+    tool: file_write
+    times: 1
+  - type: contains
+    value: ["已创建 deep/嵌套/目录/配置.md"]
+    in: tool_result
+  - type: file_assert
+    path: deep/嵌套/目录/配置.md
+    exists: true
+    contains: ["主题：评测"]
+  - type: evidence
+    files: ["deep/嵌套/目录/配置.md"]
+  - type: max_rounds
+    value: 3

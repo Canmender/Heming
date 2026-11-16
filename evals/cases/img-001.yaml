@@ -1,0 +1,30 @@
+id: img-001
+name: 智能体能打开工作区里的图片
+owner: heming
+tags: [image, tool]
+setup:
+  fixture: img-001
+prompt: 看一下 shots/pixel.png 这张图是什么，用一句话告诉我。
+script:
+  - tool_calls:
+      - name: file_image
+        arguments:
+          path: shots/pixel.png
+  - text: 打开了这张图。
+graders:
+  - type: tool_called
+    tool: file_image
+    times: 1
+  - type: contains
+    value: 已读取图片
+    in: tool_result
+  - type: contains
+    value: image/png
+    in: tool_result
+  - type: contains
+    value: 请直接看图回答
+    in: tool_result
+  - type: image_attached
+    min: 1
+  - type: max_rounds
+    value: 3

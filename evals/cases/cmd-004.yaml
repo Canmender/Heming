@@ -1,0 +1,35 @@
+﻿id: cmd-004
+name: 命令超时会被终止（不是一直挂着）
+owner: lead
+tags: [shell, security]
+setup:
+  fixture: cmd-004
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+slow: true
+prompt: 跑一个会卡住的命令，看看会不会一直挂着。
+script:
+  - tool_calls:
+      - name: run_command
+        arguments:
+          command: node -e "setTimeout(() => {}, 10000)"
+          timeout_ms: 1000
+  - text: 命令超时被终止了。
+graders:
+  - type: tool_called
+    tool: run_command
+    times: 1
+  - type: contains
+    value: 命令超时
+    in: tool_result
+  - type: contains
+    value: 命令超时
+  - type: max_rounds
+    value: 3
+  - type: min_rounds
+    value: 2
+

@@ -1,0 +1,24 @@
+id: ctx-003
+name: 系统提示词自述：知道自己在哪、这轮能用什么、长任务怎么收口
+owner: agent
+tags:
+  - context
+  - prompt
+# 为什么要这条：d.154 的运行环境段、d.156 的默认人设、d.157 的长任务协议都只活在系统提示词里。
+# 以前评测只看工具结果与最终回答——提示词写丢了，评测完全看不见（能力倒退也照样全绿）。
+prompt: "@和小鸣 你现在能做哪些事？简短说。"
+script:
+  - text: "我能读写本机文件、跑多步任务。"
+graders:
+  - type: prompt_contains
+    value:
+      - "你是和小鸣"
+      - "## 运行环境（本机）"
+      - "## 本轮可用工具（共"
+      - "file_write"
+      - "## 长任务怎么处理"
+      - "最多 12 次工具往返"
+  - type: contains
+    value: "读写本机文件"
+  - type: max_rounds
+    value: 3

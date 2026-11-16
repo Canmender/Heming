@@ -18,10 +18,10 @@ import type {
   RuleEffect,
 } from "./types.js";
 import { RISK_ORDER, ruleResource } from "./classify.js";
-import { FILE_PATCH_TOOL, isFileEditTool, targetsOfCall } from "../fileEdit/ruleTargets.js";
+import { isFileEditTool, isFileWriteTool, targetsOfCall } from "../fileEdit/ruleTargets.js";
 import { normalizeRuleResource, resourceCovers, type FileRoot } from "../fileEdit/paths.js";
 import { assessPatchSafety } from "../fileEdit/safety.js";
-import { fileRootsStore } from "../fileEdit/roots.js";
+import { currentFileRoots } from "../fileEdit/roots.js";
 
 /** 策略存储键（带版本后缀，便于将来迁移）。 */
 export const HITL_KEY = "heming.hitl.v1";
@@ -192,8 +192,9 @@ function normalizeRules(raw: unknown): HitlRule[] {
 /**
  * 策略存储的可选依赖（全部可注入，便于单测）。
  *
- * - `roots`：可写根清单。文件工具（`file_patch`）的规则匹配与「全在写根内免问」
- *   都要它；不注入时读设置区的 `fileRootsStore`（localStorage）。
+ * - `roots`：可写根清单。文件工具的规则匹配与「全在写根内免问」都要它；
+ *   不注入时读 roots.ts 的 `currentFileRoots()`（手动配置根 + 会话工作区 + 默认工作区兜底，
+ *   与文件工具、确认卡预览、记住授权共用同一份根口径）。
  * - `outOfRoot`：目标越界时的处理（ask / reject）。
  */
 export interface HitlPolicyDeps {
@@ -218,10 +219,29 @@ export class HitlPolicyStore {
     this.deps = deps ?? {};
   }
 
-  /** 当前根清单（读失败按「没有根」处理：宁可多问，不要误放行）。 */
+  /**
+   * 当前根清单：统一走 roots.ts 的 `currentFileRoots()`。
+   *
+   * 为什么不再在 policy 里自己拼 `fileRootsStore.roots()` + 工作区：根来源正在变多
+   * （手动配置根、会话工作区、未分组会话的默认工作区兜底），每处各拼一份迟早会漂移，
+   * 出现「工具能写、闸门以为越界」的分裂。roots.ts 是四处唯一的根口径，这里只调用。
+   *
+   * 工作区根**只派生、不落盘**——它是会话属性，跟着会话走；落盘会把上一个项目的
+   * 目录偷偷留在设置里，换会话后还留着一条用户没加过的写根。
+   * `deps.roots` 显式注入时仍然优先（单测用固定清单，不碰全局状态）。
+   *
+   * 读失败按「没有根」处理：宁可多问，不要误放行。
+   */
   private roots(): FileRoot[] {
+    if (this.deps.roots) {
+      try {
+        return this.deps.roots();
+      } catch {
+        return [];
+      }
+    }
     try {
-      return this.deps.roots ? this.deps.roots() : fileRootsStore.roots();
+      return currentFileRoots();
     } catch {
       return [];
     }
@@ -315,15 +335,20 @@ export class HitlPolicyStore {
   allowed(call: HitlCall, policy: HitlPolicy, agentId = ""): PolicyOutcome {
     if (policy.mode === "strict") return "ask";
     /*
-     * 文件补丁：全在可写根内且不含删除 → 免问（规格 §6 的 AutoApprove）。
+     * 文件写工具（file_patch / file_write / file_edit）：全在可写根内且不含删除 → 免问
+     * （规格 §6 的 AutoApprove）。
+     *
+     * 为什么新增写工具也必须走这里：guarded 档下如果只对 file_patch 免问，
+     * `file_write` 每次都会弹窗——用户很快就不敢用，开箱可写等于没落地。
+     * 判定复用同一份 `assessPatchSafety`，三件写工具的口径不会漂移。
      *
      * 只读根 / 越界不在这里「免问」，也不在这里拒绝——拒绝由工具层按原因给文案，
      * 闸门这里只回答「免问」还是「问人」。
-     * 补丁解析不出来（格式错、路径越界）时也返回 pass：那种补丁一定写不进磁盘，
+     * 路径解析不出来（格式错、越界、root 名不存在）时也返回 pass：那种调用一定写不进磁盘，
      * 工具层会带着精确原因失败，没必要先弹一次窗。
      */
-    if (call.name === "file_patch") {
-      return this.patchVerdict(call) === "auto" ? "pass" : "ask";
+    if (isFileWriteTool(call.name)) {
+      return this.writeVerdict(call) === "auto" ? "pass" : "ask";
     }
     if (this.underFloor(call, policy)) return "pass";
     if (policy.mode === "trusted" && this.granted(agentId, call.name, policy.scope)) {
@@ -333,11 +358,13 @@ export class HitlPolicyStore {
   }
 
   /**
-   * 文件补丁的三态安全判定（规格 §6）。
+   * 文件写工具的三态安全判定（规格 §6）。
    *
    * 走纯函数 `assessPatchSafety`：判定逻辑与「确认卡上怎么解释」共用同一份实现。
+   * file_write 覆盖已有文件**不算删除**（`deletions` 恒为 0），所以能被目录 allow 覆盖；
+   * file_edit 同理——它们都不会让文件消失。
    */
-  private patchVerdict(call: HitlCall): "auto" | "ask" | "reject" {
+  private writeVerdict(call: HitlCall): "auto" | "ask" | "reject" {
     const roots = this.roots();
     const targets = targetsOfCall(call, roots);
     if (!targets) return "auto"; // 解析不出来 ⇒ 工具层必定拒绝，不打扰用户
@@ -463,6 +490,38 @@ export class HitlPolicyStore {
     }
   }
 
+  /**
+   * 撤销单条规则（设置区逐条「撤销」）。
+   *
+   * 为什么要有它：确认卡里勾「记住本次选择」写下的目录授权，此前只能靠
+   * `clearRules()` 一次全清——用户想收回某一条（比如授错了目录、或不再编辑那个项目），
+   * 只能把其它几十条一起清掉再重来。收不回的单条授权会让「记住」变成一个不该点的按钮。
+   *
+   * 匹配口径与 `rememberRule` 写入时一致：`tool` + 归一化后的 `resource` +
+   * `effect` + `agentId`（缺省 = 全局规则）。`at` 不参与匹配——同一目录被重记时
+   * 时间戳会变，用 `at` 匹配会删不掉。
+   */
+  removeRule(target: Pick<HitlRule, "tool" | "resource" | "effect"> & { agentId?: string }): boolean {
+    const tool = String(target?.tool ?? "").trim().slice(0, 200);
+    const effect = target?.effect === "deny" ? "deny" : "allow";
+    if (!tool) return false;
+    const resource = normalizeRuleResource(String(target?.resource ?? "")).slice(0, 200);
+    const agentId = target?.agentId?.trim().slice(0, 200) || undefined;
+    const all = this.rules();
+    const next = all.filter(
+      (rule) =>
+        !(rule.tool === tool && rule.resource === resource && rule.effect === effect && rule.agentId === agentId),
+    );
+    if (next.length === all.length) return false;
+    try {
+      this.storage.setItem(HITL_RULES_KEY, JSON.stringify(next));
+    } catch {
+      /* 存不下就保持原样：宁可撤销失败，也不要假装撤销成功 */
+      return false;
+    }
+    return true;
+  }
+
   /** 一键清空全部规则（设置区「清空记住的规则」）。 */
   clearRules(): void {
     try {
@@ -488,18 +547,18 @@ export class HitlPolicyStore {
     const rules = this.rules().filter(
       (r) => r.tool === call.name && (!r.agentId || r.agentId === agentId),
     );
-    const isPatch = call.name === FILE_PATCH_TOOL;
-    const patchTargets = isPatch ? targetsOfCall(call, this.roots()) : null;
+    const isPathWrite = isFileWriteTool(call.name);
+    const writeTargets = isPathWrite ? targetsOfCall(call, this.roots()) : null;
     const resources =
-      isPatch && patchTargets && patchTargets.absolute.length > 0
-        ? patchTargets.absolute
+      isPathWrite && writeTargets && writeTargets.absolute.length > 0
+        ? writeTargets.absolute
         : this.resourcesOf(call);
 
     /*
      * 1. `deny` 永远优先。
      *
-     * 文件补丁的规则是**路径前缀**：只要有一个目标命中拒绝规则，整份补丁就拒绝——
-     * 「补丁里一半在禁区、一半在外」时，按拒绝处理才是安全方向。
+     * 文件写工具的规则是**路径前缀**：只要有一个目标命中拒绝规则，整次调用就拒绝——
+     * 「一半在禁区、一半在外」时，按拒绝处理才是安全方向。
      * 通配 deny（`*`）也照旧生效：用户显式说「这个工具全拒」，那是收紧而不是放宽。
      */
     const denyHit = rules.some(
@@ -522,17 +581,20 @@ export class HitlPolicyStore {
       (r) => r.effect === "allow" && !(isTeamTool(call.name) && r.resource === RULE_WILDCARD),
     );
     /*
-     * 3. 多目标写（file_patch）：**每个**目标都要被某条路径规则覆盖。
+     * 3. 文件写工具（file_patch 多目标 / file_write / file_edit）：**每个**目标都要被
+     *    某条路径规则覆盖。
      *
-     * 通配规则在这里不算数——「允许 file_patch 的所有调用」等于把整个工具放行，
+     * 通配规则在这里不算数——「允许这个工具的所有调用」等于把整个工具放行，
      * 与规格 §7 的红线冲突；只能按路径前缀授权。
      *
      * ★ 含删除/改名语义时**不吃任何允许规则**：删除不可逆，
      *   用户当初记住「这个目录可以改」不会预期「删文件也不问」。
      *   这类补丁照旧走闸门问一次（deny 规则仍然优先，见上面第 1 步）。
+     *   file_write 覆盖已有文件不算删除（`deletions` 恒 0），file_edit 也不是删除——
+     *   它们都可以被目录 allow 覆盖，否则「记住这个目录」对新建/改动毫无意义。
      */
-    if (isPatch) {
-      if (!patchTargets || patchTargets.deletions > 0) return null;
+    if (isPathWrite) {
+      if (!writeTargets || writeTargets.deletions > 0) return null;
       const pathAllows = allows.filter((r) => r.resource !== RULE_WILDCARD);
       if (resources.length === 0) return null;
       return resources.every((res) => pathAllows.some((r) => resourceCovers(r.resource, res)))

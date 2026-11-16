@@ -17,6 +17,13 @@ import { DEFAULT_TURN_CAPS, planTurnBudget } from "./agentContext/turnBudget.js"
 import { discoverTools, searchTools } from "./mcp/discovery.js";
 import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
+import {
+  LONG_TASK_MAX_ROUNDS,
+  longTaskLimitNotice,
+  longTaskNotice,
+  longTaskVerdict,
+  unfinishedTodoCount,
+} from "./agentRuntime/longTask.js";
 import { buildTurnEvidence } from "./rollout/evidence.js";
 import type { RolloutEvidence, RolloutInput, RolloutTurnFailure, RolloutUsage } from "./rollout/types.js";
 import type { ToolFailure } from "./toolError.js";
@@ -97,6 +104,28 @@ export interface RunSettled {
    * 只有成功且有可证据的动作时才带；任务区据此落盘，让「完成」可复核。
    */
   evidence?: RolloutEvidence;
+  /**
+   * 轮次打满（d.167.4.103）：本回合是「回答出来了，但任务被上限截断」。
+   *
+   * 为什么不让界面去猜：到顶那一刻模型被要求先给结论，气泡看起来是答完了的，
+   * 只有正文末尾一行小字提到「继续」。让用户自己打「继续」正是长任务最烦的环节，
+   * 而「撞过上限」这个事实只有编排层知道，所以由这里显式带出去，界面据此给一次点击。
+   */
+  maxRounds?: boolean;
+  /**
+   * 预算收口（d.176.4.105）：本回合是「工具返回的内容太多、预算先到顶」而被截断。
+   *
+   * 与 `maxRounds` 是两种不同的「话没说完」：轮次是可数次数，预算是 token 量。
+   * 但用户看到的都是「答案忽然停在半路、末尾一行小字让人回「继续」」——所以界面
+   * 要给同一个入口（继续），只是说明不同：这不是模型笨，是这一轮的上下文太满。
+   */
+  budgetStop?: boolean;
+  /**
+   * 本回合真正落盘的文件（d.176）：绝对路径、正斜杠。
+   *
+   * 界面拿它做「撤回本轮改动」的入口；为空/缺省 = 这一轮没改东西。
+   */
+  writes?: string[];
 }
 
 /** 工具结果里附带的一条来源（如知识库页面、本机归档消息）。 */
@@ -234,6 +263,13 @@ export interface ToolBridge {
     ok: boolean;
     sources?: ToolSource[];
     images?: ToolImage[];
+    /**
+     * 本回合真正落盘的文件（d.176）：绝对路径、正斜杠。
+     *
+     * 为什么由工具桥显式返回而不是让界面从结果文案里反推：文案会为了可读性调整，
+     * 反推出错就是「撤回撤错文件」——这是把用户的文件改坏，比没这个功能更糟。
+     */
+    writes?: string[];
     /**
      * 失败契约（P2-T9）：`ok=false` 时带稳定错误码与重试建议（见 lib/toolError.ts）。
      *
@@ -514,6 +550,8 @@ export interface TurnFailureSignals {
   denials?: number;
   /** 是否撞上了工具轮次上限（`MAX_TOOL_ROUNDS`）。 */
   maxRounds?: boolean;
+  /** 是否因工具结果累计超预算而收口（与 maxRounds 并列，见 RunSettled.budgetStop）。 */
+  budgetStop?: boolean;
 }
 
 /**
@@ -852,6 +890,10 @@ export function runAgentMentions(
         let toolFailureCount = 0;
         let deniedCount = 0;
         let maxRoundsHit = false;
+  /** 预算收口（d.176.4.105）：工具结果累计超过单轮预算而提前收口。 */
+  let budgetHit = false;
+  /** 本回合真正落盘的文件（d.176）：撤回落在这个集合上，收口时一并带出去。 */
+  const turnWrites = new Set<string>();
         /**
          * 完成证据的原料（v5 / P3-T15）：本回合成功执行过的调用 + 结果。
          * 放在 attempt 作用域里重置：溢出重试的废尝试不该出现在「这次完成」的凭据里。
@@ -1187,6 +1229,12 @@ export function runAgentMentions(
             const footer = sourceFooter(sources);
             if (footer) emitDelta(footer, aggressive);
           };
+          /**
+           * 自动续跑的段起点（d.157）：到 `MAX_TOOL_ROUNDS` 时若任务清单还有未完成项，
+           * 不收口而是开始下一段。用「段起点」而不是重置 `round`，是因为 `round` 还决定
+           * 了别的行为（`round > 0` 才检查预算），重置会让预算闸门失效。
+           */
+          let segmentStart = 0;
           for (let round = 0; ; round++) {
             /**
              * 预算驱动收口（G1）：工具结果累计超过单轮上限就不再开新一轮。
@@ -1199,6 +1247,7 @@ export function runAgentMentions(
              */
             const budget = planTurnBudget({ systemTokens: promptTokens, toolTokens });
             if (round > 0 && budget.over.includes("turn")) {
+              budgetHit = true;
               emitDelta(
                 `\n\n（本次工具返回的内容已达预算上限，先给出当前结论。回复「继续」可以接着做。）`,
                 aggressive,
@@ -1308,19 +1357,6 @@ export function runAgentMentions(
               // 还有工具调用但整轮被截断：参数完整的那些会照常执行，这里只提示「没说完」。
               emitDelta("\n\n（本轮输出触到长度上限，可能有工具调用没来得及说完，已丢弃。）", aggressive);
             }
-            // 到上限还在要工具：把已有文本给用户，并**说明**为什么停在这里。
-            // 静默 return 是曾经的实现——用户只看到话没说完，不知道是被截断的。
-            if (round >= MAX_TOOL_ROUNDS) {
-              maxRoundsHit = true;
-              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
-              emitDelta(
-                `\n\n（本次已连续调用 ${MAX_TOOL_ROUNDS} 轮工具，达到上限，先给出当前结论。回复「继续」可以接着做。）`,
-                aggressive,
-              );
-              emitFooter();
-              console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用`);
-              return;
-            }
             // 调用前先播一条 start（UI 立刻能看到「正在调用 X」）
             for (const call of calls) {
               deps.onToolTrace?.(streamId, {
@@ -1415,7 +1451,7 @@ export function runAgentMentions(
              */
             const riskOf = (name: string) => bridge?.meta?.(name)?.risk ?? "write";
             const settled: (
-              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[] }
+              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[]; writes?: string[] }
               | undefined
             )[] =
               new Array(calls.length);
@@ -1445,6 +1481,7 @@ export function runAgentMentions(
                 ok: boolean;
                 sources?: ToolSource[];
                 images?: ToolImage[];
+                writes?: string[];
               }> => {
                 const outcome = outcomes?.[i];
                 if (outcome?.kind === "deny") {
@@ -1542,6 +1579,10 @@ export function runAgentMentions(
             // 被拒/失败的结果不算「引用过」——它们根本没读到内容。
             for (const result of results) {
               if (result.ok && result.sources?.length) sources.push(...result.sources);
+              // 落盘路径同样只认「成功」的结果：失败/被拒的条目没有真的写过文件。
+              if (result.ok && result.writes?.length) {
+                for (const path of result.writes) turnWrites.add(path);
+              }
             }
             // 拿到结果后补 end（成功/失败 + 文本）
             calls.forEach((call, i) => {
@@ -1634,6 +1675,47 @@ export function runAgentMentions(
                 (results[i]?.images?.length ?? 0) * IMAGE_TOKEN_COST,
               0,
             );
+            /**
+             * 到上限：先把本轮的调用执行完，再判定收口还是续跑（d.161 修）。
+             *
+             * 旧实现把判定放在执行**之前**：到顶那一轮模型请求的工具调用被整批丢掉，
+             * 于是「读了 12 份还差 1 份」时那一份既没读也没回结果，模型只看到自己的
+             * 请求石沉大海。清单续跑把这个坑放大了（续跑＝接着请求下一段，丢的是跨段边界）。
+             */
+            if (round + 1 - segmentStart >= MAX_TOOL_ROUNDS) {
+              /**
+               * 长任务续跑：`roundsDone` 是**本次用户输入以来**累计走完的工具轮次
+               * （不是本段轮次）——上限是全轮总量，段只是「每次充电」。
+               */
+              const roundsDone = round + 1;
+              const verdict = longTaskVerdict({
+                roundsDone,
+                unfinished: unfinishedTodoCount(conversationId),
+                aborted,
+              });
+              if (verdict.continue) {
+                // 中间话术照常上行：用户能看到「它在接着做」，而不是盯着转圈。
+                for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+                emitDelta(longTaskNotice(roundsDone), aggressive);
+                segmentStart = round + 1;
+                console.info(
+                  `任务清单仍有未完成项，自动续跑：已用 ${roundsDone} 轮，上限 ${LONG_TASK_MAX_ROUNDS} 轮`,
+                );
+                continue;
+              }
+              maxRoundsHit = true;
+              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              // 到总量上限（而不是「没有未完成项」）时才说 36 轮：否则用户看到 36 会以为哪里算错了。
+              emitDelta(
+                verdict.reason === "limit"
+                  ? longTaskLimitNotice()
+                  : `\n\n（本次已连续调用 ${MAX_TOOL_ROUNDS} 轮工具，达到上限，先给出当前结论。回复「继续」可以接着做。）`,
+                aggressive,
+              );
+              emitFooter();
+              console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用（${verdict.reason}）`);
+              return;
+            }
           }
         };
         /**
@@ -1727,7 +1809,17 @@ export function runAgentMentions(
             } catch {
               /* 记账失败不影响三事件上行 */
             }
-            settle({ status: "ok", finalText: text, ...(evidence ? { evidence } : {}) });
+            settle({
+              status: "ok",
+              finalText: text,
+              ...(evidence ? { evidence } : {}),
+              // 撞过轮次上限（含自动续跑到 36 轮后收口）：界面据此给「继续」入口。
+              ...(maxRoundsHit ? { maxRounds: true } : {}),
+              // 预算收口（d.176.4.105）：同样给一次点击的「继续」，只是说明不同。
+              ...(budgetHit ? { budgetStop: true } : {}),
+              // 本轮改过哪些文件（d.176）：界面据此给「撤回本轮改动」，不让用户去记忆里翻路径。
+              ...(turnWrites.size > 0 ? { writes: [...turnWrites] } : {}),
+            });
           } else {
             settle({ status: "error", error: "端到端加密失败，回复未发送" });
             await sendError("bad_event", "端到端加密失败，回复未发送");

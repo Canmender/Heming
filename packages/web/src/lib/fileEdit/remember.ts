@@ -15,7 +15,7 @@ import { ruleResource } from "../hitl/classify.js";
 import type { HitlPolicyStore } from "../hitl/policy.js";
 import type { HitlCall, RuleEffect } from "../hitl/types.js";
 import type { FileRoot } from "./paths.js";
-import { fileRootsStore } from "./roots.js";
+import { currentFileRoots } from "./roots.js";
 import { isFileEditTool, prefixRulesOfCall } from "./ruleTargets.js";
 
 /** 记忆依赖（测试可注入固定根清单）。 */
@@ -33,9 +33,9 @@ export interface RememberOutcome {
 /**
  * 记住一次裁决。
  *
- * - `file_patch` / `file_read`：按目标文件所在目录归纳前缀，一条一条写；
- *   归纳不出来（目标不在允许的根内）就**不记**，并返回 `remembered:false`，
- *   绝不会退化成 `*`；
+ * - 文件工具（`file_patch` / `file_write` / `file_edit` / `file_read`）：按目标文件所在目录
+ *   归纳前缀，一条一条写；根口径用 `currentFileRoots()`（配置根 + 当前会话工作区），
+ *   归纳不出来（目标不在任何根内）就**不记**，并返回 `remembered:false`，绝不会退化成 `*`；
  * - 其它工具：与改前完全一致（`rememberRule(tool, ruleResource(args), effect)`）。
  */
 export function rememberDecision(
@@ -52,7 +52,7 @@ export function rememberDecision(
 
   let roots: FileRoot[] = [];
   try {
-    roots = deps?.roots ?? fileRootsStore.roots();
+    roots = deps?.roots ?? currentFileRoots();
   } catch {
     roots = [];
   }
@@ -72,7 +72,7 @@ export function canRememberCall(call: { name: string; argsJson: string }, deps?:
   if (!isFileEditTool(call.name)) return true;
   let roots: FileRoot[] = [];
   try {
-    roots = deps?.roots ?? fileRootsStore.roots();
+    roots = deps?.roots ?? currentFileRoots();
   } catch {
     roots = [];
   }
@@ -84,7 +84,7 @@ export function canRememberCall(call: { name: string; argsJson: string }, deps?:
 export function prefixesOfCall(call: { name: string; argsJson: string }, deps?: RememberDeps): string[] {
   let roots: FileRoot[] = [];
   try {
-    roots = deps?.roots ?? fileRootsStore.roots();
+    roots = deps?.roots ?? currentFileRoots();
   } catch {
     roots = [];
   }

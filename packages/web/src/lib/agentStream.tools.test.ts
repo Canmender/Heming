@@ -27,7 +27,11 @@ function makeDeps(rounds: Round[], opts: {
     text: string;
     ok: boolean;
     images?: { mimeType: string; data: string }[];
+    /** 本工具真的落盘了哪些文件（d.176 的「本轮改动可撤回」靠它）。 */
+    writes?: string[];
   }>;
+  /** 收口观察（d.176：撤回条的数据来源）。 */
+  onSettled?: (result: { status: string; writes?: string[] }) => void;
   risk?: (name: string) => "read" | "write" | "danger";
   rollout?: (item: { type: string; [k: string]: unknown }) => void;
   /** 工具目录（名字列表）；缺省只有一个 `srv__x`。 */
@@ -79,6 +83,8 @@ function makeDeps(rounds: Round[], opts: {
       send,
       onLocalDelta: vi.fn(),
       onRollout: opts.rollout,
+      onRunSettled: (_id: string, result: unknown) =>
+        opts.onSettled?.(result as { status: string; writes?: string[] }),
       onHeartbeat: opts.onHeartbeat,
       getTools: () => ({
         tools: (opts.toolNames ?? ["srv__x"]).map((name) => ({
@@ -185,8 +191,8 @@ describe("轮次与预算收口（G1）", () => {
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    // 12 轮都执行了工具，第 13 次采样被上限拦住 → 共 13 次 streamChat
-    expect(streamChat).toHaveBeenCalledTimes(MAX_TOOL_ROUNDS + 1);
+    // 12 个工具轮全部执行完（d.161 起不再丢掉到顶那轮的调用），第 13 次请求不再发出
+    expect(streamChat).toHaveBeenCalledTimes(MAX_TOOL_ROUNDS);
     const text = finishText(deps.send);
     expect(text).toContain("达到上限");
     expect(text).toContain("继续");
@@ -198,8 +204,10 @@ describe("轮次与预算收口（G1）", () => {
       { text: "", calls: [{ id: "1", name: "srv__x" }, { id: "2", name: "srv__x" }] },
       { text: "不该跑到这一轮", calls: [] },
     ];
+    const settled: { status: string; maxRounds?: boolean; budgetStop?: boolean }[] = [];
     const { deps, streamChat } = makeDeps(rounds, {
       risk: () => "read",
+      onSettled: (result) => settled.push(result),
       // 每条 13000 个汉字（≈13000 token）→ 截到 8000；两条 16000 > 12000 的回合预算
       execute: async () => ({ text: "字".repeat(13000), ok: true }),
     });
@@ -210,6 +218,9 @@ describe("轮次与预算收口（G1）", () => {
     const text = finishText(deps.send);
     expect(text).toContain("预算上限");
     expect(text).toContain("继续");
+    // d.176.4.105：界面要据此给「继续」入口；如果只认 maxRounds，这类收口就没有入口。
+    expect(settled.at(-1)?.budgetStop).toBe(true);
+    expect(settled.at(-1)?.maxRounds).toBeUndefined();
   });
 });
 
@@ -857,3 +868,68 @@ describe("心跳：长工具调用不被界面看成卡死", () => {
     // 挤掉之后仍然能再检索回来
     expect(last.length).toBeLessThanOrEqual(1 + MAX_VISIBLE_TOOLS + TOOL_SEARCH_LIMIT);
   });
+
+describe("本轮落盘清单（d.176）", () => {
+  it("工具落盘的文件收进 onRunSettled.writes，重复路径只算一次", async () => {
+    const settled: { status: string; writes?: string[] }[] = [];
+    const rounds: Round[] = [
+      {
+        text: "",
+        calls: [
+          { id: "1", name: "srv__w1" },
+          { id: "2", name: "srv__w2" },
+          { id: "3", name: "srv__w1" },
+        ],
+      },
+      { text: "改完了", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "write",
+      onSettled: (result) => settled.push(result),
+      execute: async (call) => ({
+        text: "ok",
+        ok: true,
+        writes: [call.name === "srv__w1" ? "D:/w/a.ts" : "D:/w/b.ts"],
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const writes = settled.at(-1)?.writes ?? [];
+    expect(writes.sort()).toEqual(["D:/w/a.ts", "D:/w/b.ts"]);
+  });
+
+  it("失败的工具结果即使带了 writes 也不算（别让「没写成的」出现在撤回条上）", async () => {
+    const settled: { status: string; writes?: string[] }[] = [];
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "1", name: "srv__bad" }] },
+      { text: "没改成", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "write",
+      onSettled: (result) => settled.push(result),
+      execute: async () => ({ text: "写失败", ok: false, writes: ["D:/w/a.ts"] }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(settled.at(-1)?.writes).toBeUndefined();
+  });
+
+  it("没写文件的回合不带 writes 字段（界面据此不显示撤回条）", async () => {
+    const settled: { status: string; writes?: string[] }[] = [];
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "1", name: "srv__r" }] },
+      { text: "读完了", calls: [] },
+    ];
+    const { deps } = makeDeps(rounds, {
+      risk: () => "read",
+      onSettled: (result) => settled.push(result),
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(settled.at(-1)?.writes).toBeUndefined();
+  });
+});

@@ -95,6 +95,29 @@ const EXACT: Record<string, ModelCapability> = {
     supportsParallelTools: true,
     supportsStructuredOutput: true,
   },
+  // —— DeepSeek V4（2026-11 实测 /v1/models：1M 上下文、393K 输出）——
+  //
+  // 为什么单列而不是复用 deepseek-chat：`deepseek-chat` 是历史别名（V3 时代 64K、纯文本），
+  // 而 V4 的 flash 支持图片输入且窗口是 1M。把两者混成一条，要么让 V4 用户的读图被丢掉，
+  // 要么让 V3 用户以为能发 1M 历史——两边都会真的出错。
+  "deepseek-flash": {
+    contextWindow: 1048576,
+    maxOutput: 393216,
+    supportsTools: true,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
+  },
+  "deepseek-v4-pro": {
+    contextWindow: 1048576,
+    maxOutput: 393216,
+    supportsTools: true,
+    supportsVision: false,
+    supportsReasoning: true,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
+  },
   "deepseek-reasoner": {
     contextWindow: 64000,
     maxOutput: 8192,
@@ -282,6 +305,14 @@ const PREFIX: { prefix: string; caps: ModelCapability }[] = [
   {
     prefix: "qwen",
     caps: EXACT["Qwen/Qwen2.5-7B-Instruct"],
+  },
+  {
+    prefix: "deepseek-flash",
+    caps: EXACT["deepseek-flash"],
+  },
+  {
+    prefix: "deepseek-v4",
+    caps: EXACT["deepseek-v4-pro"],
   },
   {
     prefix: "deepseek",

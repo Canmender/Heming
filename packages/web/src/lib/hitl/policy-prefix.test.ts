@@ -41,6 +41,16 @@ function patchCall(path: string): HitlCall {
   });
 }
 
+/** 造一个单路径写工具调用（file_write 整份覆盖 / file_edit 精确替换）。 */
+function writeCall(name: "file_write" | "file_edit", path: string): HitlCall {
+  return callOf(
+    name,
+    name === "file_write"
+      ? { path, content: "新内容" }
+      : { path, old_string: "旧", new_string: "新" },
+  );
+}
+
 /** 带删除语义的补丁。 */
 function deletePatchCall(path: string): HitlCall {
   return callOf("file_patch", { patch: ["*** Begin Patch", `*** Delete File: ${path}`, "*** End Patch"].join("\n") });
@@ -207,5 +217,65 @@ describe("文件补丁的免问判定（AutoApprove）", () => {
     const store = storeWith([ROOT]);
     const broken = callOf("file_patch", { patch: "不是补丁" });
     expect(store.allowed(broken, GUARDED)).toBe("pass");
+  });
+});
+
+describe("file_write / file_edit 的规则与免问（新增写工具）", () => {
+  it("新写工具也按目录前缀匹配，且规则只对同工具生效", () => {
+    const store = storeWith([ROOT]);
+    store.rememberRule("file_write", "D:/Obsidian/学院事务/", "allow");
+    expect(store.ruleFor(writeCall("file_write", "notes/a.md"))).toBe("allow");
+    expect(store.ruleFor(writeCall("file_edit", "notes/a.md"))).toBeNull();
+  });
+
+  it("file_edit 越出前缀目录就不放行", () => {
+    const store = storeWith([ROOT]);
+    store.rememberRule("file_edit", "D:/Obsidian/学院事务/笔记/", "allow");
+    expect(store.ruleFor(writeCall("file_edit", "笔记/a.md"))).toBe("allow");
+    expect(store.ruleFor(writeCall("file_edit", "笔记二/a.md"))).toBeNull();
+  });
+
+  it("file_write 覆盖已有文件不算删除：目录 allow 能覆盖，不需要额外询问", () => {
+    const store = storeWith([ROOT]);
+    store.rememberRule("file_write", "D:/Obsidian/学院事务/", "allow");
+    expect(store.ruleFor(writeCall("file_write", "已有.md"))).toBe("allow");
+  });
+
+  it("通配 allow 同样不覆盖新写工具（授权只能按目录前缀）", () => {
+    const store = storeWith([ROOT]);
+    store.rememberRule("file_write", "*", "allow");
+    expect(store.rules()).toEqual([]);
+    expect(store.ruleFor(writeCall("file_write", "a.md"))).toBeNull();
+  });
+
+  it("全在写根内 → 免问（guarded 下不弹窗）", () => {
+    expect(storeWith([ROOT]).allowed(writeCall("file_write", "notes/a.md"), GUARDED)).toBe("pass");
+    expect(storeWith([ROOT]).allowed(writeCall("file_edit", "notes/a.md"), GUARDED)).toBe("pass");
+  });
+
+  it("根外 / 只读根里的写要问；解析不出来的越界不打扰（工具层必拒）", () => {
+    // 只读根里的写：assessPatchSafety 判 reject → 闸门返回 ask
+    expect(storeWith([READ_ROOT]).allowed(writeCall("file_write", "a.md"), GUARDED)).toBe("ask");
+    // 路径本身是绝对路径/越界：解析不出来 ⇒ 工具层会带着原因拒，不弹窗
+    expect(storeWith([ROOT]).allowed(writeCall("file_write", "D:/别处/a.md"), GUARDED)).toBe("pass");
+  });
+
+  it("没有任何根时不弹窗（工具不可见，写不进去）", () => {
+    expect(storeWith([]).allowed(writeCall("file_write", "a.md"), GUARDED)).toBe("pass");
+  });
+});
+
+describe("file_glob / file_grep 的读规则", () => {
+  it("读工具按任意根生成前缀，规则命中只影响同工具", () => {
+    const store = storeWith([READ_ROOT]);
+    store.rememberRule("file_glob", "D:/参考/notes/", "allow");
+    expect(store.ruleFor(callOf("file_glob", { pattern: "*.md", path: "notes" }))).toBe("allow");
+    expect(store.ruleFor(callOf("file_grep", { pattern: "TODO", path: "notes" }))).toBeNull();
+  });
+
+  it("读工具的 wildcard allow 不落盘（与写工具同一条红线）", () => {
+    const store = storeWith([ROOT]);
+    store.rememberRule("file_grep", "*", "allow");
+    expect(store.rules()).toEqual([]);
   });
 });

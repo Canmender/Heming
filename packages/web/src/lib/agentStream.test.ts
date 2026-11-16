@@ -1,9 +1,11 @@
-﻿import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS } from "./agentStream.js";
+import { describe, it, expect, vi } from "vitest";
+import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS, MAX_TOOL_ROUNDS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 import { toHitlCall } from "./hitl/classify.js";
+import { LONG_TASK_MAX_ROUNDS } from "./agentRuntime/longTask.js";
+import { resetTodoStore, setTodos } from "./todo/store.js";
 
 const profile: LlmProfile = { id: "p1", label: "l", provider: "openai", apiKey: "k", model: "m" };
 
@@ -2193,6 +2195,94 @@ describe("turn_end.failure（P3-T16：新失败必落一类）", () => {
     const end = items.find((it) => it.type === "turn_end");
     expect(end?.status).toBe("ok");
     expect(end?.failure).toBe("max_rounds");
+  });
+
+  it("任务清单还有未完成项时自动续跑：不在第 12 轮停，跑到 36 轮总上限才收口（d.157）", async () => {
+    localStorage.clear(); // 清单落盘跨用例，必须先清存储再清内存
+    resetTodoStore();
+    setTodos("c1", [
+      { content: "已完成的第一步", status: "completed" },
+      { content: "还没做完的第二步", status: "in_progress" },
+    ]);
+    const items: { type: string; status?: string; failure?: string; text?: string }[] = [];
+    const onRunSettled = vi.fn();
+    let rounds = 0;
+    // 永远要工具：第 12/24 轮该续跑（清单未完成），第 36 轮才到总量上限收口。
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        rounds += 1;
+        o.onToolCalls?.(echoCall);
+        o.onDelta("继续");
+        return "继续";
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      onRunSettled,
+      getTools: () => ({
+        tools: [echoSpec as never],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    // 第 0–35 轮各发一次请求：36 个工具轮全部执行完才到总量上限收口。
+    expect(rounds).toBe(LONG_TASK_MAX_ROUNDS);
+    // 续跑不得吞掉边界轮的调用（d.161 修的坑）：工具轮数必须等于真正执行的次数。
+    const executedRounds = items.filter((it) => it.type === "tool_result").length;
+    expect(executedRounds).toBe(LONG_TASK_MAX_ROUNDS);
+    const end = items.find((it) => it.type === "turn_end");
+    expect(end?.failure).toBe("max_rounds");
+    const finals = items
+      .filter((it) => it.type === "assistant_final")
+      .map((it) => it.text ?? "")
+      .join("\n");
+    // 中途要给用户解释「在自动接着做」，到顶说明总量 36 轮而不是 12 轮。
+    expect(finals).toContain("自动接着做");
+    expect(finals).toContain("36 轮");
+    // 界面要靠终态里的这个标记给「继续」入口（d.167.4.103）：状态仍是 ok，
+    // 但「回答完了 ≠ 任务做完了」，两者必须能区分开。
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled.mock.calls[0][1]).toMatchObject({ status: "ok", maxRounds: true });
+  });
+
+  it("清单全完成时仍按原样停在第 12 轮（不替模型脑补任务）", async () => {
+    localStorage.clear();
+    resetTodoStore();
+    setTodos("c1", [
+      { content: "第一步", status: "completed" },
+      { content: "第二步", status: "completed" },
+    ]);
+    let rounds = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        rounds += 1;
+        o.onToolCalls?.(echoCall);
+        return "";
+      },
+    );
+    const onRunSettled = vi.fn();
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onRunSettled,
+      getTools: () => ({
+        tools: [echoSpec as never],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    // 12 个工具轮全部执行完，第 13 次请求不再发出（清单全完成 → 不续跑）。
+    expect(rounds).toBe(MAX_TOOL_ROUNDS);
+    // 即使没有清单，撞上限同样是「没做完」：界面照样要给「继续」（d.167.4.103）。
+    expect(onRunSettled.mock.calls[0][1]).toMatchObject({ status: "ok", maxRounds: true });
   });
 
   it("工具报错后上游挂掉：归 tool_error（不是笼统的 provider_error）", async () => {

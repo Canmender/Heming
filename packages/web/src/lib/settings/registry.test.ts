@@ -18,8 +18,8 @@ import {
 const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "about"]);
 
 describe("registry 完整性", () => {
-  it("11 张卡（d.136 撤「桌面小组件」、d.147 撤三张导航卡）、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(11);
+  it("12 张卡（d.136 撤「桌面小组件」、d.147 撤三张导航卡、d.156 加「智能体人设」）、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(12);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {

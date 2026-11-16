@@ -1,0 +1,38 @@
+# 用例 edit-003：精确串替换（d.153 file_edit）
+# 用途：验证模型用 file_edit 按 old_string 唯一匹配改一行，而不是整份重写。
+# P0 期望：一次 file_edit 成功，tool_result 含「替换 1 处」，
+#         file_assert 看到新端口且旧端口消失。
+id: edit-003
+name: 精确替换：把配置端口 8080 改成 9090
+owner: evals
+tags: [edit, capability]
+setup:
+  fixture: edit-003
+prompt: |
+  把 src/config.md 里的端口 8080 改成 9090，其他行（主机、超时）不要动。
+script:
+  - tool_calls:
+      - name: file_edit
+        arguments:
+          path: src/config.md
+          old_string: "端口：8080"
+          new_string: "端口：9090"
+  - text: |
+      已把 src/config.md 的端口从 8080 改成 9090，主机和超时两行没有改动。
+graders:
+  - type: tool_called
+    tool: file_edit
+    times: 1
+  - type: contains
+    value: ["替换 1 处"]
+    in: tool_result
+  - type: file_assert
+    path: src/config.md
+    contains: ["端口：9090"]
+  - type: file_assert
+    path: src/config.md
+    not_contains: ["端口：8080"]
+  - type: evidence
+    files: ["src/config.md"]
+  - type: max_rounds
+    value: 3

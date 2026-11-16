@@ -21,8 +21,23 @@ const {
   normalizeRoots,
   findRoot,
   readFile,
+  readImage,
+  sniffImageMime,
   writeBatch,
+  undoWrite,
+  listBackups,
+  createBackup,
+  readBackupIndex,
+  MAX_BACKUPS_PER_PATH,
+  globToRegExp,
+  globFiles,
+  grepFiles,
   MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_GLOB_RESULTS,
+  MAX_GREP_MATCHES,
+  MAX_GREP_LINE_CHARS,
+  MAX_WALK_DEPTH,
 } = require("./file-fs.js");
 
 /** 一个临时工作区：一个可写根 + 一个只读根。 */
@@ -78,14 +93,30 @@ function tmpLeftoversDeep(dir) {
 /** 假 ipcMain：收集 handler，便于直接按通道调用。 */
 function fakeIpc() {
   const handlers = new Map();
+  const syncHandlers = new Map();
   return {
     handle(channel, fn) {
       handlers.set(channel, fn);
+    },
+    // preload 用 sendSync 问的通道必须用 `on` + `event.returnValue` 注册——
+    // 用 handle 注册会让渲染进程永远等不到返回（窗口加载不出来）。
+    on(channel, fn) {
+      syncHandlers.set(channel, fn);
     },
     async invoke(channel, payload, event = { sender: "main" }) {
       const fn = handlers.get(channel);
       if (!fn) throw new Error(`未注册的通道 ${channel}`);
       return fn(event, payload);
+    },
+    sendSync(channel, payload, event = { sender: "main" }) {
+      const fn = syncHandlers.get(channel);
+      if (!fn) throw new Error(`未同步注册的通道 ${channel}`);
+      const box = { ...event, returnValue: undefined };
+      fn(box, payload);
+      return box.returnValue;
+    },
+    isSync(channel) {
+      return syncHandlers.has(channel);
     },
   };
 }
@@ -97,6 +128,7 @@ function register(deps = {}) {
     dialog: deps.dialog,
     getMainWindow: deps.getMainWindow ?? (() => null),
     isTrustedSender: deps.isTrustedSender ?? (() => true),
+    defaultRootDir: deps.defaultRootDir,
   });
   return ipc;
 }
@@ -105,6 +137,22 @@ function register(deps = {}) {
 function withWorkspace(fn) {
   const ws = makeWorkspace();
   return Promise.resolve(fn(ws)).finally(() => ws.cleanup());
+}
+
+/** 建一个指向目录的链接；环境不允许时跳过当前用例并返回 false。 */
+function makeDirLink(t, target, link) {
+  try {
+    fs.symlinkSync(target, link, "dir");
+    return true;
+  } catch {
+    try {
+      fs.symlinkSync(target, link, "junction");
+      return true;
+    } catch (e) {
+      t.skip(`当前环境不能创建目录链接（${e.code}），跳过`);
+      return false;
+    }
+  }
 }
 
 /* ────────────────────────────── 正常路径 ────────────────────────────── */
@@ -499,3 +547,766 @@ test("源码（剥注释后）不含任何网络能力：fetch / http / https / 
   const allowed = new Set(["node:fs", "node:fs/promises", "node:path", "node:crypto", "./path-guard"]);
   for (const mod of required) assert.ok(allowed.has(mod), `file-fs.js 引入了非白名单模块：${mod}`);
 });
+
+/* ────────────────────────────── glob 语法 ────────────────────────────── */
+
+test("globToRegExp：`*` 只在段内、`?` 匹配单字符、大小写不敏感", () => {
+  const re = globToRegExp("*.md");
+  assert.equal(re.test("a.md"), true);
+  assert.equal(re.test("a.txt"), false);
+  assert.equal(re.test("子目录/a.md"), false, "`*` 不应跨段");
+  assert.equal(globToRegExp("a?.md").test("a1.md"), true);
+  assert.equal(globToRegExp("a?.md").test("ab.md"), true);
+  assert.equal(globToRegExp("a?.md").test("abc.md"), false, "`?` 只吃一个字符");
+  assert.equal(globToRegExp("Report.MD").test("report.md"), true);
+});
+
+test("globToRegExp：`**` 跨段，且双星后接斜杠时可匹配零层", () => {
+  const re = globToRegExp("**/*.ts");
+  assert.equal(re.test("a.ts"), true, "应能命中根下文件（零层）");
+  assert.equal(re.test("src/a.ts"), true);
+  assert.equal(re.test("src/lib/a.ts"), true);
+  const nested = globToRegExp("src/**/*.ts");
+  assert.equal(nested.test("src/lib/deep/a.ts"), true);
+  assert.equal(nested.test("a.ts"), false, "有前缀目录约束时不应命中外层文件");
+});
+
+test("globToRegExp：`{a,b}` 并集、`[abc]` 字符集（含取反）", () => {
+  const union = globToRegExp("*.{md,txt}");
+  assert.equal(union.test("笔记.md"), true);
+  assert.equal(union.test("笔记.txt"), true);
+  assert.equal(union.test("笔记.js"), false);
+  const cls = globToRegExp("file[0-9].log");
+  assert.equal(cls.test("file3.log"), true);
+  assert.equal(cls.test("filex.log"), false);
+  const negated = globToRegExp("file[!0-9].log");
+  assert.equal(negated.test("filex.log"), true);
+  assert.equal(negated.test("file3.log"), false);
+});
+
+test("globToRegExp：非法模式抛 invalid-pattern（未闭合/空/绝对路径/过长）", () => {
+  const bad = ["", "   ", "a/[", "a/{b", "/abs/*.md", "C:/x/*.md", "x".repeat(2000)];
+  for (const pattern of bad) {
+    assert.throws(() => globToRegExp(pattern), (e) => e && e.code === "invalid-pattern", `应拒绝：${pattern}`);
+  }
+});
+
+/* ────────────────────────────── globFiles ────────────────────────────── */
+
+test("globFiles：返回绝对路径、root，并按 mtime 降序（同 mtime 再按相对路径升序）", () =>
+  withWorkspace(async (ws) => {
+    const older = path.join(ws.writeRoot, "a.md");
+    const newer = path.join(ws.writeRoot, "b.md");
+    fs.writeFileSync(older, "甲\n");
+    fs.writeFileSync(newer, "乙\n");
+    fs.utimesSync(older, new Date(2020, 0, 1), new Date(2020, 0, 1));
+    fs.utimesSync(newer, new Date(2021, 0, 1), new Date(2021, 0, 1));
+    const result = await globFiles({ roots: ws.roots, pattern: "*.md" });
+    assert.equal(result.ok, true);
+    assert.equal(result.root.toLowerCase(), ws.writeRoot.toLowerCase());
+    assert.deepEqual(result.paths, [newer, older]);
+    assert.equal(result.truncated, false);
+  }));
+
+test("globFiles：跳过 node_modules / .git，但包含隐藏文件", () =>
+  withWorkspace(async (ws) => {
+    fs.mkdirSync(path.join(ws.writeRoot, "node_modules", "pkg"), { recursive: true });
+    fs.writeFileSync(path.join(ws.writeRoot, "node_modules", "pkg", "x.md"), "x");
+    fs.mkdirSync(path.join(ws.writeRoot, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(ws.writeRoot, ".git", "y.md"), "y");
+    fs.writeFileSync(path.join(ws.writeRoot, ".隐藏.md"), "h");
+    fs.mkdirSync(path.join(ws.writeRoot, "src"));
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "a.md"), "a");
+    const result = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.paths.map((p) => path.basename(p)).sort(), [".隐藏.md", "a.md"]);
+  }));
+
+test("globFiles：不把本模块的原子写临时文件当用户文件", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "a");
+    fs.writeFileSync(path.join(ws.writeRoot, ".a.md.heming-tmp-abcdef"), "tmp");
+    const result = await globFiles({ roots: ws.roots, pattern: "**/*" });
+    assert.deepEqual(result.paths.map((p) => path.basename(p)), ["a.md"]);
+  }));
+
+test("globFiles：软链目录不跟随（链接指向根外也不泄漏）", (t) =>
+  withWorkspace(async (ws) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "heming-out-"));
+    try {
+      fs.writeFileSync(path.join(outside, "外.md"), "外");
+      if (!makeDirLink(t, outside, path.join(ws.writeRoot, "外链"))) return;
+      const result = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.paths, []);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }));
+
+test("globFiles：结果上限 MAX_GLOB_RESULTS，超限 truncated=true", () =>
+  withWorkspace(async (ws) => {
+    for (let i = 0; i <= MAX_GLOB_RESULTS; i += 1) {
+      fs.writeFileSync(path.join(ws.writeRoot, `f${String(i).padStart(3, "0")}.md`), "x");
+    }
+    const result = await globFiles({ roots: ws.roots, pattern: "*.md" });
+    assert.equal(result.ok, true);
+    assert.equal(result.paths.length, MAX_GLOB_RESULTS);
+    assert.equal(result.truncated, true);
+  }));
+
+test("globFiles：超过深度上限的子目录不遍历，但 truncated=true 明示", () =>
+  withWorkspace(async (ws) => {
+    let dir = ws.writeRoot;
+    for (let i = 1; i <= MAX_WALK_DEPTH + 2; i += 1) {
+      dir = path.join(dir, `d${i}`);
+      fs.mkdirSync(dir);
+    }
+    fs.writeFileSync(path.join(dir, "深.md"), "深");
+    fs.writeFileSync(path.join(ws.writeRoot, "浅.md"), "浅");
+    const result = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.paths.map((p) => path.basename(p)), ["浅.md"]);
+    assert.equal(result.truncated, true);
+  }));
+
+test("globFiles：dir 必须夹在根内；根外/不存在/非目录统一 outside-roots", () =>
+  withWorkspace(async (ws) => {
+    const outside = await globFiles({ roots: ws.roots, pattern: "*.md", dir: ws.base });
+    assert.equal(outside.ok, false);
+    assert.equal(outside.code, "outside-roots");
+    const missing = await globFiles({ roots: ws.roots, pattern: "*.md", dir: path.join(ws.writeRoot, "没有") });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.code, "outside-roots");
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "a");
+    const notDir = await globFiles({ roots: ws.roots, pattern: "*.md", dir: path.join(ws.writeRoot, "a.md") });
+    assert.equal(notDir.ok, false);
+    assert.equal(notDir.code, "outside-roots");
+  }));
+
+test("globFiles：dir 缺省用第一个根；指定根内子目录时模式相对该目录", () =>
+  withWorkspace(async (ws) => {
+    fs.mkdirSync(path.join(ws.writeRoot, "src"));
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "a.md"), "a");
+    fs.writeFileSync(path.join(ws.writeRoot, "b.md"), "b");
+    const byDefault = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
+    assert.equal(byDefault.paths.length, 2);
+    const nested = await globFiles({ roots: ws.roots, pattern: "*.md", dir: path.join(ws.writeRoot, "src") });
+    assert.deepEqual(nested.paths.map((p) => path.basename(p)), ["a.md"]);
+  }));
+
+test("搜索覆盖只读根（读权限即可）", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.readRoot, "参考.md"), "needle\n");
+    const globbed = await globFiles({ roots: ws.roots, pattern: "*.md", dir: ws.readRoot });
+    assert.equal(globbed.ok, true);
+    assert.deepEqual(globbed.paths.map((p) => path.basename(p)), ["参考.md"]);
+    const grepped = await grepFiles({ roots: ws.roots, pattern: "needle", dir: ws.readRoot });
+    assert.equal(grepped.ok, true);
+    assert.equal(grepped.matches.length, 1);
+  }));
+
+test("globFiles：未配置根时返回 no-roots", async () => {
+  const result = await globFiles({ roots: [], pattern: "*.md" });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "no-roots");
+});
+
+test("IPC file:glob：正常返回；非可信来源被拒绝（fail-closed）", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "a");
+    const ipc = register();
+    const ok = await ipc.invoke("file:glob", { roots: ws.roots, pattern: "*.md" });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.paths.length, 1);
+    const blocked = await register({ isTrustedSender: () => false }).invoke("file:glob", {
+      roots: ws.roots,
+      pattern: "*.md",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.code, "untrusted-sender");
+  }));
+
+/* ────────────────────────────── grepFiles ────────────────────────────── */
+
+test("grepFiles：命中行号/行文本正确，返回绝对路径与 root", () =>
+  withWorkspace(async (ws) => {
+    const target = path.join(ws.writeRoot, "a.md");
+    fs.writeFileSync(target, "第一行\n第二行 needle\n第三行\n");
+    const result = await grepFiles({ roots: ws.roots, pattern: "needle" });
+    assert.equal(result.ok, true);
+    assert.equal(result.root.toLowerCase(), ws.writeRoot.toLowerCase());
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].path, target);
+    assert.equal(result.matches[0].line, 2);
+    assert.equal(result.matches[0].text, "第二行 needle");
+    assert.equal(result.truncated, false);
+  }));
+
+test("grepFiles：CRLF 行号正确；内容匹配大小写敏感", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "alpha\r\nFoo\r\nfoo\r\n");
+    const lower = await grepFiles({ roots: ws.roots, pattern: "foo" });
+    assert.deepEqual(lower.matches.map((m) => m.line), [3]);
+    const upper = await grepFiles({ roots: ws.roots, pattern: "Foo" });
+    assert.deepEqual(upper.matches.map((m) => m.line), [2]);
+  }));
+
+test("grepFiles：include 过滤（按文件名与相对路径两种写法）", () =>
+  withWorkspace(async (ws) => {
+    fs.mkdirSync(path.join(ws.writeRoot, "src"));
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "a.ts"), "hit\n");
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "b.txt"), "hit\n");
+    const byName = await grepFiles({ roots: ws.roots, pattern: "hit", include: "*.ts" });
+    assert.deepEqual(byName.matches.map((m) => path.basename(m.path)), ["a.ts"]);
+    const byPath = await grepFiles({ roots: ws.roots, pattern: "hit", include: "src/**/*.ts" });
+    assert.deepEqual(byPath.matches.map((m) => path.basename(m.path)), ["a.ts"]);
+  }));
+
+test("grepFiles：二进制 / 非法 UTF-8 / 超 2MB 文件被静默跳过", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "bin.dat"), Buffer.from([0x68, 0x69, 0x74, 0x00]));
+    fs.writeFileSync(path.join(ws.writeRoot, "bad.txt"), Buffer.from([0xc3, 0x28, 0x68, 0x69, 0x74]));
+    fs.writeFileSync(path.join(ws.writeRoot, "big.txt"), `hit\n${"x".repeat(MAX_FILE_BYTES)}`);
+    const result = await grepFiles({ roots: ws.roots, pattern: "hit" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.matches, []);
+  }));
+
+test("grepFiles：长行只回传前 MAX_GREP_LINE_CHARS 个字符", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "long.md"), `hit ${"x".repeat(MAX_GREP_LINE_CHARS * 2)}\n`);
+    const result = await grepFiles({ roots: ws.roots, pattern: "hit" });
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].text.length, MAX_GREP_LINE_CHARS);
+  }));
+
+test("grepFiles：命中上限 MAX_GREP_MATCHES，超限 truncated=true", () =>
+  withWorkspace(async (ws) => {
+    const lines = Array.from({ length: MAX_GREP_MATCHES + 5 }, () => "hit").join("\n");
+    fs.writeFileSync(path.join(ws.writeRoot, "many.md"), lines);
+    const result = await grepFiles({ roots: ws.roots, pattern: "hit" });
+    assert.equal(result.matches.length, MAX_GREP_MATCHES);
+    assert.equal(result.truncated, true);
+  }));
+
+test("grepFiles：非法正则 / 根外 dir / 无根 分别给出契约错误码", () =>
+  withWorkspace(async (ws) => {
+    const bad = await grepFiles({ roots: ws.roots, pattern: "[" });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.code, "invalid-pattern");
+    const outside = await grepFiles({ roots: ws.roots, pattern: "x", dir: ws.base });
+    assert.equal(outside.ok, false);
+    assert.equal(outside.code, "outside-roots");
+    const none = await grepFiles({ roots: [], pattern: "x" });
+    assert.equal(none.ok, false);
+    assert.equal(none.code, "no-roots");
+  }));
+
+test("IPC file:grep：正常返回；非可信来源被拒绝（fail-closed）", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "needle\n");
+    const ipc = register();
+    const ok = await ipc.invoke("file:grep", { roots: ws.roots, pattern: "needle" });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.matches.length, 1);
+    const blocked = await register({ isTrustedSender: () => false }).invoke("file:grep", {
+      roots: ws.roots,
+      pattern: "needle",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.code, "untrusted-sender");
+  }));
+
+/* ────────────────────────────── write 建父目录（createParents） ────────────────────────────── */
+
+test("createParents=true：补建深层父目录并写入（仍走 tmp+rename，无残留）", () =>
+  withWorkspace(async (ws) => {
+    const target = path.join(ws.writeRoot, "新", "深", "层", "a.md");
+    const result = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "深层内容\n" }], true);
+    assert.equal(result.ok, true);
+    assert.equal(fs.readFileSync(target, "utf8"), "深层内容\n");
+    assert.deepEqual(tmpLeftoversDeep(ws.writeRoot), []);
+  }));
+
+test("createParents 默认 false：父目录仍不会被创建（老语义不变）", () =>
+  withWorkspace(async (ws) => {
+    const target = path.join(ws.writeRoot, "别建", "a.md");
+    const result = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "甲\n" }]);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /父目录/);
+    assert.equal(fs.existsSync(path.join(ws.writeRoot, "别建")), false);
+  }));
+
+test("createParents=true：父目录名是 Windows 保留名时拒绝，且不建目录", () =>
+  withWorkspace(async (ws) => {
+    const target = path.join(ws.writeRoot, "con", "a.md");
+    const result = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "甲\n" }], true);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /保留名/);
+    assert.equal(fs.existsSync(path.join(ws.writeRoot, "con")), false);
+  }));
+
+test("createParents=true：父路径中间是普通文件时拒绝，原文件内容不变", () =>
+  withWorkspace(async (ws) => {
+    const blocker = path.join(ws.writeRoot, "占位");
+    fs.writeFileSync(blocker, "原内容\n");
+    const result = await writeBatch(ws.roots, [{ kind: "write", path: path.join(blocker, "a.md"), content: "甲\n" }], true);
+    assert.equal(result.ok, false);
+    assert.equal(fs.readFileSync(blocker, "utf8"), "原内容\n");
+  }));
+
+test("createParents=true：中间软链目录仍拒绝（不放宽软链红线）", (t) =>
+  withWorkspace(async (ws) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "heming-out-"));
+    try {
+      if (!makeDirLink(t, outside, path.join(ws.writeRoot, "外链目录"))) return;
+      const target = path.join(ws.writeRoot, "外链目录", "新", "a.md");
+      const result = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "越界\n" }], true);
+      assert.equal(result.ok, false);
+      assert.equal(fs.existsSync(path.join(outside, "新")), false);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }));
+
+test("createParents=true：写入阶段失败时把本次补建的空目录收回", () =>
+  withWorkspace(async (ws) => {
+    const parent = path.join(ws.writeRoot, "回滚", "深");
+    const originalOpen = fsp.open;
+    fsp.open = async () => {
+      throw new Error("模拟 open 失败");
+    };
+    try {
+      const result = await writeBatch(
+        ws.roots,
+        [{ kind: "write", path: path.join(parent, "a.md"), content: "甲\n" }],
+        true,
+      );
+      assert.equal(result.ok, false);
+      assert.equal(fs.existsSync(parent), false);
+      assert.equal(fs.existsSync(path.join(ws.writeRoot, "回滚")), false);
+    } finally {
+      fsp.open = originalOpen;
+    }
+  }));
+
+test("IPC file:write：只认显式 createParents===true（字符串 \"true\" 不放宽）", () =>
+  withWorkspace(async (ws) => {
+    const ipc = register();
+    const viaTrue = await ipc.invoke("file:write", {
+      roots: ws.roots,
+      createParents: true,
+      ops: [{ kind: "write", path: path.join(ws.writeRoot, "允许", "a.md"), content: "甲\n" }],
+    });
+    assert.equal(viaTrue.ok, true);
+    const viaString = await ipc.invoke("file:write", {
+      roots: ws.roots,
+      createParents: "true",
+      ops: [{ kind: "write", path: path.join(ws.writeRoot, "不允许", "a.md"), content: "乙\n" }],
+    });
+    assert.equal(viaString.ok, false);
+    assert.equal(fs.existsSync(path.join(ws.writeRoot, "不允许")), false);
+  }));
+
+/* ────────────────────────────── 默认工作区（file:default-root） ────────────────────────────── */
+
+test("IPC file:default-root 必须同步注册（sendSync 通道用 handle 注册会卡死窗口加载）", async () => {
+  const ipc = register({ defaultRootDir: path.join(process.cwd(), "不该建") });
+  assert.equal(ipc.isSync("file:default-root"), true, "preload 用 sendSync 问，主进程必须用 ipcMain.on + event.returnValue");
+  await assert.rejects(() => ipc.invoke("file:default-root"), /未注册的通道/, "不该同时用 handle 注册（两个监听者会让语义含糊）");
+});
+
+test("IPC file:default-root：可信来源下补建默认工作区并返回路径", () =>
+  withWorkspace(async (ws) => {
+    const dir = path.join(ws.base, "默认工作区", "和鸣");
+    const result = await register({ defaultRootDir: dir }).sendSync("file:default-root");
+    assert.equal(result.ok, true);
+    assert.equal(result.path, dir);
+    assert.ok(fs.statSync(dir).isDirectory());
+  }));
+
+test("IPC file:default-root：非可信来源被拒绝（fail-closed）", () =>
+  withWorkspace(async (ws) => {
+    const dir = path.join(ws.base, "不该建");
+    const blocked = await register({ defaultRootDir: dir, isTrustedSender: () => false }).sendSync("file:default-root");
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.code, "untrusted-sender");
+    assert.equal(fs.existsSync(dir), false);
+  }));
+
+test("IPC file:default-root：目录已存在时幂等，且忽略渲染层传的路径", () =>
+  withWorkspace(async (ws) => {
+    const dir = path.join(ws.base, "默认工作区", "和鸣");
+    const ipc = register({ defaultRootDir: dir });
+    const first = await ipc.sendSync("file:default-root");
+    const second = await ipc.sendSync("file:default-root");
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(second.path, dir);
+    // 渲染层传什么都无效：通道只回主进程算好的那一个目录，不能借它探测任意路径
+    const spoofed = await ipc.sendSync("file:default-root", { path: path.join(ws.base, "别处") });
+    assert.equal(spoofed.path, dir);
+    assert.equal(fs.existsSync(path.join(ws.base, "别处")), false);
+  }));
+
+test("IPC file:default-root：未配置默认目录时回错误，不抛", () =>
+  withWorkspace(async () => {
+    const result = await register({}).sendSync("file:default-root");
+    assert.equal(result.ok, false);
+    assert.equal(typeof result.error, "string");
+    assert.ok(result.error.length > 0);
+  }));
+
+/* ────────────────────────── 读图（file_image / file:image） ────────────────────────── */
+
+/** 四种受支持格式的最小文件头（后面补零到 ≥ 12 字节，够嗅探即可）。 */
+const IMAGE_HEADS = {
+  "image/png": Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0]),
+  "image/jpeg": Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  "image/gif": Buffer.from("GIF89a\x00\x00\x00\x00\x00\x00", "latin1"),
+  "image/webp": Buffer.concat([Buffer.from("RIFF", "latin1"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBP", "latin1"), Buffer.from([0, 0, 0, 0])]),
+};
+
+test("sniffImageMime：按文件头认四种图片，其它一律 null（扩展名不算数）", () => {
+  for (const [mime, head] of Object.entries(IMAGE_HEADS)) {
+    assert.equal(sniffImageMime(head), mime, mime);
+  }
+  assert.equal(sniffImageMime(Buffer.from("plain text file")), null);
+  assert.equal(sniffImageMime(Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d])), null, "PDF 不是图片");
+  assert.equal(sniffImageMime(Buffer.alloc(0)), null);
+  assert.equal(sniffImageMime(Buffer.from("\x89PNG")), null, "太短不算（避免半截头误判）");
+});
+
+test("readImage：返回 mime/bytes/base64，且 base64 能还原原始字节", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "截图.png");
+    // 故意把 jpeg 存成 .png：扩展名不可信，必须按魔数判
+    fs.writeFileSync(file, IMAGE_HEADS["image/jpeg"]);
+    const result = await readImage(ws.roots, file);
+    assert.equal(result.ok, true);
+    assert.equal(result.mime, "image/jpeg");
+    assert.equal(result.bytes, IMAGE_HEADS["image/jpeg"].length);
+    assert.deepEqual(Buffer.from(result.base64, "base64"), IMAGE_HEADS["image/jpeg"]);
+  }));
+
+test("readImage：不是图片时回 unsupported-image，并提示改用 file_read", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "笔记.png");
+    fs.writeFileSync(file, "这其实是文本\n");
+    const result = await readImage(ws.roots, file);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "unsupported-image");
+    assert.match(result.error, /PNG \/ JPEG \/ GIF \/ WebP/);
+    assert.match(result.error, /file_read/);
+  }));
+
+test("readImage：超过单张上限回 too-large（图片上限与文本上限不同）", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "大图.png");
+    const buf = Buffer.alloc(MAX_IMAGE_BYTES + 1);
+    IMAGE_HEADS["image/png"].copy(buf, 0);
+    fs.writeFileSync(file, buf);
+    const result = await readImage(ws.roots, file);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "too-large");
+    assert.match(result.error, new RegExp(String(Math.round(MAX_IMAGE_BYTES / 1024))));
+  }));
+
+test("readImage：根外路径、相对路径、NUL 一律拒绝（与 readFile 同一道闸）", () =>
+  withWorkspace(async (ws) => {
+    const outside = path.join(ws.base, "根外.png");
+    fs.writeFileSync(outside, IMAGE_HEADS["image/png"]);
+    assert.equal((await readImage(ws.roots, outside)).code, "outside-roots");
+    assert.equal((await readImage(ws.roots, "库/截图.png")).code, "invalid-path");
+    assert.equal((await readImage(ws.roots, path.join(ws.writeRoot, "a\0.png"))).code, "invalid-path");
+  }));
+
+test("readImage：软链指向根外图片时拒绝（不能借链接绕出根）", (t) =>
+  withWorkspace(async (ws) => {
+    const outside = path.join(ws.base, "根外.png");
+    fs.writeFileSync(outside, IMAGE_HEADS["image/png"]);
+    const link = path.join(ws.writeRoot, "链接.png");
+    try {
+      fs.symlinkSync(outside, link, "file");
+    } catch {
+      t.skip("当前环境不允许建符号链接");
+      return;
+    }
+    const result = await readImage(ws.roots, link);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "symlink");
+  }));
+
+test("IPC file:image：正常读取；无根回 no-roots；非可信来源回 untrusted-sender", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "图.png");
+    fs.writeFileSync(file, IMAGE_HEADS["image/png"]);
+    const ok = await register().invoke("file:image", { roots: ws.roots, path: file });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.mime, "image/png");
+
+    const noRoots = await register().invoke("file:image", { roots: [], path: file });
+    assert.equal(noRoots.ok, false);
+    assert.equal(noRoots.code, "no-roots");
+
+    const denied = await register({ isTrustedSender: () => false }).invoke("file:image", { roots: ws.roots, path: file });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.code, "untrusted-sender");
+  }));
+
+/* ────────────────────── 撤销上一次写入（d.170 · file:undo） ────────────────────── */
+
+/** 建一个和文件系统分开的备份目录（模拟 userData/backups）。 */
+function makeBackupDir() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "heming-backups-"));
+  return {
+    dir: base,
+    cleanup() {
+      fs.rmSync(base, { recursive: true, force: true });
+    },
+  };
+}
+
+test("覆盖已有文件前会留备份；undoWrite 能把旧内容写回去", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "笔记.md");
+      fs.writeFileSync(target, "旧内容\n");
+
+      const written = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "新内容\n" }], false, bak.dir);
+      assert.equal(written.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "新内容\n");
+      assert.equal(written.backups.length, 1, "覆盖已有文件应产生一份备份");
+      assert.equal(written.backups[0].path, target);
+
+      const undone = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(undone.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "旧内容\n", "撤销后必须一字不差还原");
+      assert.ok(undone.restoredFrom, "要告诉调用方恢复的是哪一刻的版本");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("新建文件没有旧版本：不产生备份，undo 回 no-backup", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "新文件.md");
+      const written = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "第一次\n" }], false, bak.dir);
+      assert.equal(written.ok, true);
+      assert.equal(written.backups, undefined, "新建文件不该产生备份");
+
+      const undone = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(undone.ok, false);
+      assert.equal(undone.code, "no-backup");
+      assert.equal(fs.readFileSync(target, "utf8"), "第一次\n", "撤销失败不能动文件");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("删除文件也会先备份；undo 能把被删的文件原样恢复", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "要删的.md");
+      fs.writeFileSync(target, "别删我\n");
+      const removed = await writeBatch(ws.roots, [{ kind: "delete", path: target }], false, bak.dir);
+      assert.equal(removed.ok, true);
+      assert.equal(fs.existsSync(target), false);
+
+      const undone = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(undone.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "别删我\n");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("一份备份只能用一次：撤销成功后紧接着再撤销回 no-backup（不来回横跳）", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "a.md");
+      fs.writeFileSync(target, "v1\n");
+      await writeBatch(ws.roots, [{ kind: "write", path: target, content: "v2\n" }], false, bak.dir);
+      assert.equal((await undoWrite(ws.roots, target, bak.dir)).ok, true);
+      const again = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(again.ok, false);
+      assert.equal(again.code, "no-backup");
+      assert.equal(fs.readFileSync(target, "utf8"), "v1\n");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("undo 的越界/只读根一律拒绝，且文件保持原样", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const readOnly = path.join(ws.readRoot, "参考.txt");
+      fs.writeFileSync(readOnly, "只读\n");
+      const ro = await undoWrite(ws.roots, readOnly, bak.dir);
+      assert.equal(ro.ok, false);
+      assert.equal(ro.code, "outside-roots");
+
+      const outside = path.join(ws.base, "外部.txt");
+      const out = await undoWrite(ws.roots, outside, bak.dir);
+      assert.equal(out.ok, false);
+      assert.equal(out.code, "outside-roots");
+
+      const relative = await undoWrite(ws.roots, "库/a.md", bak.dir);
+      assert.equal(relative.ok, false);
+      assert.equal(relative.code, "outside-roots");
+
+      const noDir = await undoWrite(ws.roots, path.join(ws.writeRoot, "x.md"), null);
+      assert.equal(noDir.ok, false);
+      assert.equal(noDir.code, "no-backup-dir");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("每个文件只留最近 MAX_BACKUPS_PER_PATH 份备份（超出丢最旧）", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "count.md");
+      fs.writeFileSync(target, "v0\n");
+      for (let i = 1; i <= MAX_BACKUPS_PER_PATH + 3; i++) {
+        await writeBatch(ws.roots, [{ kind: "write", path: target, content: "v" + i + "\n" }], false, bak.dir);
+      }
+      const index = await readBackupIndex(bak.dir);
+      const key = Object.keys(index)[0];
+      assert.equal(index[key].length, MAX_BACKUPS_PER_PATH, "每文件备份数必须被裁剪到上限");
+      // 最新的那份是 v12（倒数第二次写入前的内容）
+      const undone = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(undone.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "v" + (MAX_BACKUPS_PER_PATH + 2) + "\n");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("备份目录不可写时：写入照常成功，只是没有备份（安全网不能挡住主功能）", () =>
+  withWorkspace(async (ws) => {
+    const bogus = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "heming-broken-")), "not-a-dir");
+    fs.writeFileSync(bogus, "我是一个文件，不是目录");
+    try {
+      const target = path.join(ws.writeRoot, "b.md");
+      fs.writeFileSync(target, "旧\n");
+      const written = await writeBatch(ws.roots, [{ kind: "write", path: target, content: "新\n" }], false, bogus);
+      assert.equal(written.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "新\n");
+      assert.equal(written.backups, undefined, "备份失败不该假装备份成功");
+    } finally {
+      fs.rmSync(path.dirname(bogus), { recursive: true, force: true });
+    }
+  }));
+
+test("IPC file:undo：正常撤销；无根回 no-roots；非可信来源回 untrusted-sender", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "ipc.md");
+      fs.writeFileSync(target, "IPC 旧\n");
+      const ipc = fakeIpc();
+      registerFileIpc(ipc, { isTrustedSender: () => true, backupDir: bak.dir });
+      await ipc.invoke("file:write", { roots: ws.roots, ops: [{ kind: "write", path: target, content: "IPC 新\n" }] });
+      const ok = await ipc.invoke("file:undo", { roots: ws.roots, path: target });
+      assert.equal(ok.ok, true);
+      assert.equal(fs.readFileSync(target, "utf8"), "IPC 旧\n");
+
+      const noRoots = await ipc.invoke("file:undo", { roots: [], path: target });
+      assert.equal(noRoots.ok, false);
+      assert.equal(noRoots.code, "no-roots");
+
+      const denied = await (async () => {
+        const bad = fakeIpc();
+        registerFileIpc(bad, { isTrustedSender: () => false, backupDir: bak.dir });
+        return bad.invoke("file:undo", { roots: ws.roots, path: target });
+      })();
+      assert.equal(denied.ok, false);
+      assert.equal(denied.code, "untrusted-sender");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+/* ──────────────── 最近改动列表（d.171 · file:backups） ──────────────── */
+
+test("listBackups：只列可写根内的最新一份备份，按时间倒序；只读根里的不列", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const a = path.join(ws.writeRoot, "a.md");
+      const b = path.join(ws.writeRoot, "sub", "b.md");
+      fs.mkdirSync(path.dirname(b), { recursive: true });
+      fs.writeFileSync(a, "a1");
+      fs.writeFileSync(b, "b1");
+      await writeBatch(ws.roots, [{ kind: "write", path: a, content: "a2" }], false, bak.dir);
+      await new Promise((r) => setTimeout(r, 5));
+      await writeBatch(ws.roots, [{ kind: "write", path: b, content: "b2" }], false, bak.dir);
+
+      // 只读根里的文件即使有备份也不该出现在列表里（列出来也点不动）
+      const readOnlyFile = path.join(ws.readRoot, "r.md");
+      fs.writeFileSync(readOnlyFile, "r1");
+      await createBackup(bak.dir, readOnlyFile, Buffer.from("r1"));
+
+      const listed = await listBackups(ws.roots, bak.dir);
+      assert.equal(listed.ok, true);
+      assert.deepEqual(
+        listed.items.map((it) => path.basename(it.path)),
+        ["b.md", "a.md"],
+        "最新的在最前，且只读根里的被过滤掉",
+      );
+      assert.ok(listed.items.every((it) => typeof it.at === "string" && it.bytes > 0));
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("listBackups：没有备份目录 / 没有可写根时回空列表（不是错误）", () =>
+  withWorkspace(async (ws) => {
+    const none = await listBackups(ws.roots, null);
+    assert.deepEqual(none, { ok: true, items: [] });
+    const bak = makeBackupDir();
+    try {
+      const readOnlyOnly = [{ name: "只读", path: ws.readRoot, mode: "read" }];
+      const empty = await listBackups(readOnlyOnly, bak.dir);
+      assert.deepEqual(empty, { ok: true, items: [] });
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("IPC file:backups：正常列出；无根回 no-roots；非可信来源回 untrusted-sender", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "ipc-list.md");
+      fs.writeFileSync(target, "v1");
+      const ipc = fakeIpc();
+      registerFileIpc(ipc, { isTrustedSender: () => true, backupDir: bak.dir });
+      await ipc.invoke("file:write", { roots: ws.roots, ops: [{ kind: "write", path: target, content: "v2" }] });
+
+      const ok = await ipc.invoke("file:backups", { roots: ws.roots });
+      assert.equal(ok.ok, true);
+      assert.equal(ok.items.length, 1);
+      assert.equal(ok.items[0].path, target);
+
+      const noRoots = await ipc.invoke("file:backups", { roots: [] });
+      assert.equal(noRoots.ok, false);
+      assert.equal(noRoots.code, "no-roots");
+
+      const bad = fakeIpc();
+      registerFileIpc(bad, { isTrustedSender: () => false, backupDir: bak.dir });
+      const denied = await bad.invoke("file:backups", { roots: ws.roots });
+      assert.equal(denied.code, "untrusted-sender");
+    } finally {
+      bak.cleanup();
+    }
+  }));

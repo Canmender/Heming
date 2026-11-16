@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
 import type { StorageLike } from "../memory/types.js";
 import { IMAGE_TOKEN_COST, estimateRowTokens, estimateRowsTokens, estimateTokens } from "./tokens.js";
@@ -415,6 +415,7 @@ describe("上下文设置：读写与损坏回退", () => {
       budgetTokens: 6000,
       keepRecentTurns: 8,
       llmSummary: true,
+      autoBudget: true,
     });
     expect(loadContextSettings(new FakeStorage())).toEqual(DEFAULT_CONTEXT_SETTINGS);
   });
@@ -432,7 +433,7 @@ describe("上下文设置：读写与损坏回退", () => {
     const storage = new FakeStorage();
     saveContextSettings({ enabled: false, keepRecentTurns: 4 }, storage);
     const saved = saveContextSettings({ llmSummary: false }, storage);
-    expect(saved).toEqual({ enabled: false, budgetTokens: 6000, keepRecentTurns: 4, llmSummary: false });
+    expect(saved).toEqual({ enabled: false, budgetTokens: 6000, keepRecentTurns: 4, llmSummary: false, autoBudget: true });
   });
 
   it("整体损坏回退默认（非法 JSON / 数组 / 字符串）", () => {
@@ -466,6 +467,7 @@ describe("上下文设置：读写与损坏回退", () => {
       budgetTokens: 12000,
       keepRecentTurns: 12,
       llmSummary: false,
+      autoBudget: true,
     });
   });
 
@@ -864,3 +866,4 @@ describe("normalizeContextSettings：字段级校验", () => {
     });
   });
 });
+

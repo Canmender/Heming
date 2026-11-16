@@ -1,0 +1,84 @@
+id: long-001
+name: 长任务自动续跑：清单还有未完成项时，越过 12 轮上限继续做
+owner: agent
+tags:
+  - context
+  - long-task
+# 为什么要这条：d.157 的续跑判据是「任务清单里还有 pending/in_progress」。这里预置清单让
+# 判据成立，再让脚本一路调到 12 轮上限——续跑真生效的话回合数会超过 12，被提前收口就只有 12。
+# 预置清单而不是先调 todo_write：把「清单写入」与「到顶要不要续」拆开测，红了能一眼定位。
+setup:
+  fixture: long-001
+  todos:
+    - content: 读三份文档
+      status: in_progress
+    - content: 汇总成结论
+      status: pending
+prompt: "@和小鸣 把 docs 里的文档逐份读完，然后汇总。"
+script:
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/b.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/c.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/b.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/c.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/b.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/c.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/b.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/c.md
+  - tool_calls:
+      - name: file_read
+        arguments:
+          path: docs/a.md
+  - text: "三份文档都读完了，结论见上。"
+graders:
+  # 13 次读盘 = 真的越过了 12 轮上限还继续调了一次工具。
+  - type: tool_called
+    tool: file_read
+    times: 13
+  # 12 轮工具 + 续跑那 1 次 + 最后的收口回合 = 14；没续跑的话会停在 12。
+  - type: min_rounds
+    value: 14
+  - type: contains
+    value: "读完了"
+  # 总量上限是 36 轮：这里只有 13，不该被当成到顶而提前收口。
+  - type: max_rounds
+    value: 20

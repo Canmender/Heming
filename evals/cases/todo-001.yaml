@@ -1,0 +1,39 @@
+id: todo-001
+name: 多步任务先列清单：todo_write 真的写进本会话清单
+owner: eval
+tags:
+  - context
+  - todo
+setup:
+  fixture: todo-001
+prompt: |
+  这个任务分两步：先读 docs/a.md，再写一段结论。
+  开工前先用 todo_write 把这两步列出来（第一步标成进行中）。
+todo: true
+script:
+  - tool_calls:
+      - name: todo_write
+        arguments:
+          todos:
+            - content: 读 docs/a.md
+              status: in_progress
+            - content: 写一段结论
+              status: pending
+  - text: 清单已经列好，先读第一份文档。
+graders:
+  - type: prompt_contains
+    value:
+      - todo_write
+      - 多步任务
+  - type: tool_called
+    tool: todo_write
+    times: 1
+  - type: todo_state
+    total: 2
+    completed: 0
+    in_progress: 1
+    pending: 1
+  - type: contains
+    value: 清单
+  - type: max_rounds
+    value: 3

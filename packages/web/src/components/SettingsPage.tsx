@@ -6,6 +6,7 @@ import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { BackgroundModelCard } from "./BackgroundModelCard.js";
 import { FileEditCard } from "./FileEditCard.js";
+import { PersonaCard } from "./PersonaCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
@@ -51,7 +52,13 @@ function InlineText({ text }: { text: string }) {
             {seg.text}
           </strong>
         ) : seg.kind === "code" ? (
-          <code key={i} className="rounded-sm bg-subtle-2 px-1 font-mono text-ui-xs">
+          /*
+           * 行内代码**不再单独降一档字号**：原来写 `text-ui-xs`（11px）时，
+           * 像 `~/Heming/logs/csp-report.log` 这种长路径就变成「11px 正文」，
+           * 被 `pnpm design:audit` 的 body11 门槛判为「正文冒充元信息」。
+           * 等宽 + 浅底已经足够区分，字号跟随正文（12px）。
+           */
+          <code key={i} className="rounded-sm bg-subtle-2 px-1 font-mono">
             {seg.text}
           </code>
         ) : (
@@ -311,7 +318,15 @@ export function SettingsPage() {
                 {/* 审计 F8：六张卡原来一路平铺，成本设置（Key / 上下文 / 后台模型）与
                     安全设置（工具确认 / 文件可写根 / 存储水位）混在一列里，读完不知道
                     「哪些是花钱的、哪些是本机的边界」。按三组分开，组标题统一 .ui-block-title。 */}
-                <h2 className="ui-block-title">模型与上下文</h2>
+                <h2 className="ui-block-title">智能体</h2>
+                <div
+                  data-settings-id="agent-persona"
+                  className={anchorClass(highlightId === "agent-persona")}
+                >
+                  <PersonaCard />
+                </div>
+
+                <h2 className="ui-block-title mt-5">模型与上下文</h2>
                 <div
                   data-settings-id="key-storage"
                   className={anchorClass(highlightId === "key-storage")}

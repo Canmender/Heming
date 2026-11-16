@@ -42,6 +42,12 @@ function snippet(text: string, limit = 200): string {
   return flat.length <= limit ? flat : `${flat.slice(0, limit)}…`;
 }
 
+/** 清单摘要（todo_state 失败时给人看的实际状态）。 */
+function todoDigest(todos: CaseObservation["todos"]): string {
+  if (!todos || todos.length === 0) return "（空）";
+  return todos.map((t) => `[${t.status}] ${snippet(t.content, 40)}`).join("；");
+}
+
 async function fileText(abs: string): Promise<string | null> {
   try {
     return await readFile(abs, "utf8");
@@ -108,10 +114,16 @@ async function gradeOne(grader: Grader, testCase: EvalCase, obs: CaseObservation
       const count = obs.toolCalls.filter((call) => call.name === name).length;
       // 不给 times = 「至少调用过一次」；给了 times = 要求**恰好**这么多次（README 的口径，
       // 确定性脚本下次数是可控的，多调一次就该红——那是最容易悄悄变贵的回归）。
-      const ok = grader.times === undefined ? count >= 1 : count === grader.times;
+      //
+      // d.183（真实模型）：真实模型看不见脚本，它读一份文件还是三份是「判断」不是「脚本」；
+      // 此时 times 只当「至少这么多次」，否则每条用例测的都是模型的闲笔，而不是产品能力。
+      const exact = grader.times !== undefined && obs.real !== true;
+      const need = grader.times ?? 1;
+      const ok = exact ? count === need : count >= need;
+      const mood = exact ? `恰好 ${need} 次` : `至少 ${need} 次`;
       return ok
-        ? pass(`${name} 调用 ${count} 次${grader.times === undefined ? "" : `（期望恰好 ${grader.times} 次）`}`)
-        : fail(`${name} 调用 ${count} 次，期望${grader.times === undefined ? "至少 1 次" : `恰好 ${grader.times} 次`}`);
+        ? pass(`${name} 调用 ${count} 次（期望${mood}${obs.real === true ? "，真实模式放宽" : ""}）`)
+        : fail(`${name} 调用 ${count} 次，期望${mood}`);
     }
 
     case "tool_sequence": {
@@ -131,6 +143,59 @@ async function gradeOne(grader: Grader, testCase: EvalCase, obs: CaseObservation
       return obs.rounds <= max
         ? pass(`回合数 ${obs.rounds} ≤ ${max}`)
         : fail(`回合数 ${obs.rounds} 超过上限 ${max}`);
+    }
+
+    case "min_rounds": {
+      // 「确实跑过了那个上限」的证据（d.161）：自动续跑如果没生效，回合数会停在上限，
+      // 只有真的续跑过才会超过它。用它而不是数工具调用次数——工具次数会被用例脚本写死。
+      const min = grader.min ?? 1;
+      return obs.rounds >= min
+        ? pass(`回合数 ${obs.rounds} ≥ ${min}`)
+        : fail(`回合数 ${obs.rounds} 少于下限 ${min}（看是不是续跑没生效，被上限提前收口了）`);
+    }
+
+    case "todo_state": {
+      // 任务清单的终态（d.163）：d.155 的 todo_write 只能从「工具返回了什么」看出被调用过，
+      // 看不出清单最后是不是模型声称的那个样子（比如把「已完成」写成 pending）。
+      const todos = obs.todos ?? [];
+      const counts = {
+        total: todos.length,
+        completed: todos.filter((t) => t.status === "completed").length,
+        pending: todos.filter((t) => t.status === "pending").length,
+        in_progress: todos.filter((t) => t.status === "in_progress").length,
+      };
+      const expected: Array<keyof typeof counts> = ["total", "completed", "pending", "in_progress"];
+      const mismatches = expected
+        .filter((key) => grader[key] !== undefined && grader[key] !== counts[key])
+        .map((key) => `${key}=${counts[key]}（期望 ${grader[key]}）`);
+      return mismatches.length === 0
+        ? pass(`任务清单状态吻合：共 ${counts.total}，已完成 ${counts.completed}，进行中 ${counts.in_progress}，待开始 ${counts.pending}`)
+        : fail(`任务清单状态不符：${mismatches.join("；")}；实际清单：${todoDigest(todos)}`);
+    }
+
+    case "image_attached": {
+      const need = typeof grader.min === "number" ? grader.min : 1;
+      const ok = obs.images >= need;
+      return {
+        grader,
+        ok,
+        detail: ok
+          ? `工具返回了 ${obs.images} 张图片`
+          : `工具返回的图片是 ${obs.images} 张，期望至少 ${need} 张——检查 file_image 是否真的把 image 交给了编排层（不是只回了文本）`,
+      };
+    }
+    case "prompt_contains": {
+      // 系统提示词里必须出现这些片段（d.154 运行环境段 / d.156 人设 / d.157 长任务协议）。
+      // 为什么单独一个 grader：这段文本不经过工具结果，也不一定出现在最终回答里，
+      // 但它是模型「知道自己能做什么」的唯一来源，写丢了就是能力倒退。
+      const wanted = asList(grader.value).concat(asList(grader.contains));
+      if (wanted.length === 0) return fail("prompt_contains 必须给 value");
+      const text = obs.systemPrompt ?? "";
+      if (!text.trim()) return fail("本轮系统提示词为空（没有任何提示词被注入）");
+      const missing = wanted.filter((needle) => !text.includes(needle));
+      return missing.length === 0
+        ? pass(`系统提示词包含全部 ${wanted.length} 个片段（共 ${text.length} 字）`)
+        : fail(`系统提示词缺少片段：${missing.map((m) => `「${m}」`).join("、")}；实际：${snippet(text)}`);
     }
 
     case "hitl": {
