@@ -27,9 +27,12 @@ function statusLine(run: SubagentRun): string {
 export function SubagentRuns({
   runs,
   onStop,
+  writable = false,
 }: {
   runs: SubagentRun[];
   onStop: () => void;
+  /** 用户是否已授权子代理写盘（d.202）——标题要如实写「只读」还是「可写」。 */
+  writable?: boolean;
 }) {
   const running = runs.filter((run) => run.status === "running");
   if (running.length === 0) return null;
@@ -37,12 +40,12 @@ export function SubagentRuns({
     <div
       role="status"
       aria-live="polite"
-      aria-label="只读子代理进度"
+      aria-label={writable ? "可写子代理进度" : "只读子代理进度"}
       data-testid="subagent-runs"
       className="mx-4 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-subtle-2 px-3 py-1.5 text-ui-sm text-body"
     >
       <span className="shrink-0 font-medium">
-        只读子代理 · {running.length} 个在跑
+        {writable ? "子代理（可写）" : "只读子代理"} · {running.length} 个在跑
       </span>
       <ul className="min-w-0 flex-1 basis-64 space-y-0.5">
         {running.map((run) => (

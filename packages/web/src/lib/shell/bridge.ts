@@ -121,6 +121,27 @@ export interface ShellJobKillResponse {
   alreadyFinished: boolean;
 }
 
+/**
+ * 作业最近输出的只读快照（d.203）。
+ *
+ * 与 `ShellJobOutputResponse` 的关键差别：**不消费**。界面看日志走这条，
+ * 模型读增量仍走 `command_output`，两边不会互相抢。
+ */
+export interface ShellJobPreviewResponse {
+  ok: true;
+  jobId: string;
+  running: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  /** 是否因为预览长度上限截掉了更早的内容（截了要明说）。 */
+  cut: boolean;
+  /** 累计产出的字节数。 */
+  produced: number;
+  /** 因 512KB 上限丢掉的字节数。 */
+  dropped: number;
+}
+
 /** 后台作业通道的失败形状（与前台 `ShellRunFailure` 同一套 `ok:false` 约定）。 */
 export interface ShellJobFailure {
   ok: false;
@@ -164,6 +185,15 @@ export interface ShellBridge {
   jobOutput?(payload: { jobId: string; waitMs?: number }): Promise<ShellJobOutputResponse | ShellFailure>;
   /** 请求停止一个作业（只认本主进程登记过的 jobId，不接受 pid）。 */
   jobKill?(payload: { jobId: string }): Promise<ShellJobKillResponse | ShellFailure>;
+  /**
+   * 预览一个作业最近的输出（d.203）：只读快照、不消费增量。
+   *
+   * 老安装包（d.203 之前）没有这个方法：界面据此隐藏「看日志」，而不是点开一片空白。
+   */
+  jobPreview?(payload: {
+    jobId: string;
+    maxBytes?: number;
+  }): Promise<ShellJobPreviewResponse | ShellFailure>;
 }
 
 declare global {
@@ -214,6 +244,16 @@ export function hasJobChannels(bridge: ShellBridge | null = getShellBridge()): b
       typeof bridge.jobOutput === "function" &&
       typeof bridge.jobKill === "function",
   );
+}
+
+/**
+ * 界面能否「看作业日志」（d.203）。
+ *
+ * 与 `hasJobChannels` 分开：预览是纯展示能力，老安装包缺它只影响界面，
+ * 不该让后台命令整体不可用。
+ */
+export function hasJobPreview(bridge: ShellBridge | null = getShellBridge()): boolean {
+  return Boolean(bridge && typeof bridge.jobPreview === "function");
 }
 
 /**

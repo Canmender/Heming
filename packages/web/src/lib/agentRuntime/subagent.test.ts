@@ -455,3 +455,126 @@ describe("并行子代理（d.200）", () => {
     expect(chat).not.toHaveBeenCalled();
   });
 });
+
+describe("子代理写盘授权（d.202）", () => {
+  const readTool = { type: "function", function: { name: "file_read" } };
+  const writeTool = { type: "function", function: { name: "file_write" } };
+  const execTool = { type: "function", function: { name: "run_command" } };
+
+  /** 第一轮让模型调指定工具，第二轮给结论；同时记下它每一轮看得见哪些工具。 */
+  function toolThenAnswer(calls: { name: string; arguments: string }[]) {
+    const seen: string[][] = [];
+    let round = 0;
+    const chat = vi.fn(
+      async (
+        _messages: ChatMessage[],
+        tools: unknown[],
+        _signal: AbortSignal | undefined,
+        onToolCalls: (list: { name: string; arguments: string }[]) => void,
+      ) => {
+        seen.push(
+          tools
+            .map((spec) => {
+              const fn = (spec as { function?: { name?: unknown } }).function;
+              return typeof fn?.name === "string" ? fn.name : "";
+            })
+            .filter((name) => name.length > 0),
+        );
+        round += 1;
+        if (round === 1) {
+          onToolCalls(calls);
+          return "我先动手";
+        }
+        return "结论：改完了";
+      },
+    );
+    return { chat, seen };
+  }
+
+  it("默认只读：子代理看不见写工具，调了也会被拦并说明怎么授权", async () => {
+    const { chat } = toolThenAnswer([{ name: "file_write", arguments: '{"path":"a.ts","content":"x"}' }]);
+    const execute = vi.fn(async () => ({ text: "不该执行", ok: true }));
+    const wrapped = withSubagentTool(
+      { tools: [readTool, writeTool, execTool], meta: () => undefined, execute },
+      { agentId: "a1", conversationId: "c1", chat },
+    );
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "改一下 a.ts" }),
+    });
+    expect(result.text).toContain("只读");
+    expect(result.text).toContain("结论：改完了");
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.text).not.toContain("本次改动");
+  });
+
+  it("授权后可写：看见 file_write，但看不见 run_command", async () => {
+    const { chat, seen } = toolThenAnswer([]);
+    const execute = vi.fn(async () => ({ text: "（没调工具）", ok: true }));
+    const wrapped = withSubagentTool(
+      { tools: [readTool, writeTool, execTool], meta: () => undefined, execute },
+      { agentId: "a1", conversationId: "c1", chat, writable: true },
+    );
+    await wrapped.execute({ name: SUBAGENT_TOOL, arguments: JSON.stringify({ task: "查一下" }) });
+    expect(seen[0]).toContain("file_read");
+    expect(seen[0]).toContain("file_write");
+    expect(seen[0]).not.toContain("run_command");
+  });
+
+  it("可写时落盘路径会回传 onWrite，并在结论里列出本次改动", async () => {
+    const { chat } = toolThenAnswer([
+      { name: "file_write", arguments: '{"path":"src/a.ts","content":"x"}' },
+    ]);
+    const execute = vi.fn(async () => ({
+      text: "已写入 src/a.ts",
+      ok: true,
+      writes: ["src/a.ts"],
+    }));
+    const onWrite = vi.fn();
+    const wrapped = withSubagentTool(
+      { tools: [readTool, writeTool], meta: () => undefined, execute },
+      { agentId: "a1", conversationId: "c1", chat, writable: true, onWrite },
+    );
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "改一下 a.ts" }),
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(onWrite).toHaveBeenCalledWith("src/a.ts");
+    expect(result.text).toContain("可写");
+    expect(result.text).toContain("本次改动：src/a.ts");
+  });
+
+  it("规格描述随授权变化：只读不提授权，可写要说清边界", () => {
+    const readonly = fnOf(subagentSpec(false));
+    const writable = fnOf(subagentSpec(true));
+    expect(readonly.description).toContain("只读");
+    expect(writable.description).toContain("已授权");
+    expect(writable.description).toContain("file_write");
+  });
+
+  it("可写时中断也要说清「改过的能回滚」", async () => {
+    const chat = vi.fn(async () => "不该跑");
+    const controller = new AbortController();
+    const wrapped = withSubagentTool(
+      { tools: [readTool, writeTool], meta: () => undefined, execute: vi.fn() },
+      {
+        agentId: "a1",
+        conversationId: "c1",
+        chat,
+        writable: true,
+        createSignal: () => {
+          controller.abort();
+          return controller.signal;
+        },
+      },
+    );
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "改一下 a.ts" }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("可撤回");
+    expect(chat).not.toHaveBeenCalled();
+  });
+});

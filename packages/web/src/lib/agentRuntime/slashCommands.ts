@@ -24,6 +24,8 @@ export const PLAN_COMMAND = "/plan";
 export const STATUS_COMMAND = "/status";
 /** 会话目标（d.201）：`/goal <一句话>` 设定、`/goal done` 完成、`/goal off` 清除。 */
 export const GOAL_COMMAND = "/goal";
+/** 子代理写盘授权（d.202）：`/subagent write on|off`，不带参数就是看状态。 */
+export const SUBAGENT_COMMAND = "/subagent";
 /** 列出本地命令（面板之外的兜底：用户可能就是想看一遍完整列表）。 */
 export const HELP_COMMAND = "/help";
 
@@ -42,6 +44,11 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     command: GOAL_COMMAND,
     title: "设定这次会话的目标",
     hint: "/goal 把登录改成扫码：一句话说清终点，会跨轮写进提示词；/goal done 完成、/goal off 清除",
+  },
+  {
+    command: SUBAGENT_COMMAND,
+    title: "允许子代理改文件（默认不允许）",
+    hint: "/subagent write on 授权子代理改工作区内的文件（只能 file_write/file_edit，改动可整体撤回）；write off 收回",
   },
   {
     command: STATUS_COMMAND,

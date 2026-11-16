@@ -556,6 +556,12 @@ contextBridge.exposeInMainWorld("__heming_shell", {
   jobs: () => ipcRenderer.invoke("shell:jobs"),
   /** 增量读输出；{ jobId, waitMs? }，读走即消费，waitMs 最多 30s。 */
   jobOutput: (payload) => ipcRenderer.invoke("shell:job-output", payload),
+  /**
+   * 预览最近输出（d.203）：{ jobId, maxBytes? }，只读快照、不消费。
+   *
+   * 界面上「看日志」不能走 jobOutput——那条是增量读，界面读一次模型就少一段。
+   */
+  jobPreview: (payload) => ipcRenderer.invoke("shell:job-preview", payload),
   /** 终止一个作业；只认 jobId（不认 pid），主进程按登记表杀进程树。 */
   jobKill: (payload) => ipcRenderer.invoke("shell:job-kill", payload),
 });

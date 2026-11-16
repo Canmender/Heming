@@ -33,6 +33,8 @@ export interface StatusInput {
   roots?: readonly StatusRoot[];
   /** 计划模式是否开启。 */
   planMode?: boolean;
+  /** 是否已授权子代理写盘（d.202）；省略／false＝只读。 */
+  subagentWritable?: boolean;
   /** 上下文用量快照。 */
   context?: { used: number; budget: number } | null;
   /** 任务清单（只要状态即可）。 */
@@ -104,6 +106,13 @@ export function buildStatusReport(input: StatusInput): string {
   }
 
   lines.push(`计划模式：${yesNo(input.planMode, "开（只读，先给方案）", "关")}`);
+  lines.push(
+    `子代理：${
+      input.subagentWritable
+        ? "可写（只能用 file_write / file_edit，改动进「本轮可撤回」）"
+        : "只读（默认；要它改文件发 /subagent write on）"
+    }`,
+  );
   if (input.context && input.context.budget > 0) {
     const pct = Math.round((input.context.used / input.context.budget) * 100);
     lines.push(

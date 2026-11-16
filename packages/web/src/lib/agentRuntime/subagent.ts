@@ -23,6 +23,13 @@
  * `SUBAGENT_MAX_PARALLEL`——不做无限并发，否则一个请求能把模型配额打满。
  * 同时把进度上报给界面（`onProgress`）：用户要能看见「两个子代理在读什么」，
  * 也能一键停掉（`createSignal`）。
+ *
+ * d.202：子代理可以被**显式授权写盘**。默认仍然是只读——`writable` 只能由用户
+ * 在界面里打开（会话级开关，见 `subagentWrite.ts`），不能让模型自己开。
+ * 授权后子代理也只拿到 `file_write` / `file_edit` 两件，且仍然走主桥同一套
+ * 工作区根校验（写不到根外）；每次落盘通过 `onWrite` 交给主对话记进「本轮可撤回」，
+ * 用户点一下就能整体回滚。执行命令、网络、HITL 依旧不给：子代理没有交互通道，
+ * 一旦允许它跑命令，就没有任何人能在它乱跑之前拦下来。
  */
 import type { ToolBridge } from "../agentStream.js";
 import type { ChatMessage } from "../llmClient.js";
@@ -42,6 +49,18 @@ export const SUBAGENT_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "file_read",
   "file_glob",
   "file_grep",
+]);
+
+/**
+ * 用户显式授权写盘后，子代理额外能用的工具（d.202）。
+ *
+ * 故意只有「整文件写」与「锚点替换」两件：`file_undo`（回滚别人的备份）、
+ * `run_command`（跑任意命令）、`file_image` 都不给——前两件超出「改这个文件」的
+ * 最小授权，后一件子代理用不上。
+ */
+export const SUBAGENT_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "file_write",
+  "file_edit",
 ]);
 
 /** 单次工具结果回灌给子代理的最大字符数：截断是防止一个巨型文件打爆子会话。 */
@@ -72,15 +91,25 @@ export interface SubagentProgressEvent {
   note?: string;
 }
 
-/** 子代理的人设：短、只讲边界，不讲业务。 */
-const SUBAGENT_SYSTEM_PROMPT = [
-  "你是一个只读子代理：你只能读文件、列文件、搜内容，不能写、不能执行命令、不能联网。",
-  "你的任务是把「需要翻很多文件才能确认」的事情查清楚，然后用结论回答，不要复述文件原文。",
-  "规则：",
-  "- 先想清楚要找什么，再用最少的工具调用拿到证据；同一个工具别重复调。",
-  "- 结论要能核对：写清依据的文件路径（必要时带行号），拿不到证据就明说「未确认」。",
-  "- 只回答交给你的任务，不要扩展到别的主题，也不要问用户问题（没有人会回你）。",
-].join("\n");
+/** 子代理的人设：短、只讲边界，不讲业务。授权写盘时多两条写规矩（d.202）。 */
+function subagentSystemPrompt(writable: boolean): string {
+  return [
+    writable
+      ? "你是一个子代理：你能读文件、列文件、搜内容，本轮用户已授权你改文件（只能用 file_write / file_edit，且只能改工作区内）。"
+      : "你是一个只读子代理：你只能读文件、列文件、搜内容，不能写、不能执行命令、不能联网。",
+    "你的任务是把「需要翻很多文件才能确认」的事情查清楚，然后用结论回答，不要复述文件原文。",
+    "规则：",
+    "- 先想清楚要找什么，再用最少的工具调用拿到证据；同一个工具别重复调。",
+    "- 结论要能核对：写清依据的文件路径（必要时带行号），拿不到证据就明说「未确认」。",
+    "- 只回答交给你的任务，不要扩展到别的主题，也不要问用户问题（没有人会回你）。",
+    ...(writable
+      ? [
+          "- 只改任务点名要改的文件，别顺手重构别的文件；改完用一句话说清「改了哪个文件、改了什么」。",
+          "- 拿不准要不要改的地方先别改，在结论里说明「这里可能需要你确认」。",
+        ]
+      : []),
+  ].join("\n");
+}
 
 /** 模型给 `agent_task` 的参数（解析后）。 */
 export interface SubagentArgs {
@@ -104,13 +133,13 @@ export interface SubagentToolCall {
 
 /** 跑子代理需要的外部能力；ChatPage / 评测都可以注入。 */
 export interface SubagentDeps {
-  /** 主桥的工具清单（子代理会从里面挑只读三件）。 */
+  /** 主桥的工具清单（子代理会从里面挑只读三件；授权写盘时再加两件写工具）。 */
   tools: unknown[];
   /** 执行工具（走主桥，参数形状一致）。 */
   execute: (
     call: { name: string; arguments: string },
     opts?: { signal?: AbortSignal },
-  ) => Promise<{ text: string; ok: boolean }>;
+  ) => Promise<{ text: string; ok: boolean; writes?: string[] }>;
   /** 一次对话请求；`onToolCalls` 在本轮收尾时回调。 */
   chat: (
     messages: ChatMessage[],
@@ -122,6 +151,10 @@ export interface SubagentDeps {
   signal?: AbortSignal;
   /** 进度回调（d.200）：界面据此显示并行子代理正在做什么。 */
   onProgress?: (event: SubagentProgressEvent) => void;
+  /** 用户是否显式授权了子代理写盘（d.202）：缺省 false，即只读。 */
+  writable?: boolean;
+  /** 子代理每落盘一个文件回调一次，主对话据此把路径记进「本轮可撤回」。 */
+  onWrite?: (path: string) => void;
 }
 
 /** 子代理的结果：`text` 永远是给主模型看的结论（失败也带原因）。 */
@@ -132,14 +165,15 @@ export interface SubagentResult {
   toolCalls: number;
 }
 
-/** OpenAI function spec。 */
-export function subagentSpec(): unknown {
+/** OpenAI function spec；`writable` 时描述里如实说明「本轮已授权改文件」。 */
+export function subagentSpec(writable = false): unknown {
   return {
     type: "function",
     function: {
       name: SUBAGENT_TOOL,
-      description:
-        "派只读子代理去查资料：它只能读文件/列文件/搜内容，会把结论带回来。适合「要翻很多文件才知道答案」的检索，避免把大量原文拉进主对话。可以一次派 2–3 个任务并行跑（`tasks` 数组），省下串行的工具轮次。",
+      description: writable
+        ? "派子代理去查资料、并在需要时改文件：它能读文件/列文件/搜内容，本轮用户已授权它用 file_write / file_edit 改工作区内的文件（改到哪几个文件要在任务里写清楚）。适合「要翻很多文件才知道答案」或「几处小改动互不相关」的活；可以一次派 2–3 个任务并行跑（`tasks` 数组），省下串行的工具轮次。"
+        : "派只读子代理去查资料：它只能读文件/列文件/搜内容，会把结论带回来。适合「要翻很多文件才知道答案」的检索，避免把大量原文拉进主对话。可以一次派 2–3 个任务并行跑（`tasks` 数组），省下串行的工具轮次。",
       parameters: {
         type: "object",
         properties: {
@@ -250,15 +284,24 @@ export function parseSubagentArgs(raw: string | undefined): SubagentParseResult 
   return { ok: true, args: { task: tasks[0], tasks, maxRounds } };
 }
 
-/** 只保留白名单里的只读工具 specs（子代理不该看见写工具）。 */
-function readOnlySpecs(tools: unknown[]): unknown[] {
+/** 子代理这次能看见的工具名：只读三件，授权写盘时再加两件写工具（d.202）。 */
+function allowedToolNames(writable: boolean): ReadonlySet<string> {
+  if (!writable) return SUBAGENT_READ_ONLY_TOOLS;
+  const names = new Set(SUBAGENT_READ_ONLY_TOOLS);
+  for (const name of SUBAGENT_WRITE_TOOLS) names.add(name);
+  return names;
+}
+
+/** 只保留白名单里的工具 specs（子代理不该看见被禁的工具）。 */
+function allowedSpecs(tools: unknown[], writable: boolean): unknown[] {
+  const allowed = allowedToolNames(writable);
   const out: unknown[] = [];
   for (const spec of tools) {
     const name =
       spec && typeof spec === "object"
         ? ((spec as { function?: { name?: unknown } }).function?.name ?? "")
         : "";
-    if (typeof name === "string" && SUBAGENT_READ_ONLY_TOOLS.has(name)) out.push(spec);
+    if (typeof name === "string" && allowed.has(name)) out.push(spec);
   }
   return out;
 }
@@ -289,18 +332,23 @@ async function runOne(
   deps: SubagentDeps,
   taskId: string,
 ): Promise<SubagentResult> {
-  const tools = readOnlySpecs(deps.tools);
+  const writable = deps.writable === true;
+  const allowed = allowedToolNames(writable);
+  const tools = allowedSpecs(deps.tools, writable);
   const messages: ChatMessage[] = [
-    { role: "system", content: SUBAGENT_SYSTEM_PROMPT },
+    { role: "system", content: subagentSystemPrompt(writable) },
     { role: "user", content: task },
   ];
   let toolCalls = 0;
   let lastText = "";
+  const writes: string[] = [];
   emitProgress(deps, { taskId, task, phase: "start", round: 0 });
 
   for (let round = 0; round < maxRounds; round++) {
     if (deps.signal?.aborted) {
-      const text = "子代理已中断（本次运行被停止），它没有写任何东西（它本来也只能读）。";
+      const text = writable
+        ? "子代理已中断（本次运行被停止）：它已经改过的文件在本轮「可撤回」里，可以整体回滚。"
+        : "子代理已中断（本次运行被停止），它没有写任何东西（它本来也只能读）。";
       emitProgress(deps, { taskId, task, phase: "failed", round, note: "已中断" });
       return { ok: false, text, rounds: round, toolCalls };
     }
@@ -326,7 +374,7 @@ async function runOne(
       });
       return {
         ok: true,
-        text: lastText || "（子代理没有返回内容）",
+        text: `${lastText || "（子代理没有返回内容）"}${writes.length ? `\n\n（本次改动：${writes.join("、")}）` : ""}`,
         rounds: round + 1,
         toolCalls,
       };
@@ -345,12 +393,19 @@ async function runOne(
 
     for (const [index, call] of calls.entries()) {
       const callId = call.id ?? `subagent_${round}_${index}`;
-      if (!SUBAGENT_READ_ONLY_TOOLS.has(call.name)) {
+      if (!allowed.has(call.name)) {
+        const hint = writable
+          ? `子代理只能用 ${[...allowed].join(" / ")}；${call.name} 没有执行（执行命令与网络工具不开放给子代理）。`
+          : `子代理只能调用只读工具（${[...allowed].join(" / ")}），${call.name} 没有执行${
+              SUBAGENT_WRITE_TOOLS.has(call.name)
+                ? "：本轮没有授权子代理写盘（要写的话先在输入框发 /subagent write on）"
+                : ""
+            }。`;
         messages.push({
           role: "tool",
           tool_call_id: callId,
           name: call.name,
-          content: `子代理只能调用只读工具（${[...SUBAGENT_READ_ONLY_TOOLS].join(" / ")}），${call.name} 没有执行。`,
+          content: hint,
         });
         continue;
       }
@@ -358,6 +413,13 @@ async function runOne(
       emitProgress(deps, { taskId, task, phase: "tool", round: round + 1, tool: call.name });
       const result = await deps.execute({ name: call.name, arguments: call.arguments }, 
         deps.signal ? { signal: deps.signal } : undefined);
+      if (writable && result.writes?.length) {
+        for (const path of result.writes) {
+          if (!path || writes.includes(path)) continue;
+          writes.push(path);
+          deps.onWrite?.(path);
+        }
+      }
       messages.push({
         role: "tool",
         tool_call_id: callId,
@@ -368,9 +430,10 @@ async function runOne(
   }
 
   emitProgress(deps, { taskId, task, phase: "done", round: maxRounds, note: "用完轮次预算" });
+  const writeNote = writes.length ? `\n\n（本次改动：${writes.join("、")}）` : "";
   return {
     ok: true,
-    text: `${lastText || "（子代理没有给出结论）"}\n\n（子代理用完 ${maxRounds} 轮工具预算，结论可能不完整；需要更完整就再派一次，把范围缩小到具体目录或关键词。）`,
+    text: `${lastText || "（子代理没有给出结论）"}\n\n（子代理用完 ${maxRounds} 轮工具预算，结论可能不完整；需要更完整就再派一次，把范围缩小到具体目录或关键词。）${writeNote}`,
     rounds: maxRounds,
     toolCalls,
   };
@@ -446,6 +509,13 @@ export interface WithSubagentToolOptions {
    * 那两个子代理、让主对话继续——所以两个信号取或，任一触发都算中断。
    */
   createSignal?: () => AbortSignal;
+  /**
+   * 用户是否显式授权子代理写盘（d.202）。只能由界面上的用户开关传入，
+   * **不能来自模型参数**——否则模型可以自己给自己开写权限。
+   */
+  writable?: boolean;
+  /** 子代理落盘回调：主对话据此把路径记进「本轮可撤回」。 */
+  onWrite?: (path: string) => void;
 }
 
 /** 把两个中断信号合成一个：任一方 abort 都算中断（缺一方就返回另一方）。 */
@@ -468,9 +538,10 @@ export function withSubagentTool(
   bridge: ToolBridge,
   opts: WithSubagentToolOptions,
 ): ToolBridge {
+  const writable = opts.writable === true;
   return {
     ...bridge,
-    tools: [...bridge.tools, subagentSpec()],
+    tools: [...bridge.tools, subagentSpec(writable)],
     meta: (name: string) => {
       if (name === SUBAGENT_TOOL) {
         return { risk: "read" as const, displayName: "派子代理" };
@@ -493,6 +564,8 @@ export function withSubagentTool(
         tools: bridge.tools,
         ...(signal ? { signal } : {}),
         ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+        ...(writable ? { writable: true } : {}),
+        ...(opts.onWrite ? { onWrite: opts.onWrite } : {}),
         execute: (sub, subOpts) => bridge.execute(sub, subOpts),
         // 子代理的对话走与应用内对话同一条路由（重试、退避、候选切换都在里面）；
         // onDelta 故意丢掉：子代理的中间推理不该流进主界面。
@@ -517,14 +590,16 @@ export function withSubagentTool(
       });
       // 单任务保持 d.162 的文案形状（评测与既有用例都按它断言）；多任务按「【任务 N】」分段，
       // 每段都带自己的轮次用量——主模型据此判断哪一件没查完、要不要补派。
+      // d.202：授权写盘时把「只读」如实改成「可写」，别让主模型以为子代理没动过文件。
+      const mode = writable ? "可写" : "只读";
       const sections = results.map((result, index) => {
-        const head = `子代理（只读，${result.rounds} 轮 / ${result.toolCalls} 次工具调用）结论：`;
+        const head = `子代理（${mode}，${result.rounds} 轮 / ${result.toolCalls} 次工具调用）结论：`;
         const task = parsed.args.tasks[index] ?? "";
         return results.length > 1 ? `【任务 ${index + 1}】${task}\n${head}\n${result.text}` : `${head}\n${result.text}`;
       });
       const title =
         results.length > 1
-          ? `并行子代理（只读，共 ${results.length} 个任务，每件上限 ${parsed.args.maxRounds} 轮）\n`
+          ? `并行子代理（${mode}，共 ${results.length} 个任务，每件上限 ${parsed.args.maxRounds} 轮）\n`
           : "";
       return {
         text: `${title}${sections.join("\n\n")}`,

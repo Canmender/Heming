@@ -67,4 +67,10 @@ describe("SubagentRuns（d.200）", () => {
     expect(item.textContent).toContain("…");
     expect(item.textContent?.length ?? 0).toBeLessThan(long.length);
   });
+
+  it("授权写盘时标题如实写「可写」，不继续冒充只读（d.202）", () => {
+    render(<SubagentRuns runs={[run()]} writable onStop={vi.fn()} />);
+    expect(screen.getByText(/子代理（可写） · 1 个在跑/)).toBeInTheDocument();
+    expect(screen.queryByText(/只读子代理/)).toBeNull();
+  });
 });

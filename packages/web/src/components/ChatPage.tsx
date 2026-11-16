@@ -110,7 +110,7 @@ import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import { fileRootsFor, setActiveWorkspace } from "../lib/fileEdit/roots.js";
 import { getFileBridge, hasFileBridge } from "../lib/fileEdit/bridge.js";
-import { getShellBridge, hasJobRuntime } from "../lib/shell/bridge.js";
+import { getShellBridge, hasJobChannels, hasJobPreview, hasJobRuntime } from "../lib/shell/bridge.js";
 import {
   buildRuntimeSection,
   describePlatform,
@@ -126,12 +126,22 @@ import { JobReadyBar } from "./JobReadyBar.js";
 import { ContextMeter } from "./ContextMeter.js";
 import { ResumeBar, type ResumeReason } from "./ResumeBar.js";
 import { SubagentRuns } from "./SubagentRuns.js";
+import { JobPanel } from "./JobPanel.js";
 import {
   clearTurnRunning,
   loadResumePoint,
   markTurnRunning,
 } from "../lib/agentRuntime/resumePoint.js";
 import { jobContinuePrompt, watchJobs, type WatchedJob } from "../lib/shell/jobWatch.js";
+import {
+  JOB_PANEL_POLL_MS,
+  hasRunningPanelJobs,
+  killPanelJob,
+  listPanelJobs,
+  pollPanelJobs,
+  previewPanelJob,
+  subscribePanelJobs,
+} from "../lib/shell/jobPanel.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
 import {
   applySubagentProgress,
@@ -170,9 +180,13 @@ import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
 import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
-import { GOAL_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { GOAL_COMMAND, SUBAGENT_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
 import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
 import { useGoal } from "../lib/agentRuntime/useGoal.js";
+import {
+  isSubagentWriteEnabled,
+  setSubagentWriteEnabled,
+} from "../lib/agentRuntime/subagentWrite.js";
 import { buildSlashHelp, buildStatusReport } from "../lib/agentRuntime/statusReport.js";
 import { historyFrom, stepHistory } from "../lib/agentRuntime/inputHistory.js";
 import { coreToolNames } from "../lib/agentRuntime/coreTools.js";
@@ -799,6 +813,27 @@ export function ChatPage({
    */
   const sessionGoal = useGoal(convId);
   /**
+   * 子代理写盘授权（d.202）：默认关，只有用户发 `/subagent write on` 才打开。
+   *
+   * 为什么不用模型参数开：子代理跑在工具调用闭包里，没有人能弹窗问「这个写要不要
+   * 允许」——若让模型自己开，等于给了一条无人看守的写路径。授权只看这个用户开关，
+   * 打开后子代理也只多拿 file_write / file_edit，且落盘都记进「本轮可撤回」。
+   */
+  const [subagentWrite, setSubagentWrite] = useState(() => isSubagentWriteEnabled(convId));
+
+  /**
+   * 后台作业面板（d.203）：把 d.180 的作业表搬到界面上。
+   *
+   * 为什么需要：模型说「我在跑构建」之后，用户界面上没有任何迹象——以为卡死就点停止，
+   * 把跑了几分钟的活掐断。面板只报事实（状态/耗时/退出码/日志），不编进度。
+   *
+   * 数据来自主进程的作业表（轮询 shell:jobs），不区分「谁起的」：用户自己起的、
+   * 模型起的，都是这个应用里在跑的进程，界面都该看得见。
+   */
+  const shellJobs = useSyncExternalStore(subscribePanelJobs, listPanelJobs);
+  /** 面板操作（看日志/停止）失败时的提示；成功时清空。 */
+  const [jobNotice, setJobNotice] = useState<string | null>(null);
+  /**
    * 运行中插话（d.199）：这一轮还在跑时用户补的话。
    *
    * 消息照常落库（用户看得见自己的话）；正文进这个队列，编排层每开一个工具轮
@@ -816,7 +851,32 @@ export function ChatPage({
     // 子代理进度同理：它是上一段对话里派出去的活，不该出现在别的会话面板里
     resetSubagentRuns();
     subagentStopRef.current = null;
+    // 子代理写盘授权按会话记：换会话要看那个会话自己的开关，不能顺延过来
+    setSubagentWrite(isSubagentWriteEnabled(convId));
   }, [convId]);
+  /**
+   * 后台作业轮询（d.203）：只在「还有作业在跑」时每 2 秒拉一次。
+   *
+   * 为什么用递归 setTimeout 而不是 setInterval：拉一次要等 IPC 回来再排下一次，
+   * 否则慢桥下会堆叠请求。为什么跑完就停：作业表是全局的，不需要为已完成的作业
+   * 一直发请求；用户点「日志」时再按需预览。
+   */
+  useEffect(() => {
+    const bridge = getShellBridge();
+    if (!bridge || !hasJobChannels(bridge)) return;
+    let timer: number | null = null;
+    let cancelled = false;
+    const tick = async () => {
+      const ok = await pollPanelJobs(bridge);
+      if (cancelled || !ok) return;
+      if (hasRunningPanelJobs()) timer = window.setTimeout(() => void tick(), JOB_PANEL_POLL_MS);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, []);
   /**
    * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
    *
@@ -1337,6 +1397,12 @@ export function ChatPage({
             const controller = new AbortController();
             subagentStopRef.current = controller;
             return controller.signal;
+          },
+          // 写盘授权（d.202）：只认用户开关，不认模型参数。打开后子代理多拿 file_write /
+          // file_edit，落盘路径立刻记进「本轮可撤回」——子代理改的东西也要能整体回滚。
+          ...(subagentWrite ? { writable: true } : {}),
+          onWrite: (path: string) => {
+            setTurnWrites((current) => (current.includes(path) ? current : [...current, path]));
           },
         })
       : null;
@@ -3194,9 +3260,15 @@ export function ChatPage({
       workspace: conv?.workspace ?? "",
       roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
       planMode: loadPlanMode(convId),
+      // 自检里的「子代理：只读 / 可写」直接读存储——闭包里的 state 可能还是上一轮的值
+      subagentWritable: isSubagentWriteEnabled(convId),
       context: contextUsage,
       todos: getTodos(convId),
-      jobs: { running: jobsRunning, total: watchedJobs.length },
+      // 面板有数据就以面板为准（它含用户自己起的作业）；没有才退回「这一轮盯过的那几个」
+      jobs:
+        shellJobs.length > 0
+          ? { running: shellJobs.filter((job) => job.running).length, total: shellJobs.length }
+          : { running: jobsRunning, total: watchedJobs.length },
       writes: turnWrites.length,
       resumePending: loadResumePoint(convId) !== null,
       busy: activeLocal.length > 0,
@@ -3283,6 +3355,48 @@ export function ChatPage({
         notice: goal
           ? `已设为目标：${goal.text}（之后每一轮都会看到它；说「/goal done」表示完成）`
           : "目标文本是空的，没有设定。",
+      };
+    }
+    /**
+     * 子代理写盘授权（d.202）：`/subagent write on` 授权、`write off` 收回、不带参数看状态。
+     *
+     * 全本地。为什么是「用户显式授权」而不是「子代理自己判断」：子代理跑在工具调用
+     * 闭包里，没有人能弹窗问它「这个写要不要允许」；让它自己开等于给一条无人看守的
+     * 写路径。授权只按会话记，且打开后也只多给 file_write / file_edit。
+     */
+    if (text === SUBAGENT_COMMAND || text.startsWith(`${SUBAGENT_COMMAND} `)) {
+      const rest = text.slice(SUBAGENT_COMMAND.length).trim().toLowerCase();
+      const on = rest === "write on" || rest === "on" || rest === "开";
+      const off = rest === "write off" || rest === "off" || rest === "关";
+      if (on) {
+        setSubagentWriteEnabled(convId, true);
+        setSubagentWrite(true);
+        resetSubagentRuns();
+        // 桥按 agentId 缓存：不清理会继续用上一轮那份「只读」子代理包
+        toolBridgeRef.current.clear();
+        return {
+          ok: true,
+          notice:
+            "已允许子代理改文件：它只能用 file_write / file_edit，且只能改工作区内；改动会记进「本轮可撤回」，可以整体回滚。发 `/subagent write off` 收回。",
+        };
+      }
+      if (off) {
+        setSubagentWriteEnabled(convId, false);
+        setSubagentWrite(false);
+        toolBridgeRef.current.clear();
+        return { ok: true, notice: "已收回子代理写盘授权：之后派出的子代理恢复只读。" };
+      }
+      if (rest && rest !== "status" && rest !== "状态") {
+        return {
+          ok: true,
+          notice: "用法：`/subagent write on` 允许子代理改文件、`/subagent write off` 收回、`/subagent` 看当前状态。",
+        };
+      }
+      return {
+        ok: true,
+        notice: subagentWrite
+          ? "子代理写盘：已授权（本次会话）。它只能用 file_write / file_edit，改动记进「本轮可撤回」；发 `/subagent write off` 收回。"
+          : "子代理写盘：只读（默认）。需要它改文件时发 `/subagent write on`；它不会自己开这个开关。",
       };
     }
     /**
@@ -4598,7 +4712,29 @@ export function ChatPage({
           />
         ) : null}
         {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。 */}
-        <SubagentRuns runs={subagentRuns} onStop={() => subagentStopRef.current?.abort()} />
+        <SubagentRuns
+          runs={subagentRuns}
+          writable={subagentWrite}
+          onStop={() => subagentStopRef.current?.abort()}
+        />
+        {/* 后台作业（d.203）：哪几条在跑、跑了多久、结束成没成；「停止」只停那一条。 */}
+        <JobPanel
+          jobs={shellJobs}
+          canPreview={hasJobPreview(getShellBridge())}
+          onPreview={(jobId) => {
+            setJobNotice(null);
+            void previewPanelJob(getShellBridge(), jobId).then((problem) => {
+              if (problem) setJobNotice(problem);
+            });
+          }}
+          onStop={(jobId) => {
+            setJobNotice(null);
+            void killPanelJob(getShellBridge(), jobId).then((problem) => {
+              if (problem) setJobNotice(problem);
+            });
+          }}
+          notice={jobNotice}
+        />
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div
           role="separator"

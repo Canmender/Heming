@@ -59,6 +59,7 @@ test("preload 暴露 __heming_shell.run 并转发到 shell:run（d.164）", () =
   assert.ok(m[1].includes('invoke("shell:jobs"'), "__heming_shell.jobs 必须转发到 shell:jobs（d.180）");
   assert.ok(m[1].includes('invoke("shell:job-output"'), "__heming_shell.jobOutput 必须转发到 shell:job-output（d.180）");
   assert.ok(m[1].includes('invoke("shell:job-kill"'), "__heming_shell.jobKill 必须转发到 shell:job-kill（d.180）");
+  assert.ok(m[1].includes('invoke("shell:job-preview"'), "__heming_shell.jobPreview 必须转发到 shell:job-preview（d.203）");
   assert.ok(!m[1].includes("ipcRenderer.send("), "不允许用单向 send 跑命令（拿不到退出码与输出）");
 });
 

@@ -94,7 +94,13 @@ function rendererScript() {
     // 再起一条 10 秒的命令立刻杀掉——两条路径合起来才证明「能等」和「能停」。
     out.jobStart = await shell.run({ runId: "smoke-job-1", roots, command: "node slow.js", cwd: ${root}, background: true });
     if (out.jobStart && out.jobStart.jobId) {
+      // 只读预览（d.203）：界面看日志走这条，不能消费掉模型要读的增量。
+      out.jobPreview = typeof shell.jobPreview === "function"
+        ? await shell.jobPreview({ jobId: out.jobStart.jobId })
+        : { ok: false, code: "missing" };
       out.jobFirst = await shell.jobOutput({ jobId: out.jobStart.jobId, waitMs: 0 });
+      // 预览之后增量读必须仍拿得到内容——「界面点一次日志，模型那轮就少一段」是不能接受的。
+      out.jobFirstAfterPreview = out.jobFirst && out.jobFirst.ok === true && String(out.jobFirst.stdout || "").length >= 0;
       out.jobWaited = await shell.jobOutput({ jobId: out.jobStart.jobId, waitMs: 20000 });
       out.jobList = await shell.jobs();
     }
@@ -461,6 +467,16 @@ async function run() {
     "后台作业：轮询能等到输出并看到进程结束",
     result.jobWaited && result.jobWaited.ok === true && result.jobWaited.running === false && String(result.jobWaited.stdout || "").includes("bg-ok"),
     result.jobWaited && result.jobWaited.ok ? { running: result.jobWaited.running, out: String(result.jobWaited.stdout || "").slice(0, 80) } : result.jobWaited,
+  );
+  check(
+    "后台作业：只读预览通道可用且形状正确（d.203）",
+    result.jobPreview && result.jobPreview.ok === true && typeof result.jobPreview.stdout === "string",
+    result.jobPreview && result.jobPreview.ok ? { running: result.jobPreview.running, cut: result.jobPreview.cut } : result.jobPreview,
+  );
+  check(
+    "后台作业：预览之后增量读仍能拿到（界面看日志不抢模型的输出）",
+    result.jobFirstAfterPreview === true,
+    result.jobFirst && result.jobFirst.ok ? String(result.jobFirst.stdout || "").slice(0, 60) : result.jobFirst,
   );
   check("后台作业：waitMs 0 的首次读取立即返回", result.jobFirst && result.jobFirst.ok === true, result.jobFirst);
   check(

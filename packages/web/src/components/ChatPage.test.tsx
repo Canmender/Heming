@@ -30,6 +30,10 @@ import { formatClock, formatDayClock } from "../lib/formatTime.js";
 // d.158：任务清单面板的接线用例（清单来自 todo store，渲染在输入栏上方）
 import { TODOS_KEY, clearTodos, resetTodoStore, setTodos } from "../lib/todo/store.js";
 import { GOALS_KEY, getGoal, resetGoalStore } from "../lib/agentRuntime/goal.js";
+import {
+  isSubagentWriteEnabled,
+  resetSubagentWriteStore,
+} from "../lib/agentRuntime/subagentWrite.js";
 // d.173：计划模式的接线用例（存储 + 提示词 + 按钮 aria 同源）
 import { PLAN_MODE_KEY, loadPlanMode, resetPlanMode } from "../lib/agentRuntime/planMode.js";
 import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
@@ -5662,6 +5666,34 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.click(screen.getByRole("button", { name: "完成" }));
     expect(getGoal("c1")).toBeNull();
     await waitFor(() => expect(screen.queryByTestId("goal-bar")).toBeNull());
+  }, 30_000);
+
+  it("I3t `/subagent write on` 授权子代理写盘：本地生效、命令不落库（d.202）", async () => {
+    localStorage.removeItem("heming.subagentWrite.v1");
+    resetSubagentWriteStore();
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    expect(isSubagentWriteEnabled("c1")).toBe(false);
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "/subagent write on" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/已允许子代理改文件/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    // 本地命令：不发模型、也不在历史里留一条命令
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(screen.queryByText("/subagent write on")).toBeNull();
+    expect(isSubagentWriteEnabled("c1")).toBe(true);
+
+    // 再发 write off 收回：提示如实说恢复只读
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "/subagent write off" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText(/已收回子代理写盘授权/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(isSubagentWriteEnabled("c1")).toBe(false);
   }, 30_000);
 
   it("I3q 点模型名就地换模型：绑定写回、提示生效时机，且不跳设置页（d.195）", async () => {

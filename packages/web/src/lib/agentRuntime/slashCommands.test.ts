@@ -5,6 +5,7 @@ import {
   PLAN_COMMAND,
   SLASH_COMMANDS,
   STATUS_COMMAND,
+  SUBAGENT_COMMAND,
   matchSlashCommands,
   slashQuery,
 } from "./slashCommands.js";
@@ -21,6 +22,8 @@ describe("输入框命令面板（d.184）", () => {
     expect(items.map((i) => i.command)).toContain(HELP_COMMAND);
     // d.201：目标设定同样要能被发现（否则用户永远只知道清单）
     expect(items.map((i) => i.command)).toContain(GOAL_COMMAND);
+    // d.202：子代理写盘授权默认关，但入口要能被发现
+    expect(items.map((i) => i.command)).toContain(SUBAGENT_COMMAND);
   });
 
   it("按前缀过滤，且大小写不敏感", () => {

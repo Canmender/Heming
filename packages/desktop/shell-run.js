@@ -53,6 +53,9 @@ const MAX_JOB_MS = 30 * 60 * 1000;
 /** `shell:job-output` 的最长等待：渲染层可以等到作业结束，但一次调用最多挂 30s。 */
 const MAX_JOB_WAIT_MS = 30_000;
 
+/** `shell:job-preview` 单次预览的上限：够看清最后几行报错，又不至于把 512KB 全搬过去。 */
+const MAX_JOB_PREVIEW_BYTES = 16 * 1024;
+
 /** 一次只跑一条命令：并发命令的输出交错在 HITL 与 UI 上都难以解释，也让超时语义变乱。 */
 let runQueue = Promise.resolve();
 function enqueue(task) {
@@ -632,6 +635,62 @@ async function readJobOutput(jobId, waitMs) {
 }
 
 /**
+ * 取一组 Buffer 的末尾 maxBytes 字节（同时告诉调用方有没有被截）。
+ *
+ * 作业缓冲是按块追加的数组，末尾可能落在某一块的中间，所以要逐块算偏移再 slice。
+ */
+function tailOf(chunks, maxBytes) {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const keep = Math.min(total, maxBytes);
+  const start = total - keep;
+  let seen = 0;
+  const kept = [];
+  for (const chunk of chunks) {
+    const end = seen + chunk.length;
+    if (end > start) kept.push(start > seen ? chunk.subarray(start - seen) : chunk);
+    seen = end;
+  }
+  return { text: Buffer.concat(kept).toString("utf8"), cut: keep < total };
+}
+
+/** 预览长度：缺省 16KB，夹在 512B..16KB。 */
+function clampPreviewBytes(value) {
+  const num = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : MAX_JOB_PREVIEW_BYTES;
+  return Math.min(Math.max(num, 512), MAX_JOB_PREVIEW_BYTES);
+}
+
+/**
+ * 预览一个作业**最近**的输出（d.203）。
+ *
+ * 为什么界面不能直接用 `readJobOutput`：那是**增量读、读走即消费**——用户在界面上点一次
+ * 「看输出」，模型之后的 `command_output` 就少了这一段，两边互相抢。所以单开一条只读快照
+ * 通道：不移动读游标、不清未读缓冲，只把每条流末尾 maxBytes 字节带走（`cut` 表示有没有截）。
+ *
+ * @param {string} jobId
+ * @param {number} [maxBytes] 512..MAX_JOB_PREVIEW_BYTES
+ * @returns {object}
+ */
+function previewJobOutput(jobId, maxBytes) {
+  const id = typeof jobId === "string" ? jobId.trim() : "";
+  const job = jobs.get(id);
+  if (!job) return fail("unknown-job", "没有这个作业（可能已被清理）");
+  const limit = clampPreviewBytes(maxBytes);
+  const out = tailOf(job.stdout, limit);
+  const err = tailOf(job.stderr, limit);
+  return {
+    ok: true,
+    jobId: job.id,
+    running: job.running,
+    exitCode: job.exitCode,
+    stdout: out.text,
+    stderr: err.text,
+    cut: out.cut || err.cut,
+    produced: job.produced,
+    dropped: job.dropped,
+  };
+}
+
+/**
  * 列出作业（所有在跑的 + 最近 MAX_BACKGROUND_JOBS 个已完成的，按登记顺序）。
  *
  * bytes 用「累计产出」而不是「当前未读字节」：列表关心这条命令一共产了多少输出，
@@ -728,6 +787,17 @@ function registerShellIpc(ipcMain, deps) {
     }
   });
 
+  // 预览最近输出（只读快照）：界面看日志不能消费掉模型要读的增量。
+  ipcMain.handle("shell:job-preview", (event, payload) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      const body = payload && typeof payload === "object" ? payload : {};
+      return previewJobOutput(body.jobId, body.maxBytes);
+    } catch (e) {
+      return fail("io", `预览作业输出失败：${e && e.message ? e.message : String(e)}`);
+    }
+  });
+
   // 杀掉一个作业：只认本进程登记过的 jobId（不接受 pid）。
   ipcMain.handle("shell:job-kill", (event, payload) => {
     if (!isTrustedSender(event)) return untrusted;
@@ -748,6 +818,7 @@ module.exports = {
   killTree,
   startBackground,
   readJobOutput,
+  previewJobOutput,
   killJob,
   listJobs,
   MAX_CAPTURE_BYTES,
@@ -758,4 +829,5 @@ module.exports = {
   MAX_JOB_BYTES,
   MAX_JOB_MS,
   MAX_JOB_WAIT_MS,
+  MAX_JOB_PREVIEW_BYTES,
 };

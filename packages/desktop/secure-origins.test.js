@@ -118,6 +118,7 @@ test("denyValueFor：同步桥返回 null（preload 按不可用处理），其�
     "shell:cancel",
     "shell:jobs",
     "shell:job-output",
+    "shell:job-preview",
     "shell:job-kill",
     "export:write",
     "chart:export",

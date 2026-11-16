@@ -12,6 +12,69 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.203.4.105.12",
+    "date": "2026-11-16",
+    "title": "后台作业看得见：哪几条在跑、跑了多久、点一下就能停",
+    "bullets": [
+      "`packages/desktop/shell-run.js`：",
+      "— 新增 `previewJobOutput(jobId, maxBytes)`：返回作业的**只读快照**（`stdout`/`stderr`/`cut`/`produced`/`dropped`），**不清缓冲、不移动读游标**。",
+      "— 为什么不复用 `readJobOutput`：那条是「读走即消费」，模型下一轮 `command_output` 要读的增量会被界面点一下吃掉，两边互相抢。",
+      "— `tailOf(chunks, maxBytes)` 逐块算偏移、只取末尾字节；`clampPreviewBytes(value)` 把窗口夹在 512–16384 字节（缺省 16KB）。",
+      "— 新 IPC `shell:job-preview`（`ipcMain.handle`），与 `shell:jobs` / `shell:job-output` / `shell:job-kill` 同一套 `isTrustedSender` 校验。",
+      "`packages/desktop/preload.js`：`__heming_shell.jobPreview(payload)` 转发到该通道。",
+      "`packages/web/src/lib/shell/bridge.ts`：`ShellBridge` 加可选 `jobPreview?`，新增 `hasJobPreview(bridge)`——与 `hasJobChannels` 分开判断：预览只是展示能力，老版本桌面端缺它不该让后台命令整体不可用。",
+      "新增 `packages/web/src/lib/shell/jobPanel.ts`：面板状态（内存 + 订阅，`useSyncExternalStore` 口径）、`JOB_PANEL_MAX = 20`、`JOB_PANEL_POLL_MS = 2000`、`syncPanelJobs`（**合并而非覆盖**，保留已预览输出）、`pollPanelJobs`、`previewPanelJob`、`killPanelJob`；在跑的作业永不因超上限被丢（只丢最旧的已完成）。",
+      "新增 `packages/web/src/components/JobPanel.tsx`：标题「后台作业 · N 条（x 条在跑）」；每行状态徽标（在跑 / 已完成 / 失败（退出码 N）/ 已结束（无退出码））+ 命令 + 日志不全提示 + 「日志」「停止」；展开的预览区在 `cut` 时明写「只显示最后一段；要完整输出让它读 command_output」。",
+      "`packages/web/src/components/ChatPage.tsx`：挂面板（`SubagentRuns` 之后）；仅当桌面端有作业通道时轮询（递归 `setTimeout`，切会话/卸载清理）；`/status` 的「后台作业」一行改为**以面板为准**（面板含用户自己起的作业），面板空才退回旧计数。",
+      "桌面端：`shell-run.test.js` 27 → 30 例（只读快照不消费增量 / 末尾 maxBytes 与 `cut` 标记 / 长度夹在 512–16KB / 经 IPC 可读）；`main.test.js` 的 IPC 自校验清单、`secure-origins.test.js` 的通道清单、`preload.test.js` 的转发断言同步加 `shell:job-preview`。`pnpm test` 全量 55 个测试文件全绿（exit 0）。",
+      "真机 Electron 冒烟：`pnpm smoke` **51/51** 通过（新增两条：「只读预览通道可用且形状正确」「预览之后增量读仍能拿到」）。",
+      "渲染层：新增 `jobPanel.test.ts` 12 例、`JobPanel.test.tsx` 7 例；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` 39/39。",
+      "web 全量：364 files / 5284 passed。",
+      "不做「作业输出自动刷进界面」的实时流：预览是点一下取一次尾部，持续刷会跟模型的增量读抢带宽，也让界面变成第二个日志终端。",
+      "不做「作业完成后自动发消息」：d.182 已经有 `jobWatch` 的唤醒路径，面板只呈现事实，不替用户决定下一步。",
+      "面板不跨进程重启保留：作业在桌面进程里，进程没了作业也没了，列出来的历史会是假的。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.180 起模型能起后台命令（构建、长测试、起服务），但那是「模型看得见、用户看不见」的能力：界面上没有任何地方回答「现在到底有哪几条命令在跑」。长任务里最常见的一幕是——模型说「我在跑构建」，屏幕一片安静，用户以为卡死了，点停止，把跑了几分钟、马上要出结果的活掐断。",
+      "d.200 给子代理做了状态条（哪几个在跑、点停止），后台作业缺同一件东西。这一版把它补上：面板列出所有作业、在跑的标「在跑 · 12s」、点「日志」看尾部输出、点「停止」真的杀进程树。",
+      "改了什么",
+      "**桌面端（新增一条只读通道）**",
+      "**渲染层**",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.202.4.105.12",
+    "date": "2026-11-16",
+    "title": "子代理能改了：默认仍然只读，改文件要你亲口授权",
+    "bullets": [
+      "`packages/web/src/lib/agentRuntime/subagentWrite.ts`（新）：按会话记的授权开关，落 localStorage（`heming.subagentWrite.v1`）。缺省关闭；读失败静默降级为关；模型参数**不能**打开它（`writable` 只从界面用户开关传入）。",
+      "`packages/web/src/lib/agentRuntime/subagent.ts`：",
+      "— 新增 `SUBAGENT_WRITE_TOOLS`（只 `file_write` / `file_edit`，故意不含 `file_undo` / `run_command` / `file_image`）；授权时白名单 = 只读三件 + 这两件，其余仍被拦并如实说明。",
+      "— `subagentSpec(writable)` 与系统人设随授权变化：可写时明确「只能改工作区内、只改任务点名的文件、拿不准先别改」；只读时保持 d.162 原文案（既有评测按它断言）。",
+      "— 结果文案如实标 `可写` / `只读`，并在结论里列出 `（本次改动：<路径>）`；中断文案也分叉——可写时提醒「改过的文件在「本轮可撤回」里，可整体回滚」。",
+      "— 通过 `onWrite` 把落盘路径回传，由 `ChatPage` 记进 `turnWrites`（与主对话的改动同一个撤回入口，不另造一套）。",
+      "`packages/web/src/components/ChatPage.tsx`：`/subagent write on|off` 纯本地分支（不发请求、不落库），授权变化即清工具桥缓存（否则继续用上一轮那份只读包）；`withSubagentTool` 传 `writable` + `onWrite`；切会话重新读该会话的开关，不顺延。",
+      "`packages/web/src/components/SubagentRuns.tsx`：授权时标题如实写「子代理（可写）」，不继续冒充只读。",
+      "`packages/web/src/lib/agentRuntime/statusReport.ts`：`/status` 多一行「子代理：只读（默认）/ 可写」，让人一眼看出现在是哪种。",
+      "不给子代理 `run_command` / 网络工具：写已经有风险，执行命令的风险面大一个量级，没想好边界前不开。",
+      "不做「逐次写审批」：子代理可能一轮写多次，逐次弹窗等于把并行优势吃掉；现在的折中是「按会话授权 + 全量可撤回」。",
+      "授权不设过期时间：关机重启后仍在（存储里），要收回得说 `/subagent write off`——记着这一点，别把长期授权当成一次性。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.200 让子代理能并行跑 2–3 件只读的活。但长任务里真正的形状常常是「三个文件各改一处」——它们互不相关、正适合并行，却只能串行交回主对话，吃掉三轮对话。",
+      "子代理为什么一直不给写？因为它跑在工具调用的闭包里，**没有 HITL 通道**：它调 `file_write` 时，没有人能弹窗问「这个写要不要允许」。这不是漏做，是 d.162 起就写下的红线——宁可它查完回来让主对话去写，也不给它一条无人看守的写路径。",
+      "这一版要把这条缝补成**由你亲自开的门**：默认关，你发一句话才开，开了也只给两件写工具，且改动全部记进「本轮可撤回」。",
+      "改了什么",
+      "验证",
+      "`subagentWrite.test.ts` 8 例（缺省关、开关、按会话隔离、toggle、落盘能读回、坏数据当没开且不放行、关最后一个会话删键、reset）；`subagent.test.ts` +5 例（只读时写工具被拦且说明怎么授权、可写时看得见 file_write 但看不见 run_command、落盘路径回传 onWrite 且结论含「本次改动」、spec 随授权变化、可写中断提醒可回滚）；`subagent.test.ts` 共 35 例；`SubagentRuns.test.tsx` +1（可写标题）；`slashCommands.test.ts` +1（`/subagent` 可被发现）；`ChatPage.test.tsx` +1（`/subagent write on` 不发请求不落库、存储为真、`write off` 收回）。web 全量 **362 files / 5265 passed**；typecheck 六包 Done；确定性 `eval:agent` **39/39**（tokens/pass 2589、p95 86ms）。",
+      "没做"
+    ]
+  },
+  {
     "version": "d.201.4.105.12",
     "date": "2026-11-16",
     "title": "目标记得住：把「这一切为了什么」写进每一轮提示词",

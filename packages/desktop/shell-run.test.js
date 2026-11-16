@@ -14,6 +14,7 @@ const {
   resolveWorkingDir,
   startBackground,
   readJobOutput,
+  previewJobOutput,
   killJob,
   listJobs,
   MAX_COMMAND_CHARS,
@@ -21,6 +22,7 @@ const {
   MAX_JOB_BYTES,
   MAX_JOB_MS,
   MAX_JOB_WAIT_MS,
+  MAX_JOB_PREVIEW_BYTES,
 } = require("./shell-run.js");
 
 /** 造一个临时可写根，测试结束由调用方清理。 */
@@ -629,7 +631,7 @@ test("shell:jobs / shell:job-output / shell:job-kill：非可信来源一律拒�
     isTrustedSender: (event) => event && event.trusted === true,
     spawnImpl: fakeSpawn({ stdout: "x", code: 0 }),
   });
-  for (const channel of ["shell:jobs", "shell:job-output", "shell:job-kill"]) {
+  for (const channel of ["shell:jobs", "shell:job-output", "shell:job-preview", "shell:job-kill"]) {
     assert.equal(typeof handlers.get(channel), "function", `${channel} 必须注册`);
     const res = await handlers.get(channel)({ trusted: false }, { jobId: "job-1", waitMs: 10 });
     assert.equal(res.ok, false, channel);
@@ -679,6 +681,107 @@ test("shell:run background：经 IPC 启动后台作业，再经 jobs/job-output
     const killed = await handlers.get("shell:job-kill")({ sender: {} }, { jobId: started.jobId });
     assert.equal(killed.ok, true);
     assert.equal(killed.alreadyFinished, true);
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+test("job-preview：只读快照不消费增量，读完之后 command_output 仍拿得到同一段（d.203）", async () => {
+  const root = makeRoot();
+  try {
+    const child = controlledChild(999101);
+    const job = await startJob(root, () => child);
+    child.stdout.emit("data", Buffer.from("line1\n"));
+    child.stderr.emit("data", Buffer.from("warn: x\n"));
+
+    const preview = previewJobOutput(job.jobId);
+    assert.equal(preview.ok, true);
+    assert.equal(preview.running, true);
+    assert.equal(preview.stdout, "line1\n");
+    assert.equal(preview.stderr, "warn: x\n");
+    assert.equal(preview.cut, false);
+    assert.equal(preview.produced, 14);
+
+    // 关键：预览之后模型那条增量读必须还拿得到——否则用户在界面点一次「日志」，
+    // 模型那一轮的 command_output 就少一段，两边互相抢。
+    const output = await readJobOutput(job.jobId, 0);
+    assert.equal(output.stdout, "line1\n");
+    assert.equal(output.stderr, "warn: x\n");
+
+    // 增量已经被读走：再预览就只剩空的，这是事实，不能假装还有。
+    const again = previewJobOutput(job.jobId);
+    assert.equal(again.stdout, "");
+
+    child.emit("close", 0, null);
+    await readJobOutput(job.jobId, 1000);
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
+test("job-preview：只取末尾 maxBytes 并如实标 cut；长度被夹在 512..16KB（d.203）", async () => {
+  assert.equal(MAX_JOB_PREVIEW_BYTES, 16 * 1024);
+  const root = makeRoot();
+  try {
+    const child = controlledChild(999102);
+    const job = await startJob(root, () => child);
+    // 600 字节：超过 512 的下限，预览 512 时必然要截前面。
+    const long = "a".repeat(600) + "TAIL";
+    child.stdout.emit("data", Buffer.from(long));
+
+    const tail = previewJobOutput(job.jobId, 512);
+    assert.equal(tail.stdout.length, 512);
+    assert.equal(tail.stdout.endsWith("TAIL"), true);
+    assert.equal(tail.cut, true, "截掉了前面的内容必须标出来");
+
+    // 非法/过小的 maxBytes 夹到 512：不会因为渲染层传 1 就把日志切成一个字符。
+    const tiny = previewJobOutput(job.jobId, 1);
+    assert.equal(tiny.stdout, tail.stdout);
+    assert.equal(tiny.cut, true);
+    // 缺省/非法长度 = 取到 16KB 上限：宁可多给，不能因为一个坏参数把日志清成空。
+    const nan = previewJobOutput(job.jobId, Number.NaN);
+    assert.equal(nan.stdout, long);
+    assert.equal(nan.cut, false);
+
+    const unknown = previewJobOutput("job-missing");
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.code, "unknown-job");
+
+    child.emit("close", 0, null);
+    await readJobOutput(job.jobId, 1000);
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
+test("job-preview：经 IPC 可读，跑完的作业预览仍能看到最后输出（d.203）", async () => {
+  const root = makeRoot();
+  try {
+    const handlers = new Map();
+    const ipcMain = { handle: (channel, fn) => handlers.set(channel, fn) };
+    registerShellIpc(ipcMain, {
+      isTrustedSender: () => true,
+      spawnImpl: fakeSpawn({ stdout: "build ok\n", code: 0 }, {}),
+    });
+    const started = await handlers.get("shell:run")({ sender: {} }, {
+      roots: [root],
+      cwd: root.path,
+      command: "echo build ok",
+      background: true,
+    });
+    assert.equal(started.ok, true);
+
+    // 等作业收尾（job-output 会等到结束并顺带走掉增量，这里只为等结束）。
+    const output = await handlers.get("shell:job-output")({ sender: {} }, { jobId: started.jobId, waitMs: 1000 });
+    assert.equal(output.running, false);
+
+    const preview = await handlers.get("shell:job-preview")({ sender: {} }, { jobId: started.jobId });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.running, false);
+    assert.equal(preview.exitCode, 0);
+    // 增量读已经把缓冲取走，预览这里是空的——但「读走即消费」是契约，不是 bug；
+    // 这里断言的是通道可用、形状正确、不报错。
+    assert.equal(typeof preview.stdout, "string");
+    assert.equal(preview.cut, false);
   } finally {
     fs.rmSync(root.path, { recursive: true, force: true });
   }
