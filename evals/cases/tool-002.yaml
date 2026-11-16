@@ -35,15 +35,17 @@ script:
       「把 17 条评测用例的 fixture 目录补齐，并逐条试跑」，
       复读文件确认这一行已经在磁盘上，前面的内容没有被改动。
 graders:
-  - type: tool_sequence
-    tools: [file_read, file_patch, file_read]
+  # 真实模型可能用 file_edit 追加（等价实现），所以不锁死工具序列：
+  # 保「读过、改过、文件里真的有这行」三件事。
+  - type: tool_called
+    tool: file_read
   - type: file_assert
     path: notes/工作日志.md
     contains: ["把 17 条评测用例的 fixture 目录补齐"]
   - type: file_assert
     path: notes/工作日志.md
     contains: ["## 周三"]
-  - type: contains
-    value: ["已追加并复核"]
+  - type: contains_any
+    value: [已追加, 追加了, 写入, 读回, 复核]
   - type: max_rounds
     value: 5

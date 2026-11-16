@@ -11,12 +11,13 @@
  * 退出码：0 = 全绿且无红线；1 = 有用例失败或基线对比红线；2 = 配置/环境错误。
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCases } from "./loader.js";
 import { buildReport, checkStability, compareToBaseline, loadBaseline, type EvalReport } from "./report.js";
-import { runCase, type CaseRunResult } from "./run.js";
+import { removeSandbox, runCase, type CaseRunResult } from "./run.js";
 
 /**
  * 报告里记 pnpm 版本（基线的一部分：同分数不同工具链不算可比）。
@@ -88,12 +89,44 @@ export function parseArgs(argv: string[], repoRoot: string, log: (line: string) 
   };
 }
 
+/**
+ * 两个 git 夹具（`bench-fix-git` / `bench-git-leak-recovery`）**不入版本库**：
+ * 它们内部是真 `.git`（含悬空提交与 reflog），git 会把目录登记成 submodule（mode 160000），
+ * 进库之后克隆下来既不可用、又会把仓库搞脏。
+ *
+ * 所以改成「第一次跑评测时现生成」：`evals/tools/make-bench-fixtures.cjs` 是确定性脚本，
+ * 生成结果与出题时一致。只在缺 `.git` 时才跑，已有夹具不动（不覆盖本机手改）。
+ */
+function ensureGeneratedFixtures(repoRoot: string, fixturesDir: string, log: (line: string) => void): void {
+  const generated = ["bench-fix-git", "bench-git-leak-recovery"];
+  const missing = generated.filter((name) => !existsSync(path.join(fixturesDir, name, ".git")));
+  if (missing.length === 0) return;
+  const script = path.join(repoRoot, "evals", "tools", "make-bench-fixtures.cjs");
+  if (!existsSync(script)) {
+    throw new Error(`夹具 ${missing.join("、")} 不存在，且生成脚本 ${path.relative(repoRoot, script)} 也找不到`);
+  }
+  log(`夹具 ${missing.join("、")} 缺失（git 夹具不入库）→ 运行 evals/tools/make-bench-fixtures.cjs 重建`);
+  const result = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: "utf8", stdio: "pipe" });
+  if (result.status !== 0) {
+    throw new Error(`夹具生成失败（退出码 ${result.status}）：${(result.stderr ?? "").trim().slice(-500)}`);
+  }
+}
+
 /** 跑一轮全部用例。 */
 async function runOnce(options: CliOptions, workRoot: string, label: string): Promise<CaseRunResult[]> {
   const cases = await loadCases(options.casesDir, options.filter);
   options.log(`\n${label}：${cases.length} 条用例（${options.real ? "真实模型" : "确定性脚本"}）`);
   const results: CaseRunResult[] = [];
   for (const testCase of cases) {
+    // 真实模型专用用例（d.183）：回放模式没有模型可自由决策，直接跳过、不占 pass@1。
+    if (testCase.real_skip && options.real) {
+      options.log(`  - ${testCase.id.padEnd(12)} 跳过（时间敏感，只在回放模式判定）`);
+      continue;
+    }
+    if (testCase.real_only && !options.real) {
+      options.log(`  - ${testCase.id.padEnd(12)} 跳过（只对真实模型有意义）`);
+      continue;
+    }
     const result = await runCase(testCase, {
       repoRoot: options.repoRoot,
       fixturesDir: options.fixturesDir,
@@ -127,6 +160,8 @@ export async function runCli(argv: string[], repoRoot: string): Promise<number> 
     log("--real 需要 HEMING_EVAL_API_KEY（没有 Key 时不允许静默降级成确定性模式）");
     return 2;
   }
+
+  ensureGeneratedFixtures(options.repoRoot, options.fixturesDir, log);
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   // 沙箱放在仓库的 `.tmp/evals/<时间戳>/<用例 id>/`：写盘路径都在仓库内，且 .tmp 已被 gitignore。
@@ -180,7 +215,9 @@ export async function runCli(argv: string[], repoRoot: string): Promise<number> 
     return 2;
   } finally {
     if (!options.keep) {
-      await rm(workRoot, { recursive: true, force: true });
+      // 用带重试的 removeSandbox：真实模型的用例会真的起子进程，Windows 句柄释放是异步的，
+      // 直接 rm 会在 finally 里抛 EBUSY，把已经得出的结论盖成「启动失败」。
+      await removeSandbox(workRoot);
     } else {
       log(`\n沙箱保留在：${workRoot}`);
     }

@@ -36,6 +36,10 @@ function yamlModule(): Promise<YamlLike> {
 
 const GRADER_TYPES: GraderType[] = [
   "contains",
+  "contains_any",
+  "refusal",
+  "file_equals",
+  "shell_check",
   "regex",
   "exact",
   "file_assert",
@@ -144,9 +148,20 @@ function parseGraders(file: string, value: unknown): Grader[] {
     }
     // `max_rounds` 的 value 是正整数（ctx-001 的 `value: 6`），不能走字符串校验，
     // 否则合法用例会被判成「value 必须是字符串或字符串数组」。它的校验在下面单独做。
-    if (type !== "max_rounds" && type !== "min_rounds" && type !== "todo_state" && type !== "image_attached") {
+    if (
+      type !== "max_rounds" &&
+      type !== "min_rounds" &&
+      type !== "todo_state" &&
+      type !== "image_attached" &&
+      type !== "refusal" &&
+      type !== "file_equals" &&
+      type !== "shell_check"
+    ) {
       const value_ = stringOrArray(file, `${at}.value`, raw.value);
       if (value_) grader.value = typeof raw.value === "string" ? value_[0] : value_;
+      if (type === "contains_any" && !value_) {
+        throw new CaseError(file, `${at}.value`, "contains_any 必须给 value（同义片段列表，命中任意一个即通过）");
+      }
       if (type === "prompt_contains" && !value_) {
         throw new CaseError(file, `${at}.value`, "prompt_contains 必须给 value（要出现在系统提示词里的片段）");
       }
@@ -195,6 +210,26 @@ function parseGraders(file: string, value: unknown): Grader[] {
       const n = typeof maxValue === "number" ? maxValue : Number(maxValue);
       if (!Number.isInteger(n) || n <= 0) throw new CaseError(file, `${at}.value`, "min_rounds 需要正整数");
       grader.min = n;
+    }
+    if (type === "file_equals") {
+      if (!grader.path) throw new CaseError(file, at, "file_equals 必须给 path");
+      const want = typeof raw.file_text === "string" ? raw.file_text : typeof raw.value === "string" ? raw.value : undefined;
+      if (want === undefined) throw new CaseError(file, at, "file_equals 必须给 file_text（或 value）");
+      grader.file_text = want;
+    }
+    if (type === "shell_check") {
+      if (typeof raw.command !== "string" || raw.command.trim() === "") {
+        throw new CaseError(file, at, "shell_check 必须给 command");
+      }
+      // 必须把字段搬到 grader 上：grader 是判分器读的唯一来源，
+      // 只校验不赋值会让 `grader.command` 落空（spawn('') → ERR_INVALID_ARG_VALUE）。
+      grader.command = raw.command;
+      if (raw.stdout_contains !== undefined) {
+        if (typeof raw.stdout_contains !== "string") {
+          throw new CaseError(file, `${at}.stdout_contains`, "stdout_contains 需要字符串");
+        }
+        grader.stdout_contains = raw.stdout_contains;
+      }
     }
     if (type === "todo_state") {
       // 各状态的数量：未写的项不校验（只断言关心的那几档）。
@@ -303,7 +338,10 @@ function parseCase(file: string, raw: unknown): EvalCase {
   // 顶层 script 在 `steps` 用例里是**最后一步的兜底脚本**（ctx-001 就是这种写法：
   // 前两步各自带 script，第三步只写 prompt，答案放在顶层 script）。所以两者都保留。
   if (!steps && !prompt) throw new CaseError(file, "prompt", "单步用例必须写 prompt");
-  if (!steps && !script) throw new CaseError(file, "script", "单步用例必须写 script（确定性模式没有真实模型）");
+  // d.183：`real_only` 用例本来就只在真实模型下跑（回放模式直接跳过），它没有、也不该有剧本。
+  if (!steps && !script && raw.real_only !== true) {
+    throw new CaseError(file, "script", "单步用例必须写 script（确定性模式没有真实模型）");
+  }
 
   const fakeToolsRaw = raw.fake_tools;
   let fakeTools: EvalCase["fake_tools"];
@@ -371,6 +409,8 @@ function parseCase(file: string, raw: unknown): EvalCase {
         })()
       : {}),
   ...(raw.slow !== undefined ? { slow: Boolean(raw.slow) } : {}),
+    ...(raw.real_only !== undefined ? { real_only: Boolean(raw.real_only) } : {}),
+    ...(raw.real_skip !== undefined ? { real_skip: Boolean(raw.real_skip) } : {}),
     ...(steps ? { steps } : {}),
     ...(fakeTools ? { fake_tools: fakeTools } : {}),
     ...(usage ? { usage } : {}),

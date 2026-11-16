@@ -28,7 +28,8 @@ graders:
   - type: contains
     value: ["src/a.ts"]
     in: tool_result
-  - type: contains
-    value: ["3 个 .ts 文件"]
+  # 真实模型可能说「共 3 个」「.ts 文件共 3 个」，用正则抓「3」与「.ts」的关系。
+  - type: regex
+    pattern: (3 个[\.\s]*ts|\.ts[^。]{0,6}3)
   - type: max_rounds
     value: 3

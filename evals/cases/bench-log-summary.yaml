@@ -1,0 +1,45 @@
+
+id: bench-log-summary
+name: "真实题目（Terminal-Bench 2）：按日期范围汇总日志"
+owner: lead
+tags: [bench, real-task]
+real_only: true
+setup:
+  fixture: bench-log-summary
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  logs 目录里是形如 2025-08-12_app.log 的日志文件（每条日志行都以 ISO 时间戳开头，
+  后面跟 ERROR / WARNING / INFO 中的一个级别）。
+  请统计 ERROR / WARNING / INFO 在各区间的出现次数，写到工作目录根下的 summary.csv：
+  - today：参考日 2025-08-12 当天
+  - last_7_days：从 2025-08-06 到 2025-08-12（含两端）
+  - last_30_days：从 2025-07-14 到 2025-08-12（含两端）
+  - month_to_date：2025-08-01 到 2025-08-12（含两端）
+  - total：全部日志文件
+  CSV 表头必须是 period,severity,count；行顺序：today、last_7_days、last_30_days、month_to_date、total，
+  每个区间内依次 ERROR、WARNING、INFO。不要加额外列或空行。
+graders:
+  - type: file_equals
+    path: summary.csv
+    file_text: |
+      period,severity,count
+      today,ERROR,2
+      today,WARNING,2
+      today,INFO,2
+      last_7_days,ERROR,4
+      last_7_days,WARNING,3
+      last_7_days,INFO,4
+      last_30_days,ERROR,7
+      last_30_days,WARNING,4
+      last_30_days,INFO,6
+      month_to_date,ERROR,6
+      month_to_date,WARNING,4
+      month_to_date,INFO,5
+      total,ERROR,8
+      total,WARNING,5
+      total,INFO,6

@@ -31,7 +31,10 @@ graders:
   - type: tool_called
     tool: mcp__demo__search
     times: 1
+  # 真实模型会把时间加粗（**20:00**），用正则吃掉中间的空格/星号。
+  - type: regex
+    pattern: 每周四[^0-9]{0,8}20:00
   - type: contains
-    value: ["每周四 20:00", "林澈"]
+    value: ["林澈"]
   - type: max_rounds
     value: 3

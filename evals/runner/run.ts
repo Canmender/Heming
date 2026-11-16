@@ -78,7 +78,7 @@ function toRootName(dir: string, defaultName: string): string {
  * 整个评测因此以「无法完成（退出码 2）」收场，看起来像评测框架坏了，而不是用例在验证超时。
  * `fs.rm` 的 `maxRetries` 只覆盖它内部认的那几类错误，所以外面再包一层显式重试。
  */
-async function removeSandbox(dir: string): Promise<void> {
+export async function removeSandbox(dir: string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 6; attempt++) {
     try {

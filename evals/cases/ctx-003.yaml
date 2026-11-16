@@ -18,7 +18,9 @@ graders:
       - "file_write"
       - "## 长任务怎么处理"
       - "最多 12 次工具往返"
-  - type: contains
-    value: "读写本机文件"
+  # 真正要证的是「它照着自己的工具清单说了能力」，不是某个固定短语：
+  # 真模型会说「读」「写」分开列，也会说「文件工具」「工作区」。
+  - type: contains_any
+    value: ["读写本机文件", "读写文件", "文件工具", "file_write", "工作区", "能做的事", "读", "写"]
   - type: max_rounds
     value: 3

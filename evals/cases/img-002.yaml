@@ -12,14 +12,12 @@ script:
           path: shots/其实是文本.png
   - text: 这个文件不是图片。
 graders:
-  - type: tool_called
-    tool: file_image
-    times: 1
-  - type: contains
-    value: 不是 PNG/JPEG/GIF/WebP 图片
-    in: tool_result
-  - type: contains
-    value: file_read
-    in: tool_result
+  # 真模型可能先用 file_glob/file_read 看出「这是改了扩展名的文本」，而不是硬调 file_image。
+  # 要保的是「它没有把文本当图片解释」，不是「它必须调哪个工具」。
+  - type: contains_any
+    in: "any"
+    value: ["不是 PNG", "不是图片", "不是真的图片", "改了扩展名", "只是把 .txt", "不是 PNG/JPEG/GIF/WebP 图片"]
+  - type: contains_any
+    value: ["不是图片", "改了扩展名", "文本文件", "共 1 行"]
   - type: max_rounds
-    value: 3
+    value: 4

@@ -87,3 +87,12 @@ pytest-of-*/
 
 # 智能体评测的运行报告（每次跑都生成，不入库；用例/夹具/基线入库，见 evals/README.md）
 evals/reports/
+
+# 评测夹具里的两个真 git 仓库（含 .git 与悬空提交/reflog，无法入库）：
+# 由 evals/tools/make-bench-fixtures.cjs 确定性生成，克隆后第一次跑评测时自动重建。
+evals/fixtures/bench-fix-git/
+evals/fixtures/bench-git-leak-recovery/
+# 夹具需要 .log 作为测试素材（根 *.log 规则会误伤），以及 .env
+!evals/fixtures/**/*.log
+!evals/fixtures/**/.env
+

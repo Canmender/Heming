@@ -1,0 +1,30 @@
+id: task-002
+name: 真实任务：修好计算函数并跑测试直到通过
+owner: lead
+tags:
+  - task
+  - shell
+real_only: true
+shell: true
+allow_danger: true
+setup:
+  fixture: task-002
+prompt: |
+  这个目录里 test.js 现在跑不过。
+  请找出原因、修好 calc.js，让 `node test.js` 打印「全部通过」。
+  约束：只能改 calc.js，不要动 test.js。
+  最后说明你改了什么、验证命令是什么。
+graders:
+  - type: tool_called
+    tool: run_command
+  - type: contains
+    value:
+      - 全部通过
+    in: tool_result
+  - type: evidence
+    files:
+      - calc.js
+    evidence_commands:
+      - test.js
+  - type: max_rounds
+    value: 14

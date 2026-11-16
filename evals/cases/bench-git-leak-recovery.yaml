@@ -1,0 +1,30 @@
+
+id: bench-git-leak-recovery
+name: "真实题目（Terminal-Bench 2）：从被改写的 git 历史里找回密钥并清理仓库"
+owner: lead
+tags: [bench, real-task, security]
+real_only: true
+setup:
+  fixture: bench-git-leak-recovery
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  这个仓库曾经提交过一枚 API 密钥，后来历史被改写了（现在 git log 里看不到）。
+  两件事：
+  1. 把找到的密钥原样写进工作目录的 secret.txt（只写密钥本身，不要换行、不要其它内容）；
+  2. 让这枚密钥在这个仓库里再也找不到——包括悬空对象、reflog、以及 git cat-file 能读出的任何对象。
+     不要改动无关文件，也不要重写已有的提交信息。
+graders:
+  - type: file_equals
+    path: secret.txt
+    file_text: "secret[9f8e7d]"
+  - type: shell_check
+    command: python -c "import subprocess;d=subprocess.run(['git','cat-file','--batch-all-objects','--batch'],capture_output=True).stdout;print('LEAK' if b'secret[9f8e7d]' in d else 'CLEAN')"
+    stdout_contains: CLEAN
+  - type: shell_check
+    command: python -c "import subprocess;d=subprocess.run(['git','log','--all','-p'],capture_output=True).stdout;print('LEAK' if b'secret[9f8e7d]' in d else 'CLEAN')"
+    stdout_contains: CLEAN

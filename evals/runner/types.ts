@@ -59,9 +59,15 @@ export interface CaseStep {
 
 export type GraderType =
   | "contains"
+  | "contains_any"
+  | "refusal"
   | "regex"
   | "exact"
   | "file_assert"
+  /** 文件内容逐字比较（d.179：把 Terminal-Bench 这类「输出必须完全一致」的题搬进来）。 */
+  | "file_equals"
+  /** 在工作目录里跑一条检查命令（d.179：像 benchmark 那样用「测试脚本」判分）。 */
+  | "shell_check"
   | "tool_called"
   | "tool_sequence"
   | "max_rounds"
@@ -92,6 +98,13 @@ export interface Grader {
   tool?: string;
   tools?: string[];
   times?: number;
+  /** file_equals 期望的完整文本。 */
+  file_text?: string;
+  /** shell_check 要执行的命令（在工作目录里、用系统 shell 跑）。 */
+  command?: string;
+  /** shell_check 期望的 stdout 子串（不给则只判退出码）。 */
+  stdout_contains?: string;
+
   /** max_rounds 的上限。 */
   max?: number;
   /** min_rounds 的下限（用来证明「确实跑过了那个上限」，例如自动续跑）。 */
@@ -164,6 +177,18 @@ export interface EvalCase {
    * 没有它，「点停止真的停住了」只能靠单元测试猜。
    */
   abort_after_ms?: number;
+  /**
+   * 只对真实模型有意义、回放模式跑不出来的用例（d.183）。
+   *
+   * 例如「把这个仓库的 bug 修好并跑测试」——它要模型自己决定读哪些文件、跑哪条命令，
+   * 假网关切不出这种判断。回放模式下直接跳过，不占 pass@1。
+   */
+  real_only?: boolean;
+  /**
+   * 真实模式下跳过（d.183）：时间敏感用例（故意等超时/等取消）在真实模型手里会变成
+   * 「模型换了条命令、跑得比 60s 步超时还久」——测不到想测的东西，还拖住整轮。
+   */
+  real_skip?: boolean;
   usage?: CaseUsage;
   graders: Grader[];
   /** YAML 文件路径（报错时报给人看）。 */

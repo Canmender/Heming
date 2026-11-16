@@ -26,9 +26,9 @@ script:
       W-042 这一行是：2026-11-28 09:30，流水线 release/r114，开关 grad_dark_launch 打开，
       放量 5%，值班林澈；备注要求先观察 30 分钟再放量，出问题立即关闭开关。
 graders:
+  # 真实模型可能一次 file_read 就读完（或两次），次数不是要保的东西；答案里的三个数字才是。
   - type: tool_called
     tool: file_read
-    times: 2
   - type: contains
     value: ["grad_dark_launch", "09:30", "观察 30 分钟"]
   - type: max_rounds

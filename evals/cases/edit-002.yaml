@@ -41,22 +41,9 @@ script:
       读了原文之后重写补丁，这次成功了，工具返回「1 个修改，已写入磁盘」：
       约定列表里已经多了「新增：允许放一份不超过 1 KB 的 JSON 样例；」这一行。
 graders:
-  - type: tool_called
-    tool: file_patch
-    times: 2
+  # 真实模型可能第一次就改对，不会撞 match-failed——「锚点失败要能重试」由回放模式测（d.183）。
   - type: tool_called
     tool: file_read
-    times: 1
-  - type: contains
-    value: ["锚点匹配失败", "已写入"]
-    in: final
-  - type: contains
-    value: ["锚点匹配失败（match-failed）"]
-    in: tool_result
-  # P2-T9：失败结果必须带「照做就能过」的重试建议，而不是只报错
-  - type: contains
-    value: ["可重试：先 file_read 读出该文件当前内容"]
-    in: tool_result
   - type: file_assert
     path: notes/说明.md
     contains: ["允许放一份不超过 1 KB 的 JSON 样例"]

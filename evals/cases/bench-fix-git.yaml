@@ -1,0 +1,33 @@
+
+id: bench-fix-git
+name: "真实题目（Terminal-Bench 2）：把「找不到的改动」找回来并合进 master"
+owner: lead
+tags: [bench, real-task]
+real_only: true
+setup:
+  fixture: bench-fix-git
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  我在这个仓库里给个人网站加了个新版首页和一个 about 页，后来切回 master 就找不到了
+  （分支也被删了）。请把这些改动找回来并合进 master：site/index.html 要变成新版内容，
+  site/about.html 和 site/style.css 要出现在 master 上。尽量不要破坏已有提交历史。
+graders:
+  - type: file_equals
+    path: site/index.html
+    file_text: |
+      <h1>My Site</h1>
+      <p>v2 with hero</p>
+  - type: file_assert
+    path: site/about.html
+    exists: true
+  - type: file_assert
+    path: site/style.css
+    exists: true
+  - type: shell_check
+    command: git log --oneline --all
+    stdout_contains: add hero and about page

@@ -10,3 +10,9 @@ deploy/** text eol=lf
 
 # Git 钩子由 sh 执行：CRLF 会让 `set -eu` 变成 `set -eu\r`，钩子在 Windows 上直接失效。
 .githooks/** text eol=lf
+
+# 评测用例与夹具是「字节级断言」的素材（file_equals 逐字比较、shell_check 跑 python/node 脚本），
+# 行尾被 checkout 改成 CRLF 会让同一份用例在不同机器上判分不同 → 统一 LF。
+# 注意：两个真 git 夹具（bench-fix-git / bench-git-leak-recovery）不入库，由生成脚本重建。
+evals/** text eol=lf
+

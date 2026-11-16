@@ -33,7 +33,13 @@ script:
       2. 历史预算 6000 tokens，保留最近 8 轮、预留 900，更早的轮次折叠成摘要。
       3. 单条工具输出截断 8000 字符，保留头 2/3 + 尾 1/3，中段省略并标注已截断。
 graders:
-  - type: contains
-    value: ["工具轮上限 12", "历史预算 6000 tokens", "8000 字符"]
+  # 用正则捕获「数字 + 单位」的关系，避免措辞一变就判负（真实模型会把
+  # 「工具轮上限 12」写成「工具轮上限是 12（MAX_TOOL_ROUNDS）」）。
+  - type: regex
+    pattern: (工具轮上限|工具轮)[^0-9]{0,12}12
+  - type: regex
+    pattern: (历史预算|总预算)[^0-9]{0,20}6000
+  - type: regex
+    pattern: "8000"
   - type: max_rounds
     value: 4

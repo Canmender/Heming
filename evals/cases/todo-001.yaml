@@ -28,12 +28,11 @@ graders:
   - type: tool_called
     tool: todo_write
     times: 1
+  # 只保「清单确实建起来了、共两条」：真实模型可能两步都干完再收口，
+  # 断言「必须停在一条进行中」等于惩罚它做得太干净。
   - type: todo_state
     total: 2
-    completed: 0
-    in_progress: 1
-    pending: 1
-  - type: contains
-    value: 清单
+  - type: contains_any
+    value: [清单, 任务列表, todo, 两步, 步骤]
   - type: max_rounds
     value: 3

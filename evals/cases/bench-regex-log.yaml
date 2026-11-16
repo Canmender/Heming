@@ -1,0 +1,24 @@
+
+id: bench-regex-log
+name: "真实题目（Terminal-Bench 2）：写一条能筛出目标日期的正则"
+owner: lead
+tags: [bench, real-task]
+real_only: true
+setup:
+  fixture: bench-regex-log
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  工作目录里的 log.txt 每行是一条日志。请在 regex.txt 里只写一条正则表达式（单行，不要注释、不要引号），
+  满足：用 Python 的 re.findall(pattern, log.txt 的内容, re.MULTILINE) 运行它时，
+  返回的结果恰好是「那些含合法 IPv4 地址的行里、IPv4 之前出现的第一个合法日期」。
+  日期格式 YYYY-MM-DD，必须日期合法（月份 01-12，按当月天数，2 月最多 29）；
+  IPv4 四段都必须 0-255 且没有前导零；日期前后不能紧挨字母或数字。
+graders:
+  - type: shell_check
+    command: python -c "import re;t=open('log.txt',encoding='utf-8').read();m=re.findall(open('regex.txt',encoding='utf-8').read().strip(),t,re.MULTILINE);print('MATCHES:'+','.join(m));print('OK' if m==['2025-08-01','2025-08-03','2025-08-06','2025-08-08','2025-08-11','2025-08-12'] else 'FAIL')"
+    stdout_contains: OK

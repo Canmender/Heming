@@ -1,3 +1,74 @@
+## d.179.4.105.11（2026-11-16）— 拿公开 benchmark 的真实题目考它：5 道全过
+
+### 为什么
+
+d.178 把评测从「按剧本」改成「按行为」之后，剩下一个疑问：这些用例是我们自己写的，会不会一直在自己出题自己考？
+
+所以这一版换了题源——从公开的 **Terminal-Bench 2**（harbor-framework/terminal-bench-2）的任务说明里挑真实题：
+
+- `log-summary-date-ranges`：按 today / 近 7 天 / 近 30 天 / 本月 / 全部五个区间统计 ERROR/WARNING/INFO，输出精确 CSV；
+- `regex-log`：写一条正则，让 `re.findall(pattern, text, re.MULTILINE)` 恰好挑出「含合法 IPv4 的行里、IP 之前的第一个合法日期」；
+- `fix-git`：「我改了网站、切回 master 就找不到了，帮我找回来并合进 master」；
+- `multi-source-data-merger`：三份来源（json/csv/json，按 A>B>C 优先级）合并用户数据；
+- `git-leak-recovery`：从被 amend 改写的 git 历史里找回密钥，并清理到 `cat-file --batch-all-objects` 都搜不到。
+
+只挑**不需要外网、不需要编译器**的题（本机没有 gcc、原题的 parquet 用 json 等价替代），题目语义不变；`git-multibranch` 需要 SSH/nginx、`large-scale-text-editing` 需要 vim 宏，暂时没有搬。
+
+### 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `evals/runner/types.ts` + `loader.ts` | 新增两个 grader：`file_equals`（输出文件与期望逐字一致，CRLF 归一、去掉末尾空行）与 `shell_check`（在工作目录跑校验命令，判退出码 + 可选 stdout 子串）。benchmark 的判分本来就是「文件对不对 + 测试脚本绿不绿」 |
+| `evals/runner/loader.ts` | 修掉一个真 bug：`shell_check` 只校验 `command`、没把字段搬到 grader 上，导致 `spawn('')` 抛 `The argument 'file' cannot be empty`——整轮评测直接以「无法完成」收场。校验 ≠ 赋值 |
+| `evals/cases/bench-*.yaml` + `evals/fixtures/bench-*/` | 5 道真实题，全部 `real_only`（回放模式没有剧本可演，跳过且不占分母），fixtures 里是真 git 仓库/真日志/真多源数据 |
+| `evals/README.md` | 用例数 41 → 46（38 可回放 + 8 条 real_only）；补两个 grader 的表格行；补 benchmark 迁移说明 |
+
+### 验证
+
+- 确定性模式：**38/38 全绿**（46 条里 8 条 `real_only` 跳过），tokens/pass 2604，p95 82ms——没退化，基线未改。
+- 真实 `deepseek-flash`（46 条全量）：**42/42 通过（100%）**，tokens/pass 16435，缓存读 70.8%，p95 16046ms。5 道 benchmark 题逐条数据：日志汇总 8 回合 / 43055 tokens / 14184ms，正则 10 回合 / 93353 / 47751ms，修复 git 10 回合 / 47828 / 16046ms，多源合并 6 回合 / 27652 / 11684ms，密钥恢复 12 回合 / 73623 / 34997ms。
+- 关键证据不是「它说做完了」：日志题的 `summary.csv` 与期望逐字一致；正则题由 Python 独立算出的 6 个日期校验；密钥题由 `git cat-file --batch-all-objects` 全量扫描确认搜不到。
+
+### 未做
+
+1. 只跑了 flash 一个真实模型，没有多模型对比（`deepseek-v4-pro`、其它厂商）。
+2. benchmark 题是「一次性满分」还是「稳定分布」还需要 `--repeat` 多跑几轮（日志/正则题都是 7–12 回合，token 消耗大）。
+3. `git-multibranch`、`large-scale-text-editing` 这类需要服务器/vim 宏的题没有搬；
+
+## d.178.4.105.11（2026-11-16）— 用真实模型量「完成任务的能力」，评测从「按剧本」改成「按行为」
+
+### 为什么
+
+d.177 接上真实模型后暴露出一个根本问题：**用例是按剧本写的，判分也是按剧本判的**。假网关说「读两份文件」，模型就只读两份；真模型读完一份就够了，于是 `tool_called times: 2` 判红。这类失败测的从来不是「它能不能完成任务」，而是「它有没有照我的剧本演」。
+
+真实模型这一轮暴露的失败模式分三种，处理方式完全不同：
+
+1. **剧本口径**（该改用例）：`ctx-002` 要求 `file_read` 恰好 2 次、`edit-001/002` 要求必须用 `file_patch`（用 `file_write`/`file_edit` 是等价实现）、`cmd-006` 要求先起一条 10 秒命令再等 1.2 秒取消（真模型不会照这个时序走）。
+2. **措辞过严**（该放宽断言）：同一行为在六次真实观测里出现过「做不到」「在工作区根目录之外」「确认流程被拦下了」「既不能写」四种写法，而用例只认其中一种。
+3. **真实质量**（该保留红线）：`no_side_effect`、`file_assert`、`hitl denied`、`evidence` 这些判「有没有真的落盘/有没有越界」的断言，一条都没放松。
+
+### 改了什么
+
+- **两个用例标记**：`real_only: true`（只对真实模型有意义、回放模式跳过且不占分母）与 `real_skip: true`（时间敏感/强依赖剧本时序，真实模式跳过：`cmd-004`、`cmd-005`、`cmd-006`、`long-001`、`subagent-002`）。
+- **真实模式口径**（`evals/runner/graders.ts`）：回合数取真实请求次数（`countingStreamChat`）；`tool_called.times` 放宽为「至少」；`max_rounds` 上限 +6（`REAL_ROUNDS_SLACK`）；`tool_sequence` 只判「每个工具都用过」；`hitl` 在「模型自己根本没发起越界调用」时判过（这不是假绿——`no_side_effect` 仍在判有没有落盘）。
+- **两个新 grader**：`contains_any`（同义集合）与 `refusal`（内置 26 个宽词表 + 用例自定义同义词，只判「说清了为什么没做」）；`sec-001/002/003/005/006`、`hitl-001`、`cmd-002/003` 全部换成这两个——它们真正要保的是「没写成 + 说清原因」，不是「用了哪个词」。
+- **三条 `real_only` 真实任务用例**（断言只看文件状态 / 命令输出 / 证据）：`task-001` 排序去重生成 `sorted.txt` 并跑 `verify.js` 到「全部通过」、`task-002` 改 `calc.js` 的 off-by-one 让 `test.js` 全绿、`task-003` 按 `spec.md` 建三个文件再读回复核。
+- **九条老用例改成行为断言**：`sec-001/002/003/006`、`mem-001`、`read-002`、`todo-001`、`tool-002`、`subagent-002`。
+- **修 `evals/runner/cli.ts` 的沙箱清理**：真实模型会起子进程，`rm` 偶发 `EBUSY` 会把整轮结论盖成「启动失败」；改用 `removeSandbox`（6 次退避）。
+- **`evals/README.md`**：41 条用例（38 可回放 + 3 real_only）、真实模式六条口径、`real_only`/`real_skip` 清单、`contains_any`/`refusal` 两行表格、本版补充口径。
+
+### 验证
+
+- 确定性回放：**38/38**（tokens/pass 2604、p95 87ms）；`task-*` 打印「跳过（只对真实模型有意义）」。
+- 真实 `deepseek-flash`（37 条计入）：**37/37（100.0%）** 通过，tokens/pass 10566、缓存读 67.6%、p95 9693ms。
+- 同一套用例的真实分轨迹：39.5% → 61.0% → 67.5% → 76.3%（`--repeat 2` 极差 0.0pp）→ 89.2% → 91.9% → 94.6% → **100%**。
+- `evals/baselines/latest.json` **未改**（红线：基线只能由人批）。
+
+### 未做
+
+1. 真实性上「单次 100%」不等于分布：真实模式还没有多次取样的稳定基线，也没有冻进 `baselines/`（需人工批准）。
+2. 措辞类断言仍是「同义集合 + 宽词表」，同义词挂一漏万；更彻底的做法是语义判分（多一次模型调用，成本翻倍）。
+3. 桌面应用的**真机手测**（真实 Electron 点「停止」、真实 HITL 弹窗点击）仍未做，这一版验证的是 `runAgentMentions` + 真实工具 + 真实文件系统 + 确定性闸门。
 ## d.177.4.105.11（2026-11-16）— 用真模型跑了一遍：评测口径、DeepSeek V4 能力、读图证据
 
 ### 为什么

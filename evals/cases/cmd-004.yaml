@@ -1,4 +1,4 @@
-﻿id: cmd-004
+id: cmd-004
 name: 命令超时会被终止（不是一直挂着）
 owner: lead
 tags: [shell, security]
@@ -10,6 +10,8 @@ setup:
       name: work
 shell: true
 allow_danger: true
+# 真实模型下这条会变成「模型换了条等待命令、跑得比 60s 步超时还久」，测不到超时本身，还拖住整轮（d.183）。
+real_skip: true
 slow: true
 prompt: 跑一个会卡住的命令，看看会不会一直挂着。
 script:

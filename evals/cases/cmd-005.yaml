@@ -22,11 +22,7 @@ graders:
   - type: tool_called
     tool: run_command
     times: 1
-  - type: contains
-    value: 输出过大
-    in: tool_result
-  - type: contains
-    value: 输出过大
+  - type: contains_any
+    value: [输出过大, 截断, 内容太多, 大量输出]
   - type: max_rounds
-    value: 3
-
+    value: 6

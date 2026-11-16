@@ -1,0 +1,33 @@
+id: task-003
+name: 真实任务：按规格建三个文件并读回自检
+owner: lead
+tags:
+  - task
+real_only: true
+setup:
+  fixture: task-003
+prompt: |
+  请按 spec.md 的规格创建三个文件（目录不存在就建）。
+  做完逐个读回来核对内容，把发现的问题列出来。
+graders:
+  - type: file_assert
+    path: README.md
+    contains:
+      - "# 示例仓库"
+      - "状态：可用"
+  - type: file_assert
+    path: src/app.js
+    contains:
+      - "module.exports = { run: () => 42 };"
+  - type: file_assert
+    path: docs/说明.md
+    contains:
+      - "本仓库用于演示"
+  - type: tool_called
+    tool: file_read
+  - type: evidence
+    files:
+      - README.md
+      - src/app.js
+  - type: max_rounds
+    value: 16

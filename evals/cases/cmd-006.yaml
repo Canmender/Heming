@@ -2,6 +2,8 @@ id: cmd-006
 name: 用户点停止时，跑着的命令真的被中止
 owner: heming
 tags: [shell, security]
+# 真实模型不会按剧本先起一条 10 秒命令再等 1.2 秒中止——这条只在回放模式测取消链（d.183）。
+real_skip: true
 setup:
   fixture: cmd-006
   roots:

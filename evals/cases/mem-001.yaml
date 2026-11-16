@@ -36,6 +36,9 @@ graders:
     tool: memory__recall
     times: 1
   - type: contains
-    value: ["结论", "依据三条"]
+    value: ["结论"]
+  # 真模型会用 markdown 加粗「**依据**：」或写编号列表（d.178）。
+  - type: contains_any
+    value: ["依据三条", "三条依据", "依据", "理由", "因为"]
   - type: max_rounds
     value: 3

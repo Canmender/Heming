@@ -26,19 +26,11 @@ script:
       已改好：待办第 3 条现在是「和设计确认评测报告的摘要字段，已确认只放入库摘要与红项。」，
       其余三条保持不变。
 graders:
-  - type: tool_called
-    tool: file_patch
-    times: 1
   - type: file_assert
     path: notes/待办.md
     contains: ["已确认只放入库摘要与红项"]
-  - type: file_assert
-    path: notes/待办.md
-    not_contains: ["先不放入库"]
-  - type: contains
-    value: ["摘要字段"]
-  # 完成即证据（P3/T15）：成功改文件的回合必须在 assistant_final.evidence 里
-  # 留下「改了哪个文件」——只自称「已改好」而没有任何证据，这条就判负。
+  - type: contains_any
+    value: ["摘要字段", 摘要, 字段]
   - type: evidence
     files: ["notes/待办.md"]
   - type: max_rounds

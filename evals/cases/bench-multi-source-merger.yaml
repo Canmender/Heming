@@ -1,0 +1,27 @@
+
+id: bench-multi-source-merger
+name: "真实题目（Terminal-Bench 2）：多源用户数据合并（json/csv/json）"
+owner: lead
+tags: [bench, real-task]
+real_only: true
+setup:
+  fixture: bench-multi-source-merger
+  roots:
+    - path: "."
+      mode: write
+      name: work
+shell: true
+allow_danger: true
+prompt: |
+  工作目录的 data/ 下有三份用户数据：source_a.json（最高优先）、source_b.csv、source_c.json（最低优先，
+  原题是 parquet，这里用 json 等价替代）。请按 user_id 合并成 merged_users.json：
+  - 按 user_id 升序排列
+  - 每行字段固定为 user_id、email、name、created_date（日期统一成 YYYY-MM-DD）
+  - 同一用户同一字段出现不同取值时，保留优先级最高那份的值
+  - 字段映射：user_id|id|userId → user_id；email|email_address → email；full_name|name|userName → name；
+    registration_date|created_at|joined → created_date
+  只要输出 merged_users.json 一个文件即可（冲突明细可选）。
+graders:
+  - type: shell_check
+    command: python -c "import json,sys;want=[{\"user_id\":\"u1\",\"email\":\"ada@a.example\",\"name\":\"Ada Lovelace\",\"created_date\":\"2024-01-05\"},{\"user_id\":\"u2\",\"email\":\"grace@a.example\",\"name\":\"Grace Hopper\",\"created_date\":\"2024-02-11\"},{\"user_id\":\"u3\",\"email\":\"linus@b.example\",\"name\":\"Linus T.\",\"created_date\":\"2024-03-02\"},{\"user_id\":\"u4\",\"email\":\"ken@c.example\",\"name\":\"Ken T.\",\"created_date\":\"2024-04-04\"}];got=json.load(open('merged_users.json',encoding='utf-8'));norm=lambda r:{k:str(r.get(k,'')) for k in ('user_id','email','name','created_date')};print('OK' if [norm(r) for r in got]==[norm(r) for r in want] else 'FAIL')"
+    stdout_contains: OK
