@@ -2868,7 +2868,7 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 | 线上 | **d.203.4.106.12**（安装包 r109，已部署、已发布更新源） |
 | 安装包（已发布） | **`和鸣 Setup d.203.4.106.12.exe`（`r109`，370,510,188 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传三项并校验大小 + sha512；公网 `latest.yml` → `version: 203.4.106`、`size: 370510188`、Range 请求 206 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 201.4.105`**、`path: 和鸣 Setup d.201.4.105.12.exe`、`size: 370495951`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-1023/370495951`）。 |
-| 发布标签 | 最新标签 `d.201.4.105.12`（指向 `fe705dc0`）；本轮修复先提交 `e60da1f1`，标签待本轮收尾后打 |
+| 发布标签 | 最新标签 `d.203.4.106.12`（指向 `8125cb5b`，已推到 origin）；`main` 已同步（origin/main = `8125cb5b`） |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
