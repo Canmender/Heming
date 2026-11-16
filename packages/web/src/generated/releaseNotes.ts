@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.203.4.106.12",
+    "date": "2026-11-16",
+    "title": "安装包修好了：装上就能打开",
+    "bullets": [
+      "**修的是一个「装上就崩」的 bug**：从 d.164 起的安装包缺两个必需文件（`csp-report.js`、`shell-run.js`），双击后只弹一个 `A JavaScript error occurred in main process` 的窗口就退出。现在包里有这两个文件，装完直接能打开。",
+      "**不再靠人记得**：新增一条自动检查——只要哪个代码文件被引用却没进打包清单，测试立刻报错。这类事故以后不会再有第二次。",
+      "**重装了最新版**：`d.203.4.106.12`（安装包 r109），原来的数据从 `E:\\heming-keep-data\\data` 原样搬回，会话、设置、插件都在。",
+      "**如果你的机器还装着旧的坏包**：重新跑一次安装包即可覆盖，不需要先卸载。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.203.4.105.12",
     "date": "2026-11-16",
     "title": "后台作业看得见",

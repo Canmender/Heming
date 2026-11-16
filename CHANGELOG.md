@@ -1,3 +1,37 @@
+## d.203.4.106.12（2026-11-16）— 装上也打不开：打包白名单漏了两个文件，补上并把这事变成红灯
+
+### 为什么做
+
+用户报「本机打不开最新版本的和鸣」。排查发现是两层问题：
+
+1. 用户机上一次静默更新把 `E:\Heming` 的程序文件删了、数据搬到 `E:\heming-keep-data\data` 之后安装中断——原来的应用已经没了。
+2. 更严重的是：**我们自己发出去的安装包一直起不来**。直接启动 `release/r107/win-unpacked/Heming.exe`，弹窗是 `A JavaScript error occurred in main process` / `Error: Cannot find module './csp-report.js'`，然后进程退出。
+
+根因：`packages/desktop/package.json` 的 `build.files` 是**手写的 51 项白名单**，而 `main.js` 会 `require("./csp-report.js")`（d.165.4.101 加的）和 `require("./shell-run.js")`（d.164 加的）——这两个文件从来没进白名单，打出来的 `app.asar` 里没有它们，主进程加载第一步就抛。
+
+为什么一直没被发现：真机冒烟跑的是**未打包**的 `electron .`，读的是磁盘上的源码；打包产物从来没有人启动过。于是 r105 / r106 / r107 / r108 四版安装包全部是「装上就崩」。
+
+### 改了什么
+
+- `packages/desktop/package.json`：`build.files` 补 `csp-report.js`、`shell-run.js`（紧跟在 `file-fs.js` 之后），并在 `test` 脚本里接上新测试。
+- 新增 `packages/desktop/package-files.test.js`（3 例）：
+  - **递归**从 `main.js` / `preload.js` 出发收集所有 `require("./x")` 的本地目标，断言每一个都在 `build.files` 里（支持 `assets/**/*` 这类通配）——以后再「加一个 require 忘了加白名单」直接红灯。
+  - 反向断言：`build.files` 里写的每个具体文件都真实存在（防止写了不存在的名字，别人调试半天）。
+  - 墓碑断言：`csp-report.js`、`shell-run.js` 必须在白名单里且真实存在（把这次事故钉住）。
+
+### 验证
+
+- `cd packages/desktop && node --test package-files.test.js` → 3 passed（修复前同一逻辑查出 `NOT-IN-FILES csp-report.js` / `NOT-IN-FILES shell-run.js`）。
+- 重建 `release/win-unpacked`：`app.asar` 358 项，`csp-report.js`、`shell-run.js` 均在包内；清掉 `ELECTRON_RUN_AS_NODE` 后启动，窗口标题是「和鸣」（修复前是标题为 `Error` 的崩溃弹窗）。
+- 重打 r109 安装包（`d.203.4.106.12`）并装到 `E:\Heming`，把 `E:\heming-keep-data\data` 的数据搬回 `E:\Heming\data`，启动确认可用。
+
+### 没做
+
+- 不把 `build.files` 改成自动收集（会连带打进测试、源码映射和不该进包的东西；白名单 + 这条递归测试更可控）。
+- 不在 CI 里加「启动打包产物」的冒烟（需要桌面会话/显示服务，无头环境不可靠）；这次用一条静态测试替代，成本更低。
+- 不动用户机上失败的静默更新逻辑本身（C: 只剩约 0.6GB 时 NSIS 解压失败是环境问题，另一次再单独收口）。
+
+
 ## d.203.4.105.12（2026-11-16）— 后台作业看得见：哪几条在跑、跑了多久、点一下就能停
 
 ### 为什么做
