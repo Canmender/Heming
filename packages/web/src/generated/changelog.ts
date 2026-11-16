@@ -12,6 +12,32 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.179.4.105.12",
+    "date": "2026-11-16",
+    "title": "发版门禁不再被并行测试的随机崩溃卡住",
+    "bullets": [
+      "`packages/server/package.json`：`\"test\": \"vitest run\"` → `\"test\": \"vitest run --maxWorkers=2\"`。代价是 2.5s → 7.3s；换来的是同一台机器上反复跑都稳定。**没有放宽任何断言，也没有加 `--skip`**。",
+      "服务端用例里有真起子进程 / 真写临时库的集成用例，16 个 worker 同时抢句柄与栈空间是崩溃的合理嫌疑；固定 2 个 worker 比「多试几次」诚实——门禁要的是「必然通过 vs 必然失败」，不是抽奖。",
+      "`pnpm exec vitest run --maxWorkers=2`（packages/server）：**329 passed / 16 files**，7.29s。",
+      "同轮 `node scripts/release.mjs` 后续步骤（build → 打包 → 部署 → 发布更新源）见 HANDOFF 状态表。",
+      "没有定位到具体哪个用例触发 fast-fail（需要 dump/ETW 级别排查），本轮只把门禁固定到稳定并发数。",
+      "其它包（web/desktop）继续默认并发：它们在本机连续多轮未复现崩溃。"
+    ],
+    "paragraphs": [
+      "为什么",
+      "`node scripts/release.mjs --desktop --deploy --publish` 在本机连续两次倒在第 3 步「逐包测试」：",
+      "```",
+      "Error: Worker exited unexpectedly with exit code 3221226505",
+      "  while running test file packages/server/src/app.test.ts",
+      "  while running test file packages/server/src/teamWorkspace.test.ts",
+      "```",
+      "`0xC0000409` 是 Windows 的 fast-fail（进程被自己的栈溢出保护或运行时判死），不是断言失败：同一份代码 `pnpm exec vitest run --maxWorkers=2` 跑 **329/329 全过**（7.3s），默认并发（16 个 fork）大约每 2–3 次就崩一次。也就是说，**发版能不能出门取决于跑去哪一次**——这比测试失败更糟，因为它会把「真的坏了」和「运气不好」混在一起，最后逼所有人用 `--skip-tests` 绕过门禁。",
+      "改了什么",
+      "验证",
+      "未做"
+    ]
+  },
+  {
     "version": "d.179.4.105.11",
     "date": "2026-11-16",
     "title": "拿公开 benchmark 的真实题目考它：5 道全过",
