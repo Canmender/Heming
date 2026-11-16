@@ -439,6 +439,17 @@ export interface TriggerDeps {
    */
   onHeartbeat?: (streamId: string) => void;
   /**
+   * 运行中插话（d.199）：每开一个工具轮就问一次「用户又说了什么」。
+   *
+   * 返回值会作为 `role:"user"` 追加在本轮上下文**末尾**（工具结果之后），
+   * 模型下一步就能看到新指示，不必等这一轮整个结束。
+   * 缺省 → 不插话，行为与加这个钩子之前逐字一致。
+   *
+   * 只在这里取走、不在这里兜底：如果这一轮在取走前就收尾了（答案轮/被停/报错），
+   * 队列里剩下的由触发端在收口后另起一轮处理——本模块不替用户发消息。
+   */
+  drainSteer?: () => string[];
+  /**
    * 逐候选留痕（d.48 路由组）：候选链每问一个候选回调一次，**只在本机展示**，绝不上行。
    * 单连接（链长 1）时路由层直接透传，从不回调——与没有本钩子时逐字等价。
    */
@@ -1322,6 +1333,25 @@ export function runAgentMentions(
             // 拼成整段会让用户看到「文字突然整块蹦出来」，与无工具路径的表现不一致。
             const roundChunks: string[] = [];
             let roundText = "";
+            /**
+             * 运行中插话（d.199）：用户在它干活时补的话，这一步就要进上下文。
+             *
+             * 追加在 `extra` 末尾 = 排在上一轮工具结果之后，模型看到的是
+             * 「工具结果 → 用户新指示」，而不是被插入到某一对 tool_call/tool 中间
+             * （那样供应商会直接 400）。
+             *
+             * 只在工具轮注入：无工具的流第一轮就是答案，没有「下一步」可言；
+             * 那一轮没被看到的话由触发端在收口后另起一轮处理。
+             *
+             * `round > 0` 才算工具轮：第一轮之前 `extra` 里还没有任何工具结果，
+             * 此时插进去会排在「它自己下一句工具调用」前面——模型看到的是
+             * 「用户又说了一句 → 我再调工具」，而不是「拿到结果 → 用户让我改」。
+             */
+            const steerTexts = round > 0 ? (deps.drainSteer?.() ?? []) : [];
+            for (const text of steerTexts) {
+              const trimmed = String(text ?? "").trim();
+              if (trimmed) extra.push({ role: "user", content: trimmed });
+            }
             let calls: ToolCall[] = [];
             /** 本轮是否被输出长度上限截断（finish_reason=length）：要明确告诉用户，别让它像「模型变傻了」。 */
             let truncated = false;

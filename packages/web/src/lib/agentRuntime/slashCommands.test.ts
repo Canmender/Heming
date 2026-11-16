@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GOAL_COMMAND,
   HELP_COMMAND,
   PLAN_COMMAND,
   SLASH_COMMANDS,
@@ -18,6 +19,8 @@ describe("输入框命令面板（d.184）", () => {
     // d.193：自检与帮助也要能在这里发现
     expect(items.map((i) => i.command)).toContain(STATUS_COMMAND);
     expect(items.map((i) => i.command)).toContain(HELP_COMMAND);
+    // d.201：目标设定同样要能被发现（否则用户永远只知道清单）
+    expect(items.map((i) => i.command)).toContain(GOAL_COMMAND);
   });
 
   it("按前缀过滤，且大小写不敏感", () => {

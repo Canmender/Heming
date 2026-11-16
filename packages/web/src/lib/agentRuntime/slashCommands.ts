@@ -22,6 +22,8 @@ export interface SlashCommand {
 export const PLAN_COMMAND = "/plan";
 /** 环境自检（d.193）：一条命令说清模型/工作区/可写目录/预算/清单/作业/可撤回。 */
 export const STATUS_COMMAND = "/status";
+/** 会话目标（d.201）：`/goal <一句话>` 设定、`/goal done` 完成、`/goal off` 清除。 */
+export const GOAL_COMMAND = "/goal";
 /** 列出本地命令（面板之外的兜底：用户可能就是想看一遍完整列表）。 */
 export const HELP_COMMAND = "/help";
 
@@ -35,6 +37,11 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     command: "/plan",
     title: "计划模式：只读，先给方案",
     hint: "这一轮只保留只读工具；再发一次切回正常",
+  },
+  {
+    command: GOAL_COMMAND,
+    title: "设定这次会话的目标",
+    hint: "/goal 把登录改成扫码：一句话说清终点，会跨轮写进提示词；/goal done 完成、/goal off 清除",
   },
   {
     command: STATUS_COMMAND,

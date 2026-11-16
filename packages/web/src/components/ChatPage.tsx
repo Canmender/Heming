@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
@@ -124,6 +125,7 @@ import { TurnUndoBar } from "./TurnUndoBar.js";
 import { JobReadyBar } from "./JobReadyBar.js";
 import { ContextMeter } from "./ContextMeter.js";
 import { ResumeBar, type ResumeReason } from "./ResumeBar.js";
+import { SubagentRuns } from "./SubagentRuns.js";
 import {
   clearTurnRunning,
   loadResumePoint,
@@ -131,6 +133,13 @@ import {
 } from "../lib/agentRuntime/resumePoint.js";
 import { jobContinuePrompt, watchJobs, type WatchedJob } from "../lib/shell/jobWatch.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
+import {
+  applySubagentProgress,
+  listSubagentRuns,
+  resetSubagentRuns,
+  subscribeSubagentRuns,
+} from "../lib/agentRuntime/subagentRuns.js";
+import { createSteerQueue } from "../lib/agentRuntime/steer.js";
 import { PLAN_EXECUTE_PROMPT, loadPlanMode, savePlanMode, withPlanMode } from "../lib/agentRuntime/planMode.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
@@ -159,8 +168,11 @@ import { getTodos } from "../lib/todo/store.js";
 // d.167.4.103：轮次打满后的「继续」入口（不再让用户自己打「继续」）
 import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
+import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
-import { PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { GOAL_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
+import { useGoal } from "../lib/agentRuntime/useGoal.js";
 import { buildSlashHelp, buildStatusReport } from "../lib/agentRuntime/statusReport.js";
 import { historyFrom, stepHistory } from "../lib/agentRuntime/inputHistory.js";
 import { coreToolNames } from "../lib/agentRuntime/coreTools.js";
@@ -771,9 +783,39 @@ export function ChatPage({
   const uploadingRef = useRef(false);
   /** 待发附件列表（E1）：选完不立即发送，可核对/移除，发送时随正文一起提交。 */
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  /**
+   * 并行子代理的进度（d.200）：只渲染「有子代理在跑」时的状态条。
+   *
+   * 进度来自 `subagentRuns` 内存表（`onProgress` 推入），面板据此显示真实轮次与
+   * 正在调的只读工具——不给百分比。`subagentStopRef` 是界面上的「停止」：它**只**
+   * 中断子代理，不中断主对话（两个信号在 `withSubagentTool` 里取或）。
+   */
+  const subagentRuns = useSyncExternalStore(subscribeSubagentRuns, listSubagentRuns);
+  const subagentStopRef = useRef<AbortController | null>(null);
+  /**
+   * 当前会话的目标（d.201）：有目标才渲染 GoalBar；提示词里也只在有目标时写这段。
+   *
+   * 与清单同源的理由：目标存在 localStorage，`/goal` 命令改它，组件必须订阅才看得到。
+   */
+  const sessionGoal = useGoal(convId);
+  /**
+   * 运行中插话（d.199）：这一轮还在跑时用户补的话。
+   *
+   * 消息照常落库（用户看得见自己的话）；正文进这个队列，编排层每开一个工具轮
+   * 取走一次——模型下一步就能看到，而不是等这一轮彻底结束。这一轮先收尾的，
+   * 由 `onRunSettled` 里另起一轮接着处理，绝不静默丢。
+   *
+   * 只在内存里：它属于「还没被模型看到的那几句」，刷新后消息本身仍在会话里。
+   */
+  const steerQueueRef = useRef(createSteerQueue());
   // 切会话即清：待发附件属于当前会话的输入上下文，跟到别的会话里发出去是错的
   useEffect(() => {
     setPendingFiles([]);
+    // 插话队列同理：那是「给上一段对话补的话」，换到别的会话里绝不成立
+    steerQueueRef.current.clear();
+    // 子代理进度同理：它是上一段对话里派出去的活，不该出现在别的会话面板里
+    resetSubagentRuns();
+    subagentStopRef.current = null;
   }, [convId]);
   /**
    * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
@@ -1283,7 +1325,21 @@ export function ChatPage({
     // provider，是因为子代理要「用当前这个智能体绑定的模型」跑子会话，而模型绑定
     // 是按 agentId 查的——provider 拿不到 agentId 对应的路由，也不知道会话工作区。
     // 没有桥（这一轮零工具）时不包：凭空多一个能派子代理的工具会让模型以为有检索能力。
-    const wrapped = bridge ? withSubagentTool(bridge, { agentId, conversationId: convId }) : null;
+    const wrapped = bridge
+      ? withSubagentTool(bridge, {
+          agentId,
+          conversationId: convId,
+          // 进度推给界面（d.200）：谁在跑、第几轮、正在调哪个只读工具；跑在哪一步就报哪一步。
+          onProgress: applySubagentProgress,
+          // 界面「停止」只管子代理（d.200）：主对话的停止信号仍走 `execOpts.signal`，
+          // 两者在 `withSubagentTool` 里取或，任一触发都算中断。
+          createSignal: () => {
+            const controller = new AbortController();
+            subagentStopRef.current = controller;
+            return controller.signal;
+          },
+        })
+      : null;
     // 计划模式（d.173）：只留只读工具，执行层再拦一次。
     // 这是**产品意图**不是安全边界——真正的写权限仍由可写根与 HITL 决定。
     // 以**存储**为准，不用渲染闭包里的 `planMode`：`executePlan` 在同一个 tick 里
@@ -2161,6 +2217,8 @@ export function ChatPage({
             .conversations.find((c) => c.id === convId)?.workspace;
           const bridge = buildToolsFor(agentId);
           const tools = bridge?.tools ?? [];
+          // 目标（d.201）：从存储读一次，既写进提示词也给下面的分支判断用。
+          const goalText = goalForPrompt(convId);
           let timeZone: string | undefined;
           try {
             timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -2189,6 +2247,8 @@ export function ChatPage({
             planMode: loadPlanMode(convId),
             // 任务清单（d.192）：从存储读，界面的 `useTodos` 只是投影，压缩/重启后模型要靠这条基线。
             todos: getTodos(convId),
+            // 目标（d.201）：同样从存储读——它是「这一切为了什么」，比清单更该跨轮保持。
+            ...(goalText ? { goal: goalText } : {}),
           });
         } catch {
           runtimeSection = "";
@@ -2438,6 +2498,16 @@ export function ChatPage({
           jobWatchRef.current = null;
           setWatchedJobs([]);
         }
+        /*
+         * 运行中插话（d.199）：这一轮在取走前就收尾了（走到答案那轮 / 被停 / 报错），
+         * 队列里剩下的话模型没看见——不能静默丢，也不能假装它看过。
+         * 用它另起一轮：消息早已落库，走正常发送路径，不重发、不重复入库。
+         */
+        const queued = steerQueueRef.current.shift();
+        if (queued) {
+          setSendNotice("这一轮已经收尾，正接着处理你插的那条（下一轮就是它）。", "info");
+          startRun(queued.mentions, queued.text);
+        }
         const taskId = streamTaskRef.current[streamId];
         if (!taskId) return;
         delete streamTaskRef.current[streamId];
@@ -2494,6 +2564,11 @@ export function ChatPage({
           return rows; // 压缩失败不阻断生成：按原样发送
         }
       },
+      /**
+       * 运行中插话（d.199）：每开一个工具轮取走队列里的正文，追加到本轮上下文末尾。
+       * 队列只在内存、只属于这一轮；取走后如果这一轮收尾，剩下的由 onRunSettled 另起一轮。
+       */
+      drainSteer: () => steerQueueRef.current.take(),
     };
     // 同步拿句柄（挂在 promise 上）：中断按钮不必等 fetchHistory/流完成
     const run = runAgentMentions(convId, mentions, text, deps);
@@ -3153,6 +3228,8 @@ export function ChatPage({
     mentions: { agentId: string; name: string }[],
     taskId?: string,
     attachment?: TurnAttachment,
+    /** d.199：这一轮还在跑时发的纯文本 = 插话（入队，不另起流）。 */
+    options?: { steer?: boolean },
   ): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> => {
     const text = rawText.trim();
     if (!text) return { ok: false, error: "消息为空" };
@@ -3171,6 +3248,43 @@ export function ChatPage({
     // 自检与帮助同样本地完成：没有模型绑定也要能问「为什么它不动手」。
     if (text === STATUS_COMMAND) return { ok: true, notice: buildSelfStatus() };
     if (text === HELP_COMMAND) return { ok: true, notice: buildSlashHelp() };
+    /**
+     * 会话目标（d.201）：`/goal <一句话>` 设定、`/goal done` 完成、`/goal off` 清除、`/goal` 查看。
+     *
+     * 全本地：不发请求、不落库——目标存 localStorage（`lib/agentRuntime/goal.ts`），
+     * 只影响之后每一轮的系统提示词与上面那条 GoalBar。
+     */
+    if (text === GOAL_COMMAND || text.startsWith(`${GOAL_COMMAND} `)) {
+      const rest = text.slice(GOAL_COMMAND.length).trim();
+      if (!rest) {
+        const current = getGoal(convId);
+        return {
+          ok: true,
+          notice: current
+            ? `当前目标：${current.text}（会跨轮写进提示词；/goal done 标记完成、/goal off 清除）`
+            : "还没有目标：用 `/goal 一句话说清要达成什么` 设定（例如 `/goal 把登录改成扫码`）。",
+        };
+      }
+      const keyword = rest.toLowerCase();
+      if (keyword === "done" || keyword === "完成") {
+        const current = getGoal(convId);
+        if (!current) return { ok: true, notice: "现在没有目标要标记完成。" };
+        clearGoal(convId);
+        return { ok: true, notice: `目标已标记完成：${current.text}（已从提示词里摘掉）` };
+      }
+      if (keyword === "off" || keyword === "clear" || keyword === "清除") {
+        if (!getGoal(convId)) return { ok: true, notice: "现在没有目标要清除。" };
+        clearGoal(convId);
+        return { ok: true, notice: "目标已清除。" };
+      }
+      const goal = setGoal(convId, rest);
+      return {
+        ok: true,
+        notice: goal
+          ? `已设为目标：${goal.text}（之后每一轮都会看到它；说「/goal done」表示完成）`
+          : "目标文本是空的，没有设定。",
+      };
+    }
     /**
      * MCP 懒预检（用户要求：工具要自动识别并加载）。
      *
@@ -3222,7 +3336,21 @@ export function ChatPage({
     // 拦截/封失败：草稿与浮层状态原样保留
     if (!(await sealAndSend(plain))) return { ok: false, error: "消息发送失败" };
     // 发送成功即触发智能体的本机流式生成（失败/中断由 WS 三事件回声收口）
-    if (mentions.length) startRun(mentions, text, taskId, attachment);
+    if (mentions.length) {
+      if (options?.steer) {
+        /*
+         * 这一轮还在跑（d.199）：不另起第二条流——两条流会共用 `turnToolCountRef` /
+         * 自改预算并互相重置，复盘判定与预算双双失真（这是以前直接拒绝发送的原因）。
+         * 改成入队：编排层下一步取走，模型看到「工具结果 → 用户新指示」。
+         */
+        const size = steerQueueRef.current.push({ text, mentions });
+        return {
+          ok: true,
+          notice: `已插话（排队 ${size} 条）：这一轮下一步就能看到；如果它已经收尾，会接着处理。`,
+        };
+      }
+      startRun(mentions, text, taskId, attachment);
+    }
     return { ok: true };
   };
 
@@ -3262,11 +3390,19 @@ export function ChatPage({
     // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红。
     // 有待发附件时「空正文」是合法的（纯附件消息），不在这里拦。
     if (!draft.trim() && pendingFiles.length === 0) return;
-    // 生成中不再接受新消息（d.13x）：并发两条流会共用 turnToolCountRef / selfEdit 预算，
-    // 第一条的「本轮工具次数」「自改预算」被第二条重置 —— 复盘判定与预算双双失真。
-    // 想让模型接着做，用本轮的「继续」或在停止后再发。
-    if (activeLocal.length > 0) {
-      setSendNotice("正在生成中：先点停止，或等这一轮结束再发", "info");
+    /*
+     * 运行中插话（d.199）：这一轮还在跑时，纯文本照发。
+     *
+     * 以前这里是直接拒绝（「先点停止，或等这一轮结束再发」）。可点停止会丢掉这一轮
+     * 已经做好的部分，等结束又太晚——用户真正想说的是「别改文件了，先跑测试」这种
+     * 中途修正。现在改成入队：正文在下一个工具轮就被模型看到，这一轮若先收尾，
+     * 再由收尾回调另起一轮接着处理（绝不静默丢）。
+     *
+     * 带附件的仍拦：附件是单回合输入，中途插进去没有上传时机、也没有回合可挂。
+     */
+    const running = activeLocal.length > 0;
+    if (running && (pendingFiles.length > 0 || fileRefs.length > 0)) {
+      setSendNotice("正在生成中：带附件的话请等这一轮结束再发", "info");
       return;
     }
     // 附件走独立通道：正文 + 第一个附件同发，其余各发一条 file 消息
@@ -3276,7 +3412,13 @@ export function ChatPage({
     }
     const text = draft;
     const mentions = effectiveMentions;
-    const result = await submitMessage(text, mentions);
+    const result = await submitMessage(
+      text,
+      mentions,
+      undefined,
+      undefined,
+      running ? { steer: true } : undefined,
+    );
     if (!result.ok) {
       // 纯文本发送失败：红色 role=alert + 「重试」（附件路径见 sendFile，不给重试）。
       // NO_E2E 例外：常驻横幅本身就是 role=alert，不再重复一条同样的红字。
@@ -4432,6 +4574,18 @@ export function ChatPage({
         {planReadyStreamId && planMode ? (
           <PlanReadyBar onExecute={executePlan} onDismiss={() => setPlanReadyStreamId(null)} />
         ) : null}
+        {/* 当前目标（d.201）：一条别忘终点的提醒；点「完成」就是从提示词里摘掉。 */}
+        <GoalBar
+          goal={sessionGoal}
+          onDone={() => {
+            clearGoal(convId);
+            setSendNotice("目标已标记完成，之后不会再写进提示词了。", "info");
+          }}
+          onClear={() => {
+            clearGoal(convId);
+            setSendNotice("目标已清除。", "info");
+          }}
+        />
         {roundLimitStreamId ? (
           <RoundLimitHint
             reason={continueReason}
@@ -4443,6 +4597,8 @@ export function ChatPage({
             onDismiss={() => setRoundLimitStreamId(null)}
           />
         ) : null}
+        {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。 */}
+        <SubagentRuns runs={subagentRuns} onStop={() => subagentStopRef.current?.abort()} />
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div
           role="separator"
@@ -4651,12 +4807,12 @@ export function ChatPage({
               uploading ||
               // 未绑定模型只拦「要正文回答」的发送：纯附件消息照旧进历史，
               // 这条路径在 E1 之前就是通的（sendFile 从不查绑定），别在按钮上把它关掉。
-              (Boolean(unboundAgent) && draft.trim().length > 0) ||
-              activeLocal.length > 0
+              (Boolean(unboundAgent) && draft.trim().length > 0)
+              // d.199：生成中不再禁用——纯文本会作为插话入队（带附件的由 send 里拦并说明原因）
             }
             title={
               activeLocal.length > 0
-                ? "正在生成中：先点停止，或等这一轮结束再发"
+                ? "插话：这一轮下一步就能看到（带附件的话请等这一轮结束）"
                 : unboundAgent
                   ? unboundNoticeText(unboundAgent.name)
                   : "发送"

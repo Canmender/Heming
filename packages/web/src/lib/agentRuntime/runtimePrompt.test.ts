@@ -293,3 +293,26 @@ describe("长输出再读（d.181）", () => {
     expect(without).not.toContain("spill-<数字>");
   });
 });
+
+describe("当前目标（d.201）", () => {
+  const base = { now: new Date("2026-11-16T00:00:00Z"), timeZone: "UTC" };
+
+  it("有目标才写这一段，且写在任务清单之前（先终点、后步骤）", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      goal: "把登录改成扫码",
+      todos: [{ content: "读登录页", status: "pending" }],
+    });
+    expect(text).toContain("## 当前目标（跨轮保持）");
+    expect(text).toContain("目标：把登录改成扫码");
+    expect(text).toContain("清单全做完 ≠ 目标完成");
+    expect(text.indexOf("## 当前目标")).toBeLessThan(text.indexOf("## 当前任务清单"));
+  });
+
+  it("没有目标（或只有空白）时完全不写，输出与原来一致", () => {
+    const without = buildRuntimeSection({ ...base, tools: [] });
+    expect(buildRuntimeSection({ ...base, tools: [], goal: "" })).toBe(without);
+    expect(buildRuntimeSection({ ...base, tools: [], goal: "   " })).toBe(without);
+    expect(without).not.toContain("当前目标");
+  });
+});

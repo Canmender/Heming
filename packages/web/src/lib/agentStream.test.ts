@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS, MAX_TOOL_ROUNDS, TOOL_CALL_TIMEOUT_MS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage, StreamChatOpts } from "./llmClient.js";
@@ -2529,5 +2529,100 @@ describe("只读工具并行上限（P4/T19）", () => {
     }
   });
 });
+describe("运行中插话（d.199）", () => {
+  /**
+   * 用户在两轮工具之间补了一句话：模型必须在这一轮继续时就看到它，
+   * 而不是等整轮结束。这一例锁「看到了 + 顺序在工具结果之后」。
+   */
+  it("工具轮取走插话：下一轮请求里带这句 user 消息，且排在工具结果之后", async () => {
+    const rounds = [
+      {
+        text: "我先查一下",
+        calls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: { name: "srv__echo", arguments: "{}" },
+          },
+        ],
+      },
+      { text: "好，先跑测试", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        if (r.text) o.onDelta(r.text);
+        return r.text;
+      },
+    );
+    const drainSteer = vi.fn(() => (drainSteer.mock.calls.length === 1 ? ["先跑测试"] : []));
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      drainSteer,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说：hi", ok: true }),
+      }),
+    });
 
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "改一下这个文件", deps);
+
+    // 第一轮之前还没有工具结果，不算工具轮；这里只在第二轮取一次
+    expect(drainSteer).toHaveBeenCalledTimes(1);
+    const second = streamChat.mock.calls[1][1] as ChatMessage[];
+    const steerIndex = second.findIndex((m) => m.role === "user" && m.content === "先跑测试");
+    const toolIndex = second.findIndex((m) => m.role === "tool");
+    expect(steerIndex).toBeGreaterThan(-1);
+    // 排在工具结果之后：插进 tool_call/tool 之间会让供应商 400
+    expect(toolIndex).toBeGreaterThan(-1);
+    expect(steerIndex).toBeGreaterThan(toolIndex);
+  });
+
+  it("没有 drainSteer 时行为与加它之前一致（不注入任何 user 消息）", async () => {
+    const rounds = [
+      {
+        text: "",
+        calls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: { name: "srv__echo", arguments: "{}" },
+          },
+        ],
+      },
+      { text: "完成", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        if (r.text) o.onDelta(r.text);
+        return r.text;
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说：hi", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "改一下这个文件", deps);
+
+    const second = streamChat.mock.calls[1][1] as ChatMessage[];
+    expect(second.some((m) => m.role === "user" && m.content === "先跑测试")).toBe(false);
+  });
+});
 

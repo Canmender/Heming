@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
-import type { SubagentToolCall } from "./subagent.js";
+import type { SubagentProgressEvent, SubagentToolCall } from "./subagent.js";
 import {
+  SUBAGENT_MAX_PARALLEL,
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_LIMIT,
+  SUBAGENT_PARALLEL_DEFAULT,
   SUBAGENT_READ_ONLY_TOOLS,
   SUBAGENT_TASK_MAX_CHARS,
   SUBAGENT_TOOL,
   clipSubagentResult,
   parseSubagentArgs,
   runSubagent,
+  runSubagentBatch,
   subagentSpec,
   withSubagentTool,
 } from "./subagent.js";
@@ -20,7 +23,10 @@ function fnOf(spec: unknown): {
   description: string;
   parameters: {
     required?: string[];
-    properties?: Record<string, { maximum?: number; minimum?: number }>;
+    properties?: Record<
+      string,
+      { maximum?: number; minimum?: number; type?: string; maxItems?: number; minItems?: number }
+    >;
     additionalProperties?: boolean;
   };
 } {
@@ -28,12 +34,16 @@ function fnOf(spec: unknown): {
 }
 
 describe("subagentSpec", () => {
-  it("工具名是 agent_task，只要求 task 一个必填参数", () => {
+  it("工具名是 agent_task，task 与 tasks 二选一（都不必填）", () => {
     const fn = fnOf(subagentSpec());
     expect(fn.name).toBe(SUBAGENT_TOOL);
     expect(fn.name).toBe("agent_task");
-    expect(fn.parameters.required).toEqual(["task"]);
+    expect(fn.parameters.required).toEqual([]);
     expect(fn.parameters.additionalProperties).toBe(false);
+    expect(fn.parameters.properties?.task?.type).toBe("string");
+    expect(fn.parameters.properties?.tasks?.type).toBe("array");
+    expect(fn.parameters.properties?.tasks?.maxItems).toBe(SUBAGENT_MAX_PARALLEL);
+    expect(fn.parameters.properties?.tasks?.minItems).toBe(1);
     expect(fn.parameters.properties?.max_rounds?.maximum).toBe(SUBAGENT_MAX_ROUNDS_LIMIT);
     expect(fn.parameters.properties?.max_rounds?.minimum).toBe(1);
   });
@@ -281,5 +291,167 @@ describe("withSubagentTool", () => {
     expect(result.text).toContain("安装说明");
     expect(chat).toHaveBeenCalledTimes(2);
     expect(readBridge.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("并行子代理（d.200）", () => {
+  const readTool = { type: "function", function: { name: "file_read" } };
+  const readBridge = {
+    tools: [readTool],
+    meta: () => undefined,
+    execute: vi.fn(async () => ({ text: "（文件内容）", ok: true })),
+  };
+
+  /** 找一个任务在 messages 里出现的位置——子代理把任务作为 user 消息下发。 */
+  function taskIn(messages: ChatMessage[], task: string): boolean {
+    return messages.some((m) => typeof m.content === "string" && m.content.includes(task));
+  }
+
+  it("spec 里写明可以并行：模型才知道一次能派多件", () => {
+    const fn = fnOf(subagentSpec());
+    expect(fn.description).toContain("并行");
+    expect(SUBAGENT_PARALLEL_DEFAULT).toBe(2);
+    expect(SUBAGENT_MAX_PARALLEL).toBe(3);
+  });
+
+  it("tasks 数组按顺序解析，单任务入口取第一个", () => {
+    const result = parseSubagentArgs(JSON.stringify({ tasks: ["查 docs", "查日志"], max_rounds: 3 }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.args.tasks).toEqual(["查 docs", "查日志"]);
+    expect(result.args.task).toBe("查 docs");
+    expect(result.args.maxRounds).toBe(3);
+  });
+
+  it("超过上限 / 空数组 / 非字符串 / 单条过长都拒绝，且说清怎么改", () => {
+    const tooMany = parseSubagentArgs(
+      JSON.stringify({ tasks: ["a", "b", "c", "d"] }),
+    );
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) expect(tooMany.error).toContain(String(SUBAGENT_MAX_PARALLEL));
+
+    expect(parseSubagentArgs(JSON.stringify({ tasks: [] })).ok).toBe(false);
+    expect(parseSubagentArgs(JSON.stringify({ tasks: [1, 2] })).ok).toBe(false);
+    expect(
+      parseSubagentArgs(JSON.stringify({ tasks: ["x".repeat(SUBAGENT_TASK_MAX_CHARS + 1)] })).ok,
+    ).toBe(false);
+  });
+
+  it("并发默认 2：同时在跑的不超过 2，结果顺序与传入一致", async () => {
+    let running = 0;
+    let peak = 0;
+    const tasks = ["任务一", "任务二", "任务三"];
+    const chat = vi.fn(async (messages: ChatMessage[]) => {
+      const task = tasks.find((candidate) => taskIn(messages, candidate)) ?? "?";
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return `结论：${task}`;
+    });
+    const results = await runSubagentBatch(tasks, 2, {
+      tools: [readTool],
+      execute: vi.fn(),
+      chat,
+    });
+    expect(peak).toBe(2);
+    expect(results.map((result) => result.text)).toEqual([
+      "结论：任务一",
+      "结论：任务二",
+      "结论：任务三",
+    ]);
+  });
+
+  it("传并发 1 就一个个跑（不给并发参数时不叠太多请求）", async () => {
+    let running = 0;
+    let peak = 0;
+    const tasks = ["甲", "乙"];
+    const chat = vi.fn(async (messages: ChatMessage[]) => {
+      const task = tasks.find((candidate) => taskIn(messages, candidate)) ?? "?";
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return `结论：${task}`;
+    });
+    await runSubagentBatch(tasks, 2, { tools: [readTool], execute: vi.fn(), chat }, 1);
+    expect(peak).toBe(1);
+  });
+
+  it("进度按 start → round → tool → done 上报，带真实轮次与工具名", async () => {
+    const events: SubagentProgressEvent[] = [];
+    let round = 0;
+    const chat = vi.fn(
+      async (
+        _messages: ChatMessage[],
+        _tools: unknown[],
+        _signal: AbortSignal | undefined,
+        onToolCalls: (calls: SubagentToolCall[]) => void,
+      ) => {
+        round += 1;
+        if (round === 1) {
+          onToolCalls([{ name: "file_read", arguments: '{"path":"a.md"}' }]);
+          return "我先读 a.md";
+        }
+        return "结论：a.md 是说明";
+      },
+    );
+    const execute = vi.fn(async () => ({ text: "（a.md）", ok: true }));
+    const results = await runSubagentBatch(["读 a.md"], 3, {
+      tools: [readTool],
+      execute,
+      chat,
+      onProgress: (event) => events.push(event),
+    });
+    expect(results[0]?.ok).toBe(true);
+    expect(events.map((event) => event.phase)).toEqual(["start", "round", "tool", "round", "done"]);
+    expect(events[0]?.taskId).toBe("sub-1");
+    expect(events[0]?.task).toBe("读 a.md");
+    expect(events[2]?.tool).toBe("file_read");
+    expect(events.at(-1)?.round).toBe(2);
+  });
+
+  it("多任务时结果按【任务 N】分段，每段带自己的轮次用量", async () => {
+    const tasks = ["查 docs", "查日志"];
+    const chat = vi.fn(async (messages: ChatMessage[]) => {
+      const task = tasks.find((candidate) => taskIn(messages, candidate)) ?? "?";
+      return `结论：${task} 找到了`;
+    });
+    const wrapped = withSubagentTool(readBridge, {
+      agentId: "没有绑定的智能体",
+      conversationId: "c1",
+      chat,
+    });
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ tasks }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("并行子代理");
+    expect(result.text).toContain("【任务 1】查 docs");
+    expect(result.text).toContain("【任务 2】查日志");
+    expect(result.text).toContain("结论：查 docs 找到了");
+    expect(result.text).toContain("结论：查日志 找到了");
+  });
+
+  it("界面停止（createSignal）只中断子代理：结果如实说中断，不再发请求", async () => {
+    const chat = vi.fn(async () => "不该跑");
+    const controller = new AbortController();
+    const wrapped = withSubagentTool(readBridge, {
+      agentId: "没有绑定的智能体",
+      conversationId: "c1",
+      chat,
+      createSignal: () => {
+        controller.abort();
+        return controller.signal;
+      },
+    });
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "查 docs" }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("中断");
+    expect(chat).not.toHaveBeenCalled();
   });
 });

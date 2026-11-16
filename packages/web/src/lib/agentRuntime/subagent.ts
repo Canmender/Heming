@@ -16,6 +16,13 @@
  * - **有界**：`max_rounds` 默认 4、硬上限 6；每次工具结果截断到 4000 字符。
  *   跑满预算时如实说「可能不完整」，而不是硬编一个结论。
  * - **不流式**：子代理的中间输出不进主界面（会污染阅读），只回最终结论。
+ *
+ * d.200：一次可以派 2–3 个并行子代理（`tasks` 数组）。长任务里「翻三个目录」这类
+ * 工作本来在主对话里只能串行做：每轮一次工具、每轮都等模型回来。并行派出去之后，
+ * 主对话只花一次工具调用的时间。并发的上限写死在 `SUBAGENT_PARALLEL_DEFAULT` /
+ * `SUBAGENT_MAX_PARALLEL`——不做无限并发，否则一个请求能把模型配额打满。
+ * 同时把进度上报给界面（`onProgress`）：用户要能看见「两个子代理在读什么」，
+ * 也能一键停掉（`createSignal`）。
  */
 import type { ToolBridge } from "../agentStream.js";
 import type { ChatMessage } from "../llmClient.js";
@@ -43,6 +50,28 @@ export const SUBAGENT_TOOL_RESULT_MAX = 4000;
 /** 任务描述的长度上限：太长说明主模型在把整段上下文倒过来，不如自己读。 */
 export const SUBAGENT_TASK_MAX_CHARS = 2000;
 
+/** 一次最多能派几个并行子代理：再多人就不是「省轮次」而是打满配额了。 */
+export const SUBAGENT_MAX_PARALLEL = 3;
+
+/** 并行子代理的默认并发数（模型不指定时）。 */
+export const SUBAGENT_PARALLEL_DEFAULT = 2;
+
+/** 进度阶段：开始 / 一轮对话 / 一次工具 / 结束（done|failed 各一种）。 */
+export type SubagentProgressPhase = "start" | "round" | "tool" | "done" | "failed";
+
+/** 子代理进度事件：界面据此显示「哪个子代理在第几轮、正在读什么」。 */
+export interface SubagentProgressEvent {
+  /** 本次派遣内的任务 id（`sub-1` / `sub-2`），界面用来区分行。 */
+  taskId: string;
+  task: string;
+  phase: SubagentProgressPhase;
+  round: number;
+  /** `phase === "tool"` 时的工具名。 */
+  tool?: string;
+  /** `phase` 为 done/failed 时的简述（失败原因 / 轮次用量）。 */
+  note?: string;
+}
+
 /** 子代理的人设：短、只讲边界，不讲业务。 */
 const SUBAGENT_SYSTEM_PROMPT = [
   "你是一个只读子代理：你只能读文件、列文件、搜内容，不能写、不能执行命令、不能联网。",
@@ -55,7 +84,10 @@ const SUBAGENT_SYSTEM_PROMPT = [
 
 /** 模型给 `agent_task` 的参数（解析后）。 */
 export interface SubagentArgs {
+  /** 兼容单任务写法：等于 `tasks[0]`。 */
   task: string;
+  /** 并行任务列表（1–`SUBAGENT_MAX_PARALLEL` 条）。 */
+  tasks: string[];
   maxRounds: number;
 }
 
@@ -88,6 +120,8 @@ export interface SubagentDeps {
   ) => Promise<string>;
   /** 用户中断信号；缺省视为不可中断。 */
   signal?: AbortSignal;
+  /** 进度回调（d.200）：界面据此显示并行子代理正在做什么。 */
+  onProgress?: (event: SubagentProgressEvent) => void;
 }
 
 /** 子代理的结果：`text` 永远是给主模型看的结论（失败也带原因）。 */
@@ -105,7 +139,7 @@ export function subagentSpec(): unknown {
     function: {
       name: SUBAGENT_TOOL,
       description:
-        "派一个只读子代理去查资料：它只能读文件/列文件/搜内容，会把结论带回来。适合「要翻很多文件才知道答案」的检索，避免把大量原文拉进主对话。",
+        "派只读子代理去查资料：它只能读文件/列文件/搜内容，会把结论带回来。适合「要翻很多文件才知道答案」的检索，避免把大量原文拉进主对话。可以一次派 2–3 个任务并行跑（`tasks` 数组），省下串行的工具轮次。",
       parameters: {
         type: "object",
         properties: {
@@ -113,14 +147,21 @@ export function subagentSpec(): unknown {
             type: "string",
             description: "交给子代理的任务：写清要找什么、要回答什么（一两句话）",
           },
+          tasks: {
+            type: "array",
+            items: { type: "string", description: "一条子任务" },
+            minItems: 1,
+            maxItems: SUBAGENT_MAX_PARALLEL,
+            description: `要并行查的 2–${SUBAGENT_MAX_PARALLEL} 件事，每件都写清目标；与 task 二选一`,
+          },
           max_rounds: {
             type: "integer",
             minimum: 1,
             maximum: SUBAGENT_MAX_ROUNDS_LIMIT,
-            description: `子代理最多跑几轮工具（默认 ${SUBAGENT_MAX_ROUNDS_DEFAULT}，上限 ${SUBAGENT_MAX_ROUNDS_LIMIT}）`,
+            description: `每个子代理最多跑几轮工具（默认 ${SUBAGENT_MAX_ROUNDS_DEFAULT}，上限 ${SUBAGENT_MAX_ROUNDS_LIMIT}）`,
           },
         },
-        required: ["task"],
+        required: [],
         additionalProperties: false,
       },
     },
@@ -148,19 +189,52 @@ export function parseSubagentArgs(raw: string | undefined): SubagentParseResult 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, error: "agent_task 的参数必须是 JSON 对象：{\"task\":\"…\"}。" };
   }
-  const obj = parsed as { task?: unknown; max_rounds?: unknown };
-  const task = typeof obj.task === "string" ? obj.task.trim() : "";
-  if (!task) {
-    return {
-      ok: false,
-      error: "agent_task 缺少 task：用一两句话写清要子代理查什么（例如「在 docs/ 里找出所有提到限流的文件并总结各文件的说法」）。",
-    };
-  }
-  if (task.length > SUBAGENT_TASK_MAX_CHARS) {
-    return {
-      ok: false,
-      error: `agent_task 的 task 太长了（${task.length} 字，上限 ${SUBAGENT_TASK_MAX_CHARS}）：请只写目标，不要把整段上下文倒过来。`,
-    };
+  const obj = parsed as { task?: unknown; tasks?: unknown; max_rounds?: unknown };
+  const tasks: string[] = [];
+  if (Array.isArray(obj.tasks)) {
+    if (obj.tasks.length === 0) {
+      return {
+        ok: false,
+        error: "agent_task 的 tasks 是空数组：要么不传它、只传 task，要么写 1–3 件要并行查的事。",
+      };
+    }
+    if (obj.tasks.length > SUBAGENT_MAX_PARALLEL) {
+      return {
+        ok: false,
+        error: `agent_task 一次最多派 ${SUBAGENT_MAX_PARALLEL} 个子代理（收到 ${obj.tasks.length} 个）：请把任务合并/排序，先派最关键的几件。`,
+      };
+    }
+    for (const [index, item] of obj.tasks.entries()) {
+      const text = typeof item === "string" ? item.trim() : "";
+      if (!text) {
+        return {
+          ok: false,
+          error: `agent_task 的 tasks 第 ${index + 1} 条不是非空字符串：每条都要写清要查什么。`,
+        };
+      }
+      if (text.length > SUBAGENT_TASK_MAX_CHARS) {
+        return {
+          ok: false,
+          error: `agent_task 的 tasks 第 ${index + 1} 条太长了（${text.length} 字，上限 ${SUBAGENT_TASK_MAX_CHARS}）：只写目标，不要把整段上下文倒过来。`,
+        };
+      }
+      tasks.push(text);
+    }
+  } else {
+    const task = typeof obj.task === "string" ? obj.task.trim() : "";
+    if (!task) {
+      return {
+        ok: false,
+        error: `agent_task 缺少任务：用 {"task":"要查什么"}，或 {"tasks":["第一件","第二件"]} 一次派 ${SUBAGENT_PARALLEL_DEFAULT}–${SUBAGENT_MAX_PARALLEL} 个并行子代理（max_rounds 可选，1–${SUBAGENT_MAX_ROUNDS_LIMIT}）。`,
+      };
+    }
+    if (task.length > SUBAGENT_TASK_MAX_CHARS) {
+      return {
+        ok: false,
+        error: `agent_task 的 task 太长了（${task.length} 字，上限 ${SUBAGENT_TASK_MAX_CHARS}）：请只写目标，不要把整段上下文倒过来。`,
+      };
+    }
+    tasks.push(task);
   }
   let maxRounds = SUBAGENT_MAX_ROUNDS_DEFAULT;
   if (obj.max_rounds !== undefined && obj.max_rounds !== null) {
@@ -173,7 +247,7 @@ export function parseSubagentArgs(raw: string | undefined): SubagentParseResult 
     }
     maxRounds = Math.min(value, SUBAGENT_MAX_ROUNDS_LIMIT);
   }
-  return { ok: true, args: { task, maxRounds } };
+  return { ok: true, args: { task: tasks[0], tasks, maxRounds } };
 }
 
 /** 只保留白名单里的只读工具 specs（子代理不该看见写工具）。 */
@@ -198,39 +272,58 @@ export function clipSubagentResult(text: string, limit = SUBAGENT_TOOL_RESULT_MA
   return `${body.slice(0, head)}\n…（中间省略 ${body.length - limit} 字符）…\n${body.slice(-tail)}`;
 }
 
+/** 进度上报的小工具：没有回调时什么都不做（评测与单测都不传）。 */
+function emitProgress(deps: SubagentDeps, event: SubagentProgressEvent): void {
+  deps.onProgress?.(event);
+}
+
 /**
  * 跑一个只读子代理：最多 `maxRounds` 轮「模型 → 工具 → 模型」，直到模型不再要工具。
  *
  * 不抛异常：中断、跑满预算、白名单外调用都以文案形式回到主模型手里。
+ * `taskId` 只进进度事件（并行派遣时用来区分是哪一条）。
  */
-export async function runSubagent(
-  args: SubagentArgs,
+async function runOne(
+  task: string,
+  maxRounds: number,
   deps: SubagentDeps,
+  taskId: string,
 ): Promise<SubagentResult> {
   const tools = readOnlySpecs(deps.tools);
   const messages: ChatMessage[] = [
     { role: "system", content: SUBAGENT_SYSTEM_PROMPT },
-    { role: "user", content: args.task },
+    { role: "user", content: task },
   ];
-  const maxRounds = Math.max(1, Math.min(args.maxRounds, SUBAGENT_MAX_ROUNDS_LIMIT));
   let toolCalls = 0;
   let lastText = "";
+  emitProgress(deps, { taskId, task, phase: "start", round: 0 });
 
   for (let round = 0; round < maxRounds; round++) {
     if (deps.signal?.aborted) {
-      return {
-        ok: false,
-        text: "子代理已中断（本次运行被停止），它没有写任何东西（它本来也只能读）。",
-        rounds: round,
-        toolCalls,
-      };
+      const text = "子代理已中断（本次运行被停止），它没有写任何东西（它本来也只能读）。";
+      emitProgress(deps, { taskId, task, phase: "failed", round, note: "已中断" });
+      return { ok: false, text, rounds: round, toolCalls };
     }
     let calls: SubagentToolCall[] = [];
     const text = await deps.chat(messages, tools, deps.signal, (c) => {
       calls = c ?? [];
     });
     lastText = (text ?? "").trim();
+    emitProgress(deps, {
+      taskId,
+      task,
+      phase: "round",
+      round: round + 1,
+      note: calls.length ? `${calls.length} 个工具` : "给结论",
+    });
     if (calls.length === 0) {
+      emitProgress(deps, {
+        taskId,
+        task,
+        phase: "done",
+        round: round + 1,
+        ...(lastText ? {} : { note: "没有返回内容" }),
+      });
       return {
         ok: true,
         text: lastText || "（子代理没有返回内容）",
@@ -262,6 +355,7 @@ export async function runSubagent(
         continue;
       }
       toolCalls++;
+      emitProgress(deps, { taskId, task, phase: "tool", round: round + 1, tool: call.name });
       const result = await deps.execute({ name: call.name, arguments: call.arguments }, 
         deps.signal ? { signal: deps.signal } : undefined);
       messages.push({
@@ -273,12 +367,63 @@ export async function runSubagent(
     }
   }
 
+  emitProgress(deps, { taskId, task, phase: "done", round: maxRounds, note: "用完轮次预算" });
   return {
     ok: true,
     text: `${lastText || "（子代理没有给出结论）"}\n\n（子代理用完 ${maxRounds} 轮工具预算，结论可能不完整；需要更完整就再派一次，把范围缩小到具体目录或关键词。）`,
     rounds: maxRounds,
     toolCalls,
   };
+}
+
+/**
+ * 单任务入口的入参：既接受 d.162 的 `{ task, maxRounds }`（测试与评测直接这样调），
+ * 也接受 `parseSubagentArgs` 产出的完整形状（带 `tasks`）。
+ */
+export type SubagentRunInput = { task: string; maxRounds: number } | SubagentArgs;
+
+/** 跑一个只读子代理（单任务入口，兼容 d.162 的调用方与评测）。 */
+export async function runSubagent(
+  args: SubagentRunInput,
+  deps: SubagentDeps,
+): Promise<SubagentResult> {
+  const maxRounds = Math.max(1, Math.min(args.maxRounds, SUBAGENT_MAX_ROUNDS_LIMIT));
+  const task = "tasks" in args ? (args.tasks[0] ?? args.task) : args.task;
+  return runOne(task, maxRounds, deps, "sub-1");
+}
+
+/**
+ * 并行跑 2–3 个只读子代理（d.200）。
+ *
+ * 并发只用来**等 I/O**（模型请求 + 读文件），不是把额度打满：默认 2、硬上限 3。
+ * 结果顺序与传入顺序一致（`results[i]` 对应 `tasks[i]`），界面也是按这个顺序显示的——
+ * 完成先后不该影响「第 1 件查的是什么」。
+ */
+export async function runSubagentBatch(
+  tasks: readonly string[],
+  maxRounds: number,
+  deps: SubagentDeps,
+  concurrency = SUBAGENT_PARALLEL_DEFAULT,
+): Promise<SubagentResult[]> {
+  const list = tasks.slice(0, SUBAGENT_MAX_PARALLEL);
+  if (list.length === 0) return [];
+  const rounds = Math.max(1, Math.min(maxRounds, SUBAGENT_MAX_ROUNDS_LIMIT));
+  const results: SubagentResult[] = new Array(list.length);
+  let next = 0;
+  const workers = Math.max(1, Math.min(concurrency, list.length));
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      for (;;) {
+        const index = next;
+        next += 1;
+        if (index >= list.length) return;
+        const task = list[index];
+        if (task === undefined) return;
+        results[index] = await runOne(task, rounds, deps, `sub-${index + 1}`);
+      }
+    }),
+  );
+  return results;
 }
 
 /**
@@ -292,6 +437,30 @@ export interface WithSubagentToolOptions {
   conversationId: string;
   /** 覆盖子会话的对话请求（缺省走应用内的模型路由）。 */
   chat?: SubagentDeps["chat"];
+  /** 进度上报（d.200）：界面据此显示并行子代理正在做什么。 */
+  onProgress?: SubagentDeps["onProgress"];
+  /**
+   * 界面上的「停止子代理」入口（d.200）：返回一个用户可中途中断的信号。
+   *
+   * 和主对话自己的停止信号（`execOpts.signal`）是**两件事**：用户可能只想停掉
+   * 那两个子代理、让主对话继续——所以两个信号取或，任一触发都算中断。
+   */
+  createSignal?: () => AbortSignal;
+}
+
+/** 把两个中断信号合成一个：任一方 abort 都算中断（缺一方就返回另一方）。 */
+function combineSignals(first?: AbortSignal, second?: AbortSignal): AbortSignal | undefined {
+  if (!first) return second;
+  if (!second) return first;
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  if (first.aborted || second.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+  first.addEventListener("abort", stop, { once: true });
+  second.addEventListener("abort", stop, { once: true });
+  return controller.signal;
 }
 
 /** 把 `agent_task` 包到主桥上：工具清单多一件，其余工具原样透传。 */
@@ -319,9 +488,11 @@ export function withSubagentTool(
           ok: false,
         };
       }
-      const result = await runSubagent(parsed.args, {
+      const signal = combineSignals(opts.createSignal?.(), execOpts?.signal);
+      const results = await runSubagentBatch(parsed.args.tasks, parsed.args.maxRounds, {
         tools: bridge.tools,
-        signal: execOpts?.signal,
+        ...(signal ? { signal } : {}),
+        ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
         execute: (sub, subOpts) => bridge.execute(sub, subOpts),
         // 子代理的对话走与应用内对话同一条路由（重试、退避、候选切换都在里面）；
         // onDelta 故意丢掉：子代理的中间推理不该流进主界面。
@@ -344,8 +515,21 @@ export function withSubagentTool(
             });
           }),
       });
-      const head = `子代理（只读，${result.rounds} 轮 / ${result.toolCalls} 次工具调用）结论：`;
-      return { text: `${head}\n${result.text}`, ok: result.ok };
+      // 单任务保持 d.162 的文案形状（评测与既有用例都按它断言）；多任务按「【任务 N】」分段，
+      // 每段都带自己的轮次用量——主模型据此判断哪一件没查完、要不要补派。
+      const sections = results.map((result, index) => {
+        const head = `子代理（只读，${result.rounds} 轮 / ${result.toolCalls} 次工具调用）结论：`;
+        const task = parsed.args.tasks[index] ?? "";
+        return results.length > 1 ? `【任务 ${index + 1}】${task}\n${head}\n${result.text}` : `${head}\n${result.text}`;
+      });
+      const title =
+        results.length > 1
+          ? `并行子代理（只读，共 ${results.length} 个任务，每件上限 ${parsed.args.maxRounds} 轮）\n`
+          : "";
+      return {
+        text: `${title}${sections.join("\n\n")}`,
+        ok: results.every((result) => result.ok),
+      };
     },
   };
 }

@@ -29,9 +29,11 @@ import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
 import { formatClock, formatDayClock } from "../lib/formatTime.js";
 // d.158：任务清单面板的接线用例（清单来自 todo store，渲染在输入栏上方）
 import { TODOS_KEY, clearTodos, resetTodoStore, setTodos } from "../lib/todo/store.js";
+import { GOALS_KEY, getGoal, resetGoalStore } from "../lib/agentRuntime/goal.js";
 // d.173：计划模式的接线用例（存储 + 提示词 + 按钮 aria 同源）
 import { PLAN_MODE_KEY, loadPlanMode, resetPlanMode } from "../lib/agentRuntime/planMode.js";
 import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
+import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/subagentRuns.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
@@ -4093,6 +4095,50 @@ describe("ChatPage", () => {
   });
 
 
+  /**
+   * d.199：运行中插话。
+   *
+   * 以前生成中发消息直接被拒（「先点停止，或等这一轮结束再发」）。点停止会丢掉这一轮
+   * 已经做好的部分，等结束又太晚——用户真正要的是「别改文件了，先跑测试」。
+   * 这一例锁两件事：消息照常落库/上行；提示改成「已插话」而不是把人挡回去。
+   */
+  it("运行中插话：生成中照发，消息照常发出并提示「已插话」", async () => {
+    bindAssistant();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 模拟本机正在生成（streaming + 归属标记）：这是「运行中」的真实判据
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          s1: {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "半句话",
+            status: "streaming",
+            lastAt: Date.now(),
+          },
+        },
+        streamOwner: { s1: true },
+      });
+    });
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "别改文件了，先跑测试" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 消息照常发出（插话不是「先拦住」）：落帧仍是 e2e 信封
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({ kind: "text", text: "别改文件了，先跑测试" });
+    // 提示换成「已插话」，旧的「先点停止」文案必须消失
+    await waitFor(() => expect(screen.getByText(/已插话/)).toBeInTheDocument());
+    expect(screen.queryByText(/先点停止/)).not.toBeInTheDocument();
+    await waitFor(() => expect(input).toHaveValue(""));
+  });
 });
 
 
@@ -5593,6 +5639,31 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(screen.getByText(/可撤回改动：/)).toBeInTheDocument();
   }, 30_000);
 
+  it("I3s `/goal` 设目标：本地生效、写进提示词、命令本身不落库（d.201）", async () => {
+    localStorage.removeItem(GOALS_KEY);
+    resetGoalStore();
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "/goal 把登录改成扫码" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/已设为目标：把登录改成扫码/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    // 本地命令：不发模型、不在历史里留一条「/goal …」
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(screen.queryByText("/goal 把登录改成扫码")).toBeNull();
+    expect(getGoal("c1")?.text).toBe("把登录改成扫码");
+    expect(await screen.findByTestId("goal-bar")).toHaveTextContent("把登录改成扫码");
+
+    // 「完成」把目标从存储里摘掉，条也消失
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(getGoal("c1")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("goal-bar")).toBeNull());
+  }, 30_000);
+
   it("I3q 点模型名就地换模型：绑定写回、提示生效时机，且不跳设置页（d.195）", async () => {
     await setupAgentChat();
     useLlmStore.setState({
@@ -5639,6 +5710,33 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.keyDown(box, { key: "ArrowUp" });
     expect(box.value).toBe("我正在写");
   }, 30_000);
+
+  it("I3r 并行子代理在跑时出现状态条：说清第几轮、在调什么，停止只断子代理（d.200）", async () => {
+    bindAssistant();
+    render(<ChatPage />);
+    expect(screen.queryByTestId("subagent-runs")).toBeNull();
+
+    act(() => {
+      applySubagentProgress({ taskId: "sub-1", task: "查 docs 的安装说明", phase: "start", round: 0 });
+      applySubagentProgress({
+        taskId: "sub-1",
+        task: "查 docs 的安装说明",
+        phase: "tool",
+        round: 2,
+        tool: "file_grep",
+      });
+    });
+    expect(screen.getByTestId("subagent-runs")).toBeInTheDocument();
+    expect(screen.getByText(/第 2 轮 · 正在 file_grep/)).toBeInTheDocument();
+
+    // 点「停止」只是发信号（没有在跑的子代理时不报错、也不假装清空）
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    expect(screen.getByTestId("subagent-runs")).toBeInTheDocument();
+
+    // 收口/切会话后清空，面板不该常驻
+    act(() => resetSubagentRuns());
+    expect(screen.queryByTestId("subagent-runs")).toBeNull();
+  });
 });
 
 describe("ChatPage 中断/关闭后接着做（d.189）", () => {
