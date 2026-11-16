@@ -1,7 +1,7 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-16
-- 当前版本：`d.198.4.105.12`（semver `198.4.105` / Windows `198.4.105.12`；工作树未提交、未打包、未部署）
+- 当前版本：`d.198.4.105.12`（semver `198.4.105` / Windows `198.4.105.12`；已提交 `e750ba78`、已打包 `r106`、已部署云端、已发布更新源）
 - 本轮标签：d.198 搜到之后能落到那句话上（分支 `main`，版本 d.197.4.105.12 → d.198.4.105.12）——`store/ui.ts` 新增一次性投递槽 `messageJump` / `requestMessageJump` / `consumeMessageJump`；左栏命中行、命中片段、「更早的会话里也有命中」都带 `messageId` 走 `onOpenMessage`；`ChatPage` 消费时扩窗、只滚消息容器（不用 `scrollIntoView`）、高亮 2.4 秒，消息已删则如实提示。
 - 上一轮标签：d.197 左栏搜索也能搜消息内容（分支 `main`，版本 d.196.4.105.12 → d.197.4.105.12）——服务端新增 `GET /api/conversations/search`（2–80 字、最多 200 会话 × 200 条、同会话只回最新一条、带命中片段与 `truncated`），`messages` 加 `(conv_id, created_at)` 索引；web 新增 `lib/conversationSearch.ts` 与 `searchConversationContent`，左栏在会话名不匹配时也按正文命中显示片段、列表外命中单列「更早的会话里也有命中」、失败时如实说明「只按会话名匹配」。
 - 上上轮标签：d.196 侧栏标出「哪个会话还没跑完」（`resumePoint` 改为按会话存 20 条 + `subscribeResumePoints`；新增 `useResumePoint` 与 `UnfinishedTurnBadge`，会话行显示「未跑完」；`clearTurnRunning(convId)` 只清当前会话）
@@ -31,6 +31,8 @@ d.197 让左栏能搜消息正文，但命中之后只做了一件事：打开�
 - 新增 10 例：`store/ui.test.ts` 3 例（投递槽 id 与 token 自增、消费即清、手动开会话清残留）、`ConversationRail.test.tsx` 4 例（行走 `onOpenMessage`、片段可点、页外命中带 id、没接回调时退回 `onOpen`）、`ChatPage.test.tsx` 3 例（落位并只点亮那一条、消息已删时如实提示并清槽、投给别的会话的意图不在本会话乱跳）。
 - `packages/web` 全量 **356 files / 5200 passed**；`pnpm -w typecheck` 六包全 Done；确定性 `pnpm eval:agent` **39/39**（tokens/pass 2589、p95 85ms）。
 - 版本 d.198.4.105.12（semver `198.4.105` / Windows `198.4.105.12`）；CHANGELOG 307 条 / RELEASE-NOTES 195 条；README 37484 字节。
+- 已发版：`git commit` = `e750ba78`（d.180–d.198 共 19 版累积，38 个新文件），`git tag d.198.4.105.12` 已推 origin，`main` 已 push（`0cbf5d52..e750ba78`）。
+- 安装包 `packages/desktop/release/r106/和鸣 Setup d.198.4.105.12.exe`（370,489,656 字节，sha512 `cXnrUZQq9IZLVet1w4k/sg+RRGJjBTvTTOswhKPLuw2nmhArv1MtxstjAHYOjbsa1Zz6k0VQQsJeTNpodDq9BA==`）：部署到 47.92.39.184（`INSTALL DONE: d.198.4.105.12` / `EXIT=0`，smoke `/api/health` = `{"ok":true}`）；更新源 `latest.yml` → `version: 198.4.105`、`size: 370489656`、sha512 与本地 exe 一致；公网安装包 HEAD 200 / `Content-Type: application/octet-stream` / `Content-Length: 370489656`，`Range: bytes=0-1023` → 206；云端前端产物含 `198.4.105`。
 
 ### 0.4 未做
 
@@ -2631,14 +2633,14 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-16 18:3x） | d.198.4.105.12（工作树未提交 / 未打包 / 未部署） |
-| 安装包（最新） | **`packages/desktop/release/r104/和鸣 Setup d.179.4.105.12.exe`（370,457,565 字节，sha512 `/IRMwyB9Ek8mEblBPKJLmCKxqiEVqrPqeyoJ7bLPHQJYnSnJ5uY7NMzy/bozLVKDTnXdwHNZA7Z2pcEsy9rJLA==`）** |
+| 当前版本（2026-11-16 18:5x） | d.198.4.105.12（已提交 `e750ba78` / 已打包 `r106` / 已部署 / 已发布） |
+| 安装包（最新） | **`packages/desktop/release/r106/和鸣 Setup d.198.4.105.12.exe`（370,489,656 字节，sha512 `cXnrUZQq9IZLVet1w4k/sg+RRGJjBTvTTOswhKPLuw2nmhArv1MtxstjAHYOjbsa1Zz6k0VQQsJeTNpodDq9BA==`）** |
 | 版本 | 当前 `d.198.4.105.12`（semver `198.4.105`）· 最近一条 CHANGELOG「搜到之后能落到那句话上」 |
 | 测试 | web 356 files / 5200 passed；desktop 973 passed（1 skip）；deterministic eval 39/39 |
-| 线上 | 仍是 d.179.4.105.12（安装包 r104），本轮 d.180–d.198 未部署 |
-| 安装包（已发布） | **`和鸣 Setup d.179.4.105.12.exe`（`r104`，370,457,565 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件（exe / blockmap / latest.yml）并按远端大小 + sha512 逐项校验通过；公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`、`Content-Length: 370457565`。 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 179.4.105`**、`path: 和鸣 Setup d.179.4.105.12.exe`、`size: 370457565`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，`Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-362/363`）。 |
-| 发布标签 | 最新标签 `d.179.4.105.12`（指向 `0cbf5d52`）；本轮 d.180–d.198 未提交、未 push |
+| 线上 | **d.198.4.105.12**（安装包 r106）；d.180–d.198 已部署，服务器本机 `/api/health` = `{"ok":true}` |
+| 安装包（已发布） | **`和鸣 Setup d.198.4.105.12.exe`（`r106`，370,489,656 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件（exe / blockmap / latest.yml）并按远端大小 + sha512 逐项校验通过（exe 370489656 / blockmap 383652 / latest.yml 363）；公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`、`Content-Length: 370489656`。 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 198.4.105`**、`path: 和鸣 Setup d.198.4.105.12.exe`、`size: 370489656`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-1023/370489656`）。 |
+| 发布标签 | 最新标签 `d.198.4.105.12`（指向 `e750ba78`，已推到 origin）；`main` 已同步（origin/main = `e750ba78`） |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
