@@ -1,7 +1,7 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-16
-- 当前版本：`d.201.4.105.12`（semver `201.4.105` / Windows `201.4.105.12`；工作树未提交、未打包、未部署）
+- 当前版本：`d.201.4.105.12`（semver `201.4.105` / Windows `201.4.105.12`；已提交 `4cfa0443`、已打包 `r107`、已部署云端、已发布更新源）
 - 本轮标签：d.201 目标记得住（分支 `main`，版本 d.200.4.105.12 → d.201.4.105.12）——新增 `lib/agentRuntime/goal.ts`（会话级目标：localStorage `heming.goal.v1`、按会话隔离、只留最近 50、空文本=清除、300 字截断、订阅）；`runtimePrompt` 新增 `## 当前目标（跨轮保持）`（放在任务清单之前，三条口径：清单做完≠目标完成 / 偏离先说明 / 达成后说怎么验证）；新增 `/goal` 本地命令（设定 / done / off）与 `GoalBar` + `useGoal`（输入框上方目标条，可完成/清除）；`ChatPage` 每轮把目标写进提示词、命令不发请求不落库。
 - 上一轮标签：d.200 并行子代理（分支 `main`，版本 d.199.4.105.12 → d.200.4.105.12）——`agent_task` 新增 `tasks` 数组（1–3 条，与 `task` 二选一）与 `runSubagentBatch`（默认并发 2 / 上限 3、结果按传入顺序）；新增 `SubagentProgressEvent`（start/round/tool/done/failed）与 `withSubagentTool` 的 `onProgress`/`createSignal`（界面停止与主对话停止取或）；新增 `agentRuntime/subagentRuns.ts`（内存表 + 订阅）与 `components/SubagentRuns.tsx`（状态条：第 N 轮 · 正在 xxx，可停止）；只读白名单不变。
 - 上上轮标签：d.199 生成中也能插话（分支 `main`，版本 d.198.4.105.12 → d.199.4.105.12）——新增 `agentRuntime/steer.ts` 的 `createSteerQueue`（`push/take/shift/size/pending/clear`，只存内存）；`agentStream` 的 `TriggerDeps` 加 `drainSteer`，每开一个工具轮（`round > 0`）把插话作为 `role:"user"` 追加到工具结果之后；`ChatPage` 的 `send()` 运行中不再拒绝——纯文本入队并提示「已插话（排队 N 条）」，带附件仍拦，`onRunSettled` 若有残留则另起一轮接着处理。
@@ -33,6 +33,9 @@
 
 - `goal.test.ts` 10 例；`runtimePrompt.test.ts` +2（有目标才写、无目标逐字不变）；`GoalBar.test.tsx` 5 例；`ChatPage.test.tsx` +1（`/goal` 不发请求不落库、条出现、点完成即清）。
 - web 全量 **361 files / 5250 passed**（94.2s）；typecheck 六包 Done；确定性 `eval:agent` **39/39**（tokens/pass 2589、缓存读 2.4%、p95 91ms）。
+- 发版：`git commit` = `4cfa0443`（d.199–d.201 累积，33 项改动落库）；`node scripts/release.mjs --desktop --deploy --publish --release-r 107` 十步里 **8 步 OK / 1 步 SKIP（bump）**，逐包测试 5/5。
+- 安装包 `packages/desktop/release/r107/和鸣 Setup d.201.4.105.12.exe`（**370,495,951** 字节，sha512 `jWmv32EMNQPLQXp66jG242PG8WWW/KuAti8PYj3RhDnF6LZM3rb38hKOoHYypge0erGVBhW+L/HdGtHRjoJpeQ==`；blockmap 383,602 字节、latest.yml 363 字节）：部署包 23,159,477 字节（md5 `b2f4c8c54bccc7caa3d2b1739331beb8`、清单 3181 项 0 个不该有），服务器 `INSTALL DONE: d.201.4.105.12` / `EXIT=0`，smoke `/api/health` = `{"ok":true}`、`/` 200、`heming-api` active。
+- 公网核验（release.mjs 第 10 步的 5 项人工项已逐条补做）：`http://47.92.39.184/updates/latest.yml` → **`version: 201.4.105`**、`size: 370495951`、sha512 与本地 exe 逐字一致、`releaseDate: 2026-11-16T12:19:27.689Z`；`HEAD latest.yml` → 200 / `application/octet-stream` / `Content-Length: 363`；安装包 `Range: bytes=0-1023` → **206** / `Content-Range: bytes 0-1023/370495951`；首页 200 且主 bundle `assets/index-CKF4BjdQ.js` 与本机 `packages/web/dist/index.html` 引用的同名同字节、`assets/capability-fjOXpS7W.js` 内含 `d.201.4.105.12`（不含 `198.4.105`）。
 
 ### 0.4 没做
 
@@ -2757,14 +2760,14 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-16 20:1x） | d.201.4.105.12（工作树未提交 / 未打包 / 未部署） |
-| 安装包（最新） | **`packages/desktop/release/r106/和鸣 Setup d.198.4.105.12.exe`（370,489,656 字节，sha512 `cXnrUZQq9IZLVet1w4k/sg+RRGJjBTvTTOswhKPLuw2nmhArv1MtxstjAHYOjbsa1Zz6k0VQQsJeTNpodDq9BA==`）** |
+| 当前版本（2026-11-16 20:3x） | d.201.4.105.12（已提交 `4cfa0443` / 已打包 `r107` / 已部署 / 已发布） |
+| 安装包（最新） | **`packages/desktop/release/r107/和鸣 Setup d.201.4.105.12.exe`（370,495,951 字节，sha512 `jWmv32EMNQPLQXp66jG242PG8WWW/KuAti8PYj3RhDnF6LZM3rb38hKOoHYypge0erGVBhW+L/HdGtHRjoJpeQ==`）** |
 | 版本 | 当前 `d.201.4.105.12`（semver `201.4.105`）· 最近一条 CHANGELOG「目标记得住」 |
 | 测试 | web 361 files / 5250 passed；desktop 973 passed（1 skip）；deterministic eval 39/39 |
-| 线上 | **d.198.4.105.12**（安装包 r106）；本轮 d.201 未部署 |
-| 安装包（已发布） | **`和鸣 Setup d.198.4.105.12.exe`（`r106`，370,489,656 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件（exe / blockmap / latest.yml）并按远端大小 + sha512 逐项校验通过（exe 370489656 / blockmap 383652 / latest.yml 363）；公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`、`Content-Length: 370489656`。 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 198.4.105`**、`path: 和鸣 Setup d.198.4.105.12.exe`、`size: 370489656`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-1023/370489656`）。 |
-| 发布标签 | 最新标签 `d.198.4.105.12`（指向 `d6ecddee`，已推到 origin）；`main` 已同步（origin/main = `d6ecddee`）；本轮 d.201 未提交、未 push |
+| 线上 | **d.201.4.105.12**（安装包 r107）；d.199–d.201 已部署，服务器本机 `/api/health` = `{"ok":true}`、`/` 200 |
+| 安装包（已发布） | **`和鸣 Setup d.201.4.105.12.exe`（`r107`，370,495,951 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件（exe / blockmap / latest.yml）并按远端大小 + sha512 逐项校验通过（exe 370495951 / blockmap 383602 / latest.yml 363）；公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`，`Range: bytes=0-1023` → 206。 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 201.4.105`**、`path: 和鸣 Setup d.201.4.105.12.exe`、`size: 370495951`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-1023/370495951`）。 |
+| 发布标签 | 最新标签 `d.201.4.105.12`（先打在 `4cfa0443`，随后改指文档回填提交并 push origin）；`main` 已同步 |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
