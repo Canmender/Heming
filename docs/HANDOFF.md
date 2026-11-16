@@ -1945,14 +1945,14 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-16 10:1x） | d.179.4.105.11（工作树，未提交） |
-| 安装包（最新） | 仍是 d.152 r103；本轮 d.179.4.105 未重新打包 |
-| 版本 | 应用 `d.179.4.105.11`（semver `179.4.105`） |
-| 测试 | web 338 files / 5022 passed；desktop 963 passed；eval 回放 38/38、真实 deepseek-flash 46 条 **42/42**（含 5 道 benchmark 全过） |
-| 线上 | 仍是 d.152；本轮 d.179.4.105（含 d.153–d.178）未部署 |
-| 安装包（已发布） | **`和鸣 Setup d.152.4.95.11.exe`（`r103`，370,378,694 字节，sha512 `ZE0DLcNb…w==`）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件并按远端大小 + sha512 逐项校验通过（`ok 和鸣 Setup d.152.4.95.11.exe 370378694 字节 sha512 一致`）。公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`、`Content-Length: 370378694`；`Range: bytes=0-99` → 206。 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 152.4.95`**（sha512 与本地安装包逐字一致，`size: 370378694`）；HEAD 200、`Content-Length: 360`、`Content-Type: application/octet-stream`，`Range: bytes=0-99` → 206。云端旧版本安装器未清理（下一轮可只留当前 + 上一版）。 |
-| 发布标签 | 本轮 d.153–d.179.4.105 未提交、未 push |
+| 当前版本（2026-11-16 10:46） | **d.179.4.105.12**（已提交 `6f1790ec`、已 push `origin/main`、已打包 `r104`、已部署、已发布更新源） |
+| 安装包（最新） | **`packages/desktop/release/r104/和鸣 Setup d.179.4.105.12.exe`（370,457,565 字节，sha512 `/IRMwyB9Ek8mEblBPKJLmCKxqiEVqrPqeyoJ7bLPHQJYnSnJ5uY7NMzy/bozLVKDTnXdwHNZA7Z2pcEsy9rJLA==`）** |
+| 版本 | 应用 `d.179.4.105.12`（semver `179.4.105`，Windows 四段 `179.4.105.12`；`version.mjs` exit 0） |
+| 测试 | 发版链十步：预检 / build / **逐包测试 5/5 通过** / changelog 校验 / 生成模块 / 打包 r104 / 备份+部署（install 尾部 `INSTALL DONE`）/ 发布更新源；此前实测 web 338 files / 5022 passed、desktop 963 passed、server 329 passed、eval 回放 38/38、真实 deepseek-flash 46 条 **42/42**（含 5 道 benchmark 全过） |
+| 线上 | **已部署 d.179.4.105.12** 并公网核验：`/api/health` → `{"ok":true}`；首页主 bundle `assets/index-B7QHRCX7.js` 与本机 `packages/web/dist` **同名同字节**（MD5 `cdf086bd30465216f3145e7c1de25cf1`）。服务器 `install-app.sh` 尾部 `INSTALL DONE`。 |
+| 安装包（已发布） | **`和鸣 Setup d.179.4.105.12.exe`（`r104`，370,457,565 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 3 个文件（exe / blockmap / latest.yml）并按远端大小 + sha512 逐项校验通过；公网 HEAD 安装器 → 200、`Content-Type: application/octet-stream`、`Content-Length: 370457565`。 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 179.4.105`**、`path: 和鸣 Setup d.179.4.105.12.exe`、`size: 370457565`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，`Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-362/363`）。 |
+| 发布标签 | 本轮已提交并 push `origin/main` @ `6f1790ec`（`d.179.4.105.12`）；安装包/更新源见上两行 |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
