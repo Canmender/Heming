@@ -252,7 +252,6 @@ export interface CaseObservation {
     outputDigest?: string;
   }[];
 }
-}
 
 /** rollout 记录的最小形状（runner 只关心这几类）。 */
 export type RolloutRecord =

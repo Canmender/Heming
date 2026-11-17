@@ -15,6 +15,7 @@ import type { FileRoot } from "../../packages/web/src/lib/fileEdit/paths.js";
 import type {
   ShellBridge,
   ShellCancelResponse,
+  ShellFailure,
   ShellJobFailureCode,
   ShellJobKillResponse,
   ShellJobOutputResponse,
@@ -137,7 +138,7 @@ export function createEvalShellBridge(options: EvalShellBridgeOptions): ShellBri
     },
     // d.180：后台作业四件（起 / 读增量 / 列 / 停）。评测也走桌面真实实现，
     // 否则「起得来、轮询得到、杀得掉」这三件事只有单测证明。
-    async start(request): Promise<ShellJobStartResponse> {
+    async start(request): Promise<ShellJobStartResponse | ShellFailure> {
       const result = await desktopShell.startBackground({
         runId: options.runId?.() || `eval-job-${Date.now()}-${seq++}`,
         roots: request.roots,
@@ -154,7 +155,7 @@ export function createEvalShellBridge(options: EvalShellBridgeOptions): ShellBri
         cwd: result.cwd,
       };
     },
-    async jobOutput(request): Promise<ShellJobOutputResponse> {
+    async jobOutput(request): Promise<ShellJobOutputResponse | ShellFailure> {
       const result = await desktopShell.readJobOutput(request.jobId, request.waitMs);
       if (!result.ok) {
         return { ok: false, code: jobCode(result.code), error: result.error };
@@ -170,20 +171,25 @@ export function createEvalShellBridge(options: EvalShellBridgeOptions): ShellBri
         droppedBytes: result.droppedBytes,
       };
     },
-    async jobs(): Promise<ShellJobSummary[]> {
-      return desktopShell.listJobs().map((job) => ({
-        id: job.id,
-        command: job.command,
-        cwd: job.cwd,
-        running: job.running,
-        exitCode: job.exitCode,
-        startedAt: job.startedAt,
-        finishedAt: job.finishedAt,
-        bytes: job.bytes,
-        dropped: job.dropped,
-      }));
+    async jobs(): Promise<{ ok: true; jobs: ShellJobSummary[] } | ShellFailure> {
+      // 与 web 侧 `ShellBridge.jobs` 的契约一致：成功包一层 `{ ok: true, jobs }`，
+      // 而不是裸数组（`command_list` 按 `ok` 判断通道是否可用）。
+      return {
+        ok: true,
+        jobs: desktopShell.listJobs().map((job) => ({
+          id: job.id,
+          command: job.command,
+          cwd: job.cwd,
+          running: job.running,
+          exitCode: job.exitCode,
+          startedAt: job.startedAt,
+          finishedAt: job.finishedAt,
+          bytes: job.bytes,
+          dropped: job.dropped,
+        })),
+      };
     },
-    async jobKill(request): Promise<ShellJobKillResponse> {
+    async jobKill(request): Promise<ShellJobKillResponse | ShellFailure> {
       const result = desktopShell.killJob(request.jobId);
       if (!result.ok) {
         return { ok: false, code: jobCode(result.code), error: result.error };

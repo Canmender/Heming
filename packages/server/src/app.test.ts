@@ -4,6 +4,7 @@ import type { Conversation } from "@heming/shared";
 import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp, searchSnippet } from "./app.js";
+import { issueToken } from "./auth.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -926,5 +927,165 @@ describe("会话内容搜索（d.197）", () => {
     expect(searchSnippet("line1\nline2\ntarget here", "target")).toBe("line1 line2 target here");
     expect(searchSnippet("   \n  ", "x")).toBeNull();
     expect(searchSnippet("正文里没有这个词", "absent")).toBeNull();
+  });
+});
+
+describe("token 生命周期（d.236）", () => {
+  let store: ReturnType<typeof createMemoryStore>;
+  let app: App;
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  beforeEach(() => {
+    store = createMemoryStore();
+    app = createApp(store, { allowRegister: true });
+  });
+
+  it("登录/注册响应带 expiresAt（毫秒时间戳，约 30 天后）", async () => {
+    const registered = await request(app).post("/api/auth/register").send({
+      username: "alice",
+      password: "secret123",
+      displayName: "Alice",
+    });
+    expect(registered.status).toBe(201);
+    expect(typeof registered.body.expiresAt).toBe("number");
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    expect(registered.body.expiresAt).toBeGreaterThan(Date.now() + thirtyDaysMs - 60_000);
+    expect(registered.body.expiresAt).toBeLessThan(Date.now() + thirtyDaysMs + 60_000);
+
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "alice", password: "secret123" });
+    expect(login.status).toBe(200);
+    expect(typeof login.body.expiresAt).toBe("number");
+  });
+
+  it("刷新：旧 token 立即失效，新 token 可用且重新计时", async () => {
+    const a = await register(app, "alice");
+    const refreshed = await request(app).post("/api/auth/refresh").set(auth(a.token));
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.token).not.toBe(a.token);
+    expect(typeof refreshed.body.expiresAt).toBe("number");
+
+    expect((await request(app).get("/api/me").set(auth(a.token))).status).toBe(401);
+    const me = await request(app).get("/api/me").set(auth(refreshed.body.token));
+    expect(me.status).toBe(200);
+    expect(me.body.username).toBe("alice");
+  });
+
+  it("刷新需要登录态：无 token 401", async () => {
+    expect((await request(app).post("/api/auth/refresh")).status).toBe(401);
+  });
+
+  it("登出：只吊销当前 token，其他设备不受影响", async () => {
+    const a = await register(app, "alice");
+    const second = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "alice", password: "secret123" });
+    expect(second.status).toBe(200);
+
+    const out = await request(app).post("/api/auth/logout").set(auth(a.token));
+    expect(out.status).toBe(204);
+    expect((await request(app).get("/api/me").set(auth(a.token))).status).toBe(401);
+    expect((await request(app).get("/api/me").set(auth(second.body.token))).status).toBe(200);
+  });
+
+  it("退出所有设备：DELETE /api/auth/sessions 吊销全部并返回数量", async () => {
+    const a = await register(app, "alice");
+    await request(app).post("/api/auth/login").send({ username: "alice", password: "secret123" });
+    const res = await request(app).delete("/api/auth/sessions").set(auth(a.token));
+    expect(res.status).toBe(200);
+    // 注册签发的 + 登录签发的，全部被吊销（包括发起请求的这条）。
+    expect(res.body.revoked).toBe(2);
+    expect((await request(app).get("/api/me").set(auth(a.token))).status).toBe(401);
+  });
+
+  it("过期 token 401（会话按过期处理，不再放行）", async () => {
+    const a = await register(app, "alice");
+    const expired = issueToken(store, a.user.id, Date.now() - 1);
+    expect((await request(app).get("/api/me").set(auth(expired))).status).toBe(401);
+  });
+});
+
+describe("登录/注册限流（d.236）", () => {
+  it("连续失败达到上限 → 429 + Retry-After；键按 ip|username 隔离", async () => {
+    const app = createApp(createMemoryStore(), {
+      allowRegister: true,
+      loginRateLimit: { windowMs: 60_000, max: 3 },
+    });
+    await register(app, "alice");
+    for (let i = 0; i < 3; i += 1) {
+      const r = await request(app)
+        .post("/api/auth/login")
+        .send({ username: "alice", password: "wrong-pass" });
+      expect(r.status).toBe(401);
+    }
+    const blocked = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "alice", password: "secret123" });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+
+    // 另一个用户名不受影响：限流键是 ip|username，不是全局限流。
+    const other = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "bob", password: "whatever" });
+    expect(other.status).toBe(401);
+  });
+
+  it("成功登录清零失败计数", async () => {
+    const app = createApp(createMemoryStore(), {
+      allowRegister: true,
+      loginRateLimit: { windowMs: 60_000, max: 3 },
+    });
+    await register(app, "alice");
+    for (let i = 0; i < 2; i += 1) {
+      await request(app).post("/api/auth/login").send({ username: "alice", password: "bad" });
+    }
+    const ok = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "alice", password: "secret123" });
+    expect(ok.status).toBe(200);
+    // 清零后再错 3 次仍是 401（计数重新从 0 开始）；第 4 次才 429。
+    for (let i = 0; i < 3; i += 1) {
+      expect(
+        (await request(app).post("/api/auth/login").send({ username: "alice", password: "bad" }))
+          .status,
+      ).toBe(401);
+    }
+    expect(
+      (await request(app).post("/api/auth/login").send({ username: "alice", password: "bad" }))
+        .status,
+    ).toBe(429);
+  });
+
+  it("失败响应不泄露用户是否存在（文案与形状一致）", async () => {
+    const app = createApp(createMemoryStore(), { allowRegister: true });
+    await register(app, "alice");
+    const wrongPassword = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "alice", password: "wrong-pass" });
+    const noSuchUser = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "nobody-here", password: "wrong-pass" });
+    expect(wrongPassword.status).toBe(401);
+    expect(noSuchUser.status).toBe(401);
+    expect(wrongPassword.body).toEqual(noSuchUser.body);
+    expect(wrongPassword.body).toEqual({ error: "invalid credentials" });
+  });
+
+  it("注册按 IP 限流：超限 429 + Retry-After", async () => {
+    const app = createApp(createMemoryStore(), {
+      allowRegister: true,
+      registerRateLimit: { windowMs: 60_000, max: 2 },
+    });
+    await register(app, "alice");
+    await register(app, "bob");
+    const blocked = await request(app).post("/api/auth/register").send({
+      username: "carol",
+      password: "secret123",
+      displayName: "Carol",
+    });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
   });
 });

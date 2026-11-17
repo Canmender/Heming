@@ -360,12 +360,15 @@ export function buildTaskReport(task: TaskRecord): string {
       const args = oneLine(step.args);
       if (args) lines.push(`   - 参数：${clip(args, 200)}`);
       if (step.denyCause) {
+        // hooks 拒绝 ≠ 用户拒绝：报告里混成「用户当场拒绝」会让复盘指向错的人。
         const why =
           step.denyCause === "rule"
             ? "命中记住的拒绝规则"
             : step.denyCause === "gate"
               ? "确认流程异常"
-              : "用户当场拒绝";
+              : step.denyCause === "hook"
+                ? "被工作区 hooks 拒绝"
+                : "用户当场拒绝";
         lines.push(`   - 拒绝原因：${why}`);
       }
       const result = oneLine(step.result ?? "");
@@ -594,7 +597,10 @@ function pickStep(raw: unknown): TaskStep | null {
     startedAt,
     ...(typeof raw.endedAt === "number" ? { endedAt: raw.endedAt } : {}),
     ...(sources?.length ? { sources } : {}),
-    ...(raw.denyCause === "user" || raw.denyCause === "rule" || raw.denyCause === "gate"
+    ...(raw.denyCause === "user" ||
+    raw.denyCause === "rule" ||
+    raw.denyCause === "gate" ||
+    raw.denyCause === "hook"
       ? { denyCause: raw.denyCause }
       : {}),
   };

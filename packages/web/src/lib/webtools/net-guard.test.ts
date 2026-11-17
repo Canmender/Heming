@@ -71,4 +71,34 @@ describe("checkPublicHttpUrl", () => {
       expect(verdict.ok, raw).toBe(false);
     }
   });
+
+  it("域名策略：白名单外拒绝、名单内放行、子域按规则走（d.238）", () => {
+    const policy = { mode: "allowlist" as const, allow: ["example.com", "*.docs.dev"] };
+    const blocked = checkPublicHttpUrl("https://evil.test/a", { policy });
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) {
+      expect(blocked.error).toContain("不在允许列表");
+      expect(blocked.error).toContain("设置 → 网络访问");
+    }
+    expect(checkPublicHttpUrl("https://example.com/a", { policy }).ok).toBe(true);
+    expect(checkPublicHttpUrl("https://a.example.com/a", { policy }).ok).toBe(true);
+    expect(checkPublicHttpUrl("https://api.docs.dev/a", { policy }).ok).toBe(true);
+    expect(checkPublicHttpUrl("https://docs.dev/a", { policy }).ok).toBe(false);
+  });
+
+  it("域名策略：开放模式与不传策略都不受影响", () => {
+    expect(checkPublicHttpUrl("https://anything.test/", { policy: { mode: "open", allow: [] } }).ok).toBe(true);
+    expect(checkPublicHttpUrl("https://anything.test/").ok).toBe(true);
+  });
+
+  it("内网错误优先于白名单提示（改设置也读不到内网，不能说成「加进列表就行」）", () => {
+    const verdict = checkPublicHttpUrl("http://192.168.1.5/", {
+      policy: { mode: "allowlist", allow: [] },
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.error).toContain("本机或内网");
+      expect(verdict.error).not.toContain("不在允许列表");
+    }
+  });
 });

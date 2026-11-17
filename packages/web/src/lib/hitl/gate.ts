@@ -20,12 +20,36 @@ import type { GateOutcome, HitlBatch, HitlCall, HitlVerdict } from "./types.js";
 import type { HitlPolicyStore } from "./policy.js";
 import { toHitlCall, type RawToolCall } from "./classify.js";
 import { rememberDecision } from "../fileEdit/remember.js";
+import { currentFileRoots } from "../fileEdit/roots.js";
+import type { FileRoot } from "../fileEdit/paths.js";
+import {
+  loadWorkspaceRules,
+  matchWorkspaceRules,
+  type WorkspaceRulesLoad,
+} from "./workspaceRules.js";
 
 /** 闸门的依赖（全部可注入，便于测试）。 */
 export interface HitlGateDeps {
   policy: HitlPolicyStore;
   /** 把待确认项交给 UI，返回逐项裁决。 */
   ask: (batch: HitlBatch) => Promise<HitlVerdict[]>;
+  /**
+   * 工作区权限规则加载器（`.heming/permissions.json`）。
+   *
+   * 每次 `review()` 只调用一次，缺省用 `workspaceRules.ts` 的默认加载器。
+   * 返回 `null` = 没有规则来源；返回 `{ ok:false }` 或抛错 = **全部拒绝**（fail-closed）。
+   * 单独做成依赖是为了测试能注入固定规则，不必碰磁盘桥。
+   */
+  workspaceRules?: () => Promise<WorkspaceRulesLoad | null>;
+}
+
+/** 规则配置损坏时的统一拒绝文案（测试与界面都靠这句话识别 fail-closed）。 */
+export const WORKSPACE_RULES_FAIL_REASON = "权限规则配置有误，已全部拒绝";
+
+/** 整批 fail-closed：规则加载/解析失败时，本批调用一项都不执行。 */
+function denyAllForRules(calls: HitlCall[], detail?: string): GateOutcome[] {
+  const reason = detail ? `${WORKSPACE_RULES_FAIL_REASON}（${detail}）` : WORKSPACE_RULES_FAIL_REASON;
+  return calls.map((call) => ({ kind: "deny", call, reason, cause: "rule" }));
 }
 
 /** 闸门对外只暴露一个方法。 */
@@ -67,6 +91,45 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
         deniedStreamId = batch.streamId;
       }
 
+      /*
+       * 工作区规则**整批只取一次**：逐条各读一遍盘既慢又可能在半批之内读到两个版本。
+       * 默认加载器自带 5 秒缓存；注入版（测试）可以同步返回。
+       *
+       * ★ 两条 fail-closed 路径：
+       * - 加载器抛错（IPC 断了、实现有 bug）；
+       * - 有文件但解析失败（`ok:false`）。
+       * 这两种情况下本批**全部拒绝**——「不确定规则是什么」时，
+       * 唯一安全的方向是不执行，而不是退回「没有规则」。
+       */
+      const loadRules = deps.workspaceRules ?? loadWorkspaceRules;
+      let rulesLoad: WorkspaceRulesLoad | null = null;
+      let rulesError: string | null = null;
+      try {
+        rulesLoad = await loadRules();
+      } catch (e) {
+        rulesError = e instanceof Error ? e.message : String(e);
+      }
+      if (rulesError !== null) return denyAllForRules(batch.calls, rulesError);
+      if (rulesLoad && !rulesLoad.ok) return denyAllForRules(batch.calls, rulesLoad.error);
+
+      const rulesConfig = rulesLoad ? rulesLoad.config : null;
+      /*
+       * allow 规则是否生效：`.heming/permissions.json` 来自仓库，
+       * 未信任的工作区里 allow 一律回落成 ask（deny / ask 不受影响，它们是收紧方向）。
+       * 否则克隆一个陌生仓库就等于接受它写的 `{"allow":[{"tool":"*"}]}`。
+       */
+      const allowActive = rulesLoad?.ok === true ? rulesLoad.allowActive : false;
+      // 根口径与文件工具 / 策略层共用 `currentFileRoots()`；读失败按「没有根」，
+      // 此时绝对路径一律算越界（不匹配 path 规则），偏安全的方向。
+      let roots: FileRoot[] = [];
+      if (rulesConfig) {
+        try {
+          roots = currentFileRoots();
+        } catch {
+          roots = [];
+        }
+      }
+
       /** 输出与输入等长同序：调用方按下标对齐。 */
       const outcomes: (GateOutcome | null)[] = batch.calls.map(() => null);
       /** 需要问用户的项。 */
@@ -76,9 +139,26 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
 
       batch.calls.forEach((call, index) => {
         const fp = fingerprint(batch.streamId, call.name, call.argsJson);
+        // 工作区规则与「记住的规则」都要看：deny 是跨来源的最高优先级。
+        const ws = rulesConfig ? matchWorkspaceRules(rulesConfig, call, { roots }) : null;
         // 落盘的记忆规则优先于档位：显式拒绝最高优先级，其次显式允许。
         // `ruleFor` 内部已保证 allow 不覆盖 danger（危险操作始终会问）。
         const rule = policy.ruleFor(call, batch.agentId);
+        /*
+         * 1. 工作区 deny：压过「记住的允许」、会话授权与档位。
+         *    团队规范写在仓库里，成员本地的记住操作不能把它顶掉。
+         */
+        if (ws?.verdict === "deny") {
+          outcomes[index] = {
+            kind: "deny",
+            call,
+            reason: ws.reason ? `工作区权限规则拒绝：${ws.reason}` : "工作区权限规则拒绝",
+            cause: "rule",
+          };
+          denied.add(fp);
+          return;
+        }
+        // 2. 记住的 deny 同样压过工作区的 allow——「deny 永远优先」是跨来源的。
         if (rule === "deny") {
           outcomes[index] = {
             kind: "deny",
@@ -87,6 +167,29 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
             cause: "rule",
           };
           denied.add(fp);
+          return;
+        }
+        /*
+         * 3. 工作区 ask：**强制询问**，放在「记忆允许 / 策略免问」之前。
+         *    这是规则里最容易被误解的一条——ask 的语义是「团队要求每次确认」，
+         *    不是「在策略基础上再多问一层」；策略本来会免问的调用也必须停下来。
+         */
+        if (ws?.verdict === "ask") {
+          pending.push({ index, call });
+          return;
+        }
+        /*
+         * 4. 工作区 allow：自动放行。
+         *    - danger 的 allow 已在 `matchWorkspaceRules` 里要求 `allowDanger: true`；
+         *    - 工作区未被信任时，allow 回落为 ask（团队规范来自仓库，不能自动放宽权限）。
+         */
+        if (ws?.verdict === "allow") {
+          if (!allowActive) {
+            pending.push({ index, call });
+            return;
+          }
+          auto.push(call);
+          outcomes[index] = { kind: "allow", call };
           return;
         }
         if (rule === "allow") {

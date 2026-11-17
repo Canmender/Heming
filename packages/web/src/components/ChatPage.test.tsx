@@ -4490,6 +4490,48 @@ describe("ChatPage", () => {
     await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1));
     expect(await lastSealed(send)).toMatchObject({ kind: "text", text: longText });
   }, 30_000);
+
+  it("I4i 工作区自定义命令：面板里看得见，发出去时换成那段提示词（d.240）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      glob: async ({ pattern }: { pattern: string }) =>
+        pattern.includes(".heming/commands")
+          ? { ok: true as const, paths: [".heming/commands/review.md"] }
+          : { ok: true as const, paths: [] },
+      read: async ({ path }: { path: string }) =>
+        path.includes("review.md")
+          ? { ok: true as const, content: "# 复盘\n> 按我们的风格复盘\n先读 diff，再找漏测。", bytes: 30 }
+          : { ok: false as const, code: "not-found" as const, error: "没有这个文件" },
+      write: async () => ({ ok: true as const, results: [], written: 0 }),
+      pickRoot: async () => null,
+    };
+
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      const text = "复盘完了。";
+      o.onDelta(text);
+      return text;
+    });
+
+    // 面板里要能看到它：说明 `.heming/commands/*.md` 真被读到并合进了命令列表
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/" } });
+    expect(await screen.findByText("/review")).toBeInTheDocument();
+
+    // 发出去时换成那段提示词（会落库、会调工具，不是本地动作）
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/review" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1));
+    const rows = vi.mocked(streamChat).mock.calls[0][1];
+    const joined = rows.map((row) => String(row.content ?? "")).join("\n");
+    expect(joined).toContain("先读 diff，再找漏测。");
+    expect(joined).not.toContain("/review");
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  }, 30_000);
 });
 
 
@@ -5849,12 +5891,14 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
       binary: false,
       text: "旧第一行\n旧第二行\n",
     }));
-    const read = vi.fn(async ({ path }: { path: string }) => ({
-      ok: true as const,
-      content: "新第一行\n旧第二行\n",
-      bytes: 24,
-      path,
-    }));
+    const read = vi.fn(async ({ path }: { path: string }) => {
+      // 只认目标文件：其它路径（例如 `.heming/hooks.json`）按真实桌面端回「没有这个文件」，
+      // 否则 mock 会把正文喂给任何读取方（hooks 配置解析失败 → fail-closed 全拒）。
+      if (!path.endsWith("notes/新.md")) {
+        return { ok: false as const, code: "not-found", error: "没有这个文件" };
+      }
+      return { ok: true as const, content: "新第一行\n旧第二行\n", bytes: 24, path };
+    });
     (window as unknown as { __heming_files?: unknown }).__heming_files = {
       read,
       write,
@@ -6497,12 +6541,14 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
       binary: false,
       text: "旧台账行\n",
     }));
-    const read = vi.fn(async ({ path }: { path: string }) => ({
-      ok: true as const,
-      content: "新台账行\n",
-      bytes: 12,
-      path,
-    }));
+    const read = vi.fn(async ({ path }: { path: string }) => {
+      // 工作区规则（.heming/permissions.json）与 hooks 配置必须按「不存在」回答：
+      // 假桥对任何路径都回台账内容会让规则解析失败，闸门 fail-closed 把这一批工具全拒。
+      if (path.includes("/.heming/")) {
+        return { ok: false as const, code: "not-found", error: "没有这个文件" };
+      }
+      return { ok: true as const, content: "新台账行\n", bytes: 12, path };
+    });
     (window as unknown as { __heming_files?: unknown }).__heming_files = {
       read,
       write,
@@ -6560,6 +6606,10 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
       release = resolve;
     });
     const read = vi.fn(async ({ path }: { path: string }) => {
+      // 规则/hooks 的配置文件不能被这道「卡住的门」拦住，也不能回假内容（会让闸门 fail-closed）。
+      if (path.includes("/.heming/")) {
+        return { ok: false as const, code: "not-found", error: "没有这个文件" };
+      }
       await gate;
       return { ok: true as const, content: "文件内容", bytes: 12, path };
     });
@@ -6614,4 +6664,59 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     delete (window as unknown as { __heming_files?: unknown }).__heming_files;
     localStorage.removeItem("heming.fileEdit.roots.v1");
   }, 20_000);
+/**
+   * d.236：Ctrl+F / Cmd+F 唤起会话内搜索（以前只能点顶部放大镜），Esc 关闭。
+   */
+  it("I5a Ctrl+F 唤起会话内搜索并聚焦，Esc 关闭（d.236）", async () => {
+    mockMessagesFetch([msg("m1", "第一条 发布计划", "2026-10-14T01:00:00.000Z")]);
+    render(<ChatPage />);
+    expect(await screen.findByText("第一条 发布计划")).toBeInTheDocument();
+    // 快捷键得写出来，否则没人会去试
+    expect(screen.getByRole("button", { name: "搜索会话" })).toHaveAttribute(
+      "title",
+      "搜索会话（Ctrl+F）",
+    );
+
+    fireEvent.keyDown(document, { key: "f", ctrlKey: true });
+    const input = await screen.findByLabelText("搜索本会话");
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByLabelText("搜索本会话")).toBeNull());
+  });
+
+  /**
+   * d.236：搜索要覆盖工具轨迹——「那次 grep 到底搜到了什么」以前只能在工具行里一层层翻。
+   */
+  it("I5b 会话内搜索覆盖工具轨迹（d.236）", async () => {
+    useChatStore.getState().recordTranscript("c1", "a-1", {
+      thinking: "",
+      tools: [
+        {
+          id: "t1",
+          name: "file_grep",
+          args: '{"pattern":"UNIQUE_GREP_TERM"}',
+          status: "ok",
+          result: "src/main.ts:42: UNIQUE_GREP_TERM 在这里",
+          startedAt: 1000,
+          endedAt: 1100,
+        },
+      ],
+    });
+    mockMessagesFetch([
+      { ...msg("u-1", "读一下项目结构", "2026-10-14T01:00:00.000Z"), senderId: "u1" },
+      agentMsg("a-1", "看完了", "2026-10-14T01:00:10.000Z"),
+    ]);
+    render(<ChatPage />);
+    expect(await screen.findByText("看完了")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(screen.getByLabelText("搜索本会话"), { target: { value: "UNIQUE_GREP_TERM" } });
+
+    // 正文里没有这个词，只有工具结果里有 → 必须命中
+    expect(await screen.findByText(/1\/1/)).toBeInTheDocument();
+    const list = await screen.findByTestId("search-hit-list");
+    expect(list.textContent).toContain("UNIQUE_GREP_TERM");
+  });
+
 });

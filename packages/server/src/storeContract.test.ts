@@ -677,3 +677,55 @@ for (const f of factories) {
     });
   });
 }
+
+for (const f of factories) {
+  describe(`Store 登录会话生命周期（d.236）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("未过期会话可取 userId；过期会话返回 null", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const now = Date.now();
+      store.addSession("future-digest", a.id, now + 60_000);
+      store.addSession("past-digest", a.id, now - 1);
+      expect(store.sessionUserId("future-digest")).toBe(a.id);
+      // 过期两次都为 null：第一次已顺手删除，第二次是「不存在」而非「又过期」。
+      expect(store.sessionUserId("past-digest")).toBeNull();
+      expect(store.sessionUserId("past-digest")).toBeNull();
+      expect(store.sessionUserId("no-such-digest")).toBeNull();
+    });
+
+    it("expiresAt 缺省（null）的老会话不过期：升级不踢已登录设备", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      // 旧版本 addSession 只有两个参数；升级前落库的行 expires_at 为 NULL。
+      store.addSession("legacy-digest", a.id);
+      expect(store.sessionUserId("legacy-digest")).toBe(a.id);
+      store.addSession("legacy-explicit-null", a.id, null);
+      expect(store.sessionUserId("legacy-explicit-null")).toBe(a.id);
+    });
+
+    it("deleteSession 吊销单个；deleteUserSessions 吊销本人全部且不动别人", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      store.addSession("a1", a.id, Date.now() + 60_000);
+      store.addSession("a2", a.id, Date.now() + 60_000);
+      store.addSession("b1", b.id, Date.now() + 60_000);
+
+      expect(store.deleteSession("a1")).toBe(true);
+      expect(store.deleteSession("a1")).toBe(false);
+      expect(store.sessionUserId("a1")).toBeNull();
+      expect(store.sessionUserId("a2")).toBe(a.id);
+
+      expect(store.deleteUserSessions(a.id)).toBe(1);
+      expect(store.sessionUserId("a2")).toBeNull();
+      expect(store.sessionUserId("b1")).toBe(b.id);
+      expect(store.deleteUserSessions(a.id)).toBe(0);
+    });
+  });
+}

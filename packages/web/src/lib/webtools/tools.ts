@@ -21,6 +21,7 @@ import { convertText } from "./encoding.js";
 import { getHttpBridge, httpRequest, type HttpBridgeResult, type HttpRequestFn } from "./http.js";
 import { parseJsonPath, queryJson } from "./jsonQuery.js";
 import { checkPublicHttpUrl } from "./net-guard.js";
+import { getNetPolicy } from "./netPolicy.js";
 import { searchWeb, collapseWhitespace, type SearchResult } from "./search.js";
 
 /** 搜索与读页共用的工具名。 */
@@ -268,7 +269,12 @@ function codePoint(code: number, fallback: string): string {
 async function runWebRead(args: Record<string, unknown>, request: HttpRequestFn) {
   const raw = typeof args.url === "string" ? args.url.trim() : "";
   if (!raw) return { text: "缺少 url 参数（要读取的网页地址）。", ok: false as const };
-  const verdict = checkPublicHttpUrl(raw);
+  /*
+   * 域名策略在**这一次读取开始时**取一份快照：同一次读取的多跳重定向必须用同一个
+   * 策略判断（中途用户改设置不该让这一跳松一格，也不该让已经开读的请求忽然变严）。
+   */
+  const netPolicy = getNetPolicy();
+  const verdict = checkPublicHttpUrl(raw, { policy: netPolicy });
   if (!verdict.ok) return { text: `不能读这个地址：${verdict.error}`, ok: false as const };
 
   const requested = numberOr(args.maxChars, DEFAULT_READ_CHARS);
@@ -302,7 +308,7 @@ async function runWebRead(args: Record<string, unknown>, request: HttpRequestFn)
     } catch {
       return { text: `跳转地址不合法：${location}`, ok: false as const };
     }
-    const nextVerdict = checkPublicHttpUrl(next.toString());
+    const nextVerdict = checkPublicHttpUrl(next.toString(), { policy: netPolicy });
     if (!nextVerdict.ok) {
       return { text: `跳转到了不允许的地址：${nextVerdict.error}`, ok: false as const };
     }

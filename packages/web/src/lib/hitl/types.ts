@@ -152,9 +152,11 @@ export interface HitlVerdict {
  *
  * - `user`：用户当场拒绝（或在同一轮里拒绝过同一调用）；
  * - `rule`：命中了用户此前记住的拒绝规则；
- * - `gate`：闸门/UI 异常，**不是用户拒绝**——回灌文案不能写「用户拒绝了」。
+ * - `gate`：闸门/UI 异常，**不是用户拒绝**——回灌文案不能写「用户拒绝了」；
+ * - `hook`：工作区 `.heming/hooks.json` 里的本机检查拒绝（同样不是用户拒绝，
+ *   而是仓库自带的确定性闸门——把两者混为一谈会让模型去劝用户而不是改参数）。
  */
-export type DenyCause = "user" | "rule" | "gate";
+export type DenyCause = "user" | "rule" | "gate" | "hook";
 
 /**
  * 闸门给出的最终结果：一个 tool_call 对一条。

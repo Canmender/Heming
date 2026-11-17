@@ -27,7 +27,14 @@ import {
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
-import { issueToken, userIdFromToken } from "./auth.js";
+import {
+  issueToken,
+  userIdFromToken,
+  revokeToken,
+  revokeUserSessions,
+  sessionExpiryFromNow,
+} from "./auth.js";
+import { createObservability } from "./obs.js";
 import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 import { createPluginCatalog } from "./pluginCatalog.js";
@@ -86,6 +93,8 @@ function cors(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,x-heming-client");
+  // 前端/桌面端要能从 JS 读到服务端分配的请求 id（排障时把浏览器报错对上服务端日志）。
+  res.setHeader("Access-Control-Expose-Headers", "x-request-id");
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -104,12 +113,12 @@ const SEARCH_LIMIT_DEFAULT = 20;
 const SEARCH_LIMIT_MAX = 50;
 
 /**
- * 会话内容搜索的扫描边界（单用户本机应用，不引 FTS 索引）。
+ * 会话内容搜索的扫描边界（线性扫描回退路径的预算）。
  *
- * 这里刻意用「扫最近若干个会话 × 每个会话最近若干条」的朴素做法：命中全部由
- * `listMessages` 的既有口径（内存/SQLite 两实现一致）算出来，不再新增 Store 方法、
- * 也不改任何写路径。代价是更老的消息搜不到——所以响应里带 `truncated`，前端要如实
- * 告诉用户「只搜了最近这么多」。
+ * SQLite 下优先走 FTS5（见 store.searchMessages）；内存 store、<3 字符查询与
+ * 「FTS 建不起来」的环境走这里的朴素做法：扫最近若干个会话 × 每个会话最近若干条，
+ * 命中全部由 `listMessages` 的既有口径算出来。代价是更老的消息搜不到——所以响应里带
+ * `truncated`，前端要如实告诉用户「只搜了最近这么多」。
  */
 const SEARCH_MAX_CONVERSATIONS = 200;
 const SEARCH_MAX_MESSAGES = 4000;
@@ -131,16 +140,107 @@ export function searchSnippet(text: string, query: string, pad = 30): string | n
   return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
 }
 
+/**
+ * 登录失败限流：15 分钟滑动窗口内同一 `ip|username` 失败 10 次 → 429。
+ * 注册按 IP：1 小时 20 次（注册更重，且注册成功才计数）。
+ *
+ * 为什么在内存里：单机单进程的部署形态，重启后清零可接受；不引入 Redis 一类依赖。
+ */
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_FAILURE_MAX = 10;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
+const REGISTER_MAX = 20;
+
+export interface SlidingWindowLimiter {
+  /** 已超限时返回建议的 Retry-After 秒数（>=1）；未超限返回 0。 */
+  retryAfterSeconds(key: string, now?: number): number;
+  /** 记一次失败（成功路径调用 reset）。 */
+  record(key: string, now?: number): void;
+  /** 成功登录后清零，不让「偶尔输错几次」长期粘在账上。 */
+  reset(key: string): void;
+}
+
+/**
+ * 内存滑动窗口限流器。
+ * 键由调用方拼（登录是 `ip|username`，注册是 `ip`）；时间点用毫秒时间戳数组，
+ * 每次访问时把滑出窗口的删掉——量级很小，不必上环形缓冲。
+ */
+export function createSlidingWindowLimiter(windowMs: number, max: number): SlidingWindowLimiter {
+  const hits = new Map<string, number[]>();
+
+  function live(key: string, now: number): number[] {
+    const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+    if (list.length > 0) hits.set(key, list);
+    else hits.delete(key);
+    return list;
+  }
+
+  return {
+    retryAfterSeconds(key, now = Date.now()) {
+      const list = live(key, now);
+      if (list.length < max) return 0;
+      // 最早一次失败滑出窗口后才能再试；向上取整到秒，至少 1。
+      return Math.max(1, Math.ceil((windowMs - (now - list[0])) / 1000));
+    },
+    record(key, now = Date.now()) {
+      const list = live(key, now);
+      list.push(now);
+      hits.set(key, list);
+      // 攻击者可以用无限 username 撑爆 Map：超过阈值时整体清扫一次过期键。
+      // O(n) 清理只在阈值以上触发，正常使用永远走不到。
+      if (hits.size > 10_000) {
+        for (const k of [...hits.keys()]) live(k, now);
+      }
+    },
+    reset(key) {
+      hits.delete(key);
+    },
+  };
+}
+
+/** 请求里的 Bearer token（没有则空串）。 */
+function bearerToken(req: Request): string {
+  const header = req.header("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+/** 限流用的客户端地址；取不到时用固定串（宁可全局限流，也不要意外放行）。 */
+function clientIp(req: Request): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
 export interface CreateAppOptions {
   /** 覆盖注册开关（优先于 HEMING_ALLOW_REGISTER），测试注入用；缺省读环境变量。 */
   allowRegister?: boolean;
   /** 云端插件目录（测试注入；缺省 HEMING_PLUGIN_DIR 或 <cwd>/plugins-catalog）。 */
   pluginDir?: string;
+  /** 观测日志落点（测试注入）；缺省写 stdout（vitest 下静默）。 */
+  logger?: (line: string) => void;
+  /** 指标令牌覆盖（缺省读 HEMING_METRICS_TOKEN，调用时读取）。 */
+  metricsToken?: string;
+  /** 登录失败限流覆盖（测试用小窗口/小上限，不必真打十几次请求）。 */
+  loginRateLimit?: { windowMs: number; max: number };
+  /** 注册按 IP 限流覆盖。 */
+  registerRateLimit?: { windowMs: number; max: number };
 }
 
 export function createApp(store: Store, opts?: CreateAppOptions): express.Express {
   // 环境变量在 createApp 调用时读取（非 module 级缓存），便于测试内 set/delete 后注入。
   const allowRegister = opts?.allowRegister ?? envFlagEnabled(process.env.HEMING_ALLOW_REGISTER);
+  const loginLimiter = createSlidingWindowLimiter(
+    opts?.loginRateLimit?.windowMs ?? LOGIN_FAILURE_WINDOW_MS,
+    opts?.loginRateLimit?.max ?? LOGIN_FAILURE_MAX,
+  );
+  const registerLimiter = createSlidingWindowLimiter(
+    opts?.registerRateLimit?.windowMs ?? REGISTER_WINDOW_MS,
+    opts?.registerRateLimit?.max ?? REGISTER_MAX,
+  );
+  /**
+   * 用户不存在时也跑一次等价的 scrypt：否则「不存在」明显更快，
+   * 攻击者能用响应时间枚举账号（响应体文案一致还不够）。
+   */
+  const dummyPasswordHash = hashPassword(randomBytes(16).toString("hex"));
+  const obs = createObservability({ sink: opts?.logger, metricsToken: opts?.metricsToken });
   /**
    * 云端插件目录（d.86）：插件包是**独立产物**，不随安装包分发；这里只读发布目录。
    * 缺省 `<cwd>/plugins-catalog`——部署时把该目录同步到服务器，或用 HEMING_PLUGIN_DIR 指定。
@@ -152,6 +252,9 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       join(process.cwd(), "plugins-catalog"),
   });
   const app = express();
+  // 最外层：先定/透传 x-request-id，finish 时统一落一行结构化日志与指标。
+  // 放在 CORS 之前，预检 204 也有 request id 与计数。
+  app.use(obs.middleware);
   app.use(cors);
   /**
    * 发布密钥：仓库写操作只认它，不认用户登录态（目录本身是公开的）。
@@ -175,8 +278,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   // 否则会作为 P 的推断候选把路由参数拖成 string|string[]，导致 req.params.id 类型报错。
   // 会话按 store 查（sqlite 侧持久化），服务重启后 token 仍有效。
   function authOnly(req: Request<{ [key: string]: string }>, res: Response, next: NextFunction): void {
-    const header = req.header("authorization") ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const token = bearerToken(req);
     const authedUserId = userIdFromToken(store, token);
     if (!authedUserId) {
       res.status(401).json({ error: "unauthorized" });
@@ -188,6 +290,22 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
+  });
+
+  /**
+   * 运行指标（d.236）：请求总数、状态码段、归一化路由计数、p50/p95、5xx 错误数。
+   *
+   * 访问控制（不暴露接口存在性）：
+   * - 配置了 HEMING_METRICS_TOKEN → 一律要求 `Authorization: Bearer <token>`；
+   * - 未配置 → 仅回环地址可读（本机运维/探针）；
+   * - 其余一律 404，响应体与「路由不存在」完全相同。
+   */
+  app.get("/api/metrics", (req, res) => {
+    if (!obs.metricsAllowed(req)) {
+      res.status(404).json({ error: "接口不存在" });
+      return;
+    }
+    res.json(obs.snapshot());
   });
 
   /**
@@ -390,6 +508,14 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(403).json({ error: "registration disabled" });
       return;
     }
+    // 注册按 IP 限流：放在解析 body 之前，恶意批量注册连 JSON 解析都不必做。
+    const ipKey = clientIp(req);
+    const registerRetry = registerLimiter.retryAfterSeconds(ipKey);
+    if (registerRetry > 0) {
+      res.setHeader("Retry-After", String(registerRetry));
+      res.status(429).json({ error: "too many registrations" });
+      return;
+    }
     const parsed = RegisterBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
@@ -398,27 +524,75 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     const { username, password, displayName } = parsed.data;
     try {
       const user = store.createUser(username, hashPassword(password), displayName);
+      // 只有真正建号成功才消耗 IP 配额：参数错/重名不该把人锁在门外。
+      registerLimiter.record(ipKey);
       // 注册即视为一次活跃：名册「最近活跃」不应让刚注册的人显示为从未出现。
       store.touchUser(user.id);
-      res.status(201).json({ token: issueToken(store, user.id), user });
+      const expiresAt = sessionExpiryFromNow();
+      res.status(201).json({ token: issueToken(store, user.id, expiresAt), expiresAt, user });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
   });
 
+  /**
+   * 登录失败限流：同一 `ip|username` 15 分钟内失败 10 次 → 429 + Retry-After。
+   * 成功登录清零；失败响应统一 401 `invalid credentials`，不区分「用户不存在 / 密码错」。
+   */
   app.post("/api/auth/login", (req, res) => {
     const parsed = LoginBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "invalid body" });
       return;
     }
+    const limitKey = `${clientIp(req)}|${parsed.data.username}`;
+    const retryAfter = loginLimiter.retryAfterSeconds(limitKey);
+    if (retryAfter > 0) {
+      // 超限时也不再透露账号是否存在——只看频率说话。
+      res.setHeader("Retry-After", String(retryAfter));
+      res.status(429).json({ error: "too many login attempts" });
+      return;
+    }
     const row = store.findUserByUsername(parsed.data.username);
-    if (!row || !verifyPassword(parsed.data.password, row.passwordHash)) {
+    // 用户不存在也验证一次假哈希（等时）；两种失败走同一条记录与同一条响应。
+    const passwordOk = verifyPassword(
+      parsed.data.password,
+      row?.passwordHash ?? dummyPasswordHash,
+    );
+    if (!row || !passwordOk) {
+      loginLimiter.record(limitKey);
       res.status(401).json({ error: "invalid credentials" });
       return;
     }
+    loginLimiter.reset(limitKey);
     store.touchUser(row.user.id);
-    res.json({ token: issueToken(store, row.user.id), user: row.user });
+    const expiresAt = sessionExpiryFromNow();
+    res.json({ token: issueToken(store, row.user.id, expiresAt), expiresAt, user: row.user });
+  });
+
+  /**
+   * 刷新 token（滑动续期）：旧 token 立即失效，新 token 重新计 30 天。
+   *
+   * 客户端在「剩余 <2 分钟」或收到 401 时调用（web `lib/api.ts` 单飞刷新）。
+   * 先签新再吊销旧：任何一步异常都不会把用户留在「旧的已失效、新的没拿到」。
+   */
+  app.post("/api/auth/refresh", authOnly, (req, res) => {
+    const current = bearerToken(req);
+    const expiresAt = sessionExpiryFromNow();
+    const token = issueToken(store, userId(req), expiresAt);
+    revokeToken(store, current);
+    res.json({ token, expiresAt });
+  });
+
+  /** 登出：吊销当前 token。客户端即使这次请求失败也会清本地（失败不阻断登出）。 */
+  app.post("/api/auth/logout", authOnly, (req, res) => {
+    revokeToken(store, bearerToken(req));
+    res.status(204).end();
+  });
+
+  /** 退出所有设备：吊销该用户全部会话（含当前这条），返回吊销数量。 */
+  app.delete("/api/auth/sessions", authOnly, (req, res) => {
+    res.json({ revoked: revokeUserSessions(store, userId(req)) });
   });
 
   app.get("/api/me", authOnly, (req, res) => {
@@ -1194,7 +1368,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       })
       .slice(0, SEARCH_MAX_CONVERSATIONS);
 
-    const hits: {
+    type Hit = {
       conversationId: string;
       conversationTitle: string | null;
       lastMessageAt: string | null;
@@ -1202,7 +1376,42 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       senderType: string;
       createdAt: string;
       snippet: string;
-    }[] = [];
+    };
+
+    /**
+     * 快路径：SQLite 的 FTS5 索引（trigram）。同一会话只回最新一条、输出按会话最近
+     * 活跃排序、limit/truncated 语义与下面的线性扫描完全一致。
+     * 返回 null 表示「没有加速通道」（内存 store / 查询 <3 字符 / FTS 建不起来），
+     * 此时原样走旧扫描——行为与以前完全相同。
+     */
+    const fts = store.searchMessages(q, {
+      conversationIds: conversations.map((c) => c.id),
+      limit,
+      maxScanned: SEARCH_MAX_MESSAGES,
+    });
+    if (fts) {
+      const byId = new Map(conversations.map((c) => [c.id, c]));
+      const ftsHits: Hit[] = [];
+      for (const h of fts.hits) {
+        const conv = byId.get(h.conversationId);
+        if (!conv) continue; // 理论不可达：索引查询已按会话集合收口
+        const snippet = searchSnippet(h.text, q);
+        if (!snippet) continue;
+        ftsHits.push({
+          conversationId: conv.id,
+          conversationTitle: conv.title ?? null,
+          lastMessageAt: conv.lastMessageAt ?? null,
+          messageId: h.messageId,
+          senderType: h.senderType,
+          createdAt: h.createdAt,
+          snippet,
+        });
+      }
+      res.json({ hits: ftsHits, truncated: fts.truncated, scanned: fts.scanned });
+      return;
+    }
+
+    const hits: Hit[] = [];
     let scanned = 0;
     let truncated = false;
 

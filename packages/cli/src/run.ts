@@ -1,0 +1,541 @@
+/**
+ * CLI 的无头智能体循环：把 `runAgentMentions` 接到 Node 的文件桥 / 命令桥 / 确定性闸门上。
+ *
+ * 为什么不是另写一套循环：和鸣的编排层（工具轮、预算收口、HITL、失败收口、长任务续跑）
+ * 全部在 `packages/web/src/lib/agentStream.ts` 里，评测也是直接跑它（见 evals/runner/run.ts）。
+ * CLI 如果复制一份「简化循环」，第一天就会和桌面端行为分叉——用户看到的工具轮次、
+ * 拒绝文案、预算收口都会不一样，而这正是「无头 CLI」最不该有的差异。
+ *
+ * 本文件只做三件事：
+ * 1. 组装真实依赖（真实 fs 桥、真实 file_* 工具、可选 run_command）；
+ * 2. 把「没有人类可问」翻译成一条确定性闸门规则（fail-closed）；
+ * 3. 观测 rollout，产出固定的 JSON 契约（见 README）。
+ *
+ * `streamChat` 可注入是给测试用的：测试里绝不调外部 API。
+ */
+
+import path from "node:path";
+import type { FileRoot } from "../../../packages/web/src/lib/fileEdit/paths.js";
+import { assessPatchSafety } from "../../../packages/web/src/lib/fileEdit/safety.js";
+import { isFileWriteTool, targetsOfCall } from "../../../packages/web/src/lib/fileEdit/ruleTargets.js";
+import { toHitlCall } from "../../../packages/web/src/lib/hitl/classify.js";
+import type { GateOutcome } from "../../../packages/web/src/lib/hitl/types.js";
+import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
+import {
+  MAX_TOOL_ROUNDS,
+  runAgentMentions,
+  type RunSettled,
+  type ToolBridge,
+  type TriggerDeps,
+  type TurnProgressEvent,
+} from "../../../packages/web/src/lib/agentStream.js";
+import {
+  streamChat as realStreamChat,
+  type ChatMessage,
+  type StreamChatOpts,
+} from "../../../packages/web/src/lib/llmClient.js";
+import { buildAgentContext } from "../../../packages/web/src/lib/agentRuntime/context.js";
+import { resolveBasePrompt } from "../../../packages/web/src/lib/agentRuntime/defaultPrompt.js";
+import {
+  buildRuntimeSection,
+  runtimeToolsFromSpecs,
+} from "../../../packages/web/src/lib/agentRuntime/runtimePrompt.js";
+import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
+import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
+import { createEvalToolBridge } from "../../../evals/runner/tools.js";
+import type { CliEvent } from "./events.js";
+
+/** 注入点：测试传脚本化 chat；生产用真实 OpenAI 兼容客户端。 */
+export type StreamChatFn = typeof realStreamChat;
+
+/** 一次运行是怎么收口的（CI 用来区分「做完了」与「撞上限停了」）。 */
+export type StopReason = "ok" | "max-rounds" | "aborted" | "error";
+
+export interface ToolCallRecord {
+  name: string;
+  ok: boolean;
+  /** 被闸门/策略拒绝（没有真正执行）。 */
+  denied: boolean;
+  /** 工具回给模型的文本（截断到 500 字符）。 */
+  text?: string;
+}
+
+/** `exec --json` 的固定输出契约（README 有逐字段说明）。 */
+export interface ExecJson {
+  ok: boolean;
+  /** 收口原因：`ok` 正常答完 / `max-rounds` 撞 --max-rounds / `aborted` 被中断 / `error` 运行失败。 */
+  stopReason: StopReason;
+  text: string;
+  rounds: number;
+  toolCalls: ToolCallRecord[];
+  writes: string[];
+  usage: {
+    input: number;
+    output: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
+  durationMs: number;
+  error?: string;
+}
+
+export interface AgentRunOptions {
+  prompt: string;
+  /** 工具根与工作区（绝对路径或相对当前进程的路径）。 */
+  cwd: string;
+  profile: LlmProfile;
+  /** 为 true 时挂真实的 `run_command` 并放行 danger 工具；否则命令工具不出现、调用也一律拒绝。 */
+  allowDanger: boolean;
+  /** 最多允许 N 个工具轮；第 N+1 轮若还要调工具就提前收口。缺省用编排层的 12 轮上限。 */
+  maxRounds?: number;
+  /** 测试注入；缺省真实 `streamChat`。 */
+  streamChat?: StreamChatFn;
+  /** 最终回答的增量（已做累计文本切片，直接写 stdout 即可）。 */
+  onStdout?: (chunk: string) => void;
+  /** 进度/工具轨迹行（写 stderr）。 */
+  onProgress?: (line: string) => void;
+  /** 结构化事件（`--output-format stream-json` 时写到 stdout）。缺省不发。 */
+  onEvent?: (event: CliEvent) => void;
+}
+
+export interface AgentRunOutcome {
+  json: ExecJson;
+  settled: RunSettled | undefined;
+  /** 是否由 `--max-rounds` 主动收口（不是失败，也不是用户中断）。 */
+  capHit: boolean;
+}
+
+export interface AgentRunHandle {
+  abortAll: () => void;
+  done: Promise<AgentRunOutcome>;
+}
+
+/** 工具结果文本进 JSON 前的截断长度：契约要求 500。 */
+export const TOOL_TEXT_LIMIT = 500;
+
+/** 未挂命令桥时，模型硬调 `run_command` 拿到的拒绝文案。 */
+export function shellDeniedText(): string {
+  return [
+    "未执行：CLI 未授权危险工具（需要 --allow-danger）。",
+    "【该操作未执行，文件与系统状态未被修改】",
+    "这不是重试能解决的问题：要跑命令必须由用户重新用 --allow-danger 启动 CLI。不要重复调用同一命令。",
+  ].join("\n");
+}
+
+/** 一行化 + 截断（进度行只给人看，不承载完整参数）。 */
+function oneLine(text: string, max = 80): string {
+  const flat = String(text).replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * 从工具参数里挑「一眼能认出这次调用」的几个字段给进度行。
+ *
+ * 刻意不打印整段参数：`file_write` 的参数里是整份文件内容，打出来等于把文件倒进终端日志。
+ */
+function describeCallArgs(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+    const record = parsed as Record<string, unknown>;
+    for (const key of ["command", "path", "pattern", "query", "url", "glob", "file"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return ` ${key}=${oneLine(value)}`;
+    }
+  } catch {
+    /* 参数不是 JSON：进度行不展示，工具层会给出正式失败原因 */
+  }
+  return "";
+}
+
+/** 给人读的平台名（`describePlatform` 吃的是 UA 风格的字符串）。 */
+function platformLabel(platform: NodeJS.Platform): string {
+  if (platform === "win32") return "Windows";
+  if (platform === "darwin") return "macOS";
+  if (platform === "linux") return "Linux";
+  return "";
+}
+
+/**
+ * 组装 CLI 的系统提示词：与评测同样复用生产链路（默认人设 → 运行环境段 → 合并）。
+ *
+ * 为什么 `desktop: true`：这个布尔在提示词里的含义是「文件工具会真的改本机文件」，
+ * 而不是「跑在 Electron 里」。CLI 确实会真的写用户磁盘，按「无桥」描述会让模型
+ * 以为只能聊天、拒绝执行文件任务——那是比措辞不精确更严重的错误。
+ */
+function buildCliSystemPrompt(input: {
+  prompt: string;
+  cwd: string;
+  roots: FileRoot[];
+  toolBridge: ToolBridge;
+  maxToolRounds: number;
+  allowDanger: boolean;
+  conversationId: string;
+}): string {
+  const runtime = buildRuntimeSection({
+    desktop: true,
+    platform: platformLabel(process.platform),
+    now: new Date(),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    workspace: input.cwd,
+    roots: input.roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
+    tools: runtimeToolsFromSpecs(input.toolBridge.tools, (name) => input.toolBridge.meta?.(name)),
+    // CLI 只有十来件内置工具，不会触发「按需发现」，所以明确告诉模型没有 tool_search。
+    toolSearchAvailable: false,
+    maxToolRounds: input.maxToolRounds,
+    hasBackgroundJobs: input.allowDanger,
+  });
+  return buildAgentContext({
+    agentId: "cli",
+    conversationId: input.conversationId,
+    userText: input.prompt,
+    basePrompt: resolveBasePrompt(undefined),
+    runtime,
+  }).systemPrompt;
+}
+
+/**
+ * CLI 的确定性闸门（没有人类可问时，「问」必须落成一条固定规则）。
+ *
+ * 规则：
+ * - 只读工具（`file_read` / `file_glob` / `file_grep` / `file_image` / `todo_write` /
+ *   `tool_output_read`）放行；
+ * - 根内文件写放行，根外/删除/改可执行脚本等「需要人确认」的写**一律拒绝**
+ *   （`assessPatchSafety` 只有 `auto` 才过，`ask` 也拒绝——无人值守时自动批准一次「问」
+ *   等于把 HITL 关掉）；
+ * - `run_command` 交给工具桥处理：`--allow-danger` 时真跑，否则返回「未执行」；
+ * - 认不出风险的调用**拒绝**（fail-closed）。宁可让一次未知工具的调用失败，
+ *   也不要把它当成只读放过去——CLI 常常跑在 CI 里，没有人会盯着第一行日志。
+ */
+function createCliGate(input: {
+  roots: () => FileRoot[];
+  allowDanger: boolean;
+  metaOf: (name: string) => { risk?: string } | undefined;
+}): (calls: { id: string; function: { name: string; arguments: string } }[]) => Promise<GateOutcome[]> {
+  return async (calls) =>
+    calls.map((call) => {
+      const hitlCall = toHitlCall(call);
+      const name = call.function.name;
+
+      // 命令工具由桥统一裁决：挂上了（--allow-danger）就真跑，没挂就回「未执行」。
+      if (name === SHELL_TOOL) return { kind: "allow" as const, call: hitlCall };
+
+      const meta = input.metaOf(name);
+      if (!meta || !meta.risk) {
+        return {
+          kind: "deny" as const,
+          call: hitlCall,
+          reason: `CLI 无法确认工具 ${name} 的风险，按拒绝处理（fail-closed）`,
+          cause: "gate" as const,
+        };
+      }
+      if (meta.risk === "read") return { kind: "allow" as const, call: hitlCall };
+      if (meta.risk === "danger") {
+        return input.allowDanger
+          ? { kind: "allow" as const, call: hitlCall }
+          : {
+              kind: "deny" as const,
+              call: hitlCall,
+              reason: "CLI 未授权危险工具（需要 --allow-danger）",
+              cause: "gate" as const,
+            };
+      }
+
+      // 剩下的是写类：只有明确的文件写工具才走路径安全判定，其它写工具一律拒绝。
+      if (!isFileWriteTool(name)) {
+        return {
+          kind: "deny" as const,
+          call: hitlCall,
+          reason: `CLI 不接受未声明的写工具：${name}`,
+          cause: "gate" as const,
+        };
+      }
+      const targets = targetsOfCall({ name, argsJson: call.function.arguments }, input.roots());
+      if (!targets) {
+        return {
+          kind: "deny" as const,
+          call: hitlCall,
+          reason: "无法解析这次写入的目标路径，按拒绝处理",
+          cause: "gate" as const,
+        };
+      }
+      const safety = assessPatchSafety({
+        targets: targets.absolute,
+        deletions: targets.deletions,
+        roots: input.roots(),
+        outOfRoot: "reject",
+      });
+      if (safety.verdict === "auto") return { kind: "allow" as const, call: hitlCall };
+      return {
+        kind: "deny" as const,
+        call: hitlCall,
+        reason: safety.reason,
+        cause: "gate" as const,
+      };
+    });
+}
+
+/** 把「累计文本」切成增量：`onLocalDelta` 给的是全文累积，stdout 不该重复写旧内容。 */
+function createDeltaWriter(write: ((chunk: string) => void) | undefined) {
+  let lastLength = 0;
+  return (accumulated: string) => {
+    if (!write) return;
+    if (accumulated.length <= lastLength) return;
+    write(accumulated.slice(lastLength));
+    lastLength = accumulated.length;
+  };
+}
+
+/** 启动一次无头运行（同步返回句柄，便于 SIGINT 立刻 abort）。 */
+export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
+  const startedAt = Date.now();
+  const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
+  const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
+  const conversationId = `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // 真实 fs 桥：与评测用的同一份 Node 实现（根内校验、符号链接拒绝、二进制嗅探都在）。
+  const fsBridge = createNodeFsBridge();
+  const baseBridge = createEvalToolBridge({
+    bridge: fsBridge,
+    roots: () => roots,
+    // 写根外直接拒绝（不设「问一下」——这里没有人可问）。
+    outOfRoot: () => "reject",
+    // 任务清单按本次运行独立：CLI 不在两次调用之间保存会话，清单串味只会误导模型。
+    conversationId,
+    // 只有显式 --allow-danger 才挂命令工具（它同时意味着闸门放行 danger）。
+    ...(options.allowDanger ? { shell: true } : {}),
+  });
+
+  /** 本回合真正成功落盘的文件（只认 ok=true 的结果，被拒/失败的写不算）。 */
+  const writes: string[] = [];
+  const seenWrites = new Set<string>();
+  const toolBridge: ToolBridge = {
+    tools: baseBridge.tools,
+    meta: (name) =>
+      name === SHELL_TOOL
+        ? { risk: "danger" as const, displayName: "在本机执行命令", core: true }
+        : baseBridge.meta?.(name),
+    async execute(call, execOpts) {
+      // 没挂命令工具时，模型仍可能「凭印象」调用它：回一条明确的未执行文案，
+      // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
+      if (call.name === SHELL_TOOL && !options.allowDanger) {
+        return { text: shellDeniedText(), ok: false };
+      }
+      const result = await baseBridge.execute(call, execOpts);
+      if (result.ok && result.writes?.length) {
+        for (const file of result.writes) {
+          if (seenWrites.has(file)) continue;
+          seenWrites.add(file);
+          writes.push(file);
+        }
+      }
+      return result;
+    },
+  };
+
+  const effectiveMaxRounds = options.maxRounds ?? MAX_TOOL_ROUNDS;
+  const systemPrompt = buildCliSystemPrompt({
+    prompt: options.prompt,
+    cwd,
+    roots,
+    toolBridge,
+    maxToolRounds: effectiveMaxRounds,
+    allowDanger: options.allowDanger,
+    conversationId,
+  });
+  const gate = createCliGate({
+    roots: () => roots,
+    allowDanger: options.allowDanger,
+    metaOf: (name) => toolBridge.meta?.(name),
+  });
+
+  /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
+  let modelRounds = 0;
+  const chat: StreamChatFn = (profile, messages, opts) => {
+    modelRounds += 1;
+    const impl = options.streamChat ?? realStreamChat;
+    return impl(profile, messages, opts);
+  };
+
+  /** 进度行（stderr）：只报事实，不猜进度。 */
+  const progress = (line: string) => options.onProgress?.(line);
+
+  const toolCalls: ToolCallRecord[] = [];
+  let finalText = "";
+  let usageInput = 0;
+  let usageOutput = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let sawCacheRead = false;
+  let sawCacheWrite = false;
+  let settled: RunSettled | undefined;
+  let capHit = false;
+
+  /** 供 onProgress 提前收口用：runAgentMentions 返回后立刻填上。 */
+  const abortRef: { abortAll?: () => void } = {};
+
+  const deps: TriggerDeps = {
+    getProfile: () => options.profile,
+    getPrompt: () => systemPrompt,
+    // CLI 是单轮命令：没有历史、没有会话。要接上下文就多次调用或自己拼 prompt。
+    fetchHistory: async (): Promise<ChatMessage[]> => [],
+    send: () => {},
+    streamChat: chat,
+    onLocalDelta: (_streamId, accumulated) => stream(accumulated),
+    getTools: () => toolBridge,
+    confirmToolCalls: gate,
+    onProgress: (event: TurnProgressEvent) => {
+      if (event.phase === "round") {
+        progress(`第 ${event.round} 轮：模型生成中`);
+        options.onEvent?.({ type: "round", round: event.round });
+        return;
+      }
+      progress(`第 ${event.round} 轮：调用工具 ${event.tool}`);
+      options.onEvent?.({
+        type: "round",
+        round: event.round,
+        ...(event.tool !== undefined ? { tool: event.tool } : {}),
+      });
+      // 轮次上限是「工具轮」的上限：第 N+1 轮如果模型直接作答，允许；还要调工具才收口。
+      if (options.maxRounds && event.round > options.maxRounds && !capHit) {
+        capHit = true;
+        progress(`已达到 --max-rounds ${options.maxRounds}，不再执行新的工具轮次`);
+        abortRef.abortAll?.();
+      }
+    },
+    onToolTrace: (_streamId, event) => {
+      if (event.phase === "start") {
+        progress(`调用工具 ${event.name}${describeCallArgs(event.args)}`);
+        options.onEvent?.({
+          type: "tool_start",
+          name: event.name,
+          args: describeCallArgs(event.args).trim(),
+        });
+        return;
+      }
+      // 命令工具在未授权时由桥回「未执行」：这不是工具坏了，是策略拒绝。
+      const denied = event.denied === true || (event.name === SHELL_TOOL && !options.allowDanger);
+      const state = event.denied ? "已拒绝" : event.ok ? "完成" : "失败";
+      progress(`工具 ${event.name} ${state}`);
+      options.onEvent?.({ type: "tool_end", name: event.name, ok: event.ok === true && !denied, denied });
+    },
+    onUpstreamRetry: (info) => {
+      progress(
+        `上游暂时失败，${Math.round(info.delayMs / 1000)} 秒后重试（第 ${info.attempt}/${info.max} 次）：${info.reason}`,
+      );
+      options.onEvent?.({
+        type: "retry",
+        attempt: info.attempt,
+        max: info.max,
+        delayMs: info.delayMs,
+        reason: info.reason,
+      });
+    },
+    onRollout: (item) => {
+      if (item.type === "tool_result") {
+        toolCalls.push({
+          name: item.name,
+          ok: item.ok,
+          // 命令工具在未授权时由桥回「未执行」：这不是工具坏了，是策略拒绝。
+          denied: item.denied === true || (item.name === SHELL_TOOL && !options.allowDanger),
+          ...(item.text ? { text: item.text.slice(0, TOOL_TEXT_LIMIT) } : {}),
+        });
+        return;
+      }
+      if (item.type === "assistant_final") {
+        finalText = item.text;
+        return;
+      }
+      if (item.type === "turn_end") {
+        const usage = item.usage;
+        if (!usage) return;
+        usageInput += usage.input ?? 0;
+        usageOutput += usage.output ?? 0;
+        if (usage.cacheRead !== undefined) {
+          sawCacheRead = true;
+          cacheRead += usage.cacheRead;
+        }
+        if (usage.cacheWrite !== undefined) {
+          sawCacheWrite = true;
+          cacheWrite += usage.cacheWrite;
+        }
+      }
+    },
+    onRunSettled: (_streamId, result) => {
+      settled = result;
+    },
+  };
+
+  const stream = createDeltaWriter(options.onStdout);
+  const run = runAgentMentions(conversationId, [{ agentId: "cli", name: "CLI" }], options.prompt, deps);
+  abortRef.abortAll = run.abortAll;
+
+  const done = (async (): Promise<AgentRunOutcome> => {
+    let fatal: unknown;
+    try {
+      await run;
+    } catch (error) {
+      // fetchHistory/send 都不抛；真抛了也要给出一份可读的 JSON，而不是半截堆栈。
+      fatal = error;
+    }
+
+    const status = settled?.status;
+    let error: string | undefined;
+    if (fatal !== undefined) {
+      error = fatal instanceof Error ? fatal.message : String(fatal);
+    } else if (!settled) {
+      error = "运行没有返回终态（编排层异常退出）";
+    } else if (status === "error") {
+      error = settled.error || "运行失败";
+    } else if (status === "aborted" && !capHit) {
+      error = "运行被中止";
+    }
+
+    // 达到 --max-rounds 是用户要的结果（硬上限内跑完了），不是失败；
+    // 但「一个终态都没有」或模型/工具真的失败时仍然算失败。
+    const ok = status === "ok" || (status === "aborted" && capHit && !fatal);
+
+    /**
+     * 收口原因：CI 最常问的是「它到底是做完了，还是撞上限停了」——只看 `ok`
+     * 分不出来（撞上限也算成功）。这里把原因单独给出去，消费方不必自己拼
+     * `ok && !error` 的推断。
+     */
+    const stopReason: StopReason = capHit
+      ? "max-rounds"
+      : status === "ok"
+        ? "ok"
+        : status === "aborted"
+          ? "aborted"
+          : "error";
+
+    const text = finalText || settled?.finalText || "";
+    const json: ExecJson = {
+      ok,
+      stopReason,
+      text,
+      rounds: modelRounds,
+      toolCalls,
+      writes: [...writes],
+      usage: {
+        input: usageInput,
+        output: usageOutput,
+        ...(sawCacheRead ? { cacheRead } : {}),
+        ...(sawCacheWrite ? { cacheWrite } : {}),
+      },
+      durationMs: Math.max(0, Date.now() - startedAt),
+      ...(error !== undefined ? { error } : {}),
+    };
+    return { json, settled, capHit };
+  })();
+
+  return { abortAll: run.abortAll, done };
+}
+
+/**
+ * 退出码：0 = 跑完且没有运行级失败；1 = 运行失败；130 = Ctrl+C。
+ * 用法/配置错误（2）在 index 里处理得更早（那时还没有运行句柄）。
+ */
+export function outcomeExitCode(outcome: AgentRunOutcome, interrupted = false): number {
+  if (interrupted) return 130;
+  return outcome.json.ok ? 0 : 1;
+}

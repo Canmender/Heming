@@ -10,6 +10,7 @@ import {
 import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
+import { hookDeniedText } from "./hitl/hooks.js";
 import { supportsKind } from "./capabilityNotice.js";
 import { IMAGE_TOKEN_COST, estimateRowsTokens, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
@@ -501,7 +502,7 @@ export interface TriggerDeps {
       denied?: boolean;
       /** 本调用成功返回的来源（仅 ok=true 时带；任务区汇总来源用）。 */
       sources?: ToolSource[];
-      /** 被拒原因（denied=true 时带：用户当场拒绝 / 命中记住的规则 / 闸门异常）。 */
+      /** 被拒原因（denied=true 时带：用户当场拒绝 / 命中记住的规则 / 闸门异常 / 工作区 hooks）。 */
       denyCause?: DenyCause;
       /**
        * 工具失败契约里的错误码（d.221，仅 ok=false 且工具回了契约时带）。
@@ -600,6 +601,20 @@ export interface TriggerDeps {
     calls: ToolCall[],
     ctx: { agentId: string; agentName: string; streamId: string; conversationId: string },
   ) => Promise<GateOutcome[]>;
+  /**
+   * 工具执行前的**确定性 hooks**（工作区 `.heming/hooks.json`）。
+   *
+   * 调用时机在 HITL 闸门放行之后、`bridge.execute` 之前：先让用户决定「做不做」，
+   * 再让仓库的本机检查决定「这样做行不行」。拒绝时不执行工具，回一段
+   * 「hooks 拒绝了本次调用」的文案（与用户拒绝区分开），轨迹的 `denyCause` 记为 `"hook"`。
+   *
+   * 抛错一律按**拒绝**处理（fail-closed）：hooks 的职责就是兜住「模型不自觉」，
+   * 它自己坏掉更不能变成静默放行。缺省 → 不启用，行为与接入之前逐字等价。
+   */
+  preToolUse?: (
+    call: { name: string; arguments: string },
+    ctx: { agentId: string; streamId: string },
+  ) => Promise<{ decision: "allow" | "deny"; reason?: string }>;
   /**
    * 轮次收尾回调（设计 §3/§6）：成功 finish 记 `"ok"`；中断/失败但已有部分文本记 `"partial"`
    * （触发端据此只写工作记忆，不沉淀长期记忆）；完全无文本不回调。
@@ -1766,6 +1781,14 @@ export function runAgentMentions(
              * 只有这一层看得到全貌（桥里只能看到「执行」那一小段）。
              */
             const toolMs = new Map<string, number>();
+            /**
+             * 被工作区 hooks 拒绝的调用（下标 → 原因）。
+             *
+             * 单独记一份而不是塞回 `outcomes`：`outcomes` 描述的是**人的裁决**
+             * （用户拒绝/规则/闸门异常），hooks 是仓库自带的确定性检查，两者来源不同，
+             * 轨迹与统计要能分开说（`denyCause: "hook"`）。
+             */
+            const hookDenials = new Map<number, string | undefined>();
             const runOne = async (call: ToolCall, i: number) => {
               /** 计时起点：包含 HITL 等待（见 `toolMs` 的落地口径）。 */
               const startedAt = Date.now();
@@ -1801,6 +1824,39 @@ export function runAgentMentions(
                         : deniedText(outcome.call, outcome.reason);
                   return { text, ok: false };
                 }
+                /**
+                 * 工作区 hooks（PreToolUse）：在人工闸门放行之后、真正执行之前。
+                 *
+                 * 为什么放在闸门之后：先问「做不做」（人），再问「这样做行不行」（仓库规矩）。
+                 * 反过来会在用户根本还没同意时就跑用户的脚本，既浪费也可能有副作用。
+                 *
+                 * 钩子自己抛错按拒绝处理：hooks 的目的是兜住「模型不自觉」，
+                 * 它坏掉时如果放行，等于所有硬规矩在最该生效的时刻消失。
+                 */
+                if (deps.preToolUse) {
+                  let hook: { decision: "allow" | "deny"; reason?: string };
+                  try {
+                    hook = await deps.preToolUse(
+                      { name: call.function.name, arguments: call.function.arguments },
+                      { agentId: m.agentId, streamId },
+                    );
+                  } catch (err) {
+                    hook = {
+                      decision: "deny",
+                      reason: `hooks 执行器异常：${(err as Error)?.message ?? String(err)}`,
+                    };
+                  }
+                  if (hook.decision !== "allow") {
+                    hookDenials.set(i, hook.reason);
+                    return {
+                      text: hookDeniedText({
+                        toolName: call.function.name,
+                        reason: hook.reason,
+                      }),
+                      ok: false,
+                    };
+                  }
+                }
                 return withToolTimeout(
                   (signal) =>
                     bridge!.execute(
@@ -1820,7 +1876,10 @@ export function runAgentMentions(
               repeatedCalls.set(callKey, repeat + 1);
               const tracked = job.then((result) => {
                 // 只在真正执行过时记耗时（被拒/复用缓存的调用没有「执行」这一段）。
-                if (gated?.kind !== "deny") toolMs.set(call.id, Math.max(0, Date.now() - startedAt));
+                // hooks 拒绝同样没有执行，不能记成一次耗时调用。
+                if (gated?.kind !== "deny" && !hookDenials.has(i)) {
+                  toolMs.set(call.id, Math.max(0, Date.now() - startedAt));
+                }
                 if (repeat === 0) return result;
                 return {
                   ...result,
@@ -1874,7 +1933,8 @@ export function runAgentMentions(
             // 失败归因计数（P3/T16）：被拒（人/闸门挡住）与工具报错（工具坏了/参数错）
             // 分开数——两者修法完全不同，混在一起会让报表没法指导动作。
             calls.forEach((_call, i) => {
-              if (outcomes?.[i]?.kind === "deny") deniedCount += 1;
+              // hooks 拒绝也是「被拒」，不是「工具失败」——修法完全不同。
+              if (outcomes?.[i]?.kind === "deny" || hookDenials.has(i)) deniedCount += 1;
               else if (!results[i]?.ok) toolFailureCount += 1;
               const result = results[i];
               if (result) {
@@ -1902,7 +1962,8 @@ export function runAgentMentions(
             calls.forEach((call, i) => {
               const result = results[i] ?? { text: "", ok: false };
               const gate = outcomes?.[i];
-              const denied = gate?.kind === "deny";
+              const hookDenied = hookDenials.has(i);
+              const denied = gate?.kind === "deny" || hookDenied;
               deps.onToolTrace?.(streamId, {
                 phase: "end",
                 id: call.id,
@@ -1915,7 +1976,13 @@ export function runAgentMentions(
                 ...(result.error ? { errorCode: result.error.error_code } : {}),
                 // 只有真正执行且成功的结果才算「引用过」——被拒/失败没读到内容。
                 ...(result.ok && result.sources?.length ? { sources: result.sources } : {}),
-                ...(denied && gate?.cause ? { denyCause: gate.cause } : {}),
+                // hooks 拒绝的 cause 不在闸门结果里，单独补 "hook"：
+                // 界面靠它把「被 hooks 拒绝」与「用户拒绝」分开显示。
+                ...(gate?.kind === "deny" && gate.cause
+                  ? { denyCause: gate.cause }
+                  : hookDenied
+                    ? { denyCause: "hook" as const }
+                    : {}),
               });
               record({
                 type: "tool_result",

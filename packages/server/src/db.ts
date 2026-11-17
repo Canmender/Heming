@@ -30,8 +30,10 @@ export function initSchema(db: DatabaseSyncType): void {
     );
     -- 登录会话：token 只存 SHA-256 摘要，原文不落库。
     -- 与 users 同库持久化，服务重启/发版不会把已登录设备踢回登录页。
+    -- expires_at 是毫秒时间戳；NULL = 本列引入前的老会话（视为不过期，避免升级即踢下线）。
     CREATE TABLE IF NOT EXISTS sessions (
-      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
+      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL,
+      expires_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS friend_requests (
       id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL
@@ -115,6 +117,33 @@ export function initSchema(db: DatabaseSyncType): void {
     );
   `);
   /*
+   * d.236 会话内容搜索 FTS5 索引。
+   *
+   * 为什么用 trigram：中文没有空格分词，unicode61 会把整句当一个 token，搜「全部通过」
+   * 命中不了「32 条全部通过」。trigram 按 3 字符滑窗建索引，天然支持任意子串命中
+   * （含中文、英文、标点）；查询 <3 字符时由上层回退线性扫描。
+   *
+   * rowid 与 messages.rowid 一一对应：写入/删除都按 rowid 同步，避免对 JSON 文本
+   * 建触发器（payload 是 JSON，json_extract 在触发器里既不透明也难测）。
+   * 建表失败（SQLite 未编入 FTS5 / 无 trigram 分词器）不是启动错误：上层检测不到
+   * messages_fts 就回退既有扫描，只记一次日志。
+   */
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        message_id UNINDEXED,
+        conv_id UNINDEXED,
+        text,
+        tokenize = 'trigram'
+      );
+    `);
+  } catch (err) {
+    console.warn(
+      "[db] FTS5 全文索引不可用，消息搜索回退线性扫描：",
+      (err as Error).message,
+    );
+  }
+  /*
    * d.92 团队工作台：用户自建团队 / 方案 / 任务（与上面的「全站单团队」两层东西）。
    *
    * 不建外键：级联删除在 Store 里显式做（四个删除口都要在事务里清干净），
@@ -185,6 +214,13 @@ export function initSchema(db: DatabaseSyncType): void {
   }
   if (!cols.some((c) => c.name === "n")) {
     db.exec("ALTER TABLE messages ADD COLUMN n INTEGER");
+  }
+
+  // 会话过期时间（d.236）：旧库的 sessions 表没有该列，幂等补上。
+  // 老行 expires_at 保持 NULL = 不过期——升级那一刻不能把所有已登录设备踢下线。
+  const sessionCols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionCols.some((c) => c.name === "expires_at")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN expires_at INTEGER");
   }
 
   // d.128：会话标题（Claude Code 式「按会话名找」；旧库无该列 → 幂等补）。

@@ -177,6 +177,7 @@ import { PLAN_EXECUTE_PROMPT, loadPlanMode, savePlanMode, withPlanMode } from ".
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
+import { createToolHookRunner, describeToolHooksState, setToolHooksEnabled, type ToolHookRunner } from "../lib/hitl/hookRunner.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
 import { ToolApprovalModal } from "./ToolApprovalModal.js";
@@ -203,10 +204,9 @@ import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
 import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
-import { EXPORT_COMMAND, GOAL_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { GOAL_COMMAND, HOOKS_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands, SLASH_COMMANDS } from "../lib/agentRuntime/slashCommands.js";
+import { collectCustomCommands, commandsToSlash, expandCustomCommand, type CustomCommand } from "../lib/agentRuntime/customCommands.js";
 import { expandInitCommand } from "../lib/agentRuntime/initPrompt.js";
-import { conversationMarkdown, exportFileName } from "../lib/chat/exportMarkdown.js";
-import { summarizeToolArgs } from "../lib/toolArgsSummary.js";
 import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
 import { notifyApprovalWait, notifyTurnEnd, resetTurnNotifyThrottle } from "../lib/agentRuntime/turnNotify.js";
 import { isDesktopNotifyEnabled, onDesktopNotifyOpen, setDesktopNotifyEnabled } from "../lib/desktopNotify.js";
@@ -227,6 +227,7 @@ import {
 } from "../lib/agentRuntime/finishGate.js";
 import { inspectOutgoingText, largeMessageNotice } from "../lib/agentRuntime/messageBudget.js";
 import { summarizeMcpStatus } from "../lib/mcp/summary.js";
+import { getNetPolicy } from "../lib/webtools/netPolicy.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
 import { Button } from "../components/ui/Button.js";
@@ -411,7 +412,14 @@ function historyToolArgs(args: string): string {
  * （用户看到的「逻辑链断了」）。拒绝/中断也要留下痕迹，否则模型会以为那次调用成功了。
  */
 function historyToolText(trace: ToolTrace): string {
-  if (trace.status === "denied") return "（用户拒绝了这次调用，工具未执行。）";
+  if (trace.status === "denied") {
+    // 被拒的不是只有「用户拒绝」：hooks / 记住的规则 / 闸门异常对模型的含义完全不同，
+    // 一律写成用户拒绝会让它去劝用户，而不是改参数或看检查结果。
+    if (trace.denyCause === "hook") return "（工作区 hooks 拒绝了这次调用，工具未执行。）";
+    if (trace.denyCause === "rule") return "（命中记住的拒绝规则，工具未执行。）";
+    if (trace.denyCause === "gate") return "（确认流程异常，工具未执行。）";
+    return "（用户拒绝了这次调用，工具未执行。）";
+  }
   if (trace.status === "running") return "（这次调用被中断，没有拿到结果。）";
   const raw = trace.result ?? "";
   if (!raw) return trace.status === "error" ? "（工具执行失败，没有返回内容。）" : "（工具执行完成，没有返回内容。）";
@@ -758,6 +766,16 @@ export function ChatPage({
   /** 命令面板（d.184）当前高亮的行；面板项变化时按长度收口，不越界。 */
   const [slashIndex, setSlashIndex] = useState(0);
   /**
+   * 工作区自定义命令（d.240）：`.heming/commands/*.md` 解析来的 `/名字`。
+   *
+   * ref 与 state 同时维护：面板要跟着 state 重渲染，而 `submitMessage` 在事件回调里
+   * 执行、闭包可能落后一拍，展开命令必须读 ref 才不会「刚写完文件就点发送却用了旧列表」。
+   */
+  const [customCommands, setCustomCommands] = useState<CustomCommand[]>([]);
+  const customCommandsRef = useRef<CustomCommand[]>([]);
+  /** 是否真读过一次（区分「读到 0 条」与「还没读」：`/status` 不能把没读过说成没有）。 */
+  const customCommandsLoadedRef = useRef(false);
+  /**
    * 输入框历史回溯位置（d.194）：`-1` = 不在回溯里（框里是用户自己的草稿）。
    * `draftStashRef` 存进入回溯前的那半句草稿，一路按 ↓ 走到头要原样放回去。
    */
@@ -940,6 +958,21 @@ export function ChatPage({
    * 用 ref 而不是 state：它只在 `/status` 被调用的那一刻读一次，不需要触发重渲染。
    */
   const projectRulesRef = useRef<ProjectRulesSummary | null>(null);
+  /**
+   * 工作区工具 hooks（PreToolUse）的运行器。
+   *
+   * 放在组件实例上而不是模块级：缓存按工作区根失效，换会话/换工作区必须是另一份；
+   * 组件卸载（切页）后配置缓存也应当丢掉，不要让旧工作区的规则跟着新会话走。
+   * 桥用 getter 延迟取（桌面端注入时机早于首轮，但测试里可能是后挂的）。
+   */
+  const toolHooksRef = useRef<ToolHookRunner | null>(null);
+  if (!toolHooksRef.current) {
+    toolHooksRef.current = createToolHookRunner({
+      getFileBridge,
+      getShellBridge,
+      getRoots: fileRootsFor,
+    });
+  }
   // 切会话即清：待发附件属于当前会话的输入上下文，跟到别的会话里发出去是错的
   useEffect(() => {
     setPendingFiles([]);
@@ -1020,6 +1053,8 @@ export function ChatPage({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
+  /** Ctrl+F 唤起后要聚焦的输入框（面板是条件渲染，靠 ref 拿节点）。 */
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   /**
    * d.198：从左栏搜索命中跳过来时要落位的消息 id（落位后短暂高亮，再自动熄灭）。
    * 与 `activeSearchId` 分开：那个是「本会话内搜索」的当前命中，两者互不覆盖。
@@ -2114,12 +2149,28 @@ export function ChatPage({
    * 会话内搜索的数据源：只取本机明文。未解开的信封不参与——
    * 搜索需要展示/跳转原文，而密文既搜不到也不该被当成空消息。
    */
+  const SEARCH_TOOL_TRACES = 8;
+  const SEARCH_TOOL_TEXT_MAX = 4_000;
+  /**
+   * 工具轨迹也参与搜索（d.236）。
+   *
+   * 以前只搜消息正文，「那次 grep 到底搜到了什么」「它读的是哪个文件」这类问题在搜索里
+   * 一律搜不到，只能一层层展开工具行去翻。这里把工具名、参数与结果一并塞进被搜文本。
+   * 代价是同步搜索要处理更多字符，所以：每条消息只收最近 SEARCH_TOOL_TRACES 次调用、
+   * 每次调用最多 SEARCH_TOOL_TEXT_MAX 字——长任务里单条命令输出可以到几十万字，不截断会卡住输入。
+   */
   const searchableMessages = useMemo(() => {
     const out: { id: string; text: string }[] = [];
     for (const m of visibleMessages) {
       const payload = m.enc === "e2e" ? plainOf[m.id] : m.payload;
       const text = payload && typeof payload.text === "string" ? payload.text : "";
-      if (text) out.push({ id: m.id, text });
+      const toolText = (transcriptOf(m)?.tools ?? [])
+        .filter((t) => t.id && t.name)
+        .slice(-SEARCH_TOOL_TRACES)
+        .map((t) => `${t.name} ${t.args ?? ""} ${t.result ?? ""}`.slice(0, SEARCH_TOOL_TEXT_MAX))
+        .join("\n");
+      const combined = toolText ? (text ? `${text}\n${toolText}` : toolText) : text;
+      if (combined) out.push({ id: m.id, text: combined });
     }
     return out;
   }, [visibleMessages, plainOf]);
@@ -2719,6 +2770,8 @@ export function ChatPage({
             // 混成失败用户会以为「我拒了，但它还是跑了」。
             status,
             result: e.result,
+            // 拒绝来源随轨迹落本机（会话重开后历史回放才能区分 hooks 与用户拒绝）。
+            ...(e.denyCause ? { denyCause: e.denyCause } : {}),
             endedAt: Date.now(),
           };
           if (taskId) {
@@ -2786,6 +2839,22 @@ export function ChatPage({
             cause: "gate" as const,
           }));
         }
+      },
+      /**
+       * 工具执行前的确定性 hooks（PreToolUse）：读工作区 `.heming/hooks.json`，
+       * 命中就写 payload → 用命令桥跑 → 解释退出码。
+       *
+       * 放在 deps 里而不是塞进 HITL 闸门：两者的裁决来源不同（人 vs 仓库规矩），
+       * 轨迹与统计要靠 `denyCause` 分开说。运行器内部已做了 fail-closed 与配置错误处理。
+       */
+      preToolUse: async (call, ctx) => {
+        const workspace =
+          useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace ?? "";
+        return toolHooksRef.current!.run(call, {
+          workspace,
+          agentId: ctx.agentId,
+          streamId: ctx.streamId,
+        });
       },
       // 轮次收尾写记忆（设计 §3）：成功轮次走 recordTurn（Working + 显式抽取 + 6 轮沉淀）；
       // 中断/失败只记 Working 并标 partial，不沉淀长期记忆。全程静默，绝不影响发送与流式渲染。
@@ -3527,8 +3596,78 @@ export function ChatPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLocal.length, draft, emojiOpen, voiceMenu, searchOpen, attachOpen]);
 
+  /**
+   * Ctrl+F / Cmd+F 唤起本会话搜索（d.236）。
+   *
+   * 之前只能点顶部那个放大镜；长任务里想找「刚才那句结论」要先把鼠标挪过去。
+   * 浏览器自己的「页内查找」在这里意义不大（消息在虚拟滚动容器里），所以接管。
+   * 顺带补一件事：搜索开着时 Esc 现在会关掉搜索（以前 A10 只是「不去停生成」，什么都不做，
+   * 用户按 Esc 会以为没反应）。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
+        // 面板是下一拍才挂上的，等它渲染完再聚焦并全选旧关键词（连按可以直接改写）。
+        requestAnimationFrame(() => {
+          const node = searchInputRef.current;
+          if (!node) return;
+          node.focus();
+          node.select();
+        });
+        return;
+      }
+      if (e.key === "Escape" && searchOpen) {
+        e.preventDefault();
+        setSearchOpen(false);
+        setSearchQuery("");
+        setSearchHitId(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [searchOpen]);
+
+  /**
+   * 工作区根的指纹（d.240）：可写根存在 localStorage 里，加根/换根不会引起 state 变化，
+   * 自定义命令又要「根一变就重读」，所以把根拼成一个字符串当 effect 依赖。
+   */
+  const customCommandRootKey = fileRootsFor(conv?.workspace ?? null)
+    .map((root) => `${root.mode}:${root.path}`)
+    .join("|");
+
+  /**
+   * 工作区自定义命令（d.240）：`.heming/commands/*.md` → `/名字`。
+   *
+   * 什么时候读：切会话、换工作区时读一次（命令文件是仓库里的静态配置，不跟着每轮变）。
+   * 读不到就保持空列表——自定义命令是锦上添花，任何失败都不该影响到正常对话。
+   * 同时写进 ref：`submitMessage` 在事件回调里执行，那里拿不到最新的 state 闭包。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const bridge = getFileBridge();
+    // 用「根的指纹」当依赖：手动加/换可写根时也要重读（根存在 localStorage 里，靠 state 变化触发不到）。
+    const list = fileRootsFor(conv?.workspace ?? null);
+    if (!bridge || list.length === 0) {
+      customCommandsLoadedRef.current = false;
+      setCustomCommands([]);
+      customCommandsRef.current = [];
+      return;
+    }
+    void collectCustomCommands({ bridge, roots: list }).then((commands) => {
+      if (cancelled) return;
+      customCommandsLoadedRef.current = true;
+      setCustomCommands(commands);
+      customCommandsRef.current = commands;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [convId, conv?.workspace, customCommandRootKey]);
+
   // 命令面板（d.184）：只在「以 / 开头、单行」时出现——正常消息里的斜杠（路径、日期）不弹。
-  const slashItems = matchSlashCommands(draft);
+  const slashItems = matchSlashCommands(draft, [...SLASH_COMMANDS, ...commandsToSlash(customCommands)]);
   const slashOpen = slashItems.length > 0;
   const pickSlashCommand = (command: string) => {
     setDraft(command);
@@ -3718,6 +3857,8 @@ export function ChatPage({
       vision: caps?.supportsVision,
       workspace: conv?.workspace ?? "",
       projectRules: projectRulesRef.current,
+      // d.240：读过才报数字，没读过就省略（`/status` 里会写「尚未统计」，而不是「无」）。
+      customCommands: customCommandsLoadedRef.current ? customCommands.length : undefined,
       // d.221：这个会话失败了几次、卡在哪些错误码上（只在真失败过时才有这一行）
       toolFailures: getToolFailureStats(convId),
       roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
@@ -3759,6 +3900,8 @@ export function ChatPage({
         (id) => mcpRegistry.status(id),
         mcpRegistry.enabledTools().length,
       ),
+      // d.238：网络访问边界（开放 / 仅允许 N 个域名）——被挡时用户要知道在哪儿改
+      net: getNetPolicy(),
       desktop: hasFileBridge() || getShellBridge() !== null,
     });
   }
@@ -3774,66 +3917,6 @@ export function ChatPage({
     setModelSwitcherOpen(false);
     setSendNotice(`已切换到 ${label}，下一轮对话生效。`, "info");
   }
-
-  /**
-   * 导出当前会话为 Markdown（d.236）。
-   *
-   * 为什么要有：长任务跑到几十轮，结论、改了哪些文件、卡在哪都散在几百条消息与上千次
-   * 工具调用里；要归档、贴给同事、拿去开 issue，只能一条条复制。这里读**已落库的整段
-   * 会话**（不是屏幕上那一段窗口），把工具调用与失败原因一并写进去。
-   *
-   * 纯本地：不调模型、不落库、不改会话——只在浏览器里造一个文件并触发下载。
-   * 失败要如实说（例如某些环境不允许程序化触发下载），不能提示「已导出」却什么也没有。
-   */
-  const exportConversation = (): { ok: true; notice?: string } | { ok: false; error: string } => {
-    const all = useChatStore.getState().messages[convId] ?? [];
-    const turns = all.map((m) => {
-      const tools = (transcriptOf(m)?.tools ?? [])
-        .filter((t) => t.id && t.name)
-        .map((t) => ({
-          name: t.name,
-          summary: summarizeToolArgs(t.name, t.args),
-          status: t.status,
-        }));
-      const file = m.payload.file;
-      return {
-        role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
-        name: m.senderType === "user" ? "你" : conv?.agent.name ?? "和鸣",
-        at: m.createdAt,
-        text: m.payload.text,
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(file?.name ? { files: [file.name] } : {}),
-      };
-    });
-    const at = new Date().toISOString();
-    const title = conv?.title ?? "未命名会话";
-    const markdown = conversationMarkdown({
-      title,
-      conversationId: convId,
-      exportedAt: at,
-      turns,
-      goal: getGoal(convId)?.text ?? null,
-      todos: getTodos(convId),
-      version: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null,
-    });
-    const name = exportFileName(title, at);
-    try {
-      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = name;
-      link.rel = "noopener";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      // 立刻 revoke 会让部分浏览器拿不到内容，放到下一拍再回收。
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-      return { ok: true, notice: `已导出 ${turns.length} 条消息（${name}）。` };
-    } catch {
-      return { ok: false, error: "导出失败：这个环境不允许程序化下载文件。" };
-    }
-  };
 
   /**
    * 发送一条消息（聊天输入栏与任务区自动执行共用；附件入口带 attachment 走同一条）。
@@ -3864,6 +3947,15 @@ export function ChatPage({
      */
     const initPrompt = expandInitCommand(text);
     if (initPrompt !== null) return submitMessage(initPrompt, mentions, taskId, attachment, options);
+    /**
+     * 工作区自定义命令（d.240）：`.heming/commands/<名字>.md` → `/名字`。
+     *
+     * 放在内置本地命令**之后**展开：自定义命令与内置同名时（例如仓库里放了个 `plan.md`），
+     * 内置语义优先——用户不会因为克隆了别人的仓库就丢掉「/plan 是计划模式」这件事。
+     * 与 `/init` 一样递归回 `submitMessage` 走正常发送路径（会落库、会调工具）。
+     */
+    const customPrompt = expandCustomCommand(text, customCommandsRef.current);
+    if (customPrompt !== null) return submitMessage(customPrompt, mentions, taskId, attachment, options);
     // 只对用户手打的单条命令生效：`/compact` 不落库、不发给模型，本地压缩完给结果。
     if (text === COMPACT_COMMAND) return await runCompactCommand(mentions);
     if (text === PLAN_COMMAND) {
@@ -3879,8 +3971,56 @@ export function ChatPage({
     // 自检与帮助同样本地完成：没有模型绑定也要能问「为什么它不动手」。
     if (text === STATUS_COMMAND) return { ok: true, notice: buildSelfStatus() };
     if (text === HELP_COMMAND) return { ok: true, notice: buildSlashHelp() };
-    // 导出（d.236）：纯本地动作——读当前会话的消息与工具轨迹，生成一份 Markdown 并下载。
-    if (text === EXPORT_COMMAND) return exportConversation();
+    /**
+     * 工作区工具 hooks（PreToolUse）：`/hooks` 看状态与规则、`/hooks on` 启用、`/hooks off` 关闭。
+     *
+     * 默认**不启用**：`.heming/hooks.json` 是仓库内容，克隆一个恶意仓库不能让它
+     * 在你打开智能体时自动执行命令。启用按工作区根记（localStorage），
+     * 开关文案必须明说「允许本工区脚本在本机执行」，不能让用户以为是“打开一个检查开关”。
+     */
+    if (text === HOOKS_COMMAND || text.startsWith(`${HOOKS_COMMAND} `)) {
+      const rest = text.slice(HOOKS_COMMAND.length).trim().toLowerCase();
+      const workspace =
+        useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace ?? "";
+      if (rest === "on" || rest === "开") {
+        if (!workspace.trim()) {
+          return {
+            ok: false,
+            error: "未分组会话没有工作区：hooks 只认工作区里的 .heming/hooks.json，先把会话放进一个工作区。",
+          };
+        }
+        if (!setToolHooksEnabled(workspace, true)) {
+          return {
+            ok: false,
+            error: "没能保存启用状态（本机存储不可用）。为避免“看起来开了、其实没生效”，hooks 保持未启用。",
+          };
+        }
+        const state = await toolHooksRef.current!.load(workspace, { force: true });
+        return {
+          ok: true,
+          notice:
+            `已启用本工区的 hooks。这会允许本工区的钩子脚本在你的机器上执行：规则来自工作区里的 .heming/hooks.json，脚本以你当前的用户身份运行；只在你信任这个仓库时开启。\n\n` +
+            describeToolHooksState(state),
+        };
+      }
+      if (rest === "off" || rest === "关") {
+        if (workspace.trim()) setToolHooksEnabled(workspace, false);
+        return {
+          ok: true,
+          notice:
+            "已关闭本工区的 hooks：之后只加载并展示规则，不执行任何脚本，也不拦截工具（工具照常走人工确认）。",
+        };
+      }
+      if (rest && rest !== "status" && rest !== "状态") {
+        return {
+          ok: true,
+          notice:
+            "用法：`/hooks` 看状态与规则、`/hooks on` 启用（允许本工区脚本在本机执行）、`/hooks off` 关闭。",
+        };
+      }
+      const state = await toolHooksRef.current!.load(workspace, { force: true });
+      return { ok: true, notice: describeToolHooksState(state) };
+    }
     /**
      * 会话目标（d.201）：`/goal <一句话>` 设定、`/goal done` 完成、`/goal off` 清除、`/goal` 查看。
      *
@@ -4777,6 +4917,8 @@ export function ChatPage({
             {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
             <IconButton
               label="搜索会话"
+              // 快捷键写在 title 上：Ctrl+F 是新加入口（d.236），不写出来没人会发现。
+              title="搜索会话（Ctrl+F）"
               className={searchOpen ? "bg-subtle-3" : ""}
               aria-pressed={searchOpen}
               icon={<SearchIcon width={18} height={18} />}
@@ -4806,6 +4948,7 @@ export function ChatPage({
           <SearchIcon width={14} height={14} className="shrink-0 text-muted" />
           <input
             autoFocus
+            ref={searchInputRef}
             aria-label="搜索本会话"
             value={searchQuery}
             onChange={(e) => {

@@ -11,6 +11,8 @@
  * 这是纵深防御的一层，不替代主进程桥本身的超时、方法白名单与响应体上限。
  */
 
+import { domainAllowed, describeNetPolicy, type NetPolicy } from "./netPolicy.js";
+
 export type HttpUrlVerdict = { ok: true; url: URL } | { ok: false; error: string };
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
@@ -109,7 +111,7 @@ export function isPrivateHostname(rawHostname: string): boolean {
  * 校验一个可以安全交给桌面代发桥的公开 http(s) 地址。
  * 失败时 error 是给模型看的中文原因（不抛错）。
  */
-export function checkPublicHttpUrl(raw: string): HttpUrlVerdict {
+export function checkPublicHttpUrl(raw: string, opts: { policy?: NetPolicy } = {}): HttpUrlVerdict {
   const input = String(raw ?? "").trim();
   if (!input) return { ok: false, error: "地址为空" };
 
@@ -130,6 +132,17 @@ export function checkPublicHttpUrl(raw: string): HttpUrlVerdict {
     return {
       ok: false,
       error: "不能访问本机或内网地址（只允许公开网页）",
+    };
+  }
+  /*
+   * 域名策略（d.238）：内网检查之后再问「这个域名在用户的允许列表里吗」。
+   * 顺序有意为之——先报「本机/内网不能读」（这是绝对边界，改设置也放不开），
+   * 再报「不在允许列表」（这是用户自己设的、可以改），避免用户以为改设置就能读内网。
+   */
+  if (opts.policy && !domainAllowed(opts.policy, url.hostname)) {
+    return {
+      ok: false,
+      error: `这个域名不在允许列表里：${url.hostname}。${describeNetPolicy(opts.policy)}。要放行就去「设置 → 网络访问」把它加进列表，或把模式改回「开放」`,
     };
   }
   return { ok: true, url };

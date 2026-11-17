@@ -102,6 +102,30 @@ export const SYSTEM_AGENTS: Record<
   },
 };
 
+/** 消息全文检索的一条候选（正文原样返回，片段裁剪由 app 层统一做，两实现同一口径）。 */
+export interface MessageSearchHit {
+  conversationId: string;
+  messageId: string;
+  senderType: string;
+  createdAt: string;
+  text: string;
+}
+
+/** 消息全文检索结果；`scanned` 是索引候选行数（与线性扫描的「扫过多少条消息」同义）。 */
+export interface MessageSearchResult {
+  hits: MessageSearchHit[];
+  truncated: boolean;
+  scanned: number;
+}
+
+export interface MessageSearchOptions {
+  /** 只在这些会话里搜（调用方已按成员关系与最近活跃收口）；顺序决定命中排序。 */
+  conversationIds: string[];
+  limit: number;
+  /** 最多检查多少条索引候选（对应旧实现的扫描上限，防止极端查询拖住单线程事件循环）。 */
+  maxScanned: number;
+}
+
 export interface Store {
   createUser(username: string, passwordHash: string, displayName: string): User;
   findUserByUsername(username: string): { user: User; passwordHash: string } | null;
@@ -109,10 +133,17 @@ export interface Store {
   /**
    * 登录会话：只存 token 的 SHA-256 摘要（原文不落库）。
    * 会话与用户数据同库持久化，服务重启后已登录设备无需重新登录。
+   *
+   * `expiresAt` 是毫秒时间戳。旧版本升级上来的会话行没有过期时间（null）= 永不过期：
+   * 升级不能把已经登录的设备全部踢回登录页（那是比「安全」更糟的可用性事故）。
    */
-  addSession(tokenDigest: string, userId: string): void;
-  /** 按 token 摘要取 userId；不存在返回 null。 */
+  addSession(tokenDigest: string, userId: string, expiresAt?: number | null): void;
+  /** 按 token 摘要取 userId；不存在或已过期返回 null（过期行顺手删除，避免越积越多）。 */
   sessionUserId(tokenDigest: string): string | null;
+  /** 吊销单个会话（登出 / 刷新换票）；存在并删除返回 true。 */
+  deleteSession(tokenDigest: string): boolean;
+  /** 吊销某用户全部会话（所有设备），返回实际吊销数量。 */
+  deleteUserSessions(userId: string): number;
   /** avatar 省略时保留原值。返回新 User 对象（见 createMemoryStore 内注释）。 */
   updateProfile(userId: string, patch: { displayName: string; avatar?: string }): User;
   /**
@@ -173,6 +204,12 @@ export interface Store {
     userId: string,
     envelope: { cipher: string; chainKid?: string; n?: number },
   ): ReencryptResult;
+  /**
+   * 消息正文全文检索（可选能力）：SQLite 实现走 FTS5；内存实现没有索引，返回 null
+   * 让调用方回退既有的线性扫描。返回 null 也用于「查询 <3 字符 / FTS 不可用」——
+   * 调用方只需判断「有没有加速通道」，不需要知道原因。
+   */
+  searchMessages(query: string, options: MessageSearchOptions): MessageSearchResult | null;
   /**
    * 登记本人设备公钥（E2E Task 2）：按 (userId, ikEcdh) upsert——同设备再登记覆盖
    * （SPK 轮换），新 ikEcdh 追加设备。userId 恒来自登录态，不做用户存在性校验。
@@ -400,8 +437,8 @@ export interface Store {
 export function createMemoryStore(): Store {
   const users = new Map<string, { user: User; passwordHash: string }>();
   const usersByName = new Map<string, string>();
-  /** 登录会话（token 摘要 → userId）；进程内实现，sqlite 侧对应 sessions 表。 */
-  const sessions = new Map<string, string>();
+  /** 登录会话（token 摘要 → userId + 过期时刻）；进程内实现，sqlite 侧对应 sessions 表。 */
+  const sessions = new Map<string, { userId: string; expiresAt: number | null }>();
   const conversations = new Map<
     string,
     {
@@ -517,11 +554,35 @@ export function createMemoryStore(): Store {
     findUserById(id) {
       return users.get(id)?.user ?? null;
     },
-    addSession(tokenDigest, userId) {
-      sessions.set(tokenDigest, userId);
+    addSession(tokenDigest, userId, expiresAt = null) {
+      sessions.set(tokenDigest, { userId, expiresAt });
     },
     sessionUserId(tokenDigest) {
-      return sessions.get(tokenDigest) ?? null;
+      const row = sessions.get(tokenDigest);
+      if (!row) return null;
+      // 过期即删：不把死会话留在 Map 里，也让「刷新/登出」之外没有回收任务。
+      if (row.expiresAt !== null && row.expiresAt <= Date.now()) {
+        sessions.delete(tokenDigest);
+        return null;
+      }
+      return row.userId;
+    },
+    deleteSession(tokenDigest) {
+      return sessions.delete(tokenDigest);
+    },
+    deleteUserSessions(userId) {
+      let revoked = 0;
+      // 先收集键再删：改 Map 的同时遍历迭代器在部分引擎上行为未定义。
+      for (const [key, row] of [...sessions]) {
+        if (row.userId !== userId) continue;
+        sessions.delete(key);
+        revoked += 1;
+      }
+      return revoked;
+    },
+    searchMessages() {
+      // 内存实现没有 FTS 索引：调用方回退线性扫描（两实现结果口径由 app 层统一保证）。
+      return null;
     },
     updateProfile(userId, patch) {
       const row = users.get(userId);

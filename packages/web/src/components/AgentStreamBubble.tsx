@@ -7,6 +7,7 @@ import { toolNameLabel } from "../lib/toolName.js";
 import { summarizeToolArgs, toolArgPath } from "../lib/toolArgsSummary.js";
 import { failureNextStep, parseToolFailure } from "../lib/toolFailure.js";
 import { previewToolResult } from "../lib/toolResultPreview.js";
+import { ARG_DIFF_MAX_ROWS, argDiff, formatArgDiffStat } from "../lib/fileEdit/argDiff.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { CheckIcon, ChevronIcon } from "./icons.js";
 import { Button } from "./ui/Button.js";
@@ -207,6 +208,8 @@ export function ToolTraceList({
         const failure =
           t.status === "error" || t.status === "denied" ? parseToolFailure(t.result) : null;
         const nextStep = failure === null ? null : failureNextStep(failure);
+        // d.239：成功的写/改，展开区先给「一眼能看的增删对照」——不用再点开「查看改动」。
+        const inlineDiff = t.status === "ok" ? argDiff(t.name, t.args) : null;
         return (
         <details key={t.id} className="rounded-md border border-line-soft bg-surface px-2 py-1">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-ui-xs">
@@ -260,6 +263,40 @@ export function ToolTraceList({
             ) : null}
           </summary>
           <div className="mt-1 border-t border-line-soft pt-1">
+            {inlineDiff === null ? null : (
+              <div className="mb-1" data-testid="tool-inline-diff">
+                <div className="text-ui-xs text-muted">
+                  这次改动：{formatArgDiffStat(inlineDiff)}
+                  {inlineDiff.truncated ? `（下面只画前 ${ARG_DIFF_MAX_ROWS} 行）` : ""}
+                </div>
+                <div className="mt-0.5 overflow-auto rounded-sm bg-panel font-mono text-ui-xs leading-5">
+                  {inlineDiff.rows.map((row, index) => (
+                    <div
+                      // 行内容可能重复，但「第几行 + 类型」在这一次渲染里唯一，够用
+                      key={`${index}-${row.kind}`}
+                      data-testid={`tool-diff-row-${row.kind}`}
+                      className={`flex gap-1 px-1.5 ${
+                        row.kind === "add"
+                          ? "bg-success-soft text-success"
+                          : row.kind === "del"
+                            ? "bg-danger-soft text-danger"
+                            : "text-muted"
+                      }`}
+                    >
+                      <span className="w-3 shrink-0 select-none">
+                        {row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}
+                      </span>
+                      <span className="whitespace-pre-wrap break-words">{row.text || " "}</span>
+                    </div>
+                  ))}
+                </div>
+                {inlineDiff.truncated ? (
+                  <p className="mt-0.5 text-ui-xs text-warn">
+                    对照太长，这里只画了前 {ARG_DIFF_MAX_ROWS} 行；完整对照在「本轮改动 → 查看改动」里。
+                  </p>
+                ) : null}
+              </div>
+            )}
             <div className="text-ui-xs text-muted">参数</div>
             <pre className="mt-0.5 whitespace-pre-wrap break-words rounded-sm bg-subtle-2 px-1.5 py-1 font-mono text-ui-xs text-body">
               {t.args || "{}"}

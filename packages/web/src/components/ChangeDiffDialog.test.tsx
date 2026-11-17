@@ -91,3 +91,37 @@ describe("改动对照弹窗 · 会话文件列表（d.210）", () => {
     expect(screen.getByText("改动对照 · a.ts")).toBeInTheDocument();
   });
 });
+describe("只看改动（d.239）", () => {
+  const fileWithContext = {
+    path: "D:/库/src/a.ts",
+    loading: false,
+    error: null,
+    before: "一\n二\n三\n四\n五\n六\n七\n八\n九\n目标旧\n",
+    after: "一\n二\n三\n四\n五\n六\n七\n八\n九\n目标新\n",
+  };
+
+  it("默认显示上下文，可切成「只看改动」且随时切回", () => {
+    render(<ChangeDiffDialog state={fileWithContext} onClose={() => {}} />);
+    expect(screen.getAllByTestId("diff-row-same").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("diff-row-count").textContent).toContain("含上下文");
+
+    fireEvent.click(screen.getByRole("button", { name: "只看改动" }));
+    expect(screen.queryAllByTestId("diff-row-same")).toHaveLength(0);
+    expect(screen.getByTestId("diff-row-count").textContent).toContain("已隐藏未改动的行");
+    expect(screen.getByTestId("diff-row-del").textContent).toContain("目标旧");
+    expect(screen.getByTestId("diff-row-add").textContent).toContain("目标新");
+
+    fireEvent.click(screen.getByRole("button", { name: "显示上下文" }));
+    expect(screen.getAllByTestId("diff-row-same").length).toBeGreaterThan(0);
+  });
+
+  it("整份都是改动（没有上下文行）时不出这个开关，不给死按钮", () => {
+    render(
+      <ChangeDiffDialog
+        state={{ path: "D:/库/新.md", loading: false, error: null, before: "", after: "新一\n新二\n" }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "只看改动" })).toBeNull();
+  });
+});

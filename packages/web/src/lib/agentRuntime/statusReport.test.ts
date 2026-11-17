@@ -387,3 +387,64 @@ describe("本会话用量行（d.230）", () => {
     ).toContain("本会话用量");
   });
 });
+
+describe("网络访问边界要说出来（d.238）", () => {
+  const base = {
+    version: "d.237.4.116.12",
+    model: "和小鸣",
+    workspace: "D:/剧库",
+  };
+
+  it("开放模式说明「任意公开网页，内网仍被挡」", () => {
+    const text = buildStatusReport({ ...base, net: { mode: "open", allow: [] } });
+    expect(text).toContain("网络访问：开放");
+    expect(text).toContain("内网与本机地址始终被挡");
+  });
+
+  it("白名单模式列出允许的域名与数量", () => {
+    const text = buildStatusReport({
+      ...base,
+      net: { mode: "allowlist", allow: ["docs.company.com", "*.example.dev"] },
+    });
+    expect(text).toContain("网络访问：仅允许 2 个域名");
+    expect(text).toContain("docs.company.com");
+    expect(text).toContain("*.example.dev");
+    expect(text).toContain("其余网页会被拒绝");
+  });
+
+  it("白名单开着但列表为空时明说「现在什么都读不了」", () => {
+    const text = buildStatusReport({ ...base, net: { mode: "allowlist", allow: [] } });
+    expect(text).toContain("当前列表为空");
+    expect(text).toContain("设置 → 网络访问");
+  });
+
+  it("不给策略快照时不出这一行", () => {
+    expect(buildStatusReport(base)).not.toContain("网络访问");
+  });
+});
+
+describe("工作区自定义命令（d.240）", () => {
+  const base = {
+    version: "d.240.4.116.12",
+    model: "deepseek-v4-flash",
+    workspace: "D:/评测区",
+    roots: [{ name: "评测区", path: "D:/评测区", mode: "write" as const }],
+  };
+
+  it("读到了几条就说几条，并说明面板里以 /名字 出现", () => {
+    const text = buildStatusReport({ ...base, customCommands: 3 });
+    expect(text).toContain("自定义命令：3 条");
+    expect(text).toContain(".heming/commands/*.md");
+    expect(text).toContain("`/名字`");
+  });
+
+  it("读到 0 条时直接告诉用户放个文件就能加命令", () => {
+    const text = buildStatusReport({ ...base, customCommands: 0 });
+    expect(text).toContain("自定义命令：无");
+    expect(text).toContain(".heming/commands/");
+  });
+
+  it("还没读过时不说「无」，如实写尚未统计", () => {
+    expect(buildStatusReport(base)).toContain("自定义命令：尚未统计");
+  });
+});

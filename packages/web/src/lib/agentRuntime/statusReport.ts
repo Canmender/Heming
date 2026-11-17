@@ -12,6 +12,7 @@
 
 import { formatFoldAgeMinutes } from "../agentContext/contextFold.js";
 import type { McpStatusSnapshot } from "../mcp/summary.js";
+import { describeNetPolicy } from "../webtools/netPolicy.js";
 import { SLASH_COMMANDS } from "./slashCommands.js";
 
 export interface StatusRoot {
@@ -69,6 +70,11 @@ export interface StatusInput {
    */
   projectRules?: { files: readonly { rel: string; chars: number; truncated: boolean }[]; omitted: number } | null;
   /**
+   * 工作区自定义命令条数（d.240），来自 `.heming/commands/*.md` 的解析结果。
+   * 省略 = 本会话还没读过（切会话/换工作区时才读）；0 = 读过，但没有可用的命令文件。
+   */
+  customCommands?: number | null;
+  /**
    * 工具失败归因（d.221），来自 `getToolFailureStats`。
    * null / 省略 = 这个会话还没失败过（不写这一行）。
    */
@@ -109,6 +115,11 @@ export interface StatusInput {
    * null / 省略 = 浏览器环境拿不到注册表；有值时即使 0 个服务也会说明「没有配置服务」。
    */
   mcp?: McpStatusSnapshot | null;
+  /**
+   * 网络访问策略（d.238），来自 `getNetPolicy`。
+   * 省略 = 不知道（不写这一行）；有值时按「开放」或「仅允许 N 个域名」如实说。
+   */
+  net?: { mode: "open" | "allowlist"; allow: readonly string[] } | null;
   /** 桌面桥是否存在（浏览器里没有文件/命令能力）。 */
   desktop?: boolean;
 }
@@ -186,6 +197,24 @@ export function describeProjectRulesLine(
     .join("、");
   const tail = rules.omitted > 0 ? `；还有 ${rules.omitted} 份没展开（字数上限）` : "";
   return `项目约定：${listed}${tail}`;
+}
+
+/**
+ * 工作区自定义命令（d.240）：`.heming/commands/*.md` 读到了几条。
+ *
+ * 三种状态要分清（和项目约定同一套口径）：
+ * - 省略 = 本会话还没读过（切会话/换工作区时才读），别假装「没有」；
+ * - 0 = 读过，确实没有可用文件 → 直接告诉用户放文件就能加命令；
+ * - N → 说明面板里以 `/名字` 出现，它跟内置命令一样是一段提示词（不是本地动作）。
+ */
+export function describeCustomCommandsLine(count: StatusInput["customCommands"]): string {
+  if (count === undefined || count === null) {
+    return "自定义命令：尚未统计（切一次会话或换工作区后这里会写读到几条）";
+  }
+  if (count === 0) {
+    return "自定义命令：无（在 `.heming/commands/` 放一个 `名字.md`，输入框打 `/` 就能看到它）";
+  }
+  return `自定义命令：${count} 条（来自 \`.heming/commands/*.md\`，面板里以 \`/名字\` 出现）`;
 }
 
 /**
@@ -301,6 +330,7 @@ export function buildStatusReport(input: StatusInput): string {
 
   lines.push(`工作区：${input.workspace ? shortPath(input.workspace) : "未分组（用默认工作区）"}`);
   lines.push(describeProjectRulesLine(input.projectRules));
+  lines.push(describeCustomCommandsLine(input.customCommands));
   const failureLine = describeToolFailureLine(input.toolFailures);
   if (failureLine !== null) lines.push(failureLine);
 
@@ -387,6 +417,9 @@ export function buildStatusReport(input: StatusInput): string {
     lines.push(describeToolsLine(input.tools));
   }
   if (input.mcp) lines.push(describeMcpLine(input.mcp));
+  // 网络访问（d.238）：这行回答「它到底能读哪些网站」——被域名策略挡住时，
+  // 模型只会说「不能读这个地址」，用户得知道边界在哪儿设的。
+  if (input.net) lines.push(describeNetPolicy(input.net));
 
   lines.push(`正在跑：${yesNo(input.busy, "是（想停就点停止，停了点「继续」能接着做）", "否")}`);
   return lines.join("\n");

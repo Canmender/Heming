@@ -20,7 +20,13 @@ import type {
   TeamWorkspaceSnapshot,
   WorkspaceTeam,
 } from "@heming/shared";
-import type { Store, TeamUsageRow } from "./store.js";
+import type {
+  MessageSearchHit,
+  MessageSearchOptions,
+  MessageSearchResult,
+  Store,
+  TeamUsageRow,
+} from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
 
@@ -77,6 +83,136 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  /* ───────────────── d.236 消息全文索引（FTS5 trigram） ─────────────────
+   *
+   * 索引表在 db.ts 建（失败只记一次日志）；这里做三件事：
+   *  1) 探测 messages_fts 是否存在，运行中任何 FTS 语句失败都永久降级为线性扫描——
+   *     「搜索慢一点」远好于「写消息失败 / 启动失败」；
+   *  2) 消息写入/重加密/删会话时同步索引（应用层写，不用 json_extract 触发器）；
+   *  3) 启动时把存量明文消息分批回填（幂等，可中断续跑）。
+   */
+
+  /** FTS 表是否存在（db.ts 建表失败或无 FTS5 时为 false）。 */
+  function detectFtsReady(): boolean {
+    const row = db
+      .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
+      .get();
+    return !!row;
+  }
+  let ftsReady = detectFtsReady();
+
+  /** 降级：只记一次日志，之后所有索引操作变 no-op，搜索走 app 层线性扫描。 */
+  function disableFts(reason: unknown): void {
+    if (!ftsReady) return;
+    ftsReady = false;
+    console.warn(
+      "[fts] 消息全文索引停用，搜索回退线性扫描：",
+      reason instanceof Error ? reason.message : reason,
+    );
+  }
+
+  /** 从 payload JSON 里取明文正文；解析失败/非字符串一律空串（不索引的内容搜不到，行为可预期）。 */
+  function messageText(payload: string): string {
+    try {
+      const parsed = JSON.parse(payload) as { text?: unknown };
+      return typeof parsed.text === "string" ? parsed.text : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** 索引一条消息；rowid 与 messages.rowid 相同，删除/重建都按它定位。 */
+  function indexMessage(
+    rowid: number | bigint,
+    messageId: string,
+    conversationId: string,
+    text: string,
+  ): void {
+    if (!ftsReady) return;
+    try {
+      db.prepare(
+        "INSERT OR REPLACE INTO messages_fts(rowid, message_id, conv_id, text) VALUES (?, ?, ?, ?)",
+      ).run(rowid, messageId, conversationId, text);
+    } catch (err) {
+      disableFts(err);
+    }
+  }
+
+  /** 删除一条消息的索引（重加密清明文、删会话时用）。 */
+  function unindexMessage(rowid: number | bigint): void {
+    if (!ftsReady) return;
+    try {
+      db.prepare("DELETE FROM messages_fts WHERE rowid = ?").run(rowid);
+    } catch (err) {
+      disableFts(err);
+    }
+  }
+
+  /** 删除整段会话的索引（删会话时用；conv_id 是 UNINDEXED 列，按它扫一遍即可）。 */
+  function unindexConversation(conversationId: string): void {
+    if (!ftsReady) return;
+    try {
+      db.prepare("DELETE FROM messages_fts WHERE conv_id = ?").run(conversationId);
+    } catch (err) {
+      disableFts(err);
+    }
+  }
+
+  /**
+   * 首次启动回填存量消息。
+   *
+   * 快速路径：FTS 行数 >= 可索引（enc='plain'）行数就直接跳过——每次启动不必全表重扫。
+   * 回填按 rowid 分批前进（LIMIT 500），中途失败下次重启能继续（INSERT OR REPLACE 幂等）。
+   * 加密消息（enc != 'plain'）永不入索引；明文空占位写空串，保证行数口径可对齐。
+   */
+  function backfillFts(): void {
+    if (!ftsReady) return;
+    try {
+      const count = (sql: string): number =>
+        Number((db.prepare(sql).get() as { c: number }).c);
+      const eligible = count("SELECT COUNT(*) AS c FROM messages WHERE enc = 'plain'");
+      const indexed = count("SELECT COUNT(*) AS c FROM messages_fts");
+      if (indexed >= eligible) return;
+
+      let lastRowid = -1;
+      let indexedNow = 0;
+      for (;;) {
+        const rows = db
+          .prepare(
+            `SELECT rowid AS rid, id, conv_id, payload FROM messages
+             WHERE enc = 'plain' AND rowid > ? ORDER BY rowid LIMIT 500`,
+          )
+          .all(lastRowid) as Array<{
+          rid: number;
+          id: string;
+          conv_id: string;
+          payload: string;
+        }>;
+        if (rows.length === 0) break;
+        for (const r of rows) {
+          lastRowid = Number(r.rid);
+          indexMessage(r.rid, r.id, r.conv_id, messageText(r.payload));
+          indexedNow += 1;
+        }
+      }
+      if (indexedNow > 0) {
+        console.log(`[fts] 回填消息索引 ${indexedNow} 条（存量明文消息）`);
+      }
+    } catch (err) {
+      // 回填失败不影响服务启动：索引缺失的部分由线性扫描兜底（搜索可能漏老消息）。
+      disableFts(err);
+    }
+  }
+
+  /**
+   * 把用户输入包成 FTS5 字符串字面量。
+   * 引号内的一切（AND/OR/NEAR、星号、减号、括号）都按字面量处理；内部 `"` 按 FTS5 规则双写转义。
+   * 这样用户输入永远不会变成 FTS 操作符，也不会抛 MATCH 语法错。
+   */
+  function ftsPhrase(query: string): string {
+    return `"${query.replace(/"/g, '""')}"`;
   }
 
   /** messages 行 → Message（listMessages 与 reencrypt 回读共用，防映射口径漂移）。 */
@@ -290,6 +426,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   };
   // 构造即完成单智能体化：直接 new store 的测试/调用方同样得到「名册恒一条」的不变量。
   ensureSystemAgentRows();
+  // 存量消息回填 FTS（幂等；FTS 不可用时内部直接跳过）。
+  backfillFts();
 
   return {
     close() {
@@ -325,16 +463,30 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         | undefined;
       return row ? rowToUser(row) : null;
     },
-    addSession(tokenDigest, userId) {
+    addSession(tokenDigest, userId, expiresAt = null) {
       db.prepare(
-        "INSERT OR REPLACE INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)",
-      ).run(tokenDigest, userId, new Date().toISOString());
+        "INSERT OR REPLACE INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+      ).run(tokenDigest, userId, new Date().toISOString(), expiresAt);
     },
     sessionUserId(tokenDigest) {
       const row = db
-        .prepare("SELECT user_id FROM sessions WHERE token_hash = ?")
-        .get(tokenDigest) as { user_id: string } | undefined;
-      return row?.user_id ?? null;
+        .prepare("SELECT user_id, expires_at FROM sessions WHERE token_hash = ?")
+        .get(tokenDigest) as { user_id: string; expires_at: number | bigint | null } | undefined;
+      if (!row) return null;
+      // NULL = 本列引入前的老会话（不过期）；过了期就顺手删掉，免得死会话越积越多。
+      if (row.expires_at !== null && Number(row.expires_at) <= Date.now()) {
+        db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenDigest);
+        return null;
+      }
+      return row.user_id;
+    },
+    deleteSession(tokenDigest) {
+      return db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenDigest).changes > 0;
+    },
+    deleteUserSessions(userId) {
+      return Number(
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId).changes,
+      );
     },
     updateProfile(userId, patch) {
       const existing = db.prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?").get(userId) as
@@ -378,7 +530,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         ...(envelope?.chainKid !== undefined ? { chainKid: envelope.chainKid } : {}),
         ...(envelope?.n !== undefined ? { n: envelope.n } : {}),
       };
-      db.prepare(
+      const inserted = db.prepare(
         `INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at, enc, cipher, chain_kid, n)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
       ).run(
@@ -394,6 +546,10 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         envelope?.chainKid ?? null,
         envelope?.n ?? null,
       );
+      // 明文消息立即进全文索引（写入后就能搜到）；e2e 信封服务端只有密文，不入索引。
+      if (msg.enc === "plain") {
+        indexMessage(inserted.lastInsertRowid, msg.id, conversationId, payload.text);
+      }
       return msg;
     },
     listMessages(conversationId, limit) {
@@ -414,20 +570,29 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       // 并在**同一条 UPDATE** 内清明文：payload 置 {"text":""} 占位（列 NOT NULL 不能
       // 置 NULL）、reply_to 置 NULL——出站 listMessages 对 e2e 不再含原文。
       // changes=0 时回读分类三态（sender 先于 enc 判，与内存实现同优先级）。
-      const res = db
-        .prepare(
-          `UPDATE messages SET enc = 'e2e', cipher = ?, chain_kid = ?, n = ?,
-             payload = ?, reply_to = NULL
-           WHERE id = ? AND sender_id = ? AND enc = 'plain'`,
-        )
-        .run(
-          envelope.cipher,
-          envelope.chainKid ?? null,
-          envelope.n ?? null,
-          JSON.stringify({ text: "" }),
-          messageId,
-          userId,
-        );
+      // FTS 索引同事务删除：重加密后服务端不再有明文，索引里也不能留（否则搜索会命中
+      // 用户以为已经加密的内容）。
+      const rowidRow = db.prepare("SELECT rowid AS rid FROM messages WHERE id = ?").get(messageId) as
+        | { rid: number }
+        | undefined;
+      const res = runTx(() => {
+        const updated = db
+          .prepare(
+            `UPDATE messages SET enc = 'e2e', cipher = ?, chain_kid = ?, n = ?,
+               payload = ?, reply_to = NULL
+             WHERE id = ? AND sender_id = ? AND enc = 'plain'`,
+          )
+          .run(
+            envelope.cipher,
+            envelope.chainKid ?? null,
+            envelope.n ?? null,
+            JSON.stringify({ text: "" }),
+            messageId,
+            userId,
+          );
+        if (updated.changes > 0 && rowidRow) unindexMessage(rowidRow.rid);
+        return updated;
+      });
       if (res.changes > 0) {
         const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
           | Parameters<typeof rowToMessage>[0]
@@ -441,6 +606,66 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       if (!row) return { ok: false, reason: "not_found" };
       if (row.sender_id !== userId) return { ok: false, reason: "forbidden" };
       return { ok: false, reason: "conflict" };
+    },
+    searchMessages(query, options) {
+      // 没有索引就走线性扫描（app 层看到 null 即回退）。
+      if (!ftsReady) return null;
+      // trigram 以 3 字符为最小索引单元：更短的词（如「ab」）在 FTS 里永远搜不到，
+      // 交给线性扫描，语义与内存实现一致。
+      if (Array.from(query).length < 3) return null;
+      const { conversationIds, limit, maxScanned } = options;
+      if (conversationIds.length === 0) return { hits: [], truncated: false, scanned: 0 };
+
+      const placeholders = conversationIds.map(() => "?").join(", ");
+      let rows: Array<{
+        message_id: string;
+        conv_id: string;
+        text: string;
+        sender_type: string;
+        created_at: string;
+      }>;
+      try {
+        // 只碰用户所在的会话（IN 收口），多取一条用于判断是否因扫描上限被截断。
+        rows = db
+          .prepare(
+            `SELECT messages_fts.message_id AS message_id, messages_fts.conv_id AS conv_id,
+                    messages_fts.text AS text, m.sender_type AS sender_type, m.created_at AS created_at
+             FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid
+             WHERE messages_fts MATCH ? AND messages_fts.conv_id IN (${placeholders})
+             ORDER BY m.created_at DESC, m.rowid DESC
+             LIMIT ?`,
+          )
+          .all(ftsPhrase(query), ...conversationIds, maxScanned + 1) as typeof rows;
+      } catch (err) {
+        // 语法/索引损坏：立刻降级，本次与以后都走线性扫描（搜索不能因此 500）。
+        disableFts(err);
+        return null;
+      }
+
+      const truncated = rows.length > maxScanned;
+      if (truncated) rows = rows.slice(0, maxScanned);
+      // 同一会话只保留最新一条：结果按时间倒序，第一次遇到某会话的那条就是最新命中。
+      const newest = new Map<string, MessageSearchHit>();
+      for (const r of rows) {
+        if (newest.has(r.conv_id)) continue;
+        newest.set(r.conv_id, {
+          conversationId: r.conv_id,
+          messageId: r.message_id,
+          senderType: r.sender_type,
+          createdAt: r.created_at,
+          text: r.text ?? "",
+        });
+      }
+      // 输出顺序按会话最近活跃（调用方给的顺序），与旧扫描口径一致；
+      // limit 截的是「前 N 个有命中的会话」，而不是全局前 N 条消息。
+      const hits: MessageSearchHit[] = [];
+      for (const id of conversationIds) {
+        const hit = newest.get(id);
+        if (!hit) continue;
+        hits.push(hit);
+        if (hits.length >= limit) break;
+      }
+      return { hits, truncated, scanned: rows.length };
     },
     upsertE2eDevice(userId, device) {
       // (user_id, ik_ecdh) 主键冲突 → 覆盖（SPK 轮换）；UPDATE 不动 rowid → 设备序保持
@@ -527,6 +752,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.exec("BEGIN");
       try {
         db.prepare("DELETE FROM messages WHERE conv_id = ?").run(conversationId);
+        // 全文索引同事务清掉：否则删掉的会话仍会出现在搜索结果里。
+        unindexConversation(conversationId);
         db.prepare("DELETE FROM message_reads WHERE conv_id = ?").run(conversationId);
         db.prepare("DELETE FROM conversation_members WHERE conv_id = ?").run(conversationId);
         db.prepare("DELETE FROM conversation_agents WHERE conv_id = ?").run(conversationId);

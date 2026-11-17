@@ -2,6 +2,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHitlGate, toHitlBatch } from "./gate.js";
 import { HitlPolicyStore, type HitlPolicy } from "./policy.js";
 import type { HitlBatch, HitlCall, HitlMode, HitlVerdict, RiskLevel } from "./types.js";
+import { parseWorkspaceRules, type WorkspaceRulesLoad } from "./workspaceRules.js";
+
+/** 用配置对象构造一份「解析成功的加载结果」，模拟默认加载器读到的文件。 */
+function rulesLoad(config: unknown, trusted = true): WorkspaceRulesLoad {
+  const parsed = parseWorkspaceRules(JSON.stringify(config));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return {
+    ok: true,
+    config: parsed.config,
+    invalid: parsed.invalid,
+    source: "<test>",
+    trusted,
+    allowActive: trusted,
+  };
+}
 
 /** 内存存储：每个测试一份，互不干扰。 */
 class FakeStorage {
@@ -320,6 +335,259 @@ describe("HITL 闸门：记住的规则", () => {
     const outcomes = await gate.review(batchOf([writeCall]));
     expect(outcomes[0].kind).toBe("deny");
     expect(outcomes[0].kind === "deny" && outcomes[0].cause).toBe("gate");
+  });
+});
+
+describe("HITL 闸门：工作区权限规则", () => {
+  let policy: HitlPolicyStore;
+  const callAt = (
+    id: string,
+    name: string,
+    path: string,
+    risk: HitlCall["risk"] = "write",
+  ): HitlCall => ({
+    ...makeCall(id, name, risk),
+    argsJson: JSON.stringify({ path }),
+  });
+  /** run_command 的调用：命令在参数里，路径规则对它无意义。 */
+  const commandCall = (id: string, command: string): HitlCall => ({
+    ...makeCall(id, "run_command", "danger"),
+    argsJson: JSON.stringify({ command }),
+  });
+
+  beforeEach(() => {
+    policy = new HitlPolicyStore(new FakeStorage());
+  });
+
+  it("工作区 deny 压过「记住的允许」", async () => {
+    // 用非文件编辑工具名：文件写工具的「记住允许」必须是按目录前缀的，
+    // 这里的重点是**优先级**，不是规则形状。
+    const call = callAt("w1", "fs__write_file", "src/a.ts");
+    policy.rememberRule("fs__write_file", "src/a.ts", "allow");
+    // 先确认记忆规则本来会放行——否则这条用例证明不了「压过」。
+    expect(policy.ruleFor(call, "a1")).toBe("allow");
+
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({ deny: [{ tool: "fs__write_file", path: "src/**" }] }),
+    });
+
+    const outcomes = await gate.review(batchOf([call]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes[0].kind).toBe("deny");
+    expect(outcomes[0].kind === "deny" && outcomes[0].cause).toBe("rule");
+    expect(outcomes[0].kind === "deny" && outcomes[0].reason).toContain("工作区权限规则拒绝");
+  });
+
+  it("工作区 ask 强制询问：策略层本来免问的只读调用也进待确认队列", async () => {
+    const read = callAt("r1", "file_read", "src/a.ts", "read");
+    const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+      { callId: "r1", decision: "allow" },
+    ]);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () => rulesLoad({ ask: [{ tool: "file_read", path: "src/**" }] }),
+    });
+
+    const outcomes = await gate.review(batchOf([read]));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    const asked = ask.mock.calls[0][0] as HitlBatch;
+    expect(asked.calls.map((c) => c.id)).toEqual(["r1"]);
+    expect(asked.auto ?? []).toEqual([]);
+    expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("工作区 ask 压过 trusted 档的会话授权", async () => {
+    policy.set({ mode: "trusted", floor: "write", scope: "global" });
+    policy.grant("a1", "fs__write_file", "global");
+    const call = makeCall("w1", "fs__write_file");
+    const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+      { callId: "w1", decision: "allow" },
+    ]);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () => rulesLoad({ ask: [{ tool: "fs__write_file" }] }),
+    });
+
+    await gate.review(batchOf([call]));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("工作区 allow 让 read / write 免问（strict 档也直接放行）", async () => {
+    policy.set({ mode: "strict", floor: "read", scope: "global" });
+    const read = callAt("r1", "file_read", "src/a.ts", "read");
+    const write = callAt("w1", "file_write", "src/a.ts");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({
+          allow: [
+            { tool: "file_read", path: "src/**" },
+            { tool: "file_write", path: "src/**" },
+          ],
+        }),
+    });
+
+    const outcomes = await gate.review(batchOf([read, write]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes.map((o) => o.kind)).toEqual(["allow", "allow"]);
+  });
+
+  it("未信任工作区：allow 不自动放行，回落为人工确认", async () => {
+    const write = callAt("w1", "file_write", "src/a.ts");
+    const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+      { callId: "w1", decision: "allow" },
+    ]);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({ allow: [{ tool: "file_write", path: "src/**" }] }, false),
+    });
+
+    const outcomes = await gate.review(batchOf([write]));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    const asked = ask.mock.calls[0][0] as HitlBatch;
+    expect(asked.calls.map((c) => c.id)).toEqual(["w1"]);
+    expect(asked.auto ?? []).toEqual([]);
+    // 用户当场允许后才执行
+    expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("信任后同一条 allow 规则才生效", async () => {
+    const write = callAt("w1", "file_write", "src/a.ts");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({ allow: [{ tool: "file_write", path: "src/**" }] }, true),
+    });
+
+    const outcomes = await gate.review(batchOf([write]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("deny 在未信任与已信任两种状态下都生效", async () => {
+    for (const trusted of [false, true]) {
+      policy = new HitlPolicyStore(new FakeStorage());
+      const call = callAt("w1", "file_write", "src/a.ts");
+      const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+      const gate = createHitlGate({
+        policy,
+        ask,
+        workspaceRules: async () =>
+          rulesLoad({ deny: [{ tool: "file_write", path: "src/**" }] }, trusted),
+      });
+
+      const outcomes = await gate.review(batchOf([call]));
+
+      expect(ask, `trusted=${trusted}`).not.toHaveBeenCalled();
+      expect(outcomes[0].kind, `trusted=${trusted}`).toBe("deny");
+    }
+  });
+
+  it("danger 的 allow 没有 allowDanger 仍进待确认；写了才放行", async () => {
+    const call = commandCall("d1", "pnpm test");
+    const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+      { callId: "d1", decision: "allow" },
+    ]);
+
+    const plain = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({ allow: [{ tool: "run_command", command: "pnpm *" }] }),
+    });
+    const first = await plain.review(batchOf([call]));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(first[0].kind).toBe("allow");
+
+    const explicit = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () =>
+        rulesLoad({
+          allow: [{ tool: "run_command", command: "pnpm *", allowDanger: true }],
+        }),
+    });
+    const second = await explicit.review(batchOf([call]));
+
+    // 显式放行后不再问用户（ask 仍是 1 次：只有上一轮问过）
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(second[0].kind).toBe("allow");
+  });
+
+  it("加载器抛错 → 整批按拒绝处理（fail-closed，不是退回「没有规则」）", async () => {
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () => {
+        throw new Error("桥断了");
+      },
+    });
+
+    const outcomes = await gate.review(batchOf([readCall, writeCall]));
+
+    expect(ask).not.toHaveBeenCalled();
+    for (const outcome of outcomes) {
+      expect(outcome.kind).toBe("deny");
+      expect(outcome.kind === "deny" && outcome.cause).toBe("rule");
+      expect(outcome.kind === "deny" && outcome.reason).toContain("权限规则配置有误，已全部拒绝");
+      expect(outcome.kind === "deny" && outcome.reason).toContain("桥断了");
+    }
+  });
+
+  it("有规则文件但解析失败 → 整批拒绝", async () => {
+    const gate = createHitlGate({
+      policy,
+      ask: vi.fn(async (): Promise<HitlVerdict[]> => []),
+      workspaceRules: async () => ({
+        ok: false,
+        error: "JSON 解析失败：Unexpected token",
+        source: "D:/项目/.heming/permissions.json",
+      }),
+    });
+
+    const outcomes = await gate.review(batchOf([readCall, writeCall]));
+
+    expect(outcomes.map((o) => o.kind)).toEqual(["deny", "deny"]);
+    for (const outcome of outcomes) {
+      expect(outcome.kind === "deny" && outcome.reason).toContain("权限规则配置有误，已全部拒绝");
+    }
+  });
+
+  it("denyAll 紧急开关 → 整批拒绝，且不问用户", async () => {
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () => rulesLoad({ denyAll: true }),
+    });
+
+    const outcomes = await gate.review(batchOf([readCall, writeCall]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes.map((o) => o.kind)).toEqual(["deny", "deny"]);
+    for (const outcome of outcomes) {
+      expect(outcome.kind === "deny" && outcome.reason).toContain("denyAll");
+    }
   });
 });
 

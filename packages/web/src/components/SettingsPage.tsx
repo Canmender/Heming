@@ -6,6 +6,7 @@ import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { BackgroundModelCard } from "./BackgroundModelCard.js";
 import { FileEditCard } from "./FileEditCard.js";
+import { NetworkPolicyCard } from "./NetworkPolicyCard.js";
 import { PersonaCard } from "./PersonaCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
@@ -360,6 +361,12 @@ export function SettingsPage() {
                   className={anchorClass(highlightId === "file-edit")}
                 >
                   <FileEditCard />
+                </div>
+                <div
+                  data-settings-id="net-policy"
+                  className={anchorClass(highlightId === "net-policy")}
+                >
+                  <NetworkPolicyCard />
                 </div>
 
                 <h2 className="ui-block-title mt-5">本机存储</h2>

@@ -12,6 +12,141 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.240.4.116.12",
+    "date": "2026-11-17",
+    "title": "常有的话存成命令：`.heming/commands/名字.md` 就是 `/名字`",
+    "bullets": [
+      "「按我们的风格复盘这次改动」",
+      "「先读 `docs/DESIGN.md` 再动手」",
+      "「提交前按顺序跑这三条命令」",
+      "新建 `packages/web/src/lib/agentRuntime/customCommands.test.ts` **12 例**：文件名规则（大小写、非 ASCII、非 `.md` 忽略）、标题/说明拆解、正文里的 `#` 不被当元信息、空文件与只有标题不算命令、超长截断、整批排序/同名去重/上限、精确匹配展开（带参数与大小写不同都不算）、面板条目带来源、读取时坏文件跳过与各种缺能力场景返回空且不抛。",
+      "`packages/web/src/lib/agentRuntime/statusReport.test.ts` **+3 例**：读到 N 条、读到 0 条、没读过时「尚未统计」。",
+      "`packages/web/src/components/ChatPage.test.tsx` **+1 例**（I4i）：放一个 `.heming/commands/review.md` → `/` 面板里出现 `/review` → 发 `/review` 时请求体是那段提示词、不含命令字面量。",
+      "`pnpm -w typecheck` 六包 Done；`packages/web` 全量 **395 files / 5750 passed**；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 108ms）。",
+      "不做命令参数（`/review 登录` 这种拼接留给提示词正文自己写「这次看什么」）。",
+      "不扫描全仓找命令文件（只认 `.heming/commands/` 一层，避免「从别的仓库继承了一张命令表」）。",
+      "不做界面上「新建/编辑命令」的表单（写 `.md` 是这件事最自然的编辑方式，也方便进版本库审阅）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "内置命令（`/plan` `/status` `/goal` `/hooks`…）解决的是「和鸣自己会做的事」，但每个仓库都有反复叮嘱的同一段话：",
+      "现在只能每次手打，或者塞进 `AGENTS.md`——可它是**每轮都会发**的项目约定，为此吃满上下文不划算。codex / Claude Code 都有「把常用提示词存成命令」的能力，这是五轮里「扩展」方向的最后一块。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/customCommands.ts`（新） | 读 `.heming/commands/*.md`：文件名即命令名（`review.md` → `/review`，只认 `[a-z0-9-]`）；可选首行 `# 标题`、紧随的 `> 说明`，其余全文即提示词；单条封顶 4000 字（截断处写明「需要完整内容用 `file_read`」）、最多 20 条、同名取先读到的、坏文件跳过 || `packages/web/src/components/ChatPage.tsx` | 切会话/换工作区/改可写根时读一次，合进 `/` 面板（标题 + 说明 + 来源路径）；输入 `/名字` 回车 → 换成那段提示词走**正常发送路径**（会落库、会调工具）；内置命令优先（仓库里的 `plan.md` 不会顶掉 `/plan`） || `packages/web/src/lib/agentRuntime/statusReport.ts` + ChatPage | `/status` 新增「自定义命令：N 条」；没读过时说「尚未统计」，读到 0 条时告诉用户放个文件就能加 |",
+      "口径：**文件即提示词**（不写 JSON、不配参数，和 `AGENTS.md` 同一套「仓库里的静态配置」心智）／**展开后就是普通消息**（不是本地动作，模型看得到、也会花这一轮上下文）／**读不到什么都不发生**（没有桥、没有根、老桌面端没有 `glob`：一律空列表，绝不让它影响正常对话）。",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.239.4.116.12",
+    "date": "2026-11-17",
+    "title": "改了什么，在工具行里就能看；长文件对照可以只看改动",
+    "bullets": [
+      "新建 `packages/web/src/lib/fileEdit/argDiff.test.ts` **10 例**：整份写入、CRLF 与末尾换行不多算、超过上限标截断但统计按全文、`old_string → new_string` 的增删计数、原文一致时不出对照、补丁文法（上下文/删/增/文件头/信封行）、只有上下文的补丁不出对照、别的工具不猜、非法参数不抛。",
+      "`packages/web/src/components/AgentStreamBubble.test.tsx` **+4 例**（20 → 24）：`file_write` 画逐行新增、`file_edit` 增删分开画、失败调用不画、非写工具不画。",
+      "`packages/web/src/components/ChangeDiffDialog.test.tsx` **+2 例**：默认显示上下文、切「只看改动」后上下文行消失且增删仍在、再切回来；整份都是改动时不渲染这个开关。",
+      "`pnpm -w typecheck` 六包 Done；`packages/web` 全量 **394 files / 5734 passed**；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 104ms）。",
+      "不在工具行里做「撤销这一个文件」（撤回入口仍在本轮改动条与会话台账，那里能确认、能逐条撤）。",
+      "不从参数拼「多文件补丁的分文件视图」（补丁里带文件名头，逐行对照够用；分文件统计留给会话台账）。",
+      "不给对照加语法高亮（先解决「看得到」，配色留给下一步统一样式）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "审阅这一侧还有两个「明明东西都在手里，却要绕一圈」的地方：",
+      "1. **工具行的展开区只有参数 JSON**。`file_write` 的「参数」是把整篇正文当字符串读（几千字挤成一坨），`file_edit` 要自己在 `old_string` / `new_string` 里找差别——想知道这步改了什么，得再去点「本轮改动 → 查看改动」，而那边读的是磁盘，未必等于这一步做的事。2. **改动对照里上下文占绝大多数**。改一个长文件的一两行，弹窗先给你十几行没改的内容，真正的 `+`/`−` 要自己滚着找。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/argDiff.ts`（新） | 从**工具参数**算出这次调用的增删对照：`file_write` 整份写入算新增；`file_edit` 的 `old_string → new_string` 走与弹窗同一套 LCS；`file_patch` 按补丁文法（`+`/`-`/上下文，文件头与 `@@` 画成上下文）直接画，不读盘 || `packages/web/src/components/AgentStreamBubble.tsx` | 成功的写/改调用，展开区最上面先给「这次改动：新增 N 行 / 删除 M 行」与逐行增删（`+` 绿 / `−` 红），超过 40 行如实说「只画了前 40 行，完整对照在『查看改动』里」 || `packages/web/src/components/ChangeDiffDialog.tsx` | 有上下文行时给「只看改动 / 显示上下文」切换，右侧标明「共 N 行（含上下文）」或「已隐藏未改动的行」 |",
+      "口径三条：**只从参数推**（不读盘，画的是这一步确实要做的事，不会因为文件后来被改而错位）／**失败的调用不画**（没写成功却说「改了什么」会骗人）／**统计按全文、显示按上限**（长文件不把 DOM 撑爆，但行数不虚报）。",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.238.4.116.12",
+    "date": "2026-11-17",
+    "title": "上网这件事有了边界：能读哪些域名，自己定",
+    "bullets": [
+      "**默认开放**：升级前后行为完全一致，不静默收紧（否则老用户第二天发现联网工具全废）。",
+      "**只认域名，不认路径**：`example.com/docs` 归一成 `example.com`——规则要能一句话解释清楚。",
+      "`example.com` 覆盖它自己和子域；`*.example.com` 只覆盖子域（两种写法语义不同，界面里写明）。",
+      "只管 `web_read`：搜索走的是用户自己配置的搜索服务，MCP 有自己的连接配置，两者不在这里改。",
+      "新建 `packages/web/src/lib/webtools/netPolicy.test.ts` **17 例**：归一（协议/账号/端口/尾点/通配）、拒收（IP、单段名、只写 `*`、非 ASCII、超长）、列表去重与上限、`domainAllowed`（自身/子域/`*.`/大小写/端口/列表为空）、存储（写盘、重建、默认态不写键、订阅次数、坏数据降级）。",
+      "`packages/web/src/lib/webtools/net-guard.test.ts` **+3 例**：白名单外拒绝且文案指向设置、名单内/子域放行、开放模式与不传策略不受影响、内网错误优先于白名单提示。",
+      "`packages/web/src/lib/agentRuntime/statusReport.test.ts` **+4 例**：开放 / 白名单 / 空列表 / 不给快照不出这行。",
+      "`packages/web/src/components/NetworkPolicyCard.test.tsx` **7 例**：默认开放、切白名单空列表警告、添加归一化、回车与多行粘贴、收错写法保留输入、移除、恢复默认。",
+      "`packages/web/src/lib/settings/registry.test.ts`：卡片数 12 → **13**（新增 `net-policy`，源码守卫要求与 `data-settings-id` 一致）。",
+      "`pnpm -w typecheck` 六包 Done；`packages/web` 全量 **393 files / 5717 passed**；`pnpm eval:agent` **40/40**。",
+      "顺手修两条**假桥过宽**的老用例（I3w / I3x）：它们的 `read` 对任何路径都回内容，包括 `.heming/permissions.json`——规则解析失败 → 闸门 fail-closed → 工具被全拒。改成「配置文件按不存在回答」（与真实桌面端一致），两条用例恢复稳定通过。",
+      "不做按路径/正则的细粒度规则（`example.com/docs` 这种写法容易被误解成「只许读这一篇」）。",
+      "不改 MCP 与搜索供应商的出网（各有自己的配置；统一收口需要另做主进程代发桥的策略层）。",
+      "不做团队级策略下发（`permissions.json` 管的是工具审批，不是网络；两者语义不同，暂不合并）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "`web_read` 一直只挡「本机 / 内网 / 保留段」（`net-guard.ts`），**任何公网地址都能读**。这意味着用户对「它能上网」没有边界可设：想做到「只许读公司文档站和我信任的那几个站」是做不到的；而反过来的风险是真实的——模型可能顺着搜索结果读到不该读的内部镜像、付费墙转储、别人的仓库，用户事后才发现，且没有任何地方能回看「它到底被允许读哪些站」。",
+      "《对标 Codex / Claude Code》的「2.4 沙箱与权限」一节里，网络边界那一行写的正是「无（渲染层可经主进程桥发任意 http/https）| 默认禁网，按需开 | 可配域名白名单」，最小补法第 1 条就是「网络请求加域名白名单」。这一版把这条补上，但**默认不收紧**。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/webtools/netPolicy.ts`（新） | 策略存储（模式 + 域名列表，`heming.netPolicy.v1`，坏数据静默降级为「开放」）；规则归一（去协议/账号/路径/端口/尾点、小写、支持 `*.` 子域通配、拒绝 IP/单段名/超长/含空格）；`domainAllowed()` 匹配；`describeNetPolicy()` 一句话文案 || `packages/web/src/lib/webtools/net-guard.ts` | `checkPublicHttpUrl(raw, { policy })`：内网检查**之后**再做域名判定，拒绝文案写明「不在允许列表 + 去设置里改」；顺序有意为之——内网是绝对边界，不能说成「加进列表就行」 || `packages/web/src/lib/webtools/tools.ts` | `web_read` 在**一次读取开始时**取一份策略快照，多跳重定向用同一份（中途改设置不影响正在进行的读取） || `packages/web/src/components/NetworkPolicyCard.tsx`（新）+ 设置区「写操作边界」 | 开放 / 仅允许列表两种模式；域名增删；空列表时明说「现在什么都读不了」；粘贴多行用 `textarea`（单行 input 会把两行粘成一个非法串）；加错的写法当场说明并保留输入 || `packages/web/src/lib/agentRuntime/statusReport.ts` + `ChatPage` | `/status` 新增「网络访问：开放 / 仅允许 N 个域名」一行 |",
+      "口径",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.237.4.116.12",
+    "date": "2026-11-17",
+    "title": "无头 CLI 能「边跑边说」，也能从 stdin 接指令",
+    "bullets": [
+      "**看不到过程**：`--json` 是跑完才吐一个对象。CI 里十分钟没有输出，日志一片空白；想「工具 A 成功就继续、失败就回滚」得等它全部跑完才能判断，而那时代价已经付了。",
+      "**指令只能塞进命令行**：`git diff`、`cat build.log`、一段 JSON 报错，长度和转义都会咬人；Windows 的 `cmd` 对多行参数尤其不友好。用户只能先写临时文件、再让智能体去读——多一步、还容易漏清理。",
+      "**分不清「做完了」和「撞上限停了」**：两者 `ok` 都是 `true`，CI 只能自己拼 `ok && !error` 去猜。撞 `--max-rounds` 明明是「还有活没干」，却被当成成功去发布。",
+      "新增 `packages/cli/src/events.test.ts` 3 例（一行一条、换行/引号/反斜杠转义、sink 顺序）与 `packages/cli/src/stdin.test.ts` 5 例（多段拼接、剥 BOM、空输入、超限报错并指路 `--cwd`、读失败不抛栈）。",
+      "`packages/cli/src/args.test.ts` 16 → 19 例（`--output-format` 三种值 + 等号写法、非法值与冲突、`-` 走 stdin 且不误判普通 prompt）。",
+      "`packages/cli/src/run.test.ts` 2 → 4 例（`onEvent` 顺序含 `tool_start` 的摘要参数、撞 `--max-rounds` 时 `ok: true` + `stopReason: \"max-rounds\"`、正常收口 `stopReason: \"ok\"`）→ CLI 全量 **29 例通过**。",
+      "端到端探针（假 OpenAI 兼容网关 + 真跑 CLI）：`exec --output-format stream-json` 输出 5 行、全部可解析、顺序 `start → round → delta → delta → final`，`final.result.usage` 为 `{input:42, output:7}`，进度行只在 stderr；`exec -` 从 stdin 读到的指令确实成了 user 消息。",
+      "`pnpm -w typecheck` 六包 Done；`packages/web` 全量 **391 files / 5686 passed**（本轮未改 web，跑一遍确认没连带）。",
+      "不做常驻 daemon / RPC（`heming serve`）：那是另一个产品形态，先让「一次调用」稳。",
+      "不做会话续跑（`--resume`）：CLI 现在是无状态单轮，续跑需要会话落盘与恢复语义，留给后面单独一轮。",
+      "事件流不包含模型思考（reasoning）增量：推理内容在供应商之间形状各异，先只给正文与工具事实。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "`packages/cli` 早就能跑无头任务（`heming run` 流式给人看、`heming exec --json` 跑完给一个对象），但把它接进 CI 或另一个程序时有三处硬伤，根子都是「只能一问一答」：",
+      "这一轮把这三处补齐，目标很克制：**让另一个程序能用它**，而不是造第二套运行时。循环、工具、审批口径仍然复用桌面端同一份 `runAgentMentions`。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/cli/src/events.ts`（新） | 定义事件契约：`start` / `round` / `delta` / `tool_start` / `tool_end` / `retry` / `final` / `error`；`jsonLine()` 保证一条事件一行；`createEventSink()` 只负责写出 || `packages/cli/src/args.ts` | 新增 `--output-format text\\|json\\|stream-json`（`--json` 保留为 `json` 的别名）；`prompt` 写 `-` 表示从 stdin 读（`fromStdin`）；`--json` 与 `stream-json` 同时给当场报错，不让一种静默盖掉另一种 || `packages/cli/src/stdin.ts`（新） | `readPromptFromStdin()`：读满即返、剥 BOM、**1 MB 上限**（prompt 是指令不是整份大文件）、读失败给可读原因 || `packages/cli/src/run.ts` | `AgentRunOptions.onEvent`，在 round / tool start / tool end / retry 各处发出结构化事件；`ExecJson` 新增 `stopReason: \"ok\" \\| \"max-rounds\" \\| \"aborted\" \\| \"error\"`（撞上限仍是成功，但原因写清楚） || `packages/cli/src/index.ts` | stdout 格式分发：`text` 原样流式、`json` 收尾一个对象、`stream-json` 一行一条事件（`final` 一定发，失败/中断也发）；配置错误在 `start` 之前发 `error` 事件并以退出码 2 结束 || `packages/cli/README.md` | 事件契约表、`stopReason` 字段、stdin 用法与上限、CI 里边跑边解析的示例 |",
+      "口径三条：**stdout 只放契约内容**（进度仍走 stderr，事件流里不混裸文本）／**事件里的工具参数是摘要**（`path=`、`command=`，写文件时完整参数是整份正文，不该进日志）／**退出码不因「撞上限」变成失败**（`ok` 仍为真，`stopReason` 说原因）。",
+      "验证",
+      "没做"
+    ]
+  },
+  {
+    "version": "d.236.4.116.12",
+    "date": "2026-11-17",
+    "title": "会话内搜索：Ctrl+F 就能唤起，工具轨迹也搜得到",
+    "bullets": [
+      "`ChatPage.test.tsx` 新增 2 例：",
+      "— `I5a`：`Ctrl+F` 打开搜索且输入框拿到焦点，`Esc` 关闭；按钮 `title` 带快捷键。",
+      "— `I5b`：正文里没有 `UNIQUE_GREP_TERM`、只有工具结果里有 → 搜索仍命中，命中列表摘要里能看到它。",
+      "`packages/web` 全量 **391 files / 5686 passed**（含上面修好的 I3u）。",
+      "`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 204ms）。",
+      "不替代浏览器原生页内查找（不做「全部命中一次性高亮并统计」）：消息在虚拟滚动容器里，改造面远大于收益。",
+      "搜索不支持正则、大小写敏感开关——真需要的人会去 grep 文件，会话里关键字足够。",
+      "工具轨迹只进搜索，不进消息正文：复制/引用仍只含对话文字，不给工具输出「混进正文」的机会。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "会话内搜索只有两种打开方式：把鼠标移上去点顶部那个放大镜，或者先注意到它存在。长任务里想回头找「刚才那句结论」「那次 grep 到底搜到了什么」，手要离开键盘、眼睛要找图标。",
+      "更实际的问题在**搜什么**：以前只搜消息正文。可长任务里真正承载信息的是工具轨迹——读了哪个文件、命令输出里的报错、grep 命中了哪几行，这些全在工具参数与结果里，搜索一律搜不到，只能一格一格展开工具行去翻。",
+      "改了什么",
+      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx` | 文档级快捷键：`Ctrl+F` / `Cmd+F` 打开会话内搜索并聚焦输入框（面板是条件渲染，聚焦放到下一帧）；`Esc` 关闭搜索并清空关键词——以前搜索开着按 `Esc` 什么都不做，看起来像坏的 || 同上 | 搜索范围扩到工具轨迹：每条消息附带最近 8 次工具调用的「名称 + 参数 + 结果」，每次截断 4000 字。同步搜索不能无限吃字符：长任务里一条命令输出可以到几十万字，不截断会把输入卡住 || 同上 | 放大镜按钮的 `title` 写明「搜索会话（Ctrl+F）」，让快捷键能被发现 || `packages/web/src/lib/agentRuntime/slashCommands.ts`、`ChatPage.tsx`、`lib/chat/exportMarkdown.ts` | **撤掉 `/export`**：上一轮 WIP 合入 main 的导出链与本产品既有决定冲突——`ChatPage.test.tsx` 里有一条不变量用例写明「导出/下载链已删除，会话语义只保留会话内搜索」。按既有决定删除代码、面板条目与 `exportMarkdown.ts` |",
+      "顺带修好一条**既有用例里不成立的假设**：`I3u`（点「改动」看 diff）的假桥 `read` 对任何路径都返回正文，`hooksRunner` 读 `.heming/hooks.json` 时拿到一段非法 JSON → 按 fail-closed 拒绝所有工具 → 写盘根本没发生，用例超时。改成「只认目标文件，其余按真实桌面端回 not-found」（hooks 配置不存在＝不启用）。",
+      "验证",
+      "没做"
+    ]
+  },
+  {
     "version": "d.235.4.116.12",
     "date": "2026-11-17",
     "title": "新加的两条桌面通道，真机上真的走了一遍",

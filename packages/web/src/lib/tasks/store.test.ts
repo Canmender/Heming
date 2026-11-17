@@ -756,3 +756,28 @@ describe("任务续跑（P4/T18）：幂等键与重启恢复", () => {
     expect(readTasks(storage)[0].status).toBe("running");
   });
 });
+describe("被 hooks 拒绝的任务步骤（往返）", () => {
+  it("denyCause=hook 能落盘读回，报告写「被工作区 hooks 拒绝」而不是用户拒绝", () => {
+    const id = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: "改 src",
+      now: 1000,
+    });
+    useTaskStore.getState().stepStart(id, { id: "s1", name: "file_write", args: '{"path":"src/a.ts"}', now: 1100 });
+    useTaskStore.getState().stepEnd(id, "s1", {
+      status: "denied",
+      denyCause: "hook",
+      result: "本次工具调用被工作区的 hooks 拒绝，未执行。",
+      now: 1200,
+    });
+
+    const restored = readTasks(storage).find((task) => task.id === id);
+    expect(restored?.steps[0]).toMatchObject({ id: "s1", status: "denied", denyCause: "hook" });
+
+    const report = buildTaskReport(restored!);
+    expect(report).toContain("被工作区 hooks 拒绝");
+    expect(report).not.toContain("用户当场拒绝");
+  });
+});

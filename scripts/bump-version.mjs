@@ -47,6 +47,8 @@ const SYNCED_PACKAGES = [
   { path: join(root, "packages", "server", "package.json"), label: "packages/server" },
   { path: join(root, "packages", "shared", "package.json"), label: "packages/shared" },
   { path: join(root, "packages", "setup", "package.json"), label: "packages/setup" },
+  // d.236：无头 CLI 也是对外产物（CI 里按版本核对），版本字段必须与主包同步。
+  { path: join(root, "packages", "cli", "package.json"), label: "packages/cli" },
 ];
 
 /** 读 5 段版本；读不到或格式不对时返回 null（首次发布场景）。 */

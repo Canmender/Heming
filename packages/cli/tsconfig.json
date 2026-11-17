@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // CLI 要直接 import 包外的真实源码（packages/web/src/lib/**、evals/runner/**），
+    // 所以刻意**不设** rootDir/outDir：一旦设了 rootDir，跨包源码会被判「不在根目录下」。
+    // 本包只做类型检查（--noEmit），运行时由 tsx 直接跑源码。
+    "noEmit": true,
+    // 与 packages/web 同一套 lib：被复用的源码引用了 DOMException/fetch 等，
+    // 只给 Node 的 lib 会让这些模块在这里报错（它们本身能在 Node 里跑）。
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

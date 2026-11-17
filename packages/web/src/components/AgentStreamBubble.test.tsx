@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
+import type { ToolTrace } from "../store/chat.js";
 
 describe("AgentStreamBubble", () => {
   it("streaming 态显示名字与累积文本", () => {
@@ -414,5 +415,40 @@ describe("工具行的「定位」（d.235）", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /在文件夹里定位/ })).toBeNull();
+  });
+});
+describe("工具行的内联改动对照（d.239）", () => {
+  const trace = (name: string, args: Record<string, unknown>, status: "ok" | "error" = "ok"): ToolTrace[] => [
+    { id: "t1", name, args: JSON.stringify(args), status, startedAt: 0, endedAt: 9, result: "写好了" },
+  ];
+
+  it("file_write 成功：展开区先给「这次改动」与逐行增删", () => {
+    render(<ToolTraceList tools={trace("file_write", { path: "notes/新.md", content: "第一行\n第二行\n" })} />);
+    expect(screen.getByTestId("tool-inline-diff").textContent).toContain("这次改动：新增 2 行");
+    const rows = screen.getAllByTestId("tool-diff-row-add");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain("第一行");
+    expect(rows[1]!.textContent).toContain("第二行");
+  });
+
+  it("file_edit 成功：删除行与新增行分开画", () => {
+    render(
+      <ToolTraceList
+        tools={trace("file_edit", { path: "a.ts", old_string: "const a = 1;", new_string: "const a = 2;" })}
+      />,
+    );
+    expect(screen.getByTestId("tool-inline-diff").textContent).toContain("新增 1 行 / 删除 1 行");
+    expect(screen.getAllByTestId("tool-diff-row-del")[0]!.textContent).toContain("const a = 1;");
+    expect(screen.getAllByTestId("tool-diff-row-add")[0]!.textContent).toContain("const a = 2;");
+  });
+
+  it("失败的写调用不画对照（没写成功就不说改了什么）", () => {
+    render(<ToolTraceList tools={trace("file_write", { path: "notes/新.md", content: "第一行" }, "error")} />);
+    expect(screen.queryByTestId("tool-inline-diff")).toBeNull();
+  });
+
+  it("不是写文件的工具不画对照", () => {
+    render(<ToolTraceList tools={trace("run_command", { command: "pnpm test" })} />);
+    expect(screen.queryByTestId("tool-inline-diff")).toBeNull();
   });
 });

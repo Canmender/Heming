@@ -2950,3 +2950,119 @@ describe("上下文估算校准采样（d.215）", () => {
     expect(types).toContain("agent_finish");
   });
 });
+/**
+ * 工作区 hooks（PreToolUse）：在人工闸门放行之后、bridge.execute 之前。
+ *
+ * 1. 拒绝时不执行工具，回灌文案说明「被 hooks 拒绝」而不是「用户拒绝」；
+ * 2. 轨迹 `denyCause === "hook"`；
+ * 3. 允许时行为与没接 hooks 一样（工具照常执行）。
+ */
+describe("runAgentMentions 工作区 hooks（PreToolUse）", () => {
+  function twoRounds(calls: unknown[]) {
+    const rounds = [
+      { text: "我先做一下", calls },
+      { text: "做完了", calls: [] as never[] },
+    ];
+    let round = 0;
+    return vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+  }
+
+  const oneCall = [
+    { id: "call_1", type: "function" as const, function: { name: "file_write", arguments: '{"path":"src/a.ts"}' } },
+  ];
+
+  function toolMessages(streamChat: unknown): { content: string; tool_call_id?: string }[] {
+    const second = (streamChat as ReturnType<typeof vi.fn>).mock.calls[1][1] as ChatMessage[];
+    return second.filter((m) => m.role === "tool") as never;
+  }
+
+  it("preToolUse 拒绝：bridge.execute 不被调用，回灌 hook 原因，轨迹 denyCause=hook", async () => {
+    const execute = vi.fn(async () => ({ text: "写好了", ok: true }));
+    const events: { phase: string; denied?: boolean; denyCause?: string }[] = [];
+    const preToolUse = vi.fn(async () => ({
+      decision: "deny" as const,
+      reason: '第 1 条 hook「node scripts/check.js」：不许写 src',
+    }));
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "file_write" } }],
+        execute,
+      }),
+      preToolUse,
+      onToolTrace: (_id, e) => events.push(e),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(preToolUse).toHaveBeenCalledWith(
+      { name: "file_write", arguments: '{"path":"src/a.ts"}' },
+      expect.objectContaining({ agentId: "a1", streamId: expect.any(String) }),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    const content = toolMessages(streamChat)[0].content;
+    expect(content).toContain("hooks");
+    expect(content).toContain("node scripts/check.js");
+    expect(content).toContain("不许写 src");
+    expect(content).toContain("未被修改");
+    // 不能说成用户拒绝：模型会去劝用户，而不是改参数。
+    expect(content).not.toContain("用户拒绝了");
+    const end = events.find((e) => e.phase === "end");
+    expect(end).toMatchObject({ denied: true, denyCause: "hook" });
+  });
+
+  it("preToolUse 允许：工具照常执行，轨迹不带 denyCause", async () => {
+    const execute = vi.fn(async () => ({ text: "写好了", ok: true }));
+    const events: { phase: string; denied?: boolean; denyCause?: string }[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "file_write" } }],
+        execute,
+      }),
+      preToolUse: async () => ({ decision: "allow" as const }),
+      onToolTrace: (_id, e) => events.push(e),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(toolMessages(streamChat)[0].content).toBe("写好了");
+    const end = events.find((e) => e.phase === "end");
+    expect(end?.denyCause).toBeUndefined();
+    expect(end?.denied).toBeUndefined();
+  });
+
+  it("preToolUse 抛错：按拒绝处理（fail-closed），工具不执行", async () => {
+    const execute = vi.fn(async () => ({ text: "写好了", ok: true }));
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "file_write" } }],
+        execute,
+      }),
+      preToolUse: async () => {
+        throw new Error("hooks 运行器炸了");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(execute).not.toHaveBeenCalled();
+    const content = toolMessages(streamChat)[0].content;
+    expect(content).toContain("hooks 执行器异常");
+    expect(content).toContain("hooks 运行器炸了");
+    expect(content).toContain("未被修改");
+  });
+});

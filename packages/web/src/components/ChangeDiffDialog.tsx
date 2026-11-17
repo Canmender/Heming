@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "./ui/Button.js";
 import { Dialog } from "./ui/Dialog.js";
 import type { SessionChange } from "../lib/fileEdit/sessionChanges.js";
@@ -56,6 +57,10 @@ export function ChangeDiffDialog({
   const result = readable ? diffLines(state.before ?? "", state.after ?? "") : null;
   const list = files ?? [];
   const pickable = list.length > 0 && typeof onPick === "function";
+  // d.239：改动往往只占长文件里十来行——给一个「只看改动」，避免用户在上下文里翻找。
+  const [onlyChanges, setOnlyChanges] = useState(false);
+  const rows = result === null ? [] : onlyChanges ? result.rows.filter((row) => row.kind !== "same") : result.rows;
+  const hasContext = result !== null && result.rows.some((row) => row.kind === "same");
 
   const content = (
     <div data-testid="change-diff" className="space-y-2">
@@ -87,13 +92,29 @@ export function ChangeDiffDialog({
             <p className="text-ui-xs text-warn">对照太长，这里只显示前面一部分（统计仍按全量算）。</p>
           ) : null}
           {result.identical ? null : (
+            <>
+              {hasContext ? (
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={onlyChanges}
+                    onClick={() => setOnlyChanges((value) => !value)}
+                  >
+                    {onlyChanges ? "显示上下文" : "只看改动"}
+                  </Button>
+                  <span className="text-ui-xs text-muted" data-testid="diff-row-count">
+                    {onlyChanges ? `已隐藏未改动的行（共 ${result.rows.length} 行）` : `共 ${result.rows.length} 行（含上下文）`}
+                  </span>
+                </div>
+              ) : null}
             <div
               data-testid="diff-scroll"
               className={`overflow-auto rounded-md border border-line-soft bg-panel font-mono text-ui-xs ${
                 pickable ? "max-h-[52vh]" : "max-h-[60vh]"
               }`}
             >
-              {result.rows.map((row, index) => {
+              {rows.map((row, index) => {
                 const rowClass =
                   row.kind === "add"
                     ? "bg-success-soft text-success"
@@ -117,6 +138,7 @@ export function ChangeDiffDialog({
                 );
               })}
             </div>
+            </>
           )}
         </>
       ) : null}

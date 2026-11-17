@@ -29,18 +29,19 @@ export const SUBAGENT_COMMAND = "/subagent";
 /** 系统通知开关（d.208）：`/notify on|off`，不带参数就是看状态。 */
 export const NOTIFY_COMMAND = "/notify";
 /**
+ * 工作区工具 hooks（PreToolUse）：`/hooks` 看状态与规则、`/hooks on|off` 启用/关闭。
+ *
+ * 默认关闭是安全边界：`.heming/hooks.json` 跟着仓库走，不能因为克隆了某个仓库
+ * 就让它的脚本在你的机器上自动执行。启用按工作区根记在本机 localStorage。
+ */
+export const HOOKS_COMMAND = "/hooks";
+/**
  * 生成项目约定（d.219）：让模型摸清这个仓库，写一份 `AGENTS.md`。
  *
  * 与其它 `/` 命令不同，它**不是本地命令**：约定文件必须由模型真去读代码才写得准，
  * 所以它只是把一句人话换成一段明确的任务描述，然后走正常的发送路径（会落库、会调工具）。
  */
 export const INIT_COMMAND = "/init";
-/**
- * 导出会话（d.236）：把这条会话落成一份 Markdown 文件。
- *
- * 纯本地动作：不调模型、不落库、不改会话——只在浏览器里生成一个文件并下载。
- */
-export const EXPORT_COMMAND = "/export";
 /** 列出本地命令（面板之外的兜底：用户可能就是想看一遍完整列表）。 */
 export const HELP_COMMAND = "/help";
 
@@ -76,14 +77,14 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     hint: "窗口不在前台时，一轮做完、出错、或工具等你确认会弹系统通知；点通知回到那个会话。/notify off 关掉",
   },
   {
+    command: HOOKS_COMMAND,
+    title: "工作区工具 hooks（执行前本机检查）",
+    hint: "/hooks 看规则与状态；/hooks on 启用（允许本工区 .heming/hooks.json 里的脚本在你机器上执行）、/hooks off 关闭。默认关闭",
+  },
+  {
     command: INIT_COMMAND,
     title: "让它摸清这个仓库，写一份 AGENTS.md",
     hint: "会先读 README / package.json / 几个源码文件，再把仓库的规矩写进 AGENTS.md（已存在就在原文上合并，不覆盖你手写的）",
-  },
-  {
-    command: EXPORT_COMMAND,
-    title: "把这段对话导出成 Markdown",
-    hint: "整段记录（含工具调用与失败原因）落成一个 .md 文件，方便归档、贴给别人或开 issue",
   },
   {
     command: HELP_COMMAND,

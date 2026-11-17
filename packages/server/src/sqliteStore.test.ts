@@ -154,6 +154,64 @@ describe("sqlite 持久化专项", () => {
     s.close();
   });
 
+  it("旧库 sessions 无 expires_at：幂等补列，老会话不过期（升级不踢人）", () => {
+    const dbPath = newDbPath();
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL, avatar TEXT
+      );
+      CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO users (id, username, password_hash, display_name) VALUES ('u1', 'alice', 'h', '爱丽丝');
+      INSERT INTO sessions (token_hash, user_id, created_at) VALUES ('legacy-hash', 'u1', '2020-01-01T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const s = createSqliteStore(dbPath);
+    // 迁移后老行 expires_at 为 NULL → 视为不过期（升级那一刻不把已登录设备踢下线）。
+    expect(s.sessionUserId("legacy-hash")).toBe("u1");
+    s.close();
+
+    const raw = new DatabaseSync(dbPath);
+    const cols = raw.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    expect(cols.some((c) => c.name === "expires_at")).toBe(true);
+    raw.close();
+  });
+
+  it("FTS：写入即可搜；索引被清空后重启自动回填", () => {
+    const dbPath = newDbPath();
+    const s1 = createSqliteStore(dbPath);
+    const a = s1.createUser("alice", "h", "爱丽丝");
+    const conv = s1.createAgentConversation(a.id, SYSTEM_AGENT_ID);
+    const msg = s1.addMessage(conv.id, "user", a.id, { text: "回填用的中文消息" });
+
+    // 写入路径同步索引：不用等重启/回填。
+    const immediate = s1.searchMessages("中文消息", {
+      conversationIds: [conv.id],
+      limit: 10,
+      maxScanned: 100,
+    });
+    expect(immediate?.hits.map((h) => h.messageId)).toEqual([msg.id]);
+    s1.close();
+
+    // 模拟旧库/索引丢失：清空 messages_fts，重开 store 走启动回填。
+    const raw = new DatabaseSync(dbPath);
+    raw.exec("DELETE FROM messages_fts");
+    raw.close();
+
+    const s2 = createSqliteStore(dbPath);
+    const backfilled = s2.searchMessages("中文消息", {
+      conversationIds: [conv.id],
+      limit: 10,
+      maxScanned: 100,
+    });
+    expect(backfilled?.hits.map((h) => h.messageId)).toEqual([msg.id]);
+    s2.close();
+  });
+
   it("团队：最近活跃与动向持久化（重开后仍在，幂等键仍生效）", () => {
     const dbPath = newDbPath();
     const s1 = createSqliteStore(dbPath);

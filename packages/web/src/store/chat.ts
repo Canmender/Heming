@@ -14,6 +14,7 @@ import {
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 import type { RouteAttempt } from "../lib/llmClient.js";
+import type { DenyCause } from "../lib/hitl/types.js";
 import { sealMessage, msgCache, type E2eDeps, type PlainEnvelope } from "../lib/e2eSession.js";
 
 // —— E2E Task 4：收信解密注入面（store 不 import e2eSession 的 openMessage 实现，
@@ -109,6 +110,13 @@ export interface ToolTrace {
    * 后者是工具跑了但失败。混在一起用户会以为「我拒绝了，但它还是跑了」。
    */
   status: "running" | "ok" | "error" | "denied";
+  /**
+   * 被拒原因（仅 `status === "denied"` 时可能有）。
+   *
+   * 为什么要落到轨迹里：会话重开后，历史回放要靠它区分「用户拒绝」与
+   * 「工作区 hooks 拒绝」——两者对模型的含义完全不同，不能一律写成「用户拒绝」。
+   */
+  denyCause?: DenyCause;
   /** 工具返回文本（截断由 UI 负责）。 */
   result?: string;
   startedAt: number;
@@ -190,6 +198,14 @@ function sanitizeToolTrace(raw: unknown): ToolTrace | null {
       typeof r.startedAt === "number" && Number.isFinite(r.startedAt) ? r.startedAt : 0,
   };
   if (typeof r.result === "string") tool.result = r.result.slice(0, TRANSCRIPT_LIMITS.resultChars);
+  if (
+    r.denyCause === "user" ||
+    r.denyCause === "rule" ||
+    r.denyCause === "gate" ||
+    r.denyCause === "hook"
+  ) {
+    tool.denyCause = r.denyCause;
+  }
   if (typeof r.endedAt === "number" && Number.isFinite(r.endedAt)) tool.endedAt = r.endedAt;
   return tool;
 }

@@ -90,6 +90,12 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     section: "model",
   },
   {
+    id: "net-policy",
+    title: "网络访问",
+    keywords: ["网络", "域名", "白名单", "允许列表", "allowlist", "联网", "上网", "web_read", "外网"],
+    section: "model",
+  },
+  {
     id: "storage-usage",
     title: "存储水位",
     keywords: ["存储", "配额", "空间", "localstorage", "清理", "占用", "字节"],
