@@ -11,7 +11,7 @@
  * - 目录固定在 `~/Heming/exports`，不接受外部传入的路径；
  *   `HEMING_EXPORT_DIR` 只给测试/排障用（代码侧注入，渲染层传不进来）；
  * - 文件名走白名单字符集（中文、字母、数字、-_. 空格），删除路径分隔符；
- * - 只写 `.json` 一个后缀，其他一律拒绝；
+ * - 只写 `.json` 与 `.md` 两个后缀（后者给团队周报用，d.269），其他一律拒绝；
  * - 文件名里出现 `..` 直接拒绝——清洗成「取最后一段」看似安全，但调用方原意就是穿越，
  *   静默改写会让人误以为写到了别处；明确失败更容易排查；
  * - Windows 保留名（CON/PRN/AUX/NUL/COM1…）即使带后缀也打不开，直接拒绝。
@@ -40,6 +40,23 @@ const CONTENT_MAX = 8_000_000;
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 /**
+ * 允许的后缀（小写比较）。
+ *
+ * 白名单而不是「任意后缀」：这个桥的用途只有两种——记忆导出（JSON）与团队周报（Markdown）。
+ * 放开后缀等于放开任意文本写盘，将来接进来一个「.bat/.ps1」就是执行面。
+ */
+const ALLOWED_SUFFIXES = [".json", ".md"];
+
+/** 取受支持后缀（小写）；不是白名单后缀返回空串。 */
+function suffixOf(name) {
+  const lower = String(name ?? "").toLowerCase();
+  for (const suffix of ALLOWED_SUFFIXES) {
+    if (lower.endsWith(suffix)) return suffix;
+  }
+  return "";
+}
+
+/**
  * 导出根目录。默认 `~/Heming/exports`；`HEMING_EXPORT_DIR` 可覆盖。
  * 每次调用时读环境变量（而不是模块加载时缓存），测试才能在启动后指到临时目录。
  */
@@ -56,7 +73,7 @@ function exportsRoot(env) {
  *
  * 白名单而不是黑名单：黑名单要逐个排除分隔符、控制字符、Windows 保留名……漏一个就是漏洞。
  *
- * 截断时先切名字再接后缀：否则超长标题会被截成没有 `.json` 的残名，
+ * 截断时先切名字再接后缀：否则超长标题会被截成没有受支持后缀的残名，
  * resolveTarget 会拒收，表现为「导出失败但看不出原因」。
  */
 function safeFileName(name) {
@@ -71,14 +88,13 @@ function safeFileName(name) {
     .replace(/^[.\-]+/, "");
   if (!cleaned || cleaned === ".") return null;
   if (cleaned.length > NAME_MAX) {
-    const ext = cleaned.toLowerCase().endsWith(".json") ? ".json" : "";
+    const ext = suffixOf(cleaned);
     const stem = ext ? cleaned.slice(0, cleaned.length - ext.length) : cleaned;
     cleaned = `${stem.slice(0, NAME_MAX - ext.length)}${ext}`;
   }
   // 保留名判断放在截断之后：截断不会制造新的保留名，但顺序上先清洗再判断更直观。
-  const stem = cleaned.toLowerCase().endsWith(".json")
-    ? cleaned.slice(0, cleaned.length - ".json".length)
-    : cleaned;
+  const ext = suffixOf(cleaned);
+  const stem = ext ? cleaned.slice(0, cleaned.length - ext.length) : cleaned;
   if (WINDOWS_RESERVED.test(stem)) return null;
   return cleaned;
 }
@@ -87,7 +103,7 @@ function safeFileName(name) {
 function resolveTarget(fileName, env) {
   const safe = safeFileName(fileName);
   if (!safe) return null;
-  if (!safe.toLowerCase().endsWith(".json")) return null;
+  if (suffixOf(safe) === "") return null;
   const root = exportsRoot(env);
   const full = path.resolve(root, safe);
   // 双保险：清洗后已不含分隔符，这里再确认解析结果仍在根目录内。
@@ -106,7 +122,7 @@ function writeExport(fileName, content, env) {
   if (!target) {
     return {
       ok: false,
-      error: "文件名不合法（只允许中文、字母、数字与 -_.，须以 .json 结尾，且不得包含 ..）",
+      error: "文件名不合法（只允许中文、字母、数字与 -_.，须以 .json 或 .md 结尾，且不得包含 ..）",
     };
   }
   const text = String(content ?? "");

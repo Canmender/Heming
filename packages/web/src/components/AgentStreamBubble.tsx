@@ -65,11 +65,10 @@ export function AgentStreamBubble({
         {streaming ? `${name} 正在生成回复` : errorMessage ? `${name} 生成失败` : `${name} 已生成回复`}
       </p>
       <div className="min-w-0 flex-1 px-0.5 text-ui-md leading-relaxed">
-        {/* d.246：长名字省略，别把「生成中…」挤出可视区（窄栏尤其明显）。 */}
-        <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
-          <span className="min-w-0 truncate">{name}</span>
-          {streaming && <span className="shrink-0">生成中…</span>}
-        </div>
+        {/* d.248：气泡里不再显示「我」/智能体名——名字在同一段对话里是恒定信息，
+            每条都重复一遍只会挤占正文宽度、也让人误以为在强调「谁说的」。
+            生成状态仍在这里说（读屏文案保留名字，sr-only 不占视觉空间）。 */}
+        {streaming ? <div className="mb-1 text-ui-xs text-muted">生成中…</div> : null}
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
         {tools && tools.length > 0 ? (

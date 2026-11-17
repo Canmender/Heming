@@ -1102,3 +1102,1250 @@ describe("错误契约（T2-12）", () => {
     expect(res.body).toEqual({ error: "接口不存在" });
   });
 });
+
+describe("组长语义：创建者即组长，只有组长能把任务派给别人（d.248）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+  afterEach(() => {
+    presence.reset();
+  });
+
+  async function seat() {
+    const owner = await register(app, "lead", "组长");
+    const mate = await register(app, "mate", "队员");
+    const teamId = await makeTeam(app, owner.token, "研发组", ["mate"]);
+    return { owner, mate, teamId };
+  }
+
+  it("组长能派给队员；队员的 my-tasks 里能看到，组长自己名下没有", async () => {
+    const { owner, mate, teamId } = await seat();
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "整理接口文档", assigneeId: mate.user.id });
+    expect(created.status).toBe(201);
+    expect(created.body.assigneeId).toBe(mate.user.id);
+
+    const mine = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(mine.status).toBe(200);
+    expect(mine.body.tasks).toHaveLength(1);
+    expect(mine.body.tasks[0].teamName).toBe("研发组");
+    expect(mine.body.tasks[0].task.title).toBe("整理接口文档");
+    expect(mine.body.tasks[0].task.status).toBe("todo");
+
+    const ownerMine = await request(app).get("/api/team/my-tasks").set(auth(owner.token));
+    expect(ownerMine.body.tasks).toHaveLength(0);
+
+    // 完成后不再出现在「派给我的」里：队员的智能体不该重复看到做完的活儿。
+    const done = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "done" });
+    expect(done.status).toBe(200);
+    const after = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(after.body.tasks).toHaveLength(0);
+  });
+
+  it("队员不能把任务派给别人（403），但可以自派", async () => {
+    const { owner, mate, teamId } = await seat();
+    const denied = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(mate.token))
+      .send({ title: "派给组长", assigneeId: owner.user.id });
+    expect(denied.status).toBe(403);
+    expect(String(denied.body.error)).toContain("只有组长");
+
+    const mine = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(mate.token))
+      .send({ title: "我自己的活儿", assigneeId: mate.user.id });
+    expect(mine.status).toBe(201);
+    expect(mine.body.assigneeId).toBe(mate.user.id);
+
+    const unclaimed = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(mate.token))
+      .send({ title: "谁来认领" });
+    expect(unclaimed.status).toBe(201);
+    expect(unclaimed.body.assigneeId).toBeNull();
+  });
+
+  it("队员不能把已有任务改派给别人；组长可以", async () => {
+    const { owner, mate, teamId } = await seat();
+    const task = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "先给别人" });
+    const taskId = task.body.id as string;
+
+    const denied = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: owner.user.id });
+    expect(denied.status).toBe(403);
+    expect(String(denied.body.error)).toContain("只有组长");
+
+    const reassigned = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(owner.token))
+      .send({ assigneeId: mate.user.id });
+    expect(reassigned.status).toBe(200);
+    expect(reassigned.body.assigneeId).toBe(mate.user.id);
+  });
+});
+
+describe("完成留痕：谁交的、什么时候、结论是什么（d.252）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+  afterEach(() => {
+    presence.reset();
+  });
+
+  async function seat() {
+    const owner = await register(app, "lead", "组长");
+    const mate = await register(app, "mate", "队员");
+    const teamId = await makeTeam(app, owner.token, "研发组", ["mate"]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "整理接口文档", assigneeId: mate.user.id });
+    expect(created.status).toBe(201);
+    return { owner, mate, teamId, taskId: created.body.id as string };
+  }
+
+  it("标完成时记下结论、时刻与操作者，组长在团队快照里能看到", async () => {
+    const { mate, teamId, taskId } = await seat();
+    const done = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "按新接口重写了文档，pnpm test 全绿。" });
+    expect(done.status).toBe(200);
+    expect(done.body.result).toBe("按新接口重写了文档，pnpm test 全绿。");
+    expect(typeof done.body.completedAt).toBe("string");
+    expect(done.body.completedBy).toBe(mate.user.id);
+
+    const snapshot = await request(app).get(`/api/teams/${teamId}`).set(auth(mate.token));
+    expect(snapshot.status).toBe(200);
+    const task = snapshot.body.tasks.find((item: { id: string }) => item.id === taskId);
+    expect(task.result).toBe("按新接口重写了文档，pnpm test 全绿。");
+    expect(task.completedAt).toBe(done.body.completedAt);
+    expect(task.completedBy).toBe(mate.user.id);
+  });
+
+  it("退回未完成时清掉完成痕迹，但结论留着（不假装没做过）", async () => {
+    const { mate, teamId, taskId } = await seat();
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "先交一版" })
+      .expect(200);
+    const back = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "doing" });
+    expect(back.status).toBe(200);
+    expect(back.body.completedAt).toBeNull();
+    expect(back.body.completedBy).toBeNull();
+    expect(back.body.result).toBe("先交一版");
+  });
+
+  it("结论太长会被拒绝（≤2000 字），不静默截断", async () => {
+    const { mate, teamId, taskId } = await seat();
+    const tooLong = "字".repeat(2001);
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: tooLong });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("团队简报：组长派活前得知道队里都有谁（d.253）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("组长能看到成员名单、各自身份与 id", async () => {
+    const boss = await register(app, "d253boss", "阿鸣");
+    const mate = await register(app, "d253mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+
+    const res = await request(app).get("/api/team/my-teams").set(auth(boss.token));
+    expect(res.status).toBe(200);
+    const team = res.body.teams.find((item: { id: string }) => item.id === teamId);
+    expect(team.role).toBe("owner");
+    expect(team.members).toHaveLength(2);
+    const owner = team.members.find((m: { role: string }) => m.role === "owner");
+    const member = team.members.find((m: { role: string }) => m.role === "member");
+    expect(owner).toEqual({ id: boss.user.id, displayName: "阿鸣", role: "owner", open: 0 });
+    expect(member).toEqual({ id: mate.user.id, displayName: "小李", role: "member", open: 0 });
+  });
+
+  it("成员看到的是自己的身份，且看不到不属于自己的团队", async () => {
+    const boss = await register(app, "d253boss2", "阿鸣");
+    const mate = await register(app, "d253mate2", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+    await makeTeam(app, boss.token, "封闭组");
+
+    const res = await request(app).get("/api/team/my-teams").set(auth(mate.token));
+    expect(res.status).toBe(200);
+    expect(res.body.teams.map((item: { id: string }) => item.id)).toEqual([teamId]);
+    expect(res.body.teams[0].role).toBe("member");
+  });
+});
+
+describe("任务级权限：成员只能动自己的活（d.254）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  async function seed() {
+    const boss = await register(app, "d254boss", "阿鸣");
+    const mate = await register(app, "d254mate", "小李");
+    const other = await register(app, "d254other", "小王");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username, other.user.username]);
+    const task = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "整理接口文档", assigneeId: mate.user.id });
+    expect(task.status).toBe(201);
+    return { boss, mate, other, teamId, taskId: task.body.id as string };
+  }
+
+  it("成员不能把别人名下的任务标完成，任务状态不变", async () => {
+    const { boss, mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "我做完了" });
+    expect(res.status).toBe(200);
+    const denied = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ title: "改个标题" });
+    expect(denied.status).toBe(200);
+
+    const other = await register(app, "d254third", "小张");
+    await request(app)
+      .post(`/api/teams/${teamId}/members`)
+      .set(auth(boss.token))
+      .send({ username: other.user.username });
+    const forbidden = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(other.token))
+      .send({ status: "done", result: "我替他做的" });
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.error).toContain("只能改自己名下的任务");
+
+    const snap = await request(app).get(`/api/teams/${teamId}`).set(auth(mate.token));
+    expect(snap.body.tasks[0].status).toBe("done");
+  });
+
+  it("成员能认领还没人认领的任务，但不能删别人的任务", async () => {
+    const { boss, mate, teamId } = await seed();
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "待认领的活" });
+    expect(created.status).toBe(201);
+    const claim = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: mate.user.id, status: "doing" });
+    expect(claim.status).toBe(200);
+    expect(claim.body.assigneeId).toBe(mate.user.id);
+
+    // 别人名下的任务删不动
+    const del = await request(app)
+      .delete(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(boss.token));
+    expect(del.status).toBe(204);
+  });
+
+  it("组长能改任何人的任务，也能删任何人的任务", async () => {
+    const { boss, mate, teamId, taskId } = await seed();
+    const done = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(boss.token))
+      .send({ status: "done", result: "我替小李收尾" });
+    expect(done.status).toBe(200);
+    expect(done.body.completedBy).toBe(boss.user.id);
+
+    const otherTask = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "小李的任务", assigneeId: mate.user.id });
+    const del = await request(app)
+      .delete(`/api/teams/${teamId}/tasks/${otherTask.body.id}`)
+      .set(auth(boss.token));
+    expect(del.status).toBe(204);
+  });
+
+  it("成员不能删别人名下的任务", async () => {
+    const { boss, mate, teamId, taskId } = await seed();
+    const boss2 = await register(app, "d254boss2", "老王");
+    const boss2Team = await makeTeam(app, boss2.token, "另一组", [mate.user.username]);
+    const foreign = await request(app)
+      .post(`/api/teams/${boss2Team}/tasks`)
+      .set(auth(boss2.token))
+      .send({ title: "组长自己的活" });
+    const del = await request(app)
+      .delete(`/api/teams/${boss2Team}/tasks/${foreign.body.id}`)
+      .set(auth(mate.token));
+    expect(del.status).toBe(403);
+    expect(del.body.error).toContain("只能删自己名下的任务");
+  });
+});
+
+describe("任务依赖：后置要等前置（d.255）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  async function seed() {
+    const boss = await register(app, "d255boss", "阿鸣");
+    const mate = await register(app, "d255mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+    const pre = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "先定接口契约", assigneeId: mate.user.id });
+    expect(pre.status).toBe(201);
+    return { boss, mate, teamId, preId: pre.body.id as string };
+  }
+
+  it("派活时可以写前置：前置没做完时，后置在 my-tasks 里点名它", async () => {
+    const { boss, mate, teamId, preId } = await seed();
+    const post = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "按契约写实现", assigneeId: mate.user.id, blockedBy: [preId] });
+    expect(post.status).toBe(201);
+    expect(post.body.blockedBy).toEqual([preId]);
+
+    const first = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(first.status).toBe(200);
+    const postItem = first.body.tasks.find((item: { task: { id: string } }) => item.task.id === post.body.id);
+    expect(postItem.openBlockers).toEqual([{ id: preId, title: "先定接口契约" }]);
+
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${preId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "契约定了" });
+    const second = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    const after = second.body.tasks.find((item: { task: { id: string } }) => item.task.id === post.body.id);
+    expect(after.openBlockers).toEqual([]);
+  });
+
+  it("依赖不存在、依赖自己、成环都被拒绝，且不落库", async () => {
+    const { boss, teamId, preId } = await seed();
+    const missing = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "谁都不等", blockedBy: ["task-not-exist"] });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toContain("前置任务不存在");
+
+    const self = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${preId}`)
+      .set(auth(boss.token))
+      .send({ blockedBy: [preId] });
+    expect(self.status).toBe(400);
+    expect(self.body.error).toContain("不能成环");
+
+    const second = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "第二件", blockedBy: [preId] });
+    const cycle = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${preId}`)
+      .set(auth(boss.token))
+      .send({ blockedBy: [second.body.id] });
+    expect(cycle.status).toBe(400);
+    expect(cycle.body.error).toContain("不能成环");
+
+    const snap = await request(app).get(`/api/teams/${teamId}`).set(auth(boss.token));
+    const kept = snap.body.tasks.find((task: { id: string }) => task.id === preId);
+    expect(kept.blockedBy).toEqual([]);
+  });
+
+  it("删掉前置任务后，后置的依赖会自动清掉（不留悬空 id）", async () => {
+    const { boss, teamId, preId } = await seed();
+    const post = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "后置的活", blockedBy: [preId] });
+    const del = await request(app)
+      .delete(`/api/teams/${teamId}/tasks/${preId}`)
+      .set(auth(boss.token));
+    expect(del.status).toBe(204);
+    const snap = await request(app).get(`/api/teams/${teamId}`).set(auth(boss.token));
+    const kept = snap.body.tasks.find((task: { id: string }) => task.id === post.body.id);
+    expect(kept.blockedBy).toEqual([]);
+  });
+});
+
+describe("团队概览：组长一眼看到全队进度（d.256）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("概览数出未完成、逾期、待认领、被前置卡住，成员各自几项未完成", async () => {
+    const boss = await register(app, "d256boss", "阿鸣");
+    const mate = await register(app, "d256mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+
+    const add = (body: Record<string, unknown>) =>
+      request(app).post(`/api/teams/${teamId}/tasks`).set(auth(boss.token)).send(body);
+
+    const blocker = await add({ title: "先定接口", assigneeId: mate.user.id });
+    expect(blocker.status).toBe(201);
+    const overdue = await add({
+      title: "过期的那件",
+      assigneeId: mate.user.id,
+      dueAt: new Date(Date.now() - 86_400_000).toISOString(),
+    });
+    expect(overdue.status).toBe(201);
+    await add({ title: "待认领" });
+    await add({ title: "后置", assigneeId: mate.user.id, blockedBy: [blocker.body.id] });
+    const done = await add({ title: "已经做完", assigneeId: mate.user.id });
+    expect(done.status).toBe(201);
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${done.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "做完了。" });
+
+    const res = await request(app).get("/api/team/my-teams").set(auth(boss.token));
+    expect(res.status).toBe(200);
+    const team = res.body.teams.find((item: { id: string }) => item.id === teamId);
+    expect(team.counts).toEqual({ open: 4, done: 1, overdue: 1, unassigned: 1, blocked: 1 });
+    const byId = new Map(
+      (team.members as { id: string; open: number }[]).map((member) => [member.id, member.open]),
+    );
+    expect(byId.get(mate.user.id)).toBe(3);
+    expect(byId.get(boss.user.id)).toBe(0);
+  });
+
+  it("全清时 open 为 0（界面据此写「没有未完成」）", async () => {
+    const boss = await register(app, "d256boss2", "阿鸣");
+    const teamId = await makeTeam(app, boss.token, "空组");
+    const res = await request(app).get("/api/team/my-teams").set(auth(boss.token));
+    const team = res.body.teams.find((item: { id: string }) => item.id === teamId);
+    expect(team.counts).toEqual({ open: 0, done: 0, overdue: 0, unassigned: 0, blocked: 0 });
+  });
+});
+
+describe("待认领的活：队里没人认领的任务，队员也看得到（d.260）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+  afterEach(() => {
+    presence.reset();
+  });
+
+  it("列出我所在团队的待认领任务；派给别人的、已做完的都不出现", async () => {
+    const boss = await register(app, "d260boss", "阿鸣");
+    const mate = await register(app, "d260mate", "小李");
+    const other = await register(app, "d260other", "路人");
+    const teamId = await makeTeam(app, boss.token, "研发组", [mate.user.username]);
+
+    const add = (body: Record<string, unknown>) =>
+      request(app).post(`/api/teams/${teamId}/tasks`).set(auth(boss.token)).send(body);
+
+    const unclaimed = await add({ title: "谁来认领" });
+    expect(unclaimed.status).toBe(201);
+    await add({ title: "已经派给小李", assigneeId: mate.user.id });
+    const doneUnclaimed = await add({ title: "待认领但已经做完" });
+    expect(doneUnclaimed.status).toBe(201);
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${doneUnclaimed.body.id}`)
+      .set(auth(boss.token))
+      .send({ status: "done", result: "组长收尾。" });
+
+    const mine = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(mine.status).toBe(200);
+    expect(mine.body.tasks).toHaveLength(1);
+    expect(mine.body.claimable).toHaveLength(1);
+    expect(mine.body.claimable[0].task.title).toBe("谁来认领");
+    expect(mine.body.claimable[0].task.assigneeId).toBeNull();
+    expect(mine.body.claimable[0].teamName).toBe("研发组");
+
+    // 不在这个团队的人，看不到这队里没人认领的活。
+    const outsider = await request(app).get("/api/team/my-tasks").set(auth(other.token));
+    expect(outsider.status).toBe(200);
+    expect(outsider.body.claimable).toHaveLength(0);
+  });
+
+  it("认领之后从待认领里消失，进到「派到我名下的」里", async () => {
+    const boss = await register(app, "d260boss2", "阿鸣");
+    const mate = await register(app, "d260mate2", "小李");
+    const teamId = await makeTeam(app, boss.token, "研发二组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "抢来的活" });
+    expect(created.status).toBe(201);
+
+    const claimed = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: mate.user.id });
+    expect(claimed.status).toBe(200);
+    expect(claimed.body.assigneeId).toBe(mate.user.id);
+
+    const after = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(after.body.claimable).toHaveLength(0);
+    expect(after.body.tasks).toHaveLength(1);
+    expect(after.body.tasks[0].task.id).toBe(created.body.id);
+  });
+});
+
+describe("退回任务：做不了就退回去，并说清为什么（d.261）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  async function seed() {
+    const boss = await register(app, "d261boss", "阿鸣");
+    const mate = await register(app, "d261mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+    const task = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "发版", assigneeId: mate.user.id });
+    expect(task.status).toBe(201);
+    return { boss, mate, teamId, taskId: task.body.id as string };
+  }
+
+  it("成员退回自己的任务：留痕并回到待认领，别人能看到为什么被退回", async () => {
+    const { mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: null, returnNote: "没有发布权限，需要管理员来做" });
+    expect(res.status).toBe(200);
+    expect(res.body.assigneeId).toBeNull();
+    expect(res.body.returnNote).toBe("没有发布权限，需要管理员来做");
+    expect(res.body.returnedBy).toBe(mate.user.id);
+    expect(Number.isFinite(Date.parse(res.body.returnedAt))).toBe(true);
+
+    const mine = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(mine.status).toBe(200);
+    expect(mine.body.tasks).toHaveLength(0);
+    const claimable = mine.body.claimable as Array<{ task: { id: string; returnNote: string; returnedBy: string | null } }>;
+    const item = claimable.find((entry) => entry.task.id === taskId);
+    expect(item).toBeDefined();
+    expect(item!.task.returnNote).toContain("没有发布权限");
+    expect(item!.task.returnedBy).toBe(mate.user.id);
+  });
+
+  it("重新认领会清掉退回痕迹：不能把旧原因一直挂在任务上", async () => {
+    const { mate, teamId, taskId } = await seed();
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: null, returnNote: "资料不全" });
+    const reclaim = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: mate.user.id });
+    expect(reclaim.status).toBe(200);
+    expect(reclaim.body.assigneeId).toBe(mate.user.id);
+    expect(reclaim.body.returnedAt).toBeNull();
+    expect(reclaim.body.returnedBy).toBeNull();
+    expect(reclaim.body.returnNote).toBe("");
+  });
+
+  it("组长把别人的任务退回也留痕：退的是谁的活、谁退的", async () => {
+    const { boss, mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(boss.token))
+      .send({ assigneeId: null, returnNote: "先换个更急的版本，这条放回池子" });
+    expect(res.status).toBe(200);
+    expect(res.body.returnedBy).toBe(boss.user.id);
+    expect(res.body.returnNote).toContain("先换个更急的版本");
+
+    const mine = await request(app).get("/api/team/my-tasks").set(auth(mate.token));
+    expect(mine.body.claimable.some((entry: { task: { id: string } }) => entry.task.id === taskId)).toBe(true);
+  });
+
+  it("退回原因超过 500 字直接 400，不静默截断", async () => {
+    const { mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ assigneeId: null, returnNote: "字".repeat(501) });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("任务进展：做到一半留一句话，下一轮接着做（d.262）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  async function seed() {
+    const boss = await register(app, "d262boss", "阿鸣");
+    const mate = await register(app, "d262mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "产品组", [mate.user.username]);
+    const task = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "按契约写实现", assigneeId: mate.user.id });
+    expect(task.status).toBe(201);
+    return { boss, mate, teamId, taskId: task.body.id as string };
+  }
+
+  it("成员留进展：记下内容、谁留的、什么时候，组长在快照里看得到", async () => {
+    const { boss, mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "doing", progress: "接口契约已经对齐，正在写 handler" });
+    expect(res.status).toBe(200);
+    expect(res.body.progress).toBe("接口契约已经对齐，正在写 handler");
+    expect(res.body.progressBy).toBe(mate.user.id);
+    expect(Number.isFinite(Date.parse(res.body.progressAt))).toBe(true);
+
+    const snap = await request(app).get(`/api/teams/${teamId}`).set(auth(boss.token));
+    expect(snap.status).toBe(200);
+    const task = (snap.body.tasks as Array<{ id: string; progress: string }>).find((entry) => entry.id === taskId);
+    expect(task!.progress).toContain("正在写 handler");
+  });
+
+  it("进展传空串 = 清掉（不把旧进展一直挂在任务上）", async () => {
+    const { mate, teamId, taskId } = await seed();
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ progress: "写了一半" });
+    const cleared = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ progress: "" });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.progress).toBe("");
+    expect(cleared.body.progressAt).toBeNull();
+    expect(cleared.body.progressBy).toBeNull();
+  });
+
+  it("进展超过 500 字直接 400，不静默截断", async () => {
+    const { mate, teamId, taskId } = await seed();
+    const res = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ progress: "字".repeat(501) });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("催办：组长能催别人名下的活（d.265）", () => {
+  let app: App;
+  beforeEach(() => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  /** 造「组长 + 一个成员 + 一条派给成员的任务」。 */
+  async function seat() {
+    const seatRes = await register(app, "nudgeboss", "组长");
+    const mate = await register(app, "nudgemate", "小李");
+    const teamId = await makeTeam(app, seatRes.token, "催办小组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(seatRes.token))
+      .send({ title: "交周报", assigneeId: mate.user.id });
+    return { owner: seatRes, mate, teamId, taskId: created.body.id as string };
+  }
+
+  it("组长催办：记下谁催的、什么时候，次数累加", async () => {
+    const { owner, mate, teamId, taskId } = await seat();
+    const first = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(owner.token))
+      .send({ nudge: true });
+    expect(first.status).toBe(200);
+    expect(first.body.nudgedBy).toBe(owner.user.id);
+    expect(first.body.nudgedAt).toBeTruthy();
+    expect(first.body.nudgeCount).toBe(1);
+    expect(first.body.status).toBe("todo");
+
+    const second = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(owner.token))
+      .send({ nudge: true });
+    expect(second.body.nudgeCount).toBe(2);
+  });
+
+  it("成员不能催别人的活；自己的、没人认领的、已完成的不必催", async () => {
+    const { owner, mate, teamId, taskId } = await seat();
+    const byMate = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ nudge: true });
+    expect(byMate.status).toBe(403);
+
+    const selfTask = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "自己写", assigneeId: owner.user.id });
+    const bySelf = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${selfTask.body.id}`)
+      .set(auth(owner.token))
+      .send({ nudge: true });
+    expect(bySelf.status).toBe(400);
+
+    const unassigned = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "待认领" });
+    const byUnassigned = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${unassigned.body.id}`)
+      .set(auth(owner.token))
+      .send({ nudge: true });
+    expect(byUnassigned.status).toBe(400);
+
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "交完了。" });
+    const byDone = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(owner.token))
+      .send({ nudge: true });
+    expect(byDone.status).toBe(400);
+  });
+});
+
+describe("优先级：先做哪件，任务自己说（d.268）", () => {
+  let app: App;
+  beforeEach(() => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  async function seat() {
+    const owner = await register(app, "priboss", "组长");
+    const teamId = await makeTeam(app, owner.token, "优先级小组");
+    return { owner, teamId };
+  }
+
+  it("创建时可以标高优先级，读回来还是 high；不填默认 normal", async () => {
+    const { owner, teamId } = await seat();
+    const urgent = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "线上故障排查", priority: "high" });
+    expect(urgent.status).toBe(201);
+    expect(urgent.body.priority).toBe("high");
+
+    const normal = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "写周报" });
+    expect(normal.status).toBe(201);
+    expect(normal.body.priority).toBe("normal");
+  });
+
+  it("可以改优先级；非法档位被拒（400）", async () => {
+    const { owner, teamId } = await seat();
+    const task = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "补测试" });
+    const raised = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${task.body.id}`)
+      .set(auth(owner.token))
+      .send({ priority: "high" });
+    expect(raised.status).toBe(200);
+    expect(raised.body.priority).toBe("high");
+
+    const bad = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${task.body.id}`)
+      .set(auth(owner.token))
+      .send({ priority: "urgent" });
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe("任务讨论：留言谁都能看、谁都不能改（d.271）", () => {
+  let app: App;
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("成员留言 201，列表按时间升序；非成员 403", async () => {
+    const owner = await register(app, "admin");
+    await register(app, "linxiao");
+    const teamId = await makeTeam(app, owner.token, "增长小组", ["linxiao"]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(owner.token))
+      .send({ title: "改落地页" });
+    expect(created.status).toBe(201);
+    const taskId = created.body.id as string;
+
+    const outsider = await register(app, "outsider");
+    const denied = await request(app)
+      .post(`/api/teams/${teamId}/tasks/${taskId}/comments`)
+      .set(auth(outsider.token))
+      .send({ text: "我不是成员" });
+    expect(denied.status).toBe(403);
+
+    const first = await request(app)
+      .post(`/api/teams/${teamId}/tasks/${taskId}/comments`)
+      .set(auth(owner.token))
+      .send({ text: "口径按老版本走" });
+    expect(first.status).toBe(201);
+    expect(first.body.text).toBe("口径按老版本走");
+
+    const list = await request(app)
+      .get(`/api/teams/${teamId}/tasks/${taskId}/comments`)
+      .set(auth(owner.token));
+    expect(list.status).toBe(200);
+    expect(list.body.comments).toHaveLength(1);
+    expect(list.body.comments[0].text).toBe("口径按老版本走");
+  });
+
+  it("空留言 400、任务不存在 404", async () => {
+    const owner = await register(app, "admin");
+    const teamId = await makeTeam(app, owner.token, "增长小组");
+    const empty = await request(app)
+      .post(`/api/teams/${teamId}/tasks/no-such-task/comments`)
+      .set(auth(owner.token))
+      .send({ text: "   " });
+    expect(empty.status).toBe(400);
+    const missing = await request(app)
+      .get(`/api/teams/${teamId}/tasks/no-such-task/comments`)
+      .set(auth(owner.token));
+    expect(missing.status).toBe(404);
+  });
+});
+
+describe("验收：交上来的要有人看过（d.272）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("组长验收通过：打上「已验收」，状态不动", async () => {
+    const boss = await register(app, "d272boss", "阿鸣");
+    const mate = await register(app, "d272mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "验收组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "写接口文档", assigneeId: mate.user.id });
+    expect(created.status).toBe(201);
+
+    const done = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "文档写完了，pnpm test 全绿。" });
+    expect(done.status).toBe(200);
+    // 刚交上来是「待验收」，不是默认通过。
+    expect(done.body.reviewState).toBe("pending");
+
+    const reviewed = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(boss.token))
+      .send({ review: "approve", reviewNote: "看过，可以发。" });
+    expect(reviewed.status).toBe(200);
+    expect(reviewed.body.reviewState).toBe("approved");
+    expect(reviewed.body.reviewNote).toBe("看过，可以发。");
+    expect(reviewed.body.reviewedBy).toBe(boss.user.id);
+    expect(reviewed.body.status).toBe("done");
+  });
+
+  it("打回重做：状态回进行中、保留上一版结论，且必须写原因", async () => {
+    const boss = await register(app, "d272boss2", "阿鸣");
+    const mate = await register(app, "d272mate2", "小李");
+    const teamId = await makeTeam(app, boss.token, "验收二组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "写部署脚本", assigneeId: mate.user.id });
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "先交一版" });
+
+    const noNote = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(boss.token))
+      .send({ review: "changes" });
+    expect(noNote.status).toBe(400);
+
+    const sentBack = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(boss.token))
+      .send({ review: "changes", reviewNote: "少了回滚步骤，补上再交。" });
+    expect(sentBack.status).toBe(200);
+    expect(sentBack.body.reviewState).toBe("changes");
+    expect(sentBack.body.status).toBe("doing");
+    expect(sentBack.body.reviewNote).toBe("少了回滚步骤，补上再交。");
+    // 上一版结论留着，改的人才知道上一版交的是什么。
+    expect(sentBack.body.result).toBe("先交一版");
+  });
+
+  it("只有组长能验收，而且只验收已完成的任务", async () => {
+    const boss = await register(app, "d272boss3", "阿鸣");
+    const mate = await register(app, "d272mate3", "小李");
+    const teamId = await makeTeam(app, boss.token, "验收三组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "还没做", assigneeId: mate.user.id });
+
+    const notDone = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(boss.token))
+      .send({ review: "approve" });
+    expect(notDone.status).toBe(400);
+    expect(notDone.body.error).toContain("只有已完成的任务可以验收");
+
+    await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "done", result: "做完了" });
+    const byMember = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${created.body.id}`)
+      .set(auth(mate.token))
+      .send({ review: "approve" });
+    expect(byMember.status).toBe(403);
+  });
+});
+
+describe("团队动态（d.273）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("派活会留下一条动态：谁派的、派给谁、什么时候截止", async () => {
+    const boss = await register(app, "d273boss", "阿鸣");
+    const mate = await register(app, "d273mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "动态组", [mate.user.username]);
+
+    const first = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "整理发布清单", assigneeId: mate.user.id, dueAt: "2026-11-20T00:00:00.000Z" });
+    expect(first.status).toBe(201);
+    const second = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "补接口文档" });
+    expect(second.status).toBe(201);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events`).set(auth(boss.token));
+    expect(res.status).toBe(200);
+    const events = res.body.events as {
+      kind: string;
+      summary: string;
+      taskTitle: string;
+      actorId: string;
+    }[];
+    // 建队时加成员也会留动态（d.274），所以只看派活那几条。
+    const taskEvents = events.filter((e) => e.kind === "task_added");
+    expect(taskEvents).toHaveLength(2);
+    // 最新的在前。
+    expect(taskEvents[0]!.taskTitle).toBe("补接口文档");
+    expect(taskEvents[1]!.taskTitle).toBe("整理发布清单");
+    expect(taskEvents.every((e) => e.actorId === boss.user.id)).toBe(true);
+    expect(taskEvents[1]!.summary).toContain("派给 小李");
+    // 截止只写到日，别把 ISO 串整个倒进动态里。
+    expect(taskEvents[1]!.summary).toContain("2026-11-20");
+    expect(taskEvents[1]!.summary).not.toContain("T00:00:00");
+  });
+
+  it("改状态、改优先级、催办：合成一条动态，人话能读懂", async () => {
+    const boss = await register(app, "d273boss2", "阿鸣");
+    const mate = await register(app, "d273mate2", "小李");
+    const teamId = await makeTeam(app, boss.token, "动态二组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "修登录闪退", assigneeId: mate.user.id });
+    const taskId = created.body.id as string;
+
+    const updated = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(mate.token))
+      .send({ status: "doing", priority: "high" });
+    expect(updated.status).toBe(200);
+    const nudged = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${taskId}`)
+      .set(auth(boss.token))
+      .send({ nudge: true });
+    expect(nudged.status).toBe(200);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events?limit=10`).set(auth(boss.token));
+    const events = res.body.events as { kind: string; summary: string }[];
+    expect(events[0]!.kind).toBe("task_updated");
+    expect(events[0]!.summary).toContain("催了「修登录闪退」");
+    const combined = events.find((e) => e.summary.includes("从无开始"));
+    expect(combined).toBeUndefined();
+    const statusEvent = events.find((e) => e.summary.includes("改成进行中"));
+    expect(statusEvent).toBeDefined();
+    expect(statusEvent!.summary).toContain("优先级改成高");
+    expect(statusEvent!.summary).toContain("从未开始改成进行中");
+  });
+
+  it("留言进动态；非成员看不到，也不能读", async () => {
+    const boss = await register(app, "d273boss3", "阿鸣");
+    const mate = await register(app, "d273mate3", "小李");
+    const outsider = await register(app, "d273out", "外人");
+    const teamId = await makeTeam(app, boss.token, "动态三组", [mate.user.username]);
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "核对埋点", assigneeId: mate.user.id });
+    const taskId = created.body.id as string;
+
+    const comment = await request(app)
+      .post(`/api/teams/${teamId}/tasks/${taskId}/comments`)
+      .set(auth(mate.token))
+      .send({ text: "这个埋点用老版本还是新版本的字段？" });
+    expect(comment.status).toBe(201);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events`).set(auth(boss.token));
+    const events = res.body.events as { kind: string; summary: string }[];
+    const commentEvent = events.find((e) => e.kind === "task_comment");
+    expect(commentEvent).toBeDefined();
+    expect(commentEvent!.summary).toContain("核对埋点");
+    expect(commentEvent!.summary).toContain("老版本还是新版本");
+
+    const denied = await request(app).get(`/api/teams/${teamId}/events`).set(auth(outsider.token));
+    expect(denied.status).toBe(404);
+  });
+});
+
+describe("团队动态补全：方案与成员也留痕（d.274）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("加成员、建/改/删方案都进时间线", async () => {
+    const boss = await register(app, "d274boss", "阿鸣");
+    const extra = await register(app, "d274extra", "小王");
+    const teamId = await makeTeam(app, boss.token, "留痕组", []);
+
+    const added = await request(app)
+      .post(`/api/teams/${teamId}/members`)
+      .set(auth(boss.token))
+      .send({ username: extra.user.username });
+    expect(added.status).toBe(200);
+
+    const plan = await request(app)
+      .post(`/api/teams/${teamId}/plans`)
+      .set(auth(boss.token))
+      .send({ title: "发布计划", detail: "先灰度再全量" });
+    expect(plan.status).toBe(201);
+    const planId = plan.body.id as string;
+
+    const patched = await request(app)
+      .patch(`/api/teams/${teamId}/plans/${planId}`)
+      .set(auth(boss.token))
+      .send({ title: "发布计划 v2", status: "doing" });
+    expect(patched.status).toBe(200);
+
+    const removed = await request(app)
+      .delete(`/api/teams/${teamId}/plans/${planId}`)
+      .set(auth(boss.token));
+    expect(removed.status).toBe(204);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events?limit=20`).set(auth(boss.token));
+    expect(res.status).toBe(200);
+    const events = res.body.events as { kind: string; summary: string }[];
+    expect(events.find((e) => e.kind === "member_added")!.summary).toContain("把 小王 加进了团队");
+    expect(events.find((e) => e.kind === "plan_added")!.summary).toContain("新建方案「发布计划」");
+    const updatedEvent = events.find((e) => e.kind === "plan_updated");
+    expect(updatedEvent).toBeDefined();
+    expect(updatedEvent!.summary).toContain("发布计划 v2");
+    // 只写改了哪几个字段，不把整段说明倒进动态。
+    expect(updatedEvent!.summary).toContain("标题、状态");
+    expect(events.find((e) => e.kind === "plan_removed")!.summary).toContain("删除了方案「发布计划 v2」");
+  });
+
+  it("移除成员与自己退出各自留一条", async () => {
+    const boss = await register(app, "d274boss2", "阿鸣");
+    const mate = await register(app, "d274mate2", "小李");
+    const other = await register(app, "d274other2", "小赵");
+    const teamId = await makeTeam(app, boss.token, "留痕二组", [mate.user.username, other.user.username]);
+
+    const kicked = await request(app)
+      .delete(`/api/teams/${teamId}/members/${mate.user.id}`)
+      .set(auth(boss.token));
+    expect(kicked.status).toBe(200);
+
+    const left = await request(app).post(`/api/teams/${teamId}/leave`).set(auth(other.token));
+    expect(left.status).toBe(204);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events?limit=20`).set(auth(boss.token));
+    const events = res.body.events as { kind: string; summary: string }[];
+    expect(events.find((e) => e.summary.includes("移出了团队"))!.summary).toContain("把 小李 移出了团队");
+    expect(events.find((e) => e.summary.includes("退出了团队"))!.summary).toContain("小赵 退出了团队");
+  });
+
+  it("转让队长留一条，且新队长能看到", async () => {
+    const boss = await register(app, "d274boss3", "阿鸣");
+    const mate = await register(app, "d274mate3", "小李");
+    const teamId = await makeTeam(app, boss.token, "留痕三组", [mate.user.username]);
+
+    const transfer = await request(app)
+      .post(`/api/teams/${teamId}/owner`)
+      .set(auth(boss.token))
+      .send({ userId: mate.user.id });
+    expect(transfer.status).toBe(200);
+
+    const res = await request(app).get(`/api/teams/${teamId}/events`).set(auth(mate.token));
+    const events = res.body.events as { kind: string; summary: string; actorId: string }[];
+    const event = events.find((e) => e.kind === "owner_transferred");
+    expect(event).toBeDefined();
+    expect(event!.summary).toContain("把队长转给了 小李");
+    expect(event!.actorId).toBe(boss.user.id);
+  });
+});
+
+describe("单件任务的历史（d.276）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("events?taskId= 只回这一条活的流水，别的任务不混进来", async () => {
+    const boss = await register(app, "d276boss", "阿鸣");
+    const mate = await register(app, "d276mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "历史组", [mate.user.username]);
+
+    const first = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "改落地页", assigneeId: mate.user.id });
+    expect(first.status).toBe(201);
+    const second = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "写周报" });
+    expect(second.status).toBe(201);
+
+    const patched = await request(app)
+      .patch(`/api/teams/${teamId}/tasks/${first.body.id}`)
+      .set(auth(mate.token))
+      .send({ status: "doing" });
+    expect(patched.status).toBe(200);
+
+    const all = await request(app).get(`/api/teams/${teamId}/events`).set(auth(boss.token));
+    expect(all.status).toBe(200);
+    expect(all.body.events.length).toBeGreaterThan(2);
+
+    const one = await request(app)
+      .get(`/api/teams/${teamId}/events?taskId=${first.body.id}`)
+      .set(auth(boss.token));
+    expect(one.status).toBe(200);
+    const events = one.body.events as { taskId: string | null; kind: string }[];
+    expect(events).toHaveLength(2);
+    expect(events.every((e) => e.taskId === first.body.id)).toBe(true);
+    expect(events.map((e) => e.kind).sort()).toEqual(["task_added", "task_updated"]);
+
+    // 非成员仍然看不到。
+    const outsider = await register(app, "d276out", "路人");
+    const denied = await request(app)
+      .get(`/api/teams/${teamId}/events?taskId=${first.body.id}`)
+      .set(auth(outsider.token));
+    expect(denied.status).toBe(404);
+  });
+});
+
+describe("人走了，活要归位（d.278）", () => {
+  let app: App;
+
+  beforeEach(() => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("把成员移出：他名下没做完的活回到待认领，单件历史里能查到为什么", async () => {
+    const boss = await register(app, "d278boss", "阿鸣");
+    const mate = await register(app, "d278mate", "小李");
+    const teamId = await makeTeam(app, boss.token, "归位组", [mate.user.username]);
+
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "改落地页", assigneeId: mate.user.id });
+    expect(created.status).toBe(201);
+
+    const removed = await request(app)
+      .delete(`/api/teams/${teamId}/members/${mate.user.id}`)
+      .set(auth(boss.token));
+    expect(removed.status).toBe(200);
+    const snapshot = removed.body as { tasks: { id: string; assigneeId: string | null }[] };
+    expect(snapshot.tasks.find((task) => task.id === created.body.id)?.assigneeId).toBeNull();
+
+    const history = await request(app)
+      .get(`/api/teams/${teamId}/events?taskId=${created.body.id}`)
+      .set(auth(boss.token));
+    expect(history.status).toBe(200);
+    const summaries = (history.body.events as { summary: string }[]).map((event) => event.summary);
+    expect(summaries.some((text) => text.includes("回到「待认领」"))).toBe(true);
+    expect(summaries.some((text) => text.includes("小李"))).toBe(true);
+  });
+
+  it("自己退出：名下的活同样回到待认领，团队动态里说清是谁走的", async () => {
+    const boss = await register(app, "d278boss2", "阿鸣");
+    const mate = await register(app, "d278mate2", "小李");
+    const teamId = await makeTeam(app, boss.token, "归位二组", [mate.user.username]);
+
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/tasks`)
+      .set(auth(boss.token))
+      .send({ title: "写接口文档", assigneeId: mate.user.id });
+    expect(created.status).toBe(201);
+
+    const left = await request(app).post(`/api/teams/${teamId}/leave`).set(auth(mate.token));
+    expect(left.status).toBe(204);
+
+    const snapshot = await request(app).get(`/api/teams/${teamId}`).set(auth(boss.token));
+    expect(snapshot.status).toBe(200);
+    const tasks = snapshot.body.tasks as { id: string; assigneeId: string | null }[];
+    expect(tasks.find((task) => task.id === created.body.id)?.assigneeId).toBeNull();
+
+    const events = await request(app).get(`/api/teams/${teamId}/events`).set(auth(boss.token));
+    const summaries = (events.body.events as { summary: string }[]).map((event) => event.summary);
+    expect(summaries.some((text) => text.includes("退出了团队"))).toBe(true);
+    expect(summaries.some((text) => text.includes("回到「待认领」"))).toBe(true);
+  });
+});

@@ -189,8 +189,46 @@ export function initSchema(db: DatabaseSyncType): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       due_at TEXT,
-      attachment_file_id TEXT
+      attachment_file_id TEXT,
+      result TEXT NOT NULL DEFAULT '',
+      completed_at TEXT,
+      completed_by TEXT,
+      blocked_by TEXT NOT NULL DEFAULT '[]',
+      return_note TEXT NOT NULL DEFAULT '',
+      returned_at TEXT,
+      returned_by TEXT,
+      progress TEXT NOT NULL DEFAULT '',
+      progress_at TEXT,
+      progress_by TEXT,
+      nudged_at TEXT,
+      nudged_by TEXT,
+      nudge_count INTEGER NOT NULL DEFAULT 0,
+      review_state TEXT NOT NULL DEFAULT 'pending',
+      review_note TEXT NOT NULL DEFAULT '',
+      reviewed_at TEXT,
+      reviewed_by TEXT
     );
+  CREATE TABLE IF NOT EXISTS team_task_comments (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_team_task_comments_task ON team_task_comments(task_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS team_events (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    task_id TEXT,
+    task_title TEXT NOT NULL DEFAULT '',
+    actor_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_team_events_team ON team_events(team_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id, team_id);
     CREATE INDEX IF NOT EXISTS idx_teams_updated ON teams(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_team_plans_team ON team_plans(team_id, order_index, created_at);
@@ -248,6 +286,65 @@ export function initSchema(db: DatabaseSyncType): void {
   const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
   if (!userCols.some((c) => c.name === "last_seen_at")) {
     db.exec("ALTER TABLE users ADD COLUMN last_seen_at TEXT");
+  }
+
+  // d.252：任务交付结论与完成留痕。旧库没有这三列 → 幂等补上（读侧另有 ?? 兜底）。
+  const taskCols = db.prepare("PRAGMA table_info(team_tasks)").all() as Array<{ name: string }>;
+  if (!taskCols.some((c) => c.name === "result")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN result TEXT NOT NULL DEFAULT ''");
+  }
+  if (!taskCols.some((c) => c.name === "completed_at")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN completed_at TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "completed_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN completed_by TEXT");
+  }
+  // d.255：任务依赖（前置任务 id 的 JSON 数组）。旧库补列，缺省空数组＝没有依赖。
+  if (!taskCols.some((c) => c.name === "blocked_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN blocked_by TEXT NOT NULL DEFAULT '[]'");
+  }
+  // d.261：退回原因与退回痕迹。旧库补列，缺省空串/null＝没被退回过。
+  if (!taskCols.some((c) => c.name === "return_note")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN return_note TEXT NOT NULL DEFAULT ''");
+  }
+  if (!taskCols.some((c) => c.name === "returned_at")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN returned_at TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "returned_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN returned_by TEXT");
+  }
+  // d.262：任务进展（做到哪、卡在哪）。旧库补列，缺省空串/null＝还没留过。
+  if (!taskCols.some((c) => c.name === "progress")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN progress TEXT NOT NULL DEFAULT ''");
+  }
+  if (!taskCols.some((c) => c.name === "progress_at")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN progress_at TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "progress_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN progress_by TEXT");
+  }
+  // 催办（d.265）：独立判断，别埋在 progress_by 的分支里（否则已有 progress_by 的库永远补不上）。
+  if (!taskCols.some((c) => c.name === "nudged_at")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN nudged_at TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "nudged_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN nudged_by TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "nudge_count")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN nudge_count INTEGER NOT NULL DEFAULT 0");
+  }
+  // 验收（d.272）：逐列独立判断，已有列的库不重复加。
+  if (!taskCols.some((c) => c.name === "review_state")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'");
+  }
+  if (!taskCols.some((c) => c.name === "review_note")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN review_note TEXT NOT NULL DEFAULT ''");
+  }
+  if (!taskCols.some((c) => c.name === "reviewed_at")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN reviewed_at TEXT");
+  }
+  if (!taskCols.some((c) => c.name === "reviewed_by")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN reviewed_by TEXT");
   }
 
   // T2-02：写侧直到 d.109 才把 task 动向的 title 钉成「任务」，**收紧前入库的历史行**

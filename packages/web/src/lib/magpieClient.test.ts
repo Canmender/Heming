@@ -3,6 +3,7 @@ import {
   DEFAULT_GATEWAY,
   MagpieGatewayError,
   fetchGatewayCatalog,
+  fetchGatewayImageModels,
   helloUrlOf,
   normalizeGatewayBaseUrl,
   parseGatewayModels,
@@ -63,6 +64,57 @@ describe("parseGatewayModels", () => {
   it("缺 data 数组直接报格式错误（不把空对象当没有模型）", () => {
     expect(() => parseGatewayModels({ nope: true })).toThrow(MagpieGatewayError);
     expect(() => parseGatewayModels(null)).toThrow(/缺少 data 数组/);
+  });
+
+  it("价格按 OpenRouter 的每 token 小数解析成每 100 万 token 的美元数", () => {
+    const [model] = parseGatewayModels({
+      data: [
+        {
+          id: "deepseek/deepseek-flash",
+          pricing: {
+            prompt: "0.00000015",
+            completion: "0.0000006",
+            input_cache_read: "0.000000003",
+          },
+        },
+      ],
+    });
+    expect(model).toMatchObject({
+      priceIn: 0.15,
+      priceOut: 0.6,
+      priceCacheRead: 0.003,
+      // 目录没给缓存写：未知，不是 0
+      priceCacheWrite: undefined,
+    });
+  });
+
+  it("价格为 0 是「已知免费」，与缺这一项区分开", () => {
+    const [model] = parseGatewayModels({
+      data: [{ id: "local/qwen", pricing: { prompt: "0", completion: "0" } }],
+    });
+    expect(model.priceIn).toBe(0);
+    expect(model.priceOut).toBe(0);
+    expect(parseGatewayModels({ data: [{ id: "local/x" }] })[0]!.priceIn).toBeUndefined();
+  });
+});
+
+describe("fetchGatewayImageModels", () => {
+  it("问 ?kind=image 才列得出画图模型；非 200 就当没有", async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: string) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "copilot/gpt-image-1", display_name: "GPT Image" }] }), {
+        status: 200,
+      });
+    });
+    const drawers = await fetchGatewayImageModels(DEFAULT_GATEWAY, { fetchImpl: fetchMock });
+    expect(urls).toEqual(["http://127.0.0.1:3425/v1/models?kind=image"]);
+    expect(drawers.map((model) => model.id)).toEqual(["copilot/gpt-image-1"]);
+
+    const failing = await fetchGatewayImageModels(DEFAULT_GATEWAY, {
+      fetchImpl: async () => new Response("nope", { status: 500 }),
+    });
+    expect(failing).toEqual([]);
   });
 });
 

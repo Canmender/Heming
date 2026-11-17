@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
+import { summarizeTeamTasks } from "./teamCounts.js";
 import type {
   User,
   Message,
@@ -13,10 +14,14 @@ import type {
   TeamActivityInput,
   TeamUsageInput,
   TeamItemStatus,
+  TeamTaskPriority,
   TeamMemberRole,
   TeamPlanItem,
   TeamTask,
+  TeamTaskComment,
+  TeamEvent,
   TeamWorkspaceSnapshot,
+  TeamBrief,
   WorkspaceTeam,
 } from "@heming/shared";
 
@@ -72,6 +77,10 @@ export interface TeamTaskCreateInput {
   assigneeId?: string | null;
   dueAt?: string | null;
   attachmentFileId?: string | null;
+  /** 优先级（d.268）：不填 = 普通。 */
+  priority?: TeamTaskPriority;
+  /** 前置任务 id（d.255）：同团队任务，最多 5 个，不能成环。 */
+  blockedBy?: string[];
 }
 
 export interface TeamTaskUpdateInput {
@@ -80,8 +89,24 @@ export interface TeamTaskUpdateInput {
   planId?: string | null;
   assigneeId?: string | null;
   status?: TeamItemStatus;
+  /** 优先级（d.268）：调整轻重缓急。 */
+  priority?: TeamTaskPriority;
   dueAt?: string | null;
   attachmentFileId?: string | null;
+  /** 交付结论（d.252）：完成时写「做成什么样、怎么验证的」；不要拿它覆盖 detail。 */
+  result?: string;
+  /** 前置任务 id（d.255）：整体替换；空数组 = 清空依赖。 */
+  blockedBy?: string[];
+  /** 退回原因（d.261）：assigneeId 传 null 时一起落库，说明为什么做不了。 */
+  returnNote?: string;
+  /** 最新进展（d.262）：空串 = 清空。 */
+  progress?: string;
+  /** 催办（d.265）：true = 记一次催办；只能催别人名下、还没完成的任务。 */
+  nudge?: boolean;
+  /** 验收（d.272）：approve = 通过；changes = 打回重做（必须带 reviewNote）。 */
+  review?: "approve" | "changes";
+  /** 验收意见（d.272）：打回时说明要改什么；通过时可留一句认可。 */
+  reviewNote?: string;
 }
 
 /**
@@ -335,6 +360,8 @@ export interface Store {
   // - 方案/任务：团队成员都能读写（`forbidden` 留在联合类型里给后续按项授权用）。
   /** 我是成员的团队，按 updatedAt 降序（最近有动静的在前）。 */
   listWorkspaceTeams(userId: string): WorkspaceTeam[];
+  /** 我所在团队的简报（团队名/我在里面的角色/成员名单），给智能体认人用（d.253）。 */
+  listTeamBriefs(userId: string): TeamBrief[];
   /** 团队工作台快照（成员 + 方案 + 任务）；不是成员 / 不存在 → null。 */
   getWorkspaceTeam(teamId: string, userId: string): TeamWorkspaceSnapshot | null;
   /** 建团队并把自己写成 owner 成员；返回空快照。 */
@@ -413,8 +440,11 @@ export interface Store {
     | TeamTask
     | "forbidden"
     | "not_found"
+    | "not_leader"
     | "assignee_not_member"
     | "plan_not_found"
+    | "blocker_not_found"
+    | "blocker_cycle"
     | null;
   /** 改任务（成员可写）；任务不存在 "not_found"；引用校验同 createTeamTask。 */
   updateTeamTask(
@@ -426,12 +456,97 @@ export interface Store {
     | TeamTask
     | "forbidden"
     | "not_found"
+    | "not_leader"
     | "assignee_not_member"
     | "plan_not_found"
+    | "blocker_not_found"
+    | "blocker_cycle"
+    | "not_nudgeable"
+    | "not_reviewable"
     | null;
   deleteTeamTask(teamId: string, taskId: string, actorId: string): boolean | "forbidden" | "not_found";
+  /**
+   * 派到我名下、还没完成的任务（跨团队聚合，截止近的在前）。
+   * 让队员的智能体一开口就知道「团队里有什么活儿派给我」。
+   */
+  listAssignedTeamTasks(userId: string): {
+    teamId: string;
+    teamName: string;
+    task: TeamTask;
+    /** 还没完成的前置任务（d.255）：非空说明这条活儿现在还不该开始。 */
+    openBlockers: { id: string; title: string }[];
+  }[];
+  /**
+   * 我所在团队里「还没人认领」的活（d.260）。
+   *
+   * 派活时把负责人留空 = 等认领，但此前只有团队页能看到：队员的智能体只知道派到自己名下的，
+   * 于是这类活容易一直挂着。这里只返回**我所在团队**的未认领任务（同团队是前提，别人的团队与我无关），
+   * 形状与 listAssignedTeamTasks 一致，面板与提示词复用同一套渲染。
+   */
+  listClaimableTeamTasks(userId: string): {
+    teamId: string;
+    teamName: string;
+    task: TeamTask;
+    openBlockers: { id: string; title: string }[];
+  }[];
+  /** 任务讨论（d.271）：一条任务下的留言，按时间从早到晚。 */
+  /** 团队动态（d.273）：只追加；按团队裁剪，返回按时间倒序。 */
+  addTeamEvent(event: TeamEvent): void;
+  listTeamEvents(teamId: string, limit?: number, taskId?: string | null): TeamEvent[];
+  listTeamTaskComments(teamId: string, taskId: string): TeamTaskComment[];
+  /**
+   * 追加一条讨论（d.271）。
+   *
+   * 与 progress 的区别：progress 是「最新进展」覆盖式的一条；讨论是追加的时间线，
+   * 用来问口径、补约束、回复对方的疑问——所以谁也不能改别人写过的话。
+   */
+  addTeamTaskComment(
+    teamId: string,
+    taskId: string,
+    actorId: string,
+    text: string,
+  ): TeamTaskComment | "forbidden" | "not_found";
   /** 幂等登记系统预设 agent（新库没有预设群后仍要能开「和小鸣」对话）。 */
   ensureSystemAgents(): void;
+}
+
+/**
+ * 校验任务依赖（d.255）。
+ *
+ * - 前置必须存在且属于同一个团队 → "blocker_not_found"
+ * - 不能依赖自己，也不能成环（A→B→A）→ "blocker_cycle"
+ *
+ * 只做「能表达的依赖是不是合法」，不做「没完成就不许开始」的硬阻断：
+ * 现实里经常要先试一下才知道前置是不是真的挡住了，硬拦会把模型逼成撒谎。
+ */
+function validateBlockers(
+  tasks: Map<string, TeamTask>,
+  teamId: string,
+  taskId: string | null,
+  ids: readonly string[],
+): "blocker_not_found" | "blocker_cycle" | null {
+  const clean = [...new Set(ids.map((id) => id.trim()).filter((id) => id.length > 0))];
+  for (const id of clean) {
+    const dep = tasks.get(id);
+    if (!dep || dep.teamId !== teamId) return "blocker_not_found";
+  }
+  if (taskId === null) return null;
+  const stack = [...clean];
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    if (id === taskId) return "blocker_cycle";
+    for (const b of tasks.get(id)?.blockedBy ?? []) stack.push(b);
+  }
+  return null;
+}
+
+/** 归一前置 id 列表：去空、去重、保序（schema 已限 5 个，这里只做形状收敛）。 */
+function normalizeBlockers(ids: readonly string[] | undefined): string[] {
+  if (ids === undefined) return [];
+  return [...new Set(ids.map((id) => id.trim()).filter((id) => id.length > 0))];
 }
 
 export function createMemoryStore(): Store {
@@ -483,6 +598,11 @@ export function createMemoryStore(): Store {
   >();
   const teamPlans = new Map<string, TeamPlanItem>();
   const teamTasks = new Map<string, TeamTask>();
+  /** 任务讨论（d.271）：键 = taskId，值按 created_at 升序。 */
+  const teamTaskComments = new Map<string, TeamTaskComment[]>();
+  /** 团队动态（d.273）：键 = teamId，值按时间升序；每团队只留最近 300 条。 */
+  const MAX_TEAM_EVENTS = 300;
+  const teamEvents = new Map<string, TeamEvent[]>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -491,6 +611,10 @@ export function createMemoryStore(): Store {
   };
 
   const teamMemberKey = (teamId: string, userId: string) => `${teamId}\0${userId}`;
+  /** 团队创建者即组长：只有组长能把任务派给别人（成员可自派 / 认领）。 */
+  const isTeamOwner = (teamId: string, userId: string): boolean =>
+    teams.get(teamId)?.ownerId === userId;
+
   const memberRole = (teamId: string, userId: string): TeamMemberRole | null =>
     teamMembers.get(teamMemberKey(teamId, userId))?.role ?? null;
   /** 可见团队：存在且本人是成员；否则 null（app 层一律 404，不泄露存在性）。 */
@@ -974,6 +1098,44 @@ export function createMemoryStore(): Store {
         )
         .map((team) => ({ ...team }));
     },
+    listTeamBriefs(userId) {
+      return [...teams.values()]
+        .filter((team) => teamMembers.has(teamMemberKey(team.id, userId)))
+        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+        .map((team) => {
+          // d.256：任务概览随简报一起给（组长被问进度时不用逐个 team_get）。
+          const summary = summarizeTeamTasks(
+            [...teamTasks.values()].filter((task) => task.teamId === team.id),
+          );
+          const members = [...teamMembers.values()]
+            .filter((member) => member.teamId === team.id)
+            .map((member) => {
+              const found = users.get(member.userId);
+              return {
+                id: member.userId,
+                displayName: found === undefined ? member.userId : found.user.displayName,
+                role: member.role,
+                open: summary.perMember.get(member.userId) ?? 0,
+              };
+            })
+            .sort((a, b) =>
+              a.role === b.role
+                ? a.displayName.localeCompare(b.displayName, "zh-Hans-CN")
+                : a.role === "owner"
+                  ? -1
+                  : 1,
+            );
+          return {
+            id: team.id,
+            name: team.name,
+            goal: team.goal,
+            ownerId: team.ownerId,
+            role: team.ownerId === userId ? ("owner" as const) : ("member" as const),
+            members,
+            counts: summary.counts,
+          };
+        });
+    },
     getWorkspaceTeam(teamId, userId) {
       return visibleTeam(teamId, userId) ? snapshotOf(teamId) : null;
     },
@@ -1135,6 +1297,60 @@ export function createMemoryStore(): Store {
       touchTeam(teamId);
       return true;
     },
+    listAssignedTeamTasks(userId) {
+      const out: {
+        teamId: string;
+        teamName: string;
+        task: TeamTask;
+        openBlockers: { id: string; title: string }[];
+      }[] = [];
+      for (const task of teamTasks.values()) {
+        if (task.assigneeId !== userId || task.status === "done") continue;
+        const team = teams.get(task.teamId);
+        if (!team) continue;
+        const openBlockers = (task.blockedBy ?? [])
+          .map((id) => teamTasks.get(id))
+          .filter((dep): dep is TeamTask => dep !== undefined && dep.status !== "done")
+          .map((dep) => ({ id: dep.id, title: dep.title }));
+        out.push({ teamId: team.id, teamName: team.name, task: { ...task }, openBlockers });
+      }
+      // 能做的排前面（前置没完成的其实是「还轮不到你」，不该抢在最前）。
+      out.sort(
+        (a, b) =>
+          a.openBlockers.length - b.openBlockers.length ||
+          (a.task.dueAt ?? "9999").localeCompare(b.task.dueAt ?? "9999") ||
+          a.task.updatedAt.localeCompare(b.task.updatedAt),
+      );
+      return out;
+    },
+    listClaimableTeamTasks(userId) {
+      const out: {
+        teamId: string;
+        teamName: string;
+        task: TeamTask;
+        openBlockers: { id: string; title: string }[];
+      }[] = [];
+      for (const task of teamTasks.values()) {
+        // 只认「没人认领 + 没完成」：已经派出去的不在这个列表里（那是别人名下的事）。
+        if (task.assigneeId !== null || task.status === "done") continue;
+        const team = teams.get(task.teamId);
+        if (!team) continue;
+        if (!teamMembers.has(teamMemberKey(team.id, userId))) continue;
+        const openBlockers = (task.blockedBy ?? [])
+          .map((id) => teamTasks.get(id))
+          .filter((dep): dep is TeamTask => dep !== undefined && dep.status !== "done")
+          .map((dep) => ({ id: dep.id, title: dep.title }));
+        out.push({ teamId: team.id, teamName: team.name, task: { ...task }, openBlockers });
+      }
+      // 与「派给我的」排序一致：能做的在前，其次按截止，再按更新时间。
+      out.sort(
+        (a, b) =>
+          a.openBlockers.length - b.openBlockers.length ||
+          (a.task.dueAt ?? "9999").localeCompare(b.task.dueAt ?? "9999") ||
+          a.task.updatedAt.localeCompare(b.task.updatedAt),
+      );
+      return out;
+    },
     createTeamTask(teamId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
       if (body.planId) {
@@ -1144,6 +1360,13 @@ export function createMemoryStore(): Store {
       if (body.assigneeId && memberRole(teamId, body.assigneeId) === null) {
         return "assignee_not_member";
       }
+      // 组长语义：别人的活儿只能由组长指派；成员可以自派或留空等认领。
+      if (body.assigneeId && body.assigneeId !== actorId && !isTeamOwner(teamId, actorId)) {
+        return "not_leader";
+      }
+      const blockedBy = normalizeBlockers(body.blockedBy);
+      const blockerError = validateBlockers(teamTasks, teamId, null, blockedBy);
+      if (blockerError !== null) return blockerError;
       const at = new Date().toISOString();
       const task: TeamTask = {
         id: randomUUID(),
@@ -1158,12 +1381,70 @@ export function createMemoryStore(): Store {
         updatedAt: at,
         dueAt: body.dueAt ?? null,
         attachmentFileId: body.attachmentFileId ?? null,
+        priority: body.priority ?? "normal",
+        result: "",
+        completedAt: null,
+        completedBy: null,
+        returnedAt: null,
+        returnedBy: null,
+        returnNote: "",
+    progress: "",
+    progressAt: null,
+    progressBy: null,
+    nudgedAt: null,
+    nudgedBy: null,
+        nudgeCount: 0,
+        /** 验收（d.272）：刚交上来还没人看。 */
+        reviewState: "pending",
+        reviewNote: "",
+        reviewedAt: null,
+        reviewedBy: null,
+        blockedBy,
       };
       teamTasks.set(task.id, task);
       touchTeam(teamId);
       return { ...task };
     },
-    updateTeamTask(teamId, taskId, actorId, body) {
+    listTeamTaskComments(teamId, taskId) {
+    return [...(teamTaskComments.get(taskId) ?? [])];
+  },
+
+  addTeamTaskComment(teamId, taskId, actorId, text) {
+    if (!visibleTeam(teamId, actorId)) return "forbidden";
+    const task = teamTasks.get(taskId);
+    if (!task || task.teamId !== teamId) return "not_found";
+    const comment: TeamTaskComment = {
+      id: randomUUID(),
+      teamId,
+      taskId,
+      authorId: actorId,
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    teamTaskComments.set(taskId, [...(teamTaskComments.get(taskId) ?? []), comment]);
+    touchTeam(teamId);
+    return comment;
+  },
+
+  addTeamEvent(event) {
+    const existing = teamEvents.get(event.teamId) ?? [];
+    const next = [...existing, event];
+    teamEvents.set(
+      event.teamId,
+      next.length > MAX_TEAM_EVENTS ? next.slice(next.length - MAX_TEAM_EVENTS) : next,
+    );
+  },
+
+  listTeamEvents(teamId, limit = 50, taskId) {
+    // taskId（d.276）：只回某一件活的流水，用于任务卡片的「这件活的历史」。
+    const all = (teamEvents.get(teamId) ?? []).filter(
+      (e) => taskId === undefined || taskId === null || taskId === "" || e.taskId === taskId,
+    );
+    const size = Math.max(0, Math.min(Math.floor(limit), MAX_TEAM_EVENTS));
+    return all.slice(Math.max(0, all.length - size)).reverse().map((e) => ({ ...e }));
+  },
+
+  updateTeamTask(teamId, taskId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
       const task = teamTasks.get(taskId);
       if (!task || task.teamId !== teamId) return "not_found";
@@ -1174,6 +1455,54 @@ export function createMemoryStore(): Store {
       if (body.assigneeId && memberRole(teamId, body.assigneeId) === null) {
         return "assignee_not_member";
       }
+      // 改派给别人 = 派活，同样只有组长可以做（保持原负责人或改回未认领不算）。
+      if (
+        body.assigneeId !== undefined &&
+        body.assigneeId !== null &&
+        body.assigneeId !== actorId &&
+        body.assigneeId !== task.assigneeId &&
+        !isTeamOwner(teamId, actorId)
+      ) {
+        return "not_leader";
+      }
+      /**
+       * 任务级权限（d.254）：成员只能动「自己名下」和「还没人认领」的任务。
+       *
+       * 此前只卡了「改派给别人」，于是成员可以把别人的任务标成完成、改标题、改截止——
+       * 派活的人看不到是谁改的，被改的人回来发现状态变了。组长不受限（要能替人收尾）。
+       */
+      if (!isTeamOwner(teamId, actorId) && task.assigneeId !== null && task.assigneeId !== actorId) {
+        return "forbidden";
+      }
+      const blockedBy = body.blockedBy === undefined ? undefined : normalizeBlockers(body.blockedBy);
+      if (blockedBy !== undefined) {
+        const blockerError = validateBlockers(teamTasks, teamId, taskId, blockedBy);
+        if (blockerError !== null) return blockerError;
+      }
+      const at = new Date().toISOString();
+      // 完成这件事留痕（d.252）：谁标的完成、什么时候、结论是什么。
+      // 从 done 退回去 = 结论作废，避免「已重新打开的任务挂着一条旧结论」。
+      // 退回（d.261）：把负责人清空 = 装回待认领池，并留下「谁退的、为什么」。
+      // 组长代退也算一次退回（returnedBy 记组长），这样任务板能看出「这活退过」。
+      // 催办（d.265）：只记「谁在什么时候催过一次」，不动状态、不动负责人。
+      const nudged = body.nudge === true;
+      if (nudged) {
+        if (!isTeamOwner(teamId, actorId)) return "forbidden";
+        if (task.assigneeId === null || task.assigneeId === actorId || task.status === "done") {
+          return "not_nudgeable";
+        }
+      }
+      // 验收（d.272）：只有组长能验收，而且只能验收「已完成」的活；
+      // 打回会把状态改回进行中（结论保留为「上一版」），通过则只打标。
+      const reviewed = body.review !== undefined;
+      if (reviewed) {
+        if (!isTeamOwner(teamId, actorId)) return "forbidden";
+        if (task.status !== "done") return "not_reviewable";
+      }
+      const returned = body.assigneeId === null && task.assigneeId !== null;
+      const reclaimed = body.assigneeId !== undefined && body.assigneeId !== null;
+      const becameDone = body.status === "done" && task.status !== "done";
+      const leftDone = body.status !== undefined && body.status !== "done" && task.status === "done";
       const next: TeamTask = {
         ...task,
         ...(body.title !== undefined ? { title: body.title } : {}),
@@ -1185,7 +1514,52 @@ export function createMemoryStore(): Store {
         ...(body.attachmentFileId !== undefined
           ? { attachmentFileId: body.attachmentFileId }
           : {}),
-        updatedAt: new Date().toISOString(),
+        // 优先级（d.268）：不传就保持原值。
+        ...(body.priority !== undefined ? { priority: body.priority } : {}),
+        ...(body.result !== undefined ? { result: body.result } : {}),
+        // 进展（d.262）：留一句「做到哪、卡在哪」，与 result（交付结论）分开；空串 = 清掉。
+        ...(body.progress !== undefined
+          ? body.progress === ""
+            ? { progress: "", progressAt: null, progressBy: null }
+            : { progress: body.progress, progressAt: at, progressBy: actorId }
+          : {}),
+        // 催办（d.265）：累计次数不清零，方便看出「催了还不做」。
+        ...(nudged
+          ? { nudgedAt: at, nudgedBy: actorId, nudgeCount: (task.nudgeCount ?? 0) + 1 }
+          : {}),
+        // 验收（d.272）：approved 只打标；changes 顺带把任务装回「进行中」，
+        // 保留 result 作为上一版结论（改完再标完成会重新进入待验收）。
+        ...(reviewed
+          ? body.review === "approve"
+            ? {
+                reviewState: "approved" as const,
+                reviewNote: body.reviewNote ?? task.reviewNote ?? "",
+                reviewedAt: at,
+                reviewedBy: actorId,
+              }
+            : {
+                reviewState: "changes" as const,
+                reviewNote: body.reviewNote ?? "",
+                reviewedAt: at,
+                reviewedBy: actorId,
+                status: "doing" as const,
+                completedAt: null,
+                completedBy: null,
+              }
+          : {}),
+        ...(returned
+          ? { returnedAt: at, returnedBy: actorId, returnNote: body.returnNote ?? "" }
+          : reclaimed
+            ? { returnedAt: null, returnedBy: null, returnNote: "" }
+            : {}),
+        ...(blockedBy !== undefined ? { blockedBy } : {}),
+        ...(becameDone
+          ? // 打回后重新标完成（d.275）：要重新进待验收，否则组长再也看不到这条。
+            { completedAt: at, completedBy: actorId, reviewState: "pending" as const }
+          : leftDone
+            ? { completedAt: null, completedBy: null }
+            : {}),
+        updatedAt: at,
       };
       teamTasks.set(taskId, next);
       touchTeam(teamId);
@@ -1195,7 +1569,20 @@ export function createMemoryStore(): Store {
       if (!visibleTeam(teamId, actorId)) return "not_found";
       const task = teamTasks.get(taskId);
       if (!task || task.teamId !== teamId) return "not_found";
+      // 任务级权限（d.254）：组长可删任何任务；成员只能删自己名下的，或自己创建、还没人认领的。
+      const ownsTask =
+        task.assigneeId === actorId || (task.assigneeId === null && task.createdBy === actorId);
+      if (!isTeamOwner(teamId, actorId) && !ownsTask) return "forbidden";
       teamTasks.delete(taskId);
+      // d.255：删掉的任务不能再当别人的前置，否则任务板上会挂着「等一个不存在的任务」。
+      // 不碰 updatedAt：清依赖不是这条任务自己的进度，不该把「多久没动」重置。
+      for (const [otherId, other] of teamTasks) {
+        if (!other.blockedBy?.includes(taskId)) continue;
+        teamTasks.set(otherId, {
+          ...other,
+          blockedBy: other.blockedBy.filter((id) => id !== taskId),
+        });
+      }
       touchTeam(teamId);
       return true;
     },

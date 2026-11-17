@@ -22,7 +22,10 @@ import { Stat } from "./ui/Stat.js";
 import { TextField } from "./ui/Field.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
+import { Avatar } from "./model/Avatar.js";
+import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { useLlmStore } from "../store/llm.js";
+import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
 import { ensureDesktopGateway } from "../lib/magpieHost.js";
 import {
@@ -38,6 +41,46 @@ import {
   type ProviderRow,
 } from "../lib/magpieCli.js";
 import { isModelId, parseAgents, type LocalAgent } from "../lib/magpieAgents.js";
+import {
+  buildModelRows,
+  groupModelRows,
+  isModelDisabled,
+  parseDisabledModels,
+  rowsForAgent,
+  type DisabledPattern,
+} from "../lib/modelCatalog.js";
+import { parseModelSpec } from "../lib/modelSpec.js";
+import {
+  parseAgentVisibility,
+  pickedOnlyArgs,
+  visibilityOf,
+  visibilitySummary,
+  visibleArgs,
+  type AgentVisibility,
+} from "../lib/magpieVisible.js";
+import {
+  parseCompact,
+  parseContextCap,
+  parseSuffix,
+  type CompactState,
+  type ContextCapState,
+  type SuffixState,
+} from "../lib/modelGlobals.js";
+import { GlobalModelSettings } from "./model/GlobalModelSettings.js";
+import { ImageModelSettings } from "./model/ImageModelSettings.js";
+import { parseSettingsValue } from "../lib/modelSettings.js";
+import { supportsModelTier } from "../lib/modelTier.js";
+import {
+  PROVIDER_MODELS_CHOICE_HINT,
+  PROVIDER_MODELS_CHOICE_LABEL,
+  addProviderModelArgs,
+  parseProviderModels,
+  providerModelLabel,
+  providerModelsChoiceArgs,
+  refreshProviderModelsArgs,
+  removeProviderModelArgs,
+  type ProviderModel,
+} from "../lib/providerModels.js";
 import {
   checkApiKey,
   normalizeProviderUrl,
@@ -77,6 +120,12 @@ const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
   { key: "sources", label: "来源", icon: <PlugIcon width={14} height={14} /> },
   { key: "run", label: "运行", icon: <WorkflowIcon width={14} height={14} /> },
 ];
+
+/**
+ * 智能体模型下拉的「自定义…」值：给不在网关目录里的模型留一个出口，
+ * 不让下拉把「模型列表没刷新」变成「无法选」。
+ */
+const AGENT_CUSTOM = "__custom__";
 
 const SUBSCRIPTIONS = [
   { agent: "claude", label: "Claude", desc: "Pro / Max / Team" },
@@ -127,15 +176,6 @@ const SYNC_COMMAND_LABEL: Record<string, string> = {
   set: "写入配置项",
 };
 
-/** 请求协议：auto / chat / responses / anthropic / gemini。 */
-const API_LABEL: Record<string, string> = {
-  auto: "自动识别",
-  chat: "Chat Completions",
-  responses: "Responses",
-  anthropic: "Anthropic Messages",
-  gemini: "Gemini",
-};
-
 const GROUP_ROUTING = [
   "smart",
   "order",
@@ -150,40 +190,12 @@ const GROUP_ROUTING = [
   "expiring",
 ];
 
-/**
- * 头像色板走 CSS 变量（d.124）：暗色下有一整套更亮的同色相版本，
- * 写死十六进制会让暗色头像发闷、与主题不搭。
- */
-const AVATAR_COLORS = [
-  "var(--avatar-1)",
-  "var(--avatar-2)",
-  "var(--avatar-3)",
-  "var(--avatar-4)",
-  "var(--avatar-5)",
-  "var(--avatar-6)",
-];
-
-function avatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length]!;
-}
-
-function Avatar({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ui-sm font-semibold text-white"
-      style={{ backgroundColor: avatarColor(name) }}
-    >
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-  );
-}
-
 export function ModelPage() {
   const profiles = useLlmStore((s) => s.profiles);
+  /** 网关目录：显示名、思考档、窗口、图片输入都来自这里（模型页以前忽略了它们）。 */
+  const catalogModels = useLlmStore((s) => s.models);
   const refreshCatalog = useLlmStore((s) => s.refreshCatalog);
+  const gatewayConfig = useLlmStore((s) => s.gateway);
 
   const cli = useMemo<MagpieCliBridge | null>(() => getMagpieCliBridge(), []);
   const [tab, setTab] = useState<TabKey>("models");
@@ -222,15 +234,39 @@ export function ModelPage() {
     action: () => void;
   } | null>(null);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
+  /** 智能体模型选「自定义…」后手填的 provider/model。 */
+  const [agentCustom, setAgentCustom] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [modelQuery, setModelQuery] = useState("");
+  /** 被 `model disable` 关掉的模型（glob 模式 + 当前命中）。 */
+  const [disabledModels, setDisabledModels] = useState<DisabledPattern[]>([]);
+  /** 全局模型设置（名字后缀 / 压缩窗口 / 窗口上限）。 */
+  const [suffix, setSuffix] = useState<SuffixState>({ mode: "" });
+  const [compact, setCompact] = useState<CompactState>({ fullContext: false });
+  const [contextCap, setContextCap] = useState<ContextCapState>({});
+  /** 看图模型 / 画图模型（`magpie settings` 的 vision、imageGen；空 = 自动或关掉）。 */
+  const [visionModel, setVisionModel] = useState("");
+  /** 看图模型描述图片时的思考档（`settings visionEffort`；空 = 用它自己的默认）。 */
+  const [visionEffort, setVisionEffort] = useState("");
+  const [imageGenModel, setImageGenModel] = useState("");
+  /** 内核认不认识 `model tier`：不认识就不摆速度档，免得保存必报错。 */
+  const [tierSupported, setTierSupported] = useState(false);
+  /** 网关单独列出的画图模型（`/v1/models?kind=image`），给「画图模型」下拉用。 */
+  const [drawerModels, setDrawerModels] = useState<{ id: string; name: string }[]>([]);
+  /** 每个智能体被收窄到的来源（`magpie visible`；没出现的能看到全部）。 */
+  const [visibility, setVisibility] = useState<AgentVisibility[]>([]);
+  /** 展开「可见模型」的智能体 id。 */
+  const [visibleOpen, setVisibleOpen] = useState<string | null>(null);
+  /** 可见模型编辑中的勾选（agent id → 来源 id 列表）。 */
+  const [visibleDraft, setVisibleDraft] = useState<Record<string, string[]>>({});
   /** 选中的厂商与地址类型（plan 是 planOptions 里的 id，普通地址默认）。 */
   const [presetKey, setPresetKey] = useState<{ id: string; plan: string; key: string } | null>(null);
   const [custom, setCustom] = useState({ open: false, id: "", url: "", key: "", models: "" });
   /** 自定义来源的保存前校验错误（就地显示，不弹窗、不清空已填内容）。 */
   const [customError, setCustomError] = useState<string | null>(null);
   /** 展开高级时按需读 `provider show` 的结果：chat 地址 + 普通/套餐。 */
-  const [showCache, setShowCache] = useState<Record<string, { chat: string; plan: PlanKind }>>({});
+  const [showCache, setShowCache] = useState<
+    Record<string, { chat: string; plan: PlanKind; models: ProviderModel[]; note: string }>
+  >({});
   const [showLoading, setShowLoading] = useState<string | null>(null);
   const [live, setLive] = useState("");
   const liveRef = useRef("");
@@ -243,13 +279,14 @@ export function ModelPage() {
     key: "",
     routing: "",
     fallback: "",
-    models: "",
     modelsUrl: "",
     headerName: "",
     headerValue: "",
     patience: "",
     errors: "",
   });
+  /** 每个来源「添加模型」输入框里的内容。 */
+  const [modelAdd, setModelAdd] = useState<Record<string, string>>({});
   /** 路由分组规则（可选）：把某一类请求先交给组里指定模型。 */
   const [ruleForm, setRuleForm] = useState({
     group: "",
@@ -259,8 +296,6 @@ export function ModelPage() {
     time: "",
     intent: "",
   });
-  /** 模型属性（显示名/思考档/协议）。 */
-  const [modelForm, setModelForm] = useState({ model: "", name: "", efforts: "", api: "auto" });
   const [syncKind, setSyncKind] = useState("webdav");
   const [syncCommand, setSyncCommand] = useState("now");
   const [syncValues, setSyncValues] = useState("");
@@ -306,6 +341,44 @@ export function ModelPage() {
     const result = await cli.cli(["ls"]);
     setAgents(parseAgents(result.stdout || ""));
   }, [cli]);
+
+  const loadDisabledModels = useCallback(async () => {
+    if (!cli) return;
+    const result = await cli.cli(["model", "disabled"]);
+    setDisabledModels(parseDisabledModels(result.stdout || ""));
+  }, [cli]);
+
+  const loadVisibility = useCallback(async () => {
+    if (!cli) return;
+    const result = await cli.cli(["visible"]);
+    setVisibility(parseAgentVisibility(result.stdout || ""));
+  }, [cli]);
+
+  const loadGlobals = useCallback(async () => {
+    if (!cli) return;
+    const [suffix, compact, cap, vision, visionEffort, imageGen, modelUsage] = await Promise.all([
+      cli.cli(["model", "suffix"]),
+      cli.cli(["model", "compact"]),
+      cli.cli(["model", "context-cap"]),
+      cli.cli(["settings", "get", "vision", "--json"]),
+      cli.cli(["settings", "get", "visionEffort", "--json"]),
+      cli.cli(["settings", "get", "imageGen", "--json"]),
+      cli.cli(["model"]),
+    ]);
+    setSuffix(parseSuffix(suffix.stdout || ""));
+    setCompact(parseCompact(compact.stdout || ""));
+    setContextCap(parseContextCap(cap.stdout || ""));
+    setVisionModel(parseSettingsValue(vision.stdout || ""));
+    setVisionEffort(parseSettingsValue(visionEffort.stdout || ""));
+    setTierSupported(supportsModelTier(`${modelUsage.stdout || ""}${modelUsage.stderr || ""}`));
+    setImageGenModel(parseSettingsValue(imageGen.stdout || ""));
+  }, [cli]);
+
+  /** 画图模型不在默认目录里：单独问一次网关的 `?kind=image`，问不到就当没有。 */
+  const loadDrawers = useCallback(async () => {
+    const list = await fetchGatewayImageModels(gatewayConfig).catch(() => []);
+    setDrawerModels(list.map((model) => ({ id: model.id, name: model.name })));
+  }, [gatewayConfig]);
 
   /**
    * 执行一条内核命令并保留文本结果（可达性结论要用它说人话）。
@@ -354,6 +427,76 @@ export function ModelPage() {
     [runDetailed],
   );
 
+  /**
+   * 模型目录面板的写入口：与 runDetailed 同一条忙碌/输出通道，
+   * 成功后顺手刷新被禁用清单（禁用/启用/改名都会影响它）。
+   */
+  const runModelCommand = useCallback(
+    async (title: string, args: string[], opts: { refresh?: boolean } = {}) => {
+      const result = await runDetailed(title, args, opts);
+      if (result.ok && opts.refresh) await loadDisabledModels();
+      return result;
+    },
+    [runDetailed, loadDisabledModels],
+  );
+
+  /**
+   * 可勾的来源：已添加的来源 + 当前收窄里出现但没在来源列表里的名字（家族 / 路由组），
+   * 这样界面上不会把智能体已经收窄到的家族弄丢。
+   */
+  const visibleOptionsOf = useCallback(
+    (agent: LocalAgent): string[] => {
+      const current = visibilityOf(visibility, agent.id ?? "");
+      const ids = providers.map((provider) => provider.id);
+      const extras = (current?.names ?? []).filter((name) => !ids.includes(name));
+      return [...ids, ...extras];
+    },
+    [providers, visibility],
+  );
+
+  /** 正在编辑就用手上的勾选，否则用服务端现状；不受限 = 全勾。 */
+  const visibleSelectionOf = useCallback(
+    (agent: LocalAgent): string[] => {
+      const agentId = agent.id ?? "";
+      return (
+        visibleDraft[agentId] ??
+        visibilityOf(visibility, agentId)?.names ??
+        providers.map((provider) => provider.id)
+      );
+    },
+    [visibleDraft, visibility, providers],
+  );
+
+  /** 这个智能体被收窄到的名字；空 = 全部模型都看得到。 */
+  const agentVisibleNames = useCallback(
+    (agent: LocalAgent): string[] => visibilityOf(visibility, agent.id ?? "")?.names ?? [],
+    [visibility],
+  );
+
+  /** `magpie visible <agent> <names…|all>`：写完刷新可见范围（它也会改写智能体自己的配置）。 */
+  const runVisibleCommand = async (agent: LocalAgent, args: string[]) => {
+    if (!cli || !agent.id) return;
+    const agentId = agent.id;
+    const result = await runDetailed(`保存 ${agent.name} 的可见模型`, args);
+    if (!result.ok) return;
+    setVisibleDraft((current) => {
+      const next = { ...current };
+      delete next[agentId];
+      return next;
+    });
+    await loadVisibility();
+    await loadAgents();
+  };
+
+  const saveVisible = async (agent: LocalAgent) => {
+    if (!cli || !agent.id) return;
+    const all = providers.map((provider) => provider.id);
+    const picked = visibleSelectionOf(agent);
+    const everything =
+      all.length > 0 && all.every((id) => picked.includes(id)) && picked.length === all.length;
+    await runVisibleCommand(agent, visibleArgs(agent.id, everything ? [] : picked));
+  };
+
   const runTerminal = async (title: string, args: string[]) => {
     if (!cli) {
       setOutput({ title, text: "这个操作只在和鸣桌面端可用。", ok: false });
@@ -373,18 +516,36 @@ export function ModelPage() {
     if (!cli) return;
     let alive = true;
     void (async () => {
-      await Promise.all([loadProviders(), loadAccounts(), loadAgents()]);
+      await Promise.all([
+        loadProviders(),
+        loadAccounts(),
+        loadAgents(),
+        loadDisabledModels(),
+        loadVisibility(),
+        loadGlobals(),
+        loadDrawers(),
+      ]);
       if (alive) setLoading(false);
     })();
     return () => {
       alive = false;
     };
-  }, [cli, loadProviders, loadAccounts]);
+  }, [
+    cli,
+    loadProviders,
+    loadAccounts,
+    loadAgents,
+    loadDisabledModels,
+    loadVisibility,
+    loadGlobals,
+  ]);
 
-  const visibleModels = profiles.filter((profile) => {
-    const query = modelQuery.trim().toLowerCase();
-    return !query || profile.model.toLowerCase().includes(query);
-  });
+  /** 目录行：以网关给的模型为准，目录补全显示名/思考档/窗口/图片输入。 */
+  const modelRows = useMemo(
+    () => buildModelRows(profiles, catalogModels),
+    [profiles, catalogModels],
+  );
+  const modelGroups = useMemo(() => groupModelRows(modelRows), [modelRows]);
 
   const addPreset = async () => {
     if (!presetKey || !presetKey.key.trim()) return;
@@ -438,6 +599,19 @@ export function ModelPage() {
     );
   };
 
+  /** 读一次来源详情，写进 showCache：地址、普通/套餐、以及它的模型清单。 */
+  const readShowIntoCache = useCallback(
+    async (id: string) => {
+      if (!cli) return;
+      const text = await readProviderShow(cli, id);
+      const plan = detectPlanFromShow(text) ?? "normal";
+      const chat = parseShowUrls(text).chat;
+      const { models, note } = parseProviderModels(text);
+      setShowCache((current) => ({ ...current, [id]: { chat, plan, models, note } }));
+    },
+    [cli],
+  );
+
   /** 展开某个来源的高级设置：顺带读一次详细地址，判断它是普通还是套餐地址。 */
   const toggleAdvanced = async (id: string) => {
     if (advancedProvider === id) {
@@ -448,13 +622,20 @@ export function ModelPage() {
     if (showCache[id] || !cli) return;
     setShowLoading(id);
     try {
-      const text = await readProviderShow(cli, id);
-      const plan = detectPlanFromShow(text) ?? "normal";
-      const chat = parseShowUrls(text).chat;
-      setShowCache((current) => ({ ...current, [id]: { chat, plan } }));
+      await readShowIntoCache(id);
     } finally {
       setShowLoading(null);
     }
+  };
+
+  /** 改来源的模型清单之后重读一次：清单、地址与套餐徽标都跟着变。 */
+  const runProviderModels = async (id: string, title: string, args: string[]) => {
+    const result = await runDetailed(title, args);
+    if (result.ok) {
+      await readShowIntoCache(id).catch(() => {});
+      await loadProviders();
+    }
+    return result;
   };
 
   const startTerminalRun = async () => {
@@ -469,8 +650,11 @@ export function ModelPage() {
   const agentModelOf = (agent: LocalAgent) => agentModels[agent.name] ?? "";
   const setAgentModelInput = (name: string, value: string) =>
     setAgentModels((current) => ({ ...current, [name]: value }));
-
-  const providerOf = (model: string) => (model.includes("/") ? model.split("/")[0]! : "自定义");
+  /** 智能体实际要写入的模型：选「自定义…」时取手填值。 */
+  const agentEffectiveModel = (agent: LocalAgent) => {
+    const value = agentModelOf(agent);
+    return value === AGENT_CUSTOM ? (agentCustom[agent.name] ?? "").trim() : value;
+  };
 
   /** 当前选中的厂商与地址类型（普通/套餐），添加前要问清楚。 */
   const activePreset = presetKey ? findPreset(presetKey.id) : undefined;
@@ -494,8 +678,14 @@ export function ModelPage() {
             setBusy("refresh");
             try {
               await refreshCatalog();
-              await loadProviders();
-              await loadAccounts();
+              await Promise.all([
+                loadProviders(),
+                loadAccounts(),
+                loadDisabledModels(),
+                loadVisibility(),
+                loadGlobals(),
+                loadDrawers(),
+              ]);
             } finally {
               setBusy(null);
             }
@@ -544,7 +734,7 @@ export function ModelPage() {
                 再排一行 0/0/0 只会让页面显得像没加载完。有任意数据时才出现。 */}
             {profiles.length + providers.length + accounts.length > 0 && (
               <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="可用模型" value={profiles.length} />
+                <Stat label="可用模型" value={modelRows.length} />
                 <Stat label="已添加来源" value={providers.length} />
                 <Stat label="订阅账号" value={accounts.length} />
               </div>
@@ -573,96 +763,50 @@ export function ModelPage() {
                 />
               </>
             ) : (
-              <div className="ui-card p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="ui-section-title">可用模型</h2>
-                  <TextField
-                    label="搜索模型"
-                    className="w-56"
-                    placeholder="搜索模型…"
-                    value={modelQuery}
-                    onChange={(event) => setModelQuery(event.target.value)}
-                  />
-                </div>
-                <ul className="mt-2">
-                  {visibleModels.map((profile) => (
-                    <li
-                      key={profile.model}
-                      /* 审计 F7：原来是手写的 rounded-lg + hover:bg-subtle 行，
-                         与名册/设置搜索的列表行不是一套。统一走 .ui-list-row。 */
-                      className="-mx-4 flex items-center gap-3 ui-list-row"
-                    >
-                      <Avatar name={providerOf(profile.model)} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate ui-body-sm font-semibold" title={profile.model}>
-                          {profile.model}
-                        </span>
-                        <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
-                      </span>
-                      <span className="shrink-0 rounded-full border border-success-line bg-success-soft px-2.5 py-0.5 text-ui-xs font-medium text-success">
-                        可用
-                      </span>
-                    </li>
-                  ))}
-                  {visibleModels.length === 0 && <li className="ui-caption px-2 py-2">没有匹配的模型。</li>}
-                </ul>
-              </div>
-            )}
-
-            <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <TextField
-                  label="属性模型 ID"
-                  placeholder="provider/model"
-                  value={modelForm.model}
-                  onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })}
-                />
-                <TextField
-                  label="模型显示名"
-                  placeholder="显示名"
-                  value={modelForm.name}
-                  onChange={(event) => setModelForm({ ...modelForm, name: event.target.value })}
-                />
-                <TextField
-                  label="模型思考档"
-                  placeholder="思考档，如 low,medium,high"
-                  value={modelForm.efforts}
-                  onChange={(event) => setModelForm({ ...modelForm, efforts: event.target.value })}
-                />
-                <label className="grid gap-1">
-                  <span className="ui-caption">模型请求协议</span>
-                  <select
-                    className="ui-input"
-                    value={modelForm.api}
-                    onChange={(event) => setModelForm({ ...modelForm, api: event.target.value })}
-                  >
-                    {["auto", "chat", "responses", "anthropic", "gemini"].map((api) => (
-                      <option key={api} value={api}>
-                        {API_LABEL[api] ?? api}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <Button
-                type="button"
-                size="sm" variant="primary" className="mt-2"
-                disabled={!cli || !modelForm.model.trim()}
-                onClick={() => {
-                  const model = modelForm.model.trim();
-                  if (modelForm.name.trim()) void run("重命名模型", ["model", "name", model, modelForm.name.trim()], { refresh: true });
-                  else if (modelForm.efforts.trim()) void run("设置思考档", ["model", "efforts", model, modelForm.efforts.trim()], { refresh: true });
-                  else void run("设置协议", ["model", "api", model, modelForm.api], { refresh: true });
+              <ModelCatalogPanel
+                rows={modelRows}
+                disabled={disabledModels}
+                cliReady={cli !== null}
+                onAddSource={() => setTab("sources")}
+                onRun={runModelCommand}
+                onReadSpec={async (id) => {
+                  if (!cli) return null;
+                  const result = await cli.cli(["model", "spec", id]);
+                  return result.ok ? parseModelSpec(result.stdout) : null;
                 }}
-              >
-                应用
-              </Button>
-            </details>
+                tierSupported={tierSupported}
+              />
+            )}
+            {profiles.length > 0 && (
+              <GlobalModelSettings
+                suffix={suffix}
+                compact={compact}
+                contextCap={contextCap}
+                cliReady={cli !== null}
+                onRun={async (title, args) => {
+                  const result = await runDetailed(title, args);
+                  if (result.ok) await loadGlobals();
+                  return result.ok;
+                }}
+              />
+            )}
+            {profiles.length > 0 && (
+              <ImageModelSettings
+                rows={modelRows}
+                drawers={drawerModels}
+                vision={visionModel}
+                visionEffort={visionEffort}
+                imageGen={imageGenModel}
+                cliReady={cli !== null}
+                onRun={async (title, args) => {
+                  const result = await runDetailed(title, args);
+                  if (result.ok) await loadGlobals();
+                  return result.ok;
+                }}
+              />
+            )}
           </section>
         )}
-
-        {/* ── 智能体 ─────────────────────────────────────────── */}
         {tab === "agents" && (
           <section aria-label="智能体" className="space-y-4">
             <div className="ui-alert ui-alert-warn block p-4">
@@ -700,23 +844,54 @@ export function ModelPage() {
                         <span className="block truncate ui-caption" title={agent.configPath}>
                           {agent.model}
                           {agent.detail ? ` · ${agent.detail}` : ""}
+                          {agentVisibleNames(agent).length > 0
+                            ? ` · 下拉只列它看得到的 ${rowsForAgent(modelRows, agentVisibleNames(agent)).length} 个模型`
+                            : ""}
                         </span>
                       </span>
                       {agent.id ? (
                         <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-                          <TextField
-                            label={`${agent.name} 模型`}
-                            className="w-48"
-                            placeholder="provider/model"
+                          <select
+                            className="ui-input w-52"
+                            aria-label={`${agent.name} 模型`}
                             value={agentModelOf(agent)}
                             onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
-                          />
+                          >
+                            <option value="">选择模型…</option>
+                            {groupModelRows(rowsForAgent(modelRows, agentVisibleNames(agent))).map(
+                              (group) => (
+                                <optgroup key={group.provider} label={group.provider}>
+                                  {group.rows.map((row) => (
+                                    <option
+                                      key={row.id}
+                                      value={row.id}
+                                      disabled={isModelDisabled(row, disabledModels)}
+                                    >
+                                      {row.name ? `${row.name}（${row.id}）` : row.id}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ),
+                            )}
+                            <option value={AGENT_CUSTOM}>自定义…</option>
+                          </select>
+                          {agentModelOf(agent) === AGENT_CUSTOM && (
+                            <TextField
+                              label={`${agent.name} 自定义模型`}
+                              className="w-48"
+                              placeholder="provider/model"
+                              value={agentCustom[agent.name] ?? ""}
+                              onChange={(event) =>
+                                setAgentCustom((current) => ({ ...current, [agent.name]: event.target.value }))
+                              }
+                            />
+                          )}
                           <Button
                             type="button"
                             size="sm" variant="primary"
-                            disabled={!cli || !isModelId(agentModelOf(agent))}
+                            disabled={!cli || !isModelId(agentEffectiveModel(agent))}
                             onClick={() => {
-                              const model = agentModelOf(agent).trim();
+                              const model = agentEffectiveModel(agent).trim();
                               if (!agent.id || !model) return;
                               setAgentConfirm({ id: agent.id, name: agent.name, model });
                             }}
@@ -739,6 +914,81 @@ export function ModelPage() {
                         <span className="shrink-0 ui-caption">只读（没有对应的模型命令）</span>
                       )}
                     </div>
+                    {agent.id && (
+                      <details className="ui-disclosure mt-2">
+                        <summary className="cursor-pointer ui-caption">
+                          <ChevronIcon width={12} height={12} className="ui-disclosure-chevron" />
+                          可见模型 · {visibilitySummary(visibilityOf(visibility, agent.id))}
+                        </summary>
+                        <div className="mt-2 rounded-lg border border-line bg-subtle px-3 py-2">
+                          <p className="ui-caption">
+                            只勾选要让 {agent.name} 看到的来源；全勾或不勾都等于「全部模型」。
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+                            {visibleOptionsOf(agent).map((option) => (
+                              <label key={option} className="flex items-center gap-2 ui-caption">
+                                <input
+                                  type="checkbox"
+                                  className="accent-brand"
+                                  aria-label={`${agent.name} 可见 ${option}`}
+                                  checked={visibleSelectionOf(agent).includes(option)}
+                                  disabled={!cli}
+                                  onChange={(event) =>
+                                    setVisibleDraft((current) => {
+                                      const agentId = agent.id ?? "";
+                                      const base = current[agentId] ?? visibleSelectionOf(agent);
+                                      const next = event.target.checked
+                                        ? [...new Set([...base, option])]
+                                        : base.filter((item) => item !== option);
+                                      return { ...current, [agentId]: next };
+                                    })
+                                  }
+                                />
+                                {option}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-2 ui-caption">
+                              <input
+                                type="checkbox"
+                                className="accent-brand"
+                                aria-label={`${agent.name} 只显示挑过的模型`}
+                                checked={visibilityOf(visibility, agent.id)?.pickedOnly ?? false}
+                                disabled={!cli || busy !== null}
+                                onChange={(event) =>
+                                  void runVisibleCommand(
+                                    agent,
+                                    pickedOnlyArgs(agent.id ?? "", event.target.checked),
+                                  )
+                                }
+                              />
+                              只显示逐个挑过的模型（以后新出现的模型不自动露出来）
+                            </label>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm" variant="primary"
+                              disabled={!cli || busy !== null}
+                              onClick={() => void saveVisible(agent)}
+                            >
+                              保存可见范围
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={!cli || busy !== null}
+                              onClick={() =>
+                                void runVisibleCommand(agent, ["visible", agent.id ?? "", "all"])
+                              }
+                            >
+                              恢复全部
+                            </Button>
+                          </div>
+                        </div>
+                      </details>
+                    )}
                   </li>
                 ))}
                 {agents.length === 0 && (
@@ -1221,13 +1471,112 @@ export function ModelPage() {
 
                           <div className="mt-3">
                             <div className="ui-micro">模型</div>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="ui-caption">
+                                {info?.note
+                                  ? info.note
+                                  : showLoading === row.id
+                                    ? "读取模型清单…"
+                                    : "展开后读取这个来源现在暴露的模型。"}
+                              </span>
+                              <span className="flex gap-1">
+                                {(["all", "best", "none"] as const).map((choice) => (
+                                  <Button
+                                    key={choice}
+                                    type="button"
+                                    size="sm" variant="ghost"
+                                    disabled={!cli}
+                                    title={PROVIDER_MODELS_CHOICE_HINT[choice]}
+                                    onClick={() =>
+                                      void runProviderModels(
+                                        row.id,
+                                        `设置 ${row.id} 的模型`,
+                                        providerModelsChoiceArgs(row.id, choice),
+                                      )
+                                    }
+                                  >
+                                    {PROVIDER_MODELS_CHOICE_LABEL[choice]}
+                                  </Button>
+                                ))}
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost"
+                                  disabled={!cli}
+                                  title="重新问厂商要一次模型目录"
+                                  onClick={() =>
+                                    void runProviderModels(
+                                      row.id,
+                                      "重新读取模型目录",
+                                      refreshProviderModelsArgs(row.id),
+                                    )
+                                  }
+                                >
+                                  重新读取
+                                </Button>
+                              </span>
+                            </div>
+                            {info && info.models.length > 0 && (
+                              <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`${row.id} 的模型`}>
+                                {info.models.map((model) => (
+                                  <li
+                                    key={model.id}
+                                    className="flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 text-ui-xs"
+                                  >
+                                    <span className="font-mono" title={model.id}>
+                                      {providerModelLabel(model)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="text-muted hover:text-danger disabled:opacity-40"
+                                      aria-label={`移除模型 ${model.id}`}
+                                      disabled={!cli}
+                                      onClick={() =>
+                                        void runProviderModels(
+                                          row.id,
+                                          "移除模型",
+                                          removeProviderModelArgs(row.id, model.id),
+                                        )
+                                      }
+                                    >
+                                      ×
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {info && info.models.length === 0 && (
+                              <p className="mt-2 ui-caption">这个来源现在一个模型都没暴露。</p>
+                            )}
+                            <div className="mt-2 flex flex-wrap items-start gap-2">
                               <TextField
-                                label="来源模型列表"
-                                placeholder="模型 id，逗号分隔（覆盖现有列表）"
-                                value={providerForm.models}
-                                onChange={(event) => setProviderForm({ ...providerForm, models: event.target.value })}
+                                label="添加模型"
+                                className="flex-1"
+                                placeholder="模型 id（如 deepseek/deepseek-chat）"
+                                value={modelAdd[row.id] ?? ""}
+                                onChange={(event) =>
+                                  setModelAdd((current) => ({ ...current, [row.id]: event.target.value }))
+                                }
                               />
+                              <Button
+                                type="button"
+                                size="sm" variant="ghost" className="mt-5"
+                                disabled={!cli || !(modelAdd[row.id] ?? "").trim()}
+                                onClick={() =>
+                                  void runProviderModels(
+                                    row.id,
+                                    "添加模型",
+                                    addProviderModelArgs(row.id, modelAdd[row.id] ?? ""),
+                                  ).then((result) => {
+                                    if (result.ok) {
+                                      setModelAdd((current) => ({ ...current, [row.id]: "" }));
+                                    }
+                                  })
+                                }
+                              >
+                                添加模型
+                              </Button>
+                            </div>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <TextField
                                 label="模型目录地址"
                                 placeholder="模型目录 URL（可选）"
@@ -1236,7 +1585,6 @@ export function ModelPage() {
                               />
                               <TextField
                                 label="备用模型"
-                                className="sm:col-span-2"
                                 placeholder="额度用完/故障时改用：provider/model1,provider/model2"
                                 value={providerForm.fallback}
                                 onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
@@ -1312,7 +1660,6 @@ export function ModelPage() {
                               onClick={() => {
                                 const pairs: string[] = [];
                                 if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
-                                if (providerForm.models.trim()) pairs.push(`models=${providerForm.models.trim()}`);
                                 if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
                                 if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
                                 if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
@@ -1838,3 +2185,4 @@ export function ModelPage() {
 
 /* 统计卡已抽到 ui/Stat.tsx（d.138）：此前这里的数字是 26px/p-4，首页同名卡片是
    20px/p-3，同一套「数字卡」两个页面不一样大。 */
+

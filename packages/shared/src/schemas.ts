@@ -758,6 +758,14 @@ export type TeamUsageResponse = z.infer<typeof TeamUsageResponseSchema>;
 // 走同一套 API——权限判定只有服务端一处（是否成员 / 是否 owner）。
 
 export const TeamItemStatusSchema = z.enum(["todo", "doing", "done", "blocked"]);
+
+/** 任务优先级（d.268）：派活时能说清「先做哪件」；缺省按普通处理，老数据不用迁移。 */
+export const TeamTaskPrioritySchema = z.enum(["low", "normal", "high"]);
+export type TeamTaskPriority = z.infer<typeof TeamTaskPrioritySchema>;
+
+/** 验收结果（d.272）：pending = 交了还没人看；approved = 验收通过；changes = 打回重做。 */
+export const TeamTaskReviewStateSchema = z.enum(["pending", "approved", "changes"]);
+export type TeamTaskReviewState = z.infer<typeof TeamTaskReviewStateSchema>;
 export type TeamItemStatus = z.infer<typeof TeamItemStatusSchema>;
 
 export const TeamMemberRoleSchema = z.enum(["owner", "member"]);
@@ -798,6 +806,8 @@ export const TeamTaskSchema = z.object({
   /** 指给谁做（必须是团队成员）；null = 待认领。 */
   assigneeId: z.string().nullable(),
   status: TeamItemStatusSchema,
+  /** 优先级（d.268）：low / normal / high；缺省 = 普通（老任务没有这个字段也照常读）。 */
+  priority: TeamTaskPrioritySchema.optional(),
   createdBy: z.string().min(1),
   createdAt: IsoTimeSchema,
   updatedAt: IsoTimeSchema,
@@ -805,8 +815,99 @@ export const TeamTaskSchema = z.object({
   dueAt: z.string().nullable(),
   /** 任务交付物引用共享文件库里的文件 id；null = 还没有上传。 */
   attachmentFileId: z.string().nullable(),
+  /** 交付结论：做成什么样、怎么验证的；空串/缺省 = 还没写（d.252）。 */
+  result: z.string().max(2000).optional(),
+  /** 完成的时刻（ISO）；null/缺省 = 还没完成（d.252）。 */
+  completedAt: IsoTimeSchema.nullable().optional(),
+  /** 是谁标的完成（可能是组长代标）；null/缺省 = 不知道（d.252）。 */
+  completedBy: z.string().nullable().optional(),
+  /** 退回原因（d.261）：把任务装回「待认领」时写一句为什么做不了；空串/缺省 = 没退回过。 */
+  returnNote: z.string().max(500).optional(),
+  /** 退回的时刻（ISO）；null/缺省 = 没被退回过（d.261）。 */
+  returnedAt: IsoTimeSchema.nullable().optional(),
+  /** 退回的人；再次认领或改派后清空（d.261）。 */
+  returnedBy: z.string().nullable().optional(),
+  /** 最新进展（d.262）：做到哪、卡在哪，给自己下一轮和组长看；与 result（交付结论）分开。 */
+  progress: z.string().max(500).optional(),
+  progressAt: IsoTimeSchema.nullable().optional(),
+  progressBy: z.string().nullable().optional(),
+  /** 组长催办（d.265）：最近一次催办的时刻（ISO）；null/缺省 = 没被催过。不改状态、不改负责人。 */
+  nudgedAt: IsoTimeSchema.nullable().optional(),
+  /** 催办的人（通常是组长）。 */
+  nudgedBy: z.string().nullable().optional(),
+  /** 被催过几次（累加，不清零，方便看出「催了还不做」）。 */
+  nudgeCount: z.number().int().nonnegative().optional(),
+  /** 验收（d.272）：组长对「已完成」任务的复核结果；缺省 = pending（老任务照常读）。 */
+  reviewState: TeamTaskReviewStateSchema.optional(),
+  /** 打回重做时写的原因（给做的人看要改什么）；验收通过时可留一句认可。 */
+  reviewNote: z.string().max(500).optional(),
+  reviewedAt: IsoTimeSchema.nullable().optional(),
+  reviewedBy: z.string().nullable().optional(),
+  /**
+   * 前置任务 id（d.255）：这条任务要等这些任务完成才能开始（同团队、最多 5 个）。
+   * 缺省/空数组 = 没有依赖。只作为协作信号：不硬性禁止提前动手，
+   * 但会被提示词、任务板与「派到我名下」的摘要如实说出来。
+   */
+  blockedBy: z.array(z.string().min(1)).max(5).optional(),
 });
 export type TeamTask = z.infer<typeof TeamTaskSchema>;
+
+/**
+ * 任务讨论（d.271）：组员与组长（连同各自的智能体）在一条任务下留的那句话。
+ *
+ * 与 progress（最新进展，覆盖式）不同：讨论是**追加的时间线**，用来问「这里按哪种口径」、
+ * 「补充一个约束」这类需要一问一答的事。谁的智能体都能看到，但谁都不能改动别人写过的话。
+ */
+export const TeamTaskCommentSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  taskId: z.string().min(1),
+  /** 留言的人（团队成员）。 */
+  authorId: z.string().min(1),
+  text: z.string().min(1).max(2000),
+  createdAt: IsoTimeSchema,
+});
+export type TeamTaskComment = z.infer<typeof TeamTaskCommentSchema>;
+
+export const CreateTeamTaskCommentBodySchema = z.object({
+  text: z.string().trim().min(1, "写一句话再发").max(2000, "一条留言最多 2000 字"),
+});
+export type CreateTeamTaskCommentBody = z.infer<typeof CreateTeamTaskCommentBodySchema>;
+
+/**
+ * 团队动态（d.273）：谁在什么时候对哪件事做了什么。
+ *
+ * 与快照不同：快照只回答「现在是什么样」，动态回答「为什么会变成这样」——
+ * 谁把任务改回去了、谁把一件活从别人名下拿走了、谁打的回。只追加，不改不删；
+ * 只保留最近的一段（服务端按团队裁剪），够复盘与「为什么卡住」这类追问。
+ */
+export const TeamEventKindSchema = z.enum([
+  "task_added",
+  "task_updated",
+  "task_removed",
+  "task_comment",
+  "plan_added",
+  "plan_updated",
+  "plan_removed",
+  "member_added",
+  "member_removed",
+  "owner_transferred",
+]);
+export type TeamEventKind = z.infer<typeof TeamEventKindSchema>;
+
+export const TeamEventSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  /** 跟任务相关的动态会带上任务；方案/成员变动时为 null。 */
+  taskId: z.string().nullable(),
+  /** 任务标题快照：任务被删、被改名以后，动态里仍能看懂说的是哪件。 */
+  taskTitle: z.string(),
+  actorId: z.string().min(1),
+  kind: TeamEventKindSchema,
+  summary: z.string().min(1).max(500),
+  createdAt: IsoTimeSchema,
+});
+export type TeamEvent = z.infer<typeof TeamEventSchema>;
 
 export const WorkspaceTeamMemberSchema = z.object({
   user: UserSchema,
@@ -828,6 +929,46 @@ export const WorkspaceTeamListSchema = z.object({
   teams: z.array(WorkspaceTeamSchema),
 });
 export type WorkspaceTeamList = z.infer<typeof WorkspaceTeamListSchema>;
+
+/** 团队简报里的一个成员（只给智能体认人用：id + 名字 + 角色 + 手上还压着几件活）。 */
+export const TeamBriefMemberSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  role: TeamMemberRoleSchema,
+  /** 名下未完成的任务数（d.256）：组长被问「谁手上有活」时不用逐个翻）。 */
+  open: z.number().int().nonnegative(),
+});
+export type TeamBriefMember = z.infer<typeof TeamBriefMemberSchema>;
+
+/**
+ * 我所在团队的简报（d.253）：组长派活前得知道「队里都有谁、各自身份」，
+ * 否则它只能让用户手输 id，或者凭印象猜一个不存在的负责人。
+ */
+/** 团队任务的概览（d.256）：组长的智能体一眼知道全队压了多少、多少件逾期/待认领/被前置卡住。 */
+export const TeamBriefCountsSchema = z.object({
+  open: z.number().int().nonnegative(),
+  done: z.number().int().nonnegative(),
+  overdue: z.number().int().nonnegative(),
+  unassigned: z.number().int().nonnegative(),
+  blocked: z.number().int().nonnegative(),
+});
+export type TeamBriefCounts = z.infer<typeof TeamBriefCountsSchema>;
+
+export const TeamBriefSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  goal: z.string(),
+  ownerId: z.string().min(1),
+  /** 我在这个团队里的角色。 */
+  role: TeamMemberRoleSchema,
+  members: z.array(TeamBriefMemberSchema),
+  /** 这个团队的任务概览（d.256）。 */
+  counts: TeamBriefCountsSchema,
+});
+export type TeamBrief = z.infer<typeof TeamBriefSchema>;
+
+export const TeamBriefListSchema = z.object({ teams: z.array(TeamBriefSchema) });
+export type TeamBriefList = z.infer<typeof TeamBriefListSchema>;
 
 export const CreateWorkspaceTeamBodySchema = z.object({
   name: z.string().trim().min(1, "请填写团队名称").max(40, "团队名称最多 40 字"),
@@ -881,7 +1022,7 @@ export const UpdateTeamPlanBodySchema = z
       v.status !== undefined ||
       v.orderIndex !== undefined,
     { message: "没有要修改的字段" },
-  );
+  )
 export type UpdateTeamPlanBody = z.infer<typeof UpdateTeamPlanBodySchema>;
 
 export const CreateTeamTaskBodySchema = z.object({
@@ -890,8 +1031,12 @@ export const CreateTeamTaskBodySchema = z.object({
   planId: z.string().trim().min(1).nullable().optional(),
   assigneeId: z.string().trim().min(1).nullable().optional(),
   dueAt: IsoTimeInputSchema.nullable().optional(),
+  /** 优先级（d.268）：不填 = 普通。 */
+  priority: TeamTaskPrioritySchema.optional(),
   /** 交付物（共享文件库里的文件 id）；与 PATCH 的 `attachmentFileId` 同口径。 */
   attachmentFileId: z.string().trim().min(1).nullable().optional(),
+  /** 前置任务 id（d.255）：必须是同团队的任务；最多 5 个，不能成环。 */
+  blockedBy: z.array(z.string().trim().min(1)).max(5, "最多 5 个前置任务").optional(),
 });
 export type CreateTeamTaskBody = z.infer<typeof CreateTeamTaskBodySchema>;
 
@@ -902,8 +1047,22 @@ export const UpdateTeamTaskBodySchema = z
     planId: z.string().trim().min(1).nullable().optional(),
     assigneeId: z.string().trim().min(1).nullable().optional(),
     status: TeamItemStatusSchema.optional(),
+    /** 优先级（d.268）：改派/调整轻重缓急时一起改。 */
+    priority: TeamTaskPrioritySchema.optional(),
     dueAt: IsoTimeInputSchema.nullable().optional(),
     attachmentFileId: z.string().trim().min(1).nullable().optional(),
+    /** 交付结论（d.252）：完成时写「做成什么样、怎么验证的」；不是说明字段的替代品。 */
+    result: z.string().trim().max(2000, "结论最多 2000 字").optional(),
+    /** 前置任务 id（d.255）：整体替换；传空数组 = 清空依赖。 */
+    blockedBy: z.array(z.string().trim().min(1)).max(5, "最多 5 个前置任务").optional(),
+    /** 退回原因（d.261）：assigneeId 传 null = 退回待认领，这里写一句为什么做不了。 */
+    returnNote: z.string().trim().max(500, "退回原因最多 500 字").optional(),
+  progress: z.string().trim().max(500, "进展最多 500 字").optional(),
+  /** 催办（d.265）：true = 记一次催办；只能催别人名下、还没完成的任务。 */
+  nudge: z.boolean().optional(),
+  /** 验收（d.272）：approve = 通过；changes = 打回重做（必须带 reviewNote）。只有组长能验收已完成的任务。 */
+  review: z.enum(["approve", "changes"]).optional(),
+  reviewNote: z.string().trim().max(500, "验收意见最多 500 字").optional(),
   })
   .refine(
     (v) =>
@@ -912,8 +1071,20 @@ export const UpdateTeamTaskBodySchema = z
       v.planId !== undefined ||
       v.assigneeId !== undefined ||
       v.status !== undefined ||
+      v.priority !== undefined ||
       v.dueAt !== undefined ||
-      v.attachmentFileId !== undefined,
+      v.attachmentFileId !== undefined ||
+      v.result !== undefined ||
+      v.blockedBy !== undefined ||
+      v.returnNote !== undefined ||
+    v.progress !== undefined ||
+      v.nudge !== undefined ||
+      v.review !== undefined ||
+      v.reviewNote !== undefined,
     { message: "没有要修改的字段" },
-  );
+  )
+  .refine((v) => v.review !== "changes" || (v.reviewNote ?? "").trim() !== "", {
+    message: "打回重做要写一句原因（reviewNote），让人知道要改什么",
+    path: ["reviewNote"],
+  });
 export type UpdateTeamTaskBody = z.infer<typeof UpdateTeamTaskBodySchema>;

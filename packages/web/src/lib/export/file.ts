@@ -7,6 +7,9 @@
  *    （否则界面说成功、文件却在浏览器的下载目录里，等于撒谎）。
  * 2. 无桥（浏览器降级路径）→ Blob + 临时 `<a download>` 触发下载。
  *
+ * 后缀：主进程桥只接受 `.json`（记忆导出）与 `.md`（团队周报，d.269）；
+ * 浏览器降级路径按后缀给 MIME，别把 Markdown 标成 JSON。
+ *
  * 红线：两条路径都只碰本机，**绝不发起网络请求**（测试断言 fetch 未被调用）。
  */
 
@@ -42,7 +45,7 @@ function desktopBridge(): DesktopExportBridge | undefined {
 /**
  * 保存导出内容。
  *
- * @param fileName 建议以 .json 结尾（桌面桥只接受这一种后缀）
+ * @param fileName 建议以 `.json`（记忆导出）或 `.md`（团队周报）结尾——桌面桥只接受这两种后缀
  * @param content 已序列化的完整文件内容
  * @throws 桌面桥写失败（返回 ok:false 或 IPC 异常）时抛错，由调用方给用户提示
  */
@@ -62,7 +65,10 @@ export async function saveExportFile(fileName: string, content: string): Promise
   }
 
   // 浏览器降级：Blob 只在内存里，不经过任何服务端。
-  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const mime = fileName.toLowerCase().endsWith(".md")
+    ? "text/markdown;charset=utf-8"
+    : "application/json;charset=utf-8";
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

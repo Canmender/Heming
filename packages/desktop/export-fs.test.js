@@ -66,12 +66,15 @@ test("Windows 保留名被拒绝（带后缀也不行）", () => {
   assert.equal(safeFileName("console.json"), "console.json");
 });
 
-test("resolveTarget：只接受 .json", () => {
+test("resolveTarget：只接受 .json 与 .md（周报用 .md）", () => {
   const env = { [EXPORT_DIR_ENV]: tmpDir() };
   assert.ok(resolveTarget("a.json", env));
   assert.ok(resolveTarget("A.JSON", env)); // 后缀大小写不敏感
+  assert.ok(resolveTarget("团队周报-增长小组-20261118.md", env));
+  assert.ok(resolveTarget("A.MD", env));
   assert.equal(resolveTarget("a.html", env), null);
   assert.equal(resolveTarget("a.txt", env), null);
+  assert.equal(resolveTarget("a.md.exe", env), null); // 只看结尾，不能靠中间一段
   assert.equal(resolveTarget("noext", env), null);
 });
 
@@ -100,6 +103,21 @@ test("目录自动创建，内容按 UTF-8 落盘", () => {
   assert.equal(result.path, path.join(path.resolve(dir), "记忆导出.json"));
   assert.equal(fs.readFileSync(result.path, "utf8"), '{"a":"中文"}');
   assert.equal(exportInfo(env).exists, true);
+});
+
+test("周报 .md：能写、内容原样、长名字截断也保住 .md（d.269）", () => {
+  const dir = tmpDir();
+  const env = { [EXPORT_DIR_ENV]: dir };
+  const markdown = "# 团队周报 · 增长小组\n\n- 这周完成 2 项\n";
+  const result = writeExport("团队周报-增长小组-20261118.md", markdown, env);
+  assert.equal(result.ok, true);
+  assert.ok(result.path.endsWith(".md"));
+  assert.equal(fs.readFileSync(result.path, "utf8"), markdown);
+
+  const long = resolveTarget(`${"周".repeat(300)}.md`, env);
+  assert.ok(long);
+  assert.ok(long.name.length <= 80);
+  assert.ok(long.name.endsWith(".md"), `后缀被截掉了：${long.name}`);
 });
 
 test("写失败返回 { ok:false, error } 而不抛（目录被同名文件挡住）", () => {

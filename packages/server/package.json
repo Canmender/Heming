@@ -1,13 +1,13 @@
 {
   "name": "@heming/server",
-  "version": "247.4.116",
+  "version": "277.4.120",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --maxWorkers=2"
+    "test": "node scripts/test-each.mjs"
   },
   "dependencies": {
     "@heming/shared": "workspace:*",
@@ -26,5 +26,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.247.4.116.12"
+  "hemingVersion": "d.277.4.120.12"
 }

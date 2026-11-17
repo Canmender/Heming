@@ -47,6 +47,8 @@ import {
   fetchE2eKeys,
   putE2eKeys,
   NO_E2E_MESSAGE,
+  fetchMyTeamBriefs,
+  fetchMyTeamTasks,
 } from "../lib/api.js";
 import { hasSubtle } from "../lib/e2eCrypto.js";
 import {
@@ -100,7 +102,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PlusIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PlusIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon, TaskIcon } from "./icons.js";
 import { buildSearchRows, findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
@@ -126,12 +128,22 @@ import {
 } from "../lib/agentRuntime/runtimePrompt.js";
 import { resolveBasePrompt } from "../lib/agentRuntime/defaultPrompt.js";
 import { collectProjectRules, summarizeProjectRules, type ProjectRulesSummary } from "../lib/agentRuntime/projectRules.js";
+import { describeAssignedTasks, describeClaimableTasks } from "../lib/team/assignedTasks.js";
+import {
+  MY_TASK_BADGE_MAX,
+  myTaskBadgeText,
+  myTaskButtonLabel,
+  summarizeMyTasks,
+  type MyTaskBadge,
+} from "../lib/team/myTaskBadge.js";
+import { describeTeamBriefLines } from "../lib/team/teamBrief.js";
 import { peekPluginInstallNotices, takePluginInstallNotices } from "../lib/plugins/installedNotice.js";
 import { collectFileRefs, describeFileRefIssues, fileRefIssues, type FileRefIssues } from "../lib/fileEdit/fileRefs.js";
 import { FileRefPicker } from "./FileRefPicker.js";
 import { ModelSwitcher } from "./ModelSwitcher.js";
 import { TurnUndoBar } from "./TurnUndoBar.js";
 import { ChangeDiffDialog, type ChangeDiffState } from "./ChangeDiffDialog.js";
+import { MyTasksDialog } from "./MyTasksDialog.js";
 import { SessionChangesBar } from "./SessionChangesBar.js";
 import {
   getSessionChanges,
@@ -925,6 +937,19 @@ export function ChatPage({
    */
   const [progressOpen, setProgressOpen] = useState(false);
   /**
+   * 「我的任务」面板（d.259）：把派到名下的团队任务变成一键可做的东西。
+   * 只是开合，任务列表由面板自己打开时去拉（不轮询、不开页面不请求）。
+   */
+  const [myTasksOpen, setMyTasksOpen] = useState(false);
+  /**
+   * 「我的任务」角标（d.263）：派到我名下的活有多少、队里有多少可以接。
+   *
+   * 拉取时机：挂载时一次 + 窗口重新获得焦点时一次 + 每轮对话开始时复用
+   * my-tasks 那份（每轮本来就要拉给提示词用，不额外请求）。不做定时轮询——
+   * 团队任务的时效性是「分钟级」而不是「秒级」，为它多一条常驻轮询不值。
+   */
+  const [myTaskBadge, setMyTaskBadge] = useState<MyTaskBadge | null>(null);
+  /**
    * 智能体自己打开进度栏时给的一句理由（d.245）：显示在栏内顶部，
    * 让用户知道「这一栏不是自己弹出来捣乱的，是它觉得这里值得看」。
    */
@@ -968,6 +993,33 @@ export function ChatPage({
     setPanelAgentReason("这一轮跑得比较久。");
     if (decision.notice !== null) setSendNotice(decision.notice, "info");
   }, [progressOpen, progressNow, turnProgress]);
+  /*
+   * 「我的任务」角标拉取（d.263）：挂载一次 + 窗口重新获得焦点一次。
+   *
+   * 为什么不做轮询：团队任务的时效性是分钟级，不是秒级；而且每轮对话开始时
+   * my-tasks 那份请求本来就会打（给提示词用），复用它刷新角标不增加请求量。
+   * 读失败保持原状——宁可暂时不显示，也不把「服务端读不到」渲染成「你没有活」。
+   */
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void fetchMyTeamTasks()
+        .then((res) => {
+          if (!alive) return;
+          setMyTaskBadge(summarizeMyTasks(res.tasks ?? [], res.claimable ?? []));
+        })
+        .catch(() => {
+          /* 读不到不更新：角标是提示，不是事实断言 */
+        });
+    };
+    load();
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
   /**
    * 当前会话的目标（d.201）：有目标才渲染 GoalBar；提示词里也只在有目标时写这段。
    *
@@ -2151,11 +2203,18 @@ export function ChatPage({
   /** 本会话已解密明文（占位判定；未解密消息无记录）。 */
   const plainOf = plainById[convId] ?? NO_PLAIN;
   /**
-   * 可渲染消息 = 消息列表本身。保留一层 useMemo 是为了让引用稳定：
+   * 可渲染消息 = 本会话的消息。保留一层 useMemo 是为了让引用稳定：
    * 窗口化与搜索跳转的 effect 都拿它当依赖，每次渲染都新建数组会让那些
    * effect 反复触发（尤其是 scrollIntoView）。
+   *
+   * d.248：多一道会话归属闸。`messages` 本已按会话分桶，但「新建会话后看到上一段的记录」
+   * 这类症状哪怕只来自一次写错桶（WS 晚到、合并竞态），代价也是用户直接怀疑「串会话了」——
+   * 渲染前再按 `conversationId` 过滤一遍，代价是一次 scan（脏数据时才建新数组）。
    */
-  const visibleMessages = useMemo(() => messages, [messages]);
+  const visibleMessages = useMemo(() => {
+    const clean = messages.every((m) => m.conversationId === convId);
+    return clean ? messages : messages.filter((m) => m.conversationId === convId);
+  }, [messages, convId]);
   /**
    * 输入框 ↑ 回溯用的历史（d.194）：只取本会话用户发过的文本。
    *
@@ -2738,6 +2797,39 @@ export function ChatPage({
         }
 
         /*
+         * 团队派到我名下的任务（d.248）：让它一开口就知道「团队里有什么活儿在我这儿」。
+         *
+         * 为什么每轮都拉：任务可能刚被组长改派/改截止；一次请求拿全部团队（`/api/team/my-tasks`），
+         * 失败就当没有（不阻断这一轮，也不谎报「没有任务」给模型——这一段干脆不写）。
+         */
+        let teamTaskLines: string[] = [];
+        let teamClaimLines: string[] = [];
+        let teamBriefLines: string[] = [];
+        try {
+          /*
+           * 两份一起拉（d.253）：
+           * - my-tasks：派到我名下、还没完成的活；
+           * - my-teams：我在哪些团队、我是组长还是成员、队友的 id（派活认人用）。
+           * 各自失败互不影响——团队功能挂了不该把整轮对话也拖垮。
+           */
+          const [mine, briefs] = await Promise.all([
+            fetchMyTeamTasks().catch(() => null),
+            fetchMyTeamBriefs().catch(() => null),
+          ]);
+          teamTaskLines = mine === null ? [] : describeAssignedTasks(mine.tasks);
+          // d.260：队里还没人认领的活（留空的派活）——只作为「可以接」的提示，不混进「派到我名下的」。
+          teamClaimLines = mine === null ? [] : describeClaimableTasks(mine.claimable ?? []);
+          // d.263：同一份结果顺手刷新角标——派到我名下的活，界面上也要看得见。
+          setMyTaskBadge(
+            mine === null ? null : summarizeMyTasks(mine.tasks ?? [], mine.claimable ?? []),
+          );
+          teamBriefLines = briefs === null ? [] : describeTeamBriefLines(briefs.teams);
+        } catch {
+          teamTaskLines = [];
+          teamBriefLines = [];
+        }
+
+        /*
          * 本轮引用文件段（d.175）：用户点选的工作区文件内容。
          *
          * 为什么放在提示词里而不是让模型自己读：用户说「就针对这几个文件」时，
@@ -2845,6 +2937,9 @@ export function ChatPage({
             ...(goalText ? { goal: goalText } : {}),
             // 能力配合（d.241）：知识库 / 团队 / 插件市场 / 刚装的插件——让模型知道什么时候该用哪一组。
             ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+            ...(teamBriefLines.length > 0 ? { teamBrief: teamBriefLines } : {}),
+            ...(teamTaskLines.length > 0 ? { teamTasks: teamTaskLines } : {}),
+            ...(teamClaimLines.length > 0 ? { claimableTeamTasks: teamClaimLines } : {}),
           });
         } catch {
           runtimeSection = "";
@@ -5127,6 +5222,28 @@ export function ChatPage({
                 通道已恢复
               </span>
             )}
+            {/* 我的任务（d.259）：组长派到我名下的活，点一下就能让和鸣接着做。角标见 d.263。 */}
+            <span className="relative inline-flex">
+              <IconButton
+                label={myTaskButtonLabel(myTaskBadge)}
+                className={myTasksOpen ? "bg-subtle-3 text-ink" : ""}
+                aria-expanded={myTasksOpen}
+                icon={<TaskIcon width={18} height={18} />}
+                onClick={() => setMyTasksOpen((open) => !open)}
+              />
+              {/* 角标是视觉提示，数量已写进按钮 label（读屏用户同样知情）。 */}
+              {myTaskBadge !== null && myTaskBadge.total > 0 ? (
+                <span
+                  data-testid="my-task-badge"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-danger px-1 text-center text-ui-xs font-semibold leading-4 text-white"
+                >
+                  {myTaskBadge.total > MY_TASK_BADGE_MAX
+                    ? `${MY_TASK_BADGE_MAX}+`
+                    : myTaskBadge.total}
+                </span>
+              ) : null}
+            </span>
             {/* 会话进度栏开关（Codex 式）：默认收起。 */}
             <IconButton
               label="会话进度"
@@ -5332,8 +5449,6 @@ export function ChatPage({
                 ? visibleMessages[windowStart - 1]
                 : undefined;
           const showSeparator = needsTimeSeparator(prevMsg?.createdAt, m.createdAt);
-          // 署名：自己「我」；智能体消息显示智能体名。
-          const senderName = displaySenderName(m);
           // 转录（d.126-C）：思考过程 + 工具调用轨迹。旧消息没有这两个字段 → undefined，不渲染。
           const transcript = mine ? undefined : transcriptOf(m);
           // 图表：正文里的 ```chart 围栏块。解析失败的块被跳过（不显示也不报错——
@@ -5407,7 +5522,6 @@ export function ChatPage({
                     // 用户输入：右对齐浅底气泡（无边框），署名/时间压到极小并弱化
                     <div className="rounded-3xl bg-subtle-3 px-4 py-2.5">
                       <div className="mb-1 flex items-baseline justify-end gap-2 text-ui-xs leading-4 text-muted">
-                        <span>我</span>
                         <time dateTime={m.createdAt} className="shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
                         </time>
@@ -5418,9 +5532,6 @@ export function ChatPage({
                     // 助手输出：全宽、无气泡；署名/时间极小弱化 + 思考块 + 工具轨迹 + 正文
                     <div>
                       <div className="mb-1 flex items-baseline gap-2 text-ui-xs leading-4 text-muted">
-                        {/* d.246：署名可以很长（用户能给智能体起长名），必须能省略，
-                            否则把右端的时间挤出这一行（表现为「叠在一起」）。 */}
-                        <span className="min-w-0 truncate">{senderName || "智能体"}</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
                         </time>
@@ -5765,6 +5876,20 @@ export function ChatPage({
                   onPick: (path: string) => void previewTurnChange(path),
                 }
               : {})}
+          />
+        ) : null}
+        {/* 我的任务（d.259）：读一次 /api/team/my-tasks，选中即把它变成一条用户消息。 */}
+        {myTasksOpen ? (
+          <MyTasksDialog
+            onClose={() => setMyTasksOpen(false)}
+            onPick={(item, prompt) => {
+              setMyTasksOpen(false);
+              setSendNotice(
+                `已把团队任务「${item.task.title}」发给和鸣：做完它会写结论、把状态标成完成。`,
+                "info",
+              );
+              void submitMessage(prompt, effectiveMentions);
+            }}
           />
         ) : null}
         {/* 后台作业跑完（d.182）：作业不会被 await，收口后由这里接着盯，跑完给一次点击的「继续」。 */}

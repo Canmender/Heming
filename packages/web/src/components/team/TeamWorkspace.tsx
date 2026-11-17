@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TeamWorkspaceSnapshot, WorkspaceTeam, WorkspaceTeamMember } from "@heming/shared";
 import {
   addWorkspaceMember,
@@ -14,12 +14,18 @@ import {
 import { useAuthStore } from "../../store/auth.js";
 import { useSessionStringValue } from "../../lib/sessionState.js";
 import { TEAM_SELECTION_KEY } from "../../lib/team/selection.js";
+import { describeTeamSummary, summarizeTeamTasks } from "../../lib/team/teamSummary.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { TeamPlanPanel } from "./TeamPlanPanel.js";
 import { TeamTaskPanel } from "./TeamTaskPanel.js";
+import { TeamSchedulePanel } from "./TeamSchedulePanel.js";
+import { TeamActivityPanel } from "./TeamActivityPanel.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { Button } from "../../components/ui/Button.js";
+import { Dialog } from "../ui/Dialog.js";
+import { weeklyReportFileName, weeklyReportMarkdown } from "../../lib/team/weeklyReport.js";
+import { saveExportFile } from "../../lib/export/file.js";
 
 /**
  * 团队工作台（d.92）：用户自建团队 —— 名字 / 目标 / 方案 / 任务 / 成员。
@@ -94,6 +100,14 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
   const [confirmLeaveTeam, setConfirmLeaveTeam] = useState(false);
   const cancelTransferRef = useRef<HTMLButtonElement | null>(null);
   const cancelLeaveRef = useRef<HTMLButtonElement | null>(null);
+
+  /**
+   * 周报弹窗（d.269）：成稿只在打开时算一次，之后复制/导出都用同一份文本，
+   * 避免「看到的」和「复制出来的」因为时间漂移而不一致。
+   */
+  const [reportText, setReportText] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
 
   // 新建团队表单
   const [createOpen, setCreateOpen] = useState(false);
@@ -345,10 +359,63 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
   };
 
   const isOwner = Boolean(snapshot && me && snapshot.team.ownerId === me.id);
+  /** 团队概览（d.257）：与 d.256 服务端同一套口径，界面这侧不额外发请求。 */
+  const summary = useMemo(() => summarizeTeamTasks(snapshot?.tasks ?? []), [snapshot?.tasks]);
   /** 我在这个团队里的成员身份：成员才有「退出团队」，owner 必须先转让。 */
   const mine = snapshot && me ? snapshot.members.find((m) => m.user.id === me.id) : undefined;
   /** 只有普通成员能自退：owner 走「转让队长」或「删除团队」。 */
   const canLeave = Boolean(mine) && !isOwner;
+
+  /** 打开周报弹窗：用当前快照算一份成稿（不额外发请求）。 */
+  const openWeeklyReport = () => {
+    if (!snapshot) return;
+    setReportText(
+      weeklyReportMarkdown(snapshot, {
+        memberName: (userId) => {
+          const member = snapshot.members.find((m) => m.user.id === userId);
+          return member ? `${member.user.displayName}（@${member.user.username}）` : userId;
+        },
+      }),
+    );
+    setReportOpen(true);
+  };
+
+  /** 复制成稿：剪贴板不可用（非安全上下文）时退回临时 textarea。 */
+  const copyWeeklyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = reportText;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    flash("周报已复制，可以直接粘到群里或周会材料里");
+  };
+
+  /** 导出成 .md：桌面端落到 ~/Heming/exports 并报真实路径，浏览器端退回下载。 */
+  const exportWeeklyReport = async () => {
+    if (!snapshot || reportBusy) return;
+    setReportBusy(true);
+    try {
+      const result = await saveExportFile(
+        weeklyReportFileName(snapshot.team.name, Date.now()),
+        reportText,
+      );
+      flash(
+        result.via === "desktop" && result.path ? `周报已保存到 ${result.path}` : "周报已下载",
+      );
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "导出周报失败");
+    } finally {
+      setReportBusy(false);
+    }
+  };
 
   const onCreateTeam = async () => {
     const name = draftName.trim();
@@ -510,7 +577,27 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
                     {snapshot.tasks.length} 个任务
                     {isOwner ? " · 你是队长" : ""}
                   </p>
+                  <p
+                    data-testid="team-summary"
+                    data-overdue={summary.overdue > 0 ? "true" : "false"}
+                    className={
+                      summary.overdue > 0
+                        ? "mt-1 inline-flex rounded-full bg-danger-soft px-2 py-0.5 ui-caption text-danger"
+                        : "mt-1 ui-caption"
+                    }
+                  >
+                    进度：{describeTeamSummary(summary)}
+                  </p>
                 </div>
+                <Button
+                  type="button"
+                  size="sm" variant="ghost"
+                  aria-label="生成团队周报"
+                  disabled={busy}
+                  onClick={openWeeklyReport}
+                >
+                  生成周报
+                </Button>
                 <Button
                   type="button"
                   size="sm" variant="ghost"
@@ -593,8 +680,10 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
                   <span className="text-ui-sm font-semibold text-muted">成员</span>
                   {snapshot.members.map((m) => (
                     <span key={m.user.id} className="ui-chip">
-                      {m.user.displayName}
-                      {m.role === "owner" ? " · 队长" : ""}
+                      <span data-testid={`team-member-${m.role === "owner" ? "leader" : "member"}`}>
+                        {m.user.displayName}
+                        {m.role === "owner" ? " · 队长" : ""}
+                      </span>
                       {isOwner && m.role !== "owner" && (
                         <>
                           <button
@@ -670,14 +759,21 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
               onChanged={(next) => setSnapshot(next)}
             />
 
+            {/* 按截止日看：和任务板是两条不同的轴（谁在做什么 vs 今天该交什么）。 */}
+            <TeamSchedulePanel tasks={snapshot.tasks} members={snapshot.members} />
+
             <TeamTaskPanel
               teamId={snapshot.team.id}
+              viewerId={me?.id ?? ""}
+              ownerId={snapshot.team.ownerId}
               plans={snapshot.plans}
               members={snapshot.members}
               tasks={snapshot.tasks}
               busy={busy}
               onChanged={(next) => setSnapshot(next)}
             />
+
+            <TeamActivityPanel teamId={snapshot.team.id} members={snapshot.members} />
           </div>
         )}
       </div>
@@ -812,6 +908,42 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
             要重新加入需要队长再把你拉回来。
           </p>
         </ConfirmDialog>
+      ) : null}
+
+      {reportOpen ? (
+        <Dialog
+          ariaLabel="团队周报"
+          title="团队周报"
+          description="按最近 7 天的事实生成；可以直接复制，或导出成 .md 存下来。"
+          size="lg"
+          onClose={() => setReportOpen(false)}
+          footer={
+            <>
+              <Button
+                type="button"
+                size="md" variant="primary"
+                onClick={() => void copyWeeklyReport()}
+              >
+                复制
+              </Button>
+              <Button
+                type="button"
+                size="md" variant="ghost"
+                disabled={reportBusy}
+                onClick={() => void exportWeeklyReport()}
+              >
+                导出 .md
+              </Button>
+            </>
+          }
+        >
+          <pre
+            data-testid="weekly-report"
+            className="max-h-[56vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-subtle px-3 py-2 text-ui-sm leading-6"
+          >
+            {reportText}
+          </pre>
+        </Dialog>
       ) : null}
     </div>
   );

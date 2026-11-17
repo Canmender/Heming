@@ -22,9 +22,13 @@ import {
   CreateTeamPlanBodySchema,
   UpdateTeamPlanBodySchema,
   CreateTeamTaskBodySchema,
+  CreateTeamTaskCommentBodySchema,
   UpdateTeamTaskBodySchema,
   SYSTEM_AGENT_ID,
   type SharedFileMeta,
+  type TeamEvent,
+  type TeamPlanItem,
+  type TeamTask,
 } from "@heming/shared";
 import type { Store } from "./store.js";
 import {
@@ -903,6 +907,102 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   // - owner 不能直接退出（409），先转让（POST /owner）或解散，团队不能无主；
   // - 方案与任务：团队成员都能写（任务可指派给成员、可挂到本团队的方案下）。
 
+  /**
+   * 派到我名下、还没完成的团队任务（队员的智能体靠它知道该干什么）；
+   * `claimable`（d.260）是我所在团队里还没人认领的活——留空的派活不该只躺在团队页上。
+   */
+  app.get("/api/team/my-tasks", authOnly, (req, res) => {
+    const id = userId(req);
+    res.json({
+      tasks: store.listAssignedTeamTasks(id),
+      claimable: store.listClaimableTeamTasks(id),
+    });
+  });
+
+  /** 我所在团队的简报（成员名单 + 我的角色），让组长的智能体能直接把活派到具体的人（d.253）。 */
+  app.get("/api/team/my-teams", authOnly, (req, res) => {
+    res.json({ teams: store.listTeamBriefs(userId(req)) });
+  });
+
+  /**
+   * 团队动态（d.273）：只记一句「谁做了什么」，不存字段快照。
+   *
+   * 快照回答「现在是什么样」，动态回答「为什么会变成这样」；
+   * 写入点放在路由层：内存实现与 SQLite 实现共用同一段拼句逻辑，不会两边说法不一致。
+   */
+  const clipEventText = (text: string, max = 60): string =>
+    text.length > max ? `${text.slice(0, max)}…` : text;
+
+  /**
+   * 成员离开后，名下未完成的任务会被解绑成「待认领」（store 里保证）。
+   * 这一步只补事件：否则团队动态只说「谁走了」，单件任务的历史里看不到
+   * 「这件活为什么突然变成待认领」（d.278）。最多逐件记 10 条，其余写一条汇总。
+   */
+  const pushUnassignedTaskEvents = (
+    teamId: string,
+    actorId: string,
+    before: Awaited<ReturnType<typeof store.getWorkspaceTeam>>,
+    targetUserId: string,
+    who: string,
+  ): void => {
+    const orphaned = (before?.tasks ?? []).filter(
+      (task) => task.assigneeId === targetUserId && task.status !== "done",
+    );
+    for (const task of orphaned.slice(0, 10)) {
+      pushTeamEvent(teamId, actorId, "task_updated", `因为 ${who} 离开团队，这件活回到「待认领」`, {
+        id: task.id,
+        title: task.title,
+      });
+    }
+    if (orphaned.length > 10) {
+      pushTeamEvent(
+        teamId,
+        actorId,
+        "task_updated",
+        `因为 ${who} 离开团队，另有 ${orphaned.length - 10} 件任务回到「待认领」`,
+      );
+    }
+  };
+
+  const pushTeamEvent = (
+    teamId: string,
+    actorId: string,
+    kind: TeamEvent["kind"],
+    summary: string,
+    task?: { id: string; title: string } | null,
+  ): void => {
+    store.addTeamEvent({
+      id: randomUUID(),
+      teamId,
+      taskId: task?.id ?? null,
+      taskTitle: task?.title ?? "",
+      actorId,
+      kind,
+      summary: clipEventText(summary, 500),
+      createdAt: new Date().toISOString(),
+    });
+  };
+
+  const TASK_STATUS_TEXT: Record<TeamTask["status"], string> = {
+    todo: "未开始",
+    doing: "进行中",
+    done: "已完成",
+    blocked: "有卡点",
+  };
+  const TASK_PRIORITY_TEXT: Record<NonNullable<TeamTask["priority"]>, string> = {
+    low: "低",
+    normal: "普通",
+    high: "高",
+  };
+
+  const memberNameIn = (
+    snapshot: ReturnType<Store["getWorkspaceTeam"]>,
+    id: string | null,
+  ): string => {
+    if (id === null) return "待认领";
+    const hit = snapshot?.members.find((m) => m.user.id === id);
+    return hit ? hit.user.displayName : id;
+  };
   app.get("/api/teams", authOnly, (req, res) => {
     res.json({ teams: store.listWorkspaceTeams(userId(req)) });
   });
@@ -979,10 +1079,20 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(409).json({ error: "该用户已在团队里" });
       return;
     }
+    // 团队动态（d.274）：添加成员也进时间线。
+    const addedMember = result.members.find((m) => m.user.username === parsed.data.username);
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "member_added",
+      `把 ${addedMember?.user.displayName ?? parsed.data.username} 加进了团队`,
+    );
     res.json(result);
   });
 
   app.delete("/api/teams/:id/members/:userId", authOnly, (req, res) => {
+    // 移除之后就拿不到名字了，先取快照（d.274）。
+    const beforeRemove = store.getWorkspaceTeam(req.params.id, userId(req));
     const result = store.removeWorkspaceMember(req.params.id, userId(req), req.params.userId);
     if (result === null) {
       res.status(404).json({ error: "成员不存在" });
@@ -996,12 +1106,16 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(409).json({ error: "不能移除团队创建者" });
       return;
     }
+    const removedName = memberNameIn(beforeRemove, req.params.userId);
+    pushTeamEvent(req.params.id, userId(req), "member_removed", `把 ${removedName} 移出了团队`);
+    pushUnassignedTaskEvents(req.params.id, userId(req), beforeRemove, req.params.userId, removedName);
     res.json(result);
   });
 
   // 自己退出团队（P1-4）。刻意不用 DELETE /members/:userId —— 会被「移除别人」那条路由吃掉，
   // 而且语义是「我走」不是「owner 踢人」，单独一个动词更清楚。
   app.post("/api/teams/:id/leave", authOnly, (req, res) => {
+    const beforeLeave = store.getWorkspaceTeam(req.params.id, userId(req));
     const result = store.leaveWorkspaceTeam(req.params.id, userId(req));
     if (result === null) {
       res.status(404).json({ error: "团队不存在" });
@@ -1011,6 +1125,9 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(409).json({ error: "队长请先转让团队再退出" });
       return;
     }
+    const leaverName = memberNameIn(beforeLeave, userId(req));
+    pushTeamEvent(req.params.id, userId(req), "member_removed", `${leaverName} 退出了团队`);
+    pushUnassignedTaskEvents(req.params.id, userId(req), beforeLeave, userId(req), leaverName);
     res.status(204).end();
   });
 
@@ -1027,6 +1144,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "不能转让给自己" });
       return;
     }
+    const beforeTransfer = store.getWorkspaceTeam(req.params.id, userId(req));
     const result = store.transferTeamOwnership(
       req.params.id,
       userId(req),
@@ -1044,6 +1162,12 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "只能转让给团队成员" });
       return;
     }
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "owner_transferred",
+      `把队长转给了 ${memberNameIn(beforeTransfer, parsed.data.userId)}`,
+    );
     res.json(result);
   });
 
@@ -1062,6 +1186,18 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(403).json({ error: "只有团队成员可以编排方案" });
       return;
     }
+    // createTeamPlan 还会回 "not_found"（团队没了）；以前这里没接住，会 201 回一个字符串。
+    if (result === "not_found") {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    // 团队动态（d.274）：方案也是团队里的一等公民，改动要留痕。
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "plan_added",
+      `新建方案「${result.title}」${result.detail ? `：${clipEventText(result.detail, 40)}` : ""}`,
+    );
     res.status(201).json(result);
   });
 
@@ -1071,6 +1207,9 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
       return;
     }
+    const planBefore = store
+      .getWorkspaceTeam(req.params.id, userId(req))
+      ?.plans.find((item) => item.id === req.params.planId);
     const result = store.updateTeamPlan(req.params.id, req.params.planId, userId(req), parsed.data);
     if (result === null) {
       res.status(404).json({ error: "团队不存在" });
@@ -1084,10 +1223,24 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(404).json({ error: "方案不存在" });
       return;
     }
+    const changedLabels: string[] = [];
+    if (parsed.data.title !== undefined) changedLabels.push("标题");
+    if (parsed.data.detail !== undefined) changedLabels.push("说明");
+    if (parsed.data.status !== undefined) changedLabels.push("状态");
+    if (parsed.data.orderIndex !== undefined) changedLabels.push("排序");
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "plan_updated",
+      `改了方案「${result.title}」${changedLabels.length > 0 ? `（${changedLabels.join("、")}）` : ""}`,
+    );
     res.json(result);
   });
 
   app.delete("/api/teams/:id/plans/:planId", authOnly, (req, res) => {
+    const planRemoved = store
+      .getWorkspaceTeam(req.params.id, userId(req))
+      ?.plans.find((item) => item.id === req.params.planId);
     const result = store.deleteTeamPlan(req.params.id, req.params.planId, userId(req));
     if (result === "not_found") {
       res.status(404).json({ error: "方案不存在" });
@@ -1096,6 +1249,14 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     if (result === "forbidden") {
       res.status(403).json({ error: "只有团队成员可以删方案" });
       return;
+    }
+    if (planRemoved !== undefined) {
+      pushTeamEvent(
+        req.params.id,
+        userId(req),
+        "plan_removed",
+        `删除了方案「${planRemoved.title}」`,
+      );
     }
     res.status(204).end();
   });
@@ -1129,6 +1290,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(403).json({ error: "只有团队成员可以派任务" });
       return;
     }
+    if (result === "not_leader") {
+      res.status(403).json({ error: "只有组长可以把任务派给别人（成员只能认领或做自己的）" });
+      return;
+    }
     if (result === "assignee_not_member") {
       res.status(400).json({ error: "只能把任务指派给团队成员" });
       return;
@@ -1137,6 +1302,70 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "方案不属于该团队" });
       return;
     }
+    if (result === "blocker_not_found") {
+      res.status(400).json({ error: "前置任务不存在或不属于这个团队" });
+      return;
+    }
+    if (result === "blocker_cycle") {
+      res.status(400).json({ error: "任务依赖不能成环，也不能依赖自己" });
+      return;
+    }
+    const created = result as TeamTask;
+    const createdSnap = store.getWorkspaceTeam(req.params.id, userId(req));
+    const assignee =
+      created.assigneeId === null ? null : memberNameIn(createdSnap, created.assigneeId);
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "task_added",
+      `新建任务「${created.title}」${assignee ? `，派给 ${assignee}` : ""}${created.priority === "high" ? "（高优先级）" : ""}${created.dueAt ? `，截止 ${created.dueAt.slice(0, 10)}` : ""}`,
+      created,
+    );
+    res.status(201).json(result);
+  });
+
+  app.get("/api/teams/:id/tasks/:taskId/comments", authOnly, (req, res) => {
+    const snapshot = store.getWorkspaceTeam(req.params.id, userId(req));
+    if (!snapshot) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (!snapshot.tasks.some((t) => t.id === req.params.taskId)) {
+      res.status(404).json({ error: "任务不存在" });
+      return;
+    }
+    res.json({ comments: store.listTeamTaskComments(req.params.id, req.params.taskId) });
+  });
+
+  app.post("/api/teams/:id/tasks/:taskId/comments", authOnly, (req, res) => {
+    const parsed = CreateTeamTaskCommentBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.addTeamTaskComment(
+      req.params.id,
+      req.params.taskId,
+      userId(req),
+      parsed.data.text,
+    );
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以在任务下留言" });
+      return;
+    }
+    if (result === "not_found") {
+      res.status(404).json({ error: "任务不存在" });
+      return;
+    }
+    const commentSnap = store.getWorkspaceTeam(req.params.id, userId(req));
+    const commentTask = commentSnap?.tasks.find((x) => x.id === req.params.taskId) ?? null;
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      "task_comment",
+      `在「${commentTask?.title ?? "任务"}」下留言：${clipEventText(parsed.data.text, 80)}`,
+      commentTask,
+    );
     res.status(201).json(result);
   });
 
@@ -1150,6 +1379,8 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "交付物文件不存在，请先在共享文件库上传" });
       return;
     }
+    const patchBeforeSnap = store.getWorkspaceTeam(req.params.id, userId(req));
+    const patchBeforeTask = patchBeforeSnap?.tasks.find((x) => x.id === req.params.taskId) ?? null;
     const result = store.updateTeamTask(
       req.params.id,
       req.params.taskId,
@@ -1161,7 +1392,29 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     if (result === "forbidden") {
-      res.status(403).json({ error: "只有团队成员可以改任务" });
+      res.status(403).json({
+        error: "只能改自己名下的任务（还没人认领的可以先认领）；别人的任务请让组长改派或调整",
+      });
+      return;
+    }
+    if (result === "not_leader") {
+      res.status(403).json({ error: "只有组长可以把任务派给别人（成员只能认领或做自己的）" });
+      return;
+    }
+    if (result === "blocker_not_found") {
+      res.status(400).json({ error: "前置任务不存在或不属于这个团队" });
+      return;
+    }
+    if (result === "blocker_cycle") {
+      res.status(400).json({ error: "任务依赖不能成环，也不能依赖自己" });
+      return;
+    }
+    if (result === "not_nudgeable") {
+      res.status(400).json({ error: "只能催办派给别人、还没完成的任务：自己的活不用催，没人认领的先派人，已完成的不用催" });
+      return;
+    }
+    if (result === "not_reviewable") {
+      res.status(400).json({ error: "只有已完成的任务可以验收：先让它把任务标完成，再点验收" });
       return;
     }
     if (result === "not_found") {
@@ -1176,20 +1429,79 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "方案不属于该团队" });
       return;
     }
+    const patchAfter = result as TeamTask;
+    const body = parsed.data;
+    const parts: string[] = [];
+    const label = patchAfter.title;
+    if (body.nudge === true) parts.push(`催了「${label}」一次（第 ${patchAfter.nudgeCount ?? 1} 次）`);
+    if (body.review !== undefined) {
+      parts.push(
+        body.review === "approve"
+          ? `验收通过「${label}」`
+          : `把「${label}」打回重做：${patchAfter.reviewNote || "（没写原因）"}` ,
+      );
+    }
+    if (body.assigneeId === null && patchBeforeTask?.assigneeId) {
+      parts.push(`把「${label}」退回待认领${body.returnNote ? `：${clipEventText(body.returnNote, 60)}` : ""}`);
+    } else if (body.assigneeId !== undefined && body.assigneeId !== null && body.assigneeId !== patchBeforeTask?.assigneeId) {
+      const who = memberNameIn(patchBeforeSnap, body.assigneeId);
+      parts.push(body.assigneeId === userId(req) ? `认领了「${label}」` : `把「${label}」派给 ${who}`);
+    }
+    if (body.status !== undefined && patchBeforeTask && body.status !== patchBeforeTask.status) {
+      parts.push(`把「${label}」从${TASK_STATUS_TEXT[patchBeforeTask.status]}改成${TASK_STATUS_TEXT[body.status]}`);
+    }
+    if (body.priority !== undefined && patchBeforeTask && body.priority !== patchBeforeTask.priority) {
+      parts.push(`把「${label}」的优先级改成${TASK_PRIORITY_TEXT[body.priority]}`);
+    }
+    if (body.progress !== undefined) parts.push(body.progress === "" ? `清掉了「${label}」的进展` : `更新了「${label}」的进展`);
+    if (body.result !== undefined) parts.push(`更新了「${label}」的交付结论`);
+    if (body.title !== undefined && patchBeforeTask && body.title !== patchBeforeTask.title) {
+      parts.push(`把「${patchBeforeTask.title}」改名为「${body.title}」`);
+    }
+    if (body.detail !== undefined) parts.push(`改了「${label}」的需求说明`);
+    if (body.dueAt !== undefined) {
+      parts.push(patchAfter.dueAt ? `把「${label}」的截止改成 ${patchAfter.dueAt.slice(0, 10)}` : `去掉了「${label}」的截止`);
+    }
+    if (body.planId !== undefined) parts.push(`调整了「${label}」的归属方案`);
+    if (body.blockedBy !== undefined) parts.push(`调整了「${label}」的前置依赖`);
+    if (body.attachmentFileId !== undefined) parts.push(`换了「${label}」的交付物`);
+    if (parts.length > 0) {
+      pushTeamEvent(req.params.id, userId(req), "task_updated", parts.join("；"), patchAfter);
+    }
     res.json(result);
   });
 
   app.delete("/api/teams/:id/tasks/:taskId", authOnly, (req, res) => {
+    const removedSnap = store.getWorkspaceTeam(req.params.id, userId(req));
+    const removedTask = removedSnap?.tasks.find((x) => x.id === req.params.taskId) ?? null;
     const result = store.deleteTeamTask(req.params.id, req.params.taskId, userId(req));
     if (result === "not_found") {
       res.status(404).json({ error: "任务不存在" });
       return;
     }
     if (result === "forbidden") {
-      res.status(403).json({ error: "只有团队成员可以删任务" });
+      res.status(403).json({
+        error: "只能删自己名下的任务（或自己创建、还没人认领的）；别人的任务请让组长处理",
+      });
       return;
     }
+    if (removedTask) {
+      pushTeamEvent(req.params.id, userId(req), "task_removed", `删除了任务「${removedTask.title}」`, removedTask);
+    }
     res.status(204).end();
+  });
+
+  app.get("/api/teams/:id/events", authOnly, (req, res) => {
+    const snapshot = store.getWorkspaceTeam(req.params.id, userId(req));
+    if (!snapshot) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.trunc(raw))) : 30;
+    // taskId（d.276）：可选，只看某一件活的流水（任务卡片里的「这件活的历史」）。
+    const taskId = typeof req.query.taskId === "string" ? req.query.taskId : null;
+    res.json({ events: store.listTeamEvents(req.params.id, limit, taskId) });
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {

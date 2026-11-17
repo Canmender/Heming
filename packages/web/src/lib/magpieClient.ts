@@ -33,6 +33,14 @@ export interface GatewayModel {
   reasoningLevels: string[];
   /** 是否接受图片输入（未知按 false：能力判定宁可保守）。 */
   vision: boolean;
+  /**
+   * 价格（USD / 每 100 万 token）。magpie 只对本地请求的目录给出 `pricing`
+   * （OpenRouter 形状，单位是「每 token」的十进制字符串）；没有就是未知。
+   */
+  priceIn?: number;
+  priceOut?: number;
+  priceCacheRead?: number;
+  priceCacheWrite?: number;
 }
 
 export interface GatewayCatalog {
@@ -81,6 +89,17 @@ function hasImage(modalities: unknown): boolean {
   return Array.isArray(modalities) && modalities.some((item) => String(item).toLowerCase() === "image");
 }
 
+/**
+ * 目录里的价格（OpenRouter 形状：USD / 每 token 的十进制字符串）→ USD / 每 100 万 token。
+ * 0 是「已知免费」，与「没有这一项」不同，所以不能复用 `asNumber`。
+ */
+function asPerMillion(value: unknown): number | undefined {
+  const raw =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+  if (!Number.isFinite(raw) || raw < 0) return undefined;
+  return Number((raw * 1_000_000).toFixed(6));
+}
+
 /** 解析 `/v1/models` 的响应（OpenAI 形状 + magpie 扩展字段）。 */
 export function parseGatewayModels(raw: unknown): GatewayModel[] {
   const list =
@@ -96,6 +115,10 @@ export function parseGatewayModels(raw: unknown): GatewayModel[] {
     const id = asString(obj.id).trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    const pricing =
+      obj.pricing && typeof obj.pricing === "object"
+        ? (obj.pricing as Record<string, unknown>)
+        : undefined;
     const levels = Array.isArray(obj.supported_reasoning_levels)
       ? obj.supported_reasoning_levels
           .map((entry) =>
@@ -115,6 +138,10 @@ export function parseGatewayModels(raw: unknown): GatewayModel[] {
       maxOutputTokens: asNumber(obj.max_output_tokens),
       reasoningLevels: levels,
       vision: hasImage(obj.modalities),
+      priceIn: asPerMillion(pricing?.prompt),
+      priceOut: asPerMillion(pricing?.completion),
+      priceCacheRead: asPerMillion(pricing?.input_cache_read),
+      priceCacheWrite: asPerMillion(pricing?.input_cache_write),
     });
   }
   return out;
@@ -171,4 +198,29 @@ export async function fetchGatewayCatalog(
   }
   const raw = await response.json().catch(() => null);
   return { models: parseGatewayModels(raw), version };
+}
+
+/**
+ * 画图模型（magpie 的 `kind: image` 那一类）：`/v1/models?kind=image` 才会列出来。
+ * 默认目录里没有它们，所以选「画图模型」时单独问一次。
+ */
+export async function fetchGatewayImageModels(
+  gateway: GatewayConfig,
+  deps: { fetchImpl?: FetchLike } = {},
+): Promise<GatewayModel[]> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const base = normalizeGatewayBaseUrl(gateway.baseUrl);
+  if (!base) return [];
+  let response: Response;
+  try {
+    response = await fetchImpl(`${base}/models?kind=image`, {
+      headers: { accept: "application/json", authorization: `Bearer ${gateway.key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  const raw = await response.json().catch(() => null);
+  return parseGatewayModels(raw);
 }

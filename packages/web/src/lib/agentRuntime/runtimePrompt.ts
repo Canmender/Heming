@@ -98,6 +98,21 @@ export interface RuntimeSectionInput {
    * 缺省不带这段（输出与加这个字段之前**逐字相同**），老调用点与评测快照不受影响。
    */
   capabilities?: RuntimeCapabilityInfo;
+  /**
+   * 团队派到我名下的任务（d.248，`team/assignedTasks.describeAssignedTasks` 的行）。
+   *
+   * 省略/空数组 → 不写这一段：没团队、或名下没有活儿时，多一段「没有任务」只是噪音。
+   */
+  teamTasks?: readonly string[];
+  /**
+   * 「团队里待认领的活」段落（d.260）：我所在团队里还没人认领、也没完成的任务。
+   *
+   * 与 teamTasks 分开：派到我名下的活是「要做的」，待认领的是「可以接的」——
+   * 混在一段里，模型容易把「能接」当成「已经归我」，直接标 done。
+   */
+  claimableTeamTasks?: readonly string[];
+  /** 「团队（你在的）」段落（d.253）：团队名、我的角色、成员名字与 id，给派活认人用。 */
+  teamBrief?: readonly string[];
 }
 
 /** 提示词里回灌的清单条目（与 `lib/todo/store.ts` 的 `TodoItem` 同形，避免反向依赖）。 */
@@ -350,6 +365,56 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   if (capabilityLines.length > 0) {
     lines.push("");
     lines.push(...capabilityLines);
+  }
+
+  // 团队简报（d.253）：先让它知道「我在哪些团队、队友是谁、我是不是组长」，
+  // 再往下说「派到我名下的活」。顺序反了的话，它看到任务时还不知道能把活派给谁。
+  const teamBriefLines = (input.teamBrief ?? [])
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  if (teamBriefLines.length > 0) {
+    lines.push("");
+    lines.push(...teamBriefLines);
+  }
+
+  // 团队派给我的任务（d.248）：队员的智能体一开口就该知道「团队里有什么活儿在我名下」，
+  // 而不是等用户想起来去团队页看一眼再回来转述。
+  // 放在能力段之后、计划模式之前：它回答的是「这轮先做什么」，不是收尾纪律。
+  const teamTaskLines = (input.teamTasks ?? [])
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  if (teamTaskLines.length > 0) {
+    lines.push("");
+    lines.push("## 团队任务（派到我名下的）");
+    lines.push(`- 下面 ${teamTaskLines.length} 行是团队里派到我名下、还没完成的任务：`);
+    for (const line of teamTaskLines) lines.push(`  - ${line}`);
+    lines.push("- 动手前先 team_get 看详情（说明、所属方案、截止时间、交付物）：标题只有一行，不足以判断要改哪里。");
+    lines.push(
+      "- 做完了用 team_task_update 把状态改成 done，同时用 result 写一句结论（做成什么样、怎么验证的、交付物在哪）；result 是给组长看的交付说明，不要拿它覆盖 detail。做不了或不该由我做，就直接说明并建议改派，不要默默忽略。",
+    );
+    lines.push("- 只有组长能把任务派给别人（成员只能认领或做自己的）：如果这项该由别人做，说明情况、让组长改派。");
+    lines.push("- 成员只能改自己名下或还没人认领的任务；别人的任务改不动（会被服务端拒绝），不要反复重试。做到一半就留一句进展：team_task_update 用 progress 写「做到哪、卡在哪、下一步」——它和 result（交付结论）不是一回事，进展是给自己下一轮和组长看的。做不了就把任务退回：team_task_update 把 assignee_id 传空串，并在 return_note 里写一句为什么（权限不够 / 信息不足 / 不归你），任务会回到待认领，组长能看到是谁退的、为什么——不要让它挂着不动。");
+    lines.push(
+      "- 摘要里写着「前置还没完成」的任务先别开始：先做前置（或催前置负责人），做完再回来。这层依赖只是协作信号，服务端不会硬拦你，但抢先做会把顺序搞乱。",
+    );
+    lines.push(
+      "- 派活有先后顺序时，用 team_task_add 的 blockedBy 写上前置任务 id（先建前置、拿到 id 再建后置）；不要只在标题里说「等 X 做完」。",
+    );
+  }
+
+  const claimable = input.claimableTeamTasks ?? [];
+  if (claimable.length > 0) {
+    lines.push("## 团队里待认领的活");
+    lines.push(
+      `- 下面 ${claimable.length} 行是我所在团队里还没人认领、也没完成的任务（留空的派活，谁接谁做）：`,
+    );
+    for (const line of claimable) lines.push(`  - ${line}`);
+    lines.push(
+      "- 想接其中一条，先**认领**：用 team_task_update 把这条任务的 assignee_id 设成你自己（认领失败就说明原因，不要硬做），再按上面「团队任务」的规矩做。",
+    );
+    lines.push(
+      "- 不要没认领就直接标 done：抢着标完成会让组长看不出这条活归谁，也可能和别人同时开做。",
+    );
   }
 
   // 计划模式（d.173）：开关在输入框上，用户一按就该看到「先计划、不改」。

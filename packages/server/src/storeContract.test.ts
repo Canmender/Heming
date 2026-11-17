@@ -729,3 +729,280 @@ for (const f of factories) {
     });
   });
 }
+
+for (const f of factories) {
+  describe(`Store 任务讨论（d.271）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("只有成员能留言；留言按时间升序返回，作者与正文原样保留", async () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(a.id, { name: "增长小组" });
+      expect(store.addWorkspaceMember(team.team.id, a.id, "bob")).not.toBeNull();
+      const task = store.createTeamTask(team.team.id, a.id, { title: "改落地页" });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+
+      const first = store.addTeamTaskComment(team.team.id, task.id, a.id, "口径按老版本走");
+      expect(typeof first).toBe("object");
+      await new Promise((r) => setTimeout(r, 5));
+      const second = store.addTeamTaskComment(team.team.id, task.id, b.id, "收到，今天给");
+      expect(typeof second).toBe("object");
+
+      const list = store.listTeamTaskComments(team.team.id, task.id);
+      expect(list.map((c) => c.text)).toEqual(["口径按老版本走", "收到，今天给"]);
+      expect(list[1]!.authorId).toBe(b.id);
+      expect(list[0]!.teamId).toBe(team.team.id);
+      expect(list[0]!.taskId).toBe(task.id);
+    });
+
+    it("不是团队成员不能留言；任务不属于这个团队也拒绝", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const outsider = store.createUser("eve", "h", "伊芙");
+      const team = store.createWorkspaceTeam(a.id, { name: "增长小组" });
+      const other = store.createWorkspaceTeam(a.id, { name: "另一个团队" });
+      const task = store.createTeamTask(team.team.id, a.id, { title: "改落地页" });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+
+      expect(store.addTeamTaskComment(team.team.id, task.id, outsider.id, "插一句")).toBe("forbidden");
+      expect(store.addTeamTaskComment(other.team.id, task.id, a.id, "走错团队")).toBe("not_found");
+      expect(store.addTeamTaskComment(team.team.id, "no-such-task", a.id, "幽灵任务")).toBe("not_found");
+      expect(store.listTeamTaskComments(team.team.id, task.id)).toEqual([]);
+    });
+  });
+
+  describe(`Store 任务验收（d.272）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("组长验收通过：只打标，状态与结论都不动", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(a.id, { name: "验收组" });
+      expect(store.addWorkspaceMember(team.team.id, a.id, "bob")).not.toBeNull();
+      const task = store.createTeamTask(team.team.id, a.id,{ title: "写文档", assigneeId: b.id });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+
+      const done = store.updateTeamTask(team.team.id, task.id, b.id, {
+        status: "done",
+        result: "写完了，测试全绿。",
+      });
+      if (done === null || typeof done === "string") throw new Error("标的完成失败");
+      expect(done.reviewState ?? "pending").toBe("pending");
+
+      const approved = store.updateTeamTask(team.team.id, task.id, a.id, {
+        review: "approve",
+        reviewNote: "看过，可以。",
+      });
+      if (approved === null || typeof approved === "string") throw new Error("验收失败");
+      expect(approved.reviewState).toBe("approved");
+      expect(approved.reviewNote).toBe("看过，可以。");
+      expect(approved.reviewedBy).toBe(a.id);
+      expect(approved.status).toBe("done");
+      expect(approved.result).toBe("写完了，测试全绿。");
+    });
+
+    it("打回重做：状态回进行中、保留上一版结论，记下谁打回的", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(a.id, { name: "验收组" });
+      expect(store.addWorkspaceMember(team.team.id, a.id, "bob")).not.toBeNull();
+      const task = store.createTeamTask(team.team.id, a.id, { title: "写脚本", assigneeId: b.id });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+      store.updateTeamTask(team.team.id, task.id, b.id, {
+        status: "done",
+        result: "先交一版",
+      });
+
+      const sentBack = store.updateTeamTask(team.team.id, task.id, a.id, {
+        review: "changes",
+        reviewNote: "少了回滚步骤",
+      });
+      if (sentBack === null || typeof sentBack === "string") throw new Error("打回失败");
+      expect(sentBack.reviewState).toBe("changes");
+      expect(sentBack.status).toBe("doing");
+      expect(sentBack.completedAt ?? null).toBeNull();
+      expect(sentBack.result).toBe("先交一版");
+      expect(sentBack.reviewNote).toBe("少了回滚步骤");
+      expect(sentBack.reviewedBy).toBe(a.id);
+    });
+
+    it("成员不能验收；没完成的任务也不能验收", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(a.id, { name: "验收组" });
+      expect(store.addWorkspaceMember(team.team.id, a.id, "bob")).not.toBeNull();
+      const task = store.createTeamTask(team.team.id, a.id, { title: "写脚本", assigneeId: b.id });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+
+      expect(store.updateTeamTask(team.team.id, task.id, b.id, { review: "approve" })).toBe("forbidden");
+      expect(store.updateTeamTask(team.team.id, task.id, a.id, { review: "approve" })).toBe("not_reviewable");
+    });
+  });
+}
+
+for (const f of factories) {
+  describe(`Store 团队动态（d.273）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("只追加、按时间倒序返回，limit 生效", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const team = store.createWorkspaceTeam(a.id, { name: "增长小组" });
+      const base = {
+        teamId: team.team.id,
+        taskId: null,
+        taskTitle: "",
+        actorId: a.id,
+        kind: "plan_added" as const,
+      };
+      store.addTeamEvent({
+        id: "e1",
+        ...base,
+        summary: "第一件",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
+      });
+      store.addTeamEvent({
+        id: "e2",
+        ...base,
+        summary: "第二件",
+        createdAt: new Date().toISOString(),
+      });
+
+      const list = store.listTeamEvents(team.team.id);
+      expect(list.map((e) => e.summary)).toEqual(["第二件", "第一件"]);
+      expect(list[0]!.kind).toBe("plan_added");
+      expect(list[0]!.actorId).toBe(a.id);
+      // 别人的 list 不会因为查询次数少就少一条；limit 只裁返回条数。
+      expect(store.listTeamEvents(team.team.id, 1).map((e) => e.id)).toEqual(["e2"]);
+    });
+
+    it("按团队隔离：别的团队的动态不会串过来", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const one = store.createWorkspaceTeam(a.id, { name: "一队" });
+      const two = store.createWorkspaceTeam(a.id, { name: "二队" });
+      store.addTeamEvent({
+        id: "x1",
+        teamId: one.team.id,
+        taskId: null,
+        taskTitle: "",
+        actorId: a.id,
+        kind: "task_added",
+        summary: "一队的活",
+        createdAt: new Date().toISOString(),
+      });
+
+      expect(store.listTeamEvents(one.team.id)).toHaveLength(1);
+      expect(store.listTeamEvents(two.team.id)).toEqual([]);
+    });
+
+    it("可按 taskId 过滤：只回某一件活的流水（d.276）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const team = store.createWorkspaceTeam(a.id, { name: "增长小组" });
+      const base = {
+        teamId: team.team.id,
+        taskTitle: "改落地页",
+        actorId: a.id,
+        kind: "task_updated" as const,
+      };
+      store.addTeamEvent({
+        id: "t1-a",
+        ...base,
+        taskId: "task-a",
+        summary: "改了 A",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
+      });
+      store.addTeamEvent({
+        id: "t1-b",
+        ...base,
+        taskId: "task-b",
+        summary: "改了 B",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      });
+      store.addTeamEvent({
+        id: "t1-a2",
+        ...base,
+        taskId: "task-a",
+        summary: "又改了 A",
+        createdAt: new Date().toISOString(),
+      });
+
+      expect(store.listTeamEvents(team.team.id, 10, "task-a").map((e) => e.summary)).toEqual([
+        "又改了 A",
+        "改了 A",
+      ]);
+      // 空串/null/不传都按「全队」处理。
+      expect(store.listTeamEvents(team.team.id, 10, "")).toHaveLength(3);
+      expect(store.listTeamEvents(team.team.id, 10, null)).toHaveLength(3);
+    });
+  });
+
+  describe(`Store 成员离开后任务归位（d.278）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    it("移除成员：他名下没做完的活解绑成待认领", () => {
+      const boss = store.createUser("alice", "h", "爱丽丝");
+      const mate = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(boss.id, { name: "归位组" });
+      expect(store.addWorkspaceMember(team.team.id, boss.id, mate.username)).not.toBeNull();
+
+      const task = store.createTeamTask(team.team.id, boss.id, {
+        title: "改落地页",
+        assigneeId: mate.id,
+      });
+      if (typeof task === "string" || task === null) throw new Error("建任务失败");
+
+      const removed = store.removeWorkspaceMember(team.team.id, boss.id, mate.id);
+      if (removed === null || typeof removed === "string") throw new Error("移除成员失败");
+
+      const snapshot = store.getWorkspaceTeam(team.team.id, boss.id);
+      const after = snapshot?.tasks.find((item) => item.id === task.id);
+      expect(after?.assigneeId).toBeNull();
+    });
+
+    it("自己退出：名下的活同样解绑成待认领", () => {
+      const boss = store.createUser("carol", "h", "卡萝");
+      const mate = store.createUser("dave", "h", "戴夫");
+      const team = store.createWorkspaceTeam(boss.id, { name: "归位二组" });
+      expect(store.addWorkspaceMember(team.team.id, boss.id, mate.username)).not.toBeNull();
+
+      const task = store.createTeamTask(team.team.id, boss.id, {
+        title: "写接口文档",
+        assigneeId: mate.id,
+      });
+      if (typeof task === "string" || task === null) throw new Error("建任务失败");
+
+      const left = store.leaveWorkspaceTeam(team.team.id, mate.id);
+      if (left === null || typeof left === "string") throw new Error("退出团队失败");
+
+      const snapshot = store.getWorkspaceTeam(team.team.id, boss.id);
+      expect(snapshot?.tasks.find((item) => item.id === task.id)?.assigneeId).toBeNull();
+    });
+  });
+}

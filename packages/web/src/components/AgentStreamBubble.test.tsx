@@ -4,9 +4,9 @@ import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup, ToolTraceList } from
 import type { ToolTrace } from "../store/chat.js";
 
 describe("AgentStreamBubble", () => {
-  it("streaming 态显示名字与累积文本", () => {
+  it("streaming 态显示累积文本与光标（d.248 起不再显示名字）", () => {
     render(<AgentStreamBubble name="和小鸣" text="你好" status="streaming" />);
-    expect(screen.getByText("和小鸣")).toBeInTheDocument();
+    expect(screen.queryByText("和小鸣")).toBeNull();
     expect(screen.getByText(/你好/)).toBeInTheDocument();
     expect(document.body.textContent).toContain("▌");
   });
@@ -531,14 +531,11 @@ describe("工具行折叠（d.243：长任务不再把正文挤没）", () => {
     expect(screen.getByTestId("tool-trace-hidden").textContent).toContain("还有 6 次工具调用已收起");
   });
 
-  it("名字很长时省略，不把「生成中…」挤出可视区（d.246）", () => {
+  it("气泡里不显示智能体名字，只留生成状态（d.248）", () => {
     const longName = "一个名字非常非常长的智能体".repeat(3);
     render(<AgentStreamBubble name={longName} text="在做" status="streaming" />);
-    // 名字可省略（truncate + min-w-0）：否则长名字会把右端的「生成中…」顶出去。
-    const nameNode = screen.getByText(longName);
-    expect(nameNode.className).toContain("truncate");
-    expect(nameNode.className).toContain("min-w-0");
-    // 「生成中…」不参与收缩，名字再长也始终可读。
-    expect(screen.getByText("生成中…").className).toContain("shrink-0");
+    // 名字不再占视觉空间：读屏文案（sr-only）里仍有，但界面文本里没有。
+    expect(screen.queryByText(longName)).toBeNull();
+    expect(screen.getByText("生成中…")).toBeTruthy();
   });
 });

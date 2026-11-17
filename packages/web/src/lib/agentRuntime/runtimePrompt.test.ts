@@ -408,3 +408,97 @@ describe("能力与配合（d.241）", () => {
     expect(lines[0]).toContain("## 能力与配合");
   });
 });
+
+describe("团队派给我的任务（d.248）", () => {
+  const base = (over: Partial<RuntimeSectionInput> = {}): RuntimeSectionInput => ({
+    desktop: true,
+    platform: "Windows 11",
+    now: new Date("2026-11-17T10:00:00+08:00"),
+    workspace: "D:/proj",
+    tools: [{ name: "team_get" }, { name: "team_task_update" }],
+    ...over,
+  });
+
+  it("列出任务行，并写清先看详情、做完改状态", () => {
+    const text = buildRuntimeSection(
+      base({ teamTasks: ["研发组 · 整理接口文档（未开始，明天截止）"] }),
+    );
+    expect(text).toContain("## 团队任务（派到我名下的）");
+    expect(text).toContain("研发组 · 整理接口文档（未开始，明天截止）");
+    expect(text).toContain("team_get");
+    expect(text).toContain("team_task_update");
+    expect(text).toContain("只有组长能把任务派给别人");
+  });
+
+  it("没有任务就不写这一段（与旧版逐字相同）", () => {
+    const without = buildRuntimeSection(base());
+    expect(without).not.toContain("团队任务");
+    expect(buildRuntimeSection(base({ teamTasks: [] }))).toBe(without);
+    expect(buildRuntimeSection(base({ teamTasks: ["   "] }))).toBe(without);
+  });
+});
+
+describe("团队简报：派活前先认人（d.253）", () => {
+  const base = (over: Partial<RuntimeSectionInput> = {}): RuntimeSectionInput => ({
+    desktop: true,
+    platform: "Windows 11",
+    now: new Date("2026-11-17T10:00:00+08:00"),
+    workspace: "D:/proj",
+    tools: [{ name: "team_task_add" }],
+    ...over,
+  });
+
+  it("写团队名、我的身份与队友 id，并且排在「派到我名下的任务」之前", () => {
+    const text = buildRuntimeSection(
+      base({
+        teamBrief: ["## 团队（你在的）", "- 产品组（你是组长）：成员：阿鸣（u-1，组长）"],
+        teamTasks: ["产品组 · 整理接口文档"],
+      }),
+    );
+    expect(text).toContain("## 团队（你在的）");
+    expect(text).toContain("阿鸣（u-1，组长）");
+    expect(text.indexOf("## 团队（你在的）")).toBeLessThan(
+      text.indexOf("## 团队任务（派到我名下的）"),
+    );
+  });
+
+  it("没有简报就不写这一段（与旧版逐字相同）", () => {
+    const without = buildRuntimeSection(base());
+    expect(without).not.toContain("## 团队（你在的）");
+    expect(buildRuntimeSection(base({ teamBrief: [] }))).toBe(without);
+    expect(buildRuntimeSection(base({ teamBrief: ["   "] }))).toBe(without);
+  });
+});
+
+describe("团队里待认领的活（d.260）", () => {
+  const base = (over: Partial<RuntimeSectionInput> = {}): RuntimeSectionInput => ({
+    desktop: true,
+    platform: "Windows 11",
+    now: new Date("2026-11-17T10:00:00+08:00"),
+    workspace: "D:/proj",
+    tools: [{ name: "team_get" }, { name: "team_task_update" }],
+    ...over,
+  });
+
+  it("单列一段，写明先认领（assignee_id）再动手，且排在「派到我名下的」之后", () => {
+    const text = buildRuntimeSection(
+      base({
+        teamTasks: ["研发组 · 派给我的活"],
+        claimableTeamTasks: ["研发组 · 没人接的活（待认领）"],
+      }),
+    );
+    expect(text).toContain("## 团队里待认领的活");
+    expect(text).toContain("没人接的活");
+    expect(text).toContain("认领");
+    expect(text).toContain("assignee_id");
+    expect(text.indexOf("## 团队任务（派到我名下的）")).toBeLessThan(
+      text.indexOf("## 团队里待认领的活"),
+    );
+  });
+
+  it("没有待认领的活就不写这一段（与旧版逐字相同）", () => {
+    const without = buildRuntimeSection(base());
+    expect(without).not.toContain("待认领");
+    expect(buildRuntimeSection(base({ claimableTeamTasks: [] }))).toBe(without);
+  });
+});

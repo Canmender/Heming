@@ -1,21 +1,34 @@
 import type { ToolBridge, ToolSource } from "../agentStream.js";
 import type { RiskLevel } from "../hitl/types.js";
-import type { TeamPlanItem, TeamTask, TeamWorkspaceSnapshot } from "@heming/shared";
+import type { TeamEvent, TeamPlanItem, TeamTask, TeamTaskComment, TeamWorkspaceSnapshot } from "@heming/shared";
 import {
   addWorkspaceMember,
   createTeamPlan,
   createTeamTask,
+  createTeamTaskComment,
   createWorkspaceTeam,
   fetchWorkspaceTeam,
   fetchWorkspaceTeams,
+  fetchTeamEvents,
+  fetchTeamTaskComments,
   isApiAbort,
   isApiTimeout,
+  removeWorkspaceMember,
+  transferWorkspaceTeamOwner,
   updateTeamPlan,
   updateTeamTask,
   updateWorkspaceTeam,
   type ApiRequestOptions,
 } from "../api.js";
 import { fmtLocalDateTime } from "../format/datetime.js";
+import { describeAssigneeLoad, describeLoad, loadOf, memberLoads } from "../team/load.js";
+import {
+  FIND_TASK_LIMIT_DEFAULT,
+  FIND_TASK_LIMIT_MAX,
+  describeFindResult,
+  findTeamTasks,
+} from "../team/findTasks.js";
+import { DIGEST_DEFAULT_DAYS, DIGEST_MAX_DAYS, buildTeamDigest } from "../team/digest.js";
 import type { CapabilityProvider } from "./types.js";
 
 /**
@@ -31,8 +44,10 @@ import type { CapabilityProvider } from "./types.js";
  * 只做参数形状的友好校验，并把服务端的中文错误原样回给模型。
  *
  * 风险分级：读工具 `read`（不打断用户），写工具 `write`（走 HITL 确认）。
- * 写工具没有 `danger`：团队数据都是本机服务端的结构化记录，最坏结果是改名/改状态，
- * 删除类工具本轮不提供给智能体（避免误删团队/方案/任务）。
+ * 另有两条 `danger`：`team_member_remove`（把别人移出团队）与 `team_owner_transfer`
+ * （把队长交出去）——它们影响的是别人的访问权限和团队控制权，收不回来，
+ * 所以每次都要人看一眼，不能被「记住允许」放行。
+ * 删除团队/方案/任务仍然不提供给智能体（避免误删）。
  */
 
 export interface TeamToolSpec {
@@ -43,6 +58,18 @@ export interface TeamToolSpec {
 }
 
 const str = (description: string) => ({ type: "string" as const, description });
+/** 枚举参数（d.272）：给模型一个封闭取值表，避免它自己编别名叫法。 */
+const enumStr = (values: string[], description: string) => ({
+  type: "string" as const,
+  enum: values,
+  description,
+});
+/** 对象数组参数（d.270）：一次派多件任务时用，数组元素的字段与单件一致。 */
+const objs = (description: string, itemProperties: Record<string, unknown>) => ({
+  type: "array" as const,
+  description,
+  items: { type: "object" as const, properties: itemProperties, required: ["title"] },
+});
 const STATUS_ENUM = {
   type: "string" as const,
   enum: ["todo", "doing", "done", "blocked"],
@@ -96,6 +123,92 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
     },
   },
   {
+    name: "team_task_find",
+    riskHint: "read",
+    description:
+      `${SHARED_HEAD}在团队里按关键词 / 负责人 / 状态找任务（只读）。` +
+      "快照里的任务只列前 20 条，任务多了要靠它：关键词按空格切开、每个词都要出现" +
+      "（标题、需求、结论、进展、taskId 都算），可再按负责人与「是否逾期」筛。" +
+      "只读列表，不会调用 tool_search 之外的任何工具。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        query: str("关键词（可多个，空格分隔；不区分大小写；不给 = 不限）。"),
+        assignee: str("只看某个人名下的活：username 或显示名（不给 = 不限）。"),
+        status: str("open（默认：未完成）/ done（只看已完成）/ all（全部）。"),
+        overdue: { type: "boolean" as const, description: "true = 只看「已过截止、还没完成」的。" },
+        limit: str("最多列几条（1–20，默认 10）。"),
+      },
+      required: [],
+    },
+  },
+  {
+    name: "team_task_comments",
+    riskHint: "read",
+    description:
+      `${SHARED_HEAD}看一条任务下的讨论（按时间从早到晚）：组员与组长（连同各自的智能体）在这里问口径、补约束、回复疑问。` +
+      "它和「最新进展」不同：进展是被覆盖的一条状态，讨论是追加的时间线，谁也不能改别人写过的话。" +
+      "开工前先看一眼有没有新留言；有新要求也写在这里，对方的智能体下一轮能看到。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        task_id: str("任务 id（从 team_get / team_task_find 的 tasks 里拿）。"),
+      },
+      required: ["team_id", "task_id"],
+    },
+  },
+  {
+    name: "team_events",
+    riskHint: "read",
+    description:
+      `${SHARED_HEAD}看团队最近发生了什么（只读，新的在前）：谁派了活、谁改了状态、谁催的、谁验收的、谁留了言、谁删了任务。` +
+      "快照只说「现在是什么样」，要说清「为什么变成这样」就靠它——被改回去的任务、被拿走的活、被打回的版本，这里都有记录。" +
+      "问「这周发生了什么」「怎么突然变成这样」先调它，不要凭快照猜。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        limit: str("最多看几条（1–50，默认 20）。"),
+      },
+      required: [],
+    },
+  },
+  {
+    name: "team_task_history",
+    riskHint: "read",
+    description:
+      `${SHARED_HEAD}看某一件任务自己的历史（只读，新的在前）：谁建的、谁改过状态或负责人、谁催的、谁打回或验收的、谁删了又建。` +
+      "团队动态是全队流水，这个只看一条活——排查「这件活为什么变回去了」「上次是谁打回的」用它。" +
+      "要全队的来龙去脉用 team_events；要这件活的讨论用 team_task_comments。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        task_id: str("任务 id（从 team_get / team_task_find 的 tasks 里拿）。"),
+        limit: str("最多看几条（1–50，默认 20）。"),
+      },
+      required: ["team_id", "task_id"],
+    },
+  },
+  {
+    name: "team_digest",
+    riskHint: "read",
+    description:
+      `${SHARED_HEAD}把团队近 N 天的情况算成一份复盘摘要（只读）：完成了几件、谁在忙、什么逾期、什么被前置挡住、什么被退回待安排、什么催过没动。` +
+      "用户问「这周团队怎么样」「给我一份周报/复盘」时先调它，再基于它给的数字总结，不要自己对着任务清单手工统计（清单会截断）。" +
+      "只陈述事实与下一步，不替你决定派给谁。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        days: str(`回看天数（1–${DIGEST_MAX_DAYS}，默认 ${DIGEST_DEFAULT_DAYS}）；用户说「上周」就给 7、「这个月」给 30。`),
+      },
+      required: [],
+    },
+  },
+  {
     name: "team_create",
     riskHint: "write",
     description:
@@ -140,6 +253,86 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
         username: str("要加入的用户的用户名（不是显示名，例如 zhangsan）。"),
       },
       required: ["team_id", "username"],
+    },
+  },
+  {
+    name: "team_task_nudge",
+    riskHint: "write",
+    description:
+      `${SHARED_HEAD}催办一件派给别人、还没完成的任务（只有组长能催）。` +
+      "只是留一条提醒：不改状态、不改负责人。对方和它的智能体下一轮会看到「组长在什么时候催过、催过几次」，任务板上也会显示出来。写操作，执行前会请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        task_id: str("任务 id（team_get 能看到）。"),
+      },
+      required: ["team_id", "task_id"],
+    },
+  },
+  {
+    name: "team_task_review",
+    riskHint: "write",
+    description:
+      `${SHARED_HEAD}验收一件已完成的任务（只有组长能验收）：通过，或者打回重做。` +
+      "打回必须写一句原因（note），会把任务状态改回「进行中」、保留上一版结论，做的人下一轮会看到要改什么。" +
+      "写操作，执行前会请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        task_id: str("任务 id（team_get 能看到）。"),
+        verdict: enumStr(["approve", "changes"], "approve = 验收通过；changes = 打回重做（必须带 note）。"),
+        note: str("验收意见：打回时说明要改什么；通过时可以留一句认可。"),
+      },
+      required: ["team_id", "task_id", "verdict"],
+    },
+  },
+  {
+    name: "team_member_remove",
+    riskHint: "danger",
+    description:
+      `${SHARED_HEAD}把某个成员移出团队（只有 owner 能移；队长本人不能移）。` +
+      "这会立刻收掉对方对这个团队的访问权限，收不回来；执行前一定会请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        username: str("要移出的成员用户名（不是显示名，例如 linxiao）。"),
+      },
+      required: ["team_id", "username"],
+    },
+  },
+  {
+    name: "team_owner_transfer",
+    riskHint: "danger",
+    description:
+      `${SHARED_HEAD}把队长身份转让给团队里的某位成员（只有 owner 能转让）。` +
+      "转让后你变成普通成员，不能再加人/派活/删除；执行前一定会请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        username: str("接任队长的成员用户名（不是显示名；必须是团队现有成员）。"),
+      },
+      required: ["team_id", "username"],
+    },
+  },
+  {
+    name: "team_task_comment",
+    riskHint: "write",
+    description:
+      `${SHARED_HEAD}在任务下留一句话（追加，不覆盖别人写过的）：问口径、补约束、回复对方的疑问。` +
+      "消息进任务讨论，对方的智能体下一轮在「团队任务」里能看到；说不清的需求不要靠猜，写在这里问。" +
+      "写操作，执行前会请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        team_id: str("团队 id（team_id 或 teamId 均可；不知道就先 team_list）。"),
+        task_id: str("任务 id（从 team_get / team_task_find 的 tasks 里拿）。"),
+        text: str("要说的一句话（最多 2000 字）：说清在问什么、或补充什么约束。"),
+      },
+      required: ["team_id", "task_id", "text"],
     },
   },
   {
@@ -189,6 +382,9 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
     description:
       `${SHARED_HEAD}给团队派一条任务：可挂到方案下（planId）、指派给成员` +
       "（assigneeId 必须是团队成员，可先用 team_get 查 members）、设置截止时间（dueAt，ISO 时间）。" +
+      "只有组长能把任务派给别人（成员只能给自己派活或留空等认领）；派给谁，谁的智能体下一轮就会在「团队任务」里看到。" +
+      "轻重缓急用 priority 标（low / normal / high，不填 = normal）：真正要插队的活标 high，别把什么都标高。" +
+      "一个方案要拆成几步（2–8 件）时，用 tasks 一次派完，别一件一件调 team_task_add：每件都要有 title，可选 detail / assigneeId / dueAt / priority。" +
       "写操作，执行前会请用户确认。",
     parameters: {
       type: "object",
@@ -197,7 +393,7 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
         title: str("任务标题（必填，最多 120 字）。"),
         detail: str("任务说明（可选，最多 2000 字）。"),
         assigneeId: str(
-          "指给谁做：团队成员的 userId（assigneeId 或 assignee_id 均可；必须是成员；不传 = 待认领）。",
+          "指给谁做：团队成员的 userId（assigneeId 或 assignee_id 均可；必须是成员；不传 = 待认领；派给别人需要你是组长）。",
         ),
         planId: str("归属哪条方案（planId 或 plan_id 均可；不传 = 独立任务）。"),
         dueAt: str(
@@ -206,17 +402,37 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
         attachmentFileId: str(
           "交付物文件 id（attachmentFileId 或 attachment_file_id 均可；来自共享文件库，可选）。",
         ),
+        priority: str("优先级（可选）：low / normal / high；不填 = normal。真要抢时间的活才标 high。"),
+        tasks: objs(
+          "一次派多件时用（可选，最多 8 条）：每项 { title 必填, detail?, assigneeId?, dueAt?, priority? }。给了 tasks 就不要再给 title。",
+          {
+            title: str("这一件要做什么（必填，最多 120 字）。"),
+            detail: str("任务说明（可选，最多 2000 字）。"),
+            assigneeId: str("指给谁做（可选）：成员 userId；不传 = 待认领。"),
+            dueAt: str("截止时间（可选）：ISO/UTC。"),
+            priority: str("优先级（可选）：low / normal / high。"),
+          },
+        ),
       },
-      required: ["team_id", "title"],
+      required: ["team_id"],
     },
   },
   {
     name: "team_task_update",
     riskHint: "write",
     description:
-      `${SHARED_HEAD}更新一条任务：状态 / 负责人 / 标题 / 说明 / 截止时间 / 交付物文件 id` +
-      "（attachmentFileId，来自共享文件库）。负责人必须是团队成员。" +
-      "写操作，执行前会请用户确认。",
+      `${SHARED_HEAD}更新一条任务：状态 / 负责人 / 标题 / 说明 / 截止时间 / 交付物文件 id / 交付结论` +
+      "（attachmentFileId 来自共享文件库）。负责人必须是团队成员。" +
+      "改派给别人需要组长身份（成员只能改状态，或把任务改回待认领）；接手的队友智能体下一轮会看到这条任务。" +
+      "做不了就退回：把 assigneeId 传空串，并在 return_note 里写一句为什么（权限不够 / 信息不足 / 不归你），" +
+      "任务会回到「待认领」，组长在任务板上看到是谁退的、为什么——不要让它挂着不动。" +
+
+      "任务级权限：成员只能改「自己名下」或「还没人认领」的任务，别人的任务会被拒绝——需要的话请让组长改派或调整，不要反复重试。" +
+      "优先级可用 priority 调（low / normal / high）：情况变了就改，别让高优先级一直挂着。" +
+      "做到一半就用 progress 留一句当前进展（做到哪、卡在哪）——它和 result（完成时的交付结论）不是一回事：" +
+      "进展是给下一轮的你和组长看的，别拿它当结论。" +
+      "标成 done 时必须一起给 result：写一句结论（做成什么样、怎么验证的），组长和其他人只看到状态，看不到你的过程；" +
+      "不要拿 result 覆盖 detail（detail 是需求，result 是交付）。写操作，执行前会请用户确认。",
     parameters: {
       type: "object",
       properties: {
@@ -233,6 +449,16 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
         attachmentFileId: str(
           "交付物文件 id（attachmentFileId 或 attachment_file_id 均可；空串 = 清除交付物）。",
         ),
+        result: str(
+          "交付结论（标 done 时必填）：做成什么样、怎么验证的；≤2000 字。改回未完成时这条结论会作废。",
+        ),
+        progress: str(
+          "最新进展（可选）：做到哪、卡在哪、下一步是什么；≤500 字；空串 = 清掉。与 result（交付结论）分开。",
+        ),
+        returnNote: str(
+          "退回原因（assigneeId 传空串时用）：为什么做不了，≤500 字。组长会在任务板上看到这条原因。",
+        ),
+        priority: str("新优先级（可选）：low / normal / high。"),
       },
       required: ["team_id", "task_id"],
     },
@@ -430,6 +656,24 @@ function argOptStr(args: Record<string, unknown>, key: string): string | undefin
   return typeof args[key] === "string" ? String(args[key]).trim() : undefined;
 }
 
+/** 取布尔参数：接受 true/"true"/"1"/"yes"；其余（含没给）当 false。 */
+function argBool(args: Record<string, unknown>, key: string): boolean {
+  const v = args[key];
+  if (v === true) return true;
+  if (typeof v === "string") {
+    const text = v.trim().toLowerCase();
+    return text === "true" || text === "1" || text === "yes";
+  }
+  return false;
+}
+
+/** 取对象数组参数（d.270）：非数组或元素不是对象的，直接丢弃那一个。 */
+function argObjArray(args: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const v = args[key];
+  if (!Array.isArray(v)) return [];
+  return v.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item));
+}
+
 function argOptNum(args: Record<string, unknown>, key: string): number | undefined {
   const v = args[key];
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -444,10 +688,23 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const STATUS_SET = new Set(Object.keys(STATUS_LABEL));
 
+/**
+ * 优先级（d.268）：只有三档，不给任意数字——数量一多就没法一眼看出轻重，
+ * 而模型又必须能把它稳定地搬进工具参数与快照文本里。
+ */
+const PRIORITY_LABEL: Record<string, string> = { low: "低", normal: "普通", high: "高" };
+
+/** 一次最多派几件（d.270）：再多就该拆成两次，否则参数一长模型容易漏字段。 */
+const TEAM_TASK_BATCH_MAX = 8;
+
+/** 讨论一次最多展开几条 / 单条最多展开多少字（d.271）：留言是补充信息，不该挤掉任务本身。 */
+const COMMENT_TEXT_MAX = 10;
+const COMMENT_CLIP = 200;
+const PRIORITY_SET = new Set(Object.keys(PRIORITY_LABEL));
+
 /** 成员角色：owner 叫「队长」，避免和任务的「负责人」撞词。 */
 const ROLE_LABEL: Record<string, string> = { owner: "队长", member: "成员" };
 
-/** 把快照压成模型可读的文本：带 id（后续工具要用）、按方案/任务/成员分组。 */
 /**
  * 快照里单条「说明」最多显示多少字。
  *
@@ -465,6 +722,87 @@ function clipDetail(text: string): string {
   return flat.length > SNAPSHOT_DETAIL_MAX ? `${flat.slice(0, SNAPSHOT_DETAIL_MAX)}…` : flat;
 }
 
+/** 讨论时间：本地「MM-DD HH:mm」，面板与工具结果同一套写法。 */
+function commentTime(iso: string): string {
+  return fmtLocalDateTime(iso).slice(5, 16);
+}
+
+/**
+ * 把一条任务下的讨论排成人话（d.271）。
+ *
+ * 最近 10 条、每条最多 200 字：留言多的时候优先给最新的，老的不占模型的上下文。
+ */
+function describeTaskComments(
+  task: TeamTask | null,
+  comments: TeamTaskComment[],
+  members: TeamWorkspaceSnapshot["members"],
+): string {
+  const head = task === null ? "任务讨论" : `「${task.title}」的讨论`;
+  if (comments.length === 0) return `${head}：还没有留言。有疑问就留一句，对方的智能体下一轮能看到。`;
+  const shown = comments.slice(-COMMENT_TEXT_MAX);
+  const lines = shown.map((comment) => {
+    const name =
+      members.find((m) => m.user.id === comment.authorId)?.user.displayName ?? comment.authorId;
+    const text = comment.text.length > COMMENT_CLIP ? `${comment.text.slice(0, COMMENT_CLIP)}…` : comment.text;
+    return `- ${name}（${commentTime(comment.createdAt)}）：${text}`;
+  });
+  const more = comments.length > shown.length ? `\n（还有 ${comments.length - shown.length} 条更早的没展开）` : "";
+  return `${head}（共 ${comments.length} 条）：\n${lines.join("\n")}${more}`;
+}
+
+const EVENT_CLIP = 160;
+const EVENT_KIND_LABEL: Record<TeamEvent["kind"], string> = {
+  task_added: "派活",
+  task_updated: "改动",
+  task_removed: "删任务",
+  task_comment: "留言",
+  plan_added: "新方案",
+  plan_updated: "改方案",
+  plan_removed: "删方案",
+  member_added: "加人",
+  member_removed: "移人",
+  owner_transferred: "换队长",
+};
+
+/**
+ * 把团队动态排成人话（d.273）。
+ *
+ * 只给最近若干条、每条截断：动态可能很长，而模型要的是「刚刚发生了什么」，
+ * 不是完整审计日志（审计请去服务端库）。
+ */
+function describeTeamEvents(
+  events: TeamEvent[],
+  members: TeamWorkspaceSnapshot["members"],
+): string {
+  if (events.length === 0) {
+    return "团队动态：还没有记录。派活、改状态、催办、验收、留言、改方案、加人/移人都会记一条。";
+  }
+  const lines = events.map((event) => {
+    const name = members.find((m) => m.user.id === event.actorId)?.user.displayName ?? event.actorId;
+    const text = event.summary.length > EVENT_CLIP ? `${event.summary.slice(0, EVENT_CLIP)}…` : event.summary;
+    return `- ${commentTime(event.createdAt)} · ${name}【${EVENT_KIND_LABEL[event.kind]}】${text}`;
+  });
+  return `团队动态（最近 ${events.length} 条，新的在前）：\n${lines.join("\n")}`;
+}
+
+/** 单件任务的历史（d.276）：只回这一条活的流水。 */
+function describeTaskHistory(
+  taskTitle: string,
+  events: TeamEvent[],
+  members: TeamWorkspaceSnapshot["members"],
+): string {
+  if (events.length === 0) {
+    return `「${taskTitle}」还没有历史：派活、改状态、催办、验收、留言都会记一条。`;
+  }
+  const lines = events.map((event) => {
+    const name = members.find((m) => m.user.id === event.actorId)?.user.displayName ?? event.actorId;
+    const text = event.summary.length > EVENT_CLIP ? `${event.summary.slice(0, EVENT_CLIP)}…` : event.summary;
+    return `- ${commentTime(event.createdAt)} · ${name}【${EVENT_KIND_LABEL[event.kind]}】${text}`;
+  });
+  return `「${taskTitle}」的历史（最近 ${events.length} 条，新的在前）：\n${lines.join("\n")}`;
+}
+
+/** 把快照压成模型可读的文本：带 id（后续工具要用）、按方案/任务/成员分组。 */
 export function formatTeamSnapshot(s: TeamWorkspaceSnapshot): string {
   const { team, members, plans, tasks } = s;
   const nameOf = (userId: string | null): string => {
@@ -473,6 +811,11 @@ export function formatTeamSnapshot(s: TeamWorkspaceSnapshot): string {
     return m ? `${m.user.displayName}（${m.user.username}）` : userId;
   };
   const lines: string[] = [];
+  /*
+   * 成员负载（d.264）：派活前先看清「谁手上还有活」。
+   * 只数未完成的（已完成不构成压力），逾期单独说；口径与团队简报（d.256）一致。
+   */
+  const loads = memberLoads(tasks, Date.now());
   lines.push(`团队：${team.name}（teamId：${team.id}）`);
   if (team.goal.trim()) lines.push(`目标：${team.goal.trim()}`);
   else lines.push("目标：（还没写）");
@@ -482,7 +825,7 @@ export function formatTeamSnapshot(s: TeamWorkspaceSnapshot): string {
   members.forEach((m, i) => {
     lines.push(
       `- ${i + 1}. ${m.user.displayName}（@${m.user.username}，userId：${m.user.id}）· ` +
-        `${ROLE_LABEL[m.role] ?? m.role}`,
+        `${ROLE_LABEL[m.role] ?? m.role} · 手上${describeLoad(loadOf(loads, m.user.id))}`,
     );
   });
   lines.push("");
@@ -517,10 +860,38 @@ export function formatTeamSnapshot(s: TeamWorkspaceSnapshot): string {
   return lines.join("\n");
 }
 
+/**
+ * 派活之后的一句话：这个人手上现在有多少活（d.264）。
+ *
+ * 派活是不可逆的分配动作：模型通常只看「谁合适」，不看「谁还有空」。
+ * 把负载摆在工具结果里（而不是另起一轮提示词），它下一次派活时才知道要分散。
+ */
+function assigneeLoadNote(snap: TeamWorkspaceSnapshot, assigneeId: string | null): string {
+  const member = snap.members.find((m) => m.user.id === assigneeId);
+  const name =
+    member === undefined ? "对方" : `${member.user.displayName}（@${member.user.username}）`;
+  return describeAssigneeLoad(name, loadOf(memberLoads(snap.tasks, Date.now()), assigneeId));
+}
+
 function formatPlan(plan: TeamPlanItem): string {
   return `已新增方案项「${plan.title}」（planId：${plan.id}，状态：${
     STATUS_LABEL[plan.status] ?? plan.status
   }）。`;
+}
+
+const REVIEW_LABEL: Record<string, string> = {
+  pending: "待验收",
+  approved: "已验收",
+  changes: "打回重做",
+};
+
+/** 验收状态只在「已完成」的任务上才有意义；老任务缺省 pending。 */
+function reviewSuffix(task: TeamTask): string {
+  if (task.status !== "done") return "";
+  const state = task.reviewState ?? "pending";
+  const label = REVIEW_LABEL[state] ?? state;
+  const note = (task.reviewNote ?? "").trim();
+  return note === "" ? `，验收：${label}` : `，验收：${label}（${note}）`;
 }
 
 function formatTask(task: TeamTask, members: TeamWorkspaceSnapshot["members"]): string {
@@ -530,7 +901,7 @@ function formatTask(task: TeamTask, members: TeamWorkspaceSnapshot["members"]): 
   return (
     `已创建任务「${task.title}」（taskId：${task.id}，状态：${
       STATUS_LABEL[task.status] ?? task.status
-    }，负责人：${assignee}）。`
+    }，优先级：${PRIORITY_LABEL[task.priority ?? "normal"] ?? "普通"}，负责人：${assignee}${reviewSuffix(task)}）。`
   );
 }
 
@@ -561,6 +932,22 @@ async function write(op: () => Promise<string>): Promise<{ text: string; ok: boo
     if (interrupted) return { text: interrupted, ok: false };
     return { text: failText("团队操作失败", e), ok: false };
   }
+}
+
+/** 按 username（不区分大小写、允许带 @）在快照里找人；找不到返回 null。 */
+function findMemberByUsername(
+  snap: TeamWorkspaceSnapshot,
+  username: string,
+): TeamWorkspaceSnapshot["members"][number] | null {
+  const wanted = username.trim().replace(/^@/, "").toLowerCase();
+  if (!wanted) return null;
+  return snap.members.find((m) => m.user.username.toLowerCase() === wanted) ?? null;
+}
+
+/** 成员名单一行文本（给模型看「现在都有谁」）；空团队写「（空）」。 */
+function memberListText(snap: TeamWorkspaceSnapshot): string {
+  if (snap.members.length === 0) return "（空）";
+  return snap.members.map((m) => `${m.user.displayName}（@${m.user.username}）`).join("、");
 }
 
 /** 按 teamId 或 name 解析团队；两者都没给/找不到时给出下一步指引。 */
@@ -664,6 +1051,126 @@ export function buildTeamToolBridge(): ToolBridge {
             const sources: ToolSource[] = [{ id: snap.team.id, title: `团队：${snap.team.name}` }];
             return { text: formatTeamSnapshot(snap), ok: true, sources };
           }
+          case "team_task_find": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const statusText = argStr(args, "status").toLowerCase();
+            const status =
+              statusText === "done" || statusText === "all" ? statusText : ("open" as const);
+            const assigneeText = argStr(args, "assignee");
+            let assigneeId: string | null | undefined;
+            if (assigneeText) {
+              const wanted = assigneeText.replace(/^@/, "").toLowerCase();
+              const member = snap.members.find(
+                (m) =>
+                  m.user.username.toLowerCase() === wanted ||
+                  m.user.displayName.toLowerCase() === wanted,
+              );
+              if (!member) {
+                return {
+                  text: `团队里没有叫「${assigneeText}」的成员。当前成员：${memberListText(snap)}。`,
+                  ok: false,
+                };
+              }
+              assigneeId = member.user.id;
+            }
+            const limitText = argStr(args, "limit");
+            const limit = limitText === "" ? FIND_TASK_LIMIT_DEFAULT : Number(limitText);
+            if (!Number.isFinite(limit) || limit < 1) {
+              return { text: `limit 要给数字（1–${FIND_TASK_LIMIT_MAX}）。`, ok: false };
+            }
+            const result = findTeamTasks({
+              tasks: snap.tasks,
+              ...(argStr(args, "query") ? { query: argStr(args, "query") } : {}),
+              ...(assigneeId !== undefined ? { assigneeId } : {}),
+              status,
+              overdue: argBool(args, "overdue"),
+              limit,
+            });
+            const nameOf = (id: string) =>
+              snap.members.find((m) => m.user.id === id)?.user.displayName ?? id;
+            return {
+              text: describeFindResult(result, {
+                query: argStr(args, "query"),
+                memberName: nameOf,
+                limit: FIND_TASK_LIMIT_MAX,
+              }),
+              ok: true,
+              sources: [{ id: snap.team.id, title: `团队：${snap.team.name}` }],
+            };
+          }
+          case "team_task_comments": {
+            const teamId = argStr(args, "teamId");
+            const taskId = argStr(args, "taskId");
+            if (!teamId) return { text: "team_id 不能为空；不知道就先调用 team_list。", ok: false };
+            if (!taskId) return { text: "task_id 不能为空：先从 team_get 的 tasks 里拿。", ok: false };
+            const snapshot = await fetchWorkspaceTeam(teamId, request);
+            const task = snapshot.tasks.find((item) => item.id === taskId);
+            if (!task) {
+              return { text: `这个团队里没有任务 ${taskId}（用 team_get 看完整清单）。`, ok: false };
+            }
+            const list = await fetchTeamTaskComments(teamId, taskId, request);
+            return { text: describeTaskComments(task, list.comments, snapshot.members), ok: true };
+          }
+
+          case "team_events": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const limitText = argStr(args, "limit");
+            const limit = limitText === "" ? 20 : Number(limitText);
+            if (!Number.isFinite(limit) || limit < 1 || limit > 50) {
+              return { text: "limit 要给 1–50 之间的数字。", ok: false };
+            }
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const data = await fetchTeamEvents(resolved.id, request, Math.trunc(limit));
+            return {
+              text: describeTeamEvents(data.events, snap.members),
+              ok: true,
+              sources: [{ id: snap.team.id, title: `团队：${snap.team.name}` }],
+            };
+          }
+          case "team_task_history": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const taskId = argStr(args, "taskId");
+            if (taskId === "") return { text: "要给 task_id（从 team_get 的 tasks 里拿）。", ok: false };
+            const limitText = argStr(args, "limit");
+            const limit = limitText === "" ? 20 : Number(limitText);
+            if (!Number.isFinite(limit) || limit < 1 || limit > 50) {
+              return { text: "limit 要给 1–50 之间的数字。", ok: false };
+            }
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const task = snap.tasks.find((t) => t.id === taskId);
+            if (!task) {
+              return { text: `这个团队里没有任务 ${taskId}（用 team_get 看完整清单）。`, ok: false };
+            }
+            const data = await fetchTeamEvents(resolved.id, request, Math.trunc(limit), taskId);
+            return {
+              text: describeTaskHistory(task.title, data.events, snap.members),
+              ok: true,
+              sources: [{ id: task.id, title: `任务：${task.title}` }],
+            };
+          }
+          case "team_digest": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const daysText = argStr(args, "days");
+            const days = daysText === "" ? DIGEST_DEFAULT_DAYS : Number(daysText);
+            if (!Number.isFinite(days) || days < 1 || days > DIGEST_MAX_DAYS) {
+              return { text: `days 要给 1–${DIGEST_MAX_DAYS} 之间的数字。`, ok: false };
+            }
+            const nameOf = (id: string) => {
+              const member = snap.members.find((m) => m.user.id === id);
+              return member ? `${member.user.displayName}（@${member.user.username}）` : id;
+            };
+            return {
+              text: buildTeamDigest(snap, { days, memberName: nameOf }),
+              ok: true,
+              sources: [{ id: snap.team.id, title: `团队：${snap.team.name}` }],
+            };
+          }
           case "team_create": {
             const name = argStr(args, "name");
             if (!name) return { text: "name 不能为空：请给团队起个名字（最多 40 字）。", ok: false };
@@ -708,6 +1215,109 @@ export function buildTeamToolBridge(): ToolBridge {
               return `已把 @${username} 加入团队「${snap.team.name}」。当前成员 ${snap.members.length} 人：${names.join("、")}。`;
             });
           }
+          case "team_task_nudge": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const taskId = argStr(args, "taskId");
+            if (!taskId) return { text: "task_id 不能为空（用 team_get 看任务 id）。", ok: false };
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const target = snap.tasks.find((t) => t.id === taskId);
+            if (!target) return { text: `这个团队里没有任务 ${taskId}（用 team_get 看完整清单）。`, ok: false };
+            return write(async () => {
+              const after = await updateTeamTask(resolved.id, taskId, { nudge: true }, request);
+              const times = after.nudgeCount ?? 1;
+              return `已催办「${after.title}」：这是第 ${times} 次。对方和它的智能体下一轮会看到这条提醒；任务板上也会显示「谁催的、什么时候」。`;
+            });
+          }
+          case "team_task_review": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const taskId = argStr(args, "taskId");
+            if (!taskId) return { text: "task_id 不能为空（用 team_get 看任务 id）。", ok: false };
+            const verdict = argStr(args, "verdict");
+            if (verdict !== "approve" && verdict !== "changes") {
+              return { text: "verdict 只能是 approve（通过）或 changes（打回重做）。", ok: false };
+            }
+            const note = argStr(args, "note");
+            if (verdict === "changes" && (!note || note.trim() === "")) {
+              return { text: "打回重做要写一句原因（note），让做的人知道要改什么。", ok: false };
+            }
+            return write(async () => {
+              const after = await updateTeamTask(
+                resolved.id,
+                taskId,
+                { review: verdict, ...(note ? { reviewNote: note } : {}) },
+                request,
+              );
+              if (verdict === "approve") {
+                return `已验收通过「${after.title}」${note ? `：${note}` : "。"}任务保持已完成。`;
+              }
+              return `已把「${after.title}」打回重做：${after.reviewNote ?? note ?? ""}。任务状态已回到「进行中」，上一版结论还留着；对方下一轮会看到这条意见。`;
+            });
+          }
+          case "team_member_remove": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const username = argStr(args, "username");
+            if (!username) return { text: "username 不能为空（用用户名，不是显示名）。", ok: false };
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const target = findMemberByUsername(snap, username);
+            if (!target) {
+              return {
+                text: `团队里没有 @${username}。当前成员：${memberListText(snap)}。`,
+                ok: false,
+              };
+            }
+            if (snap.team.ownerId === target.user.id) {
+              return {
+                text: "不能把队长移出团队：要么先用 team_owner_transfer 把队长转给别人，要么解散团队。",
+                ok: false,
+              };
+            }
+            return write(async () => {
+              const after = await removeWorkspaceMember(resolved.id, target.user.id, request);
+              return `已把 ${target.user.displayName}（@${target.user.username}）移出团队「${after.team.name}」。当前成员 ${after.members.length} 人：${memberListText(after)}。`;
+            });
+          }
+          case "team_owner_transfer": {
+            const resolved = await resolveTeamId(args, request);
+            if ("error" in resolved) return { text: resolved.error, ok: false };
+            const username = argStr(args, "username");
+            if (!username) return { text: "username 不能为空（用用户名，不是显示名）。", ok: false };
+            const snap = await fetchWorkspaceTeam(resolved.id, request);
+            const target = findMemberByUsername(snap, username);
+            if (!target) {
+              return {
+                text: `团队里没有 @${username}。当前成员：${memberListText(snap)}。`,
+                ok: false,
+              };
+            }
+            if (snap.team.ownerId === target.user.id) {
+              return { text: `@${username} 已经是队长了，不用转让。`, ok: false };
+            }
+            return write(async () => {
+              const after = await transferWorkspaceTeamOwner(resolved.id, target.user.id, request);
+              return `队长已转让给 ${target.user.displayName}（@${target.user.username}）。你现在是普通成员：还能看团队、认领任务，但不能再加人、派活或删除。`;
+            });
+          }
+          case "team_task_comment": {
+            const teamId = argStr(args, "teamId");
+            const taskId = argStr(args, "taskId");
+            const text = argStr(args, "text");
+            if (!teamId) return { text: "team_id 不能为空；不知道就先调用 team_list。", ok: false };
+            if (!taskId) return { text: "task_id 不能为空：先从 team_get 的 tasks 里拿。", ok: false };
+            if (!text) return { text: "要留的话不能为空：说清在问什么、或补充什么约束。", ok: false };
+            return write(async () => {
+              const comment = await createTeamTaskComment(teamId, taskId, text, request);
+              const snapshot = await fetchWorkspaceTeam(teamId, request).catch(() => null);
+              const task = snapshot?.tasks.find((item) => item.id === taskId);
+              const line = snapshot === null
+                ? ""
+                : `\n${describeTaskComments(task ?? null, [comment], snapshot.members)}`;
+              return `已在任务下留言（id：${comment.id}）。对方的智能体下一轮在「团队任务」里能看到；留言只能追加，谁也不能改别人写的话。` + line;
+            });
+          }
+
           case "team_plan_add": {
             const teamId = argStr(args, "teamId");
             const title = argStr(args, "title");
@@ -773,14 +1383,106 @@ export function buildTeamToolBridge(): ToolBridge {
           }
           case "team_task_add": {
             const teamId = argStr(args, "teamId");
-            const title = argStr(args, "title");
             if (!teamId) return { text: "team_id 不能为空；不知道就先调用 team_list。", ok: false };
-            if (!title) return { text: "title 不能为空：请写清要做什么（最多 120 字）。", ok: false };
+            const title = argStr(args, "title");
+            const batch = argObjArray(args, "tasks");
+            const planId = argOptStr(args, "planId");
+            const sharedAttachment = argOptStr(args, "attachmentFileId");
+            if (batch.length > 0 && title) {
+              return {
+                text: "title 和 tasks 只能二选一：派一件就给 title，派多件就给 tasks（每件里写 title）。",
+                ok: false,
+              };
+            }
+            if (batch.length > TEAM_TASK_BATCH_MAX) {
+              return {
+                text: `一次最多派 ${TEAM_TASK_BATCH_MAX} 件；这次给了 ${batch.length} 件，请拆成两次派。`,
+                ok: false,
+              };
+            }
+            if (batch.length === 0 && !title) {
+              return {
+                text: "title 不能为空：请写清要做什么（最多 120 字）；要一次派多件就改用 tasks。",
+                ok: false,
+              };
+            }
             const detail = argOptStr(args, "detail");
             const assigneeId = argOptStr(args, "assigneeId");
-            const planId = argOptStr(args, "planId");
             const dueAt = argOptStr(args, "dueAt");
-            const attachmentFileId = argOptStr(args, "attachmentFileId");
+            const attachmentFileId = sharedAttachment;
+            const priority = argStr(args, "priority");
+            if (priority && !PRIORITY_SET.has(priority)) {
+              return { text: "priority 不合法：只能是 low / normal / high。", ok: false };
+            }
+            // 多件模式（d.270）：逐件建，但一次调用、一份回执；失败的件如实点名，
+            // 不因为中间一件失败就把前面已经建好的藏着不说。
+            if (batch.length > 0) {
+              const seen: string[] = [];
+              const created: string[] = [];
+              let failed = 0;
+              return write(async () => {
+                for (let index = 0; index < batch.length; index += 1) {
+                  const item = batch[index]!;
+                  const itemTitle = typeof item.title === "string" ? item.title.trim() : "";
+                  if (itemTitle === "") {
+                    failed += 1;
+                    seen.push(`- 第 ${index + 1} 件：没有 title，跳过了`);
+                    continue;
+                  }
+                  const itemPriority = typeof item.priority === "string" ? item.priority.trim() : "";
+                  if (itemPriority !== "" && !PRIORITY_SET.has(itemPriority)) {
+                    failed += 1;
+                    seen.push(`- 第 ${index + 1} 件「${itemTitle}」：priority 不合法（只能是 low / normal / high）`);
+                    continue;
+                  }
+                  try {
+                    const task = await createTeamTask(
+                      teamId,
+                      {
+                        title: itemTitle,
+                        ...(typeof item.detail === "string" && item.detail.trim() !== ""
+                          ? { detail: item.detail.trim() }
+                          : {}),
+                        ...(typeof item.assigneeId === "string" && item.assigneeId.trim() !== ""
+                          ? { assigneeId: item.assigneeId.trim() }
+                          : {}),
+                        ...(planId ? { planId } : {}),
+                        ...(typeof item.dueAt === "string" && item.dueAt.trim() !== ""
+                          ? { dueAt: item.dueAt.trim() }
+                          : {}),
+                        ...(attachmentFileId ? { attachmentFileId } : {}),
+                        ...(itemPriority
+                          ? { priority: itemPriority as "low" | "normal" | "high" }
+                          : {}),
+                      },
+                      request,
+                    );
+                    created.push(`- #${index + 1} ${task.title}（${task.id}）`);
+                  } catch (error) {
+                    failed += 1;
+                    const reason = error instanceof Error ? error.message : "未知原因";
+                    seen.push(`- 第 ${index + 1} 件「${itemTitle}」没建成：${reason}`);
+                  }
+                }
+                if (created.length === 0) {
+                  return `一件都没建成：\n${seen.join("\n")}`;
+                }
+                const head = failed === 0 ? `已派 ${created.length} 件任务：` : `派了 ${created.length} 件，另有 ${failed} 件没成：`;
+                const lines = [head, ...created, ...seen];
+                const snap = await fetchWorkspaceTeam(teamId, request).catch(() => null);
+                if (snap !== null) {
+                  const names = [
+                    ...new Set(
+                      batch
+                        .map((item) => (typeof item.assigneeId === "string" ? item.assigneeId.trim() : ""))
+                        .filter((value) => value !== ""),
+                    ),
+                  ];
+                  for (const userId of names) lines.push(assigneeLoadNote(snap, userId));
+                }
+                return lines.join("\n");
+              });
+            }
             return write(async () => {
               const task = await createTeamTask(
                 teamId,
@@ -791,13 +1493,16 @@ export function buildTeamToolBridge(): ToolBridge {
                   ...(planId ? { planId } : {}),
                   ...(dueAt ? { dueAt } : {}),
                   ...(attachmentFileId ? { attachmentFileId } : {}),
+                  ...(priority ? { priority: priority as "low" | "normal" | "high" } : {}),
                 },
                 request,
               );
               // 指派了人时顺带确认它确实是成员，便于模型下一步引用。
               if (!task.assigneeId) return formatTask(task, []);
               const snap = await fetchWorkspaceTeam(teamId, request).catch(() => null);
-              return formatTask(task, snap?.members ?? []);
+              const base = formatTask(task, snap?.members ?? []);
+              // d.264：把「这个人手上现在有多少活」摆在派活结果里，下一次派活才知道要分散。
+              return snap === null ? base : `${base}\n${assigneeLoadNote(snap, task.assigneeId)}`;
             });
           }
           case "team_task_update": {
@@ -812,6 +1517,14 @@ export function buildTeamToolBridge(): ToolBridge {
             const planId = argOptStr(args, "planId");
             const dueAt = argOptStr(args, "dueAt");
             const attachmentFileId = argOptStr(args, "attachmentFileId");
+            const result = argOptStr(args, "result");
+            const returnNote = argOptStr(args, "returnNote");
+            const progress = argOptStr(args, "progress");
+            const priority = argStr(args, "priority");
+            if (priority && !PRIORITY_SET.has(priority)) {
+              return { text: "priority 不合法：只能是 low / normal / high。", ok: false };
+            }
+            const returning = assigneeId === "";
             if (status && !STATUS_SET.has(status)) {
               return {
                 text: `status 不合法：只能是 ${[...STATUS_SET].join(" / ")}（收到「${status}」）。`,
@@ -825,10 +1538,20 @@ export function buildTeamToolBridge(): ToolBridge {
               assigneeId !== undefined ||
               planId !== undefined ||
               dueAt !== undefined ||
-              attachmentFileId !== undefined;
+              attachmentFileId !== undefined ||
+              result !== undefined ||
+              returnNote !== undefined ||
+              !!priority ||
+              progress !== undefined;
             if (!changed) {
               return {
-                text: "没有要修改的字段：至少提供 status / assigneeId / title / detail / dueAt / planId / attachmentFileId 之一。",
+                text: "没有要修改的字段：至少提供 status / assigneeId / title / detail / dueAt / planId / attachmentFileId / result / returnNote / progress 之一。",
+                ok: false,
+              };
+            }
+            if (status === "done" && result === undefined) {
+              return {
+                text: "标完成前请用 result 写一句结论（做成什么样、怎么验证的）；团队里的其他人只看到状态，看不到你的过程。",
                 ok: false,
               };
             }
@@ -846,12 +1569,25 @@ export function buildTeamToolBridge(): ToolBridge {
                   ...(attachmentFileId !== undefined
                     ? { attachmentFileId: attachmentFileId || null }
                     : {}),
+                  ...(result !== undefined ? { result } : {}),
+                  ...(returnNote !== undefined ? { returnNote } : {}),
+                  ...(progress !== undefined ? { progress } : {}),
+                  ...(priority ? { priority: priority as "low" | "normal" | "high" } : {}),
                 },
                 request,
               );
-              return `已更新任务「${task.title}」（taskId：${task.id}，状态：${
+              if (returning) {
+                return `已把「${task.title}」退回待认领（taskId：${task.id}）${returnNote ? "，原因：" + returnNote : "（没写原因，建议下次说明为什么做不了）"}。组长和其他成员会在待认领里看到，并知道这是被退回的。`;
+              }
+              const base = `已更新任务「${task.title}」（taskId：${task.id}，状态：${
                 STATUS_LABEL[task.status] ?? task.status
               }）。`;
+              // 改派给别人时（d.264）：把新负责人手上的负载说清，避免「一直逮着一个人派」。
+              if (assigneeId !== undefined && assigneeId !== "") {
+                const snap = await fetchWorkspaceTeam(teamId, request).catch(() => null);
+                if (snap !== null) return `${base}\n${assigneeLoadNote(snap, task.assigneeId)}`;
+              }
+              return base;
             });
           }
           default:

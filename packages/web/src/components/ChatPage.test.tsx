@@ -206,6 +206,10 @@ function mockMessagesFetch(
     contentFail?: boolean;
     /** 附件上传（POST /api/files）的返回体；不配则维持 404（多数用例不上传）。 */
     uploadMeta?: unknown;
+    /** `/api/team/my-tasks` 的返回体（d.259「我的任务」）。不配则 404。 */
+    teamTasks?: unknown[];
+    /** `/api/team/my-tasks` 里「队里待认领」那一段（d.260）；与 teamTasks 一起用。 */
+    teamClaimable?: unknown[];
   } = {},
 ) {
   let m = 0;
@@ -241,6 +245,10 @@ function mockMessagesFetch(
         blob: async () => new Blob(["bin"]),
       } as unknown as Response);
     }
+    if (url === "/api/team/my-tasks" && conv.teamTasks !== undefined)
+      return Promise.resolve(
+        jsonRes({ tasks: conv.teamTasks, ...(conv.teamClaimable ? { claimable: conv.teamClaimable } : {}) }),
+      );
     if (url === "/api/files" && conv.uploadMeta !== undefined)
       return Promise.resolve(jsonRes(conv.uploadMeta, 201));
     return Promise.resolve(jsonRes({ error: "not found" }, 404));
@@ -306,7 +314,12 @@ function bindAssistant() {
  */
 async function setupAgentChat(
   history: Message[] = [],
-  conv: { contentFail?: boolean; uploadMeta?: unknown } = {},
+  conv: {
+    contentFail?: boolean;
+    uploadMeta?: unknown;
+    teamTasks?: unknown[];
+    teamClaimable?: unknown[];
+  } = {},
 ) {
   const send = vi.fn();
   vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
@@ -1026,7 +1039,8 @@ describe("ChatPage", () => {
     });
 
     expect(screen.getByText(/你好/)).toBeInTheDocument(); // 累积而非单段
-    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0); // 标题/气泡署名
+    // d.248：气泡里不再显示名字，只留生成状态（名字仍可能出现在顶栏，所以只断言状态行）。
+    expect(screen.getByText("生成中…")).toBeInTheDocument();
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 非本机流不占「生成中」行
     expect(useChatStore.getState().streaming["remote-1"]?.text).toBe("你好");
 
@@ -6874,15 +6888,89 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     const jump = await screen.findByRole("button", { name: "滚动到最新消息" });
     expect(jump.parentElement).toBe(shell);
 
-    // ② 助手署名可省略：长名字不能把右端的时间挤出这一行（表现为「叠在一起」）。
-    const names = Array.from(list.querySelectorAll("span")).filter(
-      (node) => node.textContent === "和小鸣",
+    // ② d.248：气泡里不再显示「我」/智能体名（名字在同一段对话里是恒定信息，
+    //    每条都重复只会挤占正文宽度）；消息区里既没有「我」也没有智能体名。
+    const visibleNames = Array.from(list.querySelectorAll("span")).filter(
+      (node) => node.textContent === "和小鸣" || node.textContent === "我",
     );
-    expect(names.length).toBeGreaterThan(0);
-    for (const node of names) expect(node.className).toContain("truncate");
+    expect(visibleNames).toHaveLength(0);
 
     // ③ 动作行会换行：窄窗口里安全范围 / 计划 / 模型不会被挤出可视区。
     expect(screen.getByTestId("composer-actions").className).toContain("flex-wrap");
+  });
+
+  it("I5g 新建的会话只渲染自己的消息：桶里混进别的会话的记录也不显示（d.248）", async () => {
+    mockMessagesFetch([]);
+    // 故意制造脏数据：c2 的桶里混着一条属于 c1 的消息。
+    const foreign = { ...agentMsg("a-foreign", "上一段对话的记录", "2026-10-14T01:00:00.000Z"), conversationId: "c1" };
+    useChatStore.setState({
+      messages: { c2: [foreign] },
+      messagesLoading: {},
+      messagesError: {},
+    });
+    useUiStore.setState({ page: "chat", activeConversationId: "c2" });
+
+    render(<ChatPage />);
+
+    // 新的会话里不该出现任何别的会话的内容（哪怕存储层写错了桶）。
+    expect(await screen.findByText(/还没有消息|开始对话/)).toBeInTheDocument();
+    expect(screen.queryByText("上一段对话的记录")).toBeNull();
+  });
+
+  it("I5h 我的任务（d.259）：点一下把派到我名下的团队任务发给和鸣", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    mockMessagesFetch([], undefined, {
+      teamTasks: [
+        {
+          teamId: "t1",
+          teamName: "产品组",
+          task: {
+            id: "k1",
+            title: "整理接口文档",
+            detail: "把 v2 的接口整理成一份 md",
+            status: "todo",
+            dueAt: null,
+            assigneeId: "u2",
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "我的任务" }));
+    fireEvent.click(await screen.findByTestId("my-task-k1"));
+
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalled());
+    const rows = vi.mocked(streamChat).mock.calls.at(-1)![1];
+    const text = rows.map((r) => String(r.content ?? "")).join("\n");
+    expect(text).toContain("请接着做这条团队任务");
+    expect(text).toContain("整理接口文档");
+    expect(text).toContain("k1");
+  });
+
+  it("I5i 我的任务角标（d.263）：派到名下与待认领分开数，都写进按钮名字", async () => {
+    const assignedTask = (id: string, title: string) => ({
+      teamId: "t1",
+      teamName: "产品组",
+      task: { id, title, detail: "", status: "todo", dueAt: null, assigneeId: "u2" },
+    });
+    await setupAgentChat([], {
+      teamTasks: [assignedTask("k1", "整理接口文档"), assignedTask("k2", "补设计稿")],
+      teamClaimable: [assignedTask("k3", "谁接都行")],
+    });
+
+    // 角标是视觉提示（aria-hidden），数量必须同时出现在按钮名字里。
+    expect(await screen.findByTestId("my-task-badge")).toHaveTextContent("3");
+    expect(
+      screen.getByRole("button", { name: "我的任务：2 项待办 · 1 项可接" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("I5j 我的任务角标（d.263）：没有活时不显示角标", async () => {
+    await setupAgentChat([], { teamTasks: [] });
+
+    expect(screen.queryByTestId("my-task-badge")).toBeNull();
+    expect(screen.getByRole("button", { name: "我的任务" })).toBeInTheDocument();
   });
 
 });

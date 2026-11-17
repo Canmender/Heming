@@ -17,7 +17,11 @@ import type {
   TeamMemberRole,
   TeamPlanItem,
   TeamTask,
+  TeamTaskComment,
+  TeamEvent,
+  TeamTaskReviewState,
   TeamWorkspaceSnapshot,
+  TeamBrief,
   WorkspaceTeam,
 } from "@heming/shared";
 import type {
@@ -27,6 +31,7 @@ import type {
   Store,
   TeamUsageRow,
 } from "./store.js";
+import { summarizeTeamTasks } from "./teamCounts.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
 
@@ -60,6 +65,26 @@ function rowToAgent(r: AgentRow): Agent {
     avatar: r.avatar ?? null,
     description: r.description,
   };
+}
+
+interface TeamEventRow {
+  id: string;
+  team_id: string;
+  task_id: string | null;
+  task_title: string;
+  actor_id: string;
+  kind: string;
+  summary: string;
+  created_at: string;
+}
+
+interface TeamTaskCommentRow {
+  id: string;
+  team_id: string;
+  task_id: string;
+  author_id: string;
+  text: string;
+  created_at: string;
 }
 
 export function createSqliteStore(dbPath: string): SqliteStore {
@@ -307,6 +332,41 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     updated_at: string;
     due_at: string | null;
     attachment_file_id: string | null;
+    /** d.252：交付结论（旧库迁移后为 ""）。 */
+    result?: string | null;
+    /** d.252：完成时刻与完成者（旧库迁移后为 null）。 */
+    completed_at?: string | null;
+    completed_by?: string | null;
+    /** d.255：前置任务 id 的 JSON 数组（旧库迁移后为 "[]"）。 */
+    blocked_by?: string | null;
+    /** d.261：退回原因、退回时刻、退回人（旧库迁移后为 ''/null）。 */
+    return_note?: string | null;
+  progress?: string | null;
+  progress_at?: string | null;
+  progress_by?: string | null;
+    nudged_at?: string | null;
+    nudged_by?: string | null;
+    nudge_count?: number | null;
+  review_state?: string | null;
+  review_note?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+    returned_at?: string | null;
+    returned_by?: string | null;
+  };
+
+  /** 解析 blocked_by 列（坏数据一律当空，不让一条脏记录毁掉整个任务列表）。 */
+  const parseBlockedBy = (raw: string | null | undefined): string[] => {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .slice(0, 5);
+    } catch {
+      return [];
+    }
   };
   const rowToTask = (r: TaskRow): TeamTask => ({
     id: r.id,
@@ -321,7 +381,57 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     updatedAt: r.updated_at,
     dueAt: r.due_at ?? null,
     attachmentFileId: r.attachment_file_id ?? null,
+    result: r.result ?? "",
+    completedAt: r.completed_at ?? null,
+    completedBy: r.completed_by ?? null,
+    blockedBy: parseBlockedBy(r.blocked_by),
+    returnNote: r.return_note ?? "",
+  progress: r.progress ?? "",
+  progressAt: r.progress_at ?? null,
+  progressBy: r.progress_by ?? null,
+    nudgedAt: r.nudged_at ?? null,
+    nudgedBy: r.nudged_by ?? null,
+    nudgeCount: r.nudge_count ?? 0,
+    // 验收（d.272）：老库没有这一列时按 pending 读。
+    reviewState: (r.review_state as TeamTaskReviewState) ?? "pending",
+    reviewNote: r.review_note ?? "",
+    reviewedAt: r.reviewed_at ?? null,
+    reviewedBy: r.reviewed_by ?? null,
+    returnedAt: r.returned_at ?? null,
+    returnedBy: r.returned_by ?? null,
   });
+
+  /**
+   * 校验任务依赖（d.255，与内存实现同口径）：前置必须同团队；不能依赖自己、不能成环。
+   * 只校验「依赖表达式」是否合法，不做「前置没完成就禁止开始」的硬阻断。
+   */
+  const validateBlockers = (
+    teamId: string,
+    taskId: string | null,
+    ids: readonly string[],
+  ): "blocker_not_found" | "blocker_cycle" | null => {
+    const clean = [...new Set(ids.map((id) => id.trim()).filter((id) => id.length > 0))];
+    for (const id of clean) {
+      const dep = db.prepare("SELECT team_id FROM team_tasks WHERE id = ?").get(id) as
+        | { team_id: string }
+        | undefined;
+      if (!dep || dep.team_id !== teamId) return "blocker_not_found";
+    }
+    if (taskId === null) return null;
+    const stack = [...clean];
+    const visited = new Set<string>();
+    while (stack.length > 0) {
+      const id = stack.pop() as string;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      if (id === taskId) return "blocker_cycle";
+      const row = db.prepare("SELECT blocked_by FROM team_tasks WHERE id = ?").get(id) as
+        | { blocked_by: string | null }
+        | undefined;
+      for (const b of parseBlockedBy(row?.blocked_by)) stack.push(b);
+    }
+    return null;
+  };
 
   const teamMemberRole = (teamId: string, userId: string): TeamMemberRole | null => {
     const row = db
@@ -331,6 +441,14 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   };
 
   /** 可见团队：存在且本人是成员；否则 null（app 层一律 404，不泄露存在性）。 */
+  /** 团队创建者即组长：只有组长能把任务派给别人（成员可自派 / 认领）。 */
+  const isTeamOwner = (teamId: string, userId: string): boolean => {
+    const row = db.prepare("SELECT owner_id FROM teams WHERE id = ?").get(teamId) as
+      | { owner_id: string }
+      | undefined;
+    return row?.owner_id === userId;
+  };
+
   const visibleTeam = (teamId: string, actorId: string): WorkspaceTeam | null => {
     const row = db.prepare("SELECT * FROM teams WHERE id = ?").get(teamId) as TeamRow | undefined;
     if (!row) return null;
@@ -1162,6 +1280,61 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         .all(userId) as TeamRow[];
       return rows.map(rowToTeam);
     },
+    listTeamBriefs(userId) {
+      const rows = db
+        .prepare(
+          `SELECT t.id AS team_id, t.name AS team_name, t.goal AS team_goal, t.owner_id,
+                  u.id AS user_id, u.display_name, m.role AS member_role
+           FROM teams t
+           JOIN team_members me ON me.team_id = t.id AND me.user_id = ?
+           JOIN team_members m ON m.team_id = t.id
+           JOIN users u ON u.id = m.user_id
+           ORDER BY t.updated_at DESC, t.id ASC, m.role ASC, u.display_name ASC`,
+        )
+        .all(userId) as {
+        team_id: string;
+        team_name: string;
+        team_goal: string;
+        owner_id: string;
+        user_id: string;
+        display_name: string;
+        member_role: TeamMemberRole;
+      }[];
+      const briefs = new Map<string, TeamBrief>();
+      for (const row of rows) {
+        let brief = briefs.get(row.team_id);
+        if (brief === undefined) {
+          brief = {
+            id: row.team_id,
+            name: row.team_name,
+            goal: row.team_goal,
+            ownerId: row.owner_id,
+            role: row.owner_id === userId ? "owner" : "member",
+            members: [],
+            counts: { open: 0, done: 0, overdue: 0, unassigned: 0, blocked: 0 },
+          };
+          briefs.set(row.team_id, brief);
+        }
+        brief.members.push({
+          id: row.user_id,
+          displayName: row.display_name,
+          role: row.member_role,
+          open: 0,
+        });
+      }
+      // d.256：概览按团队一次性算好（任务表按 team_id 查，团队数量很小）。
+      for (const brief of briefs.values()) {
+        const taskRows = db
+          .prepare("SELECT * FROM team_tasks WHERE team_id = ?")
+          .all(brief.id) as TaskRow[];
+        const summary = summarizeTeamTasks(taskRows.map(rowToTask));
+        brief.counts = summary.counts;
+        for (const member of brief.members) {
+          member.open = summary.perMember.get(member.id) ?? 0;
+        }
+      }
+      return [...briefs.values()];
+    },
     getWorkspaceTeam(teamId, userId) {
       return visibleTeam(teamId, userId) ? snapshotOf(teamId) : null;
     },
@@ -1354,6 +1527,64 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         return true;
       });
     },
+    listAssignedTeamTasks(userId) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, tm.name AS team_name FROM team_tasks t JOIN teams tm ON tm.id = t.team_id
+            WHERE t.assignee_id = ? AND t.status != 'done'
+            ORDER BY (t.due_at IS NULL), t.due_at ASC, t.updated_at ASC`,
+        )
+        .all(userId) as unknown as (TaskRow & { team_name: string })[];
+      const out = rows.map((row) => {
+        const task = rowToTask(row);
+        const openBlockers = (task.blockedBy ?? [])
+          .map(
+            (id) =>
+              db.prepare("SELECT id, title, status FROM team_tasks WHERE id = ?").get(id) as
+                | { id: string; title: string; status: string }
+                | undefined,
+          )
+          .filter(
+            (dep): dep is { id: string; title: string; status: string } =>
+              dep !== undefined && dep.status !== "done",
+          )
+          .map((dep) => ({ id: dep.id, title: dep.title }));
+        return { teamId: row.team_id, teamName: row.team_name, task, openBlockers };
+      });
+      // 能做的排前面（SQL 已按截止排序，这里只把「还轮不到」的往后挪）。
+      out.sort((a, b) => a.openBlockers.length - b.openBlockers.length);
+      return out;
+    },
+    listClaimableTeamTasks(userId) {
+      // 「我所在团队 + 没人认领 + 没完成」；JOIN team_members 保证只看得到自己的团队。
+      const rows = db
+        .prepare(
+          `SELECT t.*, tm.name AS team_name FROM team_tasks t
+             JOIN teams tm ON tm.id = t.team_id
+             JOIN team_members mem ON mem.team_id = t.team_id AND mem.user_id = ?
+            WHERE t.assignee_id IS NULL AND t.status != 'done'
+            ORDER BY (t.due_at IS NULL), t.due_at ASC, t.updated_at ASC`,
+        )
+        .all(userId) as unknown as (TaskRow & { team_name: string })[];
+      const out = rows.map((row) => {
+        const task = rowToTask(row);
+        const openBlockers = (task.blockedBy ?? [])
+          .map(
+            (id) =>
+              db.prepare("SELECT id, title, status FROM team_tasks WHERE id = ?").get(id) as
+                | { id: string; title: string; status: string }
+                | undefined,
+          )
+          .filter(
+            (dep): dep is { id: string; title: string; status: string } =>
+              dep !== undefined && dep.status !== "done",
+          )
+          .map((dep) => ({ id: dep.id, title: dep.title }));
+        return { teamId: row.team_id, teamName: row.team_name, task, openBlockers };
+      });
+      out.sort((a, b) => a.openBlockers.length - b.openBlockers.length);
+      return out;
+    },
     createTeamTask(teamId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
       if (body.planId) {
@@ -1363,12 +1594,20 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         if (!plan || plan.team_id !== teamId) return "plan_not_found";
       }
       if (body.assigneeId && !teamMemberRole(teamId, body.assigneeId)) return "assignee_not_member";
+      if (body.assigneeId && body.assigneeId !== actorId && !isTeamOwner(teamId, actorId)) {
+        return "not_leader";
+      }
+      const blockedBy = [
+        ...new Set((body.blockedBy ?? []).map((item) => item.trim()).filter((item) => item.length > 0)),
+      ];
+      const blockerError = validateBlockers(teamId, null, blockedBy);
+      if (blockerError !== null) return blockerError;
       const id = randomUUID();
       const at = new Date().toISOString();
       db.prepare(
         `INSERT INTO team_tasks
-         (id, team_id, plan_id, title, detail, assignee_id, status, created_by, created_at, updated_at, due_at, attachment_file_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, team_id, plan_id, title, detail, assignee_id, status, created_by, created_at, updated_at, due_at, attachment_file_id, result, completed_at, completed_by, blocked_by, return_note, returned_at, returned_by, progress, progress_at, progress_by, nudged_at, nudged_by, nudge_count, review_state, review_note, reviewed_at, reviewed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         teamId,
@@ -1382,11 +1621,107 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         at,
         body.dueAt ?? null,
         body.attachmentFileId ?? null,
+        "",
+        null,
+        null,
+        JSON.stringify(blockedBy),
+        "",
+        null,
+        null,
+        "",
+        null,
+        null,
+        null,
+        null,
+        0,
+        "pending",
+        "",
+        null,
+        null,
       );
       touchTeam(teamId);
       const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(id) as TaskRow;
       return rowToTask(row);
     },
+    listTeamTaskComments(teamId, taskId) {
+      const rows = db
+        .prepare(
+          "SELECT * FROM team_task_comments WHERE team_id = ? AND task_id = ? ORDER BY created_at ASC, id ASC",
+        )
+        .all(teamId, taskId) as unknown as TeamTaskCommentRow[];
+      return rows.map((r) => ({
+        id: r.id,
+        teamId: r.team_id,
+        taskId: r.task_id,
+        authorId: r.author_id,
+        text: r.text,
+        createdAt: r.created_at,
+      }));
+    },
+
+    addTeamTaskComment(teamId, taskId, actorId, text) {
+      const snapshot = this.getWorkspaceTeam(teamId, actorId);
+      if (!snapshot) return "forbidden";
+      if (!snapshot.tasks.some((task) => task.id === taskId)) return "not_found";
+      const comment = {
+        id: randomUUID(),
+        teamId,
+        taskId,
+        authorId: actorId,
+        text,
+        createdAt: new Date().toISOString(),
+      } satisfies TeamTaskComment;
+      db.prepare(
+        "INSERT INTO team_task_comments (id, team_id, task_id, author_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(comment.id, comment.teamId, comment.taskId, comment.authorId, comment.text, comment.createdAt);
+      touchTeam(teamId);
+      return comment;
+    },
+
+    addTeamEvent(event) {
+      db.prepare(
+        "INSERT INTO team_events (id, team_id, task_id, task_title, actor_id, kind, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        event.id,
+        event.teamId,
+        event.taskId,
+        event.taskTitle,
+        event.actorId,
+        event.kind,
+        event.summary,
+        event.createdAt,
+      );
+    },
+
+    listTeamEvents(teamId, limit = 50, taskId) {
+      const size = Math.max(0, Math.min(Math.floor(limit), 200));
+      // taskId（d.276）：只回某一件活的流水；空字符串/未传都按「全队」处理。
+      const byTask = typeof taskId === "string" && taskId !== "";
+      const rows = (
+        byTask
+          ? db
+              .prepare(
+                "SELECT * FROM team_events WHERE team_id = ? AND task_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(teamId, taskId, size)
+          : db
+              .prepare(
+                "SELECT * FROM team_events WHERE team_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+              )
+              .all(teamId, size)
+      ) as unknown as TeamEventRow[];
+      return rows.map((r) => ({
+        id: r.id,
+        teamId: r.team_id,
+        taskId: r.task_id,
+        taskTitle: r.task_title,
+        actorId: r.actor_id,
+        kind: r.kind as TeamEvent["kind"],
+        summary: r.summary,
+        createdAt: r.created_at,
+      }));
+    },
+
     updateTeamTask(teamId, taskId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
       const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(taskId) as
@@ -1400,6 +1735,54 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         if (!plan || plan.team_id !== teamId) return "plan_not_found";
       }
       if (body.assigneeId && !teamMemberRole(teamId, body.assigneeId)) return "assignee_not_member";
+      // 改派给别人 = 派活，同样只有组长可以做（保持原负责人或改回未认领不算）。
+      if (
+        body.assigneeId !== undefined &&
+        body.assigneeId !== null &&
+        body.assigneeId !== actorId &&
+        body.assigneeId !== row.assignee_id &&
+        !isTeamOwner(teamId, actorId)
+      ) {
+        return "not_leader";
+      }
+      // 任务级权限（d.254）：成员只能动「自己名下」和「还没人认领」的任务；组长不受限。
+      if (
+        !isTeamOwner(teamId, actorId) &&
+        row.assignee_id !== null &&
+        row.assignee_id !== actorId
+      ) {
+        return "forbidden";
+      }
+      const blockedBy =
+        body.blockedBy === undefined
+          ? undefined
+          : [
+              ...new Set(
+                body.blockedBy.map((item) => item.trim()).filter((item) => item.length > 0),
+              ),
+            ];
+      if (blockedBy !== undefined) {
+        const blockerError = validateBlockers(teamId, taskId, blockedBy);
+        if (blockerError !== null) return blockerError;
+      }
+      const at = new Date().toISOString();
+      // 退回（d.261，与内存实现同口径）：清空负责人 = 装回待认领，并记下谁退的、为什么。
+      // 催办（d.265，与内存实现同口径）。
+      const nudged = body.nudge === true;
+      if (nudged) {
+        if (!isTeamOwner(teamId, actorId)) return "forbidden";
+        if (row.assignee_id === null || row.assignee_id === actorId || row.status === "done") {
+          return "not_nudgeable";
+        }
+      }
+      // 验收（d.272，与内存实现同口径）：只有组长能验收已完成的活。
+      const reviewed = body.review !== undefined;
+      if (reviewed) {
+        if (!isTeamOwner(teamId, actorId)) return "forbidden";
+        if (row.status !== "done") return "not_reviewable";
+      }
+      const returned = body.assigneeId === null && row.assignee_id !== null;
+      const reclaimed = body.assigneeId !== undefined && body.assigneeId !== null;
       const next: TeamTask = {
         ...rowToTask(row),
         ...(body.title !== undefined ? { title: body.title } : {}),
@@ -1411,11 +1794,58 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         ...(body.attachmentFileId !== undefined
           ? { attachmentFileId: body.attachmentFileId }
           : {}),
-        updatedAt: new Date().toISOString(),
+        ...(body.result !== undefined ? { result: body.result } : {}),
+        ...(body.progress !== undefined
+          ? body.progress === ""
+            ? { progress: "", progressAt: null, progressBy: null }
+            : { progress: body.progress, progressAt: at, progressBy: actorId }
+          : {}),
+        // 催办（d.265）：累计次数不清零。
+        ...(nudged
+          ? { nudgedAt: at, nudgedBy: actorId, nudgeCount: (row.nudge_count ?? 0) + 1 }
+          : {}),
+        // 验收（d.272）：通过只打标；打回把任务装回进行中，保留 result 作为上一版结论。
+        ...(reviewed
+          ? body.review === "approve"
+            ? {
+                reviewState: "approved" as const,
+                reviewNote: body.reviewNote ?? row.review_note ?? "",
+                reviewedAt: at,
+                reviewedBy: actorId,
+              }
+            : {
+                reviewState: "changes" as const,
+                reviewNote: body.reviewNote ?? "",
+                reviewedAt: at,
+                reviewedBy: actorId,
+                status: "doing" as const,
+                completedAt: null,
+                completedBy: null,
+              }
+          : {}),
+        ...(returned
+          ? { returnedAt: at, returnedBy: actorId, returnNote: body.returnNote ?? "" }
+          : reclaimed
+            ? { returnedAt: null, returnedBy: null, returnNote: "" }
+            : {}),
+        ...(blockedBy !== undefined ? { blockedBy } : {}),
+        ...(body.status === "done" && row.status !== "done"
+          ? // 打回后重新标完成（d.275）：要重新进待验收，否则组长再也看不到这条。
+            { completedAt: at, completedBy: actorId, reviewState: "pending" as const }
+          : {}),
+        ...(body.status !== undefined && body.status !== "done" && row.status === "done"
+          ? { completedAt: null, completedBy: null }
+          : {}),
+        updatedAt: at,
       };
       db.prepare(
         `UPDATE team_tasks SET plan_id = ?, title = ?, detail = ?, assignee_id = ?, status = ?,
-           due_at = ?, attachment_file_id = ?, updated_at = ? WHERE id = ?`,
+           due_at = ?, attachment_file_id = ?, result = ?, completed_at = ?, completed_by = ?,
+           blocked_by = ?, return_note = ?, returned_at = ?, returned_by = ?,
+           progress = ?, progress_at = ?, progress_by = ?,
+           nudged_at = ?, nudged_by = ?, nudge_count = ?,
+           review_state = ?, review_note = ?, reviewed_at = ?, reviewed_by = ?,
+           updated_at = ? WHERE id = ?`,
       ).run(
         next.planId,
         next.title,
@@ -1424,6 +1854,23 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         next.status,
         next.dueAt,
         next.attachmentFileId,
+        next.result ?? "",
+        next.completedAt ?? null,
+        next.completedBy ?? null,
+        JSON.stringify(next.blockedBy ?? []),
+        next.returnNote ?? "",
+        next.returnedAt ?? null,
+        next.returnedBy ?? null,
+        next.progress ?? "",
+        next.progressAt ?? null,
+        next.progressBy ?? null,
+        next.nudgedAt ?? null,
+        next.nudgedBy ?? null,
+        next.nudgeCount ?? 0,
+        next.reviewState ?? "pending",
+        next.reviewNote ?? "",
+        next.reviewedAt ?? null,
+        next.reviewedBy ?? null,
         next.updatedAt,
         taskId,
       );
@@ -1433,10 +1880,27 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     deleteTeamTask(teamId, taskId, actorId) {
       if (!visibleTeam(teamId, actorId)) return "not_found";
       const row = db
-        .prepare("SELECT team_id FROM team_tasks WHERE id = ?")
-        .get(taskId) as { team_id: string } | undefined;
+        .prepare("SELECT team_id, assignee_id, created_by FROM team_tasks WHERE id = ?")
+        .get(taskId) as { team_id: string; assignee_id: string | null; created_by: string } | undefined;
       if (!row || row.team_id !== teamId) return "not_found";
+      // 任务级权限（d.254）：组长可删任何任务；成员只能删自己名下的，或自己创建、还没人认领的。
+      const ownsTask =
+        row.assignee_id === actorId ||
+        (row.assignee_id === null && row.created_by === actorId);
+      if (!isTeamOwner(teamId, actorId) && !ownsTask) return "forbidden";
       db.prepare("DELETE FROM team_tasks WHERE id = ?").run(taskId);
+      // d.255：删掉的任务不能再当别人的前置。只改 blocked_by，不碰 updated_at
+      //（清依赖不是那条任务自己的进度，不该把「多久没动」重置）。
+      const dependents = db
+        .prepare("SELECT id, blocked_by FROM team_tasks WHERE team_id = ? AND blocked_by LIKE ?")
+        .all(teamId, `%${taskId}%`) as Array<{ id: string; blocked_by: string | null }>;
+      for (const dep of dependents) {
+        const kept = parseBlockedBy(dep.blocked_by).filter((id) => id !== taskId);
+        db.prepare("UPDATE team_tasks SET blocked_by = ? WHERE id = ?").run(
+          JSON.stringify(kept),
+          dep.id,
+        );
+      }
       touchTeam(teamId);
       return true;
     },

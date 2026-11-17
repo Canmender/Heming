@@ -19,7 +19,10 @@ import type {
   WorkspaceTeamList,
   TeamWorkspaceSnapshot,
   TeamPlanItem,
+  TeamEvent,
   TeamTask,
+  TeamTaskComment,
+  TeamBrief,
   CreateWorkspaceTeamBody,
   UpdateWorkspaceTeamBody,
   CreateTeamPlanBody,
@@ -27,6 +30,7 @@ import type {
   CreateTeamTaskBody,
   UpdateTeamTaskBody,
 } from "@heming/shared";
+import type { AssignedTeamTask } from "./team/assignedTasks.js";
 import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
 
 /**
@@ -394,11 +398,28 @@ export const clearMyTeamUsage = (request?: ApiRequestOptions) =>
 export const fetchWorkspaceTeams = (request?: ApiRequestOptions) =>
   api<WorkspaceTeamList>("/api/teams", {}, request);
 
+/**
+ * 派到我名下、还没完成的团队任务（跨团队汇总，d.248）。
+ *
+ * 一次请求拿全：队员的智能体每轮开场都要知道「团队里有什么活儿在我名下」，
+ * 逐个团队拉快照是 N+1 次请求，白等。
+ */
+export const fetchMyTeamTasks = (request?: ApiRequestOptions) =>
+  api<{ tasks: AssignedTeamTask[]; claimable?: AssignedTeamTask[] }>(
+    "/api/team/my-tasks",
+    {},
+    request,
+  );
+
 /** 新建团队；返回完整快照（含 owner 自己在 members 里）。 */
 export const createWorkspaceTeam = (body: CreateWorkspaceTeamBody, request?: ApiRequestOptions) =>
   api<TeamWorkspaceSnapshot>("/api/teams", { method: "POST", body: JSON.stringify(body) }, request);
 
 /** 单个团队的完整工作台快照（team + members + plans + tasks）。 */
+/** 我所在团队的简报（成员名单 + 我的角色）：智能体派活前用它认人（d.253）。 */
+export const fetchMyTeamBriefs = (request?: ApiRequestOptions) =>
+  api<{ teams: TeamBrief[] }>("/api/team/my-teams", {}, request);
+
 export const fetchWorkspaceTeam = (id: string, request?: ApiRequestOptions) =>
   api<TeamWorkspaceSnapshot>(`/api/teams/${id}`, {}, request);
 
@@ -529,6 +550,45 @@ export const updateTeamTask = (
       method: "PATCH",
       body: JSON.stringify(body),
     },
+    request,
+  );
+
+/** 任务讨论（d.271）：一条任务下的留言，按时间升序。 */
+export const fetchTeamTaskComments = (
+  teamId: string,
+  taskId: string,
+  request?: ApiRequestOptions,
+) =>
+  api<{ comments: TeamTaskComment[] }>(
+    `/api/teams/${teamId}/tasks/${taskId}/comments`,
+    { method: "GET" },
+    request,
+  );
+
+/** 在任务下留言（追加，不覆盖别人的话）。 */
+export const createTeamTaskComment = (
+  teamId: string,
+  taskId: string,
+  text: string,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamTaskComment>(
+    `/api/teams/${teamId}/tasks/${taskId}/comments`,
+    { method: "POST", body: JSON.stringify({ text }) },
+    request,
+  );
+
+/** 团队动态（d.273）：谁在哪一步动了哪件活，按时间倒序。 */
+export const fetchTeamEvents = (
+  teamId: string,
+  request?: ApiRequestOptions,
+  limit = 30,
+  taskId?: string,
+) =>
+  api<{ events: TeamEvent[] }>(
+    // taskId（d.276）：只取某一件活的流水；不传就是全队。
+    `/api/teams/${teamId}/events?limit=${limit}${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ""}`,
+    { method: "GET" },
     request,
   );
 
