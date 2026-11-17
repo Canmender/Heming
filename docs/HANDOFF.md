@@ -39,6 +39,8 @@ codex / Claude Code 都有「把常用提示词存成命令」的能力，这是
 - 新建 `packages/web/src/lib/agentRuntime/customCommands.test.ts` **12 例**：文件名规则、标题/说明拆解、正文里的 `#` 不被当元信息、空文件与只有标题不算命令、超长截断、整批排序/同名去重/上限、精确匹配展开（带参数与大小写不同都不算）、面板条目带来源、读取时坏文件跳过与各种缺能力场景返回空且不抛。
 - `packages/web/src/lib/agentRuntime/statusReport.test.ts` **+3 例**；`packages/web/src/components/ChatPage.test.tsx` **+1 例**（I4i：`.heming/commands/review.md` → 面板出现 `/review` → 发 `/review` 时请求体是提示词、不含命令字面量）。
 - `pnpm -w typecheck` 六包 Done；`packages/web` 全量 **395 files / 5750 passed**；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 108ms）。
+- 发版（用户指令「自检，提交，打包，发布」）：桌面 `pnpm test` exit 0、真机冒烟 **56/56**；提交 `2e809cc1` 并推送（origin/main 同步）、打 annotated tag `d.240.4.116.12`；`release.mjs --desktop --deploy --publish --release-r 110` **8 OK / 1 SKIP（未传 --bump）/ 0 失败**，安装包 370,597,771 字节、部署包 22.7MB（清单 3278 项），云端 install + smoke 通过；更新源三项上传并校验大小/sha512。
+- 公网五项核验（人肉跑过）：`/api/health` → `{"ok":true}`、首页 200；主 bundle `assets/index-C9XC3FmF.js` 与 `packages/web/dist` 同字节（md5 `FD566A830102A00555C84FE35E1F0BCF`）；`latest.yml` 里 sha512 与本地 exe 逐字一致；更新源 `Content-Type: application/octet-stream` + `Range` → **206**；打包产物 `Heming.exe` 的 `FileVersion/ProductVersion` = `240.4.116.12`、ProductName「和鸣」，包内 `SettingsPage` 等 chunk 含 `d.240.4.116.12`（装完三处显示同一串）。
 
 ### 0.4 没做
 
@@ -4429,14 +4431,14 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-17 11:4x） | d.240.4.116.12（工作树未提交 / 未打包 / 未部署；d.203.4.107.12 起的四十七版都未发布） |
-| 安装包（最新） | **`packages/desktop/release/r109/和鸣 Setup d.203.4.106.12.exe`（370,510,188 字节，sha512 `clXHwiXRzsYVER/XoEqwJD6Dj3NRamd/EIxT7IpZTR9uEpqkUJnypR0Z4TsnyjJq8+WmJwE3J+cauwT/0Rgbsg==`）** |
+| 当前版本（2026-11-17 12:1x） | d.240.4.116.12（**已提交 `2e809cc1`** / 已打包 `r110` / 已部署 / 已发布更新源） |
+| 安装包（最新） | **`packages/desktop/release/r110/和鸣 Setup d.240.4.116.12.exe`（370,597,771 字节，sha512 `FYYxvyp5IhQjxfe5xsRO4/5xMRQNVUMx69nxD9rFp6P0SfeMr9xv8MOwSemgsJq6Qa/c+GR7q6g2ZH5ZHngxJw==`）** |
 | 版本 | 当前 `d.240.4.116.12`（semver `240.4.116`）· 最近一条 CHANGELOG「常有的话存成命令：`.heming/commands/名字.md` 就是 `/名字`」 |
 | 测试 | 桌面 pnpm test 56 组 / 1010 例（1009 passed / 1 skip）+ 真机冒烟 56/56；web 395 files / 5750 passed（另 CLI 29 例）；deterministic eval 40/40 |
-| 线上 | **d.203.4.106.12**（安装包 r109，已部署、已发布更新源）；d.203.4.107.12 起到 d.240.4.116.12 共四十七版均未打包、未部署 |
-| 安装包（已发布） | **`和鸣 Setup d.203.4.106.12.exe`（`r109`，370,510,188 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传三项并校验大小 + sha512；公网 `latest.yml` → `version: 203.4.106`、`size: 370510188`、Range 请求 206 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 203.4.106`**、`path: 和鸣 Setup d.203.4.106.12.exe`、`size: 370510188`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**；更新卡片按此判定，空间不足时不再交接安装器（d.203.4.107.12） |
-| 发布标签 | 最新标签 `d.203.4.106.12`（annotated `87cb021a`，指向 `5c265210`，已推到 origin）；`main` 已同步（origin/main = `5c265210`） |
+| 线上 | **d.240.4.116.12**（安装包 r110，已部署到 47.92.39.184、已发布更新源）；d.203.4.107.12–d.240.4.116.12 共四十七版随本版一并上线 |
+| 安装包（已发布） | **`和鸣 Setup d.240.4.116.12.exe`（`r110`，370,597,771 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传 latest.yml / exe / blockmap 三项并校验大小 + sha512；公网 `latest.yml` → `version: 240.4.116`、`size: 370597771`、Range 请求 206 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 240.4.116`**、`path: 和鸣 Setup d.240.4.116.12.exe`、`size: 370597771`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-99` → **206**（含 `Content-Range`）；公网 `/api/health` → `{"ok":true}`、首页 200，主 bundle `assets/index-C9XC3FmF.js` 与 `packages/web/dist` 同字节（md5 `FD566A830102A00555C84FE35E1F0BCF`） |
+| 发布标签 | 最新标签 `d.240.4.116.12`（annotated，指向 `2e809cc1`，已推到 origin）；`main` 已同步（origin/main = `2e809cc1`） |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
