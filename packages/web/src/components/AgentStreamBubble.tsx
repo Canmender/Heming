@@ -7,6 +7,8 @@ import { toolNameLabel } from "../lib/toolName.js";
 import { summarizeToolArgs, toolArgPath } from "../lib/toolArgsSummary.js";
 import { failureNextStep, parseToolFailure } from "../lib/toolFailure.js";
 import { previewToolResult } from "../lib/toolResultPreview.js";
+import { foldToolTraces } from "../lib/toolTraceFold.js";
+import { describeReasoningClip, previewReasoning } from "../lib/reasoningPreview.js";
 import { ARG_DIFF_MAX_ROWS, argDiff, formatArgDiffStat } from "../lib/fileEdit/argDiff.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { CheckIcon, ChevronIcon } from "./icons.js";
@@ -63,14 +65,19 @@ export function AgentStreamBubble({
         {streaming ? `${name} 正在生成回复` : errorMessage ? `${name} 生成失败` : `${name} 已生成回复`}
       </p>
       <div className="min-w-0 flex-1 px-0.5 text-ui-md leading-relaxed">
+        {/* d.246：长名字省略，别把「生成中…」挤出可视区（窄栏尤其明显）。 */}
         <div className="mb-1 flex items-baseline gap-2 text-ui-xs text-muted">
-          <span>{name}</span>
-          {streaming && <span>生成中…</span>}
+          <span className="min-w-0 truncate">{name}</span>
+          {streaming && <span className="shrink-0">生成中…</span>}
         </div>
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
         {tools && tools.length > 0 ? (
-          <ToolTraceList tools={tools} {...(onRevealPath ? { onRevealPath } : {})} />
+          <ToolTraceList
+            tools={tools}
+            fold
+            {...(onRevealPath ? { onRevealPath } : {})}
+          />
         ) : null}
         {attempts && attempts.length > 0 ? <RouteTraceLine attempts={attempts} /> : null}
 
@@ -110,10 +117,19 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
   const [open, setOpen] = useState(streaming);
   // 只处理「流式 → 结束」这一次切换：结束后自动收起，用户之后手动展开不再被干预
   const [wasStreaming, setWasStreaming] = useState(streaming);
+  // d.247：思考片段默认只渲染一段（流式中留尾巴、回看留开头），展开才看全文。
+  const [showAll, setShowAll] = useState(false);
   if (wasStreaming !== streaming) {
     setWasStreaming(streaming);
-    if (!streaming) setOpen(false);
+    if (!streaming) {
+      setOpen(false);
+      // 收起时把「看全文」也复位：下次展开回到「只看一段」，别一打开就是几万字。
+      setShowAll(false);
+    }
   }
+  const preview = previewReasoning(text, { mode: streaming ? "tail" : "head" });
+  const clipped = preview.clipped && !showAll;
+  const body = clipped ? preview.text : text;
   return (
     <div className="mt-1 rounded-md border border-dashed border-line-soft bg-subtle-2 px-2 py-1">
       <button
@@ -131,15 +147,34 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming: b
             open ? "rotate-90" : ""
           }`}
         />
-        <span>思考过程</span>
-        <span className="text-ui-xs text-muted">{text.length} 字</span>
-        {streaming && <span className="text-ui-xs text-muted">· 进行中</span>}
+        <span className="shrink-0">思考过程</span>
+        <span className="shrink-0 text-ui-xs text-muted">{text.length} 字</span>
+        {streaming && <span className="shrink-0 text-ui-xs text-muted">· 进行中</span>}
       </button>
       {open && (
         // 不设内层 max-height（B 轨 E5）：轨迹区域整体只保留一层滚动，
         // 嵌套滚动条在触控板上会「卡在里层」，用户滚不到消息列表。
-        <div className="mt-1 whitespace-pre-wrap break-words text-ui-sm italic leading-relaxed text-body">
-          {text}
+        // d.247 的「控制大小」因此靠**截断内容**实现，而不是加第二个滚动容器。
+        <div
+          data-testid="reasoning-body"
+          className="mt-1 whitespace-pre-wrap break-words text-ui-sm italic leading-relaxed text-body"
+        >
+          {clipped && preview.mode === "tail" ? <span className="text-muted">…</span> : null}
+          {body}
+          {clipped && preview.mode === "head" ? <span className="text-muted">…</span> : null}
+        </div>
+      )}
+      {open && (preview.clipped || showAll) && (
+        <div className="mt-1 flex items-center gap-2">
+          {clipped && <span className="text-ui-xs text-muted">{describeReasoningClip(preview)}</span>}
+          <button
+            type="button"
+            data-testid={showAll ? "reasoning-collapse" : "reasoning-expand"}
+            onClick={() => setShowAll((v) => !v)}
+            className={`shrink-0 rounded-sm text-ui-xs text-muted underline underline-offset-2 hover:text-ink ${FOCUS_RING_TIGHT}`}
+          >
+            {showAll ? "只看开头一段" : `展开全部（还有 ${preview.hiddenChars} 字）`}
+          </button>
         </div>
       )}
     </div>
@@ -188,6 +223,7 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
 export function ToolTraceList({
   tools,
   onRevealPath,
+  fold = false,
 }: {
   tools: ToolTrace[];
   /**
@@ -197,12 +233,42 @@ export function ToolTraceList({
    * 让用户从参数 JSON 里把路径抠出来。不传就不渲染按钮（老安装包没有 reveal 通道）。
    */
   onRevealPath?: (path: string) => void;
+  /**
+   * 折叠早先的调用（d.243）：流式气泡里传 true——长任务连跑十几条命令时，
+   * 一屏工具行会把正文挤没；失败/被拒的调用不折（那才是要立刻看见的行）。
+   * 历史回看与进度面板不折（前者外层已整体折叠，后者是用户主动打开的详情）。
+   */
+  fold?: boolean;
 }) {
+  const [showAllTraces, setShowAllTraces] = useState(false);
+  const folded = fold && !showAllTraces ? foldToolTraces(tools) : null;
+  const shown = folded === null ? tools : folded.visible;
   return (
     // 单层滚动（B 轨 E5）：此前 参数/结果 各自 max-h（120/140px）叠加外层，出现三层嵌套滚动条。
     // 现在只在这里限高，内层全部自然展开。
     <div className="mt-1 flex max-h-[60vh] flex-col gap-1 overflow-y-auto pr-1">
-      {tools.map((t) => {
+      {folded !== null && folded.hidden.length > 0 ? (
+        <button
+          type="button"
+          className="ui-hit shrink-0 rounded-md border border-dashed border-line-soft bg-subtle-2 px-2 py-1 text-left text-ui-xs text-muted hover:text-ink"
+          data-testid="tool-trace-hidden"
+          onClick={() => setShowAllTraces(true)}
+        >
+          还有 {folded.hidden.length} 次工具调用已收起
+          {folded.hiddenFailed > 0 ? `（其中 ${folded.hiddenFailed} 次出错）` : ""} · 展开
+        </button>
+      ) : null}
+      {folded === null && fold ? (
+        <button
+          type="button"
+          className="ui-hit shrink-0 self-start rounded-sm px-1 text-ui-xs text-muted hover:text-ink"
+          data-testid="tool-trace-collapse"
+          onClick={() => setShowAllTraces(false)}
+        >
+          收起早先的调用
+        </button>
+      ) : null}
+      {shown.map((t) => {
         // d.220：失败/被拒的调用，折叠行先说「为什么」——参数再清楚也不如错误码有用；
         // 完整原文与契约行仍在展开区与 title 里，一个字段都不吞。
         const failure =

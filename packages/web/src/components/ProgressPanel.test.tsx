@@ -222,3 +222,16 @@ describe("ProgressPanel · 拖拽调宽", () => {
     expect(panelBox().style.width).toBe("512px");
   });
 });
+
+describe("ProgressPanel · 谁打开了这一栏（d.245）", () => {
+  it("给了理由就在栏头下显示一句「智能体打开了这一栏」，没给就整行不出现", () => {
+    const { rerender } = render(
+      <ProgressPanel conversationId="c1" onClose={vi.fn()} agentNote="我列了三步计划，想让你看进度。" />,
+    );
+    expect(screen.getByTestId("progress-agent-note")).toHaveTextContent("智能体打开了这一栏");
+    expect(screen.getByTestId("progress-agent-note")).toHaveTextContent("我列了三步计划");
+
+    rerender(<ProgressPanel conversationId="c1" onClose={vi.fn()} />);
+    expect(screen.queryByTestId("progress-agent-note")).toBeNull();
+  });
+});

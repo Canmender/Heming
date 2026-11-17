@@ -30,7 +30,14 @@ import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
 import { formatClock, formatDayClock } from "../lib/formatTime.js";
 // d.158：任务清单面板的接线用例（清单来自 todo store，渲染在输入栏上方）
 import { TODOS_KEY, clearTodos, resetTodoStore, setTodos } from "../lib/todo/store.js";
+import {
+  peekPluginInstallNotices,
+  recordPluginInstall,
+  resetPluginInstallNotices,
+} from "../lib/plugins/installedNotice.js";
 import { GOALS_KEY, getGoal, resetGoalStore } from "../lib/agentRuntime/goal.js";
+// d.242：安全范围的「完全」是进程内开关，用例之间必须复位
+import { resetDangerAuto } from "../lib/hitl/safetyScope.js";
 import {
   isSubagentWriteEnabled,
   resetSubagentWriteStore,
@@ -315,6 +322,7 @@ describe("ChatPage", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetDangerAuto();
     // E2E 存储按 convId 复用：清 msgCache/链/暂挂（cache-first 会跨用例读到旧明文）；
     // 草稿同样按 convId 持久（d.31），不清理会把上一个用例的半截输入带进来。
     for (const k of Object.keys(localStorage)) {
@@ -337,6 +345,8 @@ describe("ChatPage", () => {
     resetPanelJobs();
     // 任务清单也是模块级内存（d.158）：收尾自检（d.232）会读它，串用例会误催。
     resetTodoStore();
+    // 刚装插件的告知也是模块级内存（d.241）：串用例会让提示词里多出一段插件说明。
+    resetPluginInstallNotices();
     // jsdom 未实现 scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
     // 附件气泡：createObjectURL 给可区分伪地址，revoke 留给卸载断言（jsdom 原生缺，由 test-setup 补桩）
@@ -1035,25 +1045,20 @@ describe("ChatPage", () => {
     expect(useChatStore.getState().streaming["remote-1"]).toBeUndefined();
   });
 
-  it("F1 回归：卸载中止后 finish(partial)/agent_error 在 ws close 之前实际发出", async () => {
-    // 受控时序：send 与 close 往同一 order 记事件类型，锁定「catch 两帧先于 close」的次序
-    const order: string[] = [];
-    const send = vi.fn((e: WsClientEvent) => {
-      order.push(e.type);
-    });
-    const close = vi.fn(() => {
-      order.push("close");
-    });
+  it("d.244：离开页面不掐断——卸载时在飞的流不被中止、连接先保留，收口后才关", async () => {
+    const send = vi.fn();
+    const close = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close } satisfies WsHandle);
-        mockMessagesFetch([]);
+    mockMessagesFetch([]);
     bindAssistant();
+    const captured: { signal?: AbortSignal } = {};
+    let release: ((text: string) => void) | null = null;
     vi.mocked(streamChat).mockImplementation(
       (_p, _m, o) =>
-        new Promise<string>((_res, rej) => {
-          const abort = () => rej(new DOMException("AbortError", "AbortError"));
-          if (o.signal.aborted) return abort();
+        new Promise<string>((res) => {
+          captured.signal = o.signal;
+          release = res;
           o.onDelta("半");
-          o.signal.addEventListener("abort", abort);
         }),
     );
 
@@ -1061,31 +1066,41 @@ describe("ChatPage", () => {
     await act(async () => {});
     await pickAndSend("@和小鸣 写段文字");
     await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
-    expect(Object.keys(useChatStore.getState().streaming)).toHaveLength(1); // 流已在飞（onDelta 半）
 
-    view.unmount(); // cleanup：WS effect 先排期延迟 close，随后 abort effect 中止进行中流
+    view.unmount();
+    await act(async () => {});
 
+    // 核心：不中止、也不立刻关连接——这一轮要在后台继续跑，回来才接得上实时输出。
+    expect(captured.signal?.aborted).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(Object.keys(useChatStore.getState().streaming).length).toBeGreaterThan(0);
+
+    // 收口后：收尾帧照常上行（答案能落库），随后才关掉这条保留的连接。
+    await act(async () => {
+      release?.("半句收尾");
+    });
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(sealedOf(send, "agent_finish")[0]?.plain).toMatchObject({
       kind: "text",
       text: expect.stringContaining("半"),
     });
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent_error", code: "aborted" }),
-    );
-    // 次序不变量：catch（微任务）的两帧落到句柄上，必须早于 close（宏任务）——否则 partial 不入库
-    expect(order.indexOf("agent_finish")).toBeLessThan(order.indexOf("close"));
-    expect(order.indexOf("agent_error")).toBeLessThan(order.indexOf("close"));
   });
 
-  it("I1 挂载清扫：本会话孤儿 streaming/streamOwner 条目被清，他会话条目保留", async () => {
-    // 上一轮卸载中止后 socket 已关、echo 收不到 → store 残留本会话「生成中」孤儿项
+  it("d.244 挂载不清正在跑的流：只把超时孤儿判死，离开页面继续的那一轮回来还看得见", async () => {
+    const now = Date.now();
     useChatStore.setState({
       streaming: {
-        orphan1: {
+        live: {
           agentId: "system-assistant",
           conversationId: "c1",
-          text: "残留半句",
+          text: "还在跑",
+          status: "streaming",
+          lastAt: now,
+        },
+        stale: {
+          agentId: "system-assistant",
+          conversationId: "c1",
+          text: "没人管的残句",
           status: "streaming",
           lastAt: 0,
         },
@@ -1094,21 +1109,21 @@ describe("ChatPage", () => {
           conversationId: "c2",
           text: "他会话的流",
           status: "streaming",
-          lastAt: 0,
+          lastAt: now,
         },
       },
-      streamOwner: { orphan1: true, otherConv: true },
+      streamOwner: { live: true, stale: true, otherConv: true },
     });
     mockMessagesFetch([]);
 
     render(<ChatPage />);
-    await act(async () => {}); // 冲刷挂载 effects（含清扫）
+    await act(async () => {}); // 冲刷挂载 effects（含过期清扫）
 
     const st = useChatStore.getState();
-    expect(Object.keys(st.streaming).sort()).toEqual(["otherConv"]); // 本 convId 孤儿被清
-    expect(st.streamOwner).toEqual({ otherConv: true }); // 归属键同步清，他会话保留
-    expect(screen.queryByText("残留半句")).not.toBeInTheDocument(); // 无「生成中」气泡残留
-    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 中断行不再出现（no-op 中断按钮消失）
+    expect(st.streaming.live?.status).toBe("streaming"); // 在跑的保留：切页回来要接上
+    expect(st.streaming.stale?.status).toBe("error"); // 60s 没刷新 → 判死（不静默挂着）
+    expect(st.streaming.otherConv?.status).toBe("streaming"); // 他会话的不动
+    expect(screen.getAllByText(/还在跑/).length).toBeGreaterThan(0);
   });
 
   it("I3 fetchHistory 不再硬截 30 条：35 条历史全部进提示词（压缩交给 prepareHistory）", async () => {
@@ -4923,6 +4938,9 @@ describe("ChatPage 复盘分身接线", () => {
   async function setup() {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // d.244：离开页面不再清流，上一个用例卸载时留下的「生成中」会跨用例残留
+    // （store 是模块级），这里显式重置，避免 send 被「生成中」挡住。
+    useChatStore.setState({ streaming: {}, streamOwner: {} });
         mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
@@ -6717,6 +6735,154 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     expect(await screen.findByText(/1\/1/)).toBeInTheDocument();
     const list = await screen.findByTestId("search-hit-list");
     expect(list.textContent).toContain("UNIQUE_GREP_TERM");
+  });
+
+  it("I5c 刚装的插件会写进本轮提示词，正常收口后不再重复（d.241）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    recordPluginInstall({
+      pluginId: "com.example.charts",
+      name: "图表增强",
+      version: "1.2.0",
+      at: Date.now(),
+      updated: false,
+      servers: ["plugin:com.example.charts:charts"],
+      skills: ["画图"],
+    });
+
+    vi.mocked(streamChat).mockResolvedValue("好，我用图表增强来做。");
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 画个图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(streamChat).toHaveBeenCalled());
+    const rows = vi.mocked(streamChat).mock.calls.at(-1)![1] as Array<{ role: string; content: string }>;
+    const systemPrompt = String(rows[0]?.content ?? "");
+    expect(systemPrompt).toContain("## 能力与配合");
+    expect(systemPrompt).toContain("「图表增强」v1.2.0（新装）");
+    expect(systemPrompt).toContain("tool_search 搜「图表增强」");
+
+    // 这一轮已经告知过：收口后清空，下一轮不再重复说（否则变成每轮噪音）。
+    await waitFor(() => expect(peekPluginInstallNotices()).toHaveLength(0));
+  });
+
+  it("I5d 左下角安全范围：三档可切，「完全」要点两次并常驻提醒（d.242）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    // 默认「自动」：不打扰，但危险操作仍会问
+    expect(screen.getByTestId("safety-scope-label").textContent).toBe("自动");
+    expect(screen.queryByTestId("safety-full-banner")).toBeNull();
+
+    // 菜单里三档都在（先确认它们能被发现，而不是只有当前档位）
+    fireEvent.click(screen.getByRole("button", { name: "安全范围：自动" }));
+    const menu = await screen.findByTestId("safety-scope-menu");
+    expect(within(menu).getByTestId("safety-scope-manual")).toBeTruthy();
+    expect(within(menu).getByTestId("safety-scope-auto")).toBeTruthy();
+    const fullItem = within(menu).getByTestId("safety-scope-full");
+
+    // 第一次点「完全」：只提醒代价，状态不动
+    fireEvent.click(fullItem);
+    await waitFor(() => expect(screen.getByText(/再点一次「完全」/)).toBeTruthy());
+    expect(screen.getByTestId("safety-scope-label").textContent).toBe("自动");
+    expect(screen.queryByTestId("safety-full-banner")).toBeNull();
+
+    // 第二次才真的打开，并出现常驻黄条
+    fireEvent.click(fullItem);
+    await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("完全"));
+    const banner = screen.getByTestId("safety-full-banner");
+    expect(banner.textContent).toContain("危险操作也会直接执行");
+
+    // 一键改回「自动」
+    fireEvent.click(within(banner).getByRole("button", { name: "改回自动" }));
+    await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("自动"));
+    expect(screen.queryByTestId("safety-full-banner")).toBeNull();
+
+    // 切到「手动」后 /status 如实写出当前档位
+    fireEvent.click(screen.getByRole("button", { name: "安全范围：自动" }));
+    fireEvent.click(await screen.findByTestId("safety-scope-manual"));
+    await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("手动"));
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/安全范围：手动/)).toBeTruthy());
+
+    // 收尾：恢复「自动」，避免影响同文件后续用例（档位是模块级存储）
+    fireEvent.click(screen.getByRole("button", { name: "安全范围：手动" }));
+    fireEvent.click(await screen.findByTestId("safety-scope-auto"));
+  });
+  it("I5e 智能体可以自己打开会话进度栏（d.245）：把理由写在栏头下面", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      round += 1;
+      if (round === 1) {
+        o.onToolCalls?.([
+          {
+            id: "pn1",
+            type: "function",
+            function: {
+              name: "panel_show",
+              arguments: JSON.stringify({ reason: "我列了三步计划，想让你看着进度走" }),
+            },
+          },
+        ]);
+        return "";
+      }
+      o.onDelta?.("按计划开始。");
+      return "按计划开始。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "@和小鸣 按计划做三步" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 侧栏被打开，且说清「谁打开、为什么」——用户不会以为栏在自己弹。
+    const note = await screen.findByTestId("progress-agent-note", undefined, { timeout: 5000 });
+    expect(note.textContent).toContain("智能体打开了这一栏");
+    expect(note.textContent).toContain("我列了三步计划");
+    expect(screen.getByRole("complementary", { name: "会话进度" })).toBeTruthy();
+
+    // 用户关掉后栏内理由一并消失。
+    fireEvent.click(screen.getByRole("button", { name: "关闭会话进度" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "会话进度" })).toBeNull(),
+    );
+  }, 15_000);
+
+  it("I5f 布局不再互相挤压（d.246）：浮标在消息区内、署名可省略、动作行会换行", async () => {
+    await setupAgentChat([agentMsg("a-1", "这是一条助手消息", "2026-10-14T01:00:00.000Z")]);
+
+    // ① 消息区自成定位上下文：浮标挂在消息区外壳里，不再相对整个会话面板定位——
+    //    否则输入区一长（附件 / 排队条 / 提示条 / 安全范围黄条）浮标就压到输入框上。
+    const list = screen.getByTestId("message-list");
+    const shell = list.parentElement;
+    expect(shell?.className).toContain("relative");
+    expect(shell?.className).toContain("flex-1");
+    expect(list.className).not.toContain("relative");
+
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 0;
+    fireEvent.scroll(list);
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: msg("m-new", "底下多了一条", "2026-10-14T02:00:00.000Z"),
+      });
+    });
+    const jump = await screen.findByRole("button", { name: "滚动到最新消息" });
+    expect(jump.parentElement).toBe(shell);
+
+    // ② 助手署名可省略：长名字不能把右端的时间挤出这一行（表现为「叠在一起」）。
+    const names = Array.from(list.querySelectorAll("span")).filter(
+      (node) => node.textContent === "和小鸣",
+    );
+    expect(names.length).toBeGreaterThan(0);
+    for (const node of names) expect(node.className).toContain("truncate");
+
+    // ③ 动作行会换行：窄窗口里安全范围 / 计划 / 模型不会被挤出可视区。
+    expect(screen.getByTestId("composer-actions").className).toContain("flex-wrap");
   });
 
 });

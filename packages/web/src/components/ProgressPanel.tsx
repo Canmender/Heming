@@ -97,11 +97,17 @@ export function ProgressPanel({
   conversationId,
   onClose,
   onRevealPath,
+  agentNote,
 }: {
   conversationId: string | null;
   onClose: () => void;
   /** 在资源管理器里定位工具涉及的文件（d.235）；不传就不显示「定位」。 */
   onRevealPath?: (path: string) => void;
+  /**
+   * 智能体为什么把这一栏打开（d.245）：一行小字说明「这一栏不是自己弹出来的」。
+   * 自动打开时是「有工具调用在等你确认」这类系统判断，显式调用时是模型给的理由。
+   */
+  agentNote?: string;
 }) {
   const progress = useConversationProgress(conversationId);
   const phaseTone = PHASE_TONES[progress.phase];
@@ -243,6 +249,15 @@ export function ProgressPanel({
         <h2 className="ui-section-title min-w-0 flex-1 truncate">会话进度</h2>
         <IconButton label="关闭会话进度" icon={<XIcon />} onClick={onClose} />
       </div>
+      {/* 谁、为什么打开了这一栏（d.245）：说清楚来源，用户才不会以为栏在自己弹。 */}
+      {agentNote !== undefined ? (
+        <p
+          data-testid="progress-agent-note"
+          className="border-b border-line-soft bg-subtle-2 px-3 py-1.5 text-ui-xs leading-4 text-muted"
+        >
+          智能体打开了这一栏：{agentNote}
+        </p>
+      ) : null}
       {/* 滚动只发生在面板内部：页面级滚动属于会话流，侧栏撑高整页会让用户滚丢消息。 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {progress.hasData ? (

@@ -40,6 +40,7 @@ import {
 } from "./manifest.js";
 import { normalizeNetworkHost, pluginIdFromServerId } from "./permissions.js";
 import { contentFingerprint, FINGERPRINT_PREFIX } from "./integrity.js";
+import { recordPluginInstall } from "./installedNotice.js";
 import { PublisherTrustStore, type SignatureStatus } from "./signature.js";
 
 // 目录（catalog）与命令面板都从插件侧反解服务归属，统一从本模块导出，
@@ -1894,6 +1895,19 @@ export class PluginStore {
       else this.data.plugins.push(plugin);
       // 关键路径用 saveOrThrow：配额/隐私模式失败必须冒泡到回滚，不能吞。
       this.saveOrThrow();
+
+      // 安装成功 → 记一条「下一轮告诉智能体」的告知（d.241）。
+      // 放在 saveOrThrow 之后：只有真的落盘成功才记，回滚/失败路径绝不留下假记忆。
+      recordPluginInstall({
+        pluginId: manifest.id,
+        name: manifest.name || manifest.id,
+        version: manifest.version,
+        at: Date.parse(at) || Date.now(),
+        // 首装 plan.existing 是 null（不是 undefined）：用 mode 判更稳，避免把首装说成「升级」。
+        updated: mode === "update",
+        servers: nextServerIds,
+        skills: manifest.contributions.skills.map((item) => item.name),
+      });
 
       return {
         changed: true,

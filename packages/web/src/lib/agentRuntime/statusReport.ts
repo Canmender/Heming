@@ -45,6 +45,11 @@ export interface StatusInput {
   roots?: readonly StatusRoot[];
   /** 计划模式是否开启。 */
   planMode?: boolean;
+  /**
+   * 安全范围（d.242）：由 `lib/hitl/safetyScope.ts` 的 `describeSafetyScope()` 给出，
+   * 已带「安全范围：」前缀。省略时不出这一行（与其它可选行同口径）。
+   */
+  safety?: string | null;
   /** 是否已授权子代理写盘（d.202）；省略／false＝只读。 */
   subagentWritable?: boolean;
   /** 系统通知是否开着（d.208）；省略＝按开处理（默认开）。 */
@@ -351,6 +356,8 @@ export function buildStatusReport(input: StatusInput): string {
   }
 
   lines.push(`计划模式：${yesNo(input.planMode, "开（只读，先给方案）", "关")}`);
+  // d.242：安全范围（手动 / 自动 / 完全）。省略时不出这一行——老调用方无感。
+  if (input.safety) lines.push(input.safety);
   lines.push(
     `子代理：${
       input.subagentWritable

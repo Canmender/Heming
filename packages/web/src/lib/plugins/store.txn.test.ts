@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { McpRegistry, MCP_SERVERS_KEY } from "../mcp/index.js";
 import { SkillPool, SKILLS_KEY, type StorageLike } from "../skills/index.js";
 import { contentFingerprint, PublisherTrustStore, PluginManifestError, pluginEnginesStatus } from "./index.js";
+import { peekPluginInstallNotices, resetPluginInstallNotices } from "./installedNotice.js";
 import {
   INSTALL_WRITE_BUDGET_BYTES,
   PLUGIN_TXN_KEYS,
@@ -186,6 +187,25 @@ describe("安装事务 · 更新与回滚到上一版", () => {
     expect(record.previous?.fingerprint).toBeTruthy();
     expect(record.history?.map((entry) => entry.version)).toEqual(["1.0.0", "1.1.0"]);
     expect(record.highestVersion).toBe("1.1.0");
+  });
+
+  it("安装成功会留下一条「刚装了插件」的告知，升级后标成升级（d.241）", () => {
+    // 这条链路是「装完 → 下一轮提示词」的交接：装成功却没留告知，等于插件白装。
+    resetPluginInstallNotices();
+    const { store } = fresh();
+    store.applyPlan(store.planInstall(manifest()));
+
+    const first = peekPluginInstallNotices();
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ pluginId: "acme.txn", version: "1.0.0", updated: false });
+    expect(first[0]?.servers).toContain(pluginServerId("acme.txn", "report"));
+    expect(first[0]?.skills).toEqual(["周报"]);
+
+    store.applyPlan(store.planInstall(upgrade("1.1.0")));
+    const second = peekPluginInstallNotices();
+    expect(second).toHaveLength(1); // 同 id 只留最新一条
+    expect(second[0]).toMatchObject({ version: "1.1.0", updated: true });
+    resetPluginInstallNotices();
   });
 
   it("history 最多 3 条：连续升级丢最旧", () => {

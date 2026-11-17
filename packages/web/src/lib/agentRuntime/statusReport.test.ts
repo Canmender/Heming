@@ -448,3 +448,26 @@ describe("工作区自定义命令（d.240）", () => {
     expect(buildStatusReport(base)).toContain("自定义命令：尚未统计");
   });
 });
+
+describe("安全范围行（d.242）", () => {
+  const base = {
+    version: "d.242.4.116.12",
+    model: "DeepSeek V4",
+    workspace: "D:/Heming",
+  };
+
+  it("给文案就原样输出（「安全范围：」前缀由 safetyScope 给）", () => {
+    const text = buildStatusReport({ ...base, safety: "安全范围：完全——连危险操作也不再逐条问（本次运行内有效）" });
+    expect(text).toContain("安全范围：完全");
+    expect(text).toContain("危险操作");
+  });
+
+  it("不给就不出这一行（老调用方无感）", () => {
+    const text = buildStatusReport(base);
+    expect(text).not.toContain("安全范围：");
+  });
+
+  it("空串也不出（与其它可选行同口径）", () => {
+    expect(buildStatusReport({ ...base, safety: "" })).not.toContain("安全范围：");
+  });
+});

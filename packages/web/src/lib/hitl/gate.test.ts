@@ -615,3 +615,47 @@ describe("toHitlBatch", () => {
     expect(batch.calls[0].displayName).toBe("自定义动作");
   });
 });
+
+describe("「完全」档的全放行开关（d.242）", () => {
+  it("dangerAuto 返回 true 时，连 danger 调用也免问", async () => {
+    const storage = new FakeStorage();
+    const policy = new HitlPolicyStore(storage);
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({ policy, ask, dangerAuto: () => true });
+
+    const outcomes = await gate.review(batchOf([dangerCall]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("开关关闭（或未注入）时 danger 仍然问人——这是安全默认值", async () => {
+    const storage = new FakeStorage();
+    const policy = new HitlPolicyStore(storage);
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => [{ callId: "d1", decision: "deny" }]);
+    const gate = createHitlGate({ policy, ask, dangerAuto: () => false });
+
+    const outcomes = await gate.review(batchOf([dangerCall]));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(outcomes[0].kind).toBe("deny");
+  });
+
+  it("工作区 deny 规则仍然优先：全放行也挡不住仓库明写不许做的事", async () => {
+    const storage = new FakeStorage();
+    const policy = new HitlPolicyStore(storage);
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      dangerAuto: () => true,
+      workspaceRules: async () => rulesLoad({ deny: [{ tool: "fs__delete_file" }] }),
+    });
+
+    const outcomes = await gate.review(batchOf([dangerCall]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes[0].kind).toBe("deny");
+  });
+});

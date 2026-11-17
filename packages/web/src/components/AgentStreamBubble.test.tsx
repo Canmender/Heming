@@ -79,6 +79,34 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
     expect(screen.queryByText("先分析一下问题")).not.toBeInTheDocument();
   });
 
+  it("思考片段太长时只显示一段（流式留尾巴），展开才看全文（d.247）", () => {
+    const longReasoning = `${"旧想法。".repeat(200)}最新想法在这里`;
+    render(<AgentStreamBubble name="和小鸣" text="" status="streaming" reasoning={longReasoning} />);
+
+    // 只渲染尾巴：气泡不会被几万字撑满，正文也不会被顶到屏幕外
+    const body = screen.getByTestId("reasoning-body");
+    expect(body.textContent).toContain("最新想法在这里");
+    expect(body.textContent!.length).toBeLessThan(longReasoning.length);
+    // 说明「前面还有多少字没显示」，用户不会以为内容丢了
+    expect(screen.getByText(/前面还有 \d+ 字没显示/)).toBeInTheDocument();
+
+    // 展开：全文都在
+    fireEvent.click(screen.getByTestId("reasoning-expand"));
+    expect(screen.getByTestId("reasoning-body").textContent).toContain("旧想法。旧想法。");
+    expect(screen.getByTestId("reasoning-body").textContent).toContain("最新想法在这里");
+    expect(screen.queryByText(/前面还有 \d+ 字没显示/)).toBeNull();
+
+    // 收起：回到「只看一段」
+    fireEvent.click(screen.getByTestId("reasoning-collapse"));
+    expect(screen.getByText(/前面还有 \d+ 字没显示/)).toBeInTheDocument();
+  });
+
+  it("短思考不出现「展开全部」（控制大小不等于处处折叠）（d.247）", () => {
+    render(<AgentStreamBubble name="和小鸣" text="" status="streaming" reasoning="想一下就好" />);
+    expect(screen.getByText("想一下就好")).toBeInTheDocument();
+    expect(screen.queryByTestId("reasoning-expand")).toBeNull();
+  });
+
   it("工具调用：显示名称/状态/耗时，展开看参数与结果", () => {
     render(
       <AgentStreamBubble
@@ -450,5 +478,67 @@ describe("工具行的内联改动对照（d.239）", () => {
   it("不是写文件的工具不画对照", () => {
     render(<ToolTraceList tools={trace("run_command", { command: "pnpm test" })} />);
     expect(screen.queryByTestId("tool-inline-diff")).toBeNull();
+  });
+});
+
+describe("工具行折叠（d.243：长任务不再把正文挤没）", () => {
+  const many = (count: number, failures: number[] = []): ToolTrace[] =>
+    Array.from({ length: count }, (_, i) => ({
+      id: `t-${i + 1}`,
+      name: "run_command",
+      args: JSON.stringify({ command: `step-${i + 1}` }),
+      status: failures.includes(i + 1) ? "error" : "ok",
+      result: failures.includes(i + 1) ? `命令失败（exec-${i + 1}）：退出码 1` : `第 ${i + 1} 步输出`,
+      startedAt: i * 10,
+      endedAt: i * 10 + 5,
+    }));
+
+  it("不传 fold 时全渲染（历史回看与进度面板保持原样）", () => {
+    render(<ToolTraceList tools={many(10)} />);
+    expect(screen.queryByTestId("tool-trace-hidden")).toBeNull();
+    expect(document.querySelectorAll("details")).toHaveLength(10);
+  });
+
+  it("流式气泡传 fold：只留最近几条，其余折成一行按钮", () => {
+    render(<ToolTraceList tools={many(10)} fold />);
+    const more = screen.getByTestId("tool-trace-hidden");
+    expect(more.textContent).toContain("还有 7 次工具调用已收起");
+    expect(document.querySelectorAll("details")).toHaveLength(3);
+    // 最近一步一定还在（用户关心「现在在干什么」）
+    expect(screen.getByText("step-10")).toBeTruthy();
+  });
+
+  it("点「展开」看全部，再点「收起」回到折叠态", () => {
+    render(<ToolTraceList tools={many(10)} fold />);
+    fireEvent.click(screen.getByTestId("tool-trace-hidden"));
+    expect(document.querySelectorAll("details")).toHaveLength(10);
+    expect(screen.queryByTestId("tool-trace-hidden")).toBeNull();
+    fireEvent.click(screen.getByTestId("tool-trace-collapse"));
+    expect(document.querySelectorAll("details")).toHaveLength(3);
+  });
+
+  it("早先的失败调用不被折掉（否则「为什么卡住」被藏起来）", () => {
+    render(<ToolTraceList tools={many(10, [2])} fold />);
+    // 第 2 步失败：即使它在「早先」里，也直接显示失败原因那一行
+    const headlines = screen.getAllByTestId("tool-failure-headline");
+    expect(headlines.some((node) => node.textContent?.includes("exec-2"))).toBe(true);
+    // 折起来的次数扣掉它
+    expect(screen.getByTestId("tool-trace-hidden").textContent).toContain("还有 6 次工具调用已收起");
+  });
+
+  it("流式气泡（AgentStreamBubble）里同样生效", () => {
+    render(<AgentStreamBubble name="和鸣" text="在做" status="streaming" tools={many(9)} />);
+    expect(screen.getByTestId("tool-trace-hidden").textContent).toContain("还有 6 次工具调用已收起");
+  });
+
+  it("名字很长时省略，不把「生成中…」挤出可视区（d.246）", () => {
+    const longName = "一个名字非常非常长的智能体".repeat(3);
+    render(<AgentStreamBubble name={longName} text="在做" status="streaming" />);
+    // 名字可省略（truncate + min-w-0）：否则长名字会把右端的「生成中…」顶出去。
+    const nameNode = screen.getByText(longName);
+    expect(nameNode.className).toContain("truncate");
+    expect(nameNode.className).toContain("min-w-0");
+    // 「生成中…」不参与收缩，名字再长也始终可读。
+    expect(screen.getByText("生成中…").className).toContain("shrink-0");
   });
 });

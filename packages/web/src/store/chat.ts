@@ -359,7 +359,8 @@ const REMOTE_ERROR_TTL_MS = 6000;
  * 取舍：TTFT 或流内间隔超过此值的慢模型会被短暂误报「生成可能已中断」，下个 chunk 到达即自愈
  * （patch 会清掉 errorMessage 并回到 streaming）；60s 对常规对话式生成足够宽松，误报成本可接受。
  */
-const STREAM_STALE_MS = 60_000;
+/** 他机流「长时间没刷新」阈值：watchdog 据此把打字机项判死（60s）。导出给页面挂载清扫用。 */
+export const STREAM_STALE_MS = 60_000;
 /**
  * `streamOwner` 的回收窗口（毫秒）。
  *

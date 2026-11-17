@@ -332,8 +332,22 @@ export class HitlPolicyStore {
    * 记住的规则（`ruleFor`）不在这里判定：规则可以**跳过询问**（allow）
    * 或**直接拒绝**（deny），语义比 `pass/ask` 更宽，由闸门先查。
    */
-  allowed(call: HitlCall, policy: HitlPolicy, agentId = ""): PolicyOutcome {
+  allowed(
+    call: HitlCall,
+    policy: HitlPolicy,
+    agentId = "",
+    opts: { dangerAuto?: boolean } = {},
+  ): PolicyOutcome {
     if (policy.mode === "strict") return "ask";
+    /*
+     * 「完全」档的全放行（d.242）：连危险操作也不再逐条问。
+     *
+     * 这是**用户显式开启、可随时关掉、重启即失效**的开关（见 `safetyScope.ts`），
+     * 不是持久档位——`types.ts` 里否掉过的 `auto` 档讲的正是「持久全放行」的危害。
+     * 闸门在这之前已经查过工作区规则（`.heming/permissions.json` 的 deny 仍然优先），
+     * 所以这里只回答「免问」，不越过用户写下的仓库级禁令。
+     */
+    if (opts.dangerAuto === true) return "pass";
     /*
      * 文件写工具（file_patch / file_write / file_edit）：全在可写根内且不含删除 → 免问
      * （规格 §6 的 AutoApprove）。

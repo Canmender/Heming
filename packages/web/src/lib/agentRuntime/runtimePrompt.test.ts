@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  CAPABILITY_SECTION_MAX_CHARS,
   MAX_LISTED_TOOLS,
   type RuntimeSectionInput,
   RUNTIME_HEADING,
   buildRuntimeSection,
+  capabilitySection,
   describePlatform,
   formatLocalTime,
 } from "./runtimePrompt.js";
@@ -314,5 +316,95 @@ describe("当前目标（d.201）", () => {
     expect(buildRuntimeSection({ ...base, tools: [], goal: "" })).toBe(without);
     expect(buildRuntimeSection({ ...base, tools: [], goal: "   " })).toBe(without);
     expect(without).not.toContain("当前目标");
+  });
+});
+
+describe("能力与配合（d.241）", () => {
+  const base = { now: new Date("2026-11-17T00:00:00Z"), timeZone: "UTC" };
+
+  it("有知识库工具时点名「先检索再回答」与出处", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      capabilities: {
+        knowledgeBaseTools: ["vault_search", "vault_read", "vault_write"],
+      },
+    });
+    expect(text).toContain("## 能力与配合");
+    expect(text).toContain("vault_search");
+    expect(text).toContain("先检索再回答");
+    expect(text).toContain("文件名或页面名");
+    // 可写时才提 vault_write（不可写却提示「去写」会误导）
+    expect(text).toContain("vault_write");
+  });
+
+  it("知识库只读时不提写入", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      capabilities: { knowledgeBaseTools: ["vault_search", "vault_read"] },
+    });
+    expect(text).toContain("先检索再回答");
+    expect(text).not.toContain("vault_write");
+  });
+
+  it("刚装/刚升级的插件逐条点名，并教它「找不到工具就先检索」", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      capabilities: {
+        newPlugins: [
+          {
+            name: "图表增强",
+            version: "1.2.0",
+            updated: true,
+            servers: ["plugin:com.example.charts:charts", "plugin:com.example.charts:export"],
+            skills: ["画图"],
+          },
+          { name: "日报助手", version: "0.3.0", updated: false },
+        ],
+      },
+    });
+    expect(text).toContain("「图表增强」v1.2.0（升级）");
+    expect(text).toContain("「日报助手」v0.3.0（新装）");
+    expect(text).toContain("贡献 2 个工具服务");
+    expect(text).toContain("1 个技能（画图）");
+    expect(text).toContain("tool_search 搜「图表增强」");
+    expect(text).toContain("不要因为没认出来就说自己没有这个能力");
+  });
+
+  it("团队与插件市场各写一条用法，且市场那条不许把预览说成装好", () => {
+    const text = buildRuntimeSection({
+      ...base,
+      capabilities: {
+        teamTools: ["team_list", "team_assign", "team_status"],
+        pluginMarketTools: ["plugin_market_search", "plugin_market_install_preview"],
+      },
+    });
+    expect(text).toContain("team_list");
+    expect(text).toContain("不知道团队 id 就先 team_list");
+    expect(text).toContain("plugin_market_search");
+    expect(text).toContain("不要把「预览过」说成「装好了」");
+  });
+
+  it("没有可写内容时整段不出现，输出与加这个字段之前逐字相同", () => {
+    const without = buildRuntimeSection({ ...base, tools: [] });
+    expect(buildRuntimeSection({ ...base, tools: [], capabilities: {} })).toBe(without);
+    expect(buildRuntimeSection({ ...base, tools: [], capabilities: { newPlugins: [] } })).toBe(
+      without,
+    );
+    expect(without).not.toContain("能力与配合");
+  });
+
+  it("超长时按行截断并留一句说明，不会吃掉整段提示词预算", () => {
+    const newPlugins = Array.from({ length: 12 }, (_, index) => ({
+      name: `很长的插件名字第${index}号`,
+      version: "1.0.0",
+      servers: Array.from({ length: 6 }, (_, key) => `plugin:com.example.${index}:service-${key}`),
+      skills: ["技能甲", "技能乙"],
+    }));
+    const lines = capabilitySection({ ...base, capabilities: { newPlugins } });
+    const text = lines.join("\n");
+    expect(text.length).toBeLessThanOrEqual(CAPABILITY_SECTION_MAX_CHARS);
+    expect(text).toContain("因长度上限省略");
+    // 标题必须留着，否则后面那条说明就成了孤句。
+    expect(lines[0]).toContain("## 能力与配合");
   });
 });

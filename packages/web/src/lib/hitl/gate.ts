@@ -41,6 +41,15 @@ export interface HitlGateDeps {
    * 单独做成依赖是为了测试能注入固定规则，不必碰磁盘桥。
    */
   workspaceRules?: () => Promise<WorkspaceRulesLoad | null>;
+  /**
+   * 「完全」档的全放行开关（d.242）：返回 true 时连危险操作也不问。
+   *
+   * 做成依赖而不是直接 import 模块状态，是为了：
+   * - 单测能注入固定值（不必碰浏览器里的开关）；
+   * - 闸门保持「纯逻辑、可注入」的风格（见本文件头注释）。
+   * 缺省（不传）等价于关闭——这是安全默认值。
+   */
+  dangerAuto?: () => boolean;
 }
 
 /** 规则配置损坏时的统一拒绝文案（测试与界面都靠这句话识别 fail-closed）。 */
@@ -197,7 +206,12 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
           outcomes[index] = { kind: "allow", call };
           return;
         }
-        const verdict = policy.allowed(call, current, batch.agentId);
+        const verdict = policy.allowed(
+          call,
+          current,
+          batch.agentId,
+          deps.dangerAuto === undefined ? {} : { dangerAuto: deps.dangerAuto() },
+        );
         if (verdict === "pass") {
           auto.push(call);
           outcomes[index] = { kind: "allow", call };

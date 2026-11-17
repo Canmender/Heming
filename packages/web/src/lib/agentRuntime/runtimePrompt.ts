@@ -92,12 +92,146 @@ export interface RuntimeSectionInput {
    * 清单做完当成交付，或者半路拐去做顺手的另一件事。空字符串/只有空白时整段不写。
    */
   goal?: string;
+  /**
+   * 能力配合（d.241）：本轮知识库 / 团队 / 插件市场工具是否在、以及「刚装了哪些插件」。
+   *
+   * 缺省不带这段（输出与加这个字段之前**逐字相同**），老调用点与评测快照不受影响。
+   */
+  capabilities?: RuntimeCapabilityInfo;
 }
 
 /** 提示词里回灌的清单条目（与 `lib/todo/store.ts` 的 `TodoItem` 同形，避免反向依赖）。 */
 export interface RuntimeTodoInfo {
   content: string;
   status: "pending" | "in_progress" | "completed";
+}
+
+/**
+ * 「刚装/刚升级的插件」（d.241）。
+ *
+ * 数据来自 `lib/plugins/installedNotice.ts`：安装成功时记一条，下一轮提示词读走并清空。
+ * 只带「用户看得出来」的字段——工具名不在这里猜（插件的工具由它贡献的 MCP 服务决定，
+ * 名字要等桥接后才知道），所以提示词的口径是「先找服务/搜插件名」，不是「一定叫某某」。
+ */
+export interface RuntimeNewPlugin {
+  /** 人读名字（清单 `name`）。 */
+  name: string;
+  /** 版本。 */
+  version: string;
+  /** true＝覆盖升级，false/缺省＝首装。 */
+  updated?: boolean;
+  /** 它贡献的服务 id（提示词只说「贡献了几个服务」，不假装知道工具名）。 */
+  servers?: readonly string[];
+  /** 它贡献的技能名。 */
+  skills?: readonly string[];
+}
+
+/**
+ * 本轮「能力配合」需要模型知道的事实（d.241）。
+ *
+ * 为什么要这一段：工具有了不等于会用。知识库/插件/团队的工具混在几十个工具名里，
+ * 模型很容易继续用「读文件 + 搜索」的老路径，于是用户觉得「装了插件、建了知识库，它就是不配合」。
+ * 这里按**本轮真实注入的工具**分组点名用法；哪组不在就整条不写（不撒谎）。
+ */
+export interface RuntimeCapabilityInfo {
+  /** 本轮属于知识库的工具名（`vault_search`/`vault_read`/…）；空/缺省＝这轮没有知识库。 */
+  knowledgeBaseTools?: readonly string[];
+  /** 本轮属于团队工作台的工具名（`team_*`）。 */
+  teamTools?: readonly string[];
+  /** 本轮属于插件市场的工具名（`plugin_market_*`）。 */
+  pluginMarketTools?: readonly string[];
+  /** 刚装/刚升级的插件（安装记录），最多列 5 个。 */
+  newPlugins?: readonly RuntimeNewPlugin[];
+}
+
+/** 「刚装插件」最多列几条：再多说明用户刚批量装，挑最近的说就够。 */
+export const MAX_LISTED_NEW_PLUGINS = 5;
+
+/** 能力与配合段的字符预算（每轮都进提示词，且尾部变化会打断前缀缓存）。 */
+export const CAPABILITY_SECTION_MAX_CHARS = 900;
+
+/** 名字数组 → 「a / b / c（等）」；空数组返回空串。 */
+function nameList(names: readonly string[], max = 4): string {
+  const clean = names.filter((name) => typeof name === "string" && name.trim()).slice(0, max);
+  if (clean.length === 0) return "";
+  const more = names.length > clean.length ? " 等" : "";
+  return `${clean.join(" / ")}${more}`;
+}
+
+/** 一条插件贡献的人话：服务与技能各自点名，都没有就只说版本。 */
+function pluginContribution(plugin: RuntimeNewPlugin): string {
+  const parts: string[] = [];
+  const servers = (plugin.servers ?? []).filter((id) => typeof id === "string" && id);
+  const skills = (plugin.skills ?? []).filter((name) => typeof name === "string" && name);
+  if (servers.length > 0) parts.push(`贡献 ${servers.length} 个工具服务（${nameList(servers, 3)}）`);
+  if (skills.length > 0) parts.push(`${skills.length} 个技能（${nameList(skills, 3)}）`);
+  return parts.join("、");
+}
+
+/**
+ * 能力与配合段（纯函数）。没有可写的内容时返回空数组——调用方据此整段不写。
+ */
+export function capabilitySection(input: RuntimeSectionInput): string[] {
+  const caps = input.capabilities;
+  if (!caps) return [];
+  const lines: string[] = [];
+
+  const kb = (caps.knowledgeBaseTools ?? []).filter((name) => typeof name === "string" && name);
+  if (kb.length > 0) {
+    const writable = kb.includes("vault_write");
+    lines.push(
+      `- 知识库：本轮有 ${nameList(kb, 4)}。凡是问「我的资料 / 笔记 / 会议纪要 / 之前写过的」，**先检索再回答**，` +
+        "并在答案里给出文件名或页面名；确实没有就说没有，不要拿常识冒充库里的内容。" +
+        (writable ? "要沉淀结论时用 vault_write（写入会请用户确认）。" : ""),
+    );
+  }
+
+  const plugins = (caps.newPlugins ?? [])
+    .filter((plugin) => plugin && typeof plugin.name === "string" && plugin.name)
+    .slice(0, MAX_LISTED_NEW_PLUGINS);
+  if (plugins.length > 0) {
+    lines.push("- 刚装 / 刚升级的插件（用户装它们就是为了让你用）：");
+    for (const plugin of plugins) {
+      const tag = plugin.updated ? "升级" : "新装";
+      const contribution = pluginContribution(plugin);
+      lines.push(
+        `  - 「${plugin.name}」v${plugin.version}（${tag}）${contribution ? `：${contribution}` : ""}。` +
+          `用户提到相关需求时优先用它的能力；本轮工具列表里没看到对应工具名，就先 tool_search 搜「${plugin.name}」` +
+          "或它贡献的服务名，再调用——不要因为没认出来就说自己没有这个能力。",
+      );
+    }
+  }
+
+  const team = (caps.teamTools ?? []).filter((name) => typeof name === "string" && name);
+  if (team.length > 0) {
+    lines.push(
+      `- 团队：涉及派活 / 看进度 / 项目协作，用 ${nameList(team, 3)} 这些工具（不知道团队 id 就先 team_list）。`,
+    );
+  }
+
+  const market = (caps.pluginMarketTools ?? []).filter((name) => typeof name === "string" && name);
+  if (market.length > 0) {
+    lines.push(
+      `- 想给和鸣加新能力：先用 ${nameList(market, 2)} 搜、再预览；真正安装要用户点确认，` +
+        "不要把「预览过」说成「装好了」。",
+    );
+  }
+
+  if (lines.length === 0) return [];
+  const heading = "## 能力与配合（用上已装的东西）";
+  const body = [heading, ...lines];
+  const text = body.join("\n");
+  if (text.length <= CAPABILITY_SECTION_MAX_CHARS) return body;
+  // 超预算时按行截断并留一句说明——宁可少说一条，也不能让这一段吃掉整段提示词的预算。
+  const kept: string[] = [heading];
+  let used = heading.length + 1;
+  for (const line of lines) {
+    if (used + line.length + 1 > CAPABILITY_SECTION_MAX_CHARS - 24) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  kept.push("- （这一段的其余提示因长度上限省略；需要细节可让用户发 /status 查看能力清单。）");
+  return kept;
 }
 
 /** 把 UA 翻成一句人话；认不出就退化成「未知系统」，绝不猜。 */
@@ -208,6 +342,14 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
     lines.push(
       "- 这一轮没有注入任何工具：需要联网/文件/知识库时先如实说明现在用不了，并告诉用户去哪里打开（设置 → 工具授权 / 文件编辑 / MCP），不要编造查询结果。",
     );
+  }
+
+  // 能力与配合（d.241）：工具有了，还要说清「什么时候该用哪一组」。
+  // 放在工具清单之后、计划模式之前：它解决的是「怎么把已装的东西用上」，不是收尾纪律。
+  const capabilityLines = capabilitySection(input);
+  if (capabilityLines.length > 0) {
+    lines.push("");
+    lines.push(...capabilityLines);
   }
 
   // 计划模式（d.173）：开关在输入框上，用户一按就该看到「先计划、不改」。

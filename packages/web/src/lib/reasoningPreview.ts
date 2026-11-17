@@ -1,0 +1,83 @@
+/**
+ * 思考片段的大小控制（d.247）。
+ *
+ * 为什么单独抽出来：思考过程是模型的自言自语，长度不受控——实测一次能写几千到几万字，
+ * 而它渲染在**正文上方**。不设上限时有两个后果：①本条气泡把正文顶到屏幕外，
+ * 用户要滚半天才看到答案；②一条消息就上万字，滚动与重排都变卡（流式还在逐字追加）。
+ *
+ * 这里的口径是**按内容截断**，不是加内层滚动条：`AgentStreamBubble` 里有一条既有决定
+ * （B 轨 E5）——轨迹区域只保留一层滚动，嵌套滚动条在触控板上会「卡在里层」，用户滚不到
+ * 消息列表。所以这里用「只显示一段 + 展开全部」，不制造第二个滚动容器。
+ *
+ * 两个方向各有道理，分开给：
+ * - 流式中（`mode: "tail"`）：用户关心的是**它现在想到哪**，留尾巴。
+ * - 回看时（`mode: "head"`）：用户想从头读，留开头。
+ */
+export const REASONING_PREVIEW_LINES = 12;
+export const REASONING_PREVIEW_CHARS = 800;
+
+export interface ReasoningPreview {
+  /** 要渲染的那一段（流式中是尾巴，回看是开头）。 */
+  text: string;
+  /** 是否被截断了（false 时 text 就是全文，调用方不该出现「展开全部」）。 */
+  clipped: boolean;
+  /** 没显示出来的字数。 */
+  hiddenChars: number;
+  /** `tail` = 保留末尾、`head` = 保留开头。 */
+  mode: "head" | "tail";
+}
+
+/**
+ * 把一段思考文本压到「最多 N 行且不超过 M 字」。
+ *
+ * 为什么两个上限都要：只有字数时，长段落会被截成一行超长文本（阅读体验差、还会撑宽）；
+ * 只有行数时，一行两万字的段落照样能把气泡撑满。取两者中更严格的那个。
+ *
+ * `mode: "tail"` 时从末尾往回取，并保证不把代理对（emoji）切一半。
+ */
+export function previewReasoning(
+  text: string,
+  options: { mode?: "head" | "tail"; lines?: number; chars?: number } = {},
+): ReasoningPreview {
+  const mode = options.mode ?? "head";
+  const maxLines = Math.max(1, options.lines ?? REASONING_PREVIEW_LINES);
+  const maxChars = Math.max(1, options.chars ?? REASONING_PREVIEW_CHARS);
+  if (text === "") return { text: "", clipped: false, hiddenChars: 0, mode };
+
+  const byChars = clipByChars(text, maxChars, mode);
+  const byLines = clipByLines(text, maxLines, mode);
+  // 两种截法取「更短」的那个：谁更省空间就用谁，但绝不把短文本误判成被截断。
+  const chosen = byChars.length <= byLines.length ? byChars : byLines;
+  if (chosen.length >= text.length) {
+    return { text, clipped: false, hiddenChars: 0, mode };
+  }
+  return { text: chosen, clipped: true, hiddenChars: text.length - chosen.length, mode };
+}
+
+function clipByChars(text: string, maxChars: number, mode: "head" | "tail"): string {
+  if (text.length <= maxChars) return text;
+  if (mode === "tail") {
+    // 从末尾取，且不切断代理对（高代理 0xD800–0xDBFF 不能是起点）。
+    let start = text.length - maxChars;
+    const first = text.charCodeAt(start);
+    if (first >= 0xd800 && first <= 0xdbff) start += 1;
+    return text.slice(start);
+  }
+  return text.slice(0, maxChars);
+}
+
+function clipByLines(text: string, maxLines: number, mode: "head" | "tail"): string {
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return text;
+  return mode === "tail"
+    ? lines.slice(lines.length - maxLines).join("\n")
+    : lines.slice(0, maxLines).join("\n");
+}
+
+/** 「…前面/后面还有 N 字没显示」——方向由 mode 决定，免得用户以为内容丢了。 */
+export function describeReasoningClip(preview: ReasoningPreview): string {
+  if (!preview.clipped) return "";
+  return preview.mode === "tail"
+    ? `前面还有 ${preview.hiddenChars} 字没显示`
+    : `后面还有 ${preview.hiddenChars} 字没显示`;
+}

@@ -13,6 +13,7 @@ import {
 } from "react";
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
+  STREAM_STALE_MS,
   useChatStore,
   transcriptOf,
   withTranscript,
@@ -125,6 +126,7 @@ import {
 } from "../lib/agentRuntime/runtimePrompt.js";
 import { resolveBasePrompt } from "../lib/agentRuntime/defaultPrompt.js";
 import { collectProjectRules, summarizeProjectRules, type ProjectRulesSummary } from "../lib/agentRuntime/projectRules.js";
+import { peekPluginInstallNotices, takePluginInstallNotices } from "../lib/plugins/installedNotice.js";
 import { collectFileRefs, describeFileRefIssues, fileRefIssues, type FileRefIssues } from "../lib/fileEdit/fileRefs.js";
 import { FileRefPicker } from "./FileRefPicker.js";
 import { ModelSwitcher } from "./ModelSwitcher.js";
@@ -158,6 +160,8 @@ import {
   subscribePanelJobs,
 } from "../lib/shell/jobPanel.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
+import { decidePanelAutoOpen } from "../lib/agentRuntime/panelAuto.js";
+import { withPanelTool } from "../lib/agentRuntime/panelTool.js";
 import { withWorkflowTool } from "../lib/agentRuntime/workflow.js";
 import {
   applySubagentProgress,
@@ -179,6 +183,16 @@ import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
 import { createToolHookRunner, describeToolHooksState, setToolHooksEnabled, type ToolHookRunner } from "../lib/hitl/hookRunner.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
+import {
+  SAFETY_SCOPES,
+  SAFETY_SCOPE_TEXT,
+  describeSafetyScope,
+  isDangerAuto,
+  policyForScope,
+  scopeOfPolicy,
+  setDangerAuto,
+  type SafetyScope,
+} from "../lib/hitl/safetyScope.js";
 import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
 import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { appendToolAudit } from "../lib/hitl/audit.js";
@@ -301,6 +315,8 @@ export const HITL_APPROVAL_TIMEOUT_MS = 60 * 60 * 1000;
  */
 const hitlGate = createHitlGate({
   policy: hitlPolicy,
+  // d.242：「完全」档的全放行开关（每次裁决现读，不缓存——用户随时可能改回来）
+  dangerAuto: isDangerAuto,
   ask: (batch) =>
     useHitlStore.getState().enqueue(
       { kind: "tool-call", payload: batch.calls, auto: batch.auto },
@@ -697,7 +713,8 @@ export function ChatPage({
   const upsertStream = useChatStore((s) => s.upsertStream);
   const removeStream = useChatStore((s) => s.removeStream);
   const markStreamOwner = useChatStore((s) => s.markStreamOwner);
-  const clearStreamsForConversation = useChatStore((s) => s.clearStreamsForConversation);
+  // d.244：不再「挂载即清本会话残留流」——离开页面不再中止流，挂载时可能正有一条在跑。
+  // 过期孤儿项交给 `sweepStaleStreams`（60s 无刷新才判死）。
   const sweepStaleStreams = useChatStore((s) => s.sweepStaleStreams);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
@@ -809,6 +826,23 @@ export function ChatPage({
    */
   const [planMode, setPlanMode] = useState<boolean>(() => loadPlanMode(convId));
   /**
+   * 安全范围（d.242）：聊天框左下角那一档，用户语言是「手动 / 自动 / 完全」。
+   *
+   * 内部落到 HITL 档位（`hitlPolicy`）+ 「完全」时的全放行开关（`safetyScope.ts` 的
+   * 进程内标志）。这里再存一份 state 只是为了按钮文案与菜单勾选能立刻刷新——
+   * 真正的判定始终读 `hitlPolicy` 与 `isDangerAuto()`（设置页改过档位也不会漂移）。
+   */
+  const [safetyScope, setSafetyScope] = useState<SafetyScope>(() =>
+    scopeOfPolicy(hitlPolicy.get(), isDangerAuto()),
+  );
+  /** 安全范围菜单是否展开。 */
+  const [safetyOpen, setSafetyOpen] = useState(false);
+  /**
+   * 「完全」的二次确认（d.242）：`true` 表示已经提醒过一次、下次点击才真开。
+   * 用 ref 而不是 state——它不需要触发渲染，只是「上一次点的是不是同一个选项」。
+   */
+  const safetyConfirmRef = useRef(false);
+  /**
    * 分叉降级提示（d.56）：来源日志重建不出前缀时，本次按普通重跑执行。
    *
    * 为什么单独占一行、不并进 `sendNotice`：输入区提示会在发送成功后被清空，
@@ -883,6 +917,57 @@ export function ChatPage({
     const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [turnProgress]);
+  /**
+   * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
+   *
+   * 状态放在 ChatPage 本地而不是 ui store/shell：这条栏只属于「当前会话」，
+   * 换会话或切页面时组件卸载，开合自然回到默认隐藏——不需要额外的清理 effect。
+   */
+  const [progressOpen, setProgressOpen] = useState(false);
+  /**
+   * 智能体自己打开进度栏时给的一句理由（d.245）：显示在栏内顶部，
+   * 让用户知道「这一栏不是自己弹出来捣乱的，是它觉得这里值得看」。
+   */
+  const [panelAgentReason, setPanelAgentReason] = useState<string | null>(null);
+  /** 这一轮是否已经自动开过栏（d.245）：一轮最多抢一次镜。 */
+  const panelAutoOpenedRef = useRef(false);
+  /** 用户手动关栏的时间（d.245）：关掉就是关掉，安静期内不再自动打开。 */
+  const panelManualClosedAtRef = useRef<number | null>(null);
+  /** 已经处理过哪一轮的自动开栏判定（按 turnProgress.startedAt 归零 autoOpened）。 */
+  const panelRunStartedAtRef = useRef(0);
+  /**
+   * 进度栏「关键时刻自动打开」（d.245）。
+   *
+   * 判据在 `lib/agentRuntime/panelAuto.ts` 里（纯函数、可单测），这里只负责把事实喂进去：
+   * 一轮跑多久、调了几次工具、用户是不是刚把栏关掉。
+   *
+   * 为什么**只**看「跑得久 + 多步」：等你确认时对话里已经顶着确认卡（那就是入口），
+   * 再自动摊开一栏属于重复打扰；需要中途展示时由模型显式调 `panel_show`。
+   */
+  useEffect(() => {
+    // 新一轮重新给一次自动打开机会：startedAt 变了就当上一轮的「已开过」失效。
+    if (turnProgress && !turnProgress.done && turnProgress.startedAt !== panelRunStartedAtRef.current) {
+      panelRunStartedAtRef.current = turnProgress.startedAt;
+      panelAutoOpenedRef.current = false;
+    }
+    const runningMs =
+      turnProgress && !turnProgress.done
+        ? Math.max(0, (progressNow || Date.now()) - turnProgress.startedAt)
+        : 0;
+    const decision = decidePanelAutoOpen({
+      open: progressOpen,
+      autoOpenedThisRun: panelAutoOpenedRef.current,
+      manualClosedAt: panelManualClosedAtRef.current,
+      now: Date.now(),
+      runningMs,
+      tools: turnProgress?.tools ?? 0,
+    });
+    if (!decision.open) return;
+    panelAutoOpenedRef.current = true;
+    setProgressOpen(true);
+    setPanelAgentReason("这一轮跑得比较久。");
+    if (decision.notice !== null) setSendNotice(decision.notice, "info");
+  }, [progressOpen, progressNow, turnProgress]);
   /**
    * 当前会话的目标（d.201）：有目标才渲染 GoalBar；提示词里也只在有目标时写这段。
    *
@@ -1038,13 +1123,6 @@ export function ChatPage({
       if (timer !== null) clearTimeout(timer);
     };
   }, []);
-  /**
-   * 右侧「会话进度」栏的开合（Codex 式：header 右上角一颗按钮呼出，再点或点关闭收起）。
-   *
-   * 状态放在 ChatPage 本地而不是 ui store/shell：这条栏只属于「当前会话」，
-   * 换会话或切页面时组件卸载，开合自然回到默认隐藏——不需要额外的清理 effect。
-   */
-  const [progressOpen, setProgressOpen] = useState(false);
   // 会话视图（T32）：对话 / 轨迹 / 上下文三块同页切换，不新开路由。
   const [view, setView] = useState<ChatView>("chat");
   /** 提示位「还有 N 条」的展开状态；提示数量变化时复位（见下方 effect）。 */
@@ -1160,6 +1238,15 @@ export function ChatPage({
   /** MediaRecorder 录音进行中（录音态提示行与中止收尾共用）。 */
   const [recording, setRecording] = useState(false);
   const wsHandleRef = useRef<WsHandle | null>(null);
+  /**
+   * d.244：整页卸载标记（切到别的页面 / 关掉会话视图）。
+   *
+   * 与「切会话」区分开：切会话要中止那一轮的流（用户视线已经移走），
+   * 而离开聊天页**不中止**——用户去设置里改个东西再回来，理应还在跑、还在实时输出。
+   * 由 `useLayoutEffect` 的 cleanup 置真（layout 清理先于普通 effect 清理，
+   * 所以下面 WS effect 的 cleanup 一定能读到它）。
+   */
+  const unmountingRef = useRef(false);
   /** 语音识别器实例：切会话/卸载时 stop，避免后台继续识别回填草稿。 */
   const recRef = useRef<{ start(): void; stop(): void } | null>(null);
   /** MediaRecorder 录音实例（与 STT 的 recRef 区分）：停录/中止收口都在 onstop。 */
@@ -1615,8 +1702,18 @@ export function ChatPage({
     // 这是**产品意图**不是安全边界——真正的写权限仍由可写根与 HITL 决定。
     // 以**存储**为准，不用渲染闭包里的 `planMode`：`executePlan` 在同一个 tick 里
     // 先写存储再发消息，state 还没落下去；读闭包会拿上一轮的 true，把这一轮的写工具又摘掉。
+    // 面板工具（d.245）：模型觉得「该让用户看进度」时自己打开右侧栏（只读、免确认）。
+    // 包在这里而不是做成 provider：面板是当前组件实例的状态，provider 拿不到组件。
+    const withPanel = wrapped
+      ? withPanelTool(wrapped, {
+          onOpen: (reason: string) => {
+            setProgressOpen(true);
+            setPanelAgentReason(reason === "" ? null : reason);
+          },
+        })
+      : null;
     const planOn = loadPlanMode(convId);
-    const finalBridge = wrapped && planOn ? withPlanMode(wrapped) : wrapped;
+    const finalBridge = withPanel && planOn ? withPlanMode(withPanel) : withPanel;
     toolBridgeRef.current.set(agentId, finalBridge);
     return finalBridge;
   };
@@ -1633,6 +1730,45 @@ export function ChatPage({
     setPlanMode(next);
     savePlanMode(convId, next);
     toolBridgeRef.current.clear();
+  };
+
+  /**
+   * 切换安全范围（d.242）：手动 / 自动 / 完全。
+   *
+   * 「完全」要点两次：第一次只提醒代价（连删文件、跑命令、改自己的执行环境都不再问），
+   * 第二次才真的开。全放行只在**本次运行内**有效（`safetyScope.ts` 故意不落盘），
+   * 所以误触最多影响这一次运行，重启即回到默认的「自动」。
+   *
+   * 判定以存储为准（`hitlPolicy.get()` + `isDangerAuto()`），不看闭包里的 state：
+   * 设置页也改同一份策略，闭包可能已经过期。
+   */
+  const chooseSafetyScope = (scope: SafetyScope) => {
+    const currentScope = scopeOfPolicy(hitlPolicy.get(), isDangerAuto());
+    if (scope === currentScope) {
+      safetyConfirmRef.current = false;
+      setSafetyOpen(false);
+      return;
+    }
+    if (scope === "full" && !safetyConfirmRef.current) {
+      safetyConfirmRef.current = true;
+      setSendNotice(
+        "完全权限：连危险操作也不再逐条问（删文件、跑命令、改自己的执行环境都在内），工作区 rules 里的 deny 仍然有效。只在本机本次运行内有效，重启即回到「自动」。要真的开，再点一次「完全」。",
+        "info",
+      );
+      return;
+    }
+    safetyConfirmRef.current = false;
+    const next = policyForScope(scope);
+    hitlPolicy.set({ ...hitlPolicy.get(), mode: next.mode });
+    setDangerAuto(next.dangerAuto);
+    setSafetyScope(scope);
+    setSafetyOpen(false);
+    setSendNotice(
+      scope === "full"
+        ? "安全范围已设为「完全」：这一轮起不再逐条确认（含危险操作）。输入区会一直显示提醒，随时点回去就能改回「自动」。"
+        : `安全范围已设为「${SAFETY_SCOPE_TEXT[scope].label}」：${SAFETY_SCOPE_TEXT[scope].hint}`,
+      "info",
+    );
   };
 
   /**
@@ -2645,6 +2781,36 @@ export function ChatPage({
             .conversations.find((c) => c.id === convId)?.workspace;
           const bridge = buildToolsFor(agentId);
           const tools = bridge?.tools ?? [];
+          // 能力配合（d.241）：按本轮真实注入的工具名分组，让模型知道「知识库 / 团队 / 插件市场」该什么时候用；
+          // 刚装过的插件也从安装记录里带过来（下一轮说一次，之后不再重复）。
+          const toolNames = tools
+            .map((spec) => (spec as { function?: { name?: string } }).function?.name)
+            .filter((name): name is string => typeof name === "string" && name.length > 0);
+          const newPlugins = peekPluginInstallNotices().map((notice) => ({
+            name: notice.name,
+            version: notice.version,
+            updated: notice.updated,
+            servers: notice.servers,
+            skills: notice.skills,
+          }));
+          const capabilities = {
+            ...(toolNames.some((name) => name.startsWith("vault_") || name.startsWith("wiki_"))
+              ? {
+                  knowledgeBaseTools: toolNames.filter(
+                    (name) => name.startsWith("vault_") || name.startsWith("wiki_"),
+                  ),
+                }
+              : {}),
+            ...(newPlugins.length > 0 ? { newPlugins } : {}),
+            ...(toolNames.some((name) => name.startsWith("team_"))
+              ? { teamTools: toolNames.filter((name) => name.startsWith("team_")) }
+              : {}),
+            ...(toolNames.some((name) => name.startsWith("plugin_market_"))
+              ? {
+                  pluginMarketTools: toolNames.filter((name) => name.startsWith("plugin_market_")),
+                }
+              : {}),
+          };
           // 目标（d.201）：从存储读一次，既写进提示词也给下面的分支判断用。
           const goalText = goalForPrompt(convId);
           let timeZone: string | undefined;
@@ -2677,6 +2843,8 @@ export function ChatPage({
             todos: getTodos(convId),
             // 目标（d.201）：同样从存储读——它是「这一切为了什么」，比清单更该跨轮保持。
             ...(goalText ? { goal: goalText } : {}),
+            // 能力配合（d.241）：知识库 / 团队 / 插件市场 / 刚装的插件——让模型知道什么时候该用哪一组。
+            ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
           });
         } catch {
           runtimeSection = "";
@@ -2984,6 +3152,12 @@ export function ChatPage({
          * （留着反而危险：三轮之后某个工具轮会突然把旧的一句话塞进上下文）。
          */
         if (result.status === "ok") {
+          /*
+           * 刚装/刚升级插件的告知（d.241）：这一轮提示词里已经写过一次，正常收口后就清掉。
+           * 只在 `ok` 清——这一轮如果被停止或报错，模型可能根本没看到那段，留着下一轮再说一次；
+           * 而「每轮都重复说」会让提示词里的 plugin 段变成噪声，也是对前缀缓存的浪费。
+           */
+          takePluginInstallNotices();
           const queued = steerQueueOf(convId).shift();
           if (queued) {
             setSendNotice("这一轮已经收尾，正接着处理你插的那条（下一轮就是它）。", "info");
@@ -3151,7 +3325,17 @@ export function ChatPage({
     runs.add(run);
     // 完成即摘除：卸载时 WS cleanup 据此判断是否还有「进行中流」需延迟 close（F1）
     run.then(
-      () => runs.delete(run),
+      () => {
+        runs.delete(run);
+        // d.244：离开聊天页时保留的这条连接，等全部流真收口后关掉——
+        // 延后一个宏任务，让收尾帧（finish/agent_error）先落到发送队列上。
+        if (unmountingRef.current && !Object.values(runsRef.current).some((s) => s.size > 0)) {
+          setTimeout(() => {
+            wsHandleRef.current?.close();
+            wsHandleRef.current = null;
+          }, 0);
+        }
+      },
       (e) => {
         runs.delete(run);
         // fetchHistory 失败等启动期错误：生成未开始，可见提示而非静默
@@ -3344,6 +3528,18 @@ export function ChatPage({
   // 页面名判断不了「任务区里也挂着一个 ChatPage」，必须按实例注册/注销。
   useEffect(() => registerChatSocket(), []);
 
+  /**
+   * d.244：整页卸载标记。layout effect 的 cleanup **先于**普通 effect 的 cleanup 执行，
+   * 所以下面 WS effect 的 cleanup 一定能读到 `unmountingRef.current === true`——
+   * 靠它把「离开聊天页」与「切会话」分开：「离开」保留在飞的流与连接，「切会话」照旧中止。
+   */
+  useLayoutEffect(
+    () => () => {
+      unmountingRef.current = true;
+    },
+    [],
+  );
+
   useEffect(() => {
     let alive = true; // 挡卸载后晚到的补拉写入（同 loadMessages effect 口径）
     /**
@@ -3421,12 +3617,16 @@ export function ChatPage({
     wsHandleRef.current = handle;
     return () => {
       alive = false;
-      // F1 回归：进行中流被卸载中止时，catch 要经此连接补发 finish(partial)+agent_error
-      // （服务端入库 partial、他机端收 error 收口）。立即 close + 清 ref 会把两帧静默丢弃——
-      // catch 在微任务里跑，故把 close 延后一个宏任务（微任务必先排空），ref 同步清空也一并延后。
-      // 无进行中流则立即关（绝大多数切会话/卸载路径，行为不变）。
       const hasInFlight = Object.values(runsRef.current).some((s) => s.size > 0);
-      if (hasInFlight && handle) {
+      if (hasInFlight && handle && unmountingRef.current) {
+        // d.244：离开聊天页不掐断这一轮——连接必须留着，`agent_finish` / `agent_error`
+        // 都靠它上行（关了就「完了也没人收尾」，答案既不落库、回来也看不到）。
+        // 关闭交给卸载 effect 里的轮询：全部收口后自会 close。
+        wsHandleRef.current = handle;
+      } else if (hasInFlight && handle) {
+        // F1 回归：切会话时进行中流被中止，catch 要经此连接补发 finish(partial)+agent_error
+        // （服务端入库 partial、他机端收 error 收口）。立即 close + 清 ref 会把两帧静默丢弃——
+        // catch 在微任务里跑，故把 close 延后一个宏任务（微任务必先排空），ref 同步清空也一并延后。
         setTimeout(() => {
           handle.close();
           if (wsHandleRef.current === handle) wsHandleRef.current = null;
@@ -3457,14 +3657,33 @@ export function ChatPage({
     }
   }, [messages.length, streamTick, scrollListToBottom]);
 
-  // I1 挂载清扫：上一轮卸载中止流后 socket 已关，finish/echo 收不到，store（整页刷新
-  // 才会清空）里可能残留本会话的「生成中」孤儿项与 streamOwner 键。新挂载时 runsRef
-  // 必为空 → 该 convId 下不可能有进行中流，残留一律按孤儿清（他/其他会话条目不动）。
-  // 空依赖 = 只在新挂载执行；切会话（convId 变化）不清——那时他机流条目仍有效。
+  // 挂载清扫（d.244 起只清「真过期」的残留）：离开聊天页不再中止在飞的流，所以新挂载时
+  // store 里的 streaming 项**可能有一个正在跑**——那是本机上一实例仍在推进的流，清掉就等于
+  // 又看不到实时输出了。只把超过 STREAM_STALE_MS（60s 没刷新）的孤儿项置 error（`sweepStaleStreams`
+  // 既有口径），真正在跑的、以及他机正在写的条目一律不动。
+  // 空依赖 = 只在挂载执行；切会话（convId 变化）不清——那时别的会话/他机流条目仍有效。
   useEffect(() => {
-    clearStreamsForConversation(convId);
+    // 只有真存在「超时没刷新」的 streaming 项时才扫——正常挂载（store 干净、
+    // 或只有 error 残留）不该有任何清扫动作，watchdog 门控用例也依赖这一点。
+    const hasStale = Object.values(useChatStore.getState().streaming).some(
+      (s) => s.status === "streaming" && Date.now() - (s.lastAt ?? 0) > STREAM_STALE_MS,
+    );
+    if (hasStale) sweepStaleStreams(Date.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * 回来时接上实时输出：挂载那一刻若本会话已有在飞的流（离开页面时它没被掐断），
+   * 明确告诉用户「它还在跑、这里看到的是实时的」，别让人以为又从头开始了。
+   * 只在每个实例里提示一次（下面 fork/恢复提示已有各自的位，这里不共用）。
+   */
+  const liveResumeNotedRef = useRef(false);
+  useEffect(() => {
+    if (liveResumeNotedRef.current) return;
+    if (!streamEntries.some(([, s]) => s.status === "streaming")) return;
+    liveResumeNotedRef.current = true;
+    setSendNotice("这一轮在你离开页面时还在跑，这里接的是实时输出。", "info");
+  }, [streamEntries]);
 
   // 他机流 watchdog（Task 7）：存在 status==="streaming" 的在飞项时，每 15s 扫一次全局 streaming，
   // 把长时间无响应（>60s 未刷新）的打字机项置 error 行（阈值在 store；本机流不自动重试，error 行有手动重试）。
@@ -3480,16 +3699,17 @@ export function ChatPage({
     return () => window.clearInterval(timer);
   }, [hasLiveStream, sweepStaleStreams]);
 
-  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停；
-  // 录音中止同走取消位（onstop 停麦克风轨、放弃发送，60s 定时器一并清）
+  // 卸载（离开聊天页）：**不再中止**进行中的流（d.244）。
+  //
+  // 以前这里 `abortAll()` + `cancelAll("页面离开")`，理由是「不再空烧供应商 token」；
+  // 但代价是「去设置里改个东西再回来」这一轮直接没了——正是用户报的「切页后返回看不到
+  // 实时流式输出」。现在改成：流继续跑、连接保留（见 WS cleanup 与 `startRun` 里的收口关闭），
+  // 本页只做本机清理。显式中止只有两处：用户点「停止」、以及真正关窗/刷新（由页面销毁兜底）。
+  //
+  // 待确认请求也不再「替用户拒绝」：闸门在裁决前不执行工具（兜底方向是「不执行」），
+  // 回来还能裁决——否则用户只是去改个设置，工具就被记成了「用户拒绝」。
   useEffect(
     () => () => {
-      for (const set of Object.values(runsRef.current)) {
-        for (const h of set) h.abortAll();
-      }
-      // 离开聊天页时确认弹窗也要收：闸门在等用户的裁决，
-      // 不收就是整轮挂死（设计 §4.4）。
-      useHitlStore.getState().cancelAll("页面离开");
       recRef.current?.stop();
       voiceRecCancelRef.current?.();
     },
@@ -3863,7 +4083,8 @@ export function ChatPage({
       toolFailures: getToolFailureStats(convId),
       roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
       planMode: loadPlanMode(convId),
-      // 自检里的「子代理：只读 / 可写」直接读存储——闭包里的 state 可能还是上一轮的值
+      // d.242：安全范围这一行读存储/开关本身，不读 state——设置页改过档位也能如实反映
+      safety: describeSafetyScope(scopeOfPolicy(hitlPolicy.get(), isDangerAuto())),
       subagentWritable: isSubagentWriteEnabled(convId),
       notifyEnabled: isDesktopNotifyEnabled(),
       sessionChanges: getSessionChanges(convId).length,
@@ -4912,7 +5133,17 @@ export function ChatPage({
               className={progressOpen ? "bg-subtle-3 text-ink" : ""}
               aria-expanded={progressOpen}
               icon={<WorkflowIcon width={18} height={18} />}
-              onClick={() => setProgressOpen((v) => !v)}
+              onClick={() => {
+                // 手动开合（d.245）：主动关掉时记时间并清理由——关掉就是关掉，
+                // 自动开栏在安静期内要让位于这个动作。
+                if (progressOpen) {
+                  panelManualClosedAtRef.current = Date.now();
+                  setPanelAgentReason(null);
+                  setProgressOpen(false);
+                } else {
+                  setProgressOpen(true);
+                }
+              }}
             />
             {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
             <IconButton
@@ -5031,6 +5262,10 @@ export function ChatPage({
       {/* 消息区：左右用 --chat-gutter（24px，窄屏 12px）与 composer 同一条竖线——
           d.126-C 删掉头像列后这里不再有额外内边距。py 上 24 / 下 20 的差是刻意留的
           「呼吸位」——完全等距时第一条消息会顶着 header 底线，视觉上像被切掉一截。 */}
+      {/* d.246：消息区单独包一层 relative——「新消息」浮标必须相对**消息区**定位。
+          以前它相对整个会话面板定位（bottom-32），输入区一长（附件、排队条、提示条、
+          安全范围黄条）就会压到输入框上，这正是「界面元素重叠」的来源之一。 */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
         data-testid="message-list"
@@ -5183,7 +5418,9 @@ export function ChatPage({
                     // 助手输出：全宽、无气泡；署名/时间极小弱化 + 思考块 + 工具轨迹 + 正文
                     <div>
                       <div className="mb-1 flex items-baseline gap-2 text-ui-xs leading-4 text-muted">
-                        <span>{senderName || "智能体"}</span>
+                        {/* d.246：署名可以很长（用户能给智能体起长名），必须能省略，
+                            否则把右端的时间挤出这一行（表现为「叠在一起」）。 */}
+                        <span className="min-w-0 truncate">{senderName || "智能体"}</span>
                         <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
                           {formatClock(m.createdAt)}
                         </time>
@@ -5235,18 +5472,20 @@ export function ChatPage({
         <div ref={bottomRef} />
         </div>
       </div>
-      {/* A3：用户上滑期间来了新内容 —— 不拽底，只亮一个回到底部的入口 */}
+      {/* A3：用户上滑期间来了新内容 —— 不拽底，只亮一个回到底部的入口。
+          d.246：定位在消息区右下角（上面那层 relative），不再压到输入区。 */}
       {newBelow ? (
         <button
           type="button"
           aria-label="滚动到最新消息"
-          className="absolute bottom-32 right-8 z-30 flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-ui-sm text-body ui-overlay-shadow hover:bg-subtle-2"
+          className="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-ui-sm text-body ui-overlay-shadow hover:bg-subtle-2"
           onClick={() => scrollToLatest()}
         >
           <ChevronIcon width={14} height={14} className="rotate-90" aria-hidden="true" />
           新消息
         </button>
       ) : null}
+      </div>
       <form onSubmit={send} className="relative shrink-0 px-chat-gutter pb-4 pt-2">
         <SlashCommandMenu items={slashItems} activeIndex={slashIndex} onPick={pickSlashCommand} />
         {/* 输入区与消息列同宽（宽屏最宽 960 自适应）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
@@ -5663,7 +5902,9 @@ export function ChatPage({
         </div>
         {/* 动作行（d.147.4.90，仿 Codex/ChatGPT）：左下圆形「+」把表情/图片/文件/语音
             收进一个菜单；右侧当前模型徽标 + 圆形发送。 */}
-        <div className="flex items-center gap-1.5 px-2.5 pb-2">
+        {/* d.246：动作行允许换行——窄窗口下「安全范围 / 计划 / 模型」总宽会超过一行，
+            以前不换行会把发送按钮挤出可视区（或压到别的元素上）。 */}
+        <div data-testid="composer-actions" className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2">
           <div className="relative">
             <button
               type="button"
@@ -5762,6 +6003,74 @@ export function ChatPage({
               </>
             )}
           </div>
+          {/* 安全范围（d.242）：左下角一键切换「手动 / 自动 / 完全」。
+              放在「+」右边、计划模式左边——三个都是「这一轮怎么干活」的开关，聚在一起。
+              「完全」选项要先点两次，且开着时常驻黄条（见下面的 banner）。 */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label={`安全范围：${SAFETY_SCOPE_TEXT[safetyScope].label}`}
+              aria-haspopup="menu"
+              aria-expanded={safetyOpen}
+              title={`安全范围：${SAFETY_SCOPE_TEXT[safetyScope].label}——${SAFETY_SCOPE_TEXT[safetyScope].hint}`}
+              onClick={() => {
+                safetyConfirmRef.current = false;
+                setSafetyOpen((v) => !v);
+              }}
+              className={`ui-hit inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-ui-sm transition-colors ${
+                safetyScope === "full" ? "bg-warn-soft text-warn" : "text-muted hover:bg-subtle-2"
+              } ${FOCUS_RING_TIGHT}`}
+            >
+              <span aria-hidden="true">{safetyScope === "full" ? "⚠" : "⛨"}</span>
+              <span data-testid="safety-scope-label">{SAFETY_SCOPE_TEXT[safetyScope].label}</span>
+              <span aria-hidden="true" className="text-ui-xs">
+                ▾
+              </span>
+            </button>
+            {safetyOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="关闭安全范围菜单"
+                  className="fixed inset-0 z-30 cursor-default"
+                  onClick={() => {
+                    safetyConfirmRef.current = false;
+                    setSafetyOpen(false);
+                  }}
+                />
+                <div
+                  role="menu"
+                  aria-label="安全范围"
+                  data-testid="safety-scope-menu"
+                  className="absolute bottom-full left-0 z-40 mb-1 w-[268px] rounded-xl border border-line-soft bg-surface p-1 ui-overlay-shadow"
+                >
+                  {SAFETY_SCOPES.map((scope) => (
+                    <button
+                      key={scope}
+                      type="button"
+                      role="menuitem"
+                      aria-checked={safetyScope === scope}
+                      data-testid={`safety-scope-${scope}`}
+                      className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-subtle-2"
+                      onClick={() => chooseSafetyScope(scope)}
+                    >
+                      <span aria-hidden="true" className="mt-0.5 w-3 shrink-0 text-ui-xs text-muted">
+                        {safetyScope === scope ? "✓" : ""}
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block text-ui-sm ${scope === "full" ? "text-warn" : "text-ink"}`}>
+                          {SAFETY_SCOPE_TEXT[scope].label}
+                        </span>
+                        <span className="block text-ui-xs leading-snug text-muted">
+                          {SAFETY_SCOPE_TEXT[scope].hint}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {/* 计划模式（d.173）：本轮只读、先出方案。按钮常驻在输入区，
               开着时高亮并带 aria-pressed——读屏能听出「已按下」，颜色不是唯一信号。 */}
           <button
@@ -5784,7 +6093,7 @@ export function ChatPage({
             className={`inline-flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-ui-sm transition-colors hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
           >
             <span
-              className={`max-w-[160px] truncate ${unboundAgent ? "text-warn" : "text-muted"}`}
+              className={`max-w-[min(160px,38vw)] truncate ${unboundAgent ? "text-warn" : "text-muted"}`}
             >
               {composerModelLabel}
             </span>
@@ -5832,6 +6141,24 @@ export function ChatPage({
           </button>
         </div>
         </div>
+        {/* 「完全」常驻提醒（d.242）：不逐条确认这件事必须一直看得见，
+            否则用户会在下一次危险操作静默执行之后才发现自己开着它。 */}
+        {safetyScope === "full" ? (
+          <div
+            data-testid="safety-full-banner"
+            role="status"
+            className="mx-2.5 mb-2 flex flex-wrap items-center gap-2 rounded-md border border-warn-line bg-warn-soft px-2 py-1 text-ui-xs text-warn"
+          >
+            <span>完全权限：不再逐条确认，危险操作也会直接执行（本次运行内有效，重启回到「自动」）。</span>
+            <button
+              type="button"
+              className="ui-hit underline underline-offset-2"
+              onClick={() => chooseSafetyScope("auto")}
+            >
+              改回自动
+            </button>
+          </div>
+        ) : null}
         {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。 */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2">
           <span className="ml-auto">
@@ -5892,7 +6219,13 @@ export function ChatPage({
       {progressOpen ? (
         <ProgressPanel
           conversationId={convId}
-          onClose={() => setProgressOpen(false)}
+          {...(panelAgentReason !== null ? { agentNote: panelAgentReason } : {})}
+          onClose={() => {
+            // 手动关栏（d.245）：记下时间——安静期内自动开栏要让位于这个动作，并把理由清掉。
+            panelManualClosedAtRef.current = Date.now();
+            setPanelAgentReason(null);
+            setProgressOpen(false);
+          }}
           {...(hasRevealBridge(getFileBridge())
             ? { onRevealPath: (path: string) => void revealTurnChange(path) }
             : {})}
