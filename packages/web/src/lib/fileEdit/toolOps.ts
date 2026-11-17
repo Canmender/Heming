@@ -13,6 +13,7 @@
  */
 
 import type { FileFsBridge } from "./bridge.js";
+import { adaptNewlines, detectNewlineStyle } from "./eol.js";
 import {
   EDIT_MAX_NEW_CHARS,
   EDIT_MAX_OLD_CHARS,
@@ -99,6 +100,14 @@ function pickReadRoot(roots: FileRoot[], rootName?: string): FileRoot | ToolResu
 /** 写盘失败 → 可执行文案（保留主进程给的具体原因，别自己编）。 */
 function writeFailure(error: string | undefined, rel: string): ToolResult {
   const detail = error || "未知原因";
+  // d.229：目标不是 UTF-8（GBK 等）时桌面端会拒绝，这不是「写不进去」，是「不该悄悄改编码」
+  if (/不是 UTF-8 编码/.test(detail)) {
+    return appendFailure(`写入磁盘失败：${detail}（目标：${rel}）`, {
+      error_code: "encoding-mismatch",
+      retry_with: "把内容写到新文件（例如加 .utf8 后缀或换个名字），或先由用户把原文件转成 UTF-8 再改",
+      hint: "桌面端拒绝覆盖非 UTF-8 文件：覆盖会把编码改成 UTF-8，按原编码读它的程序会乱码",
+    });
+  }
   const parent = /目录|parent|ENOENT/i.test(detail);
   return appendFailure(`写入磁盘失败：${detail}（目标：${rel}）`, {
     error_code: "write-failed",
@@ -189,19 +198,37 @@ export async function runWrite(deps: FileOpsDeps, args: Record<string, unknown>)
 
   // 先读一眼只为区分「新建」还是「覆盖」（不存在会立刻 not-found，不是额外成本）。
   const before = await deps.bridge.read({ roots: deps.roots, path: target.abs });
+  // d.233：覆盖已有文件时跟随它原有的换行风格——否则改了 3 行，diff 却是整篇重写
+  const fileStyle = before.ok ? detectNewlineStyle(before.content) : null;
+  const adapted = adaptNewlines(content, fileStyle);
+  const finalContent = adapted.text;
+  const finalBytes = utf8Bytes(finalContent);
+  if (finalBytes > MAX_FILE_BYTES) {
+    return failureResult(
+      "内容过大",
+      `单文件上限 ${Math.floor(MAX_FILE_BYTES / 1024)}KB，本次 ${Math.ceil(finalBytes / 1024)}KB（按原文件换行风格对齐后）。`,
+      {
+        error_code: "file-too-large",
+        hint: "拆成多个文件，或先用 file_patch 只改需要的部分",
+      },
+    );
+  }
   const response = await deps.bridge.write({
     roots: deps.roots,
-    ops: [{ kind: "write", path: target.abs, content }],
+    ops: [{ kind: "write", path: target.abs, content: finalContent }],
     createParents: true,
   });
   if (!response.ok) return writeFailure(response.error, target.rel);
 
   const created = !before.ok;
-  const lines = lineCount(content);
+  const lines = lineCount(finalContent);
   return {
     text:
-      `${created ? "已创建" : "已覆盖"} ${target.rel}（根：${root.name}）：${lines} 行 / ${bytes} 字节。` +
-      (created ? "" : "\n原内容已被整份替换（如有未读部分请重新 file_read 确认）。"),
+      `${created ? "已创建" : "已覆盖"} ${target.rel}（根：${root.name}）：${lines} 行 / ${finalBytes} 字节。` +
+      (created ? "" : "\n原内容已被整份替换（如有未读部分请重新 file_read 确认）。") +
+      (adapted.converted
+        ? `\n（原文件用的是 ${fileStyle === "\r\n" ? "CRLF" : "LF"} 换行，已按它写入：否则这次改动会把整份文件的行尾都改掉，diff 看不出真正改了什么。）`
+        : ""),
     ok: true,
     writes: [target.abs],
     sources: [{ id: target.rel, title: target.rel, detail: root.name }],
@@ -316,9 +343,13 @@ export async function runEdit(deps: FileOpsDeps, args: Record<string, unknown>):
     );
   }
 
+  // d.233：插入的多行文本要跟随原文件的换行风格，否则会写出「半份 CRLF、半份 LF」的混合行尾
+  const fileStyle = detectNewlineStyle(current.content);
+  const adapted = adaptNewlines(newText, fileStyle);
+  const insert = adapted.text;
   const next = replaceAll
-    ? current.content.split(oldText).join(newText)
-    : current.content.replace(oldText, () => newText);
+    ? current.content.split(oldText).join(insert)
+    : current.content.replace(oldText, () => insert);
   const nextBytes = utf8Bytes(next);
   if (nextBytes > MAX_FILE_BYTES) {
     return failureResult("改后文件过大", `结果 ${Math.ceil(nextBytes / 1024)}KB，超过 ${Math.floor(MAX_FILE_BYTES / 1024)}KB 上限。`, {
@@ -336,7 +367,10 @@ export async function runEdit(deps: FileOpsDeps, args: Record<string, unknown>):
   return {
     text:
       `已在 ${target.rel}（根：${root.name}）替换 ${count} 处` +
-      `${replaceAll ? "（replace_all）" : ""}；文件现为 ${lineCount(next)} 行 / ${nextBytes} 字节。`,
+      `${replaceAll ? "（replace_all）" : ""}；文件现为 ${lineCount(next)} 行 / ${nextBytes} 字节。` +
+      (adapted.converted
+        ? `\n（原文件用的是 ${fileStyle === "\r\n" ? "CRLF" : "LF"} 换行，新写入的行已按它对齐，避免出现混合行尾。）`
+        : ""),
     ok: true,
     writes: [target.abs],
     sources: [{ id: target.rel, title: target.rel, detail: root.name }],
@@ -388,6 +422,10 @@ export async function runGlob(deps: FileOpsDeps, args: Record<string, unknown>):
     `根：${root.name}`,
     `模式：${pattern}${rawDir ? `（目录：${rawDir}）` : ""}`,
     `命中 ${rels.length} 个文件${response.truncated ? "（已达上限，结果不完整，请缩小范围或换更精确的 pattern）" : ""}`,
+    // d.231：默认不进依赖/版本库/构建产物目录，但「被跳过」不等于「不存在」，要说明白
+    ...(response.skipped && response.skipped.length > 0
+      ? [`（已跳过这些目录：${response.skipped.join("、")}——依赖、版本库与构建产物通常不是答案；要搜里面就把 path 指到那个目录）`]
+      : []),
   ];
   if (rels.length === 0) {
     return {
@@ -456,6 +494,25 @@ export async function runGrep(deps: FileOpsDeps, args: Record<string, unknown>):
     `根：${root.name}`,
     `正则：${pattern}${include ? `（include：${include}）` : ""}${rawDir ? `（目录：${rawDir}）` : ""}`,
     `命中 ${hits.length} 处，涉及 ${files} 个文件${response.truncated ? "（已达上限，结果不完整，请缩小范围）" : ""}`,
+    // d.231：同 glob
+    ...(response.skipped && response.skipped.length > 0
+      ? [`（已跳过这些目录：${response.skipped.join("、")}——依赖、版本库与构建产物通常不是答案；要搜里面就把 path 指到那个目录）`]
+      : []),
+    // d.232：还有多少文件根本没被打开（太大/像二进制/编码认不出/读不了）
+    ...(response.skippedFiles && response.skippedFiles.total > 0
+      ? [
+          (() => {
+            const s = response.skippedFiles!;
+            const parts: string[] = [];
+            if (s.tooLarge > 0) parts.push(`${s.tooLarge} 个超过 2MB`);
+            if (s.binary > 0) parts.push(`${s.binary} 个像二进制`);
+            if (s.undecodable > 0) parts.push(`${s.undecodable} 个编码认不出`);
+            if (s.other > 0) parts.push(`${s.other} 个读不了`);
+            const where = s.sample.length > 0 ? `——例如 ${s.sample.join("、")}；` : "；";
+            return `（另有 ${s.total} 个文件没能搜：${parts.join("、")}${where}要搜它们就把 path/include 缩到那个目录，或直接 file_read）`;
+          })(),
+        ]
+      : []),
   ];
   if (hits.length === 0) {
     return {

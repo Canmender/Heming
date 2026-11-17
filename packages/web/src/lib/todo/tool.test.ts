@@ -159,7 +159,7 @@ describe("buildTodoToolBridge（工具桥）", () => {
 
   it("meta 声明 read + 中文名（确认卡不该被写计划刷屏）", () => {
     const bridge = buildTodoToolBridge({ conversationId: "conv-1" })!;
-    expect(bridge.meta?.(TODO_TOOL)).toEqual({ risk: "read", displayName: "更新任务清单" });
+    expect(bridge.meta?.(TODO_TOOL)).toEqual({ risk: "read", displayName: "更新任务清单", core: true });
     expect(bridge.meta?.("other_tool")).toBeUndefined();
   });
 

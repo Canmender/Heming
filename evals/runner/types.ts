@@ -152,6 +152,14 @@ export interface EvalCase {
   /** 为 true 时注入真实 `run_command`（d.165；缺省不注入，避免改变既有用例的工具清单）。 */
   shell?: boolean;
   /**
+   * 为 true 时注入真实的 `workflow_run`（d.204）。
+   *
+   * 工作流每一步都是子会话，确定性模式必须由脚本驱动：与 `agent_task` 共用
+   * `subagent_script`（各自一份队列，互不抢回合）。缺省不注入——多一件工具就会改变
+   * 既有用例的提示词与工具清单，基线会被无关改动带偏。
+   */
+  workflow?: boolean;
+  /**
    * 为 true 时确定性闸门放行 `run_command`（d.165）。
    *
    * 命令风险是 danger（生产里每条都要人点确认）：不写这个开关，命令调用会被闸门拒绝——

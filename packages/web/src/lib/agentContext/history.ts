@@ -161,8 +161,22 @@ export async function prepareHistory(
   }
 }
 
-/** 手动压缩（d.183）的返回：消息 + 给用户/界面看的统计。 */
-export interface CompactResult {
+/**
+ * 这次准备里折掉了多少条原始消息（d.217）。
+ *
+ * `prepareHistory` 的返回值只有「要发出去的 messages」，折叠了几条是内部信息；
+ * 界面需要它来解释「它怎么忘了我刚才说的话」。判据与 `compactNow` 完全一致：
+ * 头是 system 且以摘要骨架开头，才算「真的折了」——否则返回 0，不编数字。
+ */
+export function countFoldedMessages(rows: ChatMessage[], prepared: ChatMessage[]): number {
+  const head = prepared[0];
+  if (!head || head.role !== "system") return 0;
+  if (typeof head.content !== "string" || !head.content.startsWith(SUMMARY_HEADER)) return 0;
+  const folded = rows.length - (prepared.length - 1);
+  return folded > 0 ? folded : 0;
+}
+
+/** 手动压缩（d.183）的返回：消息 + 给用户/界面看的统计。 */export interface CompactResult {
   /** 压缩后真正要发出去的 messages（未压缩时与入参同序）。 */
   messages: ChatMessage[];
   /** 是否真的折叠了东西（只有一轮、或全是系统消息时为 false）。 */

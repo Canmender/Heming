@@ -94,8 +94,135 @@ const MAX_PATTERN_CHARS = 1000;
 /** 整目录跳过的名字：依赖目录与版本库对「找文件 / 搜内容」没有意义，而且体量巨大。 */
 const SKIP_DIR_NAMES = new Set(["node_modules", ".git", ".hg", ".svn"]);
 
+/**
+ * 构建产物与虚拟环境目录（d.231）。
+ *
+ * 它们在仓库里常常占掉九成文件量，但几乎不是「这个接口用在哪」的答案：命中一堆
+ * 压缩后的 bundle 既浪费上下文，又让模型误以为「只有产物里有、源码里没有」。
+ * 不是禁地——把 `dir` 直接指到那个目录，照样搜得到。
+ */
+const BUILD_DIR_NAMES = new Set([
+  "dist",
+  "build",
+  "out",
+  "coverage",
+  "target",
+  "release",
+  ".next",
+  ".nuxt",
+  ".output",
+  ".turbo",
+  ".cache",
+  "venv",
+  ".venv",
+]);
+
+/** 结果里最多点名多少个被跳过的目录（再多也没人看，数量本身由结尾的省略号表达）。 */
+const MAX_SKIPPED_REPORT = 12;
+
 /** UTF-8 严格解码器：非法序列直接抛，用于判「这不是文本文件」。 */
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+/* ─────────────────────────── 文本编码判定（d.229） ─────────────────────────── */
+
+/**
+ * GBK（中文 Windows 的 ANSI 代码页 936）严格解码器，惰性构造。
+ *
+ * 为什么要它：中文 Windows 上还有大量 GBK 文本文件（老的 .txt / .bat / .ini / .csv、
+ * 部分工具生成的报告）。它们没有 NUL 字节，所以不是「二进制」，但按 UTF-8 严解必然失败——
+ * 以前一律回「这不是 UTF-8 文本文件」，模型读不到内容，grep 也悄悄跳过，用户只看到
+ * 「它说文件读不了」。
+ */
+let GBK_DECODER = null;
+let GBK_UNAVAILABLE = false;
+
+/** 取 GBK 解码器；运行时没带完整 ICU 时返回 null（永久降级，不反复构造）。 */
+function gbkDecoder() {
+  if (GBK_UNAVAILABLE) return null;
+  if (GBK_DECODER !== null) return GBK_DECODER;
+  try {
+    GBK_DECODER = new TextDecoder("gbk", { fatal: true });
+    return GBK_DECODER;
+  } catch {
+    GBK_UNAVAILABLE = true;
+    return null;
+  }
+}
+
+/** 去掉 UTF-8 BOM（PowerShell 重定向与部分工具会带）。 */
+function stripBom(buf) {
+  return buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf ? buf.subarray(3) : buf;
+}
+
+/**
+ * 把一段字节解成文本，并报出判定出的编码。
+ *
+ * 判定顺序：UTF-8 严解 → GBK 严解 → 放弃。两步都要求整段合法（`fatal: true`），
+ * 所以正常 UTF-8 中文不会被误读成 GBK，反之亦然——与 `shell-run.js` 的命令输出解码同一口径。
+ *
+ * @returns `{ ok: true, text, encoding: "utf-8" | "gbk" }` 或 `{ ok: false }`
+ */
+function decodeTextBytes(buf) {
+  const body = stripBom(buf);
+  try {
+    return { ok: true, text: UTF8_DECODER.decode(body), encoding: "utf-8" };
+  } catch {
+    /* 不是合法 UTF-8：往下试 GBK */
+  }
+  const gbk = gbkDecoder();
+  if (gbk !== null) {
+    try {
+      return { ok: true, text: gbk.decode(body), encoding: "gbk" };
+    } catch {
+      /* 也不是合法 GBK */
+    }
+  }
+  return { ok: false };
+}
+
+/**
+ * 目标文件是不是「非 UTF-8 的文本」（d.229）。
+ *
+ * 落盘一律写 UTF-8（`Buffer.from(content, "utf8")`）：如果目标原本是 GBK 文本，
+ * 覆盖写会**悄悄把文件编码改掉**——按 ANSI 读它的程序从此乱码，而这一步没有任何提示。
+ * 所以写之前先判一次，拦下并说清楚（模型可以改写到新文件，用户可以先转码）。
+ *
+ * 只判 ≤ MAX_FILE_BYTES 的文件：更大的目标本来就不适合当文本改，也不差这一次判定。
+ * 二进制（含 NUL）不在此列——那不是「文本编码」问题，按原样允许覆盖。
+ *
+ * @returns `"gbk"` 或 `null`（UTF-8 / 二进制 / 读不了 / 太大都返回 null，不拦）
+ */
+async function nonUtf8TextTarget(abs) {
+  let stat;
+  try {
+    stat = await fsp.lstat(abs);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_BYTES) return null;
+  let buf;
+  try {
+    buf = await fsp.readFile(abs);
+  } catch {
+    return null;
+  }
+  if (looksBinary(buf)) return null;
+  try {
+    UTF8_DECODER.decode(stripBom(buf));
+    return null;
+  } catch {
+    /* 不是 UTF-8：看它是不是 GBK */
+  }
+  const gbk = gbkDecoder();
+  if (gbk === null) return null;
+  try {
+    gbk.decode(stripBom(buf));
+    return "gbk";
+  } catch {
+    return null;
+  }
+}
+
 
 /**
  * 规整渲染层传来的根清单：坏条目**逐条丢弃**，不因为一条脏数据整体失败。
@@ -194,13 +321,11 @@ async function readFile(roots, absPath) {
     return { ok: false, code: "io", error: `读取失败：${e && e.message ? e.message : String(e)}` };
   }
   if (looksBinary(buf)) return { ok: false, code: "binary", error: "这不是文本文件（检测到二进制内容）" };
-  let content;
-  try {
-    content = UTF8_DECODER.decode(buf);
-  } catch {
-    return { ok: false, code: "binary", error: "这不是 UTF-8 文本文件（含非法字节序列）" };
+  const decoded = decodeTextBytes(buf);
+  if (!decoded.ok) {
+    return { ok: false, code: "binary", error: "这不是 UTF-8 也不是 GBK 文本文件（含非法字节序列）" };
   }
-  return { ok: true, content, bytes: buf.length };
+  return { ok: true, content: decoded.text, bytes: buf.length, encoding: decoded.encoding };
 }
 
 /**
@@ -500,6 +625,8 @@ async function resolveSearchDir(roots, dir) {
 async function walkFiles(startAbs, onFile) {
   let entries = 0;
   let depthLimited = false;
+  /** 这次真跳过过的目录名（去重）——必须让调用方知道，否则「没搜到」会被当成「不存在」。 */
+  const skipped = new Set();
   const stack = [{ dir: startAbs, depth: 0 }];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -512,13 +639,16 @@ async function walkFiles(startAbs, onFile) {
     // 排序只为可复现（最终结果还会按契约再排序），代价很小
     dirents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const dirent of dirents) {
-      if (entries >= MAX_WALK_ENTRIES) return { entries, walkTruncated: true };
+      if (entries >= MAX_WALK_ENTRIES) return { entries, walkTruncated: true, skipped };
       entries += 1;
       const full = path.join(current.dir, dirent.name);
       if (dirent.isSymbolicLink()) continue;
       if (isOwnTempName(dirent.name)) continue;
       if (dirent.isDirectory()) {
-        if (SKIP_DIR_NAMES.has(dirent.name.toLowerCase())) continue;
+        if (SKIP_DIR_NAMES.has(dirent.name.toLowerCase()) || BUILD_DIR_NAMES.has(dirent.name.toLowerCase())) {
+          skipped.add(dirent.name);
+          continue;
+        }
         if (current.depth + 1 > MAX_WALK_DEPTH) {
           // 深度上限是防卡死的闸，但「没往下看」必须让调用方知道：宁可多报 truncated，
           // 也不能让模型以为「更深处的文件不存在」
@@ -532,12 +662,18 @@ async function walkFiles(startAbs, onFile) {
       } else if (dirent.isFile()) {
         const rel = path.relative(startAbs, full).split(path.sep).join("/");
         const keepGoing = await onFile(full, rel);
-        if (keepGoing === false) return { entries, walkTruncated: depthLimited };
+        if (keepGoing === false) return { entries, walkTruncated: depthLimited, skipped };
       }
       // 其它类型（设备/管道/未知）不参与搜索
     }
   }
-  return { entries, walkTruncated: depthLimited };
+  return { entries, walkTruncated: depthLimited, skipped };
+}
+
+/** 把 walkFiles 收集到的跳过目录整理成契约里的 `skipped` 字段（排序 + 截断）。 */
+function skippedReport(skipped) {
+  if (!skipped || skipped.size === 0) return [];
+  return [...skipped].sort((a, b) => a.localeCompare(b)).slice(0, MAX_SKIPPED_REPORT);
 }
 
 /* ────────────────────────── 搜索：glob / grep ────────────────────────── */
@@ -591,26 +727,36 @@ async function globFiles(payload) {
     root: rootPath,
     paths: matched.map((m) => m.abs),
     truncated: hitLimit || outcome.walkTruncated,
+    skipped: skippedReport(outcome.skipped),
   };
 }
 
-/** 静默读文本：超上限/二进制/非法 UTF-8/软链/非普通文件都返回 null（grep 直接跳过该文件）。 */
-async function readTextQuiet(abs) {
+/**
+ * 为搜索读文本，并把「为什么没搜」说清楚（d.232）。
+ *
+ * 之前这些文件一律静默跳过：grep 返回「命中 0 个」，模型据此得出「代码里没有」，
+ * 而真相可能是「那只手边有 30 个文件根本没被打开」——与 d.231 的构建产物跳过同族：
+ * **没找到 ≠ 没去找**。
+ *
+ * 软链/目录/设备文件属于遍历语义（本来就不该当搜索结果），仍按「不参与」处理、不计数；
+ * 其余四种原因是**真实的信息损失**，必须能报给调用方。
+ *
+ * @returns {Promise<{ok:true,text:string} | {ok:false,reason:"too-large"|"binary"|"undecodable"|"io"}>}
+ */
+async function readTextForSearch(abs) {
   const stat = await lstatOrNull(abs);
-  if (!stat || stat.isSymbolicLink() || !stat.isFile()) return null;
-  if (stat.size > MAX_FILE_BYTES) return null;
+  if (!stat || stat.isSymbolicLink() || !stat.isFile()) return { ok: false, reason: "io" };
+  if (stat.size > MAX_FILE_BYTES) return { ok: false, reason: "too-large" };
   let buf;
   try {
     buf = await fsp.readFile(abs);
   } catch {
-    return null;
+    return { ok: false, reason: "io" };
   }
-  if (looksBinary(buf)) return null;
-  try {
-    return UTF8_DECODER.decode(buf);
-  } catch {
-    return null;
-  }
+  if (looksBinary(buf)) return { ok: false, reason: "binary" };
+  const decoded = decodeTextBytes(buf);
+  if (!decoded.ok) return { ok: false, reason: "undecodable" };
+  return { ok: true, text: decoded.text };
 }
 
 /**
@@ -664,15 +810,27 @@ async function grepFiles(payload) {
 
   const matches = [];
   let hitLimit = false;
+  // 没搜成的文件按原因计数（d.232）：命中 0 个时，「搜过了没有」与「没去搜」必须能分开
+  const skippedFiles = { total: 0, tooLarge: 0, binary: 0, undecodable: 0, other: 0 };
+  const skippedSamples = [];
+  const MAX_SKIPPED_FILE_SAMPLES = 5;
   const outcome = await walkFiles(resolved.dir, async (abs, relToDir) => {
     if (includeMatcher) {
       // include 同时按文件名与相对路径匹配：`*.ts` 看名字，`src/**` 那类看层级
       const included = includeMatcher.test(path.basename(abs)) || includeMatcher.test(relToDir);
       if (!included) return true;
     }
-    const text = await readTextQuiet(abs);
-    if (text === null) return true;
-    const lines = text.split(/\r\n|\n|\r/);
+    const read = await readTextForSearch(abs);
+    if (!read.ok) {
+      skippedFiles.total += 1;
+      if (read.reason === "too-large") skippedFiles.tooLarge += 1;
+      else if (read.reason === "binary") skippedFiles.binary += 1;
+      else if (read.reason === "undecodable") skippedFiles.undecodable += 1;
+      else skippedFiles.other += 1;
+      if (skippedSamples.length < MAX_SKIPPED_FILE_SAMPLES) skippedSamples.push(path.basename(abs));
+      return true;
+    }
+    const lines = read.text.split(/\r\n|\n|\r/);
     for (let li = 0; li < lines.length; li += 1) {
       const head = lines[li].slice(0, MAX_GREP_LINE_CHARS);
       if (!matcher.test(head)) continue;
@@ -690,6 +848,11 @@ async function grepFiles(payload) {
     root: resolved.root.path,
     matches,
     truncated: hitLimit || outcome.walkTruncated,
+    skipped: skippedReport(outcome.skipped),
+    skippedFiles:
+      skippedFiles.total > 0
+        ? { ...skippedFiles, sample: skippedSamples }
+        : null,
   };
 }
 
@@ -786,6 +949,8 @@ async function removeCreatedDirs(dirs) {
  */
 const MAX_BACKUPS_PER_PATH = 10;
 const MAX_BACKUPS_TOTAL = 200;
+/** 预览备份时最多回多少字节给界面（d.207.4.110）：再大也不是让人读的，够看清开头就行。 */
+const MAX_BACKUP_PREVIEW_BYTES = 256 * 1024;
 const BACKUP_INDEX_FILE = "index.json";
 
 function backupKey(absPath) {
@@ -849,6 +1014,63 @@ async function pruneBackups(dir, index) {
  * 备份一份旧内容。返回 `{ at, file }`；备份写失败返回 null（**不阻塞写入**：
  * 备份是「额外的安全网」，不能因为磁盘配额满了就让用户改不了文件）。
  */
+/**
+ * 在系统文件管理器里定位一个文件（是目录就直接打开它）（d.234）。
+ *
+ * 为什么需要：智能体刚写完的文件，用户想拿去用/检查时，得自己从路径一层层点进去；
+ * 知识库（vault-fs）早有 `vault:reveal`，聊天侧却没有对应通道，只能靠人肉导航。
+ *
+ * 口径：
+ * - **只允许已授权的根**（与读/写同一套 `findRoot`）：这不是「任意路径都能弹资源管理器」的口子；
+ * - **不做软链闸**：这里既不读内容也不写，只是让系统高亮一个已有路径，拦软链没有收益、只会误伤；
+ * - **目录走 openPath、文件走 showItemInFolder**：前者打开窗口，后者在父目录里选中它（用户要的是「我改的那个文件」）。
+ */
+async function revealFile(roots, absPath, shell) {
+  if (typeof absPath !== "string" || !absPath) {
+    return { ok: false, code: "invalid-path", error: "路径不能为空" };
+  }
+  if (absPath.includes("\0")) return { ok: false, code: "invalid-path", error: "路径里含非法字符（NUL）" };
+  if (!path.isAbsolute(absPath)) {
+    return { ok: false, code: "invalid-path", error: "路径必须是绝对路径" };
+  }
+  const abs = path.resolve(absPath);
+  const root = findRoot(roots, abs);
+  if (!root) {
+    return {
+      ok: false,
+      code: "outside-roots",
+      error: "这个路径不在任何已授权的根目录里：只能定位自己授权过的目录",
+    };
+  }
+  let stat = null;
+  try {
+    stat = await fsp.stat(abs);
+  } catch {
+    stat = null;
+  }
+  if (!stat) {
+    // 「文件不存在」比「这个环境打不开资源管理器」更能说明问题：先报不存在。
+    return { ok: false, code: "not-found", error: `找不到「${path.basename(abs)}」（可能已被删或移走）` };
+  }
+  if (!shell || typeof shell.showItemInFolder !== "function") {
+    return { ok: false, code: "unsupported", error: "当前环境不能打开系统文件管理器" };
+  }
+  try {
+    if (stat.isDirectory()) {
+      if (typeof shell.openPath !== "function") {
+        return { ok: false, code: "unsupported", error: "当前环境不能打开目录" };
+      }
+      const problem = await shell.openPath(abs);
+      if (problem) return { ok: false, code: "io", error: `打开目录失败：${problem}` };
+      return { ok: true, kind: "directory", path: abs };
+    }
+    shell.showItemInFolder(abs);
+    return { ok: true, kind: "file", path: abs };
+  } catch (e) {
+    return { ok: false, code: "io", error: `打开失败：${e && e.message ? e.message : String(e)}` };
+  }
+}
+
 async function createBackup(dir, absPath, bytes) {
   if (!dir || !bytes || bytes.length === 0) return null;
   try {
@@ -944,6 +1166,68 @@ async function undoWrite(roots, absPath, dir) {
 
 
 /**
+ * 预览「撤销会把文件改成什么」（d.207.4.110）：把最新一份备份读出来给界面看。
+ *
+ * 与 `undoWrite` 的差别是**只读**：不消费备份、不动目标文件——用户只是想先看清楚再决定撤不撤。
+ * 根/根内/软链/保留名四道检查与撤销完全相同（口径必须一致，否则会出现「能看不能撤」的骗人入口）。
+ * 二进制或超大时如实标注，不硬凑成文本：给界面看的东西不能是一堆乱码。
+ */
+async function previewBackup(roots, absPath, dir, maxBytes = MAX_BACKUP_PREVIEW_BYTES) {
+  const writeRoots = roots.filter((r) => r.mode === "write");
+  if (writeRoots.length === 0) {
+    return { ok: false, code: "no-write-root", error: "尚未配置可写根（mode=write），没有可预览的备份" };
+  }
+  if (!dir) return { ok: false, code: "no-backup-dir", error: "桌面端未启用写入备份，无法预览改动" };
+  const root = findRoot(roots, absPath);
+  if (!root) return { ok: false, code: "outside-roots", error: `目标不在任何已配置的根内：${absPath}` };
+  if (root.mode !== "write") {
+    return { ok: false, code: "outside-roots", error: `目标位于只读根「${root.name}」，不能预览改动：${absPath}` };
+  }
+  const checked = checkAbsoluteInside(absPath, root.path);
+  if (!checked.ok) return { ok: false, code: "outside-roots", error: checked.error };
+  const linkCheck = assertNoSymlinkAncestor(root.path, checked.abs);
+  if (!linkCheck.ok) return { ok: false, code: "symlink", error: linkCheck.error };
+  if (isReservedName(path.basename(checked.abs))) {
+    return { ok: false, code: "io", error: `文件名是 Windows 保留名，无法预览：${path.basename(checked.abs)}` };
+  }
+
+  const index = await readBackupIndex(dir);
+  const entries = Array.isArray(index[backupKey(checked.abs)]) ? index[backupKey(checked.abs)] : [];
+  const last = entries[entries.length - 1];
+  if (!last) {
+    return {
+      ok: false,
+      code: "no-backup",
+      error: `没有「${checked.abs}」的可对比备份（新建的文件没有改动前内容；或那一次备份已经被撤销用掉）`,
+    };
+  }
+
+  let buf;
+  try {
+    buf = await fsp.readFile(path.join(dir, last.file));
+  } catch (e) {
+    return { ok: false, code: "no-backup", error: `备份文件读不出来：${e && e.message ? e.message : String(e)}` };
+  }
+
+  const truncated = buf.length > maxBytes;
+  const slice = truncated ? buf.subarray(0, maxBytes) : buf;
+  const binary = looksBinary(slice);
+  // d.229：预览也按实际编码解（GBK 中文在旧版里同样是一片乱码）；两种都不成立时当二进制
+  const decoded = binary ? { ok: false } : decodeTextBytes(slice);
+  const text = decoded.ok ? decoded.text : "";
+  return {
+    ok: true,
+    path: checked.abs,
+    at: last.at,
+    bytes: buf.length,
+    truncated,
+    binary: binary || !decoded.ok,
+    ...(decoded.ok ? { encoding: decoded.encoding } : {}),
+    text,
+  };
+}
+
+/**
  * 列出可回滚的最近改动（d.171，设置区「最近改动」用）。
  *
  * 口径：
@@ -1022,9 +1306,20 @@ async function writeBatch(roots, ops, createParents = false, backupDir = null) {
   for (const item of plan) {
     const problem = await inspectExistingTarget(item.abs);
     if (problem) return { ok: false, error: `${problem}：${item.abs}` };
-    if (item.kind === "delete" && problem === null) {
+    if (item.kind === "delete") {
       const exists = fs.existsSync(item.abs);
       if (!exists) return { ok: false, error: `要删除的文件不存在：${item.abs}` };
+      continue;
+    }
+    // d.229：覆盖写会把编码统一成 UTF-8；目标原本是 GBK 文本就先拦下，别悄悄改掉它的编码
+    const foreignEncoding = await nonUtf8TextTarget(item.abs);
+    if (foreignEncoding !== null) {
+      return {
+        ok: false,
+        error:
+          `目标文件不是 UTF-8 编码（看起来是 ${foreignEncoding.toUpperCase()}）：直接写入会把它的编码改成 UTF-8，` +
+          `按原编码读取它的程序可能会乱码。请先确认要改编码，或把结果写到新文件。目标：${item.abs}`,
+      };
     }
   }
 
@@ -1159,6 +1454,8 @@ function registerFileIpc(ipcMain, deps) {
   const isTrustedSender = (deps && deps.isTrustedSender) || (() => false);
   // 写入备份目录（main.js 传 userData/backups）。不传就退化成「没有撤销能力」，不影响读写。
   const backupDir = (deps && deps.backupDir) || null;
+  // 系统文件管理器（d.234「在文件夹里显示」）。测试里可注入桩，缺失时该能力结构化失败。
+  const fileShell = (deps && deps.shell) || null;
 
   const untrusted = { ok: false, code: "untrusted-sender", error: "未授权的调用来源" };
 
@@ -1226,6 +1523,18 @@ function registerFileIpc(ipcMain, deps) {
     }
   });
 
+  // 在系统文件管理器里定位（d.234）：用户改完文件要拿去用/检查，不该再靠人肉导航路径。
+  ipcMain.handle("file:reveal", async (event, payload) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      const roots = normalizeRoots(payload && payload.roots);
+      if (roots.length === 0) return { ok: false, code: "no-roots", error: "尚未配置任何根目录" };
+      return await revealFile(roots, payload && payload.path, fileShell);
+    } catch (e) {
+      return { ok: false, code: "io", error: `定位失败：${e && e.message ? e.message : String(e)}` };
+    }
+  });
+
   // 最近改动列表（d.171）：设置区展示「可回滚的改动」用，只读、不排队。
   ipcMain.handle("file:backups", async (event, payload) => {
     if (!isTrustedSender(event)) return untrusted;
@@ -1235,6 +1544,18 @@ function registerFileIpc(ipcMain, deps) {
       return await listBackups(roots, backupDir);
     } catch (e) {
       return { ok: false, error: `读取最近改动失败：${e && e.message ? e.message : String(e)}` };
+    }
+  });
+
+  // 预览备份（d.207.4.110）：只读，不消费备份、不动目标文件。界面「看改动」用。
+  ipcMain.handle("file:backup-preview", async (event, payload) => {
+    if (!isTrustedSender(event)) return untrusted;
+    try {
+      const roots = normalizeRoots(payload && payload.roots);
+      if (roots.length === 0) return { ok: false, code: "no-roots", error: "尚未配置任何根目录" };
+      return await previewBackup(roots, payload && payload.path, backupDir);
+    } catch (e) {
+      return { ok: false, code: "io", error: `预览改动失败：${e && e.message ? e.message : String(e)}` };
     }
   });
 
@@ -1312,10 +1633,13 @@ module.exports = {
   sniffImageMime,
   writeBatch,
   undoWrite,
+  revealFile,
+  previewBackup,
   listBackups,
   createBackup,
   readBackupIndex,
   looksBinary,
+  decodeTextBytes,
   globToRegExp,
   globFiles,
   grepFiles,
@@ -1323,8 +1647,10 @@ module.exports = {
   MAX_IMAGE_BYTES,
   MAX_BACKUPS_PER_PATH,
   MAX_BACKUPS_TOTAL,
+  MAX_BACKUP_PREVIEW_BYTES,
   MAX_PATCH_BYTES,
   MAX_FILES,
+  BUILD_DIR_NAMES,
   MAX_GLOB_RESULTS,
   MAX_GREP_MATCHES,
   MAX_GREP_LINE_CHARS,

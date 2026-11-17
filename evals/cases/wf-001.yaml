@@ -1,0 +1,60 @@
+# 用例 wf-001：有依赖的两步工作流，一次派完，第二步看得到第一步的结论
+# 用途：验证 `workflow_run` 的确定性行为——
+#   * 工具真的被调起来（tool_called）；
+#   * 批次按依赖切分（`scan` 先跑、`read` 等它），结果按步骤分组回灌；
+#   * 第二步的提示词里带着第一步的结论（这是工作流存在的理由：
+#     中间结论不经过主对话转述，也就不会在压缩时被摘掉）。
+# 子代理两回合都写 text、不调工具：证明「脚本驱动的子会话」跑通即可，不是考子代理能力。
+id: wf-001
+name: 工作流编排：有依赖的两步按批次跑完，上游结论传给下游
+owner: evals
+tags:
+  - workflow
+setup:
+  fixture: wf-001
+  roots:
+    - path: "."
+      mode: write
+      name: work
+workflow: true
+prompt: |
+  用 workflow_run 跑一个小工作流：第一步 scan 扫一遍 work 根、第二步 read 依赖第一步的结论去读入口文件。
+  两步都是只读，跑完把两步的结论一起告诉我。
+subagent_script:
+  - text: |
+      第一步结论：work 根里有 src 与 docs 两个目录。
+  - text: |
+      第二步结论：入口在 src/main.ts。
+script:
+  - tool_calls:
+      - name: workflow_run
+        arguments:
+          goal: 摸清 work 根的结构并找到入口文件
+          steps:
+            - id: scan
+              task: 列出 work 根下的目录结构
+            # 允许前向引用：依赖在所有 id 收齐后才校验，这里故意把 needs 写在后面。
+            - id: read
+              task: 根据上游结论读入口文件
+              needs: [scan]
+          max_rounds: 2
+  - text: |
+      工作流跑完了：第一步说 work 根里有 src 与 docs，第二步说入口在 src/main.ts。扫描完成。
+graders:
+  - type: tool_called
+    tool: workflow_run
+    times: 1
+  - type: contains
+    value:
+      - "工作流（2 步"
+      # 两步各自成段、按批次跑（scan 先跑，read 等它）——批次切分坏了这里会变成 1 批。
+      - "2 批"
+      - "### [scan]"
+      - "### [read]"
+      - "第一步结论"
+      - "第二步结论"
+    in: tool_result
+  - type: contains
+    value: ["扫描完成"]
+  - type: max_rounds
+    value: 3

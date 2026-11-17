@@ -14,11 +14,11 @@ evals/
 
 一条命令复现：`pnpm eval:agent`（`--json <path>` 写报告，`--compare <baseline>` 对比基线）。
 
-当前 49 条用例（39 条可回放 + 10 条 `real_only` 真实任务），覆盖七个文件工具与「长输出再读」的**真实实现**（`file_read` / `file_patch` / `file_write` /
+当前 50 条用例（40 条可回放 + 10 条 `real_only` 真实任务），覆盖七个文件工具与「长输出再读」的**真实实现**（`file_read` / `file_patch` / `file_write` /
 `file_edit` / `file_glob` / `file_grep`）与 HITL、越界、证据、并行上限等口径；d.159 起补齐了
 写入（`write-001/002`）、精确替换（`edit-003`）、检索（`search-001/002`）与根外写入（`sec-006`）；
 d.161 起把**系统提示词**接进评测（`ctx-003` 断言内置人设 + 运行环境段 + 工具清单）并覆盖
-**长任务续跑**（`long-001`：预置未完成清单，跑到 12 轮边界自动续跑、13 个 `file_read` 全部执行）；d.163 起覆盖**清单终态**（`todo-001`：`todo_write` 真的写进会话清单，`todo_state` 逐档核对）与**只读子代理**（`subagent-001`：子会话真的读文件、结论回灌主对话；`subagent-002`：子代理被要求写文件，不执行、不落盘）；d.165 起覆盖**本机命令**（`cmd-001`：真实 `shell-run.js` 执行命令、stdout 回到上下文；`cmd-002`：未声明 `allow_danger` 的 danger 工具被拒；`cmd-003`：越界 `cwd` 在工具层就被挡）；d.168 起覆盖**读图**（`img-001`：`file_image` 把真 PNG 读成图并交给编排层，`image_attached` 断言「交回了几张图」而不是只看文本；`img-002`：把文本改名成 `.png`，按魔数判 `unsupported-image` 并提示改用 `file_read`）；d.169 起覆盖**命令取消**（`cmd-006`：`abort_after_ms: 1200` 模拟用户点停止，走完 `abortAll()` → signal 透传 → `bridge.cancel(runId)` → 主进程杀进程树整链，断言工具结果写「中止」且用例 1.2 秒内结束而不是等满 10 秒命令）。
+**长任务续跑**（`long-001`：预置未完成清单，跑到 12 轮边界自动续跑、13 个 `file_read` 全部执行）；d.163 起覆盖**清单终态**（`todo-001`：`todo_write` 真的写进会话清单，`todo_state` 逐档核对）与**只读子代理**（`subagent-001`：子会话真的读文件、结论回灌主对话；`subagent-002`：子代理被要求写文件，不执行、不落盘）；d.165 起覆盖**本机命令**（`cmd-001`：真实 `shell-run.js` 执行命令、stdout 回到上下文；`cmd-002`：未声明 `allow_danger` 的 danger 工具被拒；`cmd-003`：越界 `cwd` 在工具层就被挡）；d.168 起覆盖**读图**（`img-001`：`file_image` 把真 PNG 读成图并交给编排层，`image_attached` 断言「交回了几张图」而不是只看文本；`img-002`：把文本改名成 `.png`，按魔数判 `unsupported-image` 并提示改用 `file_read`）；d.169 起覆盖**命令取消**（`cmd-006`：`abort_after_ms: 1200` 模拟用户点停止，走完 `abortAll()` → signal 透传 → `bridge.cancel(runId)` → 主进程杀进程树整链，断言工具结果写「中止」且用例 1.2 秒内结束而不是等满 10 秒命令）；d.205 起覆盖**工作流编排**（`wf-001`：`workflow_run` 两步有依赖，按批次跑完、结论按步骤分组回灌——批次数写进断言，切分坏掉会直接红）。
 
 ## 1. 用例 YAML
 
@@ -77,6 +77,7 @@ graders:                     # 必填，见 §3；全部通过才算该用例通
   作为 `getPrompt()` 的返回值。因此 d.154 的运行环境段、d.156 的人设、d.157 的续跑协议都能被用例断言；
   d.161 之前这里是 `() => ""`，那几轮的改动其实一行都没被测到。
 - **清单与子代理（d.163）**：用例写 `todo: true` 才会把**真实** `todo_write` 注入工具桥（缺省不注入——工具清单是提示词的一部分，凭空多一件会改变既有用例的 token 口径）；写 `subagent_script: [...]` 才会把 `agent_task` 挂上桥，并用 `createScriptedSubagentChat` 驱动子会话（形状与 `script` 相同，消费顺序独立，**不计入主用例的回合数**）。子代理用例必须给 `subagent_script`：确定性模式没有模型绑定，不給脚本只会拿到「没有可用的模型绑定」。
+- **工作流编排（d.205）**：用例写 `workflow: true` 才会把真实的 `workflow_run` 挂上桥；它每一步都是子会话，确定性模式同样得由脚本驱动——与 `agent_task` 共用同一份 `subagent_script` 形状，但**各建一份队列**（共用一份的话两边会互相抢回合）。`wf-001` 只断言能观测到的部分（工具被调起来、批次切分、两步结论回灌）；「上游结论有没有真的接在下游任务前面」由 `packages/web/src/lib/agentRuntime/workflow.test.ts` 的单元用例盯着（评测里子会话是脚本，看不见它收到的提示词）。
 - **本机命令（d.165）**：用例写 `shell: true` 才会把真实 `run_command` 注入工具桥；它背后是 `evals/runner/shellBridge.ts` —— `createRequire` 载入**桌面端真实的 `packages/desktop/shell-run.js`**（工作目录校验、超时杀进程树、输出上限都由生产代码跑），不是替身。命令风险是 `danger`，所以闸门**默认拒绝**；只有同时写 `allow_danger: true` 的用例才放行（等于在用例里声明「我知道它会跑命令」）。
 - **命令的超时与输出上限（d.166.4.98）**：`cmd-004` 用 `node -e "setTimeout(() => {}, 10000)"` + `timeout_ms: 1000`，断言工具结果含「命令超时」——它必须真的等 1 秒（工具层下限是 1000ms），所以用例写 `slow: true`：**该用例照常参与通过率与 token 统计，但不进 p95 延迟样本**。理由：验证「会不会挂住」的用例去改「整体快不快」的 p95，等于让红线自己弄红自己。`cmd-005` 用 700KB 输出撞 512KB 采集上限，断言「输出过大」——被终止而不是「截断后当成功」。
 - **沙箱清理要容忍「刚杀的进程还攥着 cwd」（d.166.4.98）**：`evals/runner/run.ts` 的 `removeSandbox()` 对 `EBUSY/EPERM/ENOTEMPTY` 退避重试 6 次（`fs.rm` 的 `maxRetries` 只覆盖它内部认的几类错误），确实删不掉就**留现场并警告**，不把清理失败算成用例失败——否则 `cmd-004` 会被误报成「评测框架无法完成」。

@@ -29,6 +29,8 @@ export function TurnUndoBar({
   busyPath,
   onUndo,
   onUndoOne,
+  onPreview,
+  onReveal,
   onDismiss,
 }: {
   /** 本轮落盘的绝对路径（正斜杠）。 */
@@ -39,6 +41,20 @@ export function TurnUndoBar({
   onUndo: () => void;
   /** 只撤这一个文件；不传就不展示清单（老调用方行为不变）。 */
   onUndoOne?: (path: string) => void;
+  /**
+   * 看这一个文件「改成了什么」（d.207.4.110）。
+   *
+   * 撤之前得先能看——不给看的话「撤回」这个功能用户平时不敢点。不传就不展示这个按钮
+   * （老安装包没有 `file:backup-preview` 通道）。
+   */
+  onPreview?: (path: string) => void;
+  /**
+   * 在系统文件管理器里定位这个文件（d.234）。
+   *
+   * 「改完的东西在哪儿」是落盘之后第一个真问题：不给入口就得让人肉导航路径。
+   * 不传就不展示（老安装包没有 `file:reveal` 通道）。
+   */
+  onReveal?: (path: string) => void;
   onDismiss: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -92,10 +108,34 @@ export function TurnUndoBar({
                 <span className="min-w-0 truncate text-ui-xs text-muted" title={path}>
                   {path.slice(0, path.length - name.length).replace(/\/$/, "")}
                 </span>
+                {onPreview ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={onReveal ? undefined : "ml-auto"}
+                    aria-label={`看 ${name} 改成了什么`}
+                    onClick={() => onPreview(path)}
+                    disabled={busy}
+                  >
+                    改动
+                  </Button>
+                ) : null}
+                {onReveal ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={onPreview ? undefined : "ml-auto"}
+                    aria-label={`在文件夹里显示 ${name}`}
+                    onClick={() => onReveal(path)}
+                    disabled={busy}
+                  >
+                    定位
+                  </Button>
+                ) : null}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="ml-auto"
+                  className={onPreview || onReveal ? undefined : "ml-auto"}
                   aria-label={`撤回 ${name}`}
                   onClick={() => onUndoOne?.(path)}
                   disabled={busy || rowBusy}

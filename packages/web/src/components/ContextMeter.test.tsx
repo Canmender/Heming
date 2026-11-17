@@ -29,4 +29,10 @@ describe("上下文用量指示（d.187）", () => {
     expect(meter).toHaveTextContent("下一轮会压缩早期内容");
     expect(meter.className).toContain("text-danger");
   });
+  it("校准过就在 title 里说清楚（d.215）：别让用户把修正过的数字当朴素估算", () => {
+    render(<ContextMeter used={12_400} budget={25_900} calibrated />);
+    const meter = screen.getByRole("status", { name: "上下文用量" });
+    expect(meter.getAttribute("title")).toContain("真实提示 token 校准");
+    expect(meter).toHaveTextContent("上下文 ≈ 12.4K / 25.9K（48%）");
+  });
 });

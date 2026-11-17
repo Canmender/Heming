@@ -89,6 +89,15 @@ function rendererScript() {
     out.undoAgain = typeof files.undo === "function" ? await files.undo({ roots, path: abs("notes/a.md") }) : { ok: false, code: "missing" };
     out.undoOutside = typeof files.undo === "function" ? await files.undo({ roots, path: abs("../根外.md") }) : { ok: false, code: "missing" };
     out.listAfter = typeof files.backups === "function" ? await files.backups({ roots }) : { ok: false, code: "missing" };
+    // 备份预览（d.207）：预览读的是备份内容，且**不能消费**备份——预览完还得能撤销。
+    out.writeB1 = await files.write({ roots, ops: [{ kind: "write", path: abs("notes/b.md"), content: "预览第一版\\n" }], createParents: true });
+    out.writeB2 = await files.write({ roots, ops: [{ kind: "write", path: abs("notes/b.md"), content: "预览第二版\\n" }] });
+    out.preview = typeof files.backupPreview === "function" ? await files.backupPreview({ roots, path: abs("notes/b.md") }) : { ok: false, code: "missing" };
+    out.undoAfterPreview = typeof files.undo === "function" ? await files.undo({ roots, path: abs("notes/b.md") }) : { ok: false, code: "missing" };
+    // 在文件夹里定位（d.234）：只验通道存在与拒绝路径——真调成功会弹出资源管理器，冒烟里不弹。
+    out.hasReveal = typeof files.reveal === "function";
+    out.revealOutside = out.hasReveal ? await files.reveal({ roots, path: abs("../根外.md") }) : { ok: false, code: "missing" };
+    out.revealMissing = out.hasReveal ? await files.reveal({ roots, path: abs("没有这个.md") }) : { ok: false, code: "missing" };
     out.listUntrusted = null;
     // 后台作业（d.180）：起一条 1.5 秒后输出、约 2 秒结束的命令，轮询到它结束；
     // 再起一条 10 秒的命令立刻杀掉——两条路径合起来才证明「能等」和「能停」。
@@ -457,6 +466,27 @@ async function run() {
   );
   check("同一份备份只能用一次：再撤销回 no-backup", result.undoAgain && result.undoAgain.ok === false && result.undoAgain.code === "no-backup", result.undoAgain);
   check("撤销：根外路径被主进程拒绝", result.undoOutside && result.undoOutside.ok === false, result.undoOutside);
+  check(
+    "备份预览：能看到上一版内容，并标出编码",
+    result.preview && result.preview.ok === true && result.preview.encoding === "utf-8" && String(result.preview.text || "").includes("预览第一版"),
+    result.preview,
+  );
+  check(
+    "备份预览不消费备份：预览之后照样能撤销",
+    result.undoAfterPreview && result.undoAfterPreview.ok === true,
+    result.undoAfterPreview,
+  );
+  check("在文件夹里定位：通道存在（打包漏文件会在这里红）", result.hasReveal === true, result.hasReveal);
+  check(
+    "在文件夹里定位：根外路径被主进程拒绝",
+    result.revealOutside && result.revealOutside.ok === false && result.revealOutside.code === "outside-roots",
+    result.revealOutside,
+  );
+  check(
+    "在文件夹里定位：不存在的文件回 not-found",
+    result.revealMissing && result.revealMissing.ok === false && result.revealMissing.code === "not-found",
+    result.revealMissing,
+  );
   check("越界工作目录被主进程拒绝", result.cmdOutside && result.cmdOutside.ok === false, result.cmdOutside);
   check(
     "后台作业：启动立即返回 jobId（不阻塞回合）",

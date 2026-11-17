@@ -53,6 +53,51 @@ export interface CollectedFileRefs {
 
 const EMPTY: CollectedFileRefs = { files: [], missing: [], section: "" };
 
+/**
+ * 引用这一轮「没进来的部分」（d.222）。
+ *
+ * `collectFileRefs` 早就把读到 / 没读到分开算了，但只有 `section` 进了提示词——
+ * 用户完全不知道「我明明勾了那个文件，它怎么像没看见」。引用不等于授权，读不到不是错误，
+ * 但**必须说出来**：文件被删了、移走了、是二进制、或者总量超了，模型这一轮就是没看到。
+ */
+export interface FileRefIssues {
+  /** 没读到的（相对路径；根外的会是原样路径）。 */
+  missing: readonly string[];
+  /** 读到了但只给了前 N 字（超单文件上限）。 */
+  truncated: readonly string[];
+}
+
+/** 只有真有问题时才返回对象；一切正常返回 null（调用方据此不渲染、不提示）。 */
+export function fileRefIssues(collected: CollectedFileRefs): FileRefIssues | null {
+  const truncated = collected.files.filter((file) => file.truncated).map((file) => file.rel);
+  if (collected.missing.length === 0 && truncated.length === 0) return null;
+  return { missing: [...collected.missing], truncated };
+}
+
+/** 名字列表压到 3 个，其余用「等 N 个」收口——提示行不该被长名单撑爆。 */
+function nameList(names: readonly string[]): string {
+  const shown = names.slice(0, 3).map((name) => `「${name}」`).join("、");
+  return names.length > 3 ? `${shown} 等 ${names.length} 个` : shown;
+}
+
+/**
+ * 给用户看的一句话（d.222）：说清「没看到什么」以及**这会影响什么**。
+ *
+ * 不写「引用失败」：引用本身没失败，是内容没进来；也不假装模型「读到了」。
+ */
+export function describeFileRefIssues(issues: FileRefIssues): string {
+  const parts: string[] = [];
+  if (issues.missing.length > 0) {
+    parts.push(`${nameList(issues.missing)}没读进来（可能被删、移走、不是文本，或超出这一轮的字数上限）`);
+  }
+  if (issues.truncated.length > 0) {
+    parts.push(
+      `${nameList(issues.truncated)}只给了前 ${MAX_FILE_REF_CHARS} 字（需要后面的部分让它用 file_read 读）`,
+    );
+  }
+  return `这一轮引用：${parts.join("；")}。模型看不到这些内容。`;
+}
+
 /** 找到包含该绝对路径的根，返回展示用相对路径。 */
 function locate(roots: readonly FileRoot[], absPath: string): { root: FileRoot; rel: string } | null {
   const abs = toPosixPath(absPath).replace(/\/+$/, "");

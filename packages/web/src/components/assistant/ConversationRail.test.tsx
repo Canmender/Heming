@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { Conversation } from "@heming/shared";
 import { ConversationRail, type ConversationRailProps } from "./ConversationRail.js";
 import { markTurnRunning, resetResumePoint } from "../../lib/agentRuntime/resumePoint.js";
+import { useChatStore, type AgentStreamState } from "../../store/chat.js";
 import type { ConversationContentSearchResult } from "../../lib/api.js";
 
 const agent = { id: "a1", owner_id: null, name: "和鸣", avatar: null, description: "" };
@@ -522,5 +523,29 @@ describe("ConversationRail · 点命中跳到那条消息（d.198）", () => {
     expect(props.onOpen).toHaveBeenCalledWith("c2");
     // 没有跳转入口时，片段只是文字，不是可点按钮
     expect(screen.queryByRole("button", { name: /跳到命中消息/ })).not.toBeInTheDocument();
+  });
+});
+describe("会话行「正在跑」徽标（d.212）", () => {
+  afterEach(() => {
+    useChatStore.setState({ streaming: {}, streamOwner: {} });
+  });
+
+  function streamingOf(conversationId: string): AgentStreamState {
+    return { agentId: "a1", conversationId, text: "半句话", status: "streaming", lastAt: 1_700_000_000_000 };
+  }
+
+  it("只有本机在跑的那个会话带徽标，别的会话不带", () => {
+    useChatStore.setState({ streaming: { s1: streamingOf("c1") }, streamOwner: { s1: true } });
+    renderRail({ conversations: [conv("c1", "长任务"), conv("c2", "另一个")] });
+    const running = screen.getByRole("button", { name: "打开会话：长任务" });
+    const other = screen.getByRole("button", { name: "打开会话：另一个" });
+    expect(within(running).getByText("正在跑")).toBeInTheDocument();
+    expect(within(other).queryByText("正在跑")).toBeNull();
+  });
+
+  it("别的窗口派来的流不点亮（不是这个窗口在跑）", () => {
+    useChatStore.setState({ streaming: { s1: streamingOf("c1") }, streamOwner: {} });
+    renderRail({ conversations: [conv("c1", "长任务")] });
+    expect(screen.queryByText("正在跑")).toBeNull();
   });
 });

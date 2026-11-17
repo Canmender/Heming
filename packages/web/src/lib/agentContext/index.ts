@@ -12,6 +12,8 @@ export * from "./modelBudget.js";
 export * from "./store.js";
 export * from "./history.js";
 export * from "./manualCompact.js";
+export * from "./calibration.js";
+export * from "./contextFold.js";
 
 import { SummaryCache } from "./store.js";
 

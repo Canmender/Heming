@@ -21,6 +21,7 @@ import { createNodeFsBridge } from "./fsBridge.js";
 import { createDeterministicGate, type GateDecision } from "./gate.js";
 import { gradeCase, type GraderResult } from "./graders.js";
 import { withSubagentTool } from "../../packages/web/src/lib/agentRuntime/subagent.js";
+import { withWorkflowTool } from "../../packages/web/src/lib/agentRuntime/workflow.js";
 import { createEvalToolBridge } from "./tools.js";
 import { createScriptedChat, createScriptedSubagentChat } from "./stream.js";
 import type { CaseObservation, EvalCase, RolloutRecord } from "./types.js";
@@ -197,9 +198,15 @@ export async function runCase(testCase: EvalCase, options: RunCaseOptions): Prom
   // 子代理（d.163）：用例给了 `subagent_script` 才把 `agent_task` 挂上去。
   // 不给脚本时不挂——确定性模式下没有模型绑定，挂上去只会得到「没有可用的模型绑定」。
   const subagent = createScriptedSubagentChat(testCase.subagent_script);
-  const candidateBridge = testCase.subagent_script
+  const withAgents = testCase.subagent_script
     ? withSubagentTool(baseToolBridge, { agentId: "eval-agent", conversationId, chat: subagent.chat })
     : baseToolBridge;
+  // 工作流（d.205）：`workflow_run` 的每一步都是子会话，确定性模式同样得由脚本驱动。
+  // 单独建一份脚本队列——和 `agent_task` 共用一份的话，两边会互相抢回合。
+  const workflowScript = createScriptedSubagentChat(testCase.subagent_script);
+  const candidateBridge = testCase.workflow
+    ? withWorkflowTool(withAgents, { agentId: "eval-agent", conversationId, chat: workflowScript.chat })
+    : withAgents;
   // 图片张数（d.168）：rollout 只记文本，图片由编排层另起消息发出，
   // 所以在工具边界数——这是「file_image 真的交回一张图」的唯一可靠观测点。
   let imageCount = 0;

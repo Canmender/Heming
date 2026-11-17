@@ -11,11 +11,17 @@ const assert = require("node:assert/strict");
 const { appVersion } = require("./app-version");
 
 const {
+  checkUpdateSpace,
   createUpdater,
+  formatBytes,
+  formatSpaceShortfall,
   fromSemver,
   isInstalledOnly,
+  requiredUpdateSpace,
   selectUpdate,
   toSemver,
+  UPDATE_SPACE_FACTOR,
+  UPDATE_SPACE_RESERVE_BYTES,
 } = require("./auto-update");
 
 /**
@@ -307,4 +313,142 @@ test("dispose 会摘掉进度监听，之后事件不再更新状态", async () 
   await pending;
   const handlers = au.handlers.get("download-progress");
   assert.equal(handlers.size, 0, "dispose 后不应还挂着监听");
+});
+
+// ───────────────────────── d.203.4.107：装更新前的空间预检 ─────────────────────────
+
+test("requiredUpdateSpace：安装包大小 × 系数 + 余量；拿不到大小就不要求", () => {
+  const installer = 400 * 1024 * 1024;
+  assert.equal(
+    requiredUpdateSpace(installer),
+    Math.ceil(installer * UPDATE_SPACE_FACTOR) + UPDATE_SPACE_RESERVE_BYTES,
+    "必须同时算上解压系数与固定余量",
+  );
+  // 未知大小 → 0：探测不到就不拦（宁可放过，也不要让所有人装不了更新）
+  assert.equal(requiredUpdateSpace(null), 0);
+  assert.equal(requiredUpdateSpace(Number.NaN), 0);
+  assert.equal(requiredUpdateSpace(0), 0);
+  assert.equal(requiredUpdateSpace(-1), 0);
+});
+
+test("formatBytes：人话大小，GB 一位小数", () => {
+  assert.equal(formatBytes(544 * 1024 * 1024), "544 MB");
+  assert.equal(formatBytes(Math.round(1.25 * 1024 * 1024 * 1024)), "1.3 GB");
+  assert.equal(formatBytes(0), "0 MB");
+  assert.equal(formatBytes(null), "0 MB");
+});
+
+test("checkUpdateSpace：够就过、不够逐条报差多少、探测失败不拦", () => {
+  const installer = 400 * 1024 * 1024;
+  const need = requiredUpdateSpace(installer);
+
+  const enough = checkUpdateSpace({
+    installerBytes: installer,
+    targets: [
+      { label: "安装盘", path: "E:\\Heming", freeBytes: need + 1 },
+      { label: "临时目录盘", path: "C:\\Temp", freeBytes: need * 10 },
+    ],
+  });
+  assert.equal(enough.ok, true);
+  assert.deepEqual(enough.problems, []);
+  assert.equal(enough.requiredBytes, need);
+  assert.equal(enough.installerBytes, installer);
+
+  const short = checkUpdateSpace({
+    installerBytes: installer,
+    targets: [
+      { label: "安装盘", path: "E:\\Heming", freeBytes: need * 4 },
+      // 2026-11-16 那次的真凶：安装盘够、临时盘不够
+      { label: "临时目录盘", path: "C:\\Temp", freeBytes: 100 * 1024 * 1024 },
+    ],
+  });
+  assert.equal(short.ok, false);
+  assert.equal(short.problems.length, 1);
+  assert.equal(short.problems[0].label, "临时目录盘");
+  assert.equal(short.problems[0].shortBytes, need - 100 * 1024 * 1024);
+
+  // 读不到剩余空间（null）→ 跳过，不因此拦下更新
+  const unknown = checkUpdateSpace({
+    installerBytes: installer,
+    targets: [{ label: "临时目录盘", path: "C:\\Temp", freeBytes: null }],
+  });
+  assert.equal(unknown.ok, true);
+
+  // 安装包大小未知 → 不要求任何空间
+  const noSize = checkUpdateSpace({
+    installerBytes: null,
+    targets: [{ label: "临时目录盘", path: "C:\\Temp", freeBytes: 1024 }],
+  });
+  assert.equal(noSize.ok, true);
+  assert.equal(noSize.requiredBytes, 0);
+});
+
+test("formatSpaceShortfall：说清哪块盘、还剩多少、还差多少", () => {
+  const text = formatSpaceShortfall([
+    { label: "临时目录盘", path: "C:\\Temp", freeBytes: 100 * 1024 * 1024, requiredBytes: 544 * 1024 * 1024, shortBytes: 444 * 1024 * 1024 },
+  ]);
+  assert.match(text, /磁盘空间不够/);
+  assert.match(text, /临时目录盘/);
+  assert.match(text, /C:\\Temp/);
+  assert.match(text, /只剩 100 MB/);
+  assert.match(text, /要 544 MB/);
+  assert.match(text, /还差 444 MB/);
+  assert.equal(formatSpaceShortfall([]), "");
+});
+
+test("空间不足：拒绝交接安装器，并把原因写进状态", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({
+    autoUpdater: au,
+    app: { isPackaged: true },
+    installerBytes: () => 400 * 1024 * 1024,
+    spaceTargets: () => [{ label: "临时目录盘", path: "C:\\Temp\\heming" }],
+    diskFree: () => 100 * 1024 * 1024,
+  });
+  await u.check();
+  await u.download();
+
+  const space = u.getState().space;
+  assert.equal(space.ok, false, "下载完就该先查一次空间");
+  assert.match(space.message, /磁盘空间不够/);
+
+  assert.equal(u.quitAndInstall(), false, "空间不够时不能交接安装器");
+  assert.equal(au.calls.quitAndInstall, 0, "绝不能让安装器启动（它会先删旧程序）");
+  assert.match(u.getState().lastError, /还差/);
+});
+
+test("空间充足：允许交接安装器，且不再报错", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({
+    autoUpdater: au,
+    app: { isPackaged: true },
+    installerBytes: () => 400 * 1024 * 1024,
+    spaceTargets: () => [{ label: "临时目录盘", path: "C:\\Temp\\heming" }],
+    diskFree: () => 4 * 1024 * 1024 * 1024,
+  });
+  await u.check();
+  await u.download();
+
+  assert.equal(u.getState().space.ok, true);
+  assert.equal(u.quitAndInstall(), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(au.calls.quitAndInstall, 1);
+  assert.equal(u.getState().lastError, null);
+});
+
+test("探测不到剩余空间时不拦：交出去总比卡死强", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({
+    autoUpdater: au,
+    app: { isPackaged: true },
+    installerBytes: () => 400 * 1024 * 1024,
+    spaceTargets: () => [{ label: "临时目录盘", path: "C:\\Temp\\heming" }],
+    diskFree: () => null,
+  });
+  await u.check();
+  await u.download();
+  assert.equal(u.getState().space.ok, true);
+  assert.equal(u.quitAndInstall(), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(au.calls.quitAndInstall, 1);
 });

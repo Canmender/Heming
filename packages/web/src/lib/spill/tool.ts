@@ -71,7 +71,8 @@ export function buildToolOutputBridge(deps: ToolOutputDeps = {}): ToolBridge {
       type: "function" as const,
       function: { name: spec.name, description: spec.description, parameters: spec.parameters },
     })),
-    meta: () => ({ risk: "read", displayName: "读取完整输出" }),
+    // d.207：丢了细节又要不回来时，这条是唯一出路，声明成核心工具。
+    meta: () => ({ risk: "read", displayName: "读取完整输出", core: true }),
     async execute(call) {
       if (call.name !== TOOL_OUTPUT_TOOL) {
         const failure: ToolFailureResult = failureResult("未知工具", `这个工具桥只提供 ${TOOL_OUTPUT_TOOL}。`, {

@@ -53,6 +53,7 @@ const baseState = (over: Partial<UpdateState> = {}): UpdateState => ({
   lastError: null,
   canDownload: true,
   progress: null,
+  space: null,
   ...over,
 });
 
@@ -278,5 +279,63 @@ describe("UpdateCard", () => {
     view.unmount();
     // 退订后推送不应抛错（setState 到已卸载组件在 React 18 已无害，但仍验证退订发生）
     expect(() => h.push(baseState({ status: "up-to-date" }))).not.toThrow();
+  });
+
+  // ── d.203.4.107：空间不够时提前提醒 ──
+
+  it("空间不够：在「已下载」阶段就把话说清楚，别等程序被删", async () => {
+    const h = makeBridge(
+      baseState({
+        status: "downloaded",
+        available: { version: "d.15.0.0.0" },
+        space: {
+          ok: false,
+          installerBytes: 400 * 1024 * 1024,
+          requiredBytes: 544 * 1024 * 1024,
+          message:
+            "磁盘空间不够，已取消安装：临时目录盘（C:\\Temp）只剩 100 MB，装这个版本要 544 MB，还差 444 MB。清出空间后再点一次「重启并安装」。",
+          problems: [
+            {
+              label: "临时目录盘",
+              path: "C:\\Temp",
+              freeBytes: 100 * 1024 * 1024,
+              requiredBytes: 544 * 1024 * 1024,
+              shortBytes: 444 * 1024 * 1024,
+            },
+          ],
+          targets: [{ label: "临时目录盘", path: "C:\\Temp", freeBytes: 100 * 1024 * 1024 }],
+          checkedAt: 1,
+        },
+      }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+
+    const warning = await screen.findByTestId("update-space-warning");
+    expect(warning.textContent).toContain("磁盘空间不够");
+    expect(warning.textContent).toContain("还差 444 MB");
+    expect(warning.textContent).toContain("C:\\Temp");
+  });
+
+  it("空间够：不显示那条警告", async () => {
+    const h = makeBridge(
+      baseState({
+        status: "downloaded",
+        available: { version: "d.15.0.0.0" },
+        space: {
+          ok: true,
+          installerBytes: 400 * 1024 * 1024,
+          requiredBytes: 544 * 1024 * 1024,
+          message: "",
+          problems: [],
+          targets: [{ label: "临时目录盘", path: "C:\\Temp", freeBytes: 8 * 1024 * 1024 * 1024 }],
+          checkedAt: 1,
+        },
+      }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+    await screen.findByText(/更新已下载完成/);
+    expect(screen.queryByTestId("update-space-warning")).toBeNull();
   });
 });

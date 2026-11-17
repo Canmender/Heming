@@ -29,6 +29,9 @@
  * 且下载完也不自动安装——正在编辑的会话不该被强行重启。
  */
 
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { compareVersions, appVersion } = require("./app-version");
 
 /** 更新检查的默认间隔：6 小时。 */
@@ -52,6 +55,23 @@ const DEFAULT_FEED_URL = process.env.HEMING_UPDATE_FEED || "http://47.92.39.184/
  * 首帧和 100% 不受节流——前者要让界面立刻知道「开始了」，后者决定按钮状态。
  */
 const PROGRESS_EMIT_INTERVAL_MS = 120;
+
+/**
+ * 装一个更新大概要占多少空间：安装包大小 × 该系数。
+ *
+ * 为什么要乘：NSIS 先把载荷解到临时目录，再删旧文件、写新文件，中间有
+ * 「新旧共存」的一段时间。1.2 是保守值——多算不会拦下本来能装的更新
+ * （差 20% 时安装本来也大概率失败），少算则会把用户带进「程序被删、装不回来」。
+ */
+const UPDATE_SPACE_FACTOR = 1.2;
+
+/**
+ * 除安装包本身外还要求留的余量：64MB。
+ *
+ * 为什么不是 0：装完还要写日志、写注册表、搬回用户数据；刚好卡在临界值上
+ * 的安装最容易在最后一步失败。
+ */
+const UPDATE_SPACE_RESERVE_BYTES = 64 * 1024 * 1024;
 
 /**
  * 当前是否运行在安装版。
@@ -156,6 +176,105 @@ function pickInstallerFile(files) {
 }
 
 /**
+ * 装这个安装包需要多少可用空间。
+ *
+ * 安装包大小未知（还没下载完、拿不到文件大小）时返回 0：**探测不到就不拦**。
+ * 宁可放过一次可疑的安装，也不要因为读不到大小就让所有人装不了更新。
+ */
+function requiredUpdateSpace(installerBytes) {
+  const size = Number(installerBytes);
+  if (!Number.isFinite(size) || size <= 0) return 0;
+  return Math.ceil(size * UPDATE_SPACE_FACTOR) + UPDATE_SPACE_RESERVE_BYTES;
+}
+
+/** 字节 → 人能读的大小（1 位小数，够用就好）。 */
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 MB";
+  const mb = value / (1024 * 1024);
+  if (mb < 1024) return `${Math.max(1, Math.round(mb))} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * 检查各块盘的剩余空间够不够装。
+ *
+ * 这是纯函数：不读盘、不抛异常，`freeBytes` 由调用方探测后传进来。
+ * 为什么要两块盘：安装器把载荷解到**临时目录**（往往在 C:），把文件写进
+ * **安装目录**（可能装在 D:/E:）。2026-11-16 那次「更新把程序删了却没装回来」
+ * 就是 E: 有 45GB、C: 只剩 0.6GB —— 只看安装盘会漏掉真正的瓶颈。
+ *
+ * `freeBytes` 为 null/非数字表示探测失败，该目标跳过（不拦）。
+ *
+ * @param {{ installerBytes?: number|null, targets?: { label?: string, path?: string, freeBytes?: number|null }[] }} input
+ * @returns {{ ok: boolean, requiredBytes: number, installerBytes: number|null, problems: { label: string, path: string, freeBytes: number, requiredBytes: number, shortBytes: number }[] }}
+ */
+function checkUpdateSpace({ installerBytes = null, targets = [] } = {}) {
+  const size = Number(installerBytes);
+  const normalizedInstaller = Number.isFinite(size) && size > 0 ? size : null;
+  const requiredBytes = requiredUpdateSpace(normalizedInstaller);
+  const problems = [];
+
+  for (const target of Array.isArray(targets) ? targets : []) {
+    if (!target || typeof target.path !== "string" || !target.path.trim()) continue;
+    // 显式判 null/undefined：Number(null) 是 0，会被当成「一点空间都没有」而误拦。
+    if (target.freeBytes === null || target.freeBytes === undefined) continue;
+    const freeBytes = Number(target.freeBytes);
+    // 探测失败（NaN/负数）不拦：不能因为读不到磁盘信息就不让更新。
+    if (!Number.isFinite(freeBytes) || freeBytes < 0) continue;
+    // 大小未知 → requiredBytes 为 0，永远不会命中这里。
+    if (requiredBytes > 0 && freeBytes < requiredBytes) {
+      problems.push({
+        label: typeof target.label === "string" && target.label.trim() ? target.label : target.path,
+        path: target.path,
+        freeBytes,
+        requiredBytes,
+        shortBytes: requiredBytes - freeBytes,
+      });
+    }
+  }
+
+  return {
+    ok: problems.length === 0,
+    requiredBytes,
+    installerBytes: normalizedInstaller,
+    problems,
+  };
+}
+
+/**
+ * 把空间不足拼成一句人话（给界面与日志看）。
+ *
+ * 说清三件事：哪块盘、还剩多少、还差多少。只写「空间不足」用户没法行动。
+ */
+function formatSpaceShortfall(problems) {
+  const list = Array.isArray(problems) ? problems : [];
+  if (list.length === 0) return "";
+  const parts = list.map(
+    (item) =>
+      `${item.label}（${item.path}）只剩 ${formatBytes(item.freeBytes)}，` +
+      `装这个版本要 ${formatBytes(item.requiredBytes)}，还差 ${formatBytes(item.shortBytes)}`,
+  );
+  return `磁盘空间不够，已取消安装：${parts.join("；")}。清出空间后再点一次「重启并安装」。`;
+}
+
+/**
+ * 探测某路径所在盘的可用字节数；读不到返回 null。
+ *
+ * 用 `fs.statfsSync`（Node 18.15+）：不需要外部命令、不解析 `dir` 输出、
+ * 也不会因为中文路径/盘符编码出问题。
+ */
+function defaultDiskFree(target) {
+  try {
+    const stats = fs.statfsSync(target);
+    const available = Number(stats.bavail) * Number(stats.bsize);
+    return Number.isFinite(available) && available >= 0 ? available : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 创建更新控制器。
  *
  * 依赖全部可注入，便于单测时传入假对象——自动更新牵涉网络与进程重启，
@@ -166,8 +285,19 @@ function pickInstallerFile(files) {
  * @param {any} deps.app Electron app
  * @param {() => number} [deps.now]
  * @param {(...args: any[]) => void} [deps.log]
+ * @param {(target: string) => number|null} [deps.diskFree] 探测某路径所在盘可用字节（单测注入）
+ * @param {() => { label?: string, path: string }[]} [deps.spaceTargets] 要检查的盘（单测注入）
+ * @param {() => number|null} [deps.installerBytes] 安装包大小（单测注入；默认读已下载文件）
  */
-function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {} }) {
+function createUpdater({
+  autoUpdater,
+  app,
+  now = () => Date.now(),
+  log = () => {},
+  diskFree = defaultDiskFree,
+  spaceTargets = null,
+  installerBytes = null,
+} = {}) {
   const currentVersion = appVersion();
 
   /** @type {"idle"|"checking"|"up-to-date"|"available"|"downloading"|"downloaded"|"error"} */
@@ -196,6 +326,14 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
    * 更新助手要拿它去静默安装；拿不到路径时主进程会回退到 electron-updater 自己的安装流程。
    */
   let downloadedInstaller = null;
+
+  /**
+   * 最近一次空间检查结果；没查过为 null。
+   *
+   * 为什么放进状态快照：界面要在「已下载、可以重启安装」这一刻就能提醒
+   * 「这台机器空间不够，装了会失败」，而不是等用户点了按钮、程序被删之后。
+   */
+  let space = null;
 
   const listeners = new Set();
 
@@ -247,6 +385,11 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
       canDownload: isInstalledOnly(autoUpdater, app),
       /** 下载进度；非 downloading 阶段为 null。 */
       progress,
+      /**
+       * 最近一次空间检查（d.203.4.107）；没查过为 null。
+       * ok=false 时 message 是可以直接展示给用户的中文句子。
+       */
+      space,
     };
   }
 
@@ -315,6 +458,8 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
       const files = await autoUpdater.downloadUpdate();
       downloadedInstaller = pickInstallerFile(files);
       setStatus("downloaded");
+      // 下完就知道包多大了：顺手查一次空间，让界面在用户点按钮之前就能提醒。
+      checkSpace();
       return getState();
     } catch (err) {
       lastError = err?.message ?? String(err);
@@ -324,9 +469,106 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     }
   }
 
+  /**
+   * 要检查的盘：安装目录所在盘 + 临时目录所在盘。
+   *
+   * 安装目录取 `app.getPath("exe")` 的父目录（打包后就是实际安装位置）；
+   * 临时目录取 `os.tmpdir()`（= %TEMP%，NSIS 解压载荷的地方）。
+   * 任何一边读不到路径就跳过那一边，不让探测本身把流程卡死。
+   */
+  function resolveSpaceTargets() {
+    if (typeof spaceTargets === "function") return spaceTargets();
+    const targets = [];
+    try {
+      const exePath = app?.getPath?.("exe");
+      if (typeof exePath === "string" && exePath.trim()) {
+        targets.push({ label: "安装盘", path: path.dirname(exePath) });
+      }
+    } catch (err) {
+      log(`[updater] 读安装路径失败：${err?.message ?? err}`);
+    }
+    try {
+      const tempPath = os.tmpdir();
+      if (typeof tempPath === "string" && tempPath.trim()) {
+        targets.push({ label: "临时目录盘", path: tempPath });
+      }
+    } catch (err) {
+      log(`[updater] 读临时目录失败：${err?.message ?? err}`);
+    }
+    return targets;
+  }
+
+  /**
+   * 安装包大小：优先读已下载文件的实际大小，其次用远端更新信息里的 size。
+   * 都拿不到返回 null（→ 不拦）。
+   */
+  function resolveInstallerBytes() {
+    if (typeof installerBytes === "function") {
+      try {
+        return installerBytes();
+      } catch {
+        return null;
+      }
+    }
+    if (typeof downloadedInstaller === "string" && downloadedInstaller) {
+      try {
+        return fs.statSync(downloadedInstaller).size;
+      } catch {
+        // 文件不在/读不到就退到远端声明的大小
+      }
+    }
+    const declared = Number(available?.size ?? available?.files?.[0]?.size);
+    return Number.isFinite(declared) && declared > 0 ? declared : null;
+  }
+
+  /**
+   * 查一次空间，把结果存进状态并通知订阅者。
+   *
+   * 单独暴露成方法，是为了让界面在「已下载」阶段就能先查一次，
+   * 也方便单测直接验证判定逻辑（不真的装）。
+   */
+  function checkSpace() {
+    const bytes = resolveInstallerBytes();
+    const targets = resolveSpaceTargets().map((item) => ({
+      label: item.label,
+      path: item.path,
+      freeBytes: typeof diskFree === "function" ? diskFree(item.path) : null,
+    }));
+    const result = checkUpdateSpace({ installerBytes: bytes, targets });
+    const message = result.ok ? "" : formatSpaceShortfall(result.problems);
+    space = {
+      ok: result.ok,
+      installerBytes: result.installerBytes,
+      requiredBytes: result.requiredBytes,
+      message,
+      problems: result.problems,
+      /** 每条检查目标当时剩多少（含探测失败的 null），供日志与界面排查 */
+      targets: targets.map((item) => ({
+        label: item.label,
+        path: item.path,
+        freeBytes: Number.isFinite(Number(item.freeBytes)) ? Number(item.freeBytes) : null,
+      })),
+      checkedAt: now(),
+    };
+    emit();
+    return space;
+  }
+
   /** 下载完成后退出并安装。 */
   function quitAndInstall() {
     if (status !== "downloaded") return false;
+
+    // d.203.4.107：先查空间再交接。装不下就当场拒绝——一旦把控制权交给安装器，
+    // 它会先删旧程序、再解压；解压失败时程序已经没了，用户连界面都打不开。
+    const report = checkSpace();
+    if (!report.ok) {
+      lastError = report.message;
+      log(`[updater] ${report.message}`);
+      emit();
+      return false;
+    }
+
+    lastError = null;
     setImmediate(() => autoUpdater.quitAndInstall(false, true));
     return true;
   }
@@ -357,6 +599,8 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     check,
     download,
     quitAndInstall,
+    /** 查一次安装空间（d.203.4.107）；返回结果同时写进状态快照。 */
+    checkSpace,
     scheduleCheck,
     dispose,
     getState,
@@ -384,10 +628,17 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
 module.exports = {
   DEFAULT_FEED_URL,
   DEFAULT_INTERVAL_MS,
+  UPDATE_SPACE_FACTOR,
+  UPDATE_SPACE_RESERVE_BYTES,
+  checkUpdateSpace,
   createUpdater,
+  defaultDiskFree,
+  formatBytes,
+  formatSpaceShortfall,
   fromSemver,
   isInstalledOnly,
   pickInstallerFile,
+  requiredUpdateSpace,
   selectUpdate,
   toSemver,
 };

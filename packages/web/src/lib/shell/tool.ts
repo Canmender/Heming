@@ -623,15 +623,16 @@ export function buildShellToolBridge(deps: ShellToolDeps): ToolBridge {
   return {
     tools,
     meta(name: string) {
+      // d.207：命令与后台作业是长任务的主干能力（写完要跑、跑完要读输出），声明成核心工具。
       switch (name) {
         case SHELL_TOOL:
-          return { risk: "danger" as const, displayName: "运行命令" };
+          return { risk: "danger" as const, displayName: "运行命令", core: true };
         case SHELL_OUTPUT_TOOL:
-          return { risk: "read" as const, displayName: "读取后台输出" };
+          return { risk: "read" as const, displayName: "读取后台输出", core: true };
         case SHELL_LIST_TOOL:
-          return { risk: "read" as const, displayName: "列出后台命令" };
+          return { risk: "read" as const, displayName: "列出后台命令", core: true };
         case SHELL_KILL_TOOL:
-          return { risk: "write" as const, displayName: "停止后台命令" };
+          return { risk: "write" as const, displayName: "停止后台命令", core: true };
         default:
           return undefined;
       }

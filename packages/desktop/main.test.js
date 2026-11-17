@@ -397,7 +397,7 @@ const IPC_UNGUARDED_BY_DESIGN = [
 const IPC_WIDGET_PREFIX = "widget:"; // widget 窗口控制通道由 plugin-host.js 内部按 sender 自校验
 // file-fs 的文件通道用自己的 `isTrustedSender`（fail-closed）收口，不走 secureIpc 门面；
 // 下面的断言同时钉住 file-fs 里确实还有那两道 sender 校验，防止重构时把守卫丢成裸 handler。
-const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root", "file:glob", "file:grep", "file:image", "file:undo", "file:backups", "file:default-root", "shell:run", "shell:cancel", "shell:jobs", "shell:job-output", "shell:job-preview", "shell:job-kill"];
+const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root", "file:glob", "file:grep", "file:image", "file:undo", "file:backups", "file:backup-preview", "file:reveal", "file:default-root", "shell:run", "shell:cancel", "shell:jobs", "shell:job-output", "shell:job-preview", "shell:job-kill"];
 
 function channelsIn(source, pattern) {
   const out = new Set();

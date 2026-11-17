@@ -519,3 +519,24 @@ describe("file_undo（d.170 撤销上一次写入）", () => {
     }
   });
 });
+
+describe("GBK 文本：读得到，但文案要说清「不能直接覆盖」（d.229）", () => {
+  it("file_read 成功时带上编码提示，且正文照常显示", async () => {
+    const fake = fakeBridge();
+    fake.read = async () => ({ ok: true as const, content: "中文\n测试\n", bytes: 11, encoding: "gbk" as const });
+    const bridge = buildFileToolBridge({ bridge: fake, roots: () => [ROOT] });
+    const result = await run(bridge, "file_read", { path: "旧.txt" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("中文");
+    expect(result.text).toContain("GBK 编码");
+    expect(result.text).toContain("另存为新文件");
+  });
+
+  it("普通 UTF-8 文件不出现那句编码提示", async () => {
+    const fake = fakeBridge({ "D:/库/a.md": "普通内容\n" });
+    const bridge = buildFileToolBridge({ bridge: fake, roots: () => [ROOT] });
+    const result = await run(bridge, "file_read", { path: "a.md" });
+    expect(result.ok).toBe(true);
+    expect(result.text).not.toContain("GBK");
+  });
+});

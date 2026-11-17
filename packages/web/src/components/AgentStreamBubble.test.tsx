@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup } from "./AgentStreamBubble.js";
+import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
 
 describe("AgentStreamBubble", () => {
   it("streaming 态显示名字与累积文本", () => {
@@ -115,6 +115,38 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
     expect(screen.getByText('{"q":"hi"}')).toBeInTheDocument();
   });
 
+  it("工具行默认就带一行人话摘要：写文件显示路径与行数，原始 JSON 留在 title（d.216）", () => {
+    render(
+      <AgentStreamBubble
+        name="和小鸣"
+        text=""
+        status="streaming"
+        tools={[
+          {
+            id: "t1",
+            name: "file_write",
+            args: JSON.stringify({ path: "notes/新.md", content: "一行\n两行" }),
+            status: "ok",
+            result: "已写入 2 行",
+            startedAt: 1000,
+            endedAt: 1100,
+          },
+          {
+            id: "t2",
+            name: "run_command",
+            args: JSON.stringify({ command: "pnpm -w typecheck", cwd: "D:/Heming" }),
+            status: "running",
+            startedAt: 2000,
+          },
+        ]}
+      />,
+    );
+    const summaries = screen.getAllByTestId("tool-arg-summary");
+    expect(summaries.map((node) => node.textContent)).toEqual(["notes/新.md · +2 行", "pnpm -w typecheck · D:/Heming"]);
+    // 原始 JSON 仍可从悬停（title）与展开区的「参数」里拿到
+    expect(summaries[0]?.getAttribute("title")).toContain('"content":"一行\\n两行"');
+  });
+
   it("工具失败用错误态展示", () => {
     render(
       <AgentStreamBubble
@@ -135,7 +167,7 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
       />,
     );
     expect(screen.getByText("失败")).toBeInTheDocument();
-    expect(screen.getByText(/连接断了/)).toBeInTheDocument();
+    expect(screen.getAllByText(/连接断了/).length).toBeGreaterThan(0);
   });
 
   it("没有思考过程与工具时，不渲染这两块（保持旧结构）", () => {
@@ -259,6 +291,128 @@ describe("历史消息转录块（d.126-C：思考/工具调用默认折叠）",
     expect(screen.getByText("wiki_search")).toBeInTheDocument();
     expect(screen.getByText("srv · boom")).toBeInTheDocument();
     expect(screen.getByText("找到 3 条")).toBeInTheDocument();
-    expect(screen.getByText("连接断了")).toBeInTheDocument();
+    expect(screen.getAllByText("连接断了").length).toBeGreaterThan(0);
+  });
+
+  it("工具失败时折叠行直接说原因、展开区给下一步；成功的行不受影响（d.220）", () => {
+    render(
+      <AgentStreamBubble
+        name="和小鸣"
+        text=""
+        status="streaming"
+        tools={[
+          {
+            id: "t1",
+            name: "file_write",
+            args: JSON.stringify({ path: "D:/外面/x.md", content: "hi" }),
+            status: "error",
+            result: [
+              "路径不可用（path-escape）：D:/外面/x.md 不在可写根里",
+              "可重试：把 path 改成工作区内的相对路径",
+              "提示：这个目录没有被授权写入",
+            ].join("\n"),
+            startedAt: 1000,
+            endedAt: 1050,
+          },
+          {
+            id: "t2",
+            name: "file_read",
+            args: JSON.stringify({ path: "a.md" }),
+            status: "ok",
+            result: "文件内容",
+            startedAt: 2000,
+            endedAt: 2050,
+          },
+        ]}
+      />,
+    );
+    // 失败行：折叠行是错误首行，不是参数摘要；悬停仍能拿到完整原文
+    const headline = screen.getByTestId("tool-failure-headline");
+    expect(headline.textContent).toContain("path-escape");
+    expect(headline.textContent).toContain("不在可写根里");
+    expect(headline.getAttribute("title")).toContain("可重试：把 path 改成工作区内的相对路径");
+    // 成功行还是原来的参数摘要
+    expect(screen.getByTestId("tool-arg-summary").textContent).toBe("a.md");
+    // 展开区多一行「下一步」，优先用「提示」
+    expect(screen.getByTestId("tool-failure-next").textContent).toBe("下一步：这个目录没有被授权写入");
+    // 结果原文一个字都没少（契约行仍在展开区的原文里）
+    expect(screen.getByText(/可重试：把 path 改成工作区内的相对路径/)).toBeInTheDocument();
+  });
+
+  it("工具结果很长时先给开头和结尾，展开全部才铺满（d.234）", () => {
+    const longResult = Array.from({ length: 900 }, (_, i) => `log-${i + 1}`).join("\n");
+    render(
+      <AgentStreamBubble
+        name="和小鸣"
+        text=""
+        status="streaming"
+        tools={[
+          {
+            id: "t1",
+            name: "run_command",
+            args: '{"command":"pnpm build"}',
+            status: "ok",
+            result: longResult,
+            startedAt: 1000,
+            endedAt: 2000,
+          },
+        ]}
+      />,
+    );
+
+    // 折叠态：开头与结尾都在，中间那行不在
+    const preview = screen.getByTestId("tool-result-preview");
+    expect(preview.textContent).toContain("log-1\n");
+    expect(preview.textContent).toContain("log-900");
+    expect(preview.textContent).not.toContain("log-450");
+    expect(preview.textContent).toMatch(/中间还有 \d+ 行 \/ \d+ 字未显示/);
+    // 明确告诉用户藏了多少，并给出口
+    const expand = screen.getByRole("button", { name: /展开全部（还有 \d+ 字未显示）/ });
+    fireEvent.click(expand);
+
+    // 展开后是全文，且能收回去
+    expect(screen.queryByTestId("tool-result-preview")).toBeNull();
+    expect(screen.getByTestId("tool-result-full").textContent).toContain("log-450");
+    fireEvent.click(screen.getByRole("button", { name: "收起（只看开头和结尾）" }));
+    expect(screen.getByTestId("tool-result-preview")).toBeInTheDocument();
+  });
+});
+
+
+describe("工具行的「定位」（d.235）", () => {
+  const tool = (args: string) => [
+    {
+      id: "t1",
+      name: "file_read",
+      args,
+      status: "ok" as const,
+      startedAt: 0,
+      endedAt: 12,
+      result: "读到了 2 行",
+    },
+  ];
+
+  it("接了 onRevealPath 才出现「定位」，点它回传绝对路径", () => {
+    const onRevealPath = vi.fn();
+    render(<ToolTraceList tools={tool(JSON.stringify({ path: "D:/工作区/src/a.ts" }))} onRevealPath={onRevealPath} />);
+    const button = screen.getByRole("button", { name: "在文件夹里定位 a.ts" });
+    fireEvent.click(button);
+    expect(onRevealPath).toHaveBeenCalledWith("D:/工作区/src/a.ts");
+  });
+
+  it("没接 onRevealPath 时不渲染「定位」（老安装包不留死按钮）", () => {
+    render(<ToolTraceList tools={tool(JSON.stringify({ path: "D:/工作区/src/a.ts" }))} />);
+    expect(screen.queryByRole("button", { name: /在文件夹里定位/ })).toBeNull();
+  });
+
+  it("参数里没有路径的工具（比如 run_command）不出现「定位」", () => {
+    const onRevealPath = vi.fn();
+    render(
+      <ToolTraceList
+        tools={[{ id: "t2", name: "run_command", args: JSON.stringify({ command: "pnpm test" }), status: "ok" as const, startedAt: 0, endedAt: 9, result: "ok" }]}
+        onRevealPath={onRevealPath}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /在文件夹里定位/ })).toBeNull();
   });
 });

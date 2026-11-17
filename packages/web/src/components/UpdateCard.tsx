@@ -165,6 +165,18 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
         </div>
       )}
 
+      {/* d.203.4.107：空间不够时提前说清楚，别让用户点了安装、程序被删了才发现装不回来。
+          只在「已下载」之后才有意义——那时才拿得到安装包大小。 */}
+      {state?.space && !state.space.ok && (
+        <div
+          data-testid="update-space-warning"
+          role="status"
+          className="mt-2 rounded-lg border border-line-soft bg-warn-soft px-2.5 py-2 text-ui-sm text-warn"
+        >
+          {state.space.message}
+        </div>
+      )}
+
       {!state?.canDownload && (
         <div className="mt-1 ui-caption">
           开发模式不支持下载更新，仅可检查。

@@ -14,7 +14,25 @@ const READ_ROOT: FileRoot = { name: "参考", path: "D:/参考", mode: "read" };
  */
 function fakeBridge(
   initial: Record<string, string> = {},
-  extra: { globPaths?: string[]; grepMatches?: { path: string; line: number; text: string }[] } = {},
+  extra: {
+    globPaths?: string[];
+    grepMatches?: { path: string; line: number; text: string }[];
+    /** 桌面端回报的「这次真跳过了哪些目录」（d.231）；不传 = 老桌面端不报。 */
+    skipped?: string[];
+    /**
+     * 桌面端回报的「有多少文件没能打开」（d.232）：null/不传 = 全都搜过了。
+     */
+    skippedFiles?:
+      | {
+          total: number;
+          tooLarge: number;
+          binary: number;
+          undecodable: number;
+          other: number;
+          sample: string[];
+        }
+      | null;
+  } = {},
 ) {
   const files: Record<string, string> = { ...initial };
   const writes: { ops: FileWriteOp[]; createParents?: boolean }[] = [];
@@ -40,10 +58,23 @@ function fakeBridge(
       return null;
     },
     async glob({ pattern }) {
-      return { ok: true as const, root: ROOT.path, paths: extra.globPaths ?? [], truncated: false };
+      return {
+        ok: true as const,
+        root: ROOT.path,
+        paths: extra.globPaths ?? [],
+        truncated: false,
+        ...(extra.skipped ? { skipped: extra.skipped } : {}),
+      };
     },
     async grep() {
-      return { ok: true as const, root: ROOT.path, matches: extra.grepMatches ?? [], truncated: false };
+      return {
+        ok: true as const,
+        root: ROOT.path,
+        matches: extra.grepMatches ?? [],
+        truncated: false,
+        ...(extra.skipped ? { skipped: extra.skipped } : {}),
+        ...(extra.skippedFiles !== undefined ? { skippedFiles: extra.skippedFiles } : {}),
+      };
     },
   };
   return bridge;
@@ -250,5 +281,117 @@ describe("落盘清单 writes（d.176）", () => {
     const result = await runEdit(deps(bridge), { path: "a.md", old_string: "不存在", new_string: "x" });
     expect(result.ok).toBe(false);
     expect(result.writes).toBeUndefined();
+  });
+});
+
+describe("写入被编码闸拦下：给 encoding-mismatch 与改道建议（d.229）", () => {
+  it("目标不是 UTF-8 时不再报 write-failed，而是说清「换个新文件」", async () => {
+    const bridge = fakeBridge();
+    bridge.write = async () => ({
+      ok: false as const,
+      error: "目标文件不是 UTF-8 编码（看起来是 GBK）：直接写入会把它的编码改成 UTF-8",
+    });
+    const result = await runWrite(deps(bridge), { path: "旧.txt", content: "新内容" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.error_code).toBe("encoding-mismatch");
+    expect(result.error?.hint).toContain("编码");
+    expect(result.error?.retry_with).toContain("新文件");
+  });
+});
+
+describe("搜索跳过的目录要说出来（d.231）", () => {
+  it("glob 与 grep 的头里点名被跳过的目录，并说明 path 可以指进去", async () => {
+    const bridge = fakeBridge({}, { skipped: ["build", "dist"] });
+    const glob = await runGlob(deps(bridge), { pattern: "**/*.ts" });
+    expect(glob.ok).toBe(true);
+    expect(glob.text).toContain("已跳过这些目录：build、dist");
+    expect(glob.text).toContain("path 指到那个目录");
+    // 「跳过」不等于「不存在」：正文里还有「没有匹配的文件」时这条提示同样在
+    const empty = await runGrep(deps(bridge), { pattern: "needle" });
+    expect(empty.text).toContain("没有匹配内容");
+    expect(empty.text).toContain("已跳过这些目录：build、dist");
+  });
+
+  it("老桌面端不报 skipped 时不多写这一行（不编不知道的事）", async () => {
+    const bridge = fakeBridge({}, { globPaths: ["D:/库/src/a.ts"] });
+    const glob = await runGlob(deps(bridge), { pattern: "**/*.ts" });
+    expect(glob.text).not.toContain("已跳过这些目录");
+  });
+});
+
+describe("搜索没搜到的文件要说出来（d.232）", () => {
+  it("抬头点名没能打开的文件数与原因，并给出可行的下一步", async () => {
+    const bridge = fakeBridge(
+      {},
+      {
+        grepMatches: [{ path: "D:/库/src/a.ts", line: 3, text: "needle" }],
+        skippedFiles: {
+          total: 3,
+          tooLarge: 1,
+          binary: 1,
+          undecodable: 1,
+          other: 0,
+          sample: ["巨大.log", "图片.png", "坏编码.bin"],
+        },
+      },
+    );
+    const result = await runGrep(deps(bridge), { pattern: "needle" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("另有 3 个文件没能搜");
+    expect(result.text).toContain("1 个超过 2MB");
+    expect(result.text).toContain("1 个像二进制");
+    expect(result.text).toContain("1 个编码认不出");
+    expect(result.text).toContain("巨大.log");
+    expect(result.text).toContain("直接 file_read");
+    // 命中 0 个时这条同样是关键信息：真的没有，还是没去搜
+    expect(result.text).not.toContain("读不了");
+  });
+
+  it("全都搜过了就不写这一行（不编一个「另有 0 个」）", async () => {
+    const bridge = fakeBridge({}, { grepMatches: [], skippedFiles: null });
+    const result = await runGrep(deps(bridge), { pattern: "needle" });
+    expect(result.text).toContain("没有匹配内容");
+    expect(result.text).not.toContain("没能搜");
+  });
+});
+
+describe("换行风格跟着文件走（d.233）", () => {
+  it("file_edit 插入多行到 CRLF 文件：写进去的行也是 CRLF，不留混合行尾", async () => {
+    const bridge = fakeBridge({ "D:/库/a.md": "第一行\r\n第二行\r\n" });
+    const result = await runEdit(deps(bridge), {
+      path: "a.md",
+      old_string: "第二行",
+      new_string: "第二行改\n第三行",
+    });
+    expect(result.ok).toBe(true);
+    expect(bridge.files["D:/库/a.md"]).toBe("第一行\r\n第二行改\r\n第三行\r\n");
+    expect(result.text).toContain("CRLF 换行");
+  });
+
+  it("file_edit 插到 LF 文件：不引入 \\r", async () => {
+    const bridge = fakeBridge({ "D:/库/b.md": "第一行\n第二行\n" });
+    const result = await runEdit(deps(bridge), {
+      path: "b.md",
+      old_string: "第二行",
+      new_string: "第二行改\r\n第三行",
+    });
+    expect(result.ok).toBe(true);
+    expect(bridge.files["D:/库/b.md"]).toBe("第一行\n第二行改\n第三行\n");
+  });
+
+  it("file_write 覆盖 CRLF 文件：整份跟着 CRLF，不会把 5000 行的行尾全改掉", async () => {
+    const bridge = fakeBridge({ "D:/库/c.md": "旧一\r\n旧二\r\n" });
+    const result = await runWrite(deps(bridge), { path: "c.md", content: "新一\n新二\n" });
+    expect(result.ok).toBe(true);
+    expect(bridge.files["D:/库/c.md"]).toBe("新一\r\n新二\r\n");
+    expect(result.text).toContain("CRLF 换行");
+  });
+
+  it("新建文件没有风格可跟随：保持模型给的 LF，也不多写对齐说明", async () => {
+    const bridge = fakeBridge({});
+    const result = await runWrite(deps(bridge), { path: "d.md", content: "一\n二\n" });
+    expect(result.ok).toBe(true);
+    expect(bridge.files["D:/库/d.md"]).toBe("一\n二\n");
+    expect(result.text).not.toContain("换行风格");
   });
 });

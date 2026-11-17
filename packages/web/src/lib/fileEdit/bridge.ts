@@ -15,7 +15,17 @@ import type { FileRoot } from "./paths.js";
 
 /** 读盘结果（与主进程 `file-fs.js` 的返回形状一致）。 */
 export type FileReadResponse =
-  | { ok: true; content: string; bytes: number }
+  | {
+      ok: true;
+      content: string;
+      bytes: number;
+      /**
+       * 判定出的文本编码（d.229）：主进程按「UTF-8 严解 → GBK 严解」判定。
+       * 缺省/`"utf-8"` = 普通文本；`"gbk"` = 中文 Windows 的 ANSI 文件，读得到内容，
+       * 但写入会被桌面端拦下（避免覆盖时把编码悄悄改成 UTF-8）。
+       */
+      encoding?: "utf-8" | "gbk";
+    }
   | {
       ok: false;
       code?: "invalid-path" | "outside-roots" | "symlink" | "not-found" | "not-file" | "too-large" | "binary" | "io" | "no-roots";
@@ -55,7 +65,20 @@ export type FileSearchFailure = {
  * （`relFromRoot`）——「根内相对路径」的口径仍然只有一处实现。
  */
 export type FileGlobResponse =
-  | { ok: true; root: string; paths: string[]; truncated: boolean }
+  | {
+      ok: true;
+      root: string;
+      paths: string[];
+      truncated: boolean;
+      /**
+       * 这次搜索真跳过的目录名（去重、已排序；d.231）。
+       *
+       * 依赖目录 / 版本库 / 构建产物默认不进去——但「没搜到」必须能与「被跳过了」
+       * 区分开，否则模型会把产物或依赖里的东西当成「仓库里不存在」。
+       * 老桌面端不返回这个字段（undefined），界面按「不知道」处理，不编。
+       */
+      skipped?: string[];
+    }
   | FileSearchFailure;
 
 /** `file:grep` 的一条命中（`path` 为绝对路径，`line` 从 1 开始）。 */
@@ -67,7 +90,29 @@ export interface FileGrepMatch {
 
 /** `file:grep` 的结果。 */
 export type FileGrepResponse =
-  | { ok: true; root: string; matches: FileGrepMatch[]; truncated: boolean }
+  | {
+      ok: true;
+      root: string;
+      matches: FileGrepMatch[];
+      truncated: boolean;
+      /** 同 glob：这次真跳过的目录名（d.231）。 */
+      skipped?: string[];
+      /**
+       * 这次没能打开的文件（d.232）：按原因计数 + 前几个文件名。
+       *
+       * 为什么要有：这些文件以前是静默跳过的，于是「命中 0 个」既可能是真没有，
+       * 也可能是「那只手边有几十个文件根本没被搜索」——没找到 ≠ 没去找。
+       * null / 省略 = 全都搜过了（老桌面端不返回时也按「不知道」处理，不编 0）。
+       */
+      skippedFiles?: {
+        total: number;
+        tooLarge: number;
+        binary: number;
+        undecodable: number;
+        other: number;
+        sample: string[];
+      } | null;
+    }
   | FileSearchFailure;
 
 /** preload 暴露的桥（浏览器端为 undefined）。 */
@@ -126,6 +171,18 @@ export interface FileFsBridge {
    * 只含可写根内的文件（列出来的每一行都要真的能点「回滚」）。
    */
   backups?(payload: { roots: FileRoot[] }): Promise<FileBackupsResponse>;
+  /**
+   * 预览「撤销会把文件改成什么」（桌面 0.3+ 才有，d.207.4.110）：只读，**不消费备份**。
+   *
+   * 为什么不是让界面自己读 `userData/backups`：那里是主进程的私有目录，界面拿不到路径；
+   * 而且根/软链/保留名四道检查只能在主进程做——放给渲染层等于让网页自己证明自己没越界。
+   */
+  backupPreview?(payload: { roots: FileRoot[]; path: string }): Promise<FileBackupPreviewResponse>;
+  /**
+   * 在系统文件管理器里定位（d.234）：文件走「选中它」、目录走「打开它」。
+   * 老安装包没有这个方法 → 界面不渲染「在文件夹里显示」按钮。
+   */
+  reveal?(payload: { roots: FileRoot[]; path: string }): Promise<FileRevealResponse>;
 }
 
 /** 一条可回滚的改动。 */
@@ -142,6 +199,57 @@ export interface FileBackupItem {
 export type FileBackupsResponse =
   | { ok: true; items: FileBackupItem[] }
   | { ok: false; code?: "no-roots" | "untrusted-sender" | "io"; error: string };
+
+/** `file:backup-preview` 的失败码（与主进程 `previewBackup` 对齐）。 */
+export type FileBackupPreviewFailureCode =
+  | "no-roots"
+  | "untrusted-sender"
+  | "no-write-root"
+  | "no-backup-dir"
+  | "outside-roots"
+  | "symlink"
+  | "no-backup"
+  | "io";
+
+/**
+ * `file:backup-preview` 的响应：成功回「改动前」的文本。
+ *
+ * `truncated` / `binary` 是给界面说实话用的：二进制不硬凑文本（`text` 为空串），
+ * 超长只回前 256KB——让用户知道「你看到的不是全貌」，而不是悄悄截断。
+ */
+export type FileBackupPreviewResponse =
+  | { ok: true; path: string; at: string; bytes: number; truncated: boolean; binary: boolean; text: string }
+  | { ok: false; code?: FileBackupPreviewFailureCode; error: string };
+
+/** 桥是否支持预览改动（老安装包没有：界面不渲染「看改动」按钮）。 */
+export function hasBackupPreviewBridge(bridge: FileFsBridge | null): boolean {
+  return !!bridge && typeof bridge.backupPreview === "function";
+}
+
+/** 定位失败的原因码（与桌面端 revealFile 一一对应）。 */
+export type FileRevealFailureCode =
+  | "no-roots"
+  | "untrusted-sender"
+  | "invalid-path"
+  | "outside-roots"
+  | "not-found"
+  | "unsupported"
+  | "io";
+
+/**
+ * 在文件夹里显示的结果。
+ *
+ * kind 区分「文件（在父目录里选中它）」与「目录（直接打开）」：
+ * 用户点的是同一个按钮，但该弹哪个窗口取决于路径本身。
+ */
+export type FileRevealResponse =
+  | { ok: true; kind: "file" | "directory"; path: string }
+  | { ok: false; code?: FileRevealFailureCode; error: string };
+
+/** 桥是否支持「在文件夹里显示」（老安装包没有：界面不渲染这个按钮）。 */
+export function hasRevealBridge(bridge: FileFsBridge | null): boolean {
+  return !!bridge && typeof bridge.reveal === "function";
+}
 
 /**
  * 桥是否支持列出最近改动（`file_undo` 的界面入口）。

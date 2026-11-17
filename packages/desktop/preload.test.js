@@ -184,6 +184,25 @@ test("__heming_files.backups 转发到 file:backups（最近改动列表）", as
   assert.deepEqual(invoked, [["file:backups", { roots: [] }]]);
 });
 
+test("__heming_files.backupPreview 转发到 file:backup-preview（预览改动，只读）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:backup-preview": () => ({ ok: true, path: "D:/库/a.md", at: "2026-11-16T05:00:00.000Z", bytes: 9, truncated: false, binary: false, text: "旧内容\n" }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.backupPreview, "function", "桌面端应暴露 backupPreview");
+  const res = await bridge.backupPreview({ roots: [], path: "D:/库/a.md" });
+  assert.equal(res.ok, true);
+  assert.equal(res.text, "旧内容\n");
+  assert.deepEqual(invoked, [["file:backup-preview", { roots: [], path: "D:/库/a.md" }]]);
+});
+
 test("__heming_files.defaultRootPath：加载时同步取默认工作区；取不到为 null 且不抛", () => {
   const withSync = loadExposed({ "file:default-root": () => ({ ok: true, path: "D:/文档/和鸣" }) });
   assert.equal(withSync.__heming_files.defaultRootPath, "D:/文档/和鸣");
@@ -704,4 +723,23 @@ test("pickDirectory 用户取消时原样回传 null（不报错）", async () =
   // 取消路径由主进程的 handler 归一到 null；这里 mock 掉的正是那个返回值。
   const heming = loadExposed({}, { invokeResults: { "app:pickDirectory": () => null } }).heming;
   assert.equal(await heming.pickDirectory(), null);
+});
+
+test("__heming_files.reveal 转发到 file:reveal（在文件夹里显示，d.234）", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    {},
+    {
+      invoked,
+      invokeResults: {
+        "file:reveal": () => ({ ok: true, kind: "file", path: "D:/库/a.md" }),
+      },
+    },
+  );
+  const bridge = exposed.__heming_files;
+  assert.equal(typeof bridge.reveal, "function", "桌面端应暴露 reveal");
+  const res = await bridge.reveal({ roots: [], path: "D:/库/a.md" });
+  assert.equal(res.ok, true);
+  assert.equal(res.kind, "file");
+  assert.deepEqual(invoked, [["file:reveal", { roots: [], path: "D:/库/a.md" }]]);
 });

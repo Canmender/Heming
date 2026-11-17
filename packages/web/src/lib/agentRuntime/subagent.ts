@@ -456,6 +456,23 @@ export async function runSubagent(
 }
 
 /**
+ * 按指定 task id 跑一个子代理（d.203.4.109）。
+ *
+ * 工作流（`workflow.ts`）需要让界面按**步骤 id** 区分「哪一步在跑」；
+ * `runSubagent` 固定用 `sub-1`，喂给 `agent_task` 的并行动作正好。这里把执行体
+ * 按调用方给的 id 暴露出来，避免工作流自己复制一份循环。
+ */
+export async function runSubagentTask(
+  task: string,
+  maxRounds: number,
+  deps: SubagentDeps,
+  taskId: string,
+): Promise<SubagentResult> {
+  const rounds = Math.max(1, Math.min(maxRounds, SUBAGENT_MAX_ROUNDS_LIMIT));
+  return runOne(task, rounds, deps, taskId);
+}
+
+/**
  * 并行跑 2–3 个只读子代理（d.200）。
  *
  * 并发只用来**等 I/O**（模型请求 + 读文件），不是把额度打满：默认 2、硬上限 3。
@@ -544,7 +561,8 @@ export function withSubagentTool(
     tools: [...bridge.tools, subagentSpec(writable)],
     meta: (name: string) => {
       if (name === SUBAGENT_TOOL) {
-        return { risk: "read" as const, displayName: "派子代理" };
+        // d.207：子代理是长任务扇出的主力，声明成核心工具（否则装了 MCP 后它可能被挤掉）。
+        return { risk: "read" as const, displayName: "派子代理", core: true };
       }
       return bridge.meta?.(name);
     },

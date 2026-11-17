@@ -23,6 +23,8 @@ const {
   MAX_JOB_MS,
   MAX_JOB_WAIT_MS,
   MAX_JOB_PREVIEW_BYTES,
+  decodeCommandOutput,
+  shapeTerminalText,
 } = require("./shell-run.js");
 
 /** 造一个临时可写根，测试结束由调用方清理。 */
@@ -184,6 +186,8 @@ test("shell-run：渲染层中止时杀进程并回 aborted", async () => {
     );
     assert.equal(res.ok, false);
     assert.equal(res.code, "aborted");
+    assert.match(res.error, /渲染层已断开/, "断连时的文案要说清是断开，不是用户取消");
+    assert.doesNotMatch(res.error, /已被取消/, "断连不能被写成「用户取消」——甩锅式文案会让人误以为是自己点的");
   } finally {
     fs.rmSync(root.path, { recursive: true, force: true });
   }
@@ -270,23 +274,34 @@ function stuckChild() {
   return child;
 }
 
-test("shell-run：取消在跑的命令会杀进程并回 aborted（d.165）", async () => {
+test("shell-run：取消在跑的命令会杀进程并回 aborted（d.165 / 时序修正 d.230）", async () => {
   const root = makeRoot();
   try {
     const child = stuckChild();
+    // 确定性等待「真的 spawn 了」：以前用一次 setImmediate，机器一忙就可能在校验目录阶段
+    // 就取消，于是走的是「执行前取消」分支、child 根本没用上，断言随机红（d.230 修）。
+    let spawnedResolve;
+    const spawned = new Promise((r) => {
+      spawnedResolve = r;
+    });
     const pending = runCommand(
       { roots: [root], cwd: root.path, command: "npm test", runId: "run-1" },
-      () => child,
+      () => {
+        spawnedResolve();
+        return child;
+      },
     );
-    // 等它真的 spawn 出来再取消
-    await new Promise((r) => setImmediate(r));
+    await spawned;
     assert.equal(child.killed, false);
+
     const cancelled = cancelRun("run-1");
     assert.equal(cancelled.ok, true);
+
     const res = await pending;
     assert.equal(res.ok, false);
     assert.equal(res.code, "aborted");
     assert.equal(child.killed, true, "取消必须真的杀掉子进程，而不是只改返回文案");
+    assert.match(res.error, /命令已被取消/, "用户主动停止时的文案要说「已取消」，不能甩锅给「渲染层断开」");
   } finally {
     fs.rmSync(root.path, { recursive: true, force: true });
   }
@@ -316,11 +331,18 @@ test("shell-run：取消不存在的 runId 不会误杀别的命令，也不抛"
   const root = makeRoot();
   try {
     const child = stuckChild();
+    let spawnedResolve;
+    const spawned = new Promise((r) => {
+      spawnedResolve = r;
+    });
     const pending = runCommand(
       { roots: [root], cwd: root.path, command: "sleep 1", runId: "run-a" },
-      () => child,
+      () => {
+        spawnedResolve();
+        return child;
+      },
     );
-    await new Promise((r) => setImmediate(r));
+    await spawned;
     const res = cancelRun("run-unknown");
     assert.equal(res.ok, true);
     assert.equal(child.killed, false, "取消未知 id 不能波及在跑的命令");
@@ -782,6 +804,93 @@ test("job-preview：经 IPC 可读，跑完的作业预览仍能看到最后输�
     // 这里断言的是通道可用、形状正确、不报错。
     assert.equal(typeof preview.stdout, "string");
     assert.equal(preview.cut, false);
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
+test("shell-run：输出解码——合法 UTF-8 原样、GBK 字节按 GBK 解、BOM 剥掉、坏字节不抛（d.228）", () => {
+  assert.equal(decodeCommandOutput(Buffer.from("中文 ok\n")), "中文 ok\n", "合法 UTF-8 必须原样返回");
+  assert.equal(decodeCommandOutput(Buffer.from([0xd6, 0xd0, 0xce, 0xc4])), "中文", "GBK 字节要按 GBK 解");
+  assert.equal(
+    decodeCommandOutput(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("x")])),
+    "x",
+    "UTF-8 BOM 要剥掉（PowerShell 重定向常见）",
+  );
+  assert.equal(typeof decodeCommandOutput(Buffer.from([0xff, 0xfe, 0x80])), "string", "两种编码都不成立时也不能抛");
+  assert.equal(decodeCommandOutput([]), "", "空输出是空串");
+  assert.equal(decodeCommandOutput([Buffer.from("中文"), Buffer.from(" ok")]), "中文 ok", "分块数组按顺序拼");
+});
+
+test("shell-run：命令输出的终端痕迹整形——ANSI 去掉、\\r 覆盖只留最终那一段（d.231）", () => {
+  // ANSI 颜色与光标控制：终端会吃掉，落到工具结果里就是噪声
+  assert.equal(shapeTerminalText("\u001b[32mok\u001b[0m 2 models"), "ok 2 models");
+  assert.equal(shapeTerminalText("\u001b[2K\u001b[1Gdone"), "done");
+  // OSC（窗口标题、超链接）
+  assert.equal(shapeTerminalText("\u001b]0;title\u0007内容"), "内容");
+  // \\r 覆盖：进度条最终只显示最后一段
+  assert.equal(shapeTerminalText("10%\r50%\r100%"), "100%");
+  assert.equal(shapeTerminalText("下载中 10%\r下载中 100%\n完成"), "下载中 100%\n完成");
+  // 行尾单独的 \\r（光标回行首后没再写）保留前一段，不变成空行
+  assert.equal(shapeTerminalText("abc\r\n"), "abc\n");
+  // 普通文本、制表符、换行一律不动
+  assert.equal(shapeTerminalText("a\tb\nc"), "a\tb\nc");
+  assert.equal(shapeTerminalText(""), "");
+});
+
+test("shell-run：真跑一条吐 ANSI 与 \\r 的命令，工具结果里没有转义字符（d.231）", async () => {
+  const root = makeRoot();
+  try {
+    const res = await runCommand({
+      roots: [root],
+      cwd: root.path,
+      command:
+        `node -e "const e=String.fromCharCode(27),r=String.fromCharCode(13);process.stdout.write('done'+String.fromCharCode(10)+e+'[32m10%'+e+'[0m'+r+'100%')"`,
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.exitCode, 0);
+    assert.equal(res.stdout, "done\n100%", "ANSI 与 \\r 都要按终端语义处理");
+    assert.ok(!res.stdout.includes(String.fromCharCode(27)), "结果里不能再有 ESC");
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
+test("shell-run：真跑一条吐 GBK 字节的命令，stdout 里是中文（d.228）", async () => {
+  const root = makeRoot();
+  try {
+    const res = await runCommand({
+      roots: [root],
+      cwd: root.path,
+      command: 'node -e "process.stdout.write(Buffer.from([0xd6,0xd0,0xce,0xc4]))"',
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.exitCode, 0);
+    assert.equal(res.stdout, "中文", "cmd 里跑的 node 吐 GBK 字节时必须解成中文，而不是一片问号");
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
+test("job-output / job-preview：后台作业的输出同样按实际编码解（d.228）", async () => {
+  const root = makeRoot();
+  try {
+    const child = controlledChild(999902);
+    const job = await startJob(root, () => child);
+    child.stdout.emit("data", Buffer.from([0xd6, 0xd0, 0xce, 0xc4]));
+    child.emit("close", 0, null);
+    const res = await readJobOutput(job.jobId, 1000);
+    assert.equal(res.ok, true);
+    assert.equal(res.stdout, "中文");
+
+    const child2 = controlledChild(999903);
+    const job2 = await startJob(root, () => child2);
+    child2.stderr.emit("data", Buffer.from([0xb4, 0xed, 0xce, 0xf3]));
+    const preview = previewJobOutput(job2.jobId);
+    assert.equal(preview.ok, true);
+    assert.equal(preview.stderr, "错误", "预览也要按 GBK 解（cmd 的报错就是 GBK）");
+    child2.emit("close", 1, null);
+    await readJobOutput(job2.jobId, 1000);
   } finally {
     fs.rmSync(root.path, { recursive: true, force: true });
   }

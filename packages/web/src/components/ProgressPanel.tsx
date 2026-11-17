@@ -96,9 +96,12 @@ function useViewportMaxWidth(): number {
 export function ProgressPanel({
   conversationId,
   onClose,
+  onRevealPath,
 }: {
   conversationId: string | null;
   onClose: () => void;
+  /** 在资源管理器里定位工具涉及的文件（d.235）；不传就不显示「定位」。 */
+  onRevealPath?: (path: string) => void;
 }) {
   const progress = useConversationProgress(conversationId);
   const phaseTone = PHASE_TONES[progress.phase];
@@ -308,7 +311,7 @@ export function ProgressPanel({
             {/* 没有工具调用时整段不出现：空标题比没有更让人以为「还没加载出来」。 */}
             {toolCount > 0 ? (
               <Section title="工具调用">
-                <ToolTraceList tools={progress.tools} />
+                <ToolTraceList tools={progress.tools} {...(onRevealPath ? { onRevealPath } : {})} />
               </Section>
             ) : null}
           </div>

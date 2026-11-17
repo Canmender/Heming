@@ -104,6 +104,58 @@ export class LlmHttpError extends Error {
   }
 }
 
+/**
+ * 流式响应「一直没有新字节」的容忍上限（d.211）。
+ *
+ * 为什么需要：供应商或中间网关有时**不回数据也不关连接**（思考中的模型、被限流的代理、
+ * 半死的长连接），`reader.read()` 会一直挂着——用户看到转圈，界面没有任何错误，只能手动点停止。
+ * 底层 `fetch` 本身没有空闲超时，所以这一层必须自己兜。
+ *
+ * 取值理由：正常流在「思考→输出」之间通常不超过 30 秒就有首字节或心跳；给到 120 秒是为了
+ * 不误杀长时间思考的模型，同时保证真的卡死时两分钟内一定给出结论。
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * 等响应头的超时（毫秒，d.213）。
+ *
+ * d.211 的空闲超时只在**流已经建立**之后生效（`reader.read()` 挂住）。但还有一段更早的
+ * 空白：`fetch` 把请求发出去之后，服务端（或中间网关）可能既不回状态行也不关连接——
+ * 这时连 `res` 都还没拿到，一个超时都没有，界面会永远停在「正在生成」。这一层用
+ * `CONNECT_TIMEOUT_MS` 兜住「等到第一滴响应」这段时间。
+ *
+ * 取值理由：正常网关在请求体上传完后几秒内就会回响应头（流式请求还会在首字节时回），
+ * 120 秒足够覆盖慢速预填充；真的破表，说明这条连接已经不可用了。
+ */
+export const CONNECT_TIMEOUT_MS = 120_000;
+
+/**
+ * 流卡住的专用错误：`status = 408`，这样 `isRetryableUpstreamError` 会把它当成可重试的上游抖动
+ * （408 在 `RETRYABLE_STATUS` 里），退避重试逻辑不用特判。
+ */
+export class StreamIdleTimeoutError extends LlmHttpError {
+  /** 卡在哪一段（`upstreamRetry.describeUpstreamError` 按它给不同的人话）。 */
+  readonly phase = "stream" as const;
+
+  constructor(idleMs: number) {
+    super(408, `流式响应超过 ${Math.max(1, Math.round(idleMs / 1000))} 秒没有新数据（网关或供应商可能卡住了）`);
+    this.name = "StreamIdleTimeoutError";
+  }
+}
+
+/**
+ * 等响应头超时的专用错误（d.213）：同样是 `status = 408`，同样落进可重试分类，
+ * 区别只在 `phase`——界面提示要说清是「一直没开始响应」还是「响应到一半停了」。
+ */
+export class UpstreamTimeoutError extends LlmHttpError {
+  readonly phase = "connect" as const;
+
+  constructor(connectMs: number) {
+    super(408, `上游 ${Math.max(1, Math.round(connectMs / 1000))} 秒没有开始响应（网关或供应商可能卡住了）`);
+    this.name = "UpstreamTimeoutError";
+  }
+}
+
 /** 路由层尝试一个候选后的留痕（成功/失败/为什么换走）。由 streamChatRouted 发出。 */
 export interface RouteAttempt {
   profileId: string;
@@ -222,6 +274,34 @@ export interface StreamChatOpts {
   onFinish?: (reason: string) => void;
   /** 逐候选留痕：只有 `streamChatRouted` 会读它。 */
   onAttempt?: (a: RouteAttempt) => void;
+  /**
+   * 流空闲超时（毫秒）：多久没有新字节就判定卡住（d.211）。
+   * 产品里不传，用 `STREAM_IDLE_TIMEOUT_MS`；测试把它压到几十毫秒才能验这条路径。
+   */
+  idleTimeoutMs?: number;
+  /**
+   * 等响应头的超时（毫秒，d.213）：多久没拿到响应就判定这条连接不可用。
+   * 同样只给测试传，产品用 `CONNECT_TIMEOUT_MS`。
+   */
+  connectTimeoutMs?: number;
+}
+
+/**
+ * 两个中断信号取或（`AbortSignal.any` 不可用时手工合成）。
+ * 为什么需要：空闲超时触发时必须把底层 fetch 也中止，否则那条卡住的连接会一直挂着。
+ */
+function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
+  const anyOf = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyOf === "function") return anyOf([a, b]);
+  const controller = new AbortController();
+  if (a.aborted || b.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+  const onAbort = () => controller.abort();
+  a.addEventListener("abort", onAbort, { once: true });
+  b.addEventListener("abort", onAbort, { once: true });
+  return controller.signal;
 }
 
 /**
@@ -252,6 +332,54 @@ export async function streamChat(
   const toAbortError = () => new DOMException("AbortError", "AbortError");
   const toProviderError = (e: unknown) =>
     e instanceof LlmHttpError ? e : new LlmHttpError(0, e instanceof Error ? e.message : String(e));
+
+  /**
+   * 本次响应的总取消闸：用户停止（opts.signal）或流空闲超时（idleController）任一触发，
+   * 底层 fetch 一起中止——否则「不回数据也不关连接」的网关会一直占着这条流（d.211）。
+   */
+  const idleController = new AbortController();
+  const streamSignal = combineSignals(opts.signal, idleController.signal);
+  const idleMs = opts.idleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
+  /**
+   * 「等响应头」这一段的总闸（d.213）：只有它触发时才 abort，拿到响应头之后定时器就清掉。
+   * fetch 的 signal 必须把三路合成：用户停止、流空闲超时、等响应头超时。
+   */
+  const connectMs = opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+  const connectController = new AbortController();
+  const fetchSignal = combineSignals(streamSignal, connectController.signal);
+
+  /**
+   * 带空闲超时的读一块（d.211 / d.213）：超过 `idleMs` 没有新字节就中止连接并抛
+   * `StreamIdleTimeoutError`。底层 `fetch` 没有空闲超时，供应商或网关卡住时
+   * `reader.read()` 会永远挂着；流式与非流式两条路径共用这一份。
+   */
+  const readChunkWithIdle = (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+  ): Promise<ReadableStreamReadResult<Uint8Array>> =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        // 先掐断连接：否则这条流会一直占着，重试也会撞在同一个坏连接上。
+        idleController.abort();
+        reject(new StreamIdleTimeoutError(idleMs));
+      }, idleMs);
+      reader.read().then(
+        (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
 
   const readUsage = (raw: unknown): UsageTotals | null => {
     if (!raw || typeof raw !== "object") return null;
@@ -398,16 +526,36 @@ export async function streamChat(
   };
 
   const doFetch = async (r: typeof req): Promise<Response> => {
+    /**
+     * 竞速而不是给 fetch 加超时参数：`fetch` 没有「等响应头」的超时选项，`AbortSignal.timeout`
+     * 会连响应体一起掐掉（流式请求正是在读体的时候才需要长时间存活）。所以只在这一段用
+     * 定时器竞速，拿到响应头立刻 clearTimeout，后面的读体由 `readWithIdle` 管（d.211/d.213）。
+     */
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const connectStalled = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        // 先掐断连接：否则这条「不回响应也不关」的连接会一直占着，重试也撞在同一个坏连接上。
+        connectController.abort();
+        reject(new UpstreamTimeoutError(connectMs));
+      }, connectMs);
+    });
     try {
-      return await fetch(r.url, {
-        method: "POST",
-        headers: r.headers,
-        body: r.body,
-        signal: opts.signal,
-      });
+      return await Promise.race([
+        fetch(r.url, {
+          method: "POST",
+          headers: r.headers,
+          body: r.body,
+          signal: fetchSignal,
+        }),
+        connectStalled,
+      ]);
     } catch (e) {
+      // 等响应头超时是真错误（不是用户停止），原样抛出，交给上层的退避重试判定。
+      if (e instanceof UpstreamTimeoutError) throw e;
       if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
       throw toProviderError(e);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   };
 
@@ -440,9 +588,23 @@ export async function streamChat(
       usage?: unknown;
     };
     try {
-      json = (await res.json()) as typeof json;
+      // 非流式响应也可能「回了响应头，body 却永远不结束」（d.213）：同样带空闲超时读完整段。
+      // 不能直接 res.json()——它内部那一次 read 没有任何超时，卡住就是永远转圈。
+      const bodyReader = res.body?.getReader() ?? null;
+      if (!bodyReader) throw new LlmHttpError(0, "响应没有正文");
+      const bodyDecoder = new TextDecoder();
+      let raw = "";
+      for (;;) {
+        const { done, value } = await readChunkWithIdle(bodyReader);
+        if (done) break;
+        if (value) raw += bodyDecoder.decode(value, { stream: true });
+      }
+      raw += bodyDecoder.decode();
+      json = JSON.parse(raw) as typeof json;
     } catch (e) {
+      if (e instanceof StreamIdleTimeoutError || e instanceof UpstreamTimeoutError) throw e;
       if (opts.signal.aborted) throw toAbortError();
+      if (e instanceof SyntaxError) throw new LlmHttpError(0, `响应不是合法 JSON：${e.message}`);
       throw toProviderError(e);
     }
     const carried = carriedError(json);
@@ -467,6 +629,8 @@ export async function streamChat(
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  /** 流式路径的读：与上面同一份实现（d.213 抽出来给非流式分支复用）。 */
+  const readWithIdle = () => readChunkWithIdle(reader);
   let acc = "";
   const handleLine = (line: string) => {
     if (!line.startsWith("data:")) return;
@@ -508,7 +672,7 @@ export async function streamChat(
   };
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithIdle();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");

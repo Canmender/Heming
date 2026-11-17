@@ -11,7 +11,7 @@ import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
 import { supportsKind } from "./capabilityNotice.js";
-import { IMAGE_TOKEN_COST, estimateTokens } from "./agentContext/tokens.js";
+import { IMAGE_TOKEN_COST, estimateRowsTokens, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
 import { DEFAULT_TURN_CAPS, planTurnBudget } from "./agentContext/turnBudget.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
@@ -25,6 +25,12 @@ import {
   unfinishedTodoCount,
 } from "./agentRuntime/longTask.js";
 import { coreToolNames } from "./agentRuntime/coreTools.js";
+import {
+  describeUpstreamError,
+  isRetryableUpstreamError,
+  MAX_UPSTREAM_RETRIES,
+  retryDelayMs,
+} from "./agentRuntime/upstreamRetry.js";
 import { buildTurnEvidence } from "./rollout/evidence.js";
 import type { RolloutEvidence, RolloutInput, RolloutTurnFailure, RolloutUsage } from "./rollout/types.js";
 import type { ToolFailure } from "./toolError.js";
@@ -189,7 +195,7 @@ export const MAX_SOURCES = 8;
 export const MAX_PARALLEL_READS = 3;
 
 /**
- * 单次工具调用的兜底超时（d.186）。
+ * 单次工具调用的兜底超时（d.186；d.206 起超时会**真的请求取消**）。
  *
  * 为什么要有：工具是外部世界（MCP 服务、浏览器桥、命令、网络），**没有哪一处保证一定返回**。
  * 一个不返回的调用会让整轮对话一直挂着——用户看到「正在调用 X」转圈，只能手点停止；
@@ -198,29 +204,51 @@ export const MAX_PARALLEL_READS = 3;
  * 为什么是 180 秒：`run_command` 自己的硬上限是 120 秒（见 `shell/limits.ts`），后台作业是
  * 立刻返回 jobId；能超过 180 秒还没返回的，基本可以判定为挂死，而不是「正常但慢」。
  *
- * 代价：超时后底层那次调用**可能仍在跑**（stdio/HTTP 只能「不再等」），所以文案写「已中止这次
- * 等待」而不是「已杀掉」，不让模型误以为外部状态干净了。
+ * d.206 之前只「不再等」：底层那次调用（stdio 子进程、HTTP 请求）还在跑，可能继续占资源、
+ * 甚至在你以为停住之后继续改文件。现在超时会给这次调用一个**自己的**中断信号：
+ * - 支持取消的（`run_command` → 主进程杀进程树、MCP → 发送取消通知）真的停下；
+ * - 不支持的（纯计算、同步 IO）只是不再等它，文案如实说明。
+ * 措辞按「是否真的取消了」分两条，不把「不再等」说成「已杀掉」。
  */
 export const TOOL_CALL_TIMEOUT_MS = 180_000;
 
-/** 给一次工具调用加兜底超时；超时回一条模型能照做的失败文案（不抛异常）。 */
+/**
+ * 给一次工具调用加兜底超时。
+ *
+ * `run` 拿到的信号是「本轮停止」与「这次调用超时」的合成：任一发生都会 abort。
+ * 超时后立刻 abort 这次调用（让支持取消的工具收手），并回一条模型能照做的失败文案（不抛异常）。
+ */
 function withToolTimeout<T extends { text: string; ok: boolean }>(
-  promise: Promise<T>,
+  run: (signal: AbortSignal) => Promise<T>,
   toolName: string,
+  parentSignal: AbortSignal,
+  timeoutMs: number,
 ): Promise<T | { text: string; ok: false }> {
+  const callController = new AbortController();
+  const onParentAbort = () => callController.abort();
+  if (parentSignal.aborted) callController.abort();
+  else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<{ text: string; ok: false }>((resolve) => {
     timer = setTimeout(() => {
+      const cancelled = !callController.signal.aborted;
+      callController.abort();
+      const seconds = Math.round(timeoutMs / 1000);
       resolve({
-        text:
-          `工具 ${toolName} 超过 ${Math.round(TOOL_CALL_TIMEOUT_MS / 1000)} 秒没有返回，已经中止这次等待。` +
-          "这不算任务失败：可以换一种做法（例如换成后台作业、缩小范围、或先确认外部服务的状态）再继续。",
+        text: cancelled
+          ? `工具 ${toolName} 超过 ${seconds} 秒没有返回，已经请求取消这次调用：` +
+            "能停的（本机命令、MCP 调用）会真的停下，其余只是不再等它。" +
+            "这不算任务失败：可以换一种做法（例如换成后台作业、缩小范围、或先确认外部服务的状态）再继续。"
+          : `工具 ${toolName} 超过 ${seconds} 秒没有返回，已经中止这次等待（本轮同时被停止）。` +
+            "这不算任务失败：可以换一种做法再继续。",
         ok: false,
       });
-    }, TOOL_CALL_TIMEOUT_MS);
+    }, timeoutMs);
   });
-  return Promise.race([promise, timeout]).finally(() => {
+  return Promise.race([run(callController.signal), timeout]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
+    parentSignal.removeEventListener("abort", onParentAbort);
   });
 }
 
@@ -327,10 +355,67 @@ export interface ToolBridge {
   meta?: (name: string) => {
     risk?: RiskLevel;
     displayName?: string;
+    /**
+     * 是不是「长任务全程都要用」的本地核心工具（d.207）。
+     *
+     * 为什么要由提供者在注册处声明、而不是在 `agentRuntime/coreTools.ts` 里维护一份名字清单：
+     * 清单会**静默过期**——d.204 加了 `workflow_run` 却没进清单，工具目录一过阈值
+     * （装了 MCP 服务）它就可能被「按需发现」挤到看不见，模型只能先猜着调 `tool_search`。
+     * 声明写在工具定义旁边，新加核心工具时改动点只有一处，也更容易在 review 时看见。
+     *
+     * 只该由我们自己的内置桥声明：第三方（MCP / 插件）声明自己「核心」没有意义——
+     * 常驻名额有限，钉住谁由我们决定。
+     */
+    core?: boolean;
     /** 来源与提供者 id 由能力注册表统一补齐（见 lib/capability）。 */
     origin?: ToolOrigin;
     providerId?: string;
   } | undefined;
+}
+
+/**
+ * 可中断的等待（d.203.4.108 上游重试用）。
+ *
+ * 直接 `await new Promise(r => setTimeout(r, ms))` 会吃掉停止按钮：退避期间用户
+ * 按了停止，得等它睡完才轮到中断检查——最长 10 秒，观感上就是「点了没反应」。
+ * 这里把 abort 接进定时器，中断时立即以 AbortError 收口（走既有中断路径）。
+ */
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      const error = new Error("已中断");
+      error.name = "AbortError";
+      reject(error);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      const error = new Error("已中断");
+      error.name = "AbortError";
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, Math.max(0, ms));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * 主对话的「现在在干什么」（d.214）——只报事实，不猜进度。
+ *
+ * 长任务里模型一跑十几轮，而界面上只有一句静态的「生成中：X」。用户判断不了
+ * 「还在干活」还是「卡死了」，于是点停止把十分钟的活掐掉。子代理（d.200）与
+ * 后台作业（d.203）各有面板，主对话这一条偏偏没有——所以要单独上报。
+ */
+export interface TurnProgressEvent {
+  /** 本轮的「第几轮工具循环」，从 1 开始（界面按这个数显示，不从 0 起）。 */
+  round: number;
+  /** `"round"` = 刚开始新一轮、模型在想；`"tool"` = 正在执行某个工具。 */
+  phase: "round" | "tool";
+  /** `phase === "tool"` 时的工具名；别的阶段不带。 */
+  tool?: string;
 }
 
 export interface TriggerDeps {
@@ -418,6 +503,14 @@ export interface TriggerDeps {
       sources?: ToolSource[];
       /** 被拒原因（denied=true 时带：用户当场拒绝 / 命中记住的规则 / 闸门异常）。 */
       denyCause?: DenyCause;
+      /**
+       * 工具失败契约里的错误码（d.221，仅 ok=false 且工具回了契约时带）。
+       *
+       * 为什么不从 `result` 文本里正则抠：一部分工具（如 file_read 的 io/not-found 分支）
+       * 走 `appendFailure`，文本里没有 `（code）` 那段，只有结构化字段有——界面要按
+       * 错误码归因，就必须拿这个字段，而不是从中文文案猜。
+       */
+      errorCode?: string;
     },
   ) => void;
   /**
@@ -449,6 +542,43 @@ export interface TriggerDeps {
    * 队列里剩下的由触发端在收口后另起一轮处理——本模块不替用户发消息。
    */
   drainSteer?: () => string[];
+  /**
+   * 上游瞬时错误自动重试（d.203.4.108）：每退避一次回调一次，**只在界面提示用**。
+   *
+   * 什么算瞬时错误、重试几次、等多久，判据全在 `agentRuntime/upstreamRetry.ts`，
+   * 这里只负责把「正在重试」这件事说给用户听——不说的话用户看到的是界面卡住不动，
+   * 会以为死机后点停止，把本来能自己缓过来的一轮掐掉。
+   * 缺省 → 不提示（重试照做，只是不可见）。
+   */
+  onUpstreamRetry?: (info: {
+    attempt: number;
+    max: number;
+    delayMs: number;
+    reason: string;
+  }) => void;
+  /**
+   * 上下文估算校准的采样点（d.215）：供应商报了 `input_tokens` 时，把
+   * 「这次实际花了多少提示 token」与「同一批消息我们估了多少」一起交出去。
+   *
+   * 为什么放这里而不是直接写存储：本模块保持纯逻辑可测（与 `recordUsage` 同口径），
+   * 存哪、怎么平滑、夹多少，都由 `agentContext/calibration.ts` 决定。
+   * 缺省 → 不采样（估算照旧，只是不被真实值修正）。
+   */
+  onContextSample?: (sample: { model: string; estimated: number; actual: number }) => void;
+  /**
+   * 单次工具调用的兜底超时（d.206，缺省 `TOOL_CALL_TIMEOUT_MS`）。
+   *
+   * 只给测试用（把 180 秒压到几十毫秒才能验「超时真的会请求取消」），
+   * 产品里不要传：超时值是「挂死」与「正常但慢」的分界线，不该由调用点各说各话。
+   */
+  toolTimeoutMs?: number;
+  /**
+   * 主对话进度（d.214）：每开一轮报一次 `round`，每个工具开始执行报一次 `tool`。
+   *
+   * 为什么只报这两件：轮次与工具名都是模型真实做过的事；「还剩几轮」「完成多少」没人知道，
+   * 编出来只会误导用户。缺省 → 不上报（行为与加这个钩子之前逐字一致）。
+   */
+  onProgress?: (event: TurnProgressEvent) => void;
   /**
    * 逐候选留痕（d.48 路由组）：候选链每问一个候选回调一次，**只在本机展示**，绝不上行。
    * 单连接（链长 1）时路由层直接透传，从不回调——与没有本钩子时逐字等价。
@@ -1239,13 +1369,16 @@ export function runAgentMentions(
             if (!rankedNames.includes(tool.name)) rankedNames.push(tool.name);
           }
           /**
-           * 核心工具常驻（d.191）：相关度排序对 MCP 友好，但会把本地能力挤下去。
+           * 核心工具常驻（d.191 → d.206 声明式）：相关度排序对 MCP 友好，但会把本地能力挤下去。
            *
            * 用户这句话里没提「文件」「命令」时，`file_write` / `run_command` 可能在
            * 第一轮就不可见——长任务走到一半要写要跑时，模型只能先猜着调 `tool_search`，
-           * 或者直接说做不到。所以先给常驻名单占名额，剩下的名额再按相关度与目录序补齐。
+           * 或者直接说做不到。所以先给常驻工具占名额，剩下的名额再按相关度与目录序补齐。
+           *
+           * 哪些算常驻：以桥的 `meta(name).core` 声明为准（d.206），旧名字清单只做兜底——
+           * 清单会静默过期（`workflow_run` 就漏过一次），声明写在工具定义旁边不会。
            */
-          const coreNames = coreToolNames(rankedNames);
+          const coreNames = coreToolNames(rankedNames, (name) => bridge?.meta?.(name));
           const coreSet = new Set(coreNames);
           const pinnedOrder = useDiscovery
             ? [...coreNames, ...rankedNames.filter((name) => !coreSet.has(name))]
@@ -1306,6 +1439,9 @@ export function runAgentMentions(
            */
           let segmentStart = 0;
           for (let round = 0; ; round++) {
+            // 主对话进度（d.214）：先让界面知道「进到第几轮了」，工具执行时再补一条。
+            // 放在预算收口之前——用户看到「第 N 轮」总比看到界面静止强。
+            deps.onProgress?.({ round: round + 1, phase: "round" });
             /**
              * 预算驱动收口（G1）：工具结果累计超过单轮上限就不再开新一轮。
              *
@@ -1357,7 +1493,10 @@ export function runAgentMentions(
             let truncated = false;
             /** 服务端内容策略拦下（finish_reason=content_filter / refusal）：通常正文是空的，必须说明。 */
             let refused = false;
-            await deps.streamChat(profile, await messagesFor(aggressive, extra), {
+            const requestMessages = await messagesFor(aggressive, extra);
+            /** 一次上游请求（重试时重复调用它，参数与消息逐字相同）。 */
+            const askUpstream = () =>
+              deps.streamChat(profile, requestMessages, {
               signal: controller.signal,
               ...(useTools ? { tools: toolsForRequest() } : {}),
               onToolCalls: (c) => {
@@ -1402,6 +1541,21 @@ export function runAgentMentions(
                   usageCacheWriteRounds++;
                   usageCacheWrite += u.cacheWriteTokens;
                 }
+                // 上下文估算校准（d.215）：真实提示 token 与同一批消息的估算值比一比。
+                // 只在供应商报了 inputTokens 时采样（缺一侧说明这个包压根没给提示用量），
+                // 只走回调不写存储：平滑与夹逼都在 calibration.ts，异常一律吞掉——
+                // 采样失败绝不能影响一次已经生成好的回答。
+                if (u.inputTokens !== undefined) {
+                  try {
+                    deps.onContextSample?.({
+                      model: profile.model,
+                      estimated: estimateRowsTokens(requestMessages),
+                      actual: u.inputTokens,
+                    });
+                  } catch {
+                    /* 采样是旁路副作用，失败不影响收口 */
+                  }
+                }
               },
               onDelta: (d) => {
                 if (!useTools) {
@@ -1413,6 +1567,54 @@ export function runAgentMentions(
                 buffered += d; // 兜底用：中断时这些字还没上行，不能丢
               },
             });
+
+            /**
+             * 上游瞬时错误自动重试（d.203.4.108）。
+             *
+             * 供应商那边偶发 429 / 5xx / 连接被掐断时，一次就把整轮判死太重：
+             * 长任务里前面几十轮的活都停在这里，用户还得自己再点一次「继续」。
+             * 这里按 `upstreamRetry` 的判据退避重试，**但只在「这一轮什么都没发生」时**——
+             * 已经吐过字或已经拿到工具调用再重试，会造成重复文本、重复调用，
+             * 那比一次失败更糟（用户看到的是一段话说了两遍）。
+             */
+            let upstreamFailure: unknown = null;
+            for (let attempt = 0; ; attempt += 1) {
+              upstreamFailure = null;
+              try {
+                await askUpstream();
+                break;
+              } catch (error) {
+                upstreamFailure = error;
+                if (attempt >= MAX_UPSTREAM_RETRIES) break;
+                if (aborted || controller.signal.aborted) break;
+                if (!isRetryableUpstreamError(error)) break;
+                /** 这一轮一个字都还没算：本地累积、工具调用、思考过程都还是空的。 */
+                const untouched =
+                  acc === "" &&
+                  local === "" &&
+                  roundChunks.length === 0 &&
+                  calls.length === 0 &&
+                  reasoning === "";
+                if (!untouched) break;
+                const delayMs = retryDelayMs(error, attempt);
+                deps.onUpstreamRetry?.({
+                  attempt: attempt + 1,
+                  max: MAX_UPSTREAM_RETRIES,
+                  delayMs,
+                  reason: describeUpstreamError(error),
+                });
+                console.warn(
+                  `上游瞬时错误：${describeUpstreamError(error)}，${delayMs}ms 后自动重试（第 ${attempt + 1}/${MAX_UPSTREAM_RETRIES} 次）`,
+                  error instanceof Error ? error.message : String(error),
+                );
+                try {
+                  await sleepAbortable(delayMs, controller.signal);
+                } catch {
+                  break;
+                }
+              }
+            }
+            if (upstreamFailure) throw upstreamFailure;
 
             // 内容策略拦下时（无工具路径没有下面那段「工具轮收口」的提示）：
             // 不说一句的话，用户只会看到一个空白气泡。
@@ -1448,6 +1650,9 @@ export function runAgentMentions(
             }
             // 调用前先播一条 start（UI 立刻能看到「正在调用 X」）
             for (const call of calls) {
+              // 同一件事也报给进度钩子（d.214）：界面上那句「第 N 轮 · 正在执行 X」就来自这里。
+              // 与 onToolTrace 分开是因为两者用途不同——轨迹要全量留痕，进度只要一个「当前」。
+              deps.onProgress?.({ round: round + 1, phase: "tool", tool: call.function.name });
               deps.onToolTrace?.(streamId, {
                 phase: "start",
                 id: call.id,
@@ -1540,7 +1745,16 @@ export function runAgentMentions(
              */
             const riskOf = (name: string) => bridge?.meta?.(name)?.risk ?? "write";
             const settled: (
-              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[]; writes?: string[]; jobs?: string[] }
+              | {
+                  text: string;
+                  ok: boolean;
+                  sources?: ToolSource[];
+                  images?: ToolImage[];
+                  writes?: string[];
+                  jobs?: string[];
+                  /** 失败契约（d.221 起透传给界面做归因，见 onToolTrace.errorCode）。 */
+                  error?: ToolFailure;
+                }
               | undefined
             )[] =
               new Array(calls.length);
@@ -1588,13 +1802,17 @@ export function runAgentMentions(
                   return { text, ok: false };
                 }
                 return withToolTimeout(
-                  bridge!.execute(
-                    { name: call.function.name, arguments: call.function.arguments },
-                    // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
-                    // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
-                    { signal: controller.signal },
-                  ),
+                  (signal) =>
+                    bridge!.execute(
+                      { name: call.function.name, arguments: call.function.arguments },
+                      // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
+                      // d.206 起信号也含「这次调用自己超时」——支持取消的工具（命令、MCP）
+                      // 会真的停下，而不是留一个没人等的子进程继续跑。
+                      { signal },
+                    ),
                   call.function.name,
+                  controller.signal,
+                  deps.toolTimeoutMs ?? TOOL_CALL_TIMEOUT_MS,
                 );
               })();
               const callKey = `${call.function.name}\u0000${call.function.arguments}`;
@@ -1693,6 +1911,8 @@ export function runAgentMentions(
                 ok: result.ok,
                 result: result.text,
                 ...(denied ? { denied: true } : {}),
+                // 失败归因用结构化错误码（d.221）：文本里不一定有 `（code）` 那段
+                ...(result.error ? { errorCode: result.error.error_code } : {}),
                 // 只有真正执行且成功的结果才算「引用过」——被拒/失败没读到内容。
                 ...(result.ok && result.sources?.length ? { sources: result.sources } : {}),
                 ...(denied && gate?.cause ? { denyCause: gate.cause } : {}),

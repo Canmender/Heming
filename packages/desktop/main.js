@@ -1269,6 +1269,17 @@ if (!gotLock) {
     const installer = typeof updater.getDownloadedInstaller === "function" ? updater.getDownloadedInstaller() : null;
     if (state.status !== "downloaded" || !installer) return fallback();
 
+    // d.203.4.107：交接给安装器之前先查空间。安装器会先删旧程序再解压，
+    // 装不下时程序已经没了——2026-11-16 那次「更新后应用打不开」就是这么来的。
+    // 空间不够就当场拒绝（状态里带着可直接展示的中文说明）。
+    if (typeof updater.checkSpace === "function") {
+      const space = updater.checkSpace();
+      if (space && space.ok === false) {
+        console.warn("[updater] 磁盘空间不足，已取消安装：", space.message);
+        return false;
+      }
+    }
+
     const helper = helperPath(process.resourcesPath);
     if (!fs.existsSync(helper) || !fs.existsSync(installer)) {
       console.warn("[updater] 更新助手不可用，回退到内置安装流程：", { helper, installer });
@@ -1449,6 +1460,8 @@ app.whenReady().then(() => {
       // 写入备份目录（d.170）：撤销上一次写入靠它。放 userData 下而不是工作区里——
       // 备份是应用自己的账，不该出现在用户的文件树里（也避免被 file_glob 当成源文件）。
       backupDir: path.join(app.getPath("userData"), "backups"),
+      // 「在文件夹里显示」（d.234）：只用来让系统高亮已授权根里的路径。
+      shell,
       isTrustedSender: (event) => {
         if (!mainWindow) return false;
         return BrowserWindow.fromWebContents(event.sender) === mainWindow;

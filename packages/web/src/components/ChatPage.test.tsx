@@ -6,6 +6,7 @@ import { UNBOUND_ADD_SOURCE_LABEL } from "./ux/UnboundModelNotice.js";
 import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
+import { useTokenUsageStore } from "../store/tokenUsage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore, type LlmProfile } from "../store/llm.js";
 import { setNotificationStorage, useNotificationStore } from "../store/notifications.js";
@@ -38,7 +39,11 @@ import {
 import { PLAN_MODE_KEY, loadPlanMode, resetPlanMode } from "../lib/agentRuntime/planMode.js";
 import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
 import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/subagentRuns.js";
-
+// d.218：收口后会留下「上一轮」小结，跨用例不清会把上一条用例的数字带进来
+import { resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
+import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
+import { getToolFailureStats, resetToolFailureStats } from "../lib/agentRuntime/toolFailureStats.js";
+import { resetPanelJobs, syncPanelJobs } from "../lib/shell/jobPanel.js";
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
 // sealMessage 桩——cipher 内直接 JSON 明文（形状同真信封，断言可解），
@@ -326,6 +331,12 @@ describe("ChatPage", () => {
     // 通知与待确认队列跨用例不残留（d.34 起确认会推通知，泄漏会串到别的断言）。
     useNotificationStore.setState({ items: [] });
     useHitlStore.getState().cancelAll("测试隔离");
+    // 主对话进度/收口小结是模块级内存（d.214/d.218）：不清理会把上一条用例的进度行带到下一条
+    resetTurnProgress();
+    resetToolFailureStats();
+    resetPanelJobs();
+    // 任务清单也是模块级内存（d.158）：收尾自检（d.232）会读它，串用例会误催。
+    resetTodoStore();
     // jsdom 未实现 scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
     // 附件气泡：createObjectURL 给可区分伪地址，revoke 留给卸载断言（jsdom 原生缺，由 test-setup 补桩）
@@ -426,6 +437,44 @@ describe("ChatPage", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByLabelText("搜索本会话")).not.toBeInTheDocument();
+  });
+
+  /**
+   * d.235：以前只有「2/5」这个计数，要找到想看的那一条只能一路按回车。
+   * 现在给一份命中列表：每条一行（序号 / 谁说的 / 命中附近一句），点哪条跳哪条。
+   */
+  it("会话内搜索：命中列表给出每条的摘要，点哪条跳哪条（d.235）", async () => {
+    mockMessagesFetch([
+      msg("m1", "第一条 发布计划", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "第二条 无关", "2026-10-14T01:01:00.000Z"),
+      msg("m3", "第三条 发布复盘", "2026-10-14T01:02:00.000Z"),
+    ]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("第一条 发布计划")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(screen.getByLabelText("搜索本会话"), { target: { value: "发布" } });
+
+    const list = await screen.findByTestId("search-hit-list");
+    const rows = within(list).getAllByRole("button");
+    expect(rows).toHaveLength(2);
+    // 每行都有命中附近的摘要与序号，不是只给一个计数
+    expect(rows[0]?.textContent).toContain("#1");
+    expect(rows[0]?.textContent).toContain("发布计划");
+    expect(rows[1]?.textContent).toContain("#2");
+    expect(rows[1]?.textContent).toContain("发布复盘");
+    // 当前高亮的是第一条
+    expect(rows[0]?.getAttribute("aria-current")).toBe("true");
+
+    // 点第二条就直接跳过去（不用连按回车）
+    fireEvent.click(rows[1]!);
+    expect(document.getElementById("msg-m3")?.className).toContain("ring-warn-line");
+    expect(within(list).getAllByRole("button")[1]?.getAttribute("aria-current")).toBe("true");
+
+    // 搜不到东西时不渲染空面板
+    fireEvent.change(screen.getByLabelText("搜索本会话"), { target: { value: "根本没有这段" } });
+    expect(screen.queryByTestId("search-hit-list")).toBeNull();
   });
 
   /**
@@ -560,14 +609,15 @@ describe("ChatPage", () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(screen.getByText("条目 199")).toBeInTheDocument());
+    const list = () => screen.getByTestId("message-list");
     // 窗口外：目标消息一开始没渲染
-    expect(screen.queryByText("老消息 目标命中")).not.toBeInTheDocument();
+    expect(within(list()).queryByText("老消息 目标命中")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
     fireEvent.change(screen.getByLabelText("搜索本会话"), { target: { value: "目标命中" } });
 
-    // 扩窗后节点出现且被高亮
-    expect(await screen.findByText("老消息 目标命中")).toBeInTheDocument();
+    // 扩窗后节点出现且被高亮（d.235 起搜索面板里也有一份摘要，所以按消息列表范围断言）
+    await waitFor(() => expect(within(list()).getByText("老消息 目标命中")).toBeInTheDocument());
     expect(document.getElementById("msg-s5")?.className).toContain("ring-warn-line");
   });
 
@@ -4143,6 +4193,303 @@ describe("ChatPage", () => {
     expect(screen.queryByText(/先点停止/)).not.toBeInTheDocument();
     await waitFor(() => expect(input).toHaveValue(""));
   });
+
+  /**
+   * d.225：按了停止就得停住。
+   *
+   * d.199 里收口后无条件 `shift()` 再 `startRun`：用户点停止（aborted）时，界面会自己
+   * 又开一轮——「停止」按了没停住，还会在错误之上再叠一次大概率仍失败的请求。
+   * 这一例锁：停止后不再自动开新轮；但「没发出去」必须说出来（不能静默吞掉）。
+   */
+  it("I4g /status 里能看到这个会话累计花了多少（d.230）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    // 用量账本是模块级内存 + localStorage：先清干净，这一例只认自己写的那条
+    useTokenUsageStore.getState().reset();
+    useTokenUsageStore.getState().record("m", 1_200, undefined, {
+      conversationId: "c1",
+      input: 900,
+      output: 300,
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    const line = await screen.findByText(/本会话用量：1 轮/, undefined, { timeout: 8000 });
+    expect(line.textContent).toContain("输入 900");
+    expect(line.textContent).toContain("输出 300");
+    expect(streamChat).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("I4h 点「定位」在资源管理器里选中本轮写出的文件（d.234）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    const write = vi.fn(async ({ ops }: { ops: { path: string; content?: string }[] }) => ({
+      ok: true as const,
+      results: ops.map((op) => ({ path: op.path, ok: true })),
+      written: ops.length,
+    }));
+    const reveal = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      kind: "file" as const,
+      path,
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: vi.fn(async () => ({ ok: false as const, code: "io" as const, error: "不读" })),
+      write,
+      undo: vi.fn(async () => ({ ok: false as const, error: "测试不撤" })),
+      reveal,
+      pickRoot: vi.fn(async () => null),
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      round += 1;
+      if (round === 1) {
+        o.onToolCalls?.([
+          {
+            id: "w1",
+            type: "function",
+            function: {
+              name: "file_write",
+              arguments: JSON.stringify({ path: "notes/新.md", content: "第一行\n第二行\n" }),
+            },
+          },
+        ]);
+        return "";
+      }
+      o.onDelta?.("写好了。");
+      return "写好了。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 写个文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+    fireEvent.click(screen.getByRole("button", { name: "在文件夹里显示 新.md" }));
+
+    await waitFor(() =>
+      expect(reveal).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "D:/评测区/notes/新.md" }),
+      ),
+    );
+    expect(await screen.findByText(/已在资源管理器里定位这个文件/)).toBeInTheDocument();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  }, 30_000);
+
+  it("I4a 停止时排队里的插话不会自己再跑一轮，但会说清「没发出去」（d.225）", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半句");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        }),
+    );
+
+    await pickAndSend("@和小鸣 先做第一件");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+
+    // 运行中插一句：进队列（正文照常上行落库，界面提示「已插话」）
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "插一句：别改文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/已插话/)).toBeInTheDocument());
+    expect(await lastSealed(send)).toMatchObject({ kind: "text", text: "插一句：别改文件" });
+
+    // 点停止：这一轮以 aborted 收口
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    await waitFor(() => expect(screen.getByText(/没有发出去/)).toBeInTheDocument());
+
+    // 关键断言：没有因为它而自动开第二轮
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1);
+    // 提示里说清了去向（插话正文已上行，会话历史里能看到）
+    expect(screen.getByText(/点「接着做」或重新发送时模型会看到/)).toBeInTheDocument();
+  }, 30_000);
+
+  it("I4b 排队中的插话看得见条数，也能收回：取消后不长出一条新消息，这一轮照常收尾（d.227）", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    let release: () => void = () => {};
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((res) => {
+          o.onDelta("半句");
+          release = () => {
+            o.onDelta("做完了。");
+            res("做完了。");
+          };
+        }),
+    );
+
+    await pickAndSend("@和小鸣 先做第一件");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+
+    // 连发两条插话：两条都上行落库，界面应显示「已排队 2 条插话」
+    for (const text of ["插一句：别改文件", "再插一句：先跑测试"]) {
+      fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      await waitFor(() => expect(screen.getByText(/已插话/)).toBeInTheDocument());
+      expect(await lastSealed(send)).toMatchObject({ kind: "text", text });
+    }
+
+    const pending = await screen.findByTestId("steer-pending");
+    expect(pending.textContent).toContain("已排队 2 条插话");
+
+    // 收回：排队条消失，并说清「内容还在会话里」
+    fireEvent.click(within(pending).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByTestId("steer-pending")).toBeNull());
+    expect(screen.getByText(/已取消排队的 2 条插话/)).toBeInTheDocument();
+
+    // 放行这一轮：正常收尾，且没有哪条插话被当成新一轮发出去
+    await act(async () => {
+      release();
+    });
+    // 收口的可观察信号（d.218）：进度行落成「上一轮」小结
+    await waitFor(
+      () => expect(screen.getByTestId("turn-progress").getAttribute("data-done")).toBe("true"),
+      { timeout: 4000 },
+    );
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1);
+  }, 30_000);
+
+  it("I4c 停止只停这一轮：后台还有作业在跑时要说清楚，别让人以为全停了（d.230）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    // 面板里先放一条在跑的作业（模拟「刚才让它挂了个构建」）
+    syncPanelJobs([
+      {
+        id: "job-1",
+        command: "node build.js",
+        cwd: "D:/评测区",
+        running: true,
+        exitCode: null,
+        startedAt: Date.now(),
+        finishedAt: null,
+        bytes: 128,
+        dropped: 0,
+      },
+    ]);
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半句");
+          o.signal.addEventListener("abort", () => rej(new DOMException("AbortError", "AbortError")));
+        }),
+    );
+
+    await pickAndSend("@和小鸣 先做第一件");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    await waitFor(() => expect(screen.getByText(/后台还有作业在跑/)).toBeInTheDocument());
+    // 说清了「停止不动它们」，而不是含糊地「已停止」
+    expect(screen.getByText(/点停止不会停它们/)).toBeInTheDocument();
+    resetPanelJobs();
+  }, 30_000);
+
+  it("I4d 它说做完了、清单却还有没打勾的：让它自己核一遍，别一句话带过（d.232）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    setTodos("c1", [
+      { content: "改 A", status: "pending" },
+      { content: "跑测试", status: "in_progress" },
+    ]);
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      round += 1;
+      const text = round === 1 ? "都改好了，你可以试试了。" : "补齐了，清单也更新了。";
+      o.onDelta(text);
+      return text;
+    });
+
+    await pickAndSend("@和小鸣 把这两件事做完");
+
+    // 收口那一刻就把矛盾摆到台面上（说清是几项、是哪几项）
+    await waitFor(() => expect(screen.getByText(/清单里还有 2 项没打勾/)).toBeInTheDocument());
+    // 并且真的自己又核对了一轮：第二条请求带着清单原文
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(2));
+    const rows = vi.mocked(streamChat).mock.calls.at(-1)![1];
+    const joined = rows.map((row) => String(row.content ?? "")).join("\n");
+    expect(joined).toContain("【收尾自检】");
+    expect(joined).toContain("改 A");
+    expect(joined).toContain("跑测试");
+    expect(joined).toContain("todo_write");
+    // 等这一轮自检也收口，再把清单清干净（否则下一条用例一进来就看见清单面板）。
+    await waitFor(() =>
+      expect(screen.getAllByText(/补齐了，清单也更新了。/).length).toBeGreaterThan(0),
+    );
+    act(() => {
+      clearTodos("c1");
+      resetTodoStore();
+    });
+  }, 30_000);
+
+  it("I4e 清单全都打勾了就不追问（没有可核对的东西）（d.232）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    setTodos("c1", [
+      { content: "改 A", status: "completed" },
+      { content: "跑测试", status: "completed" },
+    ]);
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      const text = "都做完了。";
+      o.onDelta(text);
+      return text;
+    });
+
+    await pickAndSend("@和小鸣 做完了吗");
+    await waitFor(() => expect(screen.getAllByText(/都做完了。/).length).toBeGreaterThan(0));
+    // 给收尾自检一点时间：不该再发一轮
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/【收尾自检】/)).toBeNull();
+    act(() => {
+      clearTodos("c1");
+      resetTodoStore();
+    });
+  }, 30_000);
+
+  it("I4f 超长消息先提醒一次，再点一次才真发（d.233）", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      const text = "收到了，分段看。";
+      o.onDelta(text);
+      return text;
+    });
+
+    // 12,000 个中文 ≈ 12,000 tokens，正好压在提醒线上
+    const longText = "啊".repeat(MESSAGE_WARN_TOKENS);
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: longText } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(screen.getByText(/比一般消息大得多/)).toBeInTheDocument());
+    // 第一下什么都没发出去：不静默截断，也不偷偷发
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(
+      send.mock.calls.filter((call) => (call[0] as { type?: string })?.type === "send_message"),
+    ).toHaveLength(0);
+    expect(vi.mocked(streamChat)).not.toHaveBeenCalled();
+
+    // 第二下照发，且内容一个字没改
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1));
+    expect(await lastSealed(send)).toMatchObject({ kind: "text", text: longText });
+  }, 30_000);
 });
 
 
@@ -5482,6 +5829,122 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     localStorage.removeItem("heming.fileEdit.roots.v1");
   });
 
+  it("I3u 点「改动」能看清改成了什么：改动前来自备份、改动后来自当前文件（d.207.4.110）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    const write = vi.fn(async ({ ops }: { ops: { path: string; content?: string }[] }) => ({
+      ok: true as const,
+      results: ops.map((op) => ({ path: op.path, ok: true })),
+      written: ops.length,
+    }));
+    const backupPreview = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      path,
+      at: "2026-11-17T00:00:00.000Z",
+      bytes: 24,
+      truncated: false,
+      binary: false,
+      text: "旧第一行\n旧第二行\n",
+    }));
+    const read = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      content: "新第一行\n旧第二行\n",
+      bytes: 24,
+      path,
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read,
+      write,
+      undo: async () => ({ ok: false as const, error: "测试不撤" }),
+      backupPreview,
+      pickRoot: async () => null,
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          {
+            id: "w1",
+            type: "function",
+            function: { name: "file_write", arguments: JSON.stringify({ path: "notes/新.md", content: "新第一行\n旧第二行\n" }) },
+          },
+        ]);
+        return "";
+      }
+      return "写好了。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 改一下那行字" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+    fireEvent.click(screen.getByRole("button", { name: "看 新.md 改成了什么" }));
+
+    const dialog = await screen.findByTestId("change-diff", undefined, { timeout: 5000 });
+    // 改动前必须走备份预览（只读、不消费），改动后必须读当前文件
+    expect(backupPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "D:/评测区/notes/新.md" }),
+    );
+    expect(read).toHaveBeenCalledWith(expect.objectContaining({ path: "D:/评测区/notes/新.md" }));
+    expect(dialog.textContent).toContain("新增 1 行 · 删除 1 行");
+    expect(screen.getByTestId("diff-row-del").textContent).toContain("旧第一行");
+    expect(screen.getByTestId("diff-row-add").textContent).toContain("新第一行");
+
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    await waitFor(() => expect(screen.queryByTestId("change-diff")).toBeNull());
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  });
+
+  it("引用里没读到的文件，界面上直说「模型看不到」（d.222）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      // 选择器只用 glob 列路径；内容由发送路径上的 read 读，这里故意读失败（文件被删/移走）
+      glob: async () => ({ ok: true as const, paths: ["D:/评测区/notes/旧.md"] }),
+      read: async () => ({ ok: false as const, code: "not-found", error: "没有这个文件" }),
+      write: async () => ({ ok: true as const, results: [], written: 1 }),
+      pickRoot: async () => null,
+    };
+
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      opts?.onDelta?.("没看到那份文件。");
+      return "没看到那份文件。";
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(
+      within(screen.getByRole("menu", { name: "更多操作菜单" })).getByRole("menuitem", {
+        name: "工作区文件（引用内容，不上传）",
+      }),
+    );
+    const picker = await screen.findByRole("dialog", { name: "引用工作区文件" });
+    fireEvent.click(await within(picker).findByRole("checkbox", { name: /旧\.md/ }));
+    fireEvent.click(within(picker).getByRole("button", { name: "确定引用" }));
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 看看引用的文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    const issue = await screen.findByTestId("file-ref-issue", undefined, { timeout: 5000 });
+    // 说清是哪个文件、说清后果（模型这一轮确实没看到），而不是沉默
+    expect(issue.textContent).toContain("旧.md");
+    expect(issue.textContent).toContain("没读进来");
+    expect(issue.textContent).toContain("模型看不到这些内容");
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  });
+
   it("I3k `/compact` 本地压缩历史：不产生用户消息，结果写成提示（d.183）", async () => {
     const long = "……".repeat(300);
     await setupAgentChat([
@@ -5641,6 +6104,97 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(screen.queryByText("/status")).toBeNull();
     expect(screen.getByText(/计划模式：/)).toBeInTheDocument();
     expect(screen.getByText(/可撤回改动：/)).toBeInTheDocument();
+  }, 30_000);
+
+  /**
+   * d.219：`/init` 与其它 `/` 命令不是一类东西。
+   *
+   * `/status`、`/goal` 是本地动作（不发模型、不落库）；`/init` 要模型真去读仓库再写
+   * AGENTS.md，所以它必须换成任务描述后**照常发出去**。这一例锁的就是这条分界：
+   * 如果哪天有人把它当本地命令处理，模型一行代码都没看就「生成了约定」，那才是灾难。
+   */
+  it("I3y `/init` 不是本地命令：换成任务描述照常发给模型（d.219）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/init" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 真任务：确实调了模型（与 /status、/goal 这类本地命令相反）
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalled(), { timeout: 8000 });
+    const rows = vi.mocked(streamChat).mock.calls.at(-1)![1];
+    const outbound = rows.map((r) => String(r.content ?? "")).join("\n");
+    expect(outbound).toContain("AGENTS.md");
+    expect(outbound).toContain("file_glob");
+    expect(outbound).toContain("先 file_read 读一遍");
+    // 命令本身不上行、也不作为消息留在界面上
+    expect(outbound).not.toContain("/init");
+    expect(screen.queryByText("/init")).toBeNull();
+  }, 30_000);
+
+  /**
+   * d.221：失败归因。
+   *
+   * 单次失败提示只看得到「这一次」；真正难诊断的是**反复卡在同一件事**上。
+   * 这一例跑一次失败的 file_read（文件不存在），再发 `/status`，要求它把
+   * 「这个会话失败几次、哪个错误码、哪个工具」数出来——而且错误码来自
+   * `toolError.ts` 契约里的英文 kebab-case，不是我另编的分类。
+   */
+  it("I3z 工具失败在 /status 里按错误码归因：几次、什么错、哪个工具（d.221）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    const read = vi.fn(async () => ({
+      ok: false as const,
+      code: "not-found" as const,
+      error: "没有这个文件",
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read,
+      write: async () => ({ ok: false as const, code: "io", error: "测试不写" }),
+      undo: async () => ({ ok: false as const, error: "测试不撤" }),
+      pickRoot: async () => null,
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          {
+            id: "r1",
+            type: "function",
+            function: { name: "file_read", arguments: JSON.stringify({ path: "notes/没有这个文件.md" }) },
+          },
+        ]);
+        return "";
+      }
+      // 界面靠增量渲染：只 return 不推 delta，气泡里永远看不到这句话
+      opts?.onDelta?.("读不到。");
+      return "读不到。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 读一下笔记" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText(/读不到。/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    // 工具确实走的是失败路径（假桥明确回了 not-found）
+    expect(read).toHaveBeenCalled();
+    // 先确认「记账」这一步确实发生，再验它出现在 /status 里（分开断言，红在哪一步一目了然）
+    expect(getToolFailureStats("c1")?.codes).toContainEqual({ code: "not-found", count: 1 });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 全量跑时前一个用例的迟到事件可能也记进 c1，所以只认「有这一项」而不是精确总数；
+    // 「次数/前三条/最多」的排版细节由 statusReport.test.ts 单测覆盖。
+    const line = await screen.findByText(/工具失败：本会话 \d+ 次/, undefined, { timeout: 8000 });
+    expect(line.textContent).toContain("not-found ×1");
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
   }, 30_000);
 
   it("I3s `/goal` 设目标：本地生效、写进提示词、命令本身不落库（d.201）", async () => {
@@ -5891,5 +6445,173 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     await waitFor(() => expect(streamChat).toHaveBeenCalled());
     expect(screen.queryByRole("status", { name: "继续上次的任务" })).toBeNull();
     localStorage.removeItem("heming.resumePoint.v1");
+  }, 20_000);
+  it("I3v 窗口在后台时，一轮跑完弹系统通知；/notify off 之后开关落库（d.208）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    const message = vi.fn();
+    (window as unknown as { __heming_notify?: unknown }).__heming_notify = {
+      message,
+      onOpen: () => () => {},
+    };
+    // 窗口不在前台：系统通知的三个前提之一
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    vi.mocked(streamChat).mockImplementation(async () => "构建也过了，可以收工。");
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 跑一下构建" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(message).toHaveBeenCalled(), { timeout: 8000 });
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "和小鸣 这一轮做完了", conversationId: "c1" }),
+    );
+
+    // /notify off：本地生效、命令不落库、开关真的写进存储
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/notify off" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText(/已关闭系统通知/);
+    expect(localStorage.getItem("heming.desktopNotify.v1")).toBe("0");
+    // 关掉之后同一轮再收口也不弹（这里的重跑由单元测试覆盖，界面只验开关落库）
+
+    focus.mockRestore();
+    delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
+    localStorage.removeItem("heming.desktopNotify.v1");
+  }, 20_000);
+  it("I3w 会话改动有台账：跑完出现「查看改动」，点开能逐个文件对照（d.210）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    const write = vi.fn(async ({ ops }: { ops: { path: string; content?: string }[] }) => ({
+      ok: true as const,
+      results: ops.map((op) => ({ path: op.path, ok: true })),
+      written: ops.length,
+    }));
+    const backupPreview = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      path,
+      at: "2026-11-17T00:00:00.000Z",
+      bytes: 12,
+      truncated: false,
+      binary: false,
+      text: "旧台账行\n",
+    }));
+    const read = vi.fn(async ({ path }: { path: string }) => ({
+      ok: true as const,
+      content: "新台账行\n",
+      bytes: 12,
+      path,
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read,
+      write,
+      undo: async () => ({ ok: false as const, error: "测试不撤" }),
+      backupPreview,
+      pickRoot: async () => null,
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          {
+            id: "w1",
+            type: "function",
+            function: { name: "file_write", arguments: JSON.stringify({ path: "notes/台账.md", content: "新台账行\n" }) },
+          },
+        ]);
+        return "";
+      }
+      return "写好了。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 记一下这个" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 收口后出现会话级台账（下一轮还在，不像「本轮可撤回」那样被覆盖）
+    const bar = await screen.findByTestId("session-changes", undefined, { timeout: 5000 });
+    expect(bar.textContent).toContain("本会话改过 台账.md");
+
+    fireEvent.click(screen.getByRole("button", { name: "查看改动" }));
+    await screen.findByTestId("change-diff", undefined, { timeout: 5000 });
+    expect(screen.getByTestId("change-diff-files")).toBeInTheDocument();
+    // 打开时已经为第一个文件取了对照（备份预览 + 读当前文件）
+    expect(backupPreview).toHaveBeenCalledWith(expect.objectContaining({ path: "D:/评测区/notes/台账.md" }));
+    expect(screen.getByTestId("diff-row-add").textContent).toContain("新台账行");
+
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    await waitFor(() => expect(screen.queryByTestId("change-diff")).toBeNull());
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  }, 20_000);
+
+  it("I3x 主对话在跑时显示第几轮、在调什么，收口即消失（d.214）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    // 工具调用卡在这儿：制造一个「正在执行 file_read」的窗口，界面这时才能被观察到。
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const read = vi.fn(async ({ path }: { path: string }) => {
+      await gate;
+      return { ok: true as const, content: "文件内容", bytes: 12, path };
+    });
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read,
+      write: async () => ({ ok: true as const, results: [], written: 0 }),
+      undo: async () => ({ ok: false as const, error: "测试不撤" }),
+      pickRoot: async () => null,
+    };
+
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_profile, _messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        opts?.onToolCalls?.([
+          {
+            id: "r1",
+            type: "function",
+            function: { name: "file_read", arguments: JSON.stringify({ path: "notes/读.md" }) },
+          },
+        ]);
+        return "";
+      }
+      opts?.onDelta?.("读到了。");
+      return "读到了。";
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 读一下那个文件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // 工具还没返回：进度行必须说清「第 1 轮 · 正在执行 file_read」，而不是一句静态的「生成中」
+    const line = await screen.findByTestId("turn-progress", undefined, { timeout: 5000 });
+    expect(line.textContent).toContain("第 1 轮");
+    expect(line.textContent).toContain("正在执行 file_read");
+    expect(line.textContent).toContain("已跑");
+
+    release();
+    // 收口后不能再显示「正在执行 / 已跑」（那是还在跑的意思），但也不能空着——
+    // d.218：换成一行小结，说清这一轮跑了几轮、几次工具、用了多久。
+    await waitFor(
+      () => {
+        const settled = screen.getByTestId("turn-progress");
+        expect(settled.getAttribute("data-done")).toBe("true");
+        expect(settled.textContent).toContain("上一轮");
+        expect(settled.textContent).not.toContain("已跑");
+      },
+      { timeout: 5000 },
+    );
+    expect(screen.getByTestId("turn-progress").textContent).toContain("1 次工具");
+    await screen.findByText(/读到了/);
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
   }, 20_000);
 });

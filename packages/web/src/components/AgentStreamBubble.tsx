@@ -4,6 +4,9 @@ import type { ToolTrace } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { humanizeProviderError } from "../lib/llmFailure.js";
 import { toolNameLabel } from "../lib/toolName.js";
+import { summarizeToolArgs, toolArgPath } from "../lib/toolArgsSummary.js";
+import { failureNextStep, parseToolFailure } from "../lib/toolFailure.js";
+import { previewToolResult } from "../lib/toolResultPreview.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { CheckIcon, ChevronIcon } from "./icons.js";
 import { Button } from "./ui/Button.js";
@@ -26,6 +29,10 @@ export interface AgentStreamBubbleProps {
   /** 本轮发生过的工具调用（按时间顺序）。 */
   tools?: ToolTrace[];
   /**
+   * 在系统文件管理器里定位工具涉及的文件（d.235）。不传就不渲染「定位」。
+   */
+  onRevealPath?: (path: string) => void;
+  /**
    * 候选链留痕（d.48 路由组）：只有问过不止一个候选才有内容，且**只在本机**。
    * 没有失败候选时这一行不显示（第一次就问对了没什么好解释的）。
    */
@@ -40,6 +47,7 @@ export function AgentStreamBubble({
   onRetry,
   reasoning,
   tools,
+  onRevealPath,
   attempts,
 }: AgentStreamBubbleProps) {
   const streaming = status === "streaming";
@@ -60,7 +68,9 @@ export function AgentStreamBubble({
         </div>
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
-        {tools && tools.length > 0 ? <ToolTraceList tools={tools} /> : null}
+        {tools && tools.length > 0 ? (
+          <ToolTraceList tools={tools} {...(onRevealPath ? { onRevealPath } : {})} />
+        ) : null}
         {attempts && attempts.length > 0 ? <RouteTraceLine attempts={attempts} /> : null}
 
         {streaming ? (
@@ -174,18 +184,76 @@ export function ToolTraceGroup({ tools }: { tools: ToolTrace[] }) {
 }
 
 /** 工具调用轨迹：一行一个工具，展开看参数与结果。 */
-export function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
+export function ToolTraceList({
+  tools,
+  onRevealPath,
+}: {
+  tools: ToolTrace[];
+  /**
+   * 在系统文件管理器里定位这次调用涉及的文件（d.235）。
+   *
+   * 历史回看时「它当时读/改的是哪个文件」常常要落到资源管理器里核对；不给入口就得
+   * 让用户从参数 JSON 里把路径抠出来。不传就不渲染按钮（老安装包没有 reveal 通道）。
+   */
+  onRevealPath?: (path: string) => void;
+}) {
   return (
     // 单层滚动（B 轨 E5）：此前 参数/结果 各自 max-h（120/140px）叠加外层，出现三层嵌套滚动条。
     // 现在只在这里限高，内层全部自然展开。
     <div className="mt-1 flex max-h-[60vh] flex-col gap-1 overflow-y-auto pr-1">
-      {tools.map((t) => (
+      {tools.map((t) => {
+        // d.220：失败/被拒的调用，折叠行先说「为什么」——参数再清楚也不如错误码有用；
+        // 完整原文与契约行仍在展开区与 title 里，一个字段都不吞。
+        const failure =
+          t.status === "error" || t.status === "denied" ? parseToolFailure(t.result) : null;
+        const nextStep = failure === null ? null : failureNextStep(failure);
+        return (
         <details key={t.id} className="rounded-md border border-line-soft bg-surface px-2 py-1">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-ui-xs">
             <StatusDot status={t.status} />
             <span className="font-mono text-ui-xs text-ink" title={t.name}>
               {toolNameLabel(t.name)}
             </span>
+            {/* d.216：默认折叠时也看得出「这次调用干了什么」，原始 JSON 仍留在展开区与 title 里 */}
+            {failure ? (
+              <span
+                className="min-w-0 flex-1 truncate text-ui-xs text-danger"
+                data-testid="tool-failure-headline"
+                title={t.result || undefined}
+              >
+                {failure.headline}
+              </span>
+            ) : (
+              summarizeToolArgs(t.name, t.args) && (
+                <span
+                  className="min-w-0 flex-1 truncate text-ui-xs text-muted"
+                  data-testid="tool-arg-summary"
+                  title={t.args || "{}"}
+                >
+                  {summarizeToolArgs(t.name, t.args)}
+                </span>
+              )
+            )}
+            {onRevealPath
+              ? (() => {
+                  const target = toolArgPath(t.name, t.args);
+                  if (target === null) return null;
+                  const label = target.split("/").pop() ?? target;
+                  return (
+                    <button
+                      type="button"
+                      className="ui-hit rounded-sm px-1 text-ui-xs text-muted hover:text-ink"
+                      aria-label={`在文件夹里定位 ${label}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        onRevealPath(target);
+                      }}
+                    >
+                      定位
+                    </button>
+                  );
+                })()
+              : null}
             <span className={`text-ui-xs ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
             {t.endedAt ? (
               <span className="text-ui-xs text-muted">{formatDuration(t.endedAt - t.startedAt)}</span>
@@ -199,21 +267,76 @@ export function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
             {t.status !== "running" && (
               <>
                 <div className="mt-1 text-ui-xs text-muted">结果</div>
-                <pre
-                  className={`mt-0.5 whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${
-                    t.status === "error" || t.status === "denied"
-                      ? "bg-danger-soft text-danger"
-                      : "bg-subtle-2 text-body"
-                  }`}
-                >
-                  {t.result || "（无返回）"}
-                </pre>
+                {/* d.234：几万字的工具结果不再一股脑塞进 DOM——先头后尾，明写藏了多少字 */}
+                <ToolResultText text={t.result} danger={t.status === "error" || t.status === "denied"} />
+                {/* d.220：把契约里的「一句出路」抬到结果下面，不用用户自己从原文里找 */}
+                {nextStep === null ? null : (
+                  <p
+                    className="mt-1 rounded-sm bg-subtle-2 px-1.5 py-1 text-ui-xs text-body"
+                    data-testid="tool-failure-next"
+                  >
+                    下一步：{nextStep}
+                  </p>
+                )}
               </>
             )}
           </div>
         </details>
-      ))}
+        );
+      })}
     </div>
+  );
+}
+
+/**
+ * 工具结果的展示块（d.234）：长结果先给「开头 + 结尾」，并给一个「展开全部」。
+ *
+ * 为什么不是一直全量渲染：一次 `run_command` 的构建日志、`file_read` 读的几千行文件，
+ * 全塞进 `<pre>` 会让展开这张卡片卡上半秒；而真正要看的部分通常就两处——开头的错误码/契约行、
+ * 结尾的结论。隐藏了多少字写清楚，谁都能点开看全部（不丢任何信息，只是不默认铺满）。
+ */
+function ToolResultText({ text, danger }: { text: string | undefined; danger: boolean }) {
+  const [showAll, setShowAll] = useState(false);
+  const preview = previewToolResult(text);
+  const body = text && text.length > 0 ? text : "（无返回）";
+  const tone = danger ? "bg-danger-soft text-danger" : "bg-subtle-2 text-body";
+  if (!preview.truncated || showAll) {
+    return (
+      <>
+        <pre
+          className={`mt-0.5 whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${tone}`}
+          data-testid="tool-result-full"
+        >
+          {body}
+        </pre>
+        {preview.truncated ? (
+          <button
+            type="button"
+            className="mt-0.5 text-ui-xs text-muted underline-offset-2 hover:underline"
+            onClick={() => setShowAll(false)}
+          >
+            收起（只看开头和结尾）
+          </button>
+        ) : null}
+      </>
+    );
+  }
+  return (
+    <>
+      <pre
+        className={`mt-0.5 whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-ui-xs ${tone}`}
+        data-testid="tool-result-preview"
+      >
+        {preview.preview}
+      </pre>
+      <button
+        type="button"
+        className="mt-0.5 text-ui-xs text-muted underline-offset-2 hover:underline"
+        onClick={() => setShowAll(true)}
+      >
+        展开全部（还有 {preview.hiddenChars} 字未显示）
+      </button>
+    </>
   );
 }
 

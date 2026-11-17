@@ -1,19 +1,1418 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-16
-- 当前版本：`d.203.4.106.12`（semver `203.4.106` / Windows `203.4.106.12`；已提交 `e60da1f1`、已打包 `r109`、已部署云端、已发布更新源）
-- 本轮标签：d.203.4.106.12 装上也打不开：打包白名单漏了两个文件（分支 `main`，版本 d.203.4.105.12 → d.203.4.106.12）——`build.files` 是手写白名单，`main.js` 里 `require("./csp-report.js")`（d.165.4.101）与 `require("./shell-run.js")`（d.164）从未加进去，`app.asar` 缺文件导致 r105–r108 全部「装上就崩」；补白名单 + 新增 `packages/desktop/package-files.test.js`（递归 require 检查 / 白名单存在性 / 墓碑断言）兜住。
-- 上一轮标签：d.203 后台作业看得见（分支 `main`，版本 d.202.4.105.12 → d.203.4.105.12）——桌面端新增只读快照通道 `shell:job-preview`（`previewJobOutput`，不清缓冲不移动游标；`tailOf` 取末尾字节、窗口夹在 512–16KB），preload `jobPreview` 转发；web 新增 `lib/shell/jobPanel.ts`（面板状态 + 2s 轮询 + 合并而非覆盖 + 在跑作业永不淘汰）与 `components/JobPanel.tsx`（哪几条在跑、跑多久、日志尾部快照、点停止杀进程树）；`ChatPage` 挂面板、`/status` 的后台作业行以面板为准。
-- 上上轮标签：d.202 子代理能改了（分支 `main`，版本 d.201.4.105.12 → d.202.4.105.12）——新增 `lib/agentRuntime/subagentWrite.ts`（按会话的写盘授权，localStorage `heming.subagentWrite.v1`，默认关、模型不能自己开）；`subagent.ts` 加 `SUBAGENT_WRITE_TOOLS`（只 `file_write`/`file_edit`）与 `allowedToolNames`/`allowedSpecs`/`subagentSystemPrompt(writable)`，落盘路径经 `onWrite` 回传并在结论里列「本次改动」；新增 `/subagent write on|off` 本地命令（授权变化即清工具桥缓存）、`SubagentRuns` 标题如实写「可写」、`/status` 多一行「子代理：只读 / 可写」。
-- 更早一轮标签：d.201 目标记得住（分支 `main`，版本 d.200.4.105.12 → d.201.4.105.12）——新增 `lib/agentRuntime/goal.ts`（会话级目标：localStorage `heming.goal.v1`、按会话隔离、只留最近 50、空文本=清除、300 字截断、订阅）；`runtimePrompt` 新增 `## 当前目标（跨轮保持）`（放在任务清单之前，三条口径：清单做完≠目标完成 / 偏离先说明 / 达成后说怎么验证）；新增 `/goal` 本地命令（设定 / done / off）与 `GoalBar` + `useGoal`（输入框上方目标条，可完成/清除）；`ChatPage` 每轮把目标写进提示词、命令不发请求不落库。
-- 更早二轮标签：d.200 并行子代理（分支 `main`，版本 d.199.4.105.12 → d.200.4.105.12）——`agent_task` 新增 `tasks` 数组（1–3 条，与 `task` 二选一）与 `runSubagentBatch`（默认并发 2 / 上限 3、结果按传入顺序）；新增 `SubagentProgressEvent`（start/round/tool/done/failed）与 `withSubagentTool` 的 `onProgress`/`createSignal`（界面停止与主对话停止取或）；新增 `agentRuntime/subagentRuns.ts`（内存表 + 订阅）与 `components/SubagentRuns.tsx`（状态条：第 N 轮 · 正在 xxx，可停止）；只读白名单不变。
-- 更早三轮标签：d.199 生成中也能插话（分支 `main`，版本 d.198.4.105.12 → d.199.4.105.12）——新增 `agentRuntime/steer.ts` 的 `createSteerQueue`（`push/take/shift/size/pending/clear`，只存内存）；`agentStream` 的 `TriggerDeps` 加 `drainSteer`，每开一个工具轮（`round > 0`）把插话作为 `role:"user"` 追加到工具结果之后；`ChatPage` 的 `send()` 运行中不再拒绝——纯文本入队并提示「已插话（排队 N 条）」，带附件仍拦，`onRunSettled` 若有残留则另起一轮接着处理。
-- 更早四轮标签：d.198 搜到之后能落到那句话上（分支 `main`，版本 d.197.4.105.12 → d.198.4.105.12）——`store/ui.ts` 新增一次性投递槽 `messageJump` / `requestMessageJump` / `consumeMessageJump`；左栏命中行、命中片段、「更早的会话里也有命中」都带 `messageId` 走 `onOpenMessage`；`ChatPage` 消费时扩窗、只滚消息容器（不用 `scrollIntoView`）、高亮 2.4 秒，消息已删则如实提示。
-- 更早五轮标签：d.197 左栏搜索也能搜消息内容（分支 `main`，版本 d.196.4.105.12 → d.197.4.105.12）——服务端新增 `GET /api/conversations/search`（2–80 字、最多 200 会话 × 200 条、同会话只回最新一条、带命中片段与 `truncated`），`messages` 加 `(conv_id, created_at)` 索引；web 新增 `lib/conversationSearch.ts` 与 `searchConversationContent`，左栏在会话名不匹配时也按正文命中显示片段、列表外命中单列「更早的会话里也有命中」、失败时如实说明「只按会话名匹配」。
-- 更早六轮标签：d.196 侧栏标出「哪个会话还没跑完」（`resumePoint` 改为按会话存 20 条 + `subscribeResumePoints`；新增 `useResumePoint` 与 `UnfinishedTurnBadge`，会话行显示「未跑完」；`clearTurnRunning(convId)` 只清当前会话）
-- 更早七轮标签：d.195 就地换模型（新增 `ModelSwitcher`；徽标点击不再跳设置页，选中即写绑定、提示下一轮生效）
+- 当前版本：`d.235.4.116.12`（semver `235.4.116` / Windows `235.4.116.12`；工作树未提交 / 未打包 / 未部署；d.203.4.107.12 起的四十二版都未发布）
+- 本轮标签：d.235.4.116.12 新加的桌面通道有真机检查了（分支 `main`，版本 d.235.4.115.12 → d.235.4.116.12）——d.207 的 `file:backup-preview` 与 d.234 的 `file:reveal` 只有单测，而单测覆盖不到「通道有没有接上主进程」（r105–r108 就因此出过「安装包装上即崩」）；本轮把两条通道放进真 Electron 冒烟（预览读得到上一版且不消费备份、定位的根外与不存在两条拒绝路径都走主进程），顺带把 `revealFile` 的检查顺序改成「先 stat 再看有没有 shell」——不再把「文件没了」报成「环境打不开文件管理器」；口径是「只验拒绝路径（成功会弹资源管理器）/ 不写死项数 / 不假装覆盖安装包形态」。
+- 上一轮标签：d.235.4.115.12 工具行也能定位到文件（分支 `main`，版本 d.234.4.115.12 → d.235.4.115.12）——d.234 只把「定位」挂在「本轮改动」那条，历史回看时「它当时读/写的是哪个文件」没有入口；本轮新增 `lib/toolArgsSummary.ts` 的 `toolArgPath()`（只认有单一目标文件的工具，不猜 glob/补丁），工具行与右侧进度栏都多一个「在文件夹里定位」按钮；口径是「只认单一目标 / 文案与本轮改动区分 / 没通道就不出现」。
+- 上上轮标签：d.234.4.115.12 它在哪儿改的，就在那儿打开（分支 `main`，版本 d.233.4.115.12 → d.234.4.115.12）——智能体刚写完的文件，以前只能拿到一条路径、自己开资源管理器点几层；知识库那侧早有 `vault:reveal`，聊天侧漏了。本轮给文件桥加 `file:reveal`（`revealFile`：只认已授权根，文件 `showItemInFolder`、目录 `openPath`，不存在回 `not-found`），「本轮改动」清单每行多一个「定位」按钮；口径是「只认已授权根 / 文件与目录分开 / 不做了就如实说」，不做默认程序打开、不做父目录导航。
+- 更早一轮标签：d.233.4.115.12 换行风格跟着文件走（分支 `main`，版本 d.232.4.115.12 → d.233.4.115.12）——模型输出几乎总是 `\n`，Windows 文件多是 `\r\n`：`file_edit` 把新片段直接塞进去会写出**混合行尾**（编辑器报警、diff 变脏、越改越乱），`file_write` 整份覆盖会把几千行的行尾一起改掉（内容只动三处、diff 却是整篇重写）。本轮新增 `lib/fileEdit/eol.ts` 的 `detectNewlineStyle()`（只认纯 LF / 纯 CRLF，混合返回 null）与 `adaptNewlines()`，在两个写入执行体里跟随原文件风格并如实说明；口径是「只跟随、不发明，改了就说明，混合行尾不猜」，不统一工作区风格、不按 .gitattributes 推断。
+- 更早二轮标签：d.232.4.115.12 搜索也要说自己跳过了什么（分支 `main`，版本 d.231.4.115.12 → d.232.4.115.12）——`file_grep` 的「命中 0 个」以前连「有没有搜过」都分不清：`file-fs.js` 的 `readTextQuiet()` 对超过 2MB、像二进制、编码认不出、读不了的文件一律静默返回 null。本轮换成 `readTextForSearch()` 按原因返回，`grepFiles()` 计数并回报 `skippedFiles`（含前 5 个文件名），`file_grep` 抬头明写「另有 N 个文件没能搜：1 个超过 2MB、1 个像二进制…——要搜就把 path/include 缩到那个目录，或直接 file_read」；不做强行搜二进制/大文件的开关、不按扩展名猜文本、不把样本扩成完整清单。
+- 更早三轮标签：d.231.4.115.12 命令输出里的终端痕迹（分支 `main`，版本 d.230.4.115.12 → d.231.4.115.12）——命令输出是打给终端看的：`npm`/`git`/构建工具夹 ANSI 颜色与光标控制，进度条用 `\r` 回行首反复改写同一行；原样塞进工具结果后，界面上是 `[32m`、`[2K` 这种鬼东西，进度条被拼成 `10%\r50%\r100%` 一长串，模型还得先过滤才能判断「这步过没过」。本轮在 `packages/desktop/shell-run.js` 新增 `shapeTerminalText()`（去 ANSI 颜色/光标/擦除/OSC/退格，含 `\r` 的行只留最后一段），并套在 `decodeCommandOutput()` 的三条返回路径上——前台命令、后台作业、作业预览一次改完；不做合并重复行/丢空行/按宽度折行（那些会改动输出本身）。
+- 更早四轮标签：d.230.4.115.12 这个会话花了多少，自检里也说了（分支 `main`，版本 d.229.4.115.12 → d.230.4.115.12）——`/status` 能答模型/可写目录/上下文/清单/作业，唯独不答「这个会话一共花了多少」：单价按输入输出分档，只看总数看不出贵在哪，而贵往往贵在输入（历史与工具 schema 全在输入里）；有些轮次供应商根本没上报用量（账本里是 `null`），既不能显示成 0，也没地方说出来。本轮在 `statusReport.ts` 新增 `UsageSnapshot`、`formatTokens()`（812 / 34.2K / 1.20M）与 `describeUsageLine()`，`ChatPage.buildSelfStatus()` 传 `totalsOf(recordsForConversation(records, convId))`；三种情况分开说：没跑过不写、一次都没上报明写「无法统计」、有数字则给轮数 + 输入/输出 + 合计并如实附未上报轮数。
+- 更早五轮标签：d.229.4.115.12 会话内搜索从「按回车猜」改成「看着挑」（分支 `main`，版本 d.228.4.115.12 → d.229.4.115.12）——会话内搜索一直只给一个计数 `1/5`、`2/5`……，想判断「是不是这一条」只能一路按回车看上下文；命中早已算出，界面只用了它的数量。本轮在 `lib/chat/search.ts` 新增 `excerptAround()` 与 `buildSearchRows()`（换行压平、在压平后的文本里重新定位关键词、取前后各 26 字、越界补省略号，并带该消息内出现次数），`ChatPage` 搜索栏下新增命中列表（`#序号 / 谁说的 / 命中附近一句 / 出现 N 处`，点哪条跳哪条、复用扩窗与高亮、当前行 `aria-current`），搜不到时不渲染空面板；口径三条：不搬正文、不按原始下标切（压平后下标会偏）、点了就跳（与按回车同一条路径）。
+- 更早六轮标签：d.228.4.115.12 几万字工具结果不再一股脑塞进界面（分支 `main`，版本 d.227.4.115.12 → d.228.4.115.12）——工具结果的展开区一直把全文塞进一个 `<pre>`：`file_read` 读几千行、`run_command` 跑一次构建、`tool_output_read` 读一段大输出，结果动辄几万到几十万字，展开卡顿、滚动阻滞；更糟的是有用信息被淹——失败契约行与错误码在开头、构建与测试的结论在结尾，中间那一大片中段输出把两头都埋了（d.220 好不容易抬到折叠行的失败原因，展开后又被淹没）。本轮新增 `lib/toolResultPreview.ts` 的 `previewToolResult()`（超 2000 字才折叠；行多时保留开头 40 行 + 结尾 12 行、中间写「…（中间还有 N 行 / M 字未显示）…」；行少但单行极长时自动退化成按字符截），`AgentStreamBubble` 的结果区换成 `ToolResultText`（默认预览 + 「展开全部（还有 N 字未显示）」，点开是全量原文并给「收起」）；口径三条：先头后尾、不假装完整（藏了多少字明写）、只影响显示（模型侧仍走原有截断与 spill）。
+- 更早七轮标签：d.227.4.115.12 贴进来一大段内容时，先告诉你代价（分支 `main`，版本 d.226.4.115.12 → d.227.4.115.12）——输入框对长度没有任何上限：把 300 KB 日志或整份文档粘进去点发送就真发出去，然后三件事都不报错——上下文被这一条吃掉（历史立刻被压成摘要，模型「突然忘了要求」被读成失忆）、供应商按请求体上限回 400（和网络错误长得一样）、账单按十几万 tokens 走；也没有任何提示告诉他「可以存成文件让我按需读」。本轮新增 `messageBudget.ts`（用与上下文预算同一套 token 估算出 chars / tokens / tooLarge，阈值 12000；`largeMessageNotice()` 把代价与更好的做法一起说清），`ChatPage.send()` 在真正发送前体检：超阈值且这次还没确认过 → 只提醒不发，再点一次才照发（原文一字不改、不静默截断），草稿一改「已确认」立即作废、发送成功复位；口径三条：不截断、不替用户决定（第一次拦第二次放）、按 token 不按字符数判（同样两万字符中文约两万 tokens、英文代码只有约五千）。
 
-## 0. 2026-11-16 装上也打不开：打包白名单漏了两个文件（分支 main，版本 d.203.4.106.12）
+## 0. 2026-11-17 新加的两条桌面通道，真机上真的走了一遍（分支 main，版本 d.235.4.116.12）
+
+### 0.1 问题（为什么做）
+
+d.207 加了 `file:backup-preview`（看某个文件的备份内容），d.234 加了 `file:reveal`（在资源管理器里定位）。两轮都有单测，但**单测覆盖不到「通道有没有真的接上主进程」**——这个仓库在这个坑里栽过一次：r105–r108 的安装包漏了两个 `require` 的文件，单测全绿、冒烟（跑未打包的 `electron .`）也绿，用户装上即崩（`Cannot find module './csp-report.js'`）。
+
+真机冒烟是唯一能覆盖「渲染层 `invoke` → 主进程 handler → 平台能力」整条链的地方，所以这两条通道必须进去走一遍。
+
+顺带修掉一个顺序问题：`revealFile` 原来先查「这个环境能不能打开文件管理器」，再 `stat`。于是在没有 `shell` 注入的环境里，一个**根本不存在**的文件会被报成「当前环境不能打开系统文件管理器」——把「文件没了」说成「环境不行」，正是这一系列改动一直在治的病。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/smoke/main.js` | 新增探针：写 `notes/b.md` 两版 → `backupPreview`（断言 `ok`、`encoding === "utf-8"`、能看到第一版）→ 再 `undo`（证明预览**不消费**备份，d.207 的口径）；`reveal` 判通道存在、根外路径回 `outside-roots`、不存在的文件回 `not-found`。新增 5 条断言，冒烟 51 项 → 56 项 |
+| `packages/desktop/file-fs.js` | `revealFile` 把「`shell` 能力判断」移到 `stat` 之后：先回答「文件在不在」，再回答「这个环境能不能打开」 |
+
+### 0.3 验证
+
+- `node smoke.js`：**56/56 项通过**（首跑 55/56，唯一红的就是上面那个顺序问题——「不存在的文件」被报成 `unsupported`）。
+- `packages/desktop` 的 `pnpm test`：**exit 0**（56 组；`file-fs.test.js` 100 例 / 99 passed / 1 skipped）。
+- 本轮只动桌面端与冒烟脚本，web 侧沿用上一轮的 388 files / 5609 passed。
+
+### 0.4 没做
+
+- 不在冒烟里调成功的 `reveal`：会真的弹出资源管理器，把无人值守的冒烟变成「会动用户屏幕」的东西。
+- 不给冒烟加「安装包形态」：那需要打包产物 + 真启动，成本远高于本轮要守的不变量（通道是否接上）。这条仍记在待办里。
+- 不把冒烟项数写死进断言（`smoke-script.test.js` 只查关键链路存在），否则每加一项都要改测试。
+
+## 0-历史-1. 2026-11-17 工具行也能直接定位到那个文件（分支 main，版本 d.235.4.115.12）
+
+### 0.1 问题（为什么做）
+
+d.234 只把「定位」挂在了「本轮改动」那条最近的位置。可历史回看时，用户真正想核对的是**它当时读的是哪个文件、写的是哪个文件**——那信息就在工具轨迹里，但轨迹只显示参数摘要（`D:/工作区/src/a.ts · +3 行`），路径是死文本；要落到资源管理器里对一遍，只能自己把路径抄出来。
+
+而且同一条消息里常常同时出现「本轮改动」与「工具调用」两处同名文件：按钮若叫同一个名字，用户与测试都分不清点的是哪一个。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/toolArgsSummary.ts` | 新增 `toolArgPath(name, argsJson)`：只认有单一目标文件的工具（`file_read` / `file_write` / `file_edit` / `file_undo` / `file_image`），取参数 `path`；纯函数不抛，非法 JSON / 空路径 / 非字符串 → `null` |
+| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 增可选 `onRevealPath`，折叠行多一个「定位」按钮（`aria-label="在文件夹里定位 <文件名>"`），点击 `preventDefault`（不顺手折叠 `<summary>`）；不传不渲染 |
+| 同上 | 流式气泡透传；历史分组那份不传（回看场景按钮太多，改走右侧进度栏） |
+| `packages/web/src/components/ProgressPanel.tsx` | 右侧「会话进度」栏透传 `onRevealPath`，工具行也能定位 |
+| `packages/web/src/components/ChatPage.tsx` | 两处渲染按 `hasRevealBridge(getFileBridge())` 决定传不传，复用 d.234 的 `revealTurnChange`（同一套「只认已授权根」的闸） |
+
+口径三条：**只认有单一目标的工具**（`file_glob` 是模式、`file_patch` 可能改多个文件，挑一个定位等于替用户猜）／**文案必须能区分**（工具行「在文件夹里定位」，本轮改动「在文件夹里显示」）／**没通道就不出现**。
+
+### 0.3 验证
+
+- `toolArgsSummary.test.ts` 13 → **17 例**（五个工具都认；glob/grep/patch 不认；非法 JSON/空对象/空白路径/非字符串 → null；两端空白去掉）。
+- `AgentStreamBubble.test.tsx` 17 → **20 例**（接了才出现「定位」并回传绝对路径；不接不出现；`run_command` 这种没路径的不出现）。
+- `ChatPage.test.tsx` 既有 **I4h** 复跑通过（按钮改名后不再重名）——182 例。
+- `packages/web` 全量 **388 files / 5609 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 86ms）。
+- 本轮只改 web 层，桌面端未改（桌面全量沿用上一轮 56 组 / 1010 例）。
+
+### 0.4 没做
+
+- 不给历史分组加按钮（一条消息里几十次调用会铺成一排「定位」）。
+- 不解析 `file_patch` 补丁正文里的多个路径挨个出按钮。
+- 不做「复制路径」（右键/选中文本本来就能复制，本轮只解决「打开到那儿」）。
+
+## 0-历史-2. 2026-11-17 它在哪儿改的，就在那儿给我打开（分支 main，版本 d.234.4.115.12）
+
+### 0.1 问题（为什么做）
+
+智能体刚写完的文件，第一个真问题不是「写得对不对」，而是「这东西在哪儿」。
+
+之前用户只能从结果里拿到一条路径（`D:/工作区/src/a.ts`），然后自己开资源管理器、一层层点进去；一轮改了三五个文件就点三五遍。知识库那侧早就有「在文件管理器中显示」（`vault:reveal`），聊天这侧一直没有对应通道——同一台机器上一边能点、一边不能点，纯属漏了。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/file-fs.js` | 新增 `revealFile(roots, absPath, shell)`：必须绝对路径、不含 NUL、**落在已授权的根里**（复用 `findRoot`，越界回 `outside-roots`）；文件 → `shell.showItemInFolder`（在父目录里选中它）、目录 → `shell.openPath`（直接打开）；文件不存在回 `not-found`；无 `shell` 回 `unsupported` |
+| `packages/desktop/file-fs.js` | 新 IPC `file:reveal`（同样过 `isTrustedSender`）；`registerFileIpc` 接收注入的 `shell` |
+| `packages/desktop/main.js` | 把 `shell` 传给文件桥 |
+| `packages/desktop/preload.js` | `__heming_files.reveal(payload)` → `file:reveal` |
+| `packages/web/src/lib/fileEdit/bridge.ts` | `FileFsBridge.reveal?`、`FileRevealResponse`（`kind: "file" \| "directory"`）、`FileRevealFailureCode`、`hasRevealBridge()` |
+| `packages/web/src/components/TurnUndoBar.tsx` | 清单每行新增「定位」按钮（`aria-label="在文件夹里显示 <文件名>"`）；没接回调不渲染 |
+| `packages/web/src/components/ChatPage.tsx` | `revealTurnChange(path)`：取工作区根 → `bridge.reveal` → 成功说「已在资源管理器里定位这个文件 / 打开那个目录」，失败原样转述桌面端原因；`hasRevealBridge` 为真才传 `onReveal` |
+
+口径三条：**只认已授权的根**（不是「任意路径都能弹资源管理器」的口子）／**文件与目录分开处理**（要的是「我改的那个文件」被选中，不是打开它的父目录）／**不做了就如实说**（文件已被删 → `not-found`，不假装成功）。
+
+### 0.3 验证
+
+- 桌面 `file-fs.test.js` 95 → **100 例**（文件走选中、目录走打开；根外路径不放行且什么都不弹；文件不在了回「找不到」；无 `shell` 结构化失败；IPC 正常 + 非可信来源被拒）；`preload.test.js` 新增转发用例；`main.test.js` / `secure-origins.test.js` 通道白名单加 `file:reveal`。
+- 桌面全量 **56 组 / 1010 例（1009 passed / 1 skip / 0 fail）**，退出码 0。
+- `TurnUndoBar.test.tsx` 11 → **13 例**（接了 `onReveal` 才出现「定位」并回传整条路径；不接不出现）；`ChatPage.test.tsx` 新增 **I4h**（假桥 `reveal` → 一轮 `file_write` → 点「看清单」→「在文件夹里显示 新.md」→ 断言收到 `D:/评测区/notes/新.md` 且提示「已在资源管理器里定位这个文件」）→ 182 例。
+- `packages/web` 全量 **388 files / 5602 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 89ms）。
+
+### 0.4 没做
+
+- 不做「用默认程序打开文件」：等于让模型写的任何东西都能一键在本机渲染/执行，风险与收益不对等；看内容走「改动对照」。
+- 不在文件工具卡片上加按钮（历史条目多，本轮只挂在「本轮改动」这条最近、最需要的位置）。
+- 不做父目录/上层导航，桌面端只负责「定位这一个已授权路径」。
+
+## 0-历史-3. 2026-11-17 换行风格跟着文件走（分支 main，版本 d.233.4.115.12）
+
+### 0.1 问题（为什么做）
+
+模型输出的文本几乎总是 `\n`，而 Windows 上的源码与文档大多是 `\r\n`。以前这两个工具都不看原文件：
+
+- **`file_edit`** 把含 `\n` 的新片段直接塞进 CRLF 文件 → 写出**混合行尾**的文件（被改的那几行是 LF，其余是 CRLF）。编辑器报警、`git diff` 变脏、后续每改一次更乱；
+- **`file_write`** 整份覆盖时不看原文件风格 → 内容只改了 3 处，diff 却是「整篇删除 + 整篇新增」，评审看不出真正改了什么；仓库若有 `core.autocrlf=true` 或 CI 换行校验，还会直接红。
+
+两者都不报错、退出码 0、「已写入」——与 d.228（GBK 编码）、d.231（终端痕迹）同族的静默破坏。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/fileEdit/eol.ts`（新） | `detectNewlineStyle(text)`：纯 LF / 纯 CRLF 才给答案，混合行尾、无换行、空串返回 `null`（没有可跟随的事实）；`adaptNewlines(text, style)`：收敛到目标风格并如实回报 `converted`（先把 `\r\n` 收成 `\n`、孤立 `\r` 也收成 `\n`，避免 `\r\r\n` 叠加） |
+| `toolOps.ts` 的 `file_write` | 覆盖已有文件时按原文件风格对齐整份内容；新建文件保持原文；对合法字节数的校验放到对齐之后再判（CRLF 会让字节数变大） |
+| `toolOps.ts` 的 `file_edit` | 插入的新文本按原文件风格对齐；结果里说明对齐过 |
+
+三条口径：**只跟随、不发明**（没有可跟随的风格就保持原样）／**改了就说明**（不静默动格式）／**混合行尾不猜**（猜错比不动更糟）。
+
+### 0.3 验证
+
+- 新建 `packages/web/src/lib/fileEdit/eol.test.ts` **8 例**：纯 LF / 纯 CRLF 识别；混合、无换行、空串 → `null`；孤立 `\r` 不算换行；两个方向的转换都标 `converted`；已是目标风格不误报；`\r\r\n` 收敛后不残留 `\r`。
+- `toolOps.test.ts` +4（**31 例**）：`file_edit` 往 CRLF 文件插两行 → 全文仍 CRLF 且提示含「CRLF 换行」；往 LF 文件插 CRLF 片段 → 不引入 `\r`；`file_write` 覆盖 CRLF 文件 → 整份 CRLF 且说明对齐；新建文件保持 LF 且不多写说明。
+- `packages/web` 全量 **388 files / 5599 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 95ms）。
+
+### 0.4 没做
+
+- 不统一整个工作区的换行风格（那是格式化工具的活；这里只保证「这次改动不弄脏文件」）。
+- 不按 `.gitattributes` 推断（桌面端不解析 git 配置；判据用文件真实字节）。
+- 不对混合行尾做「多数票」推断（混合本身就是要人来决定的信号）。
+
+## 0-历史-4. 2026-11-17 搜索也要说自己跳过了什么（分支 main，版本 d.232.4.115.12）
+
+### 0.1 问题（为什么做）
+
+`file_grep` 的「命中 0 个」在模型眼里是一个判决：代码里没有这个函数、这个项目没用过那个 API。于是它开始猜、改错地方。
+
+但真的发生过的是**一次次静默跳过**：`packages/desktop/file-fs.js` 里读文本用的 `readTextQuiet()` 对四类文件一律返回 `null` ——
+
+- 超过 `MAX_FILE_BYTES`（2MB）的大文件（生成的 JSON、日志、data 文件）；
+- `looksBinary()` 为真（含 NUL 字节）；
+- `decodeTextBytes()` 两种编码（UTF-8 / GBK）都不成立；
+- `readFile` 抛错（权限、占用、IO）。
+
+于是「没找到」与「没去找」在结果里长得一模一样。与 d.231 修的那个问题同族：那次是默认跳过构建产物目录却不说，这次是跳过了文件也不说。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/file-fs.js` | `readTextQuiet()` → `readTextForSearch()`，返回 `{ok:true,text}` 或 `{ok:false,reason}`（`too-large` / `binary` / `undecodable` / `io`；软链与非普通文件仍按遍历语义不计数）；`grepFiles()` 按原因计数、收集前 5 个文件名，成功响应新增 `skippedFiles: { total, tooLarge, binary, undecodable, other, sample } \| null` |
+| `packages/web/src/lib/fileEdit/bridge.ts` | `FileGrepResponse` 加可选 `skippedFiles`（注释：null/省略 = 全都搜过了；老桌面端不返回按「不知道」处理，不编 0） |
+| `packages/web/src/lib/fileEdit/toolOps.ts` | `file_grep` 抬头追加：`（另有 N 个文件没能搜：1 个超过 2MB、1 个像二进制、1 个编码认不出——例如 …；要搜它们就把 path/include 缩到那个目录，或直接 file_read）` |
+
+### 0.3 验证
+
+- `packages/desktop/file-fs.test.js` +1 例（95 例）：同一目录里放正常文本 + 2MB+ 大文件 + 含 NUL 的二进制 + 两种编码都不成立的字节 → 命中正常文本、`skippedFiles.total === 3` 且三类各 1、样本含三个文件名；改到全文本目录 → `skippedFiles === null`。
+- `packages/web/src/lib/fileEdit/toolOps.test.ts` +2 例（27 例）：抬头点名文件数与三类原因、含样本与「直接 file_read」；`skippedFiles: null` 时不出现「没能搜」。
+- `packages/desktop` 全量 **56 组 / 1004 例（1003 passed / 1 skip）**；`packages/web` 全量 **387 files / 5587 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 82ms）。
+
+### 0.4 没做
+
+- 不做「强行搜二进制 / 大文件」开关（命中率极低、代价是把 2MB 塞进上下文；要读用 `file_read` 的 `offset`/`limit`）。
+- 不按扩展名猜文本（`.log` 也可能是二进制；判据继续用真实字节）。
+- 不把样本扩成完整清单（真实仓库上百个，列表会淹掉结果；5 个足够判断要不要进去看）。
+
+## 0-历史-5. 2026-11-17 命令输出里的终端痕迹（分支 main，版本 d.231.4.115.12）
+
+### 0.1 问题（为什么做）
+
+命令的输出本来是打给**终端**看的，而我们原样塞进了工具结果：
+
+- `npm` / `git` / 构建工具会夹 ANSI 颜色与光标控制（`\u001b[32m`、`\u001b[2K`），界面上显示成 `[32m` 这种鬼东西，用户第一反应是「输出坏了」；
+- 进度条用 `\r` 回到行首反复改写同一行，工具结果里被拼成 `10%\r50%\r100%` 一整串，谁都读不出来；
+- 模型得先过滤这些噪声才能判断「这一步到底过没过」，每一步都白烧 token。
+
+这类问题不报错、不崩、退出码照常为 0，与 d.165 那批静默 bug 同族：**输出看起来「有内容」，但不是终端上真正看到的那段。**
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/shell-run.js` | 新增 `shapeTerminalText()`：去掉 ANSI 转义（颜色 / 光标 / 擦除 / OSC 窗口标题 / 退格），含 `\r` 的行只保留最后一段；在 `decodeCommandOutput()` 的三条返回路径统一套用 —— 前台命令、后台作业、作业预览一次改完 |
+| 同上 | `module.exports` 导出 `shapeTerminalText`，让单测能直接钉住行为 |
+
+不做：合并重复行、丢空行、按宽度折行——那些会改动输出内容本身（模型的判断依据）。
+
+### 0.3 验证
+
+- `packages/desktop/shell-run.test.js` 33 → **35 例**：颜色码、`[2K`/`[1G` 光标控制、OSC 标题、`10%\r50%\r100%` → `100%`、跨行换行保留、行尾单独 `\r` 不吃内容、普通文本/制表符不动、空串；真跑 `node -e` 输出颜色码 + 进度覆盖 → `stdout === "done\n100%"` 且不含 ESC。
+- `packages/desktop` 的 `pnpm test` 全绿：**56 组 / 1003 例**，exit 0。
+- `packages/web` 全量 **387 files / 5585 passed**（本轮只动桌面端）；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 88ms）。
+
+### 0.4 没做
+
+- 不保留原始字节给谁看：终端上看到什么，工具结果就说什么（要查原始流有回放层，不该在这里开第二个真相）。
+- 不按终端宽度折行（不知道当时的窗口宽度，猜宽度会把长行切错位置）。
+- 不把进度条的历史事件保留成多行（那正是终端上被覆盖掉的东西）。
+
+## 0-历史-6. 2026-11-17 这个会话花了多少，自检里也说了（分支 main，版本 d.230.4.115.12）
+
+### 0.1 问题（为什么做）
+
+`/status` 已经能回答「模型是谁、能写哪些目录、上下文还剩多少、清单做到哪、有没有作业在跑」，却没有一条回答**「这个会话一共花了多少」**。
+
+这不是虚荣指标，是长任务里最实在的一笔账：
+
+- 单价按输入/输出分档计费，只看「总共多少 tokens」看不出贵在哪；而一句话为什么贵，答案往往就在输入（历史 + 所有工具 schema 全在输入里，输出通常只占一小截）。
+- 有些轮次供应商根本没上报用量。这种轮次在账本里是 `null`，界面既不能显示成 0（那是假话），也没有地方说出来——`/status` 正是该说的那一处。
+- 判断「还要不要继续这个会话、要不要先 `/compact` 或开新会话」，要的就是这个数。
+
+数据本来就记着（`store/tokenUsage.ts` 每轮一条，带 `conversationId` / `streamId`），只是没人把它按会话汇总出来给用户看。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `UsageSnapshot`、`formatTokens()`（`812` / `34.2K` / `1.20M`；这一行不求精确到个位）、`describeUsageLine()`；`/status` 在「上次压缩」之后输出「本会话用量：N 轮 · 输入 X / 输出 Y tokens（合计 Z）」 |
+| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `usage: totalsOf(recordsForConversation(records, convId))` —— 只读用量账本，不写一行 |
+
+三种情况分开说：**没跑过**（不写这一行，省掉空话）／**跑过但一次都没上报**（明写「无法统计」，绝不显示成 0）／**有数字**（轮数 + 输入/输出 + 合计，未上报轮数如实附后面）。
+
+### 0.3 验证
+
+- `packages/web/src/lib/agentRuntime/statusReport.test.ts` +4 例（**34 例**）：12 轮 / 34.2K / 8.1K / 合计 42.3K 的排版；有 2 轮没上报 → 「另有 2 轮供应商没上报用量」；三轮全没上报 → 「无法统计」；省略快照或 `runs: 0` → 不出这一行。
+- `packages/web/src/components/ChatPage.test.tsx` +1 例（**181 例**）：账本预置一条（`conversationId: "c1"`、input 900 / output 300）→ `/status` 出现「本会话用量：1 轮」且含「输入 900」「输出 300」，且**不发任何请求**。
+- `packages/web` 全量 **387 files / 5585 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 88ms）。
+
+### 0.4 没做
+
+- 不按单价折算成钱（价目随供应商/模型/缓存命中而变，写死等于编；要算钱得先有一张可维护的价目表）。
+- 不在界面常驻显示（自检是「想问才问」的位置，常驻变噪音且每次刷新都要重算）。
+- 不给「未上报」轮次估算一个数填上（估算与真实账单混在一起比缺数字更坏）。
+
+## 0-历史-7. 2026-11-17 会话内搜索从「按回车猜」改成「看着挑」（分支 main，版本 d.229.4.115.12）
+
+### 0.1 问题（为什么做）
+
+会话内搜索（`Ctrl/⌘+F` 那个框）一直只给一个计数：`1/5`、`2/5`…… 想判断「是不是这一条」只能一路按回车看上下文。会话长到几十上百轮时，这和翻箱倒柜没区别：
+
+- 记得某句话说过，但不知道落在第几条命中里；
+- 命中分散在我的回复与智能体的回复里，光看计数没有信息量；
+- 想看第 4 条，必须先跳 1、2、3 条。
+
+这不是能力缺失，而是**结果没被呈现**——搜索早就把命中的消息算出来了，界面只用了它的数量。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/chat/search.ts` | 新增 `SearchHitRow`、`excerptAround()`、`buildSearchRows()`：把命中消息压成一行摘要（换行压成空格，在压平后的文本里**重新定位**关键词再取前后各 26 字，越界补「…」），并保留这条消息里出现了几次 |
+| `packages/web/src/components/ChatPage.tsx` | 搜索栏下面新增命中列表 `data-testid="search-hit-list"`：每行「#序号 / 谁说的 / 命中附近一句 / 出现 N 处」，点哪条跳哪条（复用原有扩窗 + 高亮），当前那条 `aria-current="true"`；搜不到时不渲染空面板，回车前后跳的行为不变 |
+
+口径三条：**不搬正文**（只给命中附近一句，长消息不会把面板撑爆）；**不按原始下标切**（原文换行在摘要里被压平，旧下标会偏，必须重新定位）；**点了就跳**（与按回车走同一条路径）。
+
+### 0.3 验证
+
+- `packages/web/src/lib/chat/search.test.ts` **9 例**（新增 5 例：换行压平并重新定位、开头/结尾只补一侧省略号、空文本/找不到不抛、`buildSearchRows` 保序带次数并跳过撤回、空查询/空命中返回空列表）。
+- `packages/web/src/components/ChatPage.test.tsx` +1 例（**180 例**）：三条消息里两条命中「发布」→ 面板两行、`#1` 含「发布计划」、`#2` 含「发布复盘」；点第 2 行 → `msg-m3` 高亮、该行 `aria-current`；改成搜不到的词 → 面板消失。
+- 顺带修两处**测试相撞**：新面板里也有消息原文与「#序号」，两条既有搜索用例的 `getByText` 因此撞到多个元素 → 改为按消息列表范围断言（**产品代码没为此让步**，例如没有把序号改回 `1/N` 之外的奇怪写法，也没有把摘要截成不可读）。
+- `packages/web` 全量 **387 files / 5580 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 94ms）。
+
+### 0.4 没做
+
+- 不在摘要里用 `<mark>` 高亮关键词（摘要本来就短，加底色更像选中态；高亮仍在消息本体上）。
+- 不做「跨会话搜索」的会话内版本（左栏 d.197 已覆盖，两套结果面混在一起更乱）。
+- 不给结果排序选项（按消息顺序最符合「时间线回忆」；相关度打分在这个场景没有可靠信号）。
+
+## 0-历史-8. 2026-11-17 几万字工具结果不再一股脑塞进界面（分支 main，版本 d.228.4.115.12）
+
+### 0.1 问题（为什么做）
+
+工具结果的展开区一直把全文塞进一个 `<pre>`：
+
+- `file_read` 读几千行的文件、`run_command` 跑一次构建、`tool_output_read` 读一大段大输出，结果动辄几万到几十万字——展开的瞬间要插几万个文本节点，滚动条一拖就顿；同一轮两个这种结果，界面直接卡住。
+- 更糟的是**有用信息被淹掉**：工具失败的契约行（`标题（error_code）：说明`、`可重试：…`）在开头，构建/测试的结论在结尾，中间那一大片中间输出挡着，用户得手动翻半天。
+
+d.220 好不容易把失败原因抬到折叠行，展开后又被这片中段淹没——这不是「不好看」，是「结论看不见」。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/toolResultPreview.ts`（新） | `previewToolResult()`：超 2000 字才折叠；行多时保留**开头 40 行 + 结尾 12 行**，中间写「…（中间还有 N 行 / M 字未显示）…」；行少但单行极长（压成一行的 JSON、无换行日志）自动退化成按字符截 |
+| `packages/web/src/components/AgentStreamBubble.tsx` | 结果区换成 `ToolResultText`：默认预览 + 「展开全部（还有 N 字未显示）」；点开是全量原文，另给「收起（只看开头和结尾）」 |
+
+口径三条：**先头后尾**（契约行与结论都在两端）／**不假装完整**（藏了多少字明写出来）／**只影响显示**（模型侧仍走原有截断与 spill 逻辑，一个字没动）。
+
+### 0.3 验证
+
+- 新建 `packages/web/src/lib/toolResultPreview.test.ts` **6 例**：短结果原样返回；空/undefined/null；400 行时头尾都在、中间行被藏且写明行数与字数；单行极长按字符截；刚超阈值一点也截；头尾行数可参数化。
+- `packages/web/src/components/AgentStreamBubble.test.tsx` +1 例（**17 例**）：900 行结果 → 预览含 `log-1` 与 `log-900`、不含 `log-450`，按钮文案含「还有 N 字未显示」；点开 → `tool-result-full` 含 `log-450`；点「收起」回到预览。
+- `packages/web` 全量 **387 files / 5574 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 87ms）。
+
+### 0.4 没做
+
+- 折叠时不做语法高亮（几万字着色同样费时；这条路径只求「看得见结论」）。
+- 不改模型侧的结果截断阈值（`SUBAGENT_TOOL_RESULT_MAX` 与 spill 分段读各有口径，本轮只动界面）。
+- 不做「只在搜索命中处折叠」这类花活（先默认状态做对，避免规则叠加互相打架）。
+
+## 0-历史-9. 2026-11-17 贴进来一大段内容时，先告诉你代价（分支 main，版本 d.227.4.115.12）
+
+### 0.1 问题（为什么做）
+
+输入框对长度没有任何上限：把一份 300 KB 的日志、整份接口文档、几千行代码粘进去，点发送就能直接发出去——然后发生三件**都不报错**的事。
+
+- **上下文被这一条吃掉**：估算十几万 tokens，历史压缩会立刻把之前几轮折成摘要；模型随后「突然忘了刚才的要求」，用户只会觉得「这东西怎么失忆了」，不会想到是自己那条消息挤的。
+- **服务端直接拒绝**：供应商那侧有请求体上限，回来的 400 与本项目的网络错误长得像，界面只能说「生成出错」——用户读成「软件又坏了」。
+- **账单**：一次十几万 tokens 的输入按时长计费，往往事后才发现。
+
+也没有任何提示告诉他「其实可以存成文件让我按需读」——而这正是长任务里更省上下文、也更可靠的做法。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/messageBudget.ts`（新） | `inspectOutgoingText()` 用**与上下文预算同一套 token 估算**算出 `chars` / `tokens` / `tooLarge`（阈值 `MESSAGE_WARN_TOKENS = 12_000`）；`largeMessageNotice()` 把代价与更好的做法一起说清 |
+| `packages/web/src/components/ChatPage.tsx` | `send()` 真正发送前体检：超阈值且这次还没确认过 → 只提醒不发；再点一次才照发（原文一字不改、不静默截断）；草稿一改「已确认」立即作废；发送成功后复位 |
+
+口径三条：**不截断**（模型看到半份日志却不知道缺了后半段，比不发更糟）／**不替用户决定**（第一次拦、第二次放）／**按 token 不按字符数判**（同样 2 万字符，中文约 2 万 tokens、英文代码只有约 5 千）。
+
+### 0.3 验证
+
+- 新建 `packages/web/src/lib/agentRuntime/messageBudget.test.ts` **6 例**：普通提问不拦；emoji 按码点算；12,000 个中文越线；同字符数英文代码 token 只有四分之一 → 不拦（证明判据不是字节数）；刚好卡线也算大；文案含字数/token/「挤掉前面的对话」/「被服务端直接拒绝」/「引用工作区文件」/「再点一次发送」。
+- `packages/web/src/components/ChatPage.test.tsx` +1 例（**179 例**）：`I4f` 粘 12,000 字 → 第一次点发送只出现「比一般消息大得多」，`send_message` 一条没发、`streamChat` 没调用；再点一次 → 正常发出，且封包内容与原文逐字相同。
+- `packages/web` 全量 **386 files / 5567 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 85ms）。
+
+### 0.4 没做
+
+- 不自动截断或自动摘要（会把「我到底发了什么」变成不确定的事；要压缩是用户主动 `/compact`）。
+- 不按模型窗口动态调阈值（12,000 对 64K/128K 都已属明显异常，自适应等真实反馈）。
+- 附件通道不加同样提醒（附件自有体积上限与提示；这条只管正文）。
+
+## 0-历史-10. 2026-11-17 说「做完了」之前，先把自己的清单对一遍（分支 main，版本 d.226.4.115.12）
+
+### 0.1 问题（为什么做）
+
+长任务跑到后半段，最典型的塌方不是「不会做」，而是**提前宣布完成**：模型把最后一句写成「都改好了，你可以试试了」，而任务清单里还挂着两三行 `[ ]`。
+
+这类收尾很伤信任：
+
+- 用户信了这句话去验收，发现一半没做；再让它继续，又得重新解释一遍要做什么。比直接报错更糟——报错至少不会让人白跑一趟验收。
+- 模型并不是在撒谎：`todo_write` 写下的清单就是它自己的进度基线，但**收口那一刻没人要求它回头看这份清单**。
+- 轮次预算用完有自动续跑（d.157），可「自己说完了」这条路上一个闸都没有。清单一旦与事实脱钩，后面每一轮都建在错误的「已完成」判断上。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/finishGate.ts`（新） | `unfinishedTodos()` 只读本会话清单里没打勾的项；`finishGateVerdict()` 判定该不该催（`not-ok` / `no-open` / `queued` / `already-nudged` 四种不催理由各自成词）；`finishGatePrompt()` 把未完成项逐条摆出来，要求用 `todo_write` 与事实对齐 |
+| `packages/web/src/components/ChatPage.tsx` | `onRunSettled` 里：正常做完 + 清单还有未完成 + 这次输入还没催过 + 没有排队插话 → 提示「清单里还有 N 项没打勾（哪几项）」并自动再开一轮核对；`submitMessage` 把「催过几次」清零（`retryStream` 走同一路径） |
+
+口径四条（写进注释）：只看正常收口（停止/出错不催）／只看模型自己写的清单／一次用户输入只催一次（催完仍不动手就如实停）／有插话时先让插话。
+
+### 0.3 验证
+
+- 新建 `packages/web/src/lib/agentRuntime/finishGate.test.ts` **12 例**（空会话/空清单、只挑没打勾的项、全打勾返回空、按会话隔离、四种不催理由、插话优先但清空后仍可催、提示逐条列 `[ ]`/`[>]`、超 5 条写「还有 N 项没列出来」、要求 `todo_write` 且写明「别把未完成项留在清单里」）。
+- `packages/web/src/components/ChatPage.test.tsx` +2 例（**178 例**）：`I4d` 清单剩 2 项 → 出现「清单里还有 2 项没打勾」且第二条请求内容含「【收尾自检】」与清单原文；`I4e` 清单全打勾 → 只调一次模型、不追问。插入时踩到跨用例串扰（上一条用例留下的清单让「任务清单渲染」用例一进来就看见面板）→ 两条新用例末尾都 `clearTodos("c1")` + `resetTodoStore()`，主 `describe` 的 `beforeEach` 也补了 `resetTodoStore()`。
+- `packages/web` 全量 **385 files / 5560 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 85ms）。
+
+### 0.4 没做
+
+- 不在每一轮结束都检查（只在该轮正常收口看一次）：中途轮次的清单本来就会变，盯着只会制造噪音。
+- 不替用户判定「这项其实做完了」：清单谁写的谁负责，工具只把矛盾摆到台面上。
+- 不做跨会话清单核对；也不改 `longTask.ts` 的轮次续跑（两件事边界不同，混在一起会让「为什么又跑了一轮」更难解释）。
+
+## 0-历史-11. 2026-11-17 搜代码别被构建产物淹没（分支 main，版本 d.225.4.115.12）
+
+### 0.1 问题（为什么做）
+
+`file_glob` / `file_grep` 一直只跳过依赖目录（`node_modules`）与版本库（`.git`/`.hg`/`.svn`）。但真实仓库里文件量的九成常常在**构建产物与虚拟环境**里：`dist`、`build`、`out`、`coverage`、`target`、`release`、`.next`、`.turbo`、`.cache`、`venv`、`.venv`。
+
+后果有两层。对模型：让它「找一下这个接口谁在用」，命中列表全是压缩后的 bundle —— 既烧上下文，又会引导它去读产物、得出「源码里没有」的错误结论（产物里往往刚好有一份名字被压扁的副本）。对用户：搜索结果十几条 `dist/index-XXXX.js`，只能再补一句「别搜 dist」，长任务里这句话要说很多遍。
+
+更根本的是**沉默**：即使跳过了，工具抬头也只写「命中 0 个文件」——模型无法区分「真的没有」和「我没去那儿找」。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/file-fs.js` | 新增 `BUILD_DIR_NAMES`（dist / build / out / coverage / target / release / .next / .nuxt / .output / .turbo / .cache / venv / .venv）；`walkFiles` 收集真跳过过的目录名随结果返回；glob / grep 成功响应多一个 `skipped: string[]`（去重、排序、最多点名 12 个；老调用方忽略该字段不受影响） |
+| `packages/desktop/file-fs.js` | 注释写明「不是禁地」：把 `dir`（web 侧的 `path` 参数）直接指到那个目录，照样搜得到——跳过只发生在向下遍历时 |
+| `packages/web/src/lib/fileEdit/bridge.ts` | `FileGlobResponse` / `FileGrepResponse` 成功分支加可选 `skipped?: string[]`（老桌面端不返回 = `undefined`，界面不编） |
+| `packages/web/src/lib/fileEdit/toolOps.ts` | `runGlob` / `runGrep` 抬头多一行：「（已跳过这些目录：build、dist——依赖、版本库与构建产物通常不是答案；要搜里面就把 path 指到那个目录）」；`skipped` 为空时不写 |
+
+口径三条：**跳过要报**（「没搜到」必须能和「没去找」区分开）；**不是禁地**（`path` 指进去仍可搜，不新增开关、不加 schema 预算）；**不编不知道的事**（老桌面端不给 `skipped`，界面就不写）。
+
+### 0.3 验证
+
+- `packages/desktop/file-fs.test.js` 91 → **94 例**（93 passed / 1 skip）：产物不混进结果且 `skipped` 点名 `["build","dist","node_modules"]`；`dir` 指到 `dist` 时照样搜到且 `skipped` 为空；grep 同样只回源码命中并报 `["dist"]`。
+- `packages/web/src/lib/fileEdit/toolOps.test.ts` 23 → **25 例**：glob / grep 抬头含「已跳过这些目录：build、dist」与「path 指到那个目录」（空结果时也在）；老桌面端不报 `skipped` 时不出现该行。
+- `packages/desktop` 全量 `pnpm test`：**56 组 / 1001 例，0 失败**；`packages/web` 全量 **384 files / 5546 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 87ms）。
+- 版本 `d.225.4.114.12` → **`d.225.4.115.12`**（semver `225.4.115` / Windows `225.4.115.12`）；CHANGELOG **344 条** / RELEASE-NOTES **232 条**。
+
+### 0.4 没做
+
+- 不加「包含产物」的参数（schema 预算被工具数吃紧；`path` 指进目录已经够用）。
+- 不解析 `.gitignore`（另一个工程；先把最固定的几类目录挡住）。
+- 不在界面搜索里加「是否搜了产物」的开关（模型侧说明白了，用户侧暂不需要）。
+
+## 0-历史-12. 2026-11-17 「停止」说的话要对得上真实情况（分支 main，版本 d.225.4.114.12）
+
+### 0.1 问题（为什么做）
+
+这一轮不是加功能，是修三处「说的和做的不一样 / 测试结论不可信」：
+
+1. **点「停止」只停这一轮，后台作业照旧在跑**（这是对的——用户停的是「这一轮」，不是「一切」），但停的那一刻界面一句话不说。用户会以为全停了，回头发现磁盘上多了一堆构建产物；或者反过来以为后台被杀了、重复跑一遍。
+2. **取消的文案分不清「用户点的」和「渲染层断了」**：桌面端 `shell-run.js` 的 `onAbort` 同时服务两种来源，文案一律「渲染层已断开，命令被中止」——用户自己点停止、却被告诉「渲染层断开」，属甩锅式措辞，排查时把人带偏。
+3. **`shell-run` 的取消用例会随机红**：用例在 `runCommand` 后只 `await` 一次 `setImmediate` 就取消，机器一忙可能还停在校验目录阶段 → 走「执行前取消」分支、子进程没 spawn，于是「取消必须真的杀掉子进程」这条断言随机失败。前两轮整包各红过一次（单跑必绿、整体偶红），这会毁掉每轮验收的可信度。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/shell-run.js` | 新增 `userCancelled` 集合：`cancelRun` 命中在跑的命令时先记名，`onAbort` 据此分流文案（用户取消 → 「命令已被取消：已请求终止整个进程树（含它启动的子进程）」；渲染层断开 → 保留原文案）；收口时清理，不泄漏 |
+| `packages/desktop/shell-run.test.js` | 取消用例改成**确定性等待 spawn**（spawnImpl 里 resolve 一个 promise，`await` 到它再取消），不再依赖 `setImmediate` 时序；断言文案含「命令已被取消」 |
+| `packages/desktop/shell-run.test.js` | 「渲染层中止」用例加反向断言：必须含「渲染层已断开」且**不含**「已被取消」（两条路径不许混用措辞） |
+| `packages/web/src/components/ChatPage.tsx` | `abortRuns` 中断后检查面板是否有在跑的后台作业：有就提示「已停止这一轮。后台还有作业在跑（点停止不会停它们）：在「后台作业」面板里可以逐条停，或者让它跑完。」 |
+| `packages/web/src/components/ChatPage.test.tsx` | 新增 I4c（预置在跑作业 → 发起一轮 → 点「停止生成」→ 断言出现「后台还有作业在跑」「点停止不会停它们」）；主 describe 的 `beforeEach` 补 `resetPanelJobs()` 防串扰 |
+
+口径三条：**只报事实**（取消只说「已请求终止进程树」，不夸成「已确认全部杀干净」）；**不混用措辞**（用户取消 vs 断连各说各的，测试双向钉住）；**测试要确定性**（等真实状态，不等「大概已经好了」）。
+
+### 0.3 验证
+
+- `packages/desktop/shell-run.test.js`：33 例全绿；`packages/desktop` 全量 `pnpm test` **连跑两次都是 56 组 / 998 例，0 失败**（此前整包偶红的那条现在确定性）。
+- `packages/web`：`ChatPage.test.tsx` **176 例全绿**；全量 **384 files / 5544 passed**。
+- `pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 82ms）。
+- 版本 `d.225.4.113.12` → **`d.225.4.114.12`**（semver `225.4.114` / Windows `225.4.114.12`）；CHANGELOG **343 条** / RELEASE-NOTES **231 条**。
+
+### 0.4 没做
+
+- 不把「停止」做成「连后台作业一起停」（那是另一种语义，要有独立入口与二次确认；本轮先把话说清楚）。
+- 不改后台作业的存活性（窗口失焦、切会话后它本来就该继续跑）。
+- 不追查 `shell-run` 偶红背后的产品级竞态（结论是测试时序问题；产品路径已有「执行前取消」分支且行为正确）。
+
+## 0-历史-13. 2026-11-17 GBK 文本读得到、搜得到，覆盖先拦住（分支 main，版本 d.225.4.113.12）
+
+### 0.1 问题（为什么做）
+
+上一轮（d.225.4.112.12）修的是**命令输出**里的 GBK 乱码。文件侧是同一族问题，而且更常见：
+
+- `packages/desktop/file-fs.js` 的 `readFile` 只按 UTF-8 严解，GBK 文件直接回「这不是 UTF-8 文本文件（含非法字节序列）」——中文 Windows 上随手存的 `.txt`/`.bat`/`.ini`/`.csv` 大多是 GBK，模型一个都读不到；
+- `readTextQuiet`（`file_grep` 用）遇到 GBK 静默跳过——「我明明有这文件，它说搜不到」；
+- 改动对照的 `previewBackup` 用 `slice.toString("utf8")` 预览，GBK 备份预览出来是一片乱码；
+- 更危险的是落盘：写入一律 UTF-8，覆盖 GBK 文件会**悄悄改掉编码**，按 ANSI 读它的程序从此乱码，且这一步不报错。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/file-fs.js` | 新增 `decodeTextBytes()`：UTF-8 严解 → GBK 严解（`gbkDecoder()` 惰性构造，缺完整 ICU 时永久降级返回 null）→ 都不成算非文本；顺手剥 BOM |
+| `packages/desktop/file-fs.js` | `readFile` 改走它，成功时带 `encoding: "utf-8" \| "gbk"`；失败文案改成「这不是 UTF-8 也不是 GBK 文本文件」 |
+| `packages/desktop/file-fs.js` | `readTextQuiet` 改走它（`file_grep` 现在能搜 GBK 文件） |
+| `packages/desktop/file-fs.js` | `previewBackup` 改走它，响应带 `encoding`；二进制仍判 `binary` |
+| `packages/desktop/file-fs.js` | `writeBatch` 覆盖前新增 `nonUtf8TextTarget()`：二进制/超 2MB/非文本不拦；GBK 文本目标**拒绝写入**并回一条可照做的说明（「请先确认要改编码，或把结果写到新文件」），delete 分支跳过检查 |
+| `packages/web/src/lib/fileEdit/bridge.ts` | `FileReadResponse` 成功分支加 `encoding?: "utf-8" \| "gbk"` |
+| `packages/web/src/lib/fileEdit/tools.ts` | `file_read` 头部追加「这个文件是 GBK 编码：已按 GBK 解码显示；写入会被拒绝以免改动它的编码，需要改就另存为新文件」 |
+| `packages/web/src/lib/fileEdit/toolOps.ts` | 写入被编码闸拦下时映射成结构化契约 `error_code: "encoding-mismatch"` + 重试建议（写到新文件 / 先转 UTF-8），不再落到笼统的 `write-failed` |
+
+三条口径：**读宽写严**（读尽力解，写不替用户改编码）；**不猜**（两种严格解码都不成才算非文本）；**拒绝要说人话**（给模型可执行的重试建议，否则它只会重试同一个写入）。
+
+### 0.3 验证
+
+- `packages/desktop/file-fs.test.js` 新增 3 例：GBK 文本读得到 / grep 搜得到 / 覆盖被拒且**原文件字节未变**（同时确认 UTF-8 覆盖与新建不受影响）；`previewBackup` 预览 GBK 备份得到正确文字与 `encoding:"gbk"`；`decodeTextBytes` 四种输入。该文件现 **91 例（90 passed / 1 skip）**。
+- `packages/web`：`tools.test.ts` +2（GBK 提示 / UTF-8 不提示 → 43 例）、`toolOps.test.ts` +1（`encoding-mismatch` 契约 → 23 例）。
+- `packages/desktop` 全量 `pnpm test`：**56 组 / 998 例（997 passed / 1 skip），0 失败**。（首跑曾偶发 `shell-run：取消在跑的命令会杀进程` 一条红，单独跑该文件 33/33 通过、整体重跑全绿，与本轮改动无关，属并行负载下的既有时序抖。）
+- `packages/web` 全量：**384 files / 5543 passed**；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 92ms）。
+
+### 0.4 没做
+
+- 不做 GBK **回写**（要编码表，属新增依赖；本轮目标是「读得到、别改坏」）。
+- 不做自动转换编码（会改动用户文件，必须由人决定）。
+- 不猜其它中文编码（Big5 等）：GB18030 与 GBK 兼容部分已覆盖，其余等真实需求。
+
+## 0-历史-14. 2026-11-17 命令输出的中文不再是乱码（分支 main，版本 d.225.4.112.12）
+
+### 0.1 问题（为什么做）
+
+Windows 控制台的默认代码页是 936（GBK）。`cmd` 的内建命令（`dir`、`type`、`tree`）、以及大量没改过输出编码的老工具，吐出来的是 GBK 字节；而命令桥一直按 UTF-8 硬解（`Buffer.concat(...).toString("utf8")`，前台、后台作业、日志预览三处各写一次）。
+
+结果：在本机明明能跑通的命令，模型和用户拿到的是一片问号或方块——`dir` 出来是问号，中文路径全是替换字符。更糟的是模型据此判断「命令坏了 / 文件不存在」，开始瞎猜；用户界面上一眼看到乱码，直接把「能跑命令」这条能力判死。
+
+这类 bug 不报错、不崩、退出码还是 0，属于「看起来执行了但结果不能用」——和 d.165 那三个静默 bug 同一家族。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/desktop/shell-run.js` | 新增 `decodeCommandOutput(chunks)`：UTF-8 严解（`{ fatal: true }`）→ 失败试 GBK 严解 → 都失败才退回 UTF-8 容错；剥 UTF-8 BOM；GBK 解码器惰性构造，运行时缺完整 ICU 时永久降级为容错解码（不抛） |
+| 同上 | 四处取输出统一改用它：前台命令 stdout/stderr、后台作业增量读 stdout/stderr、作业预览 `tailOf` 的末尾片段 |
+| 同上 | `decodeCommandOutput` 加入 `module.exports`，单测与其它桥可复用 |
+
+口径三条：**只认严格合法**（前两步都用 `fatal: true`，正常 UTF-8 中文不会被误读成 GBK）；**不按行猜编码**（混合编码极罕见，按行猜会让截断位置与真实字节错位）；**不改别人的命令**（不偷偷加 `chcp 65001`，解码在桥这一层做完）。
+
+### 0.3 验证
+
+- `packages/desktop/shell-run.test.js` 新增 3 例（30 → 33）：①纯函数——合法 UTF-8 原样、GBK 字节解成「中文」、BOM 剥掉、两种编码都不成立的坏字节不抛、空输出是空串、分块数组按顺序拼；②真跑一条吐 GBK 字节的命令（`node -e` 往 stdout 写 `[0xd6,0xd0,0xce,0xc4]`，断言 `stdout === "中文"`）；③后台作业与作业预览同样按实际编码解（`[0xb4,0xed,0xce,0xf3]` → 「错误」）。
+- `packages/desktop` 全量 `pnpm test`：**56 组 / 995 例，0 失败**；`pnpm -w typecheck` 六包 Done。
+- `packages/web` 全量 **384 files / 5540 passed**；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 85ms）。
+
+### 0.4 没做
+
+- 不做「让用户手动选编码」：多数人不知道自己的控制台是 GBK 还是 UTF-8，选错了照样乱码；严解自动判定已经够。
+- 不做逐行混合编码解码：截断与行号会错位，收益远小于风险。
+- 不给命令偷偷加 `chcp 65001`：那会改掉程序本身的行为（有的工具据此切输出格式），只在自己的解码边界上做事。
+
+## 0-历史-15. 2026-11-17 排队中的插话看得见也能收回（分支 main，版本 d.225.4.111.12）
+
+### 0.1 问题（为什么做）
+
+d.199 起生成中可以直接插话，但排队这件事一直是个黑盒：发完只回一句「已插话（排队 N 条）」，之后界面上什么都不显示。连发两句，用户说不清还有几条没被模型看到、会不会重复、写错了能不能收回——只能等这一轮跑完再看结果。
+
+长任务里「刚才那句我说错了」是常事。没有退路，人只会选点停止：把跑了十分钟的活和那两句错话一起扔掉。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/components/ChatPage.tsx` | 新增 `steerPendingCount` 状态，与按会话的插话队列（d.226 的 `steerQueueOf(convId)`）同步：入队（`push` 的返回值）、被工具轮取走（`drainSteer` 里 `take()` 之后）、收口（`onRunSettled` 的 `shift` / `clear` 之后）、切会话（换成那个会话自己的条数）四处都更新；新增 `cancelSteerQueue()`：只清内存队列，提示「已取消排队的 N 条插话（内容还在会话里，这一轮照常跑完）」 |
+| 输入区 | 引用提示之后新增排队条（`data-testid="steer-pending"`）：「已排队 N 条插话 · 这一轮下一步就会看到」+「取消」按钮；条数为 0 时整块不渲染 |
+
+口径三条：排队条只报条数、不重复正文（正文就是刚发出去那条消息）；取消只清「这一轮要不要插嘴」，文字早已上行落库、仍在会话历史里；切会话显示的是那个会话自己的队列（d.226 起队列按会话存）。
+
+### 0.3 验证
+
+- `packages/web/src/components/ChatPage.test.tsx` 新增 I4b：流式挂起 → 连发两条插话 → 排队条显示「已排队 2 条插话」→ 点「取消」→ 排队条消失、提示含「已取消排队的 2 条插话」→ 放行这一轮 → 收口（进度行 `data-done="true"`）且 `streamChat` 只被调用 1 次（证明没有哪条插话被当成新一轮发出去）。
+- `ChatPage.test.tsx` 175 例全过；`packages/web` 全量 **384 files / 5540 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 83ms）。
+
+### 0.4 没做
+
+- 排队条不列每一条插话的正文：正文就在输入区上方刚发出去的消息里，重复一遍反而占地方。
+- 取消之后不把那几句塞回输入框：它们已经是会话里的一条消息，塞回去会变成「同一句话出现两次」。
+- 不做「移动排队顺序」或「改一条已排队的插话」：真要改，取消后重发即可。
+
+## 0-历史-16. 2026-11-17 两个会话各跑各的：插话、停止、计数不再串台（分支 main，版本 d.224.4.111.12）
+
+### 0.1 问题（为什么做）
+
+长任务很少只跑一条会话：A 会话慢慢改代码、B 会话查资料，是这台机器上最正常的用法。而这条路径上三样东西是**全局共享**的，谁都不报错，结果却是错的：
+
+- **插话队列**（d.199）：共享一个队列时，A 在跑、用户切到 B 插一句「别动那份配置」，B 的下一轮会先把这句取走——B 的模型突然看到一句没人对它说的话。
+- **子代理停止信号**（d.200）：共享一个 `AbortController` 时，A 的子代理还在跑、用户在 B 点「停止」，停掉的是 A 那一批，B 的照跑。
+- **本轮工具调用次数**（复盘判「复杂任务」用）：共享一个计数时，先收口的那一轮会把后收口那轮的次数读成自己的，复盘据此判错难度。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/steerQueues.ts`（新） | 按会话的插话队列注册表：`of(conversationId)` 同一 id 永远返回同一实例（排队不会因再取一次丢掉），`size()` 给测试/调试，`clear(id?)` 按会话或全清 |
+| `packages/web/src/lib/agentRuntime/steerQueues.test.ts`（新） | 4 例：两个会话各排各的、谁也取不走对方的话；同一会话取回同一实例；按会话清；全清 |
+| `packages/web/src/components/ChatPage.tsx` | 插话队列换成注册表（`steerQueueOf(convId)`，`drainSteer`/入队/收口 shift 全部走它）；子代理停止控制器按会话存（`subagentStopsRef[convId]`，界面「停止」只 `abort` 眼前这个会话那个）；本轮工具计数从组件级 ref 改成 `startRun` 作用域里的局部变量（一次调用一份，收口读自己那份，`onToolComplete` 的 `toolCallCount` 随之改） |
+
+口径三条：切会话不再清插话队列（队列归会话，切回去还在排队）；子代理进度面板仍只显示当前会话的（`resetSubagentRuns()` 未变）；工具计数只用于复盘判难度，不参与任何额度计算。
+
+### 0.3 验证
+
+- `steerQueues.test.ts` 4 例全过；`ChatPage.test.tsx` **174 例全过**（原有插话、停止、收尾路径一字未改）。
+- `packages/web` 全量 **384 files / 5539 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 85ms）。
+
+### 0.4 没做
+
+- 没做「两个会话同时跑」的端到端用例：要真起两条流再造一次会话切换，测试能构造但很脆；这次把隔离逻辑抽成可单测的注册表，盯住「取不走对方的话」这个关键性质。
+- 没做跨会话「一键停止全部」按钮。
+- 没改 MCP 相关的共享状态（`mcpPrefetched`/`mcpRetryAtRef`）：那是「这台机器上 MCP 服不服」的事实，本来就该全局。
+
+## 0-历史-17. 2026-11-17 点了停止就真的停住（分支 main，版本 d.224.4.110.12）
+
+### 0.1 问题（为什么做）
+
+d.199 的「运行中插话」有个致命副作用：`onRunSettled` 里**不管这一轮为什么收口**，都会把队列里那条取出来、`shift()` 之后立刻 `startRun`。
+
+于是用户点「停止」时：这一轮以 `aborted` 收口 → 界面自己又开了一轮 → **「停止」按了没停住**。如果这一轮是报错收口，则是在一个已经失败的请求上再叠一次大概率同样失败的请求。用户看到的现场是「我明明点了停止，它还在跑」——比原来「生成中直接拒绝发送」更让人不信任这套东西。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/components/ChatPage.tsx` | `onRunSettled` 的插话处理按 `result.status` 分流：`ok` → 原样 `shift()` + `startRun`（行为不变）；`aborted` / `error` → 不再自动开轮，改为 `steerQueueRef.current.clear()` 并提示「你点了停止：排队里的 N 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）」/「这一轮出错了：…（内容留在会话里，重试时会一起看到）」 |
+| `packages/web/src/components/ChatPage.test.tsx` | 新增 **I4a**：真流式挂起 → 发送 → 运行中插一句（断言正文照常上行、提示「已插话」）→ 点「停止生成」→ 断言 `streamChat` 只被调用 1 次、提示含「没有发出去」与去向 |
+
+为什么清队列而不是留着：插话正文发送时已经上行落库，续跑/重试时模型从会话历史里就会看到；留在内存队列反而危险——几轮之后某个工具轮会突然把很久以前的一句话塞进上下文，像模型「想起来一句过时指令」。
+
+### 0.3 验证
+
+- `ChatPage.test.tsx` **174 例**全过（新增 1 例）
+- `packages/web` 全量 **383 files / 5535 passed**（96.58s）
+- `pnpm -w typecheck` **六包全 Done**；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 89ms）
+- 版本 `d.224.4.109.12 → d.224.4.110.12`（semver `224.4.110` / Windows `224.4.110.12`）；CHANGELOG 338 条 / RELEASE-NOTES 226 条
+
+### 0.4 没做
+
+- 不把「没发出去的插话」自动放回输入框：多条会互相覆盖，而且用户可能已经改主意
+- 不在 `aborted` 时自动重放这一轮：点停止的意思就是不跑了，「接着做」的入口（d.189）已经在
+- 不补「正常收口时自动接着处理」的端到端用例：该行为 d.199 起没变，本轮只锁「停/错不自动开轮」
+
+## 0-历史-18. 2026-11-17 工具被按需发现挡住时，说清楚（分支 main，版本 d.224.4.109.12）
+
+### 0.1 问题（为什么做）
+
+工具目录超过 20 个就会切到「按需发现」（对应 Codex 的 `tool_search`）：第一轮只给模型约 20 个工具 + 一个检索器，其余要它先检索一次才调得动。机制本身是对的——每个函数都带完整 JSON Schema，五六个 MCP 服务叠起来吃掉可观的输入预算，模型在几十个名字里挑也更容易选错。
+
+但界面上一句话都没说。用户装到第三个 MCP 服务后会发现「它怎么不用我那个工具了」，第一反应是能力坏了或者模型不行，实际是工具被挡在检索后面。`/status` 的本轮工具行只写着「共 N 个（其中核心 C 个常驻）」，读不出这一层；用户在 `/status` 里找不到答案，就只能去改模型、改提示词。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | `tools` 快照扩为 `{ count; core; discovery?; visible?; threshold? }`；新增 `describeToolsLine()`：没超阈值时输出与以前逐字相同；超阈值时补「超过 20 个，已改按需发现——每轮先给约 20 个 + tool_search，其余要先检索」以及「想让它直接可用：停用不用的服务」；阈值/可见数缺失按 20 兜底，绝不写出 `0` 或 `undefined` |
+| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `discovery: names.length > TOOL_SEARCH_THRESHOLD`、`visible: MAX_VISIBLE_TOOLS`、`threshold: TOOL_SEARCH_THRESHOLD`——与 `agentStream` 的钉选同一口径，界面不自己猜阈值 |
+| `packages/web/src/lib/agentRuntime/statusReport.test.ts` | 新增 `describe("工具目录与按需发现（d.224）")` 3 例：未超阈值不提按需发现；超阈值时阈值/可见数/`tool_search`/「停用不用的服务」都在；缺阈值与可见数时按 20 兜底且无 `undefined` |
+
+### 0.3 验证
+
+- `statusReport.test.ts` **30 例**通过；`ChatPage.test.tsx` **173 例**通过（定向合计 203）
+- `packages/web` 全量 **383 files / 5534 passed**（94.49s）
+- `pnpm -w typecheck` **六包全 Done**；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 91ms）
+- 版本 `d.223.4.109.12 → d.224.4.109.12`（semver `224.4.109` / Windows `224.4.109.12`）；CHANGELOG 337 条 / RELEASE-NOTES 225 条
+
+### 0.4 没做
+
+- 不在 `/status` 里列出「此刻被挡住的具体名字」：第一轮可见集合还取决于你这句话的相关度检索（d.191 之后的排序），静态快照写出来会误导
+- 不自动抬高阈值、也不自动关服务：那会让 schema 预算悄悄膨胀，是要用户拍板的事
+- 不改按需发现本身的行为（常驻钉选、检索解锁上限都保持原样）
+
+## 0-历史-19. 2026-11-17 MCP 有没有连上，`/status` 里写清楚（分支 main，版本 d.223.4.109.12）
+
+### 0.1 问题（为什么做）
+
+MCP 工具出现在工具清单里，不等于那台服务此刻连得上。服务进程第二天没起来、配置写错、或者启动时连过一次之后掉线（`state: "stale"`），模型照样在清单里看见这些工具，然后一次次调用失败。
+
+`packages/web/src/lib/mcp/store.ts` 的 `McpServerStatus` 注释早就把这件事讲透了：「快照会落盘，服务第二天起不来时清单还在，界面就显示已连接，模型则拿到一份指向死进程的工具目录」——状态必须反映最近一次连接尝试的结果。但这份状态只出现在「能力 → MCP」页里，`/status` 看不到；而 d.221 的工具失败统计只会说「这个会话失败了 N 次，卡在 transport ×3」，说不出「因为爬虫那台没连上」。用户于是去改模型、改提示词，改不到点上。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/mcp/summary.ts`（新） | `summarizeMcpStatus(servers, statusOf, enabledTools)` 纯函数 → `{ total; enabled; connected; failed[{name,state,error}]; pending; tools }`；只统计已启用服务、无记录算 pending、失败原因原样带出、工具数非法归零 |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeMcpLine(mcp)` 与 `StatusInput.mcp`：零配置 / 全停用 / 全连上（给工具数）/ 有问题点名 + 原因 + 指路「能力 → MCP」；行插在「本轮工具」之后 |
+| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 读 `mcpRegistry.servers()`、`status(id)`、`enabledTools().length` 组快照——只读，不发请求、不触发重连 |
+| 测试 | 新增 `summary.test.ts` 6 例；`statusReport.test.ts` +6 例（共 27） |
+
+### 0.3 验证
+
+- 定向：`summary.test.ts` 6 例、`statusReport.test.ts` 27 例全过。
+- `packages/web` 全量 **383 files / 5531 passed**（98.67s）；`pnpm -w typecheck` **六包全 Done**；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 92ms）。
+- 版本 `d.222.4.109.12 → d.223.4.109.12`（semver `223.4.109` / Windows `223.4.109.12`）。
+- 文档：CHANGELOG 540237 字节 / 336 条、RELEASE-NOTES 57774 字节 / 224 条、README 45421 字节。
+
+### 0.4 没做
+
+- 不在 `/status` 里发起重连：自检是只读快照，动它会变成「看一次就重连一次」的副作用。
+- 不列出每个服务的全部工具：那一屏属于「能力 → MCP」，`/status` 只回答「连得上吗」。
+- 不把 MCP 失败并入 d.221 的工具失败统计：一个是连接事实、一个是调用结果，混在一起会让人以为「失败 = 没连上」。
+
+## 0-历史-20. 2026-11-17 引用的文件没读进来，界面上直说（分支 main，版本 d.222.4.109.12）
+
+### 0.1 问题（为什么做）
+
+d.175 起输入区可以「引用工作区文件」：勾几个文件，内容随这一轮一起给模型，省掉它自己 `file_read` 的往返。`lib/fileEdit/fileRefs.ts` 从一开始就把三种情况分开算了——读到了、没读到（被删 / 移走 / 二进制 / 空文件 / 总量超限）、读到了但只给了前 6000 字。
+
+但只有拼好的**段落**进了提示词：`collected.missing` 和每条的 `truncated` 从来没到过界面。于是用户勾了三个文件、其中一个刚被挪走，这一轮模型就是没看到，界面上一个字都不说；回答里没提到那份文件，用户的结论是「它连文件都没读」。引用不等于授权，读不到不算错误，但**静默**是错误。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/fileEdit/fileRefs.ts` | 新增 `FileRefIssues { missing; truncated }`、`fileRefIssues(collected)`（没问题返回 `null`）、`describeFileRefIssues(issues)`——一句话说清「哪个没读进来 / 哪个只给了前 N 字」以及后果「模型看不到这些内容」；名单超过 3 个压成「等 N 个」 |
+| `packages/web/src/components/ChatPage.tsx` | 发送路径保留 `collectFileRefs` 完整结果（以前只取 `.section`）；问题推到引用芯片下方（`data-testid="file-ref-issue"`、`text-warn`），同时给一次提示位提示（缺文件 error、只截断 info）；收口 / 删引用 / 切会话都清；**顺手补上切会话不清引用**——以前换会话后上一轮勾的文件还挂着 |
+| `packages/web/src/lib/fileEdit/fileRefs.test.ts` | +5 例（全都读到不返回问题、缺与截断分开列、文案含文件名 / 字数上限 / 后果、名字过多压成「等 5 个」、只有截断不说「没读进来」）→ 15 例 |
+| `packages/web/src/components/ChatPage.test.tsx` | +1 例（d.222）：假桥 `glob` 列出 `notes/旧.md`、`read` 回 `not-found`，走「更多操作 → 工作区文件 → 勾选 → 确定引用 → 发送」真实路径 → `file-ref-issue` 出现且含「旧.md」「没读进来」「模型看不到这些内容」→ 173 例 |
+
+### 0.3 验证
+
+- 定向：`fileRefs.test.ts` 15 例、`ChatPage.test.tsx` 173 例全过。
+- `packages/web` 全量 **382 files / 5519 passed**（90.95s）；`pnpm -w typecheck` **六包全 Done**；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 85ms）。
+- 版本 `d.221.4.109.12 → d.222.4.109.12`（semver `222.4.109` / Windows `222.4.109.12`）。
+- 文档：CHANGELOG 538368 字节 / 335 条、RELEASE-NOTES 57515 字节 / 223 条、README 45195 字节。
+
+### 0.4 没做
+
+- 不做「自动重试读取」：文件确实没了就是没了，重试只是多一次失败。
+- 不做「把缺失文件写进会话」：那是模型该知道的事（已经在提示词段落里说了），界面这条只给用户看。
+- 不把缺失清单放进 `/status`：那是「这一轮」的事实，不是会话级状态；`/status` 已有工具失败统计（d.221），两者口径不同，混在一起会让人以为引用失败是工具失败。
+
+## 0-历史-21. 2026-11-17 失败卡在哪，数得出来（分支 main，版本 d.221.4.109.12）
+
+### 0.1 问题（为什么做）
+
+d.220 让每一次工具失败都说清了「为什么」，但「为什么」是一次性的。真正难处理的是**反复卡在同一件事上**：
+
+- 长任务里七次调用红了三次。若三次都是 `path-escape`，那是**工作区没选对**——改一个设置就能过；
+- 若三次是 `match-failed` / `read-failed` / `unknown-tool`，那是**模型在使用工具的方式上偏了**——该换说法、或补约定；
+- 若打头的是 `denied`，那是**用户自己在一次次拒绝**——该调授权策略。
+
+三种情况的修法完全不同，而界面上只有零散的单次红字，要靠人记忆去数。`/status` 恰恰是「我自己也不知道它为什么不干活」时最该看的那一屏，偏偏没有这一项。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/toolFailure.ts` | 新增 `failureCode(result)`：取契约里中文括号那段英文 kebab-case 错误码；取不到返回 null，**不按中文猜**（猜错会把两种失败并成一类） |
+| `packages/web/src/lib/agentRuntime/toolFailureStats.ts`（新） | 按会话累计：`recordToolFailure` / `getToolFailureStats` / `clearToolFailureStats` / `resetToolFailureStats`；被拒单独记 `denied`；错误码上限 20 种，长尾记进 `dropped`；只存内存、按会话隔离 |
+| `packages/web/src/lib/agentStream.ts` | `onToolTrace` end 事件增加 `errorCode?: string`（取工具返回的结构化 `result.error.error_code`），并把 `settled` 的元素类型补上 `error?: ToolFailure` |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeToolFailureLine`：`工具失败：本会话 3 次（path-escape ×2、match-failed ×1）；出错最多的是 file_write（2 次）`；只列前 3 个错误码并说明「还有 N 种没列」；无失败时整行不出现 |
+| `packages/web/src/components/ChatPage.tsx` | `onToolTrace` end 分支为 `error` / `denied` 记账，归到**这条流所属的会话**；`/status` 传 `toolFailures` |
+
+### 0.3 验证
+
+- `toolFailureStats.test.ts` **9 例**（无失败无统计、次数降序、被拒分开、unknown 不丢、**结构化 errorCode 优先**、会话隔离与清除、20 种上限与 dropped、工具名缺失不崩、空会话不入账）。
+- `toolFailure.test.ts` +4 例（共 12 例）；`statusReport.test.ts` +3 例（共 21 例，含「没有失败整行不出现」）。
+- `ChatPage.test.tsx` 新增 **I3z**（失败的 `file_read` 之后 `/status` 出现 `not-found ×1`），并把「记账」与「显示」分开断言。
+- `packages/web` 全量 **382 files / 5513 passed**（97.6s）；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 82ms）。
+
+### 0.4 没做
+
+- 不做按工具曲线、不存历史快照：这一行回答「这一段活卡在哪」，不是监控报表。
+- 不写盘：重启后重新数，免得把上一进程的失败算到这一次头上。
+- 不统计「重试后成功」：要在重试处打点，语义也容易与 `tool_failed` 混。
+
+### 0.5 现场备注
+
+- 第一版从 `result` 文本取错误码，实测全落进 `unknown`：`runRead` 的 `not-found` 分支走 `appendFailure`，文本是「没有这个文件\n可重试：…」，没有 `（not-found）`。修法是让编排层透传结构化的 `error.error_code`——**契约定好的字段，别从人读的文案里反推**。
+- 全量跑时前一个用例迟到的 tool end 会落进同一会话的内存统计，`ChatPage` 那条只断言「有 not-found ×1」，精确排版由 `statusReport.test.ts` 覆盖；并在主 `describe` 的 `beforeEach` 补 `resetToolFailureStats()`。
+
+## 0-历史-22. 2026-11-17 工具失败了，折叠行直接说原因（分支 main，版本 d.220.4.109.12）
+
+### 0.1 问题（为什么做）
+
+工具失败的**信息其实一直都在**：`packages/web/src/lib/toolError.ts` 早就定了失败契约——第一行 `标题（error_code）：说明`，再加可选的 `可重试：…` 与 `提示：…`，模型看得到，才有一次改对的机会。
+
+但这套契约只到了模型那一侧。界面上：
+
+- 折叠行只有工具名、参数摘要和「失败」两个字；
+- 原因（`path-escape` / `no-roots` / `match-failed` / 超时）埋在展开区的原文里，一条条点开才看得到；
+- 契约里的「一句出路」也是散文，混在结果正文中。
+
+于是长任务里七次调用红两次时，用户只知道「它又失败了」，不知道**为什么**、更不知道**下一步改什么**——把「没给可写根」「路径在根外」这类配置问题读成模型能力问题。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/toolFailure.ts`（新） | `parseToolFailure(result)` 解析出 `headline`（第一行，压到 72 字、按码点截断不劈代理对）、`hint`（`提示：…`）、`retry`（`可重试：…`）；`failureNextStep(note)` 优先「提示」、其次「可重试」、都没有返回 null。**只搬运 `toolError.ts` 的契约，不另立建议表** |
+| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 每行先算失败摘要：`status` 为 `error`/`denied` 时折叠行改为显示错误首行（`text-danger`、`title` 保留完整原文），成功行仍是 d.216 的参数摘要；展开区在结果下方多一行「下一步：…」（只有真解析出提示才出现） |
+| 全文 | 原始 `result` 一个字不删：展开区仍是完整原文，摘要只出现在折叠那一行 |
+
+### 0.3 验证
+
+- 新增 `packages/web/src/lib/toolFailure.test.ts` **8 例**：三字段解析、只有标题、空串/空白/`undefined`/`null` 都不算失败、超长按码点截断且不劈代理对、多行只取首行做标题、空的「提示：」「可重试：」不当有内容、下一步优先级、拒绝执行文案同样可解析。
+- `packages/web/src/components/AgentStreamBubble.test.tsx` 加 1 例：失败行折叠显示 `path-escape` 首行且 `title` 带完整契约行、成功行仍是参数摘要、展开区有「下一步：…」、原文契约行仍在；顺带把两处「失败原文只出现一次」的断言改成 `getAllByText(...).length > 0`（同一句现在既在折叠行又在展开区，属预期重复）。
+- `packages/web` 全量 **381 files / 5496 passed**（91.7s）；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 88ms）。
+
+### 0.4 没做
+
+- 不新增建议表：错误码与出路仍由 `toolError.ts` 负责，界面只做搬运——要补建议就补契约本身，两处口径不会分叉。
+- 不在折叠行显示「下一步」：一行放不下两件事，折叠时就该只回答「为什么」。
+- 不做失败归因统计（按 `error_code` 计数、进 `/status`）：那要动 `ToolTrace` 的存储与聚合，留到单独一轮。
+
+### 0.5 现场备注
+
+- `tools.map` 从箭头表达式改成块体（需要按行算失败摘要），`details` 内部缩进随之调整；`nextStep` 只算一次，避免在 JSX 里重复解析。
+- 两处既有断言原本假设失败文本在页面上只出现一次，现在折叠行会重复显示首行——不是回归，是这一轮想要的效果。
+
+## 0-历史-23. 2026-11-17 项目约定从生成到读到都看得见（分支 main，版本 d.219.4.109.12）
+
+### 0.1 问题（为什么做）
+
+d.174 起每轮都会在工作区里找 `AGENTS.md` 一族读进系统提示词，但这条链路的**两头都是哑的**：
+
+- **生成入口没有**：用户不知道有这回事，只能自己手写（还得先知道文件名与位置）。codex 有 `/init`。
+- **读取过程看不见**：`/status` 列了模型、工作区、可写目录、预算、清单、作业，却没有一个字说「这一轮读到了哪份约定」。于是「它为什么不按我们的规矩来」无从查起——**没读到 / 被截断 / 根本没这份文件**，三种情况处理方式完全不同，界面却把它们说成同一件事。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `INIT_COMMAND = "/init"` 与面板第 8 条，说明点明「写进 AGENTS.md，已存在就合并、不覆盖」 |
+| `packages/web/src/lib/agentRuntime/initPrompt.ts`（新） | `INIT_PROMPT`：先 `file_glob` 看结构、`file_read` 读 README / package.json / 2–3 个代表源文件 → 写工作区根的 `AGENTS.md`；已存在先读再合并；≤200 行；只写这一个文件；`expandInitCommand(text)` 做纯函数换算 |
+| `packages/web/src/components/ChatPage.tsx` | `submitMessage` 入口 `expandInitCommand`：命中即把命令换成任务描述**继续走正常发送路径**（落库 + 调工具 + 走写盘确认）——与 `/status`、`/goal` 这类纯本地命令的分界线；项目约定收集处留 `summarizeProjectRules` 摘要到 ref，`buildSelfStatus` 传给 `/status` |
+| `packages/web/src/lib/agentRuntime/projectRules.ts` | 新增 `ProjectRulesSummary` / `summarizeProjectRules`：只给事实（文件名、字数、是否截断、省略几份），正文不进摘要 |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeProjectRulesLine` 与 `shortChars`：列出文件与字数、标注截断与省略；无文件说「无」并指 `/init`；未跑过一轮说「尚未统计」——不把「不知道」说成「没有」 |
+
+顺带修掉 `StatusInput` 里 `contextFold` 与 `tasks` 两条注释挤在同一行的排版问题。
+
+### 0.3 验证
+
+- `initPrompt.test.ts` 5 例；`projectRules.test.ts` +2（摘要只给事实、空集给空数组）；`statusReport.test.ts` +4（列出文件与字数 / 截断与省略如实标 / 无文件说「无」并指 `/init` / 未统计不冒充「无」）；`slashCommands.test.ts` +2（面板含 `/init`、说明点明 AGENTS.md 与合并）。
+- `ChatPage.test.tsx` 新增 I3y：打 `/init` 回车后确实调了模型、外发内容含 `AGENTS.md` / `file_glob` / 「先 file_read 读一遍」，且 `/init` 本身不上行、不留消息。
+- `packages/web` 全量 **380 files / 5487 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 82ms）。
+
+### 0.4 没做
+
+1. 不让模型自己决定约定文件叫什么：只认 `PROJECT_RULE_FILES` 那四个固定名字——否则用户根本不知道它读了什么。
+2. 不把约定正文放进 `/status`：自检是查状态的地方，几千字正文会把它撑成半个文件查看器。
+3. 不做「一键重写已有 AGENTS.md」：合并语义交给模型在提示词约束下做，机械覆盖用户手写的那份比没有这个命令更糟。
+
+## 0-历史-24. 2026-11-17 跑完不白跑（分支 main，版本 d.218.4.109.12）
+
+### 0.1 问题（为什么做）
+
+d.214 给了主对话一条进度行（「第 3 轮 · 正在执行 file_grep · 已跑 42 秒」），但它在收口那一刻**整条消失**。
+
+长任务一次跑十几分钟，收口那一刻用户常常不在屏幕前：回来只看到最后一句话，想知道「刚才那一下到底干了多少」只能往上翻消息数工具调用——还数不准（同一次工具调用在流式气泡里可能分成多段）。这些数字本来就是模型真实做过的事，白扔了可惜。
+
+而进度行如果留着不动，又会被当成「还在跑」，用户会一直等一个不存在的下一轮。所以做法是：**收口时把它换成一行小结**。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/turnProgress.ts` | `TurnProgress` 增 `startedAt`（第一次上报的时刻）、`tools`（真实工具调用次数）、`done`、`endedAt`；新增 `settleTurnProgress(conversationId, now)`：把跑动态换成收口态并保留数字，重复调用不重复通知；`recordTurnProgress` 在「收口后又来进度」时重置计时与次数（新一轮不能累加上一轮）；`describeTurnProgress` 收口态输出「上一轮：N 轮 · M 次工具 · 用时 X」 |
+| `packages/web/src/components/TurnProgressLine.tsx` | 收口后：呼吸点停止、不再显示「已跑」，改为一行小结；`data-done` 标明状态（测试与样式都可依赖） |
+| `packages/web/src/components/ChatPage.tsx` | 收口时 `clearTurnProgress` → `settleTurnProgress`；秒表只在真的在跑时开；切会话时保留已收口的小结（切回来还能看到「上一次干了多少」），未收口的照旧清掉 |
+| `packages/web/src/components/ChatPage.test.tsx` | 主 describe 的 `beforeEach` 里 `resetTurnProgress()`：这张表是模块级内存，不清会把上一条用例的数字带进来（实测有 9 条用例被串红） |
+
+口径三条：只报模型真做过的事（轮次 / 工具次数 / 用时，都是从事件里数出来的）；一个工具都没用时就不写「0 次工具」；切会话保留小结但绝不保留「正在执行」。
+
+### 0.3 验证
+
+- `turnProgress.test.ts` 9 → **15 例**（工具次数按真实调用累加、收口文案、无工具时不写 0 次、收口后再来进度重新起算、重复收口只通知一次、没进度的会话收口不造假）
+- `TurnProgressLine.test.tsx` 4 → **6 例**（收口后没有「已跑」、呼吸点停止）
+- `ChatPage.test.tsx` **170 例**（I3x 改为断言收口后出现「上一轮 … 1 次工具」而不是消失）
+- `packages/web` 全量 **379 files / 5474 passed**（96.6s）；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 84ms）
+- 版本 `d.218.4.109.12`；CHANGELOG **331 条** / RELEASE-NOTES **219 条**
+
+### 0.4 没做
+
+1. 不显示 token 与费用：per-turn 的 token 在用量账本里按 stream 落着，但「这一轮花了多少钱」要等用户配了价目表才准，先不给半截数字。
+2. 不做「点小结展开历史每一轮」：那需要把每轮的工具清单按轮聚合，属于另一个面板（本条进度行只管当前这一轮）。
+3. 不把小结写盘：它是「上一轮」的瞬时事实，重开应用后会话里本就有完整消息与工具轨迹，写盘只会让重启后看到一条来路不明的小结。
+
+## 0-历史-25. 2026-11-17 压缩这件事说出来（分支 main，版本 d.217.4.109.12）
+
+### 0.1 问题（为什么做）
+
+长任务跑到十几轮后，`prepareHistory` 会按预算把更早的消息折成一段摘要（d.183 起还能手动 `/compact`）。界面从头到尾**什么都不说**。
+
+于是用户看到的现象是「它怎么突然忘了我刚说的规矩」「我让它别动那个文件，它又动了」，容易归因成「这模型不行」，而不是「那一轮之前的历史已经变成摘要了」。会话里的原文一条都没删——被折的只是**发给模型的请求**——这点用户也无从得知。codex 压缩上下文时会明确告诉用户，这条对齐它。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentContext/history.ts` | 新增纯函数 `countFoldedMessages(rows, prepared)`：判据与 `compactNow` 一致（头是 system 且以摘要骨架开头才算折了，否则回 0，不编数字） |
+| `packages/web/src/lib/agentContext/contextFold.ts`（新） | 按会话记「最近一次折了几条、什么时候」：`recordContextFold` / `getContextFold` / `clearContextFold` / `resetContextFolds`；只留最近 20 个会话、坏数据丢弃、`localStorage` 抛异常静默降级；`foldNoticeText`、`foldAgeMinutes`、`formatFoldAgeMinutes` |
+| `packages/web/src/lib/agentContext/index.ts` | 导出 `contextFold` 模块 |
+| `packages/web/src/components/ChatPage.tsx` | `prepareHistory` 包装里算折叠条数：真折了就记一条并在提示位说一次；`/status` 快照带 `contextFold` |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | `StatusInput.contextFold?`；上下文那行之后输出 `上次压缩：折叠 18 条（3 分钟前）——会话原文一条没删，模型看到的是摘要；要是它忘了要求，把关键约束再说一遍。` |
+
+口径三条：只报事实（折了几条、多久以前，不解释「为什么忘」）、说清原文没删、只在真折的那一次提示（不进消息流、不落库）。
+
+### 0.3 验证
+
+- `contextFold.test.ts` **11 例**（按会话记/覆盖/非正数与空 id 不记/拷贝隔离/清除范围/20 会话上限/坏数据丢弃/写入异常不崩/提示文案/时间文案）
+- `compact.test.ts` +3 例（`countFoldedMessages` 与 `compactNow` 的 `foldedCount` 一致、没折时是 0、头不是摘要时是 0）
+- `statusReport.test.ts` +2 例（折过就出现且说清「原文没删」；没折过 / 0 条不出这一行）→ 14 例
+- `packages/web` 全量 **379 files / 5466 passed**（91.5s）；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、p95 86ms）
+- 版本 `d.217.4.109.12`；CHANGELOG **330 条** / RELEASE-NOTES **218 条**
+
+### 0.4 没做
+
+1. 不显示摘要正文：会打断阅读；只想看统计可以 `/compact` 自己压一次。
+2. 不做「把原文塞回上下文」：那等于撤销压缩，会把这一轮又推回超限。
+3. 不记录每一次折叠：只留最近一次，避免让用户以为「一直在丢东西」。
+
+## 0-历史-26. 2026-11-17 工具调用不再只给一坨 JSON（分支 main，版本 d.216.4.109.12）
+
+### 0.1 问题（为什么做）
+
+工具轨迹里每次调用展开后，`参数` 直接渲染模型给的原始 JSON：写文件时那是一整篇正文、跑命令时那是一整条命令。用户看到的是一屏转义字符，而不是「它改了哪个文件、改了多少行、跑了什么命令」。历史回看更难受——折叠状态那一行只有工具名，想确认「这轮到底动了哪儿」必须逐个展开。
+
+写文件恰恰是参数最长、也最该说清楚的一类动作（「它到底改了我哪个文件」），却因为 JSON 最像乱码而最难扫。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/toolArgsSummary.ts`（新） | 纯函数 `summarizeToolArgs(name, argsJson)`：按工具名取「用户关心的字段」拼一行摘要；解析失败一律返回空串（宁可只显示工具名，也不瞎猜）；长文本压一行并按码点截断 |
+| `packages/web/src/lib/toolArgsSummary.test.ts`（新） | 13 例：写/改/补丁/读/图/撤销/glob/grep/跑命令/后台作业/子代理/工作流/清单/长输出/未知工具/非法 JSON/代理对截断 |
+| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 折叠行在工具名后渲染摘要（`data-testid="tool-arg-summary"`，`title` 保留原始 JSON）；展开区「参数」仍是完整原文 |
+| `packages/web/src/components/AgentStreamBubble.test.tsx` | +1 例：写文件 `notes/新.md · +2 行`、跑命令 `pnpm -w typecheck · D:/Heming`，并断言原始 JSON 仍在 `title` 里 |
+
+摘要口径：`file_write` → `路径 · +N 行`；`file_edit` → `路径 · N 行 → M 行`；`file_patch` → `补丁 · 文件名`（多个文件时报个数，从 `+++` 行数）；`file_read`/`file_image`/`file_undo` → 路径；`file_glob` → 模式；`file_grep` → `/模式/ in 路径`；`run_command` → 命令行（截 60 字，带 cwd）；`command_output`/`command_kill` → `作业 <id>`；`command_list` → `列出后台作业`；`agent_task` → 任务摘要（并行时 `并行 N 件：…`）；`workflow_run` → `N 步 · 目标`；`todo_write` → `N 项`；`tool_output_read` → `#id · 从第 N 字`；未知工具（MCP 等）→ 前两个标量 `key: value`。
+
+### 0.3 验证
+
+- `packages/web` 全量 **378 files / 5450 passed**（96.3s）
+- `pnpm -w typecheck` 六包全 Done
+- `pnpm eval:agent` **40/40 通过**（tokens/pass 2576、缓存读 2.3%、p95 87ms）
+- 定向：`toolArgsSummary.test.ts` 13/13、`AgentStreamBubble.test.tsx` 15/15
+- 版本 `d.216.4.109.12`；CHANGELOG **329 条** / RELEASE-NOTES **217 条**
+
+### 0.4 没做
+
+1. 不猜语义：摘要只做字段搬运与截断，不调模型总结（多一次请求，也容易说得比事实多）。
+2. 不改展开区：`参数` 仍是完整原始 JSON——摘要让人先看懂，抠细节时原文还在。
+3. 不做图标或分类色：一行文字够扫，加颜色会与状态色（完成/失败/拒绝）抢注意力。
+
+## 0-历史-27. 2026-11-17 上下文估算有了准头（分支 main，版本 d.215.4.109.12）
+
+### 0.1 问题（为什么做）
+
+输入区那行「上下文 ≈ 12.4K / 25.9K（48%）」与「接近上限，可以发 /compact」的提醒，都建立在本机估算上（CJK 一字一 token、ASCII 四字符一 token）。
+
+估算漏掉三样且都不是小数：**工具 schema 开销**（每轮随请求发出的八个内置工具 + MCP 清单，估算里根本没有）、**各家分词器差异**（英文/代码尤其明显）、**消息结构模板**。偏差危险的地方不是数字难看，而是让「快到上限了」出现得太晚——真超限时上游只回 400，压缩链再紧急收紧也救不回已经发出的这一轮；反过来估算偏高会让用户白白 `/compact`。
+
+供应商其实每轮都告诉了我们真值：`usage.input_tokens`。
+
+### 0.2 改了什么
+
+- 新建 `packages/web/src/lib/agentContext/calibration.ts`：按模型记「实际 / 估算」的平滑倍率。首条样本直接成为倍率，之后每条只占一半权重（`SMOOTHING = 0.5`）；倍率夹在 `RATIO_MIN = 0.8`–`RATIO_MAX = 1.8`；估算低于 `MIN_SAMPLE_ESTIMATE = 2000` 不采样（短对话偏差主要是固定开销，摊成比例会虚高）；模型名归一（小写 + trim）；最多记 `MAX_CALIBRATION_ENTRIES = 12` 个模型，按最近使用淘汰；落盘 `heming.contextCalibration.v1`，坏数据丢弃、写不进 storage 只丢持久化。
+- `packages/web/src/lib/agentStream.ts`：`TriggerDeps` 加 `onContextSample?: (sample: { model; estimated; actual }) => void`；在每轮 `onUsage` 里当 `inputTokens !== undefined` 时用 `estimateRowsTokens(requestMessages)` 与 `u.inputTokens` 组成样本回调，异常吞掉（旁路副作用不得反噬收口）。只走回调不写存储——本模块保持纯逻辑可测。
+- `packages/web/src/components/ChatPage.tsx`：`onContextSample` → `recordContextSample()` → 立刻 `refreshContextUsage()`；`refreshContextUsage()` 用 `calibrateEstimate(raw, profile.model)` 显示，并记 `calibrated` 布尔。
+- `packages/web/src/components/ContextMeter.tsx`：加 `calibrated?: boolean`，校准过时 `title` 改成「已用供应商上报的真实提示 token 校准」——被修正过的数字必须说清楚，否则用户会当朴素估算而不信。
+- `packages/web/src/lib/agentRuntime/statusReport.ts`：`context` 加 `calibrated?: boolean`，命中时在上下文行后加「（已按实测校准）」。
+
+**刻意的边界**：校准只影响显示与提醒，**不改变压缩决策**（`prepareHistory` 仍用未校准估算）。压缩是不可逆动作，宁可提醒略晚，也不能因一次异常样本误压历史。
+
+### 0.3 验证
+
+- 新建 `calibration.test.ts` **13 例**：无样本为 1、估算太小不采样、非正数/空模型不采样、首条直接生效、上下限夹逼、平滑只占一半、按模型隔离与大小写归一、落盘重载生效、坏数据丢弃、setItem 抛错不崩、12 个模型上限淘汰最旧、列表按时间倒序、非法估算值原样返回。
+- `agentStream.test.ts` +3 例：报了 `inputTokens` 就把模型/估算/实际交出去（估算 > 0）；只报 `totalTokens` 不采样；采样回调抛错时本轮照样 `agent_finish`、无 `agent_error`。
+- `ContextMeter.test.tsx` +1 例（校准过时 title 含「真实提示 token 校准」且数字不变）；`statusReport.test.ts` +2 例（校准注明 / 未校准不注明）。
+- `packages/web` 全量 **377 files / 5436 passed**；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 86ms）。
+- 版本 d.214.4.109.12 → **d.215.4.109.12**（semver `215.4.109` / Windows `215.4.109.12`）；CHANGELOG 328 条 / RELEASE-NOTES 216 条。
+
+### 0.4 没做
+
+- 不按「固定开销 + 比例」两段式拟合（要更多样本才稳，单倍率已能把偏差从几成压到一点）。
+- 不拿校准数字改压缩阈值（见上）。
+- 不做「估算 vs 实测」历史曲线（一次性调试信息，留在界面上会变成没人看的图表）。
+
+## 0-历史-28. 2026-11-17 主对话也能看出跑到第几轮（分支 main，版本 d.214.4.109.12）
+
+### 0.1 问题（为什么做）
+
+长任务一跑十几二十轮，界面上关于「它在干什么」的信息只有一句静态的「生成中：和小鸣」。用户判断不了「还在干活」还是「已经卡死」，只有干等或点停止——后者会把跑了十分钟的活掐掉。
+
+旁支都有进度：子代理有 `SubagentRuns`（d.200）、后台作业有 `JobPanel`（d.203），唯独最需要的主链路什么都不说。
+
+### 0.2 改了什么
+
+- `packages/web/src/lib/agentStream.ts`：新增 `TurnProgressEvent { round; phase: "round" | "tool"; tool? }` 与 `TriggerDeps.onProgress`。工具轮循环开头报一次 `round`（第 N 轮，从 1 起），每次工具调用前补一条 `tool`（带工具名）。缺省不报，行为与之前逐字一致。
+- 新建 `packages/web/src/lib/agentRuntime/turnProgress.ts`：按会话存当前进度（内存 + 快照缓存，`useSyncExternalStore` 拿稳定引用）；脏轮次（0 / >99 / NaN）与空会话 id 不入账；`tool` 阶段没工具名退回「在思考」；`describeTurnProgress()` / `formatElapsed()` 统一口径。
+- 新建 `packages/web/src/components/TurnProgressLine.tsx`：`第 3 轮 · 正在执行 file_grep · 已跑 42 秒`；没进度整个不渲染；`role="status"`。
+- `packages/web/src/components/ChatPage.tsx`：接 `onProgress` 写进度表；有进度时开 1 秒秒表推进「已跑 X 秒」；收口（`onRunSettled` 第一行）与切会话都清掉。
+
+三条口径：只报事实、不编百分比、收口即消失。
+
+### 0.3 验证
+
+- 新建 `turnProgress.test.ts` **9 例**、`TurnProgressLine.test.tsx` **4 例**。
+- `agentStream.test.ts` +2 例：两轮（先工具后答案）事件序列恰为 `round(1) → tool(file_read) → round(2)`；不传 `onProgress` 行为不变。
+- `ChatPage.test.tsx` +1 例（I3x）：工具调用卡在真实异步里 → 断言「第 1 轮 · 正在执行 file_read · 已跑 …」出现；放开后收口，进度条消失、答案落下。
+- `packages/web` 全量 **376 files / 5417 passed**（92.8s）；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 88ms）。
+- 版本 d.213.4.109.12 → **d.214.4.109.12**（semver `214.4.109` / Windows `214.4.109.12`）；CHANGELOG 327 条 / RELEASE-NOTES 215 条。
+
+### 0.4 没做
+
+- 不显示百分比或「预计剩余」（编出来的进度比没有进度更糟）。
+- 不做逐工具耗时统计（界面上多一行数字只会更吵）。
+- 不写进 `/status`、不落盘：它描述的是「此刻」，刷新后应当不复存在。
+
+## 0-历史-29. 2026-11-17 请求阶段也有出口（分支 main，版本 d.213.4.109.12）
+
+### 0.1 问题（为什么做）
+
+d.211 给流式响应加了空闲超时，但那只覆盖**流建立之后**。真实卡死还有两段空白：
+
+- **连响应头都等不到**：`fetch` 已发出、服务端接了连接却不回状态行 → `await fetch(...)` 永远不返回，界面停在「正在生成」，模型没吐字、工具也没在跑，用户只能点停止。d.203.4.108 的重试对此无效——它得先拿到一个错误才能重试。
+- **非流式路径会挂**：供应商不跟随 `stream` 开关时走 `res.json()`，它内部那次读没有任何超时——给了响应头、正文永远不写完，一样挂死。
+
+两处都没有计时器。
+
+### 0.2 改了什么
+
+- `packages/web/src/lib/llmClient.ts`：
+  - 新增 `CONNECT_TIMEOUT_MS = 120_000`：只给「发出请求 → 收到响应头」这段计时。`doFetch` 改成「fetch 与计时器竞速」（不能给 `fetch` 加整体超时，否则正常的长响应体会被一起掐掉），超时 `connectController.abort()` 并抛 `UpstreamTimeoutError`（`status 408`、`phase: "connect"`）；拿到响应头即 `clearTimeout`。
+  - 抽出 `readChunkWithIdle(reader)`：一次读一个 chunk，`idleMs` 内没新数据就 `abort` + 抛 `StreamIdleTimeoutError`（`phase: "stream"`）；**流式与非流式共用同一份实现**。
+  - 非流式分支 `res.json()` 换成「带空闲超时读完整个 body 再 `JSON.parse`」；两类超时错误原样透出，`AbortError` 仍转成用户停止，非法 JSON 给 `LlmHttpError(0, "响应不是合法 JSON：…")`。
+- `packages/web/src/lib/agentRuntime/upstreamRetry.ts`：408 文案按 `phase` 分三档（connect / stream / 无 phase），并在注释里写明 408 被复用为空闲/连接超时的原因。
+
+### 0.3 验证
+
+- `packages/web/src/lib/llmClient.integration.test.ts`（真 HTTP + 真 SSE）9 例，新增 3 条：①连响应头都等不到 → `UpstreamTimeoutError` + `phase:"connect"` + 文案含「没有开始响应」、耗时 < 3s、只请求 1 次；②非流式 body 不结束 → `StreamIdleTimeoutError` + `phase:"stream"`；③响应头到手后定时器不再掐连接（300ms 后才有内容，`connectTimeoutMs: 120` 仍成功）。
+- `packages/web/src/lib/agentRuntime/upstreamRetry.test.ts` 10 例（408 三档文案 + 仍属可重试瞬时错误）。
+- 定向 3 个文件 **126 例**通过；`packages/web` 全量 **374 files / 5401 passed**（93.7s）；`pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 84ms）。
+- 版本 d.212.4.109.12 → **d.213.4.109.12**（semver `213.4.109` / Windows `213.4.109.12`）；CHANGELOG 326 条 / RELEASE-NOTES 214 条。
+
+### 0.4 没做
+
+- 不把两个超时做成用户可调（120 秒是「人还能理解在等」的上限，做成开关只是多一项配置负担）。
+- 不在等响应头超时后自动换供应商（路由是用户的配置，替用户改属于越权）。
+- 不细分成「首字节超时」与「空闲超时」两档：connect 段与 stream 段各 120 秒已覆盖两类真实卡死。
+
+## 0-历史-30. 2026-11-17 左栏能看出哪个会话正在跑（分支 main，版本 d.212.4.109.12）
+
+### 0.1 问题（为什么做）
+
+长任务最常见的错觉是「屏幕没动 = 它没在干活」。在会话 A 里派一轮要跑几分钟的活，切到会话 B 看别的东西，左栏里 A 和别的会话长得一模一样——于是回去重发一遍，或者干脆把整个应用关掉。
+
+已有的两处提示都不回答这个问题：`/status`（d.193）只在**打开那个会话**时说话；「未跑完」徽标（d.196）说的是**过去**没跑完（关窗/崩溃/用户停下留下的续跑点）。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentRuntime/runningStreams.ts`（新） | 纯函数 `runningConversationIds(streaming, streamOwner)` / `isConversationRunning(...)`：①只认本机起的流（`streamOwner[id] === true`）——WS 回声里的条目是别的窗口/设备在跑，跟着点亮会误导；②只认 `status === "streaming"`（`error` 已收场）；③按会话去重并保持首次出现顺序；④丢掉没有会话 id 的条目。不读时间、不读存储 |
+| `packages/web/src/lib/agentRuntime/useRunningConversations.ts`（新） | `useMemo` 把 `streaming` / `streamOwner` 两个切片算成 `Set<string>`：左栏每行问一次是 O(1)，且只在切片换引用时重算 |
+| `packages/web/src/components/RunningTurnBadge.tsx`（新） | 会话行上的「正在跑」徽标（`ui-chip`、`aria-label="正在跑"`、title「这一轮还在跑：模型或工具正在工作」）；不在跑就不渲染 |
+| `packages/web/src/components/assistant/ConversationRail.tsx` | 渲染在「未跑完」徽标**之前**：一个说此刻，一个说过去，互不替代 |
+
+### 0.3 验证
+
+- 新增 `runningStreams.test.ts` **8 例**：本机流认、无 owner 不认、error 不认、同会话重复只亮一次且保序、空/缺会话 id 丢弃、脏切片不崩；`isConversationRunning` 正负与空 id。
+- 新增 `RunningTurnBadge.test.tsx` **4 例**：在跑显示、别的会话在跑不显示、只有别的设备回声不显示、收口后订阅驱动消失（用 `act()` 包 store 更新，否则 React 报 not wrapped in act）。
+- `ConversationRail.test.tsx` 加 **2 例**（只有那一个会话带徽标；非本机流不点亮）→ 29 例。
+- `packages/web` 全量 **374 files / 5398 passed**（91.4s）；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 83ms）。
+
+### 0.4 没做
+
+1. 不显示进度百分比：真实进度只有子代理/后台作业知道，左栏编一个数字比不显示更坏。
+2. 不在工作区分组头上汇总（「这个工作区有 2 个在跑」）：先把单会话口径钉住。
+3. 不做托盘/任务栏角标：留给需要时再加。
+
+## 0-历史-31. 2026-11-17 流卡住了会自己收场：空闲超时断开并交给重试（分支 main，版本 d.211.4.109.12）
+
+### 0.1 问题
+
+d.203.4.108 能让上游 429 / 5xx / 连接被掐断自动退避重试，d.206 能把卡住的工具调用取消掉。但还有一条路没有任何出口：**流已建立、数据突然不来、连接也不关**。
+
+真实场景很常见：供应商「思考」时长时间不发字节、中间网关被限流后既不回数据也不断开、半死的长连接挂在那里。此时 `reader.read()` 永远挂着——界面是永久转圈的「生成中」，用户看不到任何错误，只能手动点停止，而停掉这一轮就白跑了。`fetch` 本身没有空闲超时，这一层必须自己兜。
+
+### 0.2 改了什么
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/llmClient.ts` | `STREAM_IDLE_TIMEOUT_MS = 120_000`；`StreamIdleTimeoutError extends LlmHttpError`（`status = 408`）；`combineSignals(opts.signal, idleController.signal)` 作为 `fetch` 的总闸；读循环改为 `readWithIdle()`（超时 → `idleController.abort()` 掐断连接 + 抛错误，已收到的 `acc` 不丢）；`StreamChatOpts.idleTimeoutMs?` 仅测试用 |
+| `packages/web/src/lib/agentRuntime/upstreamRetry.ts` | `describeUpstreamError` 对 408 输出「流式响应卡住了（长时间没有新数据）」（408 本来就在 `RETRYABLE_STATUS` 里，无需特判重试） |
+
+设计取舍：408 直接复用已有可重试分类，避免在 `agentStream` 里再加一条特判；超时被视为失败（不伪装成正常收尾），但半截内容保留在界面上。
+
+### 0.3 验证
+
+- `llmClient.integration.test.ts` +1 例（真 HTTP + 真 SSE：假网关写半句后既不写 `[DONE]` 也不结束响应）：`idleTimeoutMs: 120` → `StreamIdleTimeoutError`（`status 408`、`body` 含「没有新数据」）、`deltas === ["先说半句"]`、耗时 < 3s、只请求一次。
+- `upstreamRetry.test.ts` +1 例：408 文案 + `isRetryableUpstreamError(408) === true`。
+- `packages/web` 全量 **372 files / 5384 passed**；`pnpm -w typecheck` 六包 Done；确定性评测 **40/40**（tokens/pass 2576、缓存读 2.3%、p95 88ms）。
+
+### 0.4 没做
+
+- **不把卡住伪装成正常收尾**：超时如实报错，不假装这一轮做完了。
+- **不按模型类型调阈值**：思考型模型确实可能长时间无输出，但阈值可配会增加理解成本；120 秒对现有供应商够用，真遇到再按日志调。
+- **不自动换供应商重跑**：只做「断开并交给已有重试」；跨候选切换属于路由层 `streamChatRouted`，另算。
+
+## 0-历史-32. 2026-11-17 这个会话一共动过哪些文件：会话级改动台账（分支 main，版本 d.210.4.109.12）
+
+### 0.1 问题
+
+d.207 能逐行看「本轮改成了什么」，但那份对照挂在**当前一轮**上：下一轮跑起来就被 `TurnUndoBar` 覆盖，点一下「保留」也立刻消失。长任务改到第十几轮之后，用户真正想问的是另一个问题——**这个会话一共动过哪些文件？** 之前只能靠翻聊天记录回忆，而记录会被压缩、会被折叠。
+
+长任务里最贵的失误不是改错一行，是「改乱了却不知道乱在哪、也没法回头」。
+
+### 0.2 改了什么
+
+| 文件 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/fileEdit/sessionChanges.ts`（新） | 会话级台账 `SessionChange { path; at; writes }`；`SESSION_CHANGES_KEY = "heming.sessionChanges.v1"`、每会话 100 文件 / 最多 30 会话；内存 + localStorage 双写、`snapshots` 按会话缓存保证 `getSessionChanges` 引用稳定（`useSyncExternalStore` 前提）、`isChange` 校验坏条目、存储异常静默降级；导出 `subscribeSessionChanges`、`getSessionChanges`、`recordSessionChanges`（去重、同路径累加 `writes`）、`clearSessionChanges`、`resetSessionChanges` |
+| `packages/web/src/components/SessionChangesBar.tsx`（新） | 输入框上方「本会话改过 a.ts、b.ts、c.ts 等 N 个」+「查看改动」；空台账整条不渲染 |
+| `packages/web/src/components/ChangeDiffDialog.tsx` | 可选 `files` / `onPick`：左侧文件列表（basename + 「改过 N 次」+ `aria-current`），右侧随选中文件换对照；不传时保持原单文件标题 `改动对照 · name` |
+| `packages/web/src/components/ChatPage.tsx` | 收口 `if (result.writes?.length) recordSessionChanges(convId, result.writes)`；`sessionChanges` 走 `useSyncExternalStore`；`openSessionChanges()`（无 `hasBackupPreviewBridge` 时只提示「只有台账」，否则开弹窗并 `previewTurnChange(第一条)`）；三处清 `setChangeDiff(null)` 同步清 `sessionChangesOpen`；`buildSelfStatus` 传 `sessionChanges: getSessionChanges(convId).length` |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | `StatusInput.sessionChanges?: number`；`/status` 多一行「本会话改动：N 个文件（点输入框上方的「查看改动」逐行对照）」，0/省略不占行 |
+
+### 0.3 验证
+
+- `sessionChanges.test.ts` **11 例**（会话隔离、最近在前、重复改累加、快照引用稳定、跨进程读回、100/30 上限、坏数据、存储抛异常不崩）。
+- `SessionChangesBar.test.tsx` **3 例**、`ChangeDiffDialog.test.tsx` **6 例**（+2 文件列表）、`statusReport.test.ts` **10 例**（+1）、`ChatPage.test.tsx` **169 例**（+I3w）。
+- `pnpm -w typecheck` 六包全 Done；`packages/web` 全量 **372 files / 5381 passed**；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 89ms）。
+
+### 0.4 没做
+
+- **不存改动内容**：台账只记「哪些文件、改了几次」；存内容会撑爆 localStorage，且与备份目录重复。
+- **不做整会话一键回滚**：一次撤十几轮风险太大（中间可能有用户认可的改动），本版只负责「看清楚」。
+- **不显示跨会话汇总**：不同工作区/分支的改动混在一张表里没有可靠语义。
+
+## 0-历史-33. 2026-11-17 请求与字节流第一次被真实验证：协议层集成测试（分支 main，版本 d.209.4.109.12）
+
+### 0.1 问题
+
+所有涉及模型的测试都把 `streamChat` 换成假函数，于是两件事从来没有被真实字节验证过：
+
+1. **我们发出去的请求体长什么样**——`tools` 有没有保持 OpenAI 外壳、`stream_options.include_usage` 在不在、`max_tokens` 有没有显式给、Authorization 头对不对；
+2. **回来的字节怎么拼回文本与工具调用**——`tool_calls` 的参数是按 `index` 分片到达的，跨帧拆开时能不能拼回一次完整调用。
+
+d.165 那个「工具 spec 没包 OpenAI 外壳，多 provider 合并后 `run_command` 静默不可达」的 bug 就出在这条接缝上，而它只有真请求才暴露。测试替身越多，接缝越容易积灰。
+
+### 0.2 改了什么
+
+- 新建 `packages/web/src/lib/llmClient.integration.test.ts`（`// @vitest-environment node`），用 `http.createServer` 起本地假网关，让 `streamChat` 走真实 `fetch`，5 例覆盖：
+  1. **请求体**：`model` / `stream` / `temperature` / `max_tokens`（档案手填优先）/ `stream_options.include_usage` / `tools`（外壳原样，逐字相等断言）/ `tool_choice: auto` / `messages` / `Authorization: Bearer <key>`；
+  2. **SSE 增量**：内容分帧到达时按序回调，返回值是全文累积；
+  3. **跨帧 tool_calls**：同一个 `index` 三片（id+name、半个 arguments、剩下一半）拼回一次调用 `{"path":"a.md"}`，`onFinish` 拿到 `tool_calls`；
+  4. **400 降级链**：首个请求被 400 拒绝后去掉 `stream_options` 重发成功，且第二次的消息与工具外壳逐字不变；
+  5. **非流式兼容**：网关回 `content-type: application/json` 时整段一次性交出；
+  6. **中途取消**：`abort` 抛 `AbortError`，不当成供应商错误。
+- 所有断言都落在「假网关真的收到了这些字节」上（`gateway.calls` 的长度与内容），不是再包一层假函数；测试自带 `afterEach` 关服务器、`server.closeAllConnections()` 防止流式连接残留。
+
+### 0.3 验证
+
+- 定向：`vitest run src/lib/llmClient.integration.test.ts` → **5/5 通过**（54ms，真 socket）。
+- `packages/web` 全量 **370 files / 5364 passed**（92.3s）。
+- `pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 92ms）。
+
+### 0.4 没做
+
+- 不做真实网关端到端（要 Key 与公网，属于 `--real` 评测范畴，不进每次 CI）。
+- 不测 `streamChatRouted` 的多候选切换（已由 `llmRoute` 单测覆盖，重复测没有新信息）。
+- 不引入 `nock`/`undici` 等新依赖（用 Node 自带 `http`，零新增依赖）。
+
+### 0.5 现场备注
+
+- `LlmProvider` 目前只有 `"openai"` 一个字面量，测试里写 `provider: "deepseek"` 会被 typecheck 拒（TS2322）——写 `"openai"`，`baseUrl` 指本机假网关即可。
+- 本轮只改测试与文档，产品代码零改动；版本按「新功能」位 bump（沿用评测/测试基建轮次的口径）。
+
+## 0-历史-34. 2026-11-17 跑完真的会提醒你：系统通知接上链路（分支 main，版本 d.208.4.109.12）
+
+### 0.1 问题
+
+长任务的标准用法是「让它跑，我去干别的」。但这条链路一直是断的：
+
+- 桌面端通知桥 `packages/desktop/notify-bridge.js` 从 d.39 起就齐全（`cleanText` 压控制符、按码点截断、`TITLE_MAX=80`/`BODY_MAX=160`、`getFocusedWindow` + `mainWin.isFocused()` 双闸不打扰、点击只处理第一次、`win.show()+focus()` 后发 `notify:open` 带会话 id，连压力测试都有）；
+- 渲染层也有 `packages/web/src/lib/desktopNotify.ts` 的 `notifyDesktop()`；
+- 但**生产代码里没有任何一处调用它**（只有它自己的测试引用），`notify:open` 也从未订阅。
+
+于是通知功能在代码里存在了几个月、在用户那里等于不存在：切走之后永远不知道那一轮已经跑完，或者正停在「等你确认」上——回来看到的是「已超时按拒绝处理」。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/desktopNotify.ts` | 新增开关 `DESKTOP_NOTIFY_KEY = "heming.desktopNotify.v1"`（默认开、只认显式 `"0"` 为关）、`isDesktopNotifyEnabled()`、`setDesktopNotifyEnabled()`；`notifyDesktop()` 先看开关，`document.hasFocus` 加函数存在性保护；新增 `onDesktopNotifyOpen(handler)` 订阅点击回传（包装 `window.__heming_notify.onOpen`，回调异常吞掉、返回退订、无桥返回空函数） |
+| `packages/web/src/lib/agentRuntime/turnNotify.ts`（新） | `describeTurnEnd()` 把收口状态翻成人话：做完了 / 出错了 / 撞轮次上限 / 上下文满了；`aborted` 返回 `null`（用户自己停的，不打扰）；`describeApprovalWait()` 说清哪个工具在等确认；`firstLine`/`clipText` 按码点截断；`notifyTurnEnd()` 按「同会话 + 同标题 4 秒」去重、`notifyApprovalWait()` 按 requestId 一小时去重；`resetTurnNotifyThrottle()` |
+| `packages/web/src/components/ChatPage.tsx` | `onRunSettled` 里 `notifyTurnEnd(result, 名, convId)`；新增 effect 在 `pendingHitl`（tool-call）出现时 `notifyApprovalWait(...)`；新增 effect 订阅 `onDesktopNotifyOpen` → `openConversation(conversationId)`；切会话时 `resetTurnNotifyThrottle()`；`submitMessage` 加 `/notify on|off|status` 本地分支；`buildSelfStatus` 传 `notifyEnabled` |
+| `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `NOTIFY_COMMAND = "/notify"` 与面板条目（第 7 条命令，能被发现） |
+| `packages/web/src/lib/agentRuntime/statusReport.ts` | `StatusInput` 加 `notifyEnabled?`，`/status` 多一行「系统通知：开（窗口不在前台时…）/ 关（发 /notify on 打开）」 |
+
+两条口径：**只报状态、不猜结果**（正文取模型最后输出首行，没有就写「打开会话看结果」）；**窗口在前台就不弹**（沿用桌面端既有双闸，不另造一套判断）。
+
+### 0.3 验证
+
+- 新增 `packages/web/src/lib/agentRuntime/turnNotify.test.ts` **12 例**（四种收口文案、`aborted` 不提醒、首行与码点截断、同会话去重与重置、不同会话/标题互不影响、确认请求只提醒一次、通知带会话 id）。
+- `packages/web/src/lib/desktopNotify.test.ts` 扩到 **5 例**（默认开 / 关掉不弹 / 打开恢复 / 点击回传与退订 / 回调异常不外溢）。
+- `packages/web/src/lib/agentRuntime/statusReport.test.ts` +1（开关两态 + 省略按默认开）；`slashCommands.test.ts` 断言面板共 7 条。
+- `packages/web/src/components/ChatPage.test.tsx` +1（**I3v**）：假 `__heming_notify` + `document.hasFocus` 返回 false → 一轮跑完收到 `title`「和小鸣 这一轮做完了」与会话 id `c1`；发 `/notify off` → 命令不落库、`heming.desktopNotify.v1` 写成 `"0"`。
+- `packages/web` 全量 **368 files / 5359 passed**（88.6s）；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576、缓存读 2.3%、p95 92ms）。
+
+### 0.4 没做
+
+- 不做「审批超时前再提醒一次」：超时按拒绝收口，多提醒一次更像催命。
+- 不做托盘图标 / 通知声音 / 免打扰时段：需要新权限或设置页，先确认通知本身有用。
+- 不做通知历史：应用内已有通知中心（d.34），系统通知只负责「叫醒」，不负责存档。
+
+### 0.5 现场备注
+
+- 本轮**未打包、未部署、未发布**（用户要求「每次更新不做打包」）：线上仍是 d.203.4.106.12（安装包 r109），本地 d.203.4.107.12 起八版未发布。
+- C: 盘空间仍紧张（上次只剩约 0.6GB，清理后约 11GB）；打包时需把 `TEMP`/`TMP` 指到 D 盘。
+
+## 0-历史-35. 2026-11-17 撤之前先看清楚：本轮改动逐行对照（分支 main，版本 d.207.4.109.12）
+
+### 0.1 问题
+
+d.176 / d.185 已经支持「撤回本轮改动」与「按文件撤回」，但**撤之前看不到改了什么**。模型改文件的动作经常发生在没打开的文件里，界面上只写「本轮改了 a.ts、b.ts」，至于里面哪几行变了，用户得自己开编辑器找（还得先猜到在哪一行）。
+
+后果是这条安全网平时不敢用：万一撤掉的是自己要的改动呢？于是宁可留着错的也不点。本轮把「看清楚」补上——每个文件一个「改动」按钮，点开就是改动前/改动后的逐行对照。
+
+### 0.2 改了什么
+
+| 层 | 文件 | 改动 |
+| --- | --- | --- |
+| 桌面 | `packages/desktop/file-fs.js` | 新增 `previewBackup()`：**只读**读回某个路径最近一份改动前备份；与 `undoWrite` 同一套闸（可写根 / 只读根 / 根内 / 软链祖先 / 保留名）；**不消费备份、不动目标文件**；单次最多 256KB（`MAX_BACKUP_PREVIEW_BYTES`）、二进制嗅探（`binary`）、`cut` 标记 |
+| 桌面 | `packages/desktop/file-fs.js` / `preload.js` | 新 IPC `file:backup-preview` → `__heming_files.backupPreview`（只挂主预加载，组件/桌宠不暴露） |
+| 测试 | 桌面 `pnpm test` **56 组 / 992 例（991 passed / 1 skip）**；web 368 files / 5339 passed；deterministic eval **40/40** |
+| 渲染 | `packages/web/src/lib/fileEdit/turnDiff.ts` | 行级对照：先剥公共前后缀，中间用 LCS（`Uint32Array`）；长段未改动折叠成「…（省略 N 行未改动）」；完全一致时**不产出任何行**并明说「内容没有变化」；上限 600 行、上下文 3 行 |
+| 渲染 | `packages/web/src/components/ChangeDiffDialog.tsx` | 新弹窗：两列行号 + `+`/`-` 前缀、增行绿/删行红；加载中、失败（只报原因不画空对照）、二进制、截断（256KB / 2MB / 太长）各自如实说明 |
+| 渲染 | `packages/web/src/components/TurnUndoBar.tsx` | 每个文件多一个「改动」按钮；没收到 `onPreview` 就不渲染（老安装包行为不变），`ml-auto` 退回撤回按钮 |
+| 渲染 | `packages/web/src/components/ChatPage.tsx` | `previewTurnChange()`：先预览备份、再读当前文件，两边都拿到才画对照；读不到备份（新建文件 / 已被撤销用过）直接说原因；切会话、开新一轮、撤回之后都关掉对照 |
+
+对照的两边都是**真实磁盘内容**，不是工具参数拼的：`file_edit` 只带改动片段，用它拼会把文件其余部分漏掉。
+
+### 0.3 验证
+
+- `packages/desktop`：`node --test file-fs.test.js` **87 passed**（新增 4 例）；`node --test main.test.js preload.test.js secure-origins.test.js` **95 passed**
+- 新增 `turnDiff.test.ts` **6 例**、`ChangeDiffDialog.test.tsx` **4 例**、`TurnUndoBar.test.tsx` +2（共 **11 例**）、`ChatPage.test.tsx` +1（共 **167 例**）——后者断言「备份预览与当前文件各被读一次」且弹窗里出现增删行
+- `packages/web` 全量 **368 files / 5339 passed**；`pnpm -w typecheck` 六包全 Done；`pnpm eval:agent` **40/40**（tokens/pass 2576）
+- 期间还修掉一处类型债：`turnDiff.ts` 的 `Op` 类型没有 `omitted` 字段、测试侧 `.find()` 缺类型守卫，`tsc` 首跑报 4 处 → 都按类型补齐（不是用 `as any` 绕过）
+
+### 0.4 没做
+
+- 不保留多版本历史对照（只看「最近一次改动前」；要翻更早得靠系统快照）
+- 不做整轮的汇总 diff（一次改十个文件时仍是一文件一窗口，汇总容易变成一屏噪点）
+- 老安装包不显示「改动」按钮（没有 `file:backup-preview` 通道就藏起来，而不是点了报错）
+
+### 0.5 现场备注
+
+- 本会话仍带 `ELECTRON_RUN_AS_NODE=1`（跑桌面 exe 前要清空，否则它按 Node 解释执行）
+- 打包相关命令本轮不跑（用户要求「每次更新不做打包」）；`d.203.4.107.12` 起的七版本地未打包、线上仍是 d.203.4.106.12（r109）
+
+## 0-历史-36. 2026-11-17 常驻工具不再靠一份会过期的名单（分支 main，版本 d.206.4.109.12）
+
+### 0.1 问题
+
+工具目录超过 20 个（装两三个 MCP 就会超）时，和鸣切到「按需发现」：只塞一部分工具进请求，其余靠 `tool_search` 解锁，名额按「与用户这句话的相关度」排。于是**本地能力会被 MCP 挤掉**——用户说「帮我查下笔记」，相关度命中的全是笔记工具与一堆 `srv__*`，第一轮可能看不见 `file_write` / `run_command`，长任务走到一半要写要跑时模型只能先猜着 `tool_search`，或干脆说做不到。
+
+d.191 的办法是列一份常驻名单，但名单有个隐蔽失效方式：**会过期，而且不报错**。d.204 加了 `workflow_run`，没人想起来补——装了 MCP 的机器上，模型自己刚学会的工作流工具可能被挤到看不见的地方。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `lib/agentStream.ts` | `ToolBridge.meta` 返回类型加 `core?: boolean`：**由注册工具的地方声明**「这是长任务全程要用的本地核心工具」 |
+| `lib/fileEdit/tools.ts`、`lib/shell/tool.ts`、`lib/todo/tool.ts`、`lib/spill/tool.ts`、`lib/agentRuntime/subagent.ts`、`lib/agentRuntime/workflow.ts` | 六个内置桥在自己的 `meta()` 里声明 `core: true`（文件读写 8 个、命令与作业 4 个、清单、长输出、子代理、工作流） |
+| `lib/agentRuntime/coreTools.ts` | `isCoreTool(name, metaOf?)` / `coreToolNames(names, metaOf?)`：**声明优先、旧名单兜底、两者取并集**；旧名单补上漏掉的 `workflow_run` |
+| `lib/agentStream.ts`（钉选处）、`components/ChatPage.tsx`（`/status` 计数） | 都改成把桥的 `meta` 传进去，两条路径同一口径 |
+
+为什么取并集而不是直接删清单：清单兜住的是**没补声明的桥**（第三方、老安装包、单测假桥）。声明漏了最坏退回以前的行为，不会更差；声明补上就立刻生效。# 0.3 验证
+
+- `coreTools.test.ts` 由 5 例扩到 **8 例**：旧名单含 `workflow_run`（墓碑断言，防再漏）、声明优先、声明与名单取并集、显式 `core: false` 不钉、MCP/相似名不被误钉、顺序与去重。
+- `agentStream.test.ts` 新增 2 例走真链路（25 个工具的目录、用户这句话与工具描述无关）：桥声明 `core` 的工具**出现在第一轮请求的工具清单里**；没声明的那条不出现——证明钉选逻辑真的接上了，而不只是单测函数对。
+- 六个内置桥的 `meta` 断言同步补 `core: true`（`shell/tool.test.ts` 31 例、`subagent.test.ts` 35 例、`workflow.test.ts` 20 例、`todo` 19 例、`spill` 7 例全过）。
+- `pnpm -w typecheck` 六包 Done；`packages/web` 全量 **366 files / 5326 passed**；`pnpm eval:agent` **40/40**。
+
+# 0.4 没做
+
+- 没做**逐工具名额配置**：常驻名额是全局阈值，谁该钉住由声明决定；核心工具多到挤掉相关度工具时再谈分组。
+- 没让 MCP/插件声明 `core`：名额有限，钉谁必须由我们决定（与 MCP `annotations` 不可信同一口径）。
+- 没在界面上列「这次钉住了哪几个」：`/status` 只报数量。
+
+## 0-历史-37. 2026-11-17 工具超时不再只是「不等了」：该停的真的停（分支 main，版本 d.205.4.109.12）
+
+### 0.1 问题
+
+d.186 的 180 秒兜底超时只做到「**不再等**」：`Promise.race` 到点回一条失败文案，底层那次调用还照跑——本机命令的子进程、MCP 的 HTTP 请求都留在后面继续。
+
+后果安静但危险：用户以为它停了，进程树还在写文件；挂死的 MCP 调用一直占连接，下一轮同类调用继续排队；模型被告知「超时」，却无法知道外部状态干净没有。
+
+### 0.2 改了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `packages/web/src/lib/agentStream.ts` | `withToolTimeout` 改成收 `run(signal)`：给**每次**工具调用建自己的 `AbortController`，与本轮停止信号合成（`parentSignal` abort → 自己的也 abort），超时那一刻 `abort()` 这次调用 |
+| 同上 | 超时文案分两条：真发了取消 → 「已经请求取消这次调用：能停的（本机命令、MCP 调用）会真的停下，其余只是不再等它」；本轮同时被停止 → 「已经中止这次等待（本轮同时被停止）」 |
+| 同上 | `TriggerDeps` 新增 `toolTimeoutMs?`，**只给测试用**（把 180 秒压到 1 秒才能验「超时真的 abort」），注释写明产品里不要传 |
+
+没有新增「杀进程」逻辑——能力早就有，这次只是把**超时**接到那条已有的取消链上：`run_command` 监听 `signal.abort` → `bridge.cancel(runId)` → 主进程杀进程树（d.164）；MCP 桥先查 `signal.aborted` 再 `client.callTool(..., { signal })`；文件类工具是纯同步/短异步，abort 时本来没在跑。
+
+### 0.3 验证
+
+- `agentStream.test.ts` 新增 2 例（该文件 **105 例**、全过）：
+  - 「超过兜底时限」：工具永不返回；超时后断言工具**收到的信号 `aborted === true`**（核心断言——只断言文案测不出「停没停」），文案含「已经请求取消这次调用」「能停的（本机命令、MCP 调用）会真的停下」，这一轮照常收口（无 `agent_error`、有 `agent_finish`）；
+  - 「在时限内返回」：信号未 abort、结果原样回给模型。
+- `packages/web` 全量：**366 files / 5321 passed**。
+- `pnpm -w typecheck`：六包全 Done。
+- `pnpm eval:agent`：**40/40 通过**（tokens/pass 2576、p95 89ms）。
+
+### 0.4 没做
+
+- 没给不同工具配不同超时（MCP 可配 600 秒，理论上该单独放宽）：这轮只保证「到点真的停」，阈值分层等真实挂死数据再说。
+- 没在界面上单独提示「这次是被取消的」：工具结果里已写清，轨迹里也有 `ok:false`。
+- 没把超时次数计入 `/status`：一次超时是工具问题，不是会话状态问题。
+
+## 0-历史-38. 2026-11-17 工作流也有回归网：多步编排进评测（分支 main，版本 d.205.4.108.12）
+
+### 0.1 问题（为什么这轮做评测而不是做新功能）
+
+d.204 交付的 `workflow_run` 只有 `workflow.test.ts` 的单元测试盯着。单测能证明「依赖排序、上游结论注入、失败隔离」这些函数逻辑对，但它证明不了**模型真的会调到这件工具**、也证明不了「结果回灌给主对话之后长什么样」——`workflow_run` 在评测里此前根本不存在：`evals/runner/tools.ts` 只组文件工具、`todo_write`、`tool_output_read`，以及按用例 `shell: true` 挂的 `run_command`。
+
+这是这个仓库反复踩过的坑：d.159 的 `evals/runner` 只认两个文件工具，d.153 新加的四个工具一度完全度量不到；d.165 的三条命令用例第一次跑就把三个静默 bug 抓了出来。新能力不上评测，等于「自己说它能用」。
+
+### 0.2 改了什么
+
+| 文件 | 改动 |
+| --- | --- |
+| `evals/runner/types.ts` | `EvalCase` 加 `workflow?: boolean`，注释写明「工作流每一步都是子会话，确定性模式必须脚本驱动；与 `agent_task` 共用 `subagent_script`，各自一份队列；缺省不注入，免得既有用例工具清单被多一件工具带偏」 |
+| `evals/runner/loader.ts` | 解析 `workflow` 开关（`Boolean(raw.workflow)`） |
+| `evals/runner/run.ts` | import `withWorkflowTool`；在子代理包装之外再包一层；**单独建一份** `createScriptedSubagentChat(testCase.subagent_script)` 给工作流用——和 `agent_task` 共用一份队列的话，两边会互相抢回合 |
+| `evals/cases/wf-001.yaml` | 新用例：两步有依赖（`scan` → `read`，`needs` 故意写成前向引用），断言 `workflow_run` 被调 1 次、工具结果含批次头 `工作流（2 步`、`2 批`、两个步骤分段 `### [scan]` / `### [read]`、两步结论、最终话术含「扫描完成」 |
+| `evals/fixtures/wf-001/` | 极简夹具（`README.md` + `src/main.ts`）：用例只验证批次与结论回灌，不依赖真实文件内容 |
+| `evals/README.md` | 用例数 49 → 50（可回放 39 → 40）；覆盖段落补 `wf-001`；「工具开关」小节新增「工作流编排（d.205）」，说明「上游结论注入」为什么由单元测试盯而不是评测盯（评测里子会话是脚本，看不见它收到的提示词） |
+
+顺带修掉一条**假绿**：`SettingsPage.test.tsx`「展开显示用户版发布说明」断言的是最新一版 RELEASE-NOTES 的第一条 bullet，而 d.204 的用户版说明当初写成了纯段落（`bullets: []`）→ 实际断言的是空串，等于没断言。把 d.204 说明改成四条 bullet 后重跑 `build-changelog`（`releaseNotes.ts` 205 条重新生成），该文件 39 例全过。
+
+### 0.3 验证
+
+- `pnpm eval:agent -- --filter wf-`：**1/1 通过**（2 回合、2040 tokens、23ms）。
+- `pnpm eval:agent`：**40/40 通过**（tokens/pass 2576、缓存读 2.3%、p95 84ms）。
+- `pnpm eval:agent -- --compare evals/baselines/latest.json`：分数 100%（基线 100%）、tokens/pass 2576（基线 2604，**-1.1%**）、p95 100ms（基线 110ms）、安全用例 14 条全过 → 全绿；`evals/baselines/latest.json` **未改**（基线只能人工确认后改）。
+- `pnpm -w typecheck`：六包全 Done。
+- `packages/web` 全量：**366 files / 5319 passed**。
+
+### 0.4 没做
+
+- 没给「工作流里某一步失败、后续步骤照跑」加评测用例：确定性模式下子会话是脚本，造不出「某一步抛错」又不依赖真实模型；这条由 `workflow.test.ts` 的执行用例覆盖。
+- 没把 `workflow` 开关默认打开：多一件工具就多一份 schema 预算与提示词噪声，只给写明了 `workflow: true` 的用例。
+- 没更新评测基线（同上：`evals/baselines/latest.json` 只能人工确认）；也没打包（用户要求本轮不发安装包）。
+
+## 0-历史-39. 2026-11-16 有依赖的检索一次派完：工作流编排（分支 main，版本 d.204.4.108.12）
+
+### 0.1 问题
+
+`agent_task`（d.162/d.200）能一次派 2–3 个**互不相干**的子代理，但真实的检索大多有先后：「先看仓库结构，再按结构决定去读哪几个目录」。这种活现在只能串行派两次——中间那一步的结论要经过主对话转述一遍：既花 token，又可能在下一次压缩里被摘掉，模型跑到第 3 步就忘了第 1 步查到了什么。主对话还要为「转述」多花一到两轮工具轮次。
+
+### 0.2 改了什么
+
+- 新增 `packages/web/src/lib/agentRuntime/workflow.ts`：`workflow_run` 工具。参数 `{ goal, steps:[{id,task,needs}], max_rounds }`，1–6 步；`parseWorkflowArgs` 做全量校验（缺目标 / 非法 JSON / 空步骤 / 超 6 步 / 重复 id / 非法 id / 空任务 / 超长任务 / 未知依赖 / 自依赖），依赖在所有 id 收齐后校验（允许前向引用）。
+- `planWaves`：Kahn 拓扑分层——同批互不依赖可并行（上限 `WORKFLOW_MAX_CONCURRENT = 3`），批与批之间是同步点；成环时返回**哪几条在互相等待**，让主模型知道该删哪条 `needs`。
+- `runWorkflow`：按批执行，上游结论经 `upstreamContext` 注入下游任务（带步骤 id 与任务名、单条截断 `WORKFLOW_UPSTREAM_CONTEXT_MAX = 1200` 字）；某一步抛错被就地捕获记成该步 `ok:false`，后面的步骤照跑（一步失败不拖垮整条流程）；结果按计划顺序汇总成 `### [id] task` 分段，带轮次用量。
+- `subagent.ts` 新增导出 `runSubagentTask(task, maxRounds, deps, taskId)`：工作流需要按**步骤 id**（`wf-<id>`）上报进度，复用 `agent_task` 的同一个执行体（只读白名单、截断、轮次上限全部照旧）。
+- `withWorkflowTool(bridge, opts)`：工具清单多一件 `workflow_run`，`meta` 声明 `{ risk: "read", displayName: "跑工作流" }`；其余工具原样透传；中断信号与 `agent_task` 同源（界面「停止」与主对话停止取或）；缺模型绑定时给指路文案。
+- `ChatPage.tsx`：工具桥组装由 `withSubagentTool` 后再包一层 `withWorkflowTool`（顺序固定：工作流要用到 `agent_task` 的只读白名单与执行体），因此计划模式下的 `withPlanMode` 同样覆盖它；进度沿用 `applySubagentProgress`，面板按 `wf-<id>` 分行。
+- `runWorkflow` 里对进度事件做了一次重映射：面板显示**这一步原本要做什么**，而不是下游注入的「上游步骤已经查到的结论…」那段长文。
+
+### 0.3 验证
+
+- 新增 `packages/web/src/lib/agentRuntime/workflow.test.ts` **20 例**：参数校验 6 组（含前向引用合法、max_rounds 夹逼）、批次切分 3 组（链式 / 并行 / 菱形 / 成环）、执行 5 组（依赖顺序、上游注入、截断、并行峰值 ≤ 3 且结果按计划顺序、失败标记、进度文案）、工具包装 6 组（只读元数据、透传、参数错不发起子会话、成环执行前拒绝、无绑定指路、注入 chat 跑通全流程、spec 上限）。
+- `packages/web` 全量 **366 files / 5319 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（tokens/pass 2589、缓存读 2.4%、p95 88ms）。
+- 版本 `d.203.4.108.12 → d.204.4.108.12`；CHANGELOG `316` 条、RELEASE-NOTES `204` 条；README 40,042 字节（新增 bullet「有依赖的活一次派完（d.204.4.108.12）」）。
+
+### 0.4 没做
+
+1. **不让工作流写盘**：写入口径仍是「用户在界面上显式授权、由 `agent_task` 执行」；工作流只做检索编排，哪天真要它写，也得先有逐步骤的审批边界。
+2. **不做跨轮持久化**：工作流是单次工具调用内的编排，跑完即结束；不落盘、不续跑——续跑是「继续」按钮与清单的职责。
+3. **不做任意图执行器**：没有条件分支、没有循环、没有自动重试策略（失败由主模型按结论决定下一步），避免把「编排」变成为难用户的编程语言。
+
+## 0-历史-40. 2026-11-16 断一下不报废：上游抖动自动退避重试（分支 main，版本 d.203.4.108.12）
+
+### 0.1 问题
+
+长任务跑到第二十轮，供应商那边偶发一个 429 或连接被掐断，整轮当场判死：界面只剩一条「生成出错」，上下文与工具进度都得从头再来。这些错误绝大多数几秒后就恢复（限流窗口过去、网关换节点），为一次抖动扔掉整轮活不划算。
+
+### 0.2 改了什么
+
+- 新增 `packages/web/src/lib/agentRuntime/upstreamRetry.ts`：判据集中在模块里——`isRetryableUpstreamError`（408/425/429/500/502/503/504/529 与 `fetch failed`/`ECONNRESET`/`socket hang up` 算瞬时；400/401/403/404/413/422 不算；`AbortError`/「已中断」优先不重试）、`retryDelayMs`（`Retry-After` 优先，夹在 0–10 秒；否则 800ms 起翻倍）、`MAX_UPSTREAM_RETRIES = 2`、`describeUpstreamError`（「请求太频繁（HTTP 429）」/「上游暂时不可用（HTTP 503）」/「网络连接中断」）。
+- `packages/web/src/lib/agentStream.ts`：每个请求尝试外包一层退避重试，**只在「这一轮什么都没发生」时重试**（`acc`/`local`/`roundChunks`/`calls`/`reasoning` 全空）——已吐字再重试会造成重复文本，比失败更糟；新增 `TriggerDeps.onUpstreamRetry`（每退避一次回调）；新增模块级 `sleepAbortable(ms, signal)`（退避期间按停止立即以 AbortError 收口，不等睡完）。
+- `packages/web/src/components/ChatPage.tsx`：把 `onUpstreamRetry` 落成提示「上游暂时不可用（HTTP 503），1.6 秒后自动重试（第 1/2 次）；不想等可以直接点停止。」——不提示的话界面像卡住，用户会点停止，把能自己缓过来的一轮掐掉。
+
+### 0.3 验证
+
+- `upstreamRetry.test.ts` 9 例（状态码分档、网络报文、中断优先、`status` 形状、800→1600 退避与上限、`Retry-After` 夹逼、默认次数、文案）。
+- `agentStream.test.ts` 新增 4 例（共 103 例）：503 未吐字 → 重试后成功且不上报错误；连续三次失败 → 重试两次后照旧上报；已吐字再断 → 只调一次；400 → 不重试。
+- `packages/web` 全量 **365 files / 5299 passed**；`pnpm -w typecheck` 六包 Done；确定性 `pnpm eval:agent` **39/39**（tokens/pass 2589、p95 87ms）。
+- `CHANGELOG.md` 315 条 / `RELEASE-NOTES.md` 203 条；README 39720 字节。
+
+### 0.4 没做
+
+- 不做无限重试：两次之后把错误交给用户并保留「继续」入口，自动重试不该变成静默等待。
+- 不在已输出内容后重试：需要「重放整轮」（重新上传、重跑工具），是另一件事，风险大于收益。
+- 不重试内容策略拒绝（`content_filter` / `refusal`）：换一次请求也一样被拒。
+
+## 0-历史-41. 2026-11-16 装更新前先量地方（分支 main，版本 d.203.4.107.12）
+
+### 0.1 问题
+
+2026-11-16 那次「更新把程序删了、却没装回来」，直接原因是**空间**：安装盘 `E:` 有 45GB，而临时目录在 `C:`——只剩 0.6GB。NSIS 安装器的顺序是「先删旧程序、再解压新文件」，解压失败时旧程序已经没了，只剩一个空目录，用户随后打不开应用。
+
+这个顺序我们改不了（安装器不是我们的），能改的是**别把它启动在装不下的机器上**。旧逻辑里没有任何空间判断：用户点「重启并安装」，控制权就交出去了，结果好不好全看运气。
+
+### 0.2 改了什么
+
+**`packages/desktop/auto-update.js`**
+
+- `requiredUpdateSpace(installerBytes)`：装这个包需要的空间 = 安装包 × 1.2 + 64MB（解压期间新旧文件共存 + 收尾余量）。大小未知返回 0（不拦）。
+- `checkUpdateSpace({ installerBytes, targets })`：纯函数，逐块盘判定并返回「差多少字节」；`freeBytes` 为 null/NaN 时**跳过不拦**（不能因为读不到磁盘信息就让所有人装不了更新）。
+- `formatBytes` / `formatSpaceShortfall`：把字节写成「400 MB」，并拼成一句可直接展示的中文（哪块盘、还剩多少、差多少、清完再点一次）。
+- `defaultDiskFree(target)`：`fs.statfsSync` 读可用字节（不跑外部命令、不解析中文路径）。
+- `checkSpace()`：查一次写进状态快照 `{ ok, installerBytes, requiredBytes, message, problems, targets, checkedAt }`，并 `emit()`。
+- `download()` 成功后自动查一次（那时才拿得到安装包大小），界面在用户点按钮**之前**就能提醒。
+- `quitAndInstall()` 交接前复查：不够就拒绝、写 `lastError`、返回 false，**绝不启动安装器**。
+
+**`packages/desktop/main.js`**：交给自绘更新助手（`resources/updater/setup.exe`）之前同样先 `updater.checkSpace()`；不够就当场拒绝并 `console.warn` 出原因。真正会删程序的是安装器，这道闸必须在它启动之前。
+
+**渲染层**：`UpdateState.space` 补类型（可选字段，老主进程为 undefined）；`UpdateCard` 在「已下载」阶段渲染 `data-testid="update-space-warning"` 警告条，直接展示主进程算好的那句话。
+
+### 0.3 验证
+
+- `packages/desktop/auto-update.test.js` **26 例**（新增 6）：系数与余量、人话大小、多块盘判定、null 探测不拦、不足时拒绝交接、充足时正常交接、探测失败不拦。
+- `packages/desktop` 全量 `pnpm test`：**56 组 / 987 例（986 passed / 1 skip）**，fail 0，exit 0。
+- `packages/web` 全量：**364 files / 5286 passed**（新增 2 例：空间不足显示警告、充足不显示）。
+- `pnpm -w typecheck` 六包 Done；`pnpm eval:agent` **39/39**（tokens/pass 2589、缓存读 2.4%、p95 86ms）。
+- 版本 `d.203.4.107.12`（semver `203.4.107` / Windows `203.4.107.12`）；CHANGELOG 314 条 / RELEASE-NOTES 202 条；README 39,434 字节。
+
+### 0.4 没做
+
+1. **不自动清理临时目录**——`%TEMP%` 是别的程序的目录，自动删风险太大；本轮只做「不装、说清楚」。
+2. **不自动换盘下载**——换到哪个盘、要不要问用户是产品决策，不是一次修复能定的。
+3. **本轮不打包、不发版**（用户要求：每次更新不做打包）——预检要等下一次打包才会进安装版。
+
+### 0.5 现场备注
+
+排查这次事故时顺手清了 `C:\Users\ADMIN\AppData\Local\Temp` 里两坨陈旧载荷（`ihaj3tct` 6.8GB 的 VS 安装残留、`heming-setup` 3.6GB 的历史截图与测试安装目录），C: 从 1.16GB → 11.44GB 空闲。清理命令都先断言路径在 `%TEMP%` 下再删；将来可考虑把「安装前空间不足」的提示写进更新卡片常驻区（现在只在已下载阶段出现）。
+
+## 0-历史-42. 2026-11-16 装上也打不开：打包白名单漏了两个文件（分支 main，版本 d.203.4.106.12）
 
 ### 0.1 问题
 
@@ -47,7 +1446,7 @@
 - 不在 CI 里加「启动打包产物」的冒烟：需要桌面会话/显示服务，无头环境不可靠；这次用静态测试替代。
 - 不动用户机上失败的静默更新逻辑本身（C: 空间不足导致 NSIS 解压失败是环境问题）；自动更新前预检磁盘空间这件事单独收口。
 
-## 0-历史-1. 2026-11-16 后台作业看得见（分支 main，版本 d.203.4.105.12）
+## 0-历史-43. 2026-11-16 后台作业看得见（分支 main，版本 d.203.4.105.12）
 
 ### 0.1 问题
 
@@ -76,7 +1475,7 @@ d.200 给子代理做了状态条（哪几个在跑、点停止），后台作�
 - 不做「作业完成后自动发消息」：d.182 已有 `jobWatch` 唤醒路径，面板只呈现事实，不替用户决定下一步。
 - 面板不跨进程重启保留：作业在桌面进程里，进程没了作业也没了，列出来的历史会是假的。
 
-## 0-历史-2. 2026-11-16 子代理能改了（分支 main，版本 d.202.4.105.12）
+## 0-历史-44. 2026-11-16 子代理能改了（分支 main，版本 d.202.4.105.12）
 
 ### 0.1 问题
 
@@ -114,7 +1513,7 @@ d.200 让子代理能并行跑 2–3 件只读的活，但长任务里最常见�
 - 不做「逐次写审批」：子代理可能一轮写多次，逐次弹窗等于把并行优势吃掉；现在的折中是「按会话授权 + 全量可撤回」。
 - 授权不设过期时间：关机重启后仍在（存 localStorage），要收回得说 `/subagent write off`——别把长期授权当成一次性。
 
-## 0-历史-3. 2026-11-16 目标记得住（分支 main，版本 d.201.4.105.12）
+## 0-历史-45. 2026-11-16 目标记得住（分支 main，版本 d.201.4.105.12）
 
 ### 0.1 问题
 
@@ -144,7 +1543,7 @@ d.200 让子代理能并行跑 2–3 件只读的活，但长任务里最常见�
 - 模型不能自己宣布完成 —— 判断权留给人（点「完成」）。
 - 目标暂未进 `/status` 的行。
 
-## 0-历史-4. 2026-11-16 并行子代理（分支 main，版本 d.200.4.105.12）
+## 0-历史-46. 2026-11-16 并行子代理（分支 main，版本 d.200.4.105.12）
 
 ### 0.1 问题
 
@@ -192,7 +1591,7 @@ d.162 的 `agent_task` 一次只能派一件。长任务里「三个目录各查
 2. 不做「多任务结果自动汇总成一份报告」：现在是把每段结论带回主对话，由主模型自己合并。
 3. 真机 Electron 端到端仍未做：冒烟里没有假模型网关与假后端，跑一轮真实对话要先搭这两样。
 
-## 0-历史-5. 2026-11-16 生成中也能插话（分支 main，版本 d.199.4.105.12）
+## 0-历史-47. 2026-11-16 生成中也能插话（分支 main，版本 d.199.4.105.12）
 
 ### 0.1 问题
 
@@ -241,7 +1640,7 @@ d.162 的 `agent_task` 一次只能派一件。长任务里「三个目录各查
 2. 队列不落盘：刷新后消息还在会话里，但「插给这一轮」的意图不再生效（不会自动重放）。
 3. 真机 Electron 手测（点停止 / HITL 点允许 / 关窗重开续跑）仍未做。
 
-## 0-历史-6. 2026-11-16 搜到之后能落到那句话上（分支 main，版本 d.198.4.105.12）
+## 0-历史-48. 2026-11-16 搜到之后能落到那句话上（分支 main，版本 d.198.4.105.12）
 
 ### 0.1 问题
 
@@ -268,7 +1667,7 @@ d.197 让左栏能搜消息正文，但命中之后只做了一件事：打开�
 2. 不落到附件/图片本身（只落到消息，不展开附件预览）；
 3. 没有跳转历史/回退（一次落位，没有「返回上一处」）。
 
-## 0-历史-7. 2026-11-16 左栏搜索也能搜消息内容（分支 main，版本 d.197.4.105.12）
+## 0-历史-49. 2026-11-16 左栏搜索也能搜消息内容（分支 main，版本 d.197.4.105.12）
 
 ### 0.1 问题
 
@@ -295,7 +1694,7 @@ d.197 让左栏能搜消息正文，但命中之后只做了一件事：打开�
 2. 不做全文索引 / 拼音 / 模糊匹配，只按最近消息线性扫（扫到上限会标「只搜了最近的消息」）；
 3. 端到端加密消息的正文服务端看不到，因此搜不到（客户端本地搜需要另做）。
 
-## 0-历史-8. 2026-11-16 侧栏标出「哪个会话还没跑完」（分支 main，版本 d.196.4.105.12）
+## 0-历史-50. 2026-11-16 侧栏标出「哪个会话还没跑完」（分支 main，版本 d.196.4.105.12）
 
 ### 0.1 问题
 
@@ -323,7 +1722,7 @@ d.189 的「没跑完的一轮」只在**打开那个会话时**才出现一条�
 2. 徽标不带时间；
 3. 不做手动清理入口（24 小时自动过期）。
 
-## 0-历史-9. 2026-11-16 换模型不用离开对话（分支 main，版本 d.195.4.105.12）
+## 0-历史-51. 2026-11-16 换模型不用离开对话（分支 main，版本 d.195.4.105.12）
 
 ### 0.1 问题
 
@@ -345,7 +1744,7 @@ d.189 的「没跑完的一轮」只在**打开那个会话时**才出现一条�
 2. 不能在弹窗里新建来源（网关与 Key 仍在设置页）；
 3. 不做「按任务自动选模型」。
 
-## 0-历史-10. 2026-11-16 输入框 ↑ 调出上一条（分支 main，版本 d.194.4.105.12）
+## 0-历史-52. 2026-11-16 输入框 ↑ 调出上一条（分支 main，版本 d.194.4.105.12）
 
 ### 0.1 问题
 
@@ -378,7 +1777,7 @@ codex / Claude Code 都是空输入框按 ↑ 调回上一条，和鸣此前没�
 2. 编辑即退出回溯（刻意的，避免改过的草稿被别条替换），不支持「改完继续往回翻」；
 3. 没有 `Ctrl+R` 历史搜索。
 
-## 0-历史-11. 2026-11-16 `/status` 一条命令说清环境（分支 main，版本 d.193.4.105.12）
+## 0-历史-53. 2026-11-16 `/status` 一条命令说清环境（分支 main，版本 d.193.4.105.12）
 
 ### 0.1 问题：能力一件件补上了，状态却散在七八个地方
 
@@ -415,7 +1814,7 @@ d.153 以来陆续加了工作区根（含默认工作区）、计划模式、�
 2. 不列 MCP 服务连接状态（只给工具数，服务级失败仍要去设置页看）；
 3. 没有「一键复制自检」按钮。
 
-## 0-历史-12. 2026-11-16 接着做时，它知道自己做到哪一步了（分支 main，版本 d.192.4.105.12）
+## 0-历史-54. 2026-11-16 接着做时，它知道自己做到哪一步了（分支 main，版本 d.192.4.105.12）
 
 ### 0.1 问题：清单存下来了，模型却看不见
 
@@ -449,7 +1848,7 @@ d.155 起有 `todo_write`，清单存在本机（`lib/todo/store.ts`），`TodoP
 2. 清单每会话一份（`MAX_STORED_LISTS=50`），多会话并行时各自独立、不能合并；
 3. 提示词里的是快照，模型本轮中途改清单要等下一轮才反映（界面上实时）。
 
-## 0-历史-13. 2026-11-16 工具一多，本地能力也不会被挤没（分支 main，版本 d.191.4.105.12）
+## 0-历史-55. 2026-11-16 工具一多，本地能力也不会被挤没（分支 main，版本 d.191.4.105.12）
 
 ### 0.1 问题：装了 MCP，第一轮里可能没有 `file_write`
 
@@ -483,7 +1882,7 @@ d.155 起有 `todo_write`，清单存在本机（`lib/todo/store.ts`），`TodoP
 2. 系统提示词的工具清单仍按「桥里全部工具」渲染，与「本轮请求实际可见的 20 个」不完全一致；
 3. 没有「用户显式要求临时拓宽名额」的入口。
 
-## 0-历史-14. 2026-11-16 被截断的长输出，重启后还能读回来（分支 main，版本 d.190.4.105.12）
+## 0-历史-56. 2026-11-16 被截断的长输出，重启后还能读回来（分支 main，版本 d.190.4.105.12）
 
 ### 0.1 问题：`spill-3` 活不过一次重启
 
@@ -520,7 +1919,7 @@ d.181 给长任务补了「溢出内容可读回」：工具结果超过 8000 �
 2. 600K 是拍的常量，没有按实际可用配额动态调整；
 3. 溢出的完整文本仍不进搜索/索引，只能按 handle 按段读。
 
-## 0-历史-15. 2026-11-16 断在半路的活，回来能接着做（分支 `main`，版本 d.189.4.105.12）
+## 0-历史-57. 2026-11-16 断在半路的活，回来能接着做（分支 `main`，版本 d.189.4.105.12）
 
 ### 0.1 问题：长任务最怕「断在半路」，而两个断点都没有出口
 
@@ -567,7 +1966,7 @@ d.157 起一轮能自动续跑 3 段共 36 轮工具调用，d.167 起「轮次�
 2. 标记只保留最近一条，没有按会话保存多份历史断点；
 3. 真机 Electron 里「关窗 → 重开 → 点继续」还没手测（单测/集成覆盖，窗口生命周期只有真机能验）。
 
-## 0-历史-16. 2026-11-16 用真实模型把「完成任务」再量一遍（分支 `main`，版本 d.188.4.105.12）
+## 0-历史-58. 2026-11-16 用真实模型把「完成任务」再量一遍（分支 `main`，版本 d.188.4.105.12）
 
 ### 0.1 问题：十二处改动之后，真模型侧没人验过
 
@@ -602,7 +2001,7 @@ d.180–d.187 连着改了十二件事（后台作业、作业唤醒、spill 溢
 2. 只跑 `deepseek-flash`，没有跨模型对照。
 3. `task-005` token 成本偏高，未做「更省 token 的等价验收脚本」（会削弱「自证」的意义）。
 
-## 0-历史-17. 2026-11-16 让用户看见「上下文快满了」（分支 `main`，版本 d.187.4.105.12）
+## 0-历史-59. 2026-11-16 让用户看见「上下文快满了」（分支 `main`，版本 d.187.4.105.12）
 
 ### 0.1 问题：长任务的失败是静默的
 
@@ -640,7 +2039,7 @@ d.160 起预算按模型窗口自动分配、d.183 起可以 `/compact`，但**�
 2. 不做自动 `/compact` 建议弹窗（主动打断比「一行可忽略的字」更烦）。
 3. 数字是估算：不冒充精确计费值。
 
-## 0-历史-18. 2026-11-16 工具卡住不再把整轮对话拖死（分支 `main`，版本 d.186.4.105.12）
+## 0-历史-60. 2026-11-16 工具卡住不再把整轮对话拖死（分支 `main`，版本 d.186.4.105.12）
 
 ### 0.1 问题：一个不返回的调用能把整轮挂死
 
@@ -682,7 +2081,7 @@ d.180 加了后台作业后，长任务更多依赖外部服务，这个洞只�
 2. 超时上限不可配置。
 3. 不统计「哪些工具最常超时」（等真实使用数据再决定是否埋点）。
 
-## 0-历史-19. 2026-11-16 改错了只撤那一个文件（分支 `main`，版本 d.185.4.105.12）
+## 0-历史-61. 2026-11-16 改错了只撤那一个文件（分支 `main`，版本 d.185.4.105.12）
 
 ### 0.1 问题：只有「全部撤回」这一个动作
 
@@ -719,7 +2118,7 @@ codex 的审阅体验是按文件看、按文件改；和鸣至少要做到按�
 2. 不支持「撤某个文件里的某一段」——备份粒度是整份文件。
 3. 清单不跨轮累积（只记最近一轮，与 d.176 一致）。
 
-## 0-历史-20. 2026-11-16 打一个 `/` 就看见能做什么（分支 `main`，版本 d.184.4.105.12）
+## 0-历史-62. 2026-11-16 打一个 `/` 就看见能做什么（分支 `main`，版本 d.184.4.105.12）
 
 ### 0.1 问题：命令存在，但界面上找不到
 
@@ -754,7 +2153,7 @@ d.183 加了 `/compact`，可用户得先知道有这串字符。输入框里没
 2. 历史补全（↑ 取上一条已发消息）。
 3. 键位可配置。
 
-## 0-历史-21. 2026-11-16 上下文可以手动压一次，压了多少也说得清（分支 main，版本 d.183.4.105.12）
+## 0-历史-63. 2026-11-16 上下文可以手动压一次，压了多少也说得清（分支 main，版本 d.183.4.105.12）
 
 ### 0.1 问题：压缩一直在做，用户既看不见也按不下
 
@@ -797,7 +2196,7 @@ d.183 加了 `/compact`，可用户得先知道有这串字符。输入框里没
 2. 摘要只能看到「压了几条、省了多少」，正文本身不可查看 / 编辑。
 3. 手动摘要只存本机 `localStorage`，换设备不同步。
 
-## 0-历史-22. 2026-11-16 后台作业跑完会回来叫你（分支 main，版本 d.182.4.105.12）
+## 0-历史-64. 2026-11-16 后台作业跑完会回来叫你（分支 main，版本 d.182.4.105.12）
 
 ### 0.1 问题：作业不会被 await
 
@@ -828,7 +2227,7 @@ d.180 让 `run_command` 能 `background: true` 起作业，但编排层只 `awai
 2. 作业注册表在主进程内存里，关应用即丢，无持久化。
 3. `command_kill` 仍是 `write` 风险：计划模式里被拦，作业照跑。
 
-## 0-历史-23. 2026-11-16 被截断的长输出可以按需读回（分支 main，版本 d.181.4.105.12）
+## 0-历史-65. 2026-11-16 被截断的长输出可以按需读回（分支 main，版本 d.181.4.105.12）
 
 ### 0.1 问题：中间那段被扔掉，而且扔了没人知道能不能拿回来
 
@@ -871,7 +2270,7 @@ d.180 让 `run_command` 能 `background: true` 起作业，但编排层只 `awai
 3. **没有 `/compact` 式主动整理**：溢出存储只被动淘汰，不做「把散落的小 handle 合并成摘要」。
 4. 差距表里还剩两项大的：**作业完成通知/空闲唤醒**、**压缩摘要与 `/compact`**；其次子代理控制与并发、通用超时策略。
 
-## 0-历史-24. 2026-11-16 长任务的地基：命令可以在后台跑（分支 main，版本 d.180.4.105.12）
+## 0-历史-66. 2026-11-16 长任务的地基：命令可以在后台跑（分支 main，版本 d.180.4.105.12）
 
 ### 0.1 问题：最典型的长时间工程动作跑不了
 
@@ -929,7 +2328,7 @@ d.180 让 `run_command` 能 `background: true` 起作业，但编排层只 `awai
 3. 压缩摘要 / `/compact`。
 4. 子代理控制工具与并发；通用超时策略（目前只有 shell）。
 
-## 0-历史-25. 2026-11-16 拿公开 benchmark 的真实题目考它（分支 main，版本 d.179.4.105.11）
+## 0-历史-67. 2026-11-16 拿公开 benchmark 的真实题目考它（分支 main，版本 d.179.4.105.11）
 
 ### 0.1 问题：自己出题自己考
 
@@ -971,7 +2370,7 @@ d.178 把判分从「按剧本」改成「按行为」之后，剩下的疑问�
 3. 需要服务器 / vim 宏的两道题没搬。
 
 
-## 0-历史-26. 2026-11-16 用真实模型量完工能力（分支 main，版本 d.178.4.105.11）
+## 0-历史-68. 2026-11-16 用真实模型量完工能力（分支 main，版本 d.178.4.105.11）
 
 ### 0.1 问题：用例按剧本写，判分也按剧本判
 
@@ -1000,7 +2399,7 @@ d.177 接上真实模型后，`--real` 的分数只有 15/38（39.5%）。逐条
 2. 措辞类断言仍是「同义集合 + 宽词表」，同义词挂一漏万；彻底的解法是语义判分（多一次模型调用，成本翻倍）。
 3. 桌面应用真机手测（真实 Electron 点停止、真实 HITL 弹窗点击）仍未做。
 
-## 0-历史-27. 2026-11-16 用真模型跑了一遍（分支 `main`，版本 d.177.4.105.11）
+## 0-历史-69. 2026-11-16 用真模型跑了一遍（分支 `main`，版本 d.177.4.105.11）
 
 ### 0.1 为什么这一轮不是加功能
 
@@ -1038,7 +2437,7 @@ d.177 接上真实模型后，`--real` 的分数只有 15/38（39.5%）。逐条
 2. `--real` 基线未冻结（真实模型有随机性，需要多次重复取样）。
 3. 真机 Electron 手点「停止」与真实 HITL 弹窗点击仍未覆盖（缺网关注入点）。
 
-## 0-历史-28. 2026-11-16 预算到顶也给一次点击的「继续」（分支 `main`，版本 d.176.4.105.11）
+## 0-历史-70. 2026-11-16 预算到顶也给一次点击的「继续」（分支 `main`，版本 d.176.4.105.11）
 
 ### 0.1 为什么这是 d.167 漏掉的一半
 
@@ -1071,7 +2470,7 @@ d.167.4.103 修的是「轮次到顶时，气泡看起来答完了、只能自�
 2. 连续多次预算收口没有折叠策略。
 3. 「继续」是重发一轮（走 `retryStream`），不是从截断处续接 token。
 
-## 0-历史-29. 2026-11-16 改错了能一键撤回（分支 `main`，版本 d.176.4.104.11）
+## 0-历史-71. 2026-11-16 改错了能一键撤回（分支 `main`，版本 d.176.4.104.11）
 
 ### 0.1 为什么撤回要出现在「刚写完」的位置
 
@@ -1105,7 +2504,7 @@ d.170 给了模型 `file_undo`，d.171 又在设置里做了「最近改动（�
 2. 没有「重做」：一份备份只能用一次。
 3. 只管文件写入类工具；`run_command` 在工作区里的副作用不在文件备份范围内。
 
-## 0-历史-30. 2026-11-16 引用工作区文件（分支 main，版本 d.175.4.104.11）
+## 0-历史-72. 2026-11-16 引用工作区文件（分支 main，版本 d.175.4.104.11）
 
 ### 0.1 问题：用户说「就这几个文件」，只能靠描述文件名
 
@@ -1153,7 +2552,7 @@ d.170 给了模型 `file_undo`，d.171 又在设置里做了「最近改动（�
 2. 整目录引用（递归带上目录下所有文件）：需要先定上限与展示口径。
 3. 引用条不落库：刷新页面后这一轮的引用消失（内容已经进过提示词，重放不需要它）。
 
-## 0-历史-31. 2026-11-16 项目约定文件（分支 main，版本 d.174.4.104.11）
+## 0-历史-73. 2026-11-16 项目约定文件（分支 main，版本 d.174.4.104.11）
 
 ### 0.1 问题：它知道有哪些工具，不知道这个仓库的规矩
 
@@ -1206,7 +2605,7 @@ DSH / Claude Code / opencode 都在工作区里读一份约定文件（`AGENTS.m
 2. 界面看不到「这一轮读了哪个约定文件」，只能从回答里推断。
 3. 约定文件改了下一轮才生效（每轮现读，不监听变化）。
 
-## 0-历史-32. 2026-11-16 计划就绪一键执行（分支 main，版本 d.173.4.104.11）
+## 0-历史-74. 2026-11-16 计划就绪一键执行（分支 main，版本 d.173.4.104.11）
 
 ### 0.1 问题：计划给完了，用户还得做两件事
 
@@ -1242,7 +2641,7 @@ d.172 的计划模式这一轮只给只读工具，模型先读、再给方案�
 2. 计划模式下 `run_command` 仍被摘（risk=danger），「先跑一次测试看看现状」做不到。
 3. 计划模式不跨会话记忆：每次新对话默认关闭。
 
-## 0-历史-33. 2026-11-16 计划模式（分支 main，版本 d.172.4.104.11）
+## 0-历史-75. 2026-11-16 计划模式（分支 main，版本 d.172.4.104.11）
 
 ### 0.1 问题：智能体不会「先别动手」
 
@@ -1280,7 +2679,7 @@ d.172 的计划模式这一轮只给只读工具，模型先读、再给方案�
 2. 没有「接受计划、一键转执行」的按钮：用户要自己关掉开关再让它动手，比 opencode 少一步。
 3. 计划模式下 `run_command` 也被摘（risk=danger），所以「先跑一次测试看看现状」做不到——下一版可考虑给只读命令一条白名单，但要单独的确认口径。
 
-## 0-历史-34. 2026-11-16 connect-src / img-src 进冒烟（分支 main，版本 d.171.4.104.11）
+## 0-历史-76. 2026-11-16 connect-src / img-src 进冒烟（分支 main，版本 d.171.4.104.11）
 
 ### 0.1 问题：能被骗过去的失败形态
 
@@ -1318,7 +2717,7 @@ d.166–d.171 的冒烟已经把「窗口能不能起来」「CSP 两档」「�
 3. 违例上报仍只落本机日志，没有上报端点。
 4. 真实 Electron 里手动点停止仍未手测；`--real` 评测基线仍空白。
 
-## 0-历史-35. 2026-11-16 最近改动列表（分支 main，版本 d.171.4.103.11）
+## 0-历史-77. 2026-11-16 最近改动列表（分支 main，版本 d.171.4.103.11）
 
 ### 0.1 问题：能撤回，但只有模型知道
 
@@ -1348,7 +2747,7 @@ d.170 给智能体加了 `file_undo`，机制是主进程在每次覆盖/删除*
 3. `run_command` 直接改文件（如 `git checkout`）不进备份，因此也不出现在这个列表。
 4. 真实 Electron 里手动点停止仍未手测；`connect-src`/`img-src` 违例、`--real` 基线仍空白。
 
-## 0-历史-36. 2026-11-16 改错了能撤回（分支 main，版本 d.170.4.103.11）
+## 0-历史-78. 2026-11-16 改错了能撤回（分支 main，版本 d.170.4.103.11）
 
 ### 0.1 问题：写能力有了，退回键没有
 
@@ -1386,7 +2785,7 @@ d.153 给了智能体七个文件工具。从那天起它能覆盖文件、能�
 3. 只覆盖 `file:write`/`file:delete` 链路；`run_command` 直接改文件（如 `git checkout`）不进备份。
 4. 真实 Electron 里手动点「停止」仍未手测；`connect-src` / `img-src` 违例、`--real` 基线仍空白。
 
-## 0-历史-37. 2026-11-16 命令取消有了端到端回归（分支 main，版本 d.169.4.103.11）
+## 0-历史-79. 2026-11-16 命令取消有了端到端回归（分支 main，版本 d.169.4.103.11）
 
 ### 0.1 缺的是一条链，不是一个函数
 
@@ -1430,7 +2829,7 @@ ChatPage.abortAll() → agentStream 把 signal 透传给工具 → shell/tool.ts
 
 ---
 
-## 0-历史-38. 2026-11-16 读图工具 file_image（分支 main，版本 d.168.4.103.11）
+## 0-历史-80. 2026-11-16 读图工具 file_image（分支 main，版本 d.168.4.103.11）
 
 ### 0.1 问题：模型有视觉能力，但工作区里的图片对它不存在
 用户说「这张截图哪里不对」「照着这个设计稿改样式」时，和鸣只能让用户自己描述：`file_read` 遇到图片按二进制拒掉（`binary-file`），视觉附件又只覆盖用户**自己上传**的图。DSH 早就有 `read_image`，这是「能调工具」上一处很具体的缺口。
@@ -1455,7 +2854,7 @@ ChatPage.abortAll() → agentStream 把 signal 透传给工具 → shell/tool.ts
 1. 没有缩图与 EXIF 方向校正，超 5MB 一律拒。
 2. 只认 PNG/JPEG/GIF/WebP，TIFF/HEIC 需用户先转换。
 
-## 0-历史-39. 2026-11-16 这一轮做完没做完，现在能一眼看出来并一键接着做（历史小节，版本 d.167.4.103.11）
+## 0-历史-81. 2026-11-16 这一轮做完没做完，现在能一眼看出来并一键接着做（历史小节，版本 d.167.4.103.11）
 
 ### 0.1 问题：能力有了，用户发现不了
 
@@ -1483,7 +2882,7 @@ ChatPage.abortAll() → agentStream 把 signal 透传给工具 → shell/tool.ts
 - 没有「自动继续直到完成」的开关。
 - 真机 Electron 窗口里没点过这个按钮（jsdom + 单测覆盖，未见真实窗口）。
 
-## 0-历史-40. 2026-11-16 「记住这个目录」能逐条撤销了（分支 `main`，版本 d.166.4.102.11 → d.167.4.102.11）
+## 0-历史-82. 2026-11-16 「记住这个目录」能逐条撤销了（分支 `main`，版本 d.166.4.102.11 → d.167.4.102.11）
 
 ### 0.1 为什么
 
@@ -1514,7 +2913,7 @@ ChatPage.abortAll() → agentStream 把 signal 透传给工具 → shell/tool.ts
 2. 团队工具的规则复用同一接口，但设置区目前只在文件编辑卡露出撤销入口。
 3. 撤销后不弹「已恢复为逐次询问」的引导，只在卡片内给一行状态文案。
 
-## 0-历史-41. 2026-11-16 CSP 违例上报：从「有实现没人测」变成「有实现、有单测、有真机链路」（历史小节，版本 d.166.4.101.11）
+## 0-历史-83. 2026-11-16 CSP 违例上报：从「有实现没人测」变成「有实现、有单测、有真机链路」（历史小节，版本 d.166.4.101.11）
 
 ### 0.1 为什么
 
@@ -1554,7 +2953,7 @@ CHANGELOG 插入脚本被执行了两次，顶部出现两份 `d.166.4.101.11`�
 2. 冒烟把两档日志写成两个文件（`csp-report.log` / `csp-report-report.log`），生产只有一个日志文件，不做区分。
 3. 仍没有「点一次真实 HITL 弹窗」的端到端（需要真实模型回合才会触发写入确认）。
 
-## 0-历史-42. 2026-11-16 CSP 违例上报变成可测的（分支 `main`，版本 d.166.4.101.11）
+## 0-历史-84. 2026-11-16 CSP 违例上报变成可测的（分支 `main`，版本 d.166.4.101.11）
 
 ### 0.1 为什么
 
@@ -1580,7 +2979,7 @@ CHANGELOG 插入脚本被执行了两次，顶部出现两份 `d.166.4.101.11`�
 2. 日志没有轮转保留（超 256KB 清空），也没有界面入口——排障仍要靠用户把 `~/Heming/logs/csp-report.log` 发过来。
 3. `enforce` 与 `report` 两档日志不区分（都记，因为关心的是「谁挡了什么」）。
 
-## 0-历史-43. 上一版让冒烟加载真实整页，但协议处理里没挂 CSP：页面在宽松策略下启动，而生产带的
+## 0-历史-85. 上一版让冒烟加载真实整页，但协议处理里没挂 CSP：页面在宽松策略下启动，而生产带的
 
 ### 0.1 为什么
 
@@ -1606,7 +3005,7 @@ CHANGELOG 插入脚本被执行了两次，顶部出现两份 `d.166.4.101.11`�
 2. 冒烟没点真实 HITL 弹窗。
 3. CI 的 Windows job 仍未在真实 runner 上跑过。
 
-## 0-历史-44. d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data:` 占
+## 0-历史-86. d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data:` 占
 
 ### 0.1 为什么
 
@@ -1634,7 +3033,7 @@ d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data
 2. `app://` 下的 CSP 头还没断言（现在只验证页面能起来）。
 3. CI 的 Windows job 仍未在真实 runner 上跑过。
 
-## 0-历史-45. `run_command` 是唯一能真的动用户机器的工具，但 d.165 只覆盖了「
+## 0-历史-87. `run_command` 是唯一能真的动用户机器的工具，但 d.165 只覆盖了「
 
 `run_command` 是唯一能真的动用户机器的工具，但 d.165 只覆盖了「跑通 / 默认被拒 / 工作目录越界」
 三条。两条最要命的行为没有机器验证：**命令卡住时会不会一直挂着**、**吐出巨量输出时会不会把上下文撑爆**。
@@ -1673,7 +3072,7 @@ d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data
 2. 超时用例只验证「1 秒处收口」，没断言子进程树被杀干净（枚举进程在评测里不稳定）。
 3. 真机 Electron 端到端（整页 `web-dist` + 真实确认弹窗）仍是最大空白。
 
-## 0-历史-46. 2026-11-16 冒烟接进发版链路（分支 `main`，版本 d.165.4.98.11）
+## 0-历史-88. 2026-11-16 冒烟接进发版链路（分支 `main`，版本 d.165.4.98.11）
 
 上一版（d.165.4.97.11）加真机冒烟时，它一次就抓到了「`file:default-root` 用 `ipcMain.handle`
 注册、`preload.js` 却用 `sendSync` 同步问 → 窗口加载不出来」——那个 bug 从 d.162 起静默了四版。
@@ -1714,7 +3113,7 @@ d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data
 2. CI 的 Windows job 还没在真实 GitHub runner 上跑过（本地只有 Windows 本机）；首次 push 后要看一眼红绿，别当成已验证。
 3. `run_command` 的超时与取消仍无确定性评测用例。
 
-## 0-历史-47. 2026-11-16 默认工作区那行 IPC 会让窗口打不开：补桌面桥真机冒烟并修掉（分支 `main`，版本 d.165.4.96.11 → d.165.4.97.11）
+## 0-历史-89. 2026-11-16 默认工作区那行 IPC 会让窗口打不开：补桌面桥真机冒烟并修掉（分支 `main`，版本 d.165.4.96.11 → d.165.4.97.11）
 
 上一版给未分组会话加了「默认工作区」，让没手动配根的人也能读写文件。那条「把默认路径下发给渲染层」的通道注册错了类型：`preload.js` 在**加载时**用 `ipcRenderer.sendSync("file:default-root")` 同步问一次，主进程却用 `ipcMain.handle`（异步）注册。`sendSync` 只认同步监听者，于是渲染进程永远等不到 `event.returnValue` —— **窗口直接加载不出来**。这个包发出去，用户双击图标只会看到起不来的窗口。
 
@@ -1739,7 +3138,7 @@ d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data
 2. 没有把冒烟并进 `npm test`：它要起 Electron、依赖窗口系统，并进去会让 900+ 个纯逻辑用例变脆；它是单独命令，改桥时跑。
 3. 冒烟不覆盖 HITL 弹窗（要人点确认），仍属人工验收。
 
-## 0-历史-48. 2026-11-16 给命令补评测，第一次跑就抓出三个真 bug（分支 `main`，版本 d.165.4.96.11）
+## 0-历史-90. 2026-11-16 给命令补评测，第一次跑就抓出三个真 bug（分支 `main`，版本 d.165.4.96.11）
 
 上一版让智能体能跑本机命令。能不能跑是一回事，**跑对没跑对**是另一回事：命令链路横跨工具层、桌面主进程、`cmd.exe`，任何一处出错都表现为「看起来执行了」。这版先给命令补三条确定性评测（真实工具层 + 真实 `shell-run.js`），再按评测结果修。
 
@@ -1767,7 +3166,7 @@ d.165.4.98 把桌面桥冒烟接进了发版链路，但冒烟加载的是 `data
 2. 没有覆盖超时与取消的用例（要真等 30 秒或真杀进程树，会拖慢评测；单测已覆盖）。
 3. `cmd-002` 只验证「默认拒绝」，没验证「用户在场时能点允许」（需真机 UI，属端到端范畴）。
 
-## 0-历史-49. 2026-11-16 「停止」真的能停：在跑的命令会被杀掉（分支 `main`，版本 d.164.4.96.11）
+## 0-历史-91. 2026-11-16 「停止」真的能停：在跑的命令会被杀掉（分支 `main`，版本 d.164.4.96.11）
 
 d.164 让智能体能跑命令，但「停下来」只做了一半：用户点停止时，渲染层只是不再等结果，`ipcRenderer.invoke` 没有 abort——**已 spawn 的命令会继续跑到超时（最长 2 分钟）**，占 CPU、占文件锁、还在改工作区。对一个能跑 `npm install` 的工具，这不是体验问题是正确性问题。
 
@@ -1796,7 +3195,7 @@ d.164 让智能体能跑命令，但「停下来」只做了一半：用户点�
 2. 取消粒度是整条命令：没有 SIGTERM→SIGKILL 的优雅退出，直接杀进程树。
 3. 没有「取消后别重试」的提示词规则（现状靠 `aborted` 错误码与正文）。
 
-## 0-历史-50. 2026-11-16 智能体第一次能在本机跑命令（分支 `main`，版本 d.164.4.95.11）
+## 0-历史-92. 2026-11-16 智能体第一次能在本机跑命令（分支 `main`，版本 d.164.4.95.11）
 
 前十一版补齐了「会想、会读写文件、会派只读帮手」，但不会执行命令——装依赖、跑测试、看 `git` / 端口、构建都只能把命令写给用户自己粘。opencode / hermes / dsh 都有终端工具，这是最后一道硬差距。这一版的重点不是「怎么跑」，而是「怎么跑得有限、可解释、能停下来」。
 
@@ -1842,7 +3241,7 @@ d.164 让智能体能跑命令，但「停下来」只做了一半：用户点�
 3. 没有危险命令黑名单（`rm -rf` 之类）：按字符串判意图必然误判，先靠 danger 恒问 + 用户在场兜底。
 4. 命令输出的结构化解析（识别 `npm test` 通过/失败行）未做。
 
-## 0-历史-51. 2026-11-16 评测补上「清单终态」与「只读子代理」（分支 `main`，版本 d.163.4.95.11）
+## 0-历史-93. 2026-11-16 评测补上「清单终态」与「只读子代理」（分支 `main`，版本 d.163.4.95.11）
 
 d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评测里此前一件都测不到：`todo_write` 不在评测工具桥里（只能靠 `fake_tools` 假装）、`agent_task` 起不了子会话（确定性模式没有模型绑定）。本版把评测补到能断言它们。
 
@@ -1880,7 +3279,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - `agent_task` 没有 `--real` 用例（真实模型下的子代理质量要另立基线）；
 - 仍欠：真机 Electron E2E、提交/打包/部署（用户未要求）。
 
-## 0-历史-52. 2026-11-16 只读子代理（分支 `main`，版本 d.162.4.95.11）
+## 0-历史-94. 2026-11-16 只读子代理（分支 `main`，版本 d.162.4.95.11）
 
 本轮补的是「翻资料」这类活的分工：主对话的窗口用来想，检索的脏活交给一个只读子代理。
 
@@ -1916,7 +3315,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 评测没有 `agent_task` 用例：假网关只驱动主会话，嵌套对话要另给 `evals/runner` 加「子会话脚本」能力。
 - 仍欠：真机 Electron 端到端（d.153 起一直欠）、提交/打包/部署（用户未要求）。
 
-## 0-历史-53. d.160 历史预算按模型上下文窗口分配（不再硬编码 6000）
+## 0-历史-95. d.160 历史预算按模型上下文窗口分配（不再硬编码 6000）
 
 本轮补的是**度量**：让评测能测到前五版加的提示词能力，并顺手修掉它抓出来的一个真 bug。
 
@@ -1945,7 +3344,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 评测还没覆盖 `todo_write` 本身（eval 桥只挂文件工具 + `fake_tools`）与 d.160 的预算收敛行为。
 - 侧栏进度点 / 清单留档；提交、打包、部署（用户未要求）。
 
-## 0-历史-54. d.159 评测第一次能真的调起新文件工具（修 runner 三处盲区）
+## 0-历史-96. d.159 评测第一次能真的调起新文件工具（修 runner 三处盲区）
 
 本轮补的是「长任务做到一半，前面说过的话突然不见了」的地基。不是加新工具，是把已经写好的压缩链路接到**真实模型的窗口**上。
 
@@ -1976,7 +3375,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 3. **侧栏进度点 + 清单留档**：TodoPanel 只在当前会话可见，历史会话看不到它当时做到哪。
 4. 提交 / 打包 / 部署：本轮 d.153–d.160 仍未提交、未打包、未 push（用户未要求）。
 
-## 0-历史-55. d.158 任务清单渲染进输入区（模型在做什么，用户看得见）
+## 0-历史-97. d.158 任务清单渲染进输入区（模型在做什么，用户看得见）
 
 本轮不是加功能，是**补度量**：d.153 交付的六个文件工具里，有四个从来没被评测跑过——不是没人写用例，是运行器把工具名写死了。
 
@@ -2011,7 +3410,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 评测运行器不在 `pnpm -w typecheck` 的 include 里，本次改动由实际运行覆盖，没有独立类型检查入口。
 
 
-## 0-历史-56. d.157 长任务自动续跑（清单没做完就接着做，不用催「继续」）
+## 0-历史-98. d.157 长任务自动续跑（清单没做完就接着做，不用催「继续」）
 
 用户目标（原话）：「……无法进行长任务处理……我要的结果是高性能的比肩 opencode、hermes、dsh 的新时代智能体应用」。d.155 把清单写进会话状态、d.157 让智能体在清单没做完时自动接着做，但这份清单**用户看不见**——它只存在于 `todo/store` 与提示词里，用户只能从工具调用气泡里逐条拼。长任务一次能跑 36 轮工具，用户最需要的恰恰是这一屏：它打算做几步、现在到第几步、还剩几条。
 
@@ -2046,7 +3445,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 真机 Electron 手工端到端（d.153 起一直欠，所有桌面桥改动只有单测）。
 - 上下文压缩策略对齐 DSH、评测基线扩充（长任务跑 36 轮时的上下文增长没有基线覆盖）。
 
-## 0-历史-57. d.156 内置智能体有了默认人设，并且可以在设置里改
+## 0-历史-99. d.156 内置智能体有了默认人设，并且可以在设置里改
 
 用户目标（原话）：「……无法进行长任务处理……我要的结果是高性能的比肩 opencode、hermes、dsh 的新时代智能体应用」。d.154 让智能体知道自己在哪、手上有什么，d.155 有了任务清单，d.156 有了行为准则——但**长任务仍然干到一半就停**：`agentStream` 每轮用户输入最多 12 轮工具往返（`MAX_TOOL_ROUNDS`），到顶只提示「回复『继续』可以接着做」，等于把续跑责任推回给用户（他得盯着、自己判断是不是真没做完、再敲一次）。
 
@@ -2081,7 +3480,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 续跑只按「清单有未完成项」判据；没有 DSH 那样的任务队列、子代理并行、跨用户输入的任务续跑（用户关掉页面即停）。
 - 未做真实 Electron 手工端到端；本轮未打包、未部署。
 
-## 0-历史-58. d.155 给智能体一张任务清单（todo_write，按会话持久化）
+## 0-历史-100. d.155 给智能体一张任务清单（todo_write，按会话持久化）
 
 用户目标（本轮）：「和鸣仿佛网页端对话，他不知道自己能做什么……我要的结果是高性能的比肩 opencode、hermes、dsh 的新时代智能体应用」。d.154 补了运行环境段（平台/时间/工作区/工具清单/轮次上限），但**「怎么做事」始终没人交代**：`store/llm.ts` 的 `prompts` 默认空记录，全仓 `setPrompt` 只有定义没有调用方——没有任何界面能编辑提示词，所以内置智能体此前实际上只有环境段这一段。结果是：环境知道了，行为方式还是散装（不先核实、没工具也硬答、多步任务不列计划、说完成没证据）。
 
@@ -2124,7 +3523,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 上下文压缩策略与 DSH 对齐、评测基线扩充、真机 Electron 手工端到端。
 
 
-## 0-历史-59. d.154 让智能体知道自己是谁、在哪、有什么工具（运行环境段）
+## 0-历史-101. d.154 让智能体知道自己是谁、在哪、有什么工具（运行环境段）
 
 用户原话（本轮目标）：「和鸣仿佛网页端对话……无法进行长任务处理……我要的结果是高性能的比肩 opencode、hermes、dsh 的新时代智能体应用」。上一版解决了「不知道自己在哪、能做什么」，但**多步任务没有可外化的账本**：计划只写在回复的一段话里，做几步就丢；用户看不到「做到哪、还差什么」；模型一旦被工具结果岔开，也不会回到原计划。DSH 用 `tool-todo` 解决这件事（整份替换快照 + 三态 + 只允许一条 in_progress），本版按同样的语义移植，保留和鸣自己的存储与 HITL 口径。
 
@@ -2163,7 +3562,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 内置智能体**默认人设提示词**（base 仍可能为空串）。
 - 上下文压缩策略与 DSH 对齐、评测基线扩充、真机 Electron 手工端到端。
 
-## 0-历史-60. d.153 智能体第一次能真的读写本机文件（六个文件工具 + 工作区自动写根）
+## 0-历史-102. d.153 智能体第一次能真的读写本机文件（六个文件工具 + 工作区自动写根）
 
 用户原话：「当前的和鸣状态仿佛网页端对话，他不知道自己能做什么，不知道自己的运行环境，无法调用工具以及其他内容，无法进行长任务处理……我要的结果是高性能的比肩 opencode、hermes、dsh 的新时代智能体应用」。
 
@@ -2199,7 +3598,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - 工具目录治理（MCP 默认可用性）、上下文压缩策略与 DSH 对齐、评测基线扩充。
 - 未做真机 Electron 手工端到端（web 单测覆盖）。
 
-## 0-历史-61. d.152 云端更新回填与公网核验（部署事实留档）
+## 0-历史-103. d.152 云端更新回填与公网核验（部署事实留档）
 
 用户原话：「当前智能体存在极大问题，无法创造写入文件，没有任何文件写入，读写的能力……现在的和鸣甚至不能称之为智能体应用」。**根因不是模型、提示词或工具实现，而是权限默认值**：`buildFileToolBridgeIfAvailable` 要求「桌面桥存在 + 至少一条可写根」，而 `DEFAULT_FILE_ROOTS.roots = []` 且必须去设置区手动加根——所以开箱即用的智能体手里**零个文件工具**；同时补丁工具只支持锚点补丁，写不了整份文件、建空文件、列目录、搜内容。安装版 `E:\Heming\data\Local Storage\leveldb` 里确认**没有** `heming.fileEdit.roots.v1` 键，佐证「从未配过根」。
 
@@ -2260,7 +3659,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 4. **未打包未提交**：本轮工作树含他人未提交的团队页 WIP（`packages/server/src/app.ts`、`team.test.ts`、`TeamPage.tsx`、`TeamWorkspace.tsx`、`lib/api.ts`、`lib/team/share.ts`、`lib/team/selection.ts`），提交时**只 add 本任务文件**。
 5. 老安装包（无 `glob`/`grep`/`createParents`/`defaultRootPath`）的降级路径已有单测，但真实老客户端升级场景未验。
 
-## 0-历史-62. 本轮只动一件事：团队页从「同一服务器的所有人」收口到「同队的人」，并把「共享」从手动
+## 0-历史-104. 本轮只动一件事：团队页从「同一服务器的所有人」收口到「同队的人」，并把「共享」从手动
 
 本轮只动一件事：**团队页从「同一服务器的所有人」收口到「同队的人」**，并把「共享」从手动开启改成默认打开、可逐类关闭。
 
@@ -2268,7 +3667,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 - **共享默认打开**：任务摘要 / 日程摘要 / 用量三类默认上传，团队页逐类可关；**关掉只停止以后的上传**，已上传内容要点「清除共享记录 / 清除我的用量」才撤回（避免「关开关 = 偷偷删数据」）。`app.ts` 增加开关读写路由，`HomeTeamUsage.tsx` 与首页团队卡同步。
 - **红线不变**：提示词、对话正文、工具参数、任务结果、文件名仍然不出本机（沿用动向隐私口径：task 类只上报占位「任务」，历史行做读侧投影）。
 - **验证**（本轮实跑）：发版链路十步全过——预检 / `pnpm -r build` / 5 个包逐包测试 / changelog 校验 / 生成模块 / 打包 `r103` / 备份 + 部署 / 发布更新源 / 证据；服务器 install 尾部 `INSTALL DONE: d.152.4.95.11`、smoke `{"ok":true}`；公网 `http://47.92.39.184/api/health` = `{"ok":true}`，首页 bundle 引用与本地 `packages/web/dist/index.html` 完全一致（主 bundle MD5 `698DCAAAA9BA54758E9B4BB44209C687`），`/updates/latest.yml` = `152.4.95`、sha512 与本地安装包一致。**未真机复验**：安装、应用内更新、团队页在真实双账号下的可见性。
-## 0-历史-63. 2026-11-15 内置运行环境自包含：装完即用，不用再装 Python 和 uv（历史小节，版本 d.147.4.94.11）
+## 0-历史-105. 2026-11-15 内置运行环境自包含：装完即用，不用再装 Python 和 uv（历史小节，版本 d.147.4.94.11）
 
 用户口径：按 `docs/research/2026-11-15-agent-tuning-execution-plan.md` 执行——「一次一批、一批一个版本号、独立可回滚；一次只改一个变量；『变好』必须能被一条命令复现」。本程序把智能体从「感觉还行」推进到「可度量、可回归」：先埋点与题集建立基线，再按 P2 工具层 → P3 可信度 → P4 续跑并行的顺序各批改一个变量，每批都用同一条 `pnpm eval:agent` 验证分数不降、token 不涨、p95 不退化，安全用例只收紧不放松。
 
@@ -2571,7 +3970,7 @@ d.155 的任务清单、d.157 的续跑、d.162 的子代理，三件事在评�
 
 
 
-## 0-历史-64. 用户口径：智能体界面「复刻一般智能体应用」（参考 ChatGPT / Claude 
+## 0-历史-106. 用户口径：智能体界面「复刻一般智能体应用」（参考 ChatGPT / Claude 
 
 用户口径：智能体界面「复刻一般智能体应用」（参考 ChatGPT / Claude 官方极简风）；记忆页**界面完全去掉**，
 全部按默认值在后台运行；多智能体协作**单独做一个页面**完成。本轮是特性变更（版本特性位 146 → 147），
@@ -2615,7 +4014,7 @@ shared 8 files / 119 tests；`pnpm build` 全包通过；desktop `node --test` �
 `pnpm design:audit` 三个断点全门槛通过。手工验收：新建/切换/改名/删除会话、会话列表搜索与折叠、
 协作页三模式（顺序/主管/辩论）跑通、设置页记忆说明、命令面板「新建会话 / 协作」。
 
-## 0-历史-65. 产品口径变了：全产品只有一个内置智能体「和小鸣」（id `system-assist
+## 0-历史-107. 产品口径变了：全产品只有一个内置智能体「和小鸣」（id `system-assist
 
 产品口径变了：**全产品只有一个内置智能体「和小鸣」（id `system-assistant`），不可创建 / 修改 / 删除**，
 交互对齐 Codex / Claude Code —— 会话列表 + 当前对话，不再有智能体名册、编辑页与多智能体协作。
@@ -2660,7 +4059,7 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 两级标题大纲，记忆容量标签收回 12 字内）。手工验收：新建/切换/改名/删除会话、模型绑定、记忆页、技能页、
 命令面板「新建会话」、插件设置 agent 字段。
 
-## 0-历史-66. 2026-11-13 修出包：更新助手只收通用在线外壳（历史小节，版本 d.140.3.56.11）
+## 0-历史-108. 2026-11-13 修出包：更新助手只收通用在线外壳（历史小节，版本 d.140.3.56.11）
 
 两条线并行推进，都在工作区里，**尚未提交**（与同轮安装器/插件卡片改动混在一起，提交时按目录拆分）。
 
@@ -2861,14 +4260,14 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-16 21:5x） | d.203.4.106.12（已提交 `e60da1f1` / 已打包 `r109` / 已部署 / 已发布） |
+| 当前版本（2026-11-17 08:5x） | d.235.4.116.12（工作树未提交 / 未打包 / 未部署；d.203.4.107.12 起的四十二版都未发布） |
 | 安装包（最新） | **`packages/desktop/release/r109/和鸣 Setup d.203.4.106.12.exe`（370,510,188 字节，sha512 `clXHwiXRzsYVER/XoEqwJD6Dj3NRamd/EIxT7IpZTR9uEpqkUJnypR0Z4TsnyjJq8+WmJwE3J+cauwT/0Rgbsg==`）** |
-| 版本 | 当前 `d.203.4.106.12`（semver `203.4.106`）· 最近一条 CHANGELOG「装上也打不开：打包白名单漏了两个文件」 |
-| 测试 | 桌面 `node --test package-files.test.js` 3/3；重建 win-unpacked 启动正常；web 364 files / 5284 passed（本轮未改 web）；deterministic eval 39/39 |
-| 线上 | **d.203.4.106.12**（安装包 r109，已部署、已发布更新源） |
+| 版本 | 当前 `d.235.4.116.12`（semver `235.4.116`）· 最近一条 CHANGELOG「工具行也能直接定位到那个文件」 |
+| 测试 | 桌面 pnpm test 56 组 / 1010 例（1009 passed / 1 skip）+ 真机冒烟 56/56；web 388 files / 5609 passed（本轮未改 web）；deterministic eval 40/40 |
+| 线上 | **d.203.4.106.12**（安装包 r109，已部署、已发布更新源）；d.203.4.107.12 起到 d.235.4.116.12 共四十二版均未打包、未部署 |
 | 安装包（已发布） | **`和鸣 Setup d.203.4.106.12.exe`（`r109`，370,510,188 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs` 上传三项并校验大小 + sha512；公网 `latest.yml` → `version: 203.4.106`、`size: 370510188`、Range 请求 206 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 201.4.105`**、`path: 和鸣 Setup d.201.4.105.12.exe`、`size: 370495951`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Length: 363`、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**（`Content-Range: bytes 0-1023/370495951`）。 |
-| 发布标签 | 最新标签 `d.203.4.106.12`（指向 `8125cb5b`，已推到 origin）；`main` 已同步（origin/main = `8125cb5b`） |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **`version: 203.4.106`**、`path: 和鸣 Setup d.203.4.106.12.exe`、`size: 370510188`、sha512 与本地 exe 逐字一致；HEAD 200、`Content-Type: application/octet-stream`，安装包 `Range: bytes=0-1023` → **206**；更新卡片按此判定，空间不足时不再交接安装器（d.203.4.107.12） |
+| 发布标签 | 最新标签 `d.203.4.106.12`（annotated `87cb021a`，指向 `5c265210`，已推到 origin）；`main` 已同步（origin/main = `5c265210`） |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。

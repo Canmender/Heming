@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
 import type { StorageLike } from "../memory/types.js";
-import { compactNow, prepareHistory } from "./history.js";
+import { compactNow, countFoldedMessages, prepareHistory } from "./history.js";
 import { SUMMARY_HEADER } from "./summary.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "./settings.js";
 import { SummaryCache } from "./store.js";
@@ -154,5 +154,30 @@ describe("compactNow：手动压缩（d.183）", () => {
       settings: { ...DEFAULT_CONTEXT_SETTINGS, budgetTokens: 100_000, keepRecentTurns: 20 },
     });
     expect(auto).toEqual(rows);
+  });
+});
+
+describe("折叠条数的判据（d.217）", () => {
+  const rows = conversation(20);
+
+  it("头是摘要骨架时，按「原始条数 - (返回条数 - 1)」算折叠条数", async () => {
+    const compacted = await compactNow(rows, {
+      settings: { ...DEFAULT_CONTEXT_SETTINGS, budgetTokens: 100_000, keepRecentTurns: 2 },
+    });
+    expect(compacted.compacted).toBe(true);
+    expect(countFoldedMessages(rows, compacted.messages)).toBe(compacted.foldedCount);
+  });
+
+  it("没折（历史原样返回）时是 0，不编数字", async () => {
+    const auto = await prepareHistory(rows, {
+      settings: { ...DEFAULT_CONTEXT_SETTINGS, budgetTokens: 100_000, keepRecentTurns: 20 },
+    });
+    expect(countFoldedMessages(rows, auto)).toBe(0);
+  });
+
+  it("头不是摘要（普通 system 或空列表）时也是 0", () => {
+    expect(countFoldedMessages(rows, [{ role: "system", content: "普通系统提示词" }, ...rows])).toBe(0);
+    expect(countFoldedMessages(rows, [])).toBe(0);
+    expect(countFoldedMessages(rows, [{ role: "system", content: SUMMARY_HEADER }])).toBe(rows.length);
   });
 });

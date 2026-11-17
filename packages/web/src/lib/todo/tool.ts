@@ -145,7 +145,9 @@ export function buildTodoToolBridge(deps: { conversationId: string }): ToolBridg
       },
     ],
     // 只写本地计划、无外部副作用：确认卡不该被「写计划」刷屏。
-    meta: (name) => (name === TODO_TOOL ? { risk: "read" as const, displayName: "更新任务清单" } : undefined),
+    // d.207：清单是长任务的进度基线，声明成核心工具，别被按需发现挤掉。
+    meta: (name) =>
+      name === TODO_TOOL ? { risk: "read" as const, displayName: "更新任务清单", core: true } : undefined,
     execute: async (call) => {
       if (call.name !== TODO_TOOL) {
         return { text: `未知工具 ${call.name}`, ok: false };

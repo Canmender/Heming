@@ -168,3 +168,26 @@ export async function collectProjectRules(input: {
 
   return { files, section: lines.join("\n"), omitted };
 }
+
+/**
+ * 约定文件的「只读摘要」（d.219）：给 `/status` 与界面用。
+ *
+ * 为什么需要：d.174 起每一轮都会悄悄读 `AGENTS.md` 并塞进提示词，但用户看不见
+ * 「这一轮到底读到了什么」——于是「它为什么不按我们的规矩来」无从查起
+ * （没读到 / 被截断 / 根本没这份文件，三种情况的处理完全不同）。
+ *
+ * 只给事实：读了哪几份、各多少字、是否被截断、还有几份没展开。
+ * 正文不进摘要：`/status` 是自检，不是看文件的地方。
+ */
+export interface ProjectRulesSummary {
+  files: { rel: string; chars: number; truncated: boolean }[];
+  /** 因为总量上限没展开的文件数。 */
+  omitted: number;
+}
+
+export function summarizeProjectRules(collected: CollectedProjectRules): ProjectRulesSummary {
+  return {
+    files: collected.files.map((file) => ({ rel: file.rel, chars: file.text.length, truncated: file.truncated })),
+    omitted: collected.omitted.length,
+  };
+}

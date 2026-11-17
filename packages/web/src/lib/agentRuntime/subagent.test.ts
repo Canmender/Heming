@@ -234,7 +234,7 @@ describe("withSubagentTool", () => {
 
   it("meta：agent_task 报只读 + 中文名，其它工具原样透传", () => {
     const wrapped = withSubagentTool(baseBridge, { agentId: "system-assistant", conversationId: "c1" });
-    expect(wrapped.meta?.(SUBAGENT_TOOL)).toEqual({ risk: "read", displayName: "派子代理" });
+    expect(wrapped.meta?.(SUBAGENT_TOOL)).toEqual({ risk: "read", displayName: "派子代理", core: true });
     expect(wrapped.meta?.("file_read")).toEqual({ risk: "read", displayName: "读取文件" });
     expect(wrapped.meta?.("other")).toBeUndefined();
   });

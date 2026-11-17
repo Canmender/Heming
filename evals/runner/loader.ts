@@ -398,6 +398,7 @@ function parseCase(file: string, raw: unknown): EvalCase {
     ...(subagentScript ? { subagent_script: subagentScript } : {}),
     ...(raw.todo !== undefined ? { todo: Boolean(raw.todo) } : {}),
     ...(raw.shell !== undefined ? { shell: Boolean(raw.shell) } : {}),
+    ...(raw.workflow !== undefined ? { workflow: Boolean(raw.workflow) } : {}),
     ...(raw.allow_danger !== undefined ? { allow_danger: Boolean(raw.allow_danger) } : {}),
     ...(raw.abort_after_ms !== undefined
       ? (() => {

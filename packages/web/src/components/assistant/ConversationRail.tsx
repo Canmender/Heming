@@ -14,6 +14,7 @@ import {
 } from "../../lib/workspace/group.js";
 import { WorkspaceDialog, type WorkspaceDialogMode } from "./WorkspaceDialog.js";
 import { UnfinishedTurnBadge } from "../UnfinishedTurnBadge.js";
+import { RunningTurnBadge } from "../RunningTurnBadge.js";
 import type { ConversationContentHit, ConversationContentSearchResult } from "../../lib/api.js";
 import {
   CONTENT_SEARCH_DEBOUNCE_MS,
@@ -485,6 +486,8 @@ export function ConversationRail({
               </span>
             ) : null}
             {/* d.196：这一轮没跑完（关窗/崩溃/用户停下），进来就能接着做。 */}
+            {/* d.212：「正在跑」只是此刻的事实；与下面「未跑完」（过去没跑完）互不替代。 */}
+            <RunningTurnBadge conversationId={conv.id} />
             <UnfinishedTurnBadge conversationId={conv.id} />
             {conv.lastMessageAt ? (
               <span className="shrink-0 text-ui-xs tabular-nums text-muted">

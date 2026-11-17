@@ -520,6 +520,16 @@ contextBridge.exposeInMainWorld("__heming_files", {
   /** 最近可回滚的改动（设置区列表）；返回 { ok, items: [{ path, at, bytes }] }。 */
   backups: (payload) => ipcRenderer.invoke("file:backups", payload),
   /**
+   * 预览「撤销会把文件改成什么」（只读，不消费备份）。
+   * 返回 { ok, path?, at?, bytes?, truncated?, binary?, text?, code?, error? }。
+   */
+  backupPreview: (payload) => ipcRenderer.invoke("file:backup-preview", payload),
+  /**
+   * 在系统文件管理器里定位（d.234）：文件走「选中它」，目录走「打开它」。
+   * 返回 { ok, kind?, path?, code?, error? }；只接受已授权根里的绝对路径。
+   */
+  reveal: (payload) => ipcRenderer.invoke("file:reveal", payload),
+  /**
    * 读一张图片（base64）；返回 { ok, mime?, bytes?, base64?, code?, error? }。
    *
    * 与 read 分开是不让「读文本」的调用方有机会拿到 base64 大块，

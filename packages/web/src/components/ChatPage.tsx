@@ -38,7 +38,7 @@ import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { formatBytes } from "../lib/export/conversation.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
-import { useTokenUsageStore } from "../store/tokenUsage.js";
+import { recordsForConversation, totalsOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import {
   uploadEncryptedFile,
   fetchFileBlobUrl,
@@ -74,16 +74,23 @@ import {
   type HistoryRow,
   type VisionImageSlot,
 } from "../lib/vision/history.js";
-import { MAX_TOOL_ROUNDS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
+import { MAX_TOOL_ROUNDS, MAX_VISIBLE_TOOLS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { recordRollout, rolloutLog } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
   COMPACT_COMMAND,
   applyModelBudget,
+  calibrateEstimate,
   compactNow,
+  contextCalibrationRatio,
+  countFoldedMessages,
+  foldNoticeText,
+  getContextFold,
+  recordContextFold,
   estimateRowsTokens,
   loadContextSettings,
   prepareHistory as prepareAgentHistory,
+  recordContextSample,
   summaryCache,
 } from "../lib/agentContext/index.js";
 import { agentPrefsStore, memoryStore } from "../lib/memory/index.js";
@@ -93,7 +100,7 @@ import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
 import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PlusIcon, PhoneIcon, SearchIcon, XIcon, AlertIcon, WorkflowIcon } from "./icons.js";
-import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
+import { buildSearchRows, findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
   ReasoningBlock,
@@ -109,7 +116,7 @@ import { useConversationProgress } from "../lib/progress/useConversationProgress
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import { fileRootsFor, setActiveWorkspace } from "../lib/fileEdit/roots.js";
-import { getFileBridge, hasFileBridge } from "../lib/fileEdit/bridge.js";
+import { getFileBridge, hasBackupPreviewBridge, hasFileBridge, hasRevealBridge } from "../lib/fileEdit/bridge.js";
 import { getShellBridge, hasJobChannels, hasJobPreview, hasJobRuntime } from "../lib/shell/bridge.js";
 import {
   buildRuntimeSection,
@@ -117,15 +124,23 @@ import {
   runtimeToolsFromSpecs,
 } from "../lib/agentRuntime/runtimePrompt.js";
 import { resolveBasePrompt } from "../lib/agentRuntime/defaultPrompt.js";
-import { collectProjectRules } from "../lib/agentRuntime/projectRules.js";
-import { collectFileRefs } from "../lib/fileEdit/fileRefs.js";
+import { collectProjectRules, summarizeProjectRules, type ProjectRulesSummary } from "../lib/agentRuntime/projectRules.js";
+import { collectFileRefs, describeFileRefIssues, fileRefIssues, type FileRefIssues } from "../lib/fileEdit/fileRefs.js";
 import { FileRefPicker } from "./FileRefPicker.js";
 import { ModelSwitcher } from "./ModelSwitcher.js";
 import { TurnUndoBar } from "./TurnUndoBar.js";
+import { ChangeDiffDialog, type ChangeDiffState } from "./ChangeDiffDialog.js";
+import { SessionChangesBar } from "./SessionChangesBar.js";
+import {
+  getSessionChanges,
+  recordSessionChanges,
+  subscribeSessionChanges,
+} from "../lib/fileEdit/sessionChanges.js";
 import { JobReadyBar } from "./JobReadyBar.js";
 import { ContextMeter } from "./ContextMeter.js";
 import { ResumeBar, type ResumeReason } from "./ResumeBar.js";
 import { SubagentRuns } from "./SubagentRuns.js";
+import { TurnProgressLine } from "./TurnProgressLine.js";
 import { JobPanel } from "./JobPanel.js";
 import {
   clearTurnRunning,
@@ -143,13 +158,21 @@ import {
   subscribePanelJobs,
 } from "../lib/shell/jobPanel.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
+import { withWorkflowTool } from "../lib/agentRuntime/workflow.js";
 import {
   applySubagentProgress,
   listSubagentRuns,
   resetSubagentRuns,
   subscribeSubagentRuns,
 } from "../lib/agentRuntime/subagentRuns.js";
-import { createSteerQueue } from "../lib/agentRuntime/steer.js";
+import {
+  clearTurnProgress,
+  getTurnProgress,
+  recordTurnProgress,
+  settleTurnProgress,
+  subscribeTurnProgress,
+} from "../lib/agentRuntime/turnProgress.js";
+import { createSteerQueueRegistry } from "../lib/agentRuntime/steerQueues.js";
 import { PLAN_EXECUTE_PROMPT, loadPlanMode, savePlanMode, withPlanMode } from "../lib/agentRuntime/planMode.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
@@ -180,16 +203,30 @@ import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
 import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
-import { GOAL_COMMAND, SUBAGENT_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { EXPORT_COMMAND, GOAL_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands } from "../lib/agentRuntime/slashCommands.js";
+import { expandInitCommand } from "../lib/agentRuntime/initPrompt.js";
+import { conversationMarkdown, exportFileName } from "../lib/chat/exportMarkdown.js";
+import { summarizeToolArgs } from "../lib/toolArgsSummary.js";
 import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
+import { notifyApprovalWait, notifyTurnEnd, resetTurnNotifyThrottle } from "../lib/agentRuntime/turnNotify.js";
+import { isDesktopNotifyEnabled, onDesktopNotifyOpen, setDesktopNotifyEnabled } from "../lib/desktopNotify.js";
 import { useGoal } from "../lib/agentRuntime/useGoal.js";
 import {
   isSubagentWriteEnabled,
   setSubagentWriteEnabled,
 } from "../lib/agentRuntime/subagentWrite.js";
 import { buildSlashHelp, buildStatusReport } from "../lib/agentRuntime/statusReport.js";
+import { getToolFailureStats, recordToolFailure } from "../lib/agentRuntime/toolFailureStats.js";
 import { historyFrom, stepHistory } from "../lib/agentRuntime/inputHistory.js";
 import { coreToolNames } from "../lib/agentRuntime/coreTools.js";
+import {
+  FINISH_GATE_MAX_NUDGES,
+  finishGatePrompt,
+  finishGateVerdict,
+  unfinishedTodos,
+} from "../lib/agentRuntime/finishGate.js";
+import { inspectOutgoingText, largeMessageNotice } from "../lib/agentRuntime/messageBudget.js";
+import { summarizeMcpStatus } from "../lib/mcp/summary.js";
 import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
 import { chatExamplesFor } from "../lib/onboarding.js";
 import { Button } from "../components/ui/Button.js";
@@ -801,11 +838,33 @@ export function ChatPage({
    * 并行子代理的进度（d.200）：只渲染「有子代理在跑」时的状态条。
    *
    * 进度来自 `subagentRuns` 内存表（`onProgress` 推入），面板据此显示真实轮次与
-   * 正在调的只读工具——不给百分比。`subagentStopRef` 是界面上的「停止」：它**只**
+   * 正在调的只读工具——不给百分比。`subagentStopsRef` 是界面上的「停止」：它**只**
    * 中断子代理，不中断主对话（两个信号在 `withSubagentTool` 里取或）。
+   *
+   * 按会话存（d.226）：两个会话可以各跑各的，界面上的「停止」只能停眼前这个会话的
+   * 子代理。以前是一个共享的 ref——A 会话的子代理在跑、用户切到 B 会话点停止，
+   * 停掉的是 A 那一批（而 B 的还在跑），两边都说不上对。
    */
   const subagentRuns = useSyncExternalStore(subscribeSubagentRuns, listSubagentRuns);
-  const subagentStopRef = useRef<AbortController | null>(null);
+  const subagentStopsRef = useRef<Record<string, AbortController | null>>({});
+  /**
+   * 主对话进度（d.214）：第几轮、正在执行哪个工具、已经跑了多久。
+   *
+   * 只报事实：轮次与工具名都是模型真的做过的事，不编百分比（没人知道还差几轮）。
+   * 收口/停止/切会话都清掉，免得上一轮的数字留在屏幕上被当成「现在还在跑」。
+   */
+  const turnProgress = useSyncExternalStore(subscribeTurnProgress, () => getTurnProgress(convId));
+  /** 让「已跑 X 秒」自己往前走：只有真的在跑时才开秒表；收口后（小结）不需要再 tick。 */
+  const [progressNow, setProgressNow] = useState(0);
+  useEffect(() => {
+    if (!turnProgress || turnProgress.done) {
+      setProgressNow(0);
+      return;
+    }
+    setProgressNow(Date.now());
+    const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [turnProgress]);
   /**
    * 当前会话的目标（d.201）：有目标才渲染 GoalBar；提示词里也只在有目标时写这段。
    *
@@ -841,19 +900,88 @@ export function ChatPage({
    * 由 `onRunSettled` 里另起一轮接着处理，绝不静默丢。
    *
    * 只在内存里：它属于「还没被模型看到的那几句」，刷新后消息本身仍在会话里。
+   *
+   * 按会话存（d.226）：两个会话可以同时各跑一轮，排队的话只能喂给**说这话的那个
+   * 会话**。以前是一个共享队列——A 会话在跑时用户切到 B 会话插一句，B 的下一轮
+   * 会先看到 A 的那句（谁都没报错，但上下文串了）。隔离逻辑在 `steerQueues.ts`，
+   * 有独立单测盯着「两个会话取不走对方的话」。
    */
-  const steerQueueRef = useRef(createSteerQueue());
+  const steerQueuesRef = useRef(createSteerQueueRegistry());
+  const steerQueueOf = (conversationId: string) => steerQueuesRef.current.of(conversationId);
+  /**
+   * 收尾自检（d.232）：这次用户输入已经催过几次。
+   *
+   * 按会话记而不是只记一个布尔：两个会话可能在差不多的时刻各跑一轮，互相不该影响。
+   * 计数在 `submitMessage`（用户亲自开口）里归零——「一次用户输入最多催一次」的边界是
+   * 用户的消息，不是轮次：催完之后仍不动手就如实停，把判断权交回用户
+   * （无限催会让界面变成停不下来的自动循环）。
+   */
+  const finishGateNudgesRef = useRef<Record<string, number>>({});
+  /**
+   * 超长消息（d.233）：这一次点击是否已经提醒过。
+   *
+   * 语义是「第一次拦、第二次放」：不静默截断（模型看到半份日志却不知道缺了后半段，
+   * 比不发更糟），但也绝不替用户决定「这条不许发」——他要发就再点一次。
+   * 草稿一改就复位：换了内容，之前那次「确认」不该继续生效。
+   */
+  const largeSendConfirmedRef = useRef(false);
+  /**
+   * 排队中的插话条数（d.227）：让用户看得见「我补的那几句还没被取走」。
+   *
+   * 以前排队是纯内存里的黑盒：连发两句插话，界面上只有一句「已插话」，谁也说不清
+   * 还有几条在等、能不能收回。这里只报条数（取走即减），并给一个「取消」入口。
+   */
+  const [steerPendingCount, setSteerPendingCount] = useState(0);
+  /**
+   * 上一轮读到的项目约定（d.219）。
+   *
+   * d.174 起每轮都会读 `AGENTS.md` 一族并注入提示词，但那是**静默**的：用户既不知道
+   * 读没读到，也不知道被截断了没有——`/status` 里把这三个事实说出来，才谈得上「可核对」。
+   * 用 ref 而不是 state：它只在 `/status` 被调用的那一刻读一次，不需要触发重渲染。
+   */
+  const projectRulesRef = useRef<ProjectRulesSummary | null>(null);
   // 切会话即清：待发附件属于当前会话的输入上下文，跟到别的会话里发出去是错的
   useEffect(() => {
     setPendingFiles([]);
-    // 插话队列同理：那是「给上一段对话补的话」，换到别的会话里绝不成立
-    steerQueueRef.current.clear();
-    // 子代理进度同理：它是上一段对话里派出去的活，不该出现在别的会话面板里
+    // 插话队列按会话存（d.226），换会话时不必清：那个会话的队列只归它自己；
+    // 这里只把「上一个会话的停止信号」放下，免得切回来时按钮还指着旧控制器。
     resetSubagentRuns();
-    subagentStopRef.current = null;
+    subagentStopsRef.current[convId] = null;
     // 子代理写盘授权按会话记：换会话要看那个会话自己的开关，不能顺延过来
     setSubagentWrite(isSubagentWriteEnabled(convId));
+    // 改动对照属于上一个会话那一轮的文件，留在屏幕上会让人以为改的是眼前这个会话
+    setChangeDiff(null);
+    setSessionChangesOpen(false);
+    // 通知去重按会话/标题记：不重置会让上一个会话刚弹过的同类通知挡住这个会话的
+    resetTurnNotifyThrottle();
+    // 主对话进度属于上一段对话：切过去再看时不该还写着「第 3 轮 · 正在执行 X」。
+    // 但已经收口的那条小结（d.218）留着——切回来还能看到「上一次干了多少」，与侧栏徽标同口径。
+    if (getTurnProgress(convId)?.done !== true) clearTurnProgress(convId);
+    /*
+     * 引用的工作区文件同理（d.222 顺手补齐）：那是上一个会话里挑的文件。
+     * 带过去要么因为根不同而读不到（现在会明说没读进来），要么把 A 会话的文件悄悄塞进 B 会话的请求里。
+     */
+    fileRefsRef.current = [];
+    setFileRefs([]);
+    setFileRefIssue(null);
+    // 排队的插话按会话存（d.226）：切过去要显示那个会话自己的排队条数，不是上一个会话的
+    setSteerPendingCount(steerQueuesRef.current.of(convId).size());
   }, [convId]);
+  /**
+   * 点系统通知回到那个会话（d.208）。
+   *
+   * 桌面端在通知被点时会把窗口拉回前台并回传会话 id（`notify:open`）。不接这条线，
+   * 「点通知跳转」就只是一句空话——用户点了没反应，比不弹更糟。
+   */
+  useEffect(
+    () =>
+      onDesktopNotifyOpen((conversationId) => {
+        if (!conversationId) return;
+        const state = useUiStore.getState();
+        if (state.activeConversationId !== conversationId) state.openConversation(conversationId);
+      }),
+    [],
+  );
   /**
    * 后台作业轮询（d.203）：只在「还有作业在跑」时每 2 秒拉一次。
    *
@@ -928,6 +1056,14 @@ export function ChatPage({
    */
   const [fileRefs, setFileRefs] = useState<string[]>([]);
   const fileRefsRef = useRef<string[]>([]);
+  /*
+   * 引用里没进来的部分（d.222）。
+   *
+   * `collectFileRefs` 一直把「读到 / 没读到 / 只给了前 N 字」分开算，但以前只有拼好的段落
+   * 进了提示词：用户勾了三个文件、其中一个被删了，模型这一轮就是没看到，而界面上一个字都不说，
+   * 于是「它怎么像没看过那份文件」被归因成模型不行。这里把事实摊到引用芯片下面。
+   */
+  const [fileRefIssue, setFileRefIssue] = useState<FileRefIssues | null>(null);
   const [refPickerOpen, setRefPickerOpen] = useState(false);
   /*
    * 本轮落盘的文件（d.176）：来自 `onRunSettled` 的 `writes`，由工具桥显式返回。
@@ -935,6 +1071,13 @@ export function ChatPage({
    * 不解析工具结果文案——文案会为了可读性调整，反推出错就是撤错文件。
    */
   const [turnWrites, setTurnWrites] = useState<string[]>([]);
+  /**
+   * 本会话改动台账（d.210）：只存「哪个文件改过几次」，内容对照仍按需读备份。
+   *
+   * `getSnapshot` 依赖 `sessionChanges.ts` 的引用稳定性：内容没变时必须返回同一个数组，
+   * 否则 `useSyncExternalStore` 会无限重渲染（数据层为此做了按会话快照缓存）。
+   */
+  const sessionChanges = useSyncExternalStore(subscribeSessionChanges, () => getSessionChanges(convId));
   const [undoing, setUndoing] = useState(false);
   /**
    * 上下文用量（d.187）：`{used, budget}`，按当前模型窗口估算。
@@ -942,12 +1085,27 @@ export function ChatPage({
    * 只在这里存一份快照，渲染交给 `ContextMeter`（安静档自己隐掉）。
    * 为什么不每帧算：`loadMessages` 是异步的，且用户打字时不需要重算。
    */
-  const [contextUsage, setContextUsage] = useState<{ used: number; budget: number }>({
+  const [contextUsage, setContextUsage] = useState<{ used: number; budget: number; calibrated: boolean }>({
     used: 0,
     budget: 0,
+    calibrated: false,
   });
   /** 正在单独撤回的那个文件（d.185；与「全部撤回」互斥的进度显示）。 */
   const [undoingPath, setUndoingPath] = useState<string | null>(null);
+  /**
+   * 「这一个文件改成了什么」（d.207.4.110）。
+   *
+   * 数据来自两处真实磁盘内容：改动前 = 主进程写入备份（只读预览），改动后 = 当前文件。
+   * 不用工具参数拼——`file_edit` 只给片段，拼出来的对照会漏掉文件其余部分。
+   */
+  const [changeDiff, setChangeDiff] = useState<ChangeDiffState | null>(null);
+  /**
+   * 会话级改动回顾（d.210）：这个会话到现在动过哪些文件。
+   *
+   * `TurnUndoBar` 只看当前这一轮，下一轮就被覆盖；长任务改了十几轮之后，
+   * 「一共动了哪些文件」只能靠台账回答（`lib/fileEdit/sessionChanges.ts`）。
+   */
+  const [sessionChangesOpen, setSessionChangesOpen] = useState(false);
   /**
    * 「这一轮没跑完」的续跑入口（d.189）。
    *
@@ -1180,8 +1338,6 @@ export function ChatPage({
   const titleSetRef = useRef<Set<string>>(new Set());
   /** 本机流 → 候选链留痕（d.48 路由组）：同样只用于 UI 展示，不进消息、不上行。 */
   const routeTraceRef = useRef<Record<string, RouteAttempt[]>>({});
-  /** 本轮工具调用次数（复盘判「复杂任务」用；onTurnComplete 拿不到 streamId，故按轮次累计）。 */
-  const turnToolCountRef = useRef(0);
   /**
    * 自我修改工具桥（self.*）的依赖与预算。
    *
@@ -1385,7 +1541,7 @@ export function ChatPage({
     // provider，是因为子代理要「用当前这个智能体绑定的模型」跑子会话，而模型绑定
     // 是按 agentId 查的——provider 拿不到 agentId 对应的路由，也不知道会话工作区。
     // 没有桥（这一轮零工具）时不包：凭空多一个能派子代理的工具会让模型以为有检索能力。
-    const wrapped = bridge
+    const withAgents = bridge
       ? withSubagentTool(bridge, {
           agentId,
           conversationId: convId,
@@ -1395,7 +1551,7 @@ export function ChatPage({
           // 两者在 `withSubagentTool` 里取或，任一触发都算中断。
           createSignal: () => {
             const controller = new AbortController();
-            subagentStopRef.current = controller;
+            subagentStopsRef.current[convId] = controller;
             return controller.signal;
           },
           // 写盘授权（d.202）：只认用户开关，不认模型参数。打开后子代理多拿 file_write /
@@ -1403,6 +1559,20 @@ export function ChatPage({
           ...(subagentWrite ? { writable: true } : {}),
           onWrite: (path: string) => {
             setTurnWrites((current) => (current.includes(path) ? current : [...current, path]));
+          },
+        })
+      : null;
+    const wrapped = withAgents
+      ? withWorkflowTool(withAgents, {
+          agentId,
+          conversationId: convId,
+          // 工作流的每一步都是一个只读子代理：沿用同一份进度与停止信号，
+          // 界面因此既看得见「第几步在跑」，也能一键停掉整条流程。
+          onProgress: applySubagentProgress,
+          createSignal: () => {
+            const controller = new AbortController();
+            subagentStopsRef.current[convId] = controller;
+            return controller.signal;
           },
         })
       : null;
@@ -1469,6 +1639,9 @@ export function ChatPage({
     }
     setUndoing(false);
     setTurnWrites([]);
+    // 撤回之后对照就没有意义了（旧内容已经回到文件里），弹窗跟着关掉
+    setChangeDiff(null);
+    setSessionChangesOpen(false);
     if (failed.length === 0) {
       setSendNotice(`已撤回本轮改动的 ${ok} 个文件，已回到改动前的样子。`, "info");
     } else {
@@ -1514,6 +1687,95 @@ export function ChatPage({
     } finally {
       setUndoingPath(null);
     }
+  };
+
+  /**
+   * 看某个文件「这一轮改成了什么」（d.207.4.110）。
+   *
+   * 顺序刻意是「先读备份再读当前」：备份读不出来（新建文件、已被撤销用过）就不必再读当前文件，
+   * 而且弹窗能立刻说清为什么看不了。两边都拿到才画对照——只拿到一半的对照是错的。
+   */
+  const previewTurnChange = async (path: string) => {
+    const bridge = getFileBridge();
+    if (!bridge?.backupPreview) {
+      setSendNotice("当前桌面端版本不支持查看改动（没有 file:backup-preview 通道）。", "info");
+      return;
+    }
+    const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
+    const roots = fileRootsFor(workspace);
+    setChangeDiff({ path, loading: true, error: null, before: null, after: null });
+    try {
+      const before = await bridge.backupPreview({ roots, path });
+      if (!before.ok) {
+        setChangeDiff({ path, loading: false, error: before.error, before: null, after: null });
+        return;
+      }
+      if (before.binary) {
+        setChangeDiff({
+          path,
+          loading: false,
+          error: "改动前的内容是二进制文件，没法画成文字对照（可以看文件大小或用编辑器）。",
+          before: null,
+          after: null,
+        });
+        return;
+      }
+      const after = await bridge.read({ roots, path });
+      setChangeDiff({
+        path,
+        loading: false,
+        error: null,
+        before: before.text,
+        // 读不到当前文件（已被删掉）时按空内容算：对照就全是删除，这是事实
+        after: after.ok ? after.content : "",
+        ...(before.truncated ? { beforeTruncated: true } : {}),
+      });
+    } catch {
+      setChangeDiff({ path, loading: false, error: "读改动失败：桌面端没有响应。", before: null, after: null });
+    }
+  };
+
+  /**
+   * 在系统文件管理器里定位本轮改动的一个文件（d.234）。
+   *
+   * 为什么放在这条清单上：落盘之后第一个真问题是「它改的东西在哪儿」。不给入口就得
+   * 让人从工作区路径一层层点进去；桌面端只允许已授权根里的路径（越界会结构化失败）。
+   */
+  const revealTurnChange = async (path: string) => {
+    const bridge = getFileBridge();
+    if (!bridge?.reveal) {
+      setSendNotice("当前桌面端版本不支持在文件夹里显示（没有 file:reveal 通道）。", "info");
+      return;
+    }
+    const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
+    const roots = fileRootsFor(workspace);
+    try {
+      const res = await bridge.reveal({ roots, path });
+      if (!res.ok) {
+        setSendNotice(res.error, "error");
+        return;
+      }
+      setSendNotice(res.kind === "directory" ? "已在资源管理器里打开那个目录。" : "已在资源管理器里定位这个文件。", "info");
+    } catch {
+      setSendNotice("定位失败：桌面端没有响应。", "error");
+    }
+  };
+
+  /**
+   * 打开会话级改动回顾（d.210）。
+   *
+   * 先挑最近改的那个文件读对照：弹窗一开就有内容，用户再点左边换。
+   * 没有 `file:backup-preview`（老安装包）时如实说明——台账还在，但没有内容可对照。
+   */
+  const openSessionChanges = () => {
+    const latest = sessionChanges[0];
+    if (!latest) return;
+    if (!hasBackupPreviewBridge(getFileBridge())) {
+      setSendNotice("当前桌面端版本不支持查看改动内容（只有台账：这个会话改过哪些文件）。", "info");
+      return;
+    }
+    setSessionChangesOpen(true);
+    void previewTurnChange(latest.path);
   };
 
   /**
@@ -1662,6 +1924,23 @@ export function ChatPage({
     });
     // 去重键兜底：切回再切走时重复触发也不会重复推。
   }, [pendingHitl?.requestId, pendingHitl?.conversationId, pendingHitl?.agentName, convId]);
+
+  /**
+   * 工具确认在等用户时也弹系统通知（d.208）。
+   *
+   * 应用内通知中心只覆盖「用户还看着这个窗口」的情况；切去别的应用干活时，
+   * 那条待确认会一直挂着直到超时按拒绝处理——用户回来发现「它自己拒了」。
+   * 同一个 requestId 只提醒一次（`notifyApprovalWait` 内按 requestId 去重）。
+   */
+  useEffect(() => {
+    if (!pendingHitl || pendingHitl.kind !== "tool-call") return;
+    notifyApprovalWait(
+      pendingHitl.requestId,
+      pendingHitl.calls,
+      pendingHitl.agentName,
+      pendingHitl.conversationId,
+    );
+  }, [pendingHitl?.requestId, pendingHitl?.kind]);
 
   // 超时按拒绝收口（d.34）：60 分钟没人裁决，逐项 deny 并留痕。
   useEffect(() => {
@@ -1848,6 +2127,17 @@ export function ChatPage({
     () => findMessageHits(searchableMessages, searchQuery),
     [searchableMessages, searchQuery],
   );
+  // d.235：结果面板的行——每条命中给一句「命中处附近」的摘要，点哪条跳哪条。
+  // 以前只有「2/5」这个计数，要找到想看的那一条只能一路按回车。
+  const searchRows = useMemo(
+    () => buildSearchRows(searchableMessages, searchHits, searchQuery),
+    [searchableMessages, searchHits, searchQuery],
+  );
+  /** 行 → 消息：只为了拿署名（我 / 智能体名），命中列表本身只有 id 与文本。 */
+  const searchMessageById = useMemo(
+    () => new Map(visibleMessages.map((m) => [m.id, m])),
+    [visibleMessages],
+  );
   const searchIndex = hitPosition(searchHits, searchHitId);
   const activeSearchHit = searchHits[searchIndex >= 0 ? searchIndex : 0] ?? null;
   const activeSearchId = activeSearchHit?.id ?? null;
@@ -1987,6 +2277,13 @@ export function ChatPage({
     }
     const forkRun = resolveForkRun(forkTask, forkView);
     setForkNotice(forkRun.notice ?? null);
+    /**
+     * 这一轮的流 → 工具调用次数（复盘判「复杂任务」用，d.226）。
+     *
+     * 放在 `startRun` 的作用域里：一次调用一份计数，两个会话各跑各的不会互相读走。
+     * 以前是组件级共享 ref，先收口的那个会话会把后收口那轮的次数读成自己的。
+     */
+    let turnToolCount = 0;
     const deps: TriggerDeps = {
       getProfile: resolveProfile,
       getPrompt: (agentId) => resolveBasePrompt(useLlmStore.getState().prompts[agentId]),
@@ -2187,7 +2484,10 @@ export function ChatPage({
         // 新一轮开始：上一条「轮次打满」提示已完成使命（继续/改主意都算），清掉；
         // 「计划就绪」同理——新一轮要么在计划里接着聊，要么已经动手了。
         setRoundLimitStreamId(null);
-    setTurnWrites([]);
+        setTurnWrites([]);
+        // 上一轮的对照窗口不该跨到新一轮（那时的文件状态已经不是现在这个）
+        setChangeDiff(null);
+        setSessionChangesOpen(false);
         setPlanReadyStreamId(null);
         if (taskId) {
           streamTaskRef.current[streamId] = taskId;
@@ -2197,7 +2497,7 @@ export function ChatPage({
         // 新的一轮从最新的工具目录起步（上轮缓存的桥可能已过期）
         toolBridgeRef.current.clear();
         routeTraceRef.current[streamId] = [];
-        turnToolCountRef.current = 0;
+        turnToolCount = 0;
         // 新一轮开始：重置自我修改的单轮预算（上轮用掉的次数不该拖累这一轮）
         selfEditRef.current!.budget.reset(mention.agentId, convId);
         markStreamOwner(streamId);
@@ -2236,15 +2536,18 @@ export function ChatPage({
           const rulesWorkspace = useChatStore
             .getState()
             .conversations.find((c) => c.id === convId)?.workspace;
-          rulesSection = (
-            await collectProjectRules({
-              bridge: getFileBridge(),
-              roots: fileRootsFor(rulesWorkspace),
-              workspace: rulesWorkspace,
-            })
-          ).section;
+          const collected = await collectProjectRules({
+            bridge: getFileBridge(),
+            roots: fileRootsFor(rulesWorkspace),
+            workspace: rulesWorkspace,
+          });
+          rulesSection = collected.section;
+          // 顺手留一份只读摘要给 `/status`（d.219）：读没读到、被截断了没有，用户要能核对。
+          projectRulesRef.current = summarizeProjectRules(collected);
         } catch {
           rulesSection = "";
+          // 读失败 ≠ 工作区里没有约定：保持「尚未统计」，别把读不到说成「没有」。
+          projectRulesRef.current = null;
         }
 
         /*
@@ -2264,16 +2567,24 @@ export function ChatPage({
             const refsWorkspace = useChatStore
               .getState()
               .conversations.find((c) => c.id === convId)?.workspace;
-            filesSection = (
-              await collectFileRefs({
-                bridge: getFileBridge(),
-                roots: fileRootsFor(refsWorkspace),
-                paths: refs,
-              })
-            ).section;
+            const collected = await collectFileRefs({
+              bridge: getFileBridge(),
+              roots: fileRootsFor(refsWorkspace),
+              paths: refs,
+            });
+            filesSection = collected.section;
+            // d.222：读不到 / 被截断都摊到界面上；一句话说清「模型这一轮看不到这些」。
+            const issues = fileRefIssues(collected);
+            setFileRefIssue(issues);
+            if (issues !== null) {
+              setSendNotice(describeFileRefIssues(issues), issues.missing.length > 0 ? "error" : "info");
+            }
+          } else {
+            setFileRefIssue(null);
           }
         } catch {
           filesSection = "";
+          setFileRefIssue(null);
         }
 
         let runtimeSection = "";
@@ -2376,7 +2687,7 @@ export function ChatPage({
         const list = (toolTraceRef.current[streamId] ??= []);
         const idx = list.findIndex((t) => t.id === e.id);
         if (e.phase === "start") {
-          turnToolCountRef.current += 1;
+          turnToolCount += 1;
           const entry: ToolTrace = {
             id: e.id,
             name: e.name,
@@ -2391,6 +2702,17 @@ export function ChatPage({
           }
         } else if (idx >= 0) {
           const status = e.denied ? "denied" : e.ok ? "ok" : "error";
+          // d.221：失败按稳定错误码记账（被拒的记 denied，绝不和「工具失败」混成一件）。
+          // 归到**这条流所属的会话**：切会话后迟到的 end 事件不该记到当前会话头上。
+          if (status === "error" || status === "denied") {
+            const streamConv = useChatStore.getState().streaming[streamId]?.conversationId ?? convId;
+            recordToolFailure(streamConv, {
+              tool: e.name,
+              ...(e.denied ? { denied: true } : {}),
+              ...(e.errorCode === undefined ? {} : { errorCode: e.errorCode }),
+              ...(e.result === undefined ? {} : { result: e.result }),
+            });
+          }
           list[idx] = {
             ...list[idx],
             // 「已拒绝」与「失败」分开：被拒的工具**根本没执行**，
@@ -2483,7 +2805,7 @@ export function ChatPage({
               userText,
               assistantText,
               recentTurns: memoryStore.working(convId, agentId).slice(-6),
-              toolCallCount: turnToolCountRef.current,
+              toolCallCount: turnToolCount,
               profile: resolveProfile(agentId),
             });
           }
@@ -2517,9 +2839,25 @@ export function ChatPage({
         // 而不是「这一轮结果不好」。
         // d.196：只清当前会话——别的会话里没跑完的活不该被顺手抹掉（侧栏徽标要用）。
         clearTurnRunning(convId);
+        // 主对话进度（d.214）：这一轮已经收口，不能再显示「正在执行 X」——留着等于告诉用户
+        // 「还在跑」，而实际上它已经停了（用户会一直等一个不存在的下一轮）。
+        // d.218：也不直接抹掉，换成一行小结（几轮 / 几次工具 / 用时多少），
+        // 免得跑完那一刻用户不在屏幕前，回头只能翻消息猜「刚才那一下干了多少」。
+        settleTurnProgress(convId);
         // 引用只对这一轮有效（d.175）：回合收尾就清掉，避免下一次无意的发送带上旧文件。
         fileRefsRef.current = [];
         setFileRefs([]);
+        setFileRefIssue(null);
+        /*
+         * 系统通知（d.208）：窗口不在前台时提醒「跑完了 / 出错了 / 撞上限了」。
+         *
+         * 是否真弹由 `notifyDesktop` 判断（前台不弹、用户关了开关不弹），这里只负责
+         * 把状态翻成人话并带上会话 id——点通知能直接回到这个会话。
+         */
+        {
+          const settledMeta = streamMeta.current[streamId] ?? { agentId: "system-assistant", name: "和小鸣" };
+          notifyTurnEnd(result, settledMeta.name, convId);
+        }
         // 轮次打满（d.167.4.103）：成功收口但被上限截断 → 输入区上方给一次「继续」。
         // 放在任务区判断之前：普通聊天流不建档，同样需要这个入口。
         if (result.maxRounds) setRoundLimitStreamId(streamId);
@@ -2534,6 +2872,9 @@ export function ChatPage({
         }
         // 这一轮改过文件就给一次点击的「撤回」（d.176），没改就清掉上一条。
         setTurnWrites(result.writes ?? []);
+        // 会话级台账（d.210）：撤回条会被下一轮覆盖，这里的记录留到会话结束，
+        // 用户随时能回看「这个会话一共动过哪些文件、各改了几次」。
+        if (result.writes && result.writes.length > 0) recordSessionChanges(convId, result.writes);
         // 回合收尾刷新上下文用量（d.187）：刚发出去的那一轮才是真实占用。
         refreshContextUsage();
         // 后台作业（d.182）：作业不会被 await，收口后由界面接着盯，跑完给一次「继续」。
@@ -2565,14 +2906,73 @@ export function ChatPage({
           setWatchedJobs([]);
         }
         /*
-         * 运行中插话（d.199）：这一轮在取走前就收尾了（走到答案那轮 / 被停 / 报错），
-         * 队列里剩下的话模型没看见——不能静默丢，也不能假装它看过。
-         * 用它另起一轮：消息早已落库，走正常发送路径，不重发、不重复入库。
+         * 运行中插话（d.199，d.225 修「停不下来」）：只有这一轮**正常做完**时才自动接着处理排队的那条。
+         *
+         * 以前不管收口原因都会 `shift()` 后立刻开新轮：用户点了停止（aborted）或这一轮报错（error），
+         * 界面会自己又跑起来——「停止」按了没停住，而且错误之上再叠一次大概率仍失败的请求。
+         * 现在这两种情况只把「没发出去」说清楚并清空队列：插话内容早已作为用户消息落库，
+         * 下一次继续/重试时模型在历史里就看到它了，不需要靠内存队列再送一遍
+         * （留着反而危险：三轮之后某个工具轮会突然把旧的一句话塞进上下文）。
          */
-        const queued = steerQueueRef.current.shift();
-        if (queued) {
-          setSendNotice("这一轮已经收尾，正接着处理你插的那条（下一轮就是它）。", "info");
-          startRun(queued.mentions, queued.text);
+        if (result.status === "ok") {
+          const queued = steerQueueOf(convId).shift();
+          if (queued) {
+            setSendNotice("这一轮已经收尾，正接着处理你插的那条（下一轮就是它）。", "info");
+            startRun(queued.mentions, queued.text);
+          }
+        } else if (steerQueueOf(convId).size() > 0) {
+          const missed = steerQueueOf(convId).size();
+          steerQueueOf(convId).clear();
+          setSendNotice(
+            result.status === "aborted"
+              ? `你点了停止：排队里的 ${missed} 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）。`
+              : `这一轮出错了：排队里的 ${missed} 条插话没有发出去（内容留在会话里，重试时会一起看到）。`,
+            "info",
+          );
+        }
+        // 排队条跟着真实队列走（d.227）：收口后要么被取走一条（继续跑）、要么被清空
+        setSteerPendingCount(steerQueueOf(convId).size());
+        /*
+         * 收尾自检（d.232）：它说这一轮做完了，但任务清单里还有没打勾的项。
+         *
+         * 长任务最典型的塌方就是「提前宣布完成」：最后一句写「都改好了」，清单里还挂着
+         * 两三行 `[ ]`，用户去验收才发现一半没做。这里不替用户判断完成度（那是它自己的
+         * 清单），只把矛盾摆到台面上，并且**一次用户输入只问一次**——催完还不动手就停，
+         * 接着问只会变成停不下来的自动循环。
+         *
+         * 只看 `ok`：用户点停止、或这一轮出错，那是另一种情境（并且刚好是用户已经介入）。
+         * 有排队插话时先让插话——用户的即时意图优先于系统自检。
+         */
+        if (result.status === "ok") {
+          const openTodos = unfinishedTodos(convId);
+          const verdict = finishGateVerdict({
+            status: result.status,
+            open: openTodos.length,
+            nudges: finishGateNudgesRef.current[convId] ?? 0,
+            steerQueued: steerQueueOf(convId).size() > 0,
+          });
+          if (verdict.nudge) {
+            finishGateNudgesRef.current[convId] = (finishGateNudgesRef.current[convId] ?? 0) + 1;
+            const gateMeta = streamMeta.current[streamId] ?? { agentId: "system-assistant", name: "和小鸣" };
+            const listed = openTodos
+              .slice(0, 3)
+              .map((item) => item.content)
+              .join("、");
+            setSendNotice(
+              `清单里还有 ${openTodos.length} 项没打勾（${listed}${openTodos.length > 3 ? "…" : ""}）：我让它自己核一遍，别一句话带过。`,
+              "info",
+            );
+            startRun([{ agentId: gateMeta.agentId, name: gateMeta.name }], finishGatePrompt(openTodos));
+          } else if (verdict.reason === "already-nudged") {
+            // 已经催过一次还这样：如实收尾，把「还剩几项」留在屏幕上，别再自动跑。
+            // `FINISH_GATE_MAX_NUDGES` 就是这条线的位置（改它之前先想清楚会不会变成死循环）。
+            if (openTodos.length > 0 && finishGateNudgesRef.current[convId] !== undefined) {
+              setSendNotice(
+                `这一轮又收尾了，清单里仍有 ${openTodos.length} 项没打勾（已提醒过一次，不再自动追问）。可以说「继续」或直接指出先做哪项。`,
+                "info",
+              );
+            }
+          }
         }
         const taskId = streamTaskRef.current[streamId];
         if (!taskId) return;
@@ -2602,7 +3002,7 @@ export function ChatPage({
             loadContextSettings(),
             profile ? resolveCapability(profile) : null,
           );
-          return await prepareAgentHistory(rows, {
+          const prepared = await prepareAgentHistory(rows, {
             settings,
             cache: summaryCache,
             conversationId: convId,
@@ -2626,6 +3026,13 @@ export function ChatPage({
                 }
               : undefined,
           });
+          // d.217：折了就当面说一次——否则用户只看到「它忘了我刚说的规矩」。
+          const foldedCount = countFoldedMessages(rows, prepared);
+          if (foldedCount > 0) {
+            recordContextFold(convId, foldedCount);
+            setSendNotice(foldNoticeText(foldedCount), "info");
+          }
+          return prepared;
         } catch {
           return rows; // 压缩失败不阻断生成：按原样发送
         }
@@ -2634,7 +3041,40 @@ export function ChatPage({
        * 运行中插话（d.199）：每开一个工具轮取走队列里的正文，追加到本轮上下文末尾。
        * 队列只在内存、只属于这一轮；取走后如果这一轮收尾，剩下的由 onRunSettled 另起一轮。
        */
-      drainSteer: () => steerQueueRef.current.take(),
+      drainSteer: () => {
+        const queue = steerQueueOf(convId);
+        const texts = queue.take();
+        // 取走即减（d.227）：排队条要跟着真实队列走，不能只加不减
+        if (texts.length > 0) setSteerPendingCount(queue.size());
+        return texts;
+      },
+      /**
+       * 主对话进度（d.214）：把「第几轮 / 正在执行哪个工具」写到内存表，输入区上方那行据此渲染。
+       *
+       * 只在本机展示，不上行；收口时（`onRunSettled`）统一清掉。
+       */
+      onProgress: (event) => recordTurnProgress(convId, event),
+      /**
+       * 上下文估算校准采样（d.215）：供应商报了提示 token 就记一条，
+       * 再用新倍率刷新输入区那行用量——用户看到的是校准后的数字，
+       * 不必自己去猜「估算偏了多少」。
+       */
+      onContextSample: (sample) => {
+        recordContextSample(sample);
+        refreshContextUsage();
+      },
+      /**
+       * 上游瞬时错误自动重试（d.203.4.108）：把「正在自动重试」说给用户听。
+       * 不说的话界面会像卡住，用户会点停止，把本来能自己缓过来的一轮掐掉。
+       * 提示只发一次（下一次重试覆盖同一句），收口时的正常文案会把提示位覆盖掉。
+       */
+      onUpstreamRetry: ({ attempt, max, delayMs, reason }) => {
+        const seconds = Math.max(1, Math.round(delayMs / 100) / 10);
+        setSendNotice(
+          `${reason}，${seconds} 秒后自动重试（第 ${attempt}/${max} 次）；不想等可以直接点停止。`,
+          "info",
+        );
+      },
     };
     // 同步拿句柄（挂在 promise 上）：中断按钮不必等 fetchHistory/流完成
     const run = runAgentMentions(convId, mentions, text, deps);
@@ -2658,6 +3098,14 @@ export function ChatPage({
     // 确认弹窗也要收掉：否则用户按了停止，弹窗还杵在屏幕上，
     // 闸门的 await 永不 resolve → 整轮挂死（设计 §4.4）。
     useHitlStore.getState().cancelAll("用户中断");
+    // d.230：「停止」只停这一轮对话，后台作业不受影响。不说清的话，
+    // 用户会以为全停了，回头发现构建还在跑、或者以为被杀了。
+    if (hasRunningPanelJobs()) {
+      setSendNotice(
+        "已停止这一轮。后台还有作业在跑（点停止不会停它们）：在「后台作业」面板里可以逐条停，或者让它跑完。",
+        "info",
+      );
+    }
   };
   /**
    * 把「中断本会话」登记给跨组件登记表（d.86）：任务区右栏的汇总卡据此停止运行，
@@ -3042,6 +3490,8 @@ export function ChatPage({
   const onDraftChange = (value: string) => {
     // 手打就退出回溯（d.194）：改过的文字不该再被 ↑ 覆盖，除非重新从空框开始。
     if (historyIndex >= 0) setHistoryIndex(-1);
+    // 换了内容，「这条很长，确认再发」的那次确认作废（d.233）。
+    largeSendConfirmedRef.current = false;
     setDraft(value);
     scheduleDraftSave(convId, value);
   };
@@ -3166,7 +3616,16 @@ export function ChatPage({
         loadContextSettings(),
         profile ? resolveCapability(profile) : null,
       );
-      setContextUsage({ used: estimateRowsTokens(rows), budget: settings.budgetTokens });
+      // 校准（d.215）：真实上报的提示 token 与估算差多少，按模型记住倍率；
+      // 只修正显示与提醒，压缩决策仍用未校准的估算（避免一次异常样本让整段历史被误压）。
+      const raw = estimateRowsTokens(rows);
+      const model = profile?.model ?? "";
+      const ratio = contextCalibrationRatio(model);
+      setContextUsage({
+        used: calibrateEstimate(raw, model),
+        budget: settings.budgetTokens,
+        calibrated: ratio !== 1,
+      });
     } catch {
       /* 指标失败静默：它是提示，不是功能；拿不到就不显示，别影响发送 */
     }
@@ -3258,12 +3717,25 @@ export function ChatPage({
       modelWindow: caps?.contextWindow,
       vision: caps?.supportsVision,
       workspace: conv?.workspace ?? "",
+      projectRules: projectRulesRef.current,
+      // d.221：这个会话失败了几次、卡在哪些错误码上（只在真失败过时才有这一行）
+      toolFailures: getToolFailureStats(convId),
       roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),
       planMode: loadPlanMode(convId),
       // 自检里的「子代理：只读 / 可写」直接读存储——闭包里的 state 可能还是上一轮的值
       subagentWritable: isSubagentWriteEnabled(convId),
+      notifyEnabled: isDesktopNotifyEnabled(),
+      sessionChanges: getSessionChanges(convId).length,
       context: contextUsage,
+      // d.217：这个会话最近一次被折了多少条——只读存储，不改状态
+      contextFold: (() => {
+        const fold = getContextFold(convId);
+        if (!fold) return null;
+        return { foldedCount: fold.foldedCount, ageMinutes: Math.max(0, Math.floor((Date.now() - fold.at) / 60_000)) };
+      })(),
       todos: getTodos(convId),
+      // d.230：这个会话累计花了多少——只读用量账本，不写一行
+      usage: totalsOf(recordsForConversation(useTokenUsageStore.getState().records, convId)),
       // 面板有数据就以面板为准（它含用户自己起的作业）；没有才退回「这一轮盯过的那几个」
       jobs:
         shellJobs.length > 0
@@ -3272,7 +3744,21 @@ export function ChatPage({
       writes: turnWrites.length,
       resumePending: loadResumePoint(convId) !== null,
       busy: activeLocal.length > 0,
-      tools: { count: names.length, core: coreToolNames(names).length },
+      // 常驻工具数以桥的声明为准（d.207），旧名单只兜底——与 `agentStream` 的钉选同一口径
+      tools: {
+        count: names.length,
+        core: coreToolNames(names, (name) => bridge?.meta?.(name)).length,
+        // d.224：工具一多就切「按需发现」，界面上得说清「它为什么有时要先检索一次」
+        discovery: names.length > TOOL_SEARCH_THRESHOLD,
+        visible: MAX_VISIBLE_TOOLS,
+        threshold: TOOL_SEARCH_THRESHOLD,
+      },
+      // d.223：MCP 工具在清单里 ≠ 服务连得上；把「谁没连上、为什么」摊开
+      mcp: summarizeMcpStatus(
+        mcpRegistry.servers(),
+        (id) => mcpRegistry.status(id),
+        mcpRegistry.enabledTools().length,
+      ),
       desktop: hasFileBridge() || getShellBridge() !== null,
     });
   }
@@ -3290,6 +3776,66 @@ export function ChatPage({
   }
 
   /**
+   * 导出当前会话为 Markdown（d.236）。
+   *
+   * 为什么要有：长任务跑到几十轮，结论、改了哪些文件、卡在哪都散在几百条消息与上千次
+   * 工具调用里；要归档、贴给同事、拿去开 issue，只能一条条复制。这里读**已落库的整段
+   * 会话**（不是屏幕上那一段窗口），把工具调用与失败原因一并写进去。
+   *
+   * 纯本地：不调模型、不落库、不改会话——只在浏览器里造一个文件并触发下载。
+   * 失败要如实说（例如某些环境不允许程序化触发下载），不能提示「已导出」却什么也没有。
+   */
+  const exportConversation = (): { ok: true; notice?: string } | { ok: false; error: string } => {
+    const all = useChatStore.getState().messages[convId] ?? [];
+    const turns = all.map((m) => {
+      const tools = (transcriptOf(m)?.tools ?? [])
+        .filter((t) => t.id && t.name)
+        .map((t) => ({
+          name: t.name,
+          summary: summarizeToolArgs(t.name, t.args),
+          status: t.status,
+        }));
+      const file = m.payload.file;
+      return {
+        role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
+        name: m.senderType === "user" ? "你" : conv?.agent.name ?? "和鸣",
+        at: m.createdAt,
+        text: m.payload.text,
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(file?.name ? { files: [file.name] } : {}),
+      };
+    });
+    const at = new Date().toISOString();
+    const title = conv?.title ?? "未命名会话";
+    const markdown = conversationMarkdown({
+      title,
+      conversationId: convId,
+      exportedAt: at,
+      turns,
+      goal: getGoal(convId)?.text ?? null,
+      todos: getTodos(convId),
+      version: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null,
+    });
+    const name = exportFileName(title, at);
+    try {
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // 立刻 revoke 会让部分浏览器拿不到内容，放到下一拍再回收。
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      return { ok: true, notice: `已导出 ${turns.length} 条消息（${name}）。` };
+    } catch {
+      return { ok: false, error: "导出失败：这个环境不允许程序化下载文件。" };
+    }
+  };
+
+  /**
    * 发送一条消息（聊天输入栏与任务区自动执行共用；附件入口带 attachment 走同一条）。
    *
    * 返回失败原因而不是只设提示：任务区自动执行失败时要把任务收口成「失败」，
@@ -3305,6 +3851,19 @@ export function ChatPage({
   ): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> => {
     const text = rawText.trim();
     if (!text) return { ok: false, error: "消息为空" };
+    // d.232：用户亲自开口 → 收尾自检的「这次已经催过几次」重新起算（`retryStream` 也走这里，
+    // 「继续/接着做」自然算一次新的开始）。放在这里而不是 `startRun`：催收尾本身也调 `startRun`，
+    // 在那儿清零会把刚记下的次数抹掉，导致每轮都催、变成自动循环。
+    finishGateNudgesRef.current[convId] = 0;
+    /**
+     * `/init`（d.219）：把命令换成一段任务描述，**继续走正常发送路径**。
+     *
+     * 与其它 `/` 命令的区别：约定文件必须由模型真去读代码才写得准，所以这里不能
+     * 本地拼一段文本了事——它是一次真正的任务（会落库、会调工具、会走写盘确认）。
+     * 递归调用而不是就地改 `text`：下面的分支都基于 `text`，改局部变量容易漏。
+     */
+    const initPrompt = expandInitCommand(text);
+    if (initPrompt !== null) return submitMessage(initPrompt, mentions, taskId, attachment, options);
     // 只对用户手打的单条命令生效：`/compact` 不落库、不发给模型，本地压缩完给结果。
     if (text === COMPACT_COMMAND) return await runCompactCommand(mentions);
     if (text === PLAN_COMMAND) {
@@ -3320,6 +3879,8 @@ export function ChatPage({
     // 自检与帮助同样本地完成：没有模型绑定也要能问「为什么它不动手」。
     if (text === STATUS_COMMAND) return { ok: true, notice: buildSelfStatus() };
     if (text === HELP_COMMAND) return { ok: true, notice: buildSlashHelp() };
+    // 导出（d.236）：纯本地动作——读当前会话的消息与工具轨迹，生成一份 Markdown 并下载。
+    if (text === EXPORT_COMMAND) return exportConversation();
     /**
      * 会话目标（d.201）：`/goal <一句话>` 设定、`/goal done` 完成、`/goal off` 清除、`/goal` 查看。
      *
@@ -3400,6 +3961,37 @@ export function ChatPage({
       };
     }
     /**
+     * 系统通知开关（d.208）：`/notify off` 关掉、`/notify on` 打开、不带参数看状态。
+     *
+     * 全本地。默认开：它只在「窗口不在前台」时才会真弹（桌面端两道判断），
+     * 所以正常情况下不会打扰；给开关是因为总有人不想被系统弹窗打断。
+     */
+    if (text === NOTIFY_COMMAND || text.startsWith(`${NOTIFY_COMMAND} `)) {
+      const rest = text.slice(NOTIFY_COMMAND.length).trim().toLowerCase();
+      const on = rest === "on" || rest === "开";
+      const off = rest === "off" || rest === "关";
+      if (on) {
+        setDesktopNotifyEnabled(true);
+        return {
+          ok: true,
+          notice: "已打开系统通知：窗口不在前台时，一轮做完 / 出错 / 工具等你确认会弹一次；点通知回到那个会话。",
+        };
+      }
+      if (off) {
+        setDesktopNotifyEnabled(false);
+        return { ok: true, notice: "已关闭系统通知：之后只在应用内提示，不再弹桌面通知。" };
+      }
+      if (rest && rest !== "status" && rest !== "状态") {
+        return { ok: true, notice: "用法：`/notify off` 关闭系统通知、`/notify on` 打开、`/notify` 看当前状态。" };
+      }
+      return {
+        ok: true,
+        notice: isDesktopNotifyEnabled()
+          ? "系统通知：开（窗口不在前台时，跑完 / 出错 / 等你确认会弹一次，点通知回到会话）。发 `/notify off` 关闭。"
+          : "系统通知：关（只在应用内提示）。发 `/notify on` 打开。",
+      };
+    }
+    /**
      * MCP 懒预检（用户要求：工具要自动识别并加载）。
      *
      * 应用启动时已经自动连过一次，但那次可能失败（uvx 首次下载依赖要一两分钟、
@@ -3453,11 +4045,12 @@ export function ChatPage({
     if (mentions.length) {
       if (options?.steer) {
         /*
-         * 这一轮还在跑（d.199）：不另起第二条流——两条流会共用 `turnToolCountRef` /
+         * 这一轮还在跑（d.199）：不另起第二条流——两条流会共用工具计数 /
          * 自改预算并互相重置，复盘判定与预算双双失真（这是以前直接拒绝发送的原因）。
          * 改成入队：编排层下一步取走，模型看到「工具结果 → 用户新指示」。
          */
-        const size = steerQueueRef.current.push({ text, mentions });
+        const size = steerQueueOf(convId).push({ text, mentions });
+        setSteerPendingCount(size);
         return {
           ok: true,
           notice: `已插话（排队 ${size} 条）：这一轮下一步就能看到；如果它已经收尾，会接着处理。`,
@@ -3474,6 +4067,22 @@ export function ChatPage({
     cancelDraftSave();
     clearDraft(convId);
     setSendNotice(null);
+  };
+
+  /**
+   * 取消排队的插话（d.227）。
+   *
+   * 为什么允许收回：插话是「还没被模型看到的那几句」，写完就发现说错了是常事。
+   * 取消只清内存队列——那几条消息已经在会话里（发出去时就上行落库了），所以这一轮
+   * 不会被插嘴，但文字本身没丢，后面的轮次仍能从历史里看到。
+   */
+  const cancelSteerQueue = () => {
+    const queue = steerQueueOf(convId);
+    const missed = queue.size();
+    if (missed === 0) return;
+    queue.clear();
+    setSteerPendingCount(0);
+    setSendNotice(`已取消排队的 ${missed} 条插话（内容还在会话里，这一轮照常跑完）。`, "info");
   };
 
   /**
@@ -3519,6 +4128,22 @@ export function ChatPage({
       setSendNotice("正在生成中：带附件的话请等这一轮结束再发", "info");
       return;
     }
+    /*
+     * 超长消息（d.233）：第一次点击只提醒，第二次才真发。
+     *
+     * 输入框没有长度上限，粘一份 300 KB 日志也能直接发出去——后果是上下文被这一条吃掉
+     * （历史压缩把之前几轮折成摘要，模型「突然忘了要求」）、或者服务端直接 400（看起来
+     * 像网络错误）、或者账单。这里不截断、不偷偷改内容，只把代价说清楚并给更好的做法。
+     * 放在附件分支之前：正文 + 附件一起发时，正文同样吃预算。
+     */
+    {
+      const inspection = inspectOutgoingText(draft);
+      if (inspection.tooLarge && !largeSendConfirmedRef.current) {
+        largeSendConfirmedRef.current = true;
+        setSendNotice(largeMessageNotice(inspection), "info");
+        return;
+      }
+    }
     // 附件走独立通道：正文 + 第一个附件同发，其余各发一条 file 消息
     if (pendingFiles.length > 0) {
       await sendPendingFiles(draft, effectiveMentions);
@@ -3552,6 +4177,8 @@ export function ChatPage({
       });
     }
     resetComposer();
+    // 发出去之后复位「超长已确认」（d.233）：下一条消息重新从「先提醒一次」开始。
+    largeSendConfirmedRef.current = false;
     // 本地命令（如 `/compact`）不产生消息，但它的结果要留在这条「提示位」上：
     // resetComposer 会清 sendNotice，所以在它之后再落位。
     if (result.notice) setSendNotice(result.notice, "info");
@@ -4223,6 +4850,41 @@ export function ChatPage({
           />
         </div>
       )}
+      {/* d.235：命中列表——每条一行（序号 / 谁说的 / 命中附近的一句），点哪条跳哪条 */}
+      {searchOpen && searchRows.length > 0 ? (
+        <ul
+          data-testid="search-hit-list"
+          className="max-h-44 overflow-y-auto border-b border-line-soft bg-surface"
+        >
+          {searchRows.map((row, i) => {
+            const message = searchMessageById.get(row.id);
+            const active = row.id === activeSearchId;
+            return (
+              <li key={row.id}>
+                <button
+                  type="button"
+                  aria-current={active ? "true" : undefined}
+                  aria-label={`跳到第 ${i + 1} 个命中：${row.excerpt}`}
+                  className={`flex w-full items-baseline gap-2 px-chat-gutter py-1 text-left text-ui-xs ${
+                    active ? "bg-warn-soft text-ink" : "text-muted hover:bg-subtle-2"
+                  }`}
+                  onClick={() => setSearchHitId(row.id)}
+                >
+                  {/* 只给序号不给「1/2」：总条数已经在搜索栏那行，面板里重复一遍只是噪声 */}
+                  <span className="w-7 shrink-0 tabular-nums">#{i + 1}</span>
+                  <span className="shrink-0 text-body">
+                    {message ? displaySenderName(message) : "消息"}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate" title={row.excerpt}>
+                    {row.excerpt || "（这条消息没有可显示的正文）"}
+                  </span>
+                  {row.count > 1 ? <span className="shrink-0">{row.count} 处</span> : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       {/* 消息区：左右用 --chat-gutter（24px，窄屏 12px）与 composer 同一条竖线——
           d.126-C 删掉头像列后这里不再有额外内边距。py 上 24 / 下 20 的差是刻意留的
           「呼吸位」——完全等距时第一条消息会顶着 header 底线，视觉上像被切掉一截。 */}
@@ -4422,6 +5084,9 @@ export function ChatPage({
             status={s.status}
             errorMessage={s.errorMessage}
             onRetry={streamOwner[id] && s.status === "error" ? () => retryStream(id) : undefined}
+            {...(hasRevealBridge(getFileBridge())
+              ? { onRevealPath: (path: string) => void revealTurnChange(path) }
+              : {})}
           />
         ))}
         <div ref={bottomRef} />
@@ -4590,7 +5255,7 @@ export function ChatPage({
             位置在拖动把手上方——它跟输入区一起随窗口收缩，不会被消息流挤走。 */}
         <TodoPanel conversationId={convId} />
         {/* 上下文用量（d.187）：安静档自己隐掉；到 80% 提醒可以 /compact。 */}
-        <ContextMeter used={contextUsage.used} budget={contextUsage.budget} />
+        <ContextMeter used={contextUsage.used} budget={contextUsage.budget} calibrated={contextUsage.calibrated} />
         {/* 「接着做」（d.189）：用户点了停止、或应用重启后发现上一轮没收口。不自动发。 */}
         {resumeState ? (
           <ResumeBar
@@ -4618,12 +5283,41 @@ export function ChatPage({
                     const next = fileRefs.filter((item) => item !== path);
                     fileRefsRef.current = next;
                     setFileRefs(next);
+                    // 删掉文件后旧的「没读进来」提示就不再对应当前引用，直接收掉。
+                    setFileRefIssue(null);
                   }}
                 >
                   <XIcon width={12} height={12} aria-hidden="true" />
                 </button>
               </span>
             ))}
+          </div>
+        ) : null}
+        {/* 引用没读进来的部分（d.222）：不静默——模型这一轮确实没看到它。 */}
+        {fileRefIssue !== null ? (
+          <p
+            data-testid="file-ref-issue"
+            role="status"
+            className="px-4 pt-1 text-ui-xs text-warn"
+          >
+            {describeFileRefIssues(fileRefIssue)}
+          </p>
+        ) : null}
+        {/* 排队中的插话（d.227）：连发几句时能看见还有几条没被取走，写错了也能收回。 */}
+        {steerPendingCount > 0 ? (
+          <div
+            data-testid="steer-pending"
+            role="status"
+            className="mx-4 mb-1 flex items-center gap-2 rounded-md border border-line-soft bg-subtle px-3 py-1 text-ui-sm text-muted"
+          >
+            <span>已排队 {steerPendingCount} 条插话 · 这一轮下一步就会看到</span>
+            <button
+              type="button"
+              className="ui-hit ml-auto rounded-sm text-ui-xs text-muted hover:text-ink"
+              onClick={cancelSteerQueue}
+            >
+              取消
+            </button>
           </div>
         ) : null}
         {refPickerOpen ? (
@@ -4669,7 +5363,26 @@ export function ChatPage({
             busyPath={undoingPath}
             onUndo={() => void undoTurnWrites()}
             onUndoOne={(path) => void undoTurnFile(path)}
+            {...(hasBackupPreviewBridge(getFileBridge()) ? { onPreview: (path: string) => void previewTurnChange(path) } : {})}
+            {...(hasRevealBridge(getFileBridge()) ? { onReveal: (path: string) => void revealTurnChange(path) } : {})}
             onDismiss={() => setTurnWrites([])}
+          />
+        ) : null}
+        {/* 会话级改动回顾（d.210）：撤回条只活一轮，这条能一直回到会话结束。 */}
+        <SessionChangesBar changes={sessionChanges} onOpen={openSessionChanges} />
+        {changeDiff ? (
+          <ChangeDiffDialog
+            state={changeDiff}
+            onClose={() => {
+              setChangeDiff(null);
+              setSessionChangesOpen(false);
+            }}
+            {...(sessionChangesOpen && sessionChanges.length > 0
+              ? {
+                  files: sessionChanges,
+                  onPick: (path: string) => void previewTurnChange(path),
+                }
+              : {})}
           />
         ) : null}
         {/* 后台作业跑完（d.182）：作业不会被 await，收口后由这里接着盯，跑完给一次点击的「继续」。 */}
@@ -4711,11 +5424,13 @@ export function ChatPage({
             onDismiss={() => setRoundLimitStreamId(null)}
           />
         ) : null}
+        {/* 主对话在跑（d.214）：第几轮、在调什么工具、已经跑了多久；只在有进度时出现。 */}
+        <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
         {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。 */}
         <SubagentRuns
           runs={subagentRuns}
           writable={subagentWrite}
-          onStop={() => subagentStopRef.current?.abort()}
+          onStop={() => subagentStopsRef.current[convId]?.abort()}
         />
         {/* 后台作业（d.203）：哪几条在跑、跑了多久、结束成没成；「停止」只停那一条。 */}
         <JobPanel
@@ -5031,7 +5746,15 @@ export function ChatPage({
       </div>
       {/* 右侧栏与主区并列（Codex 式）：主区 min-w-0，被挤压时输入框正常收缩；
           栏自己带 border-l，关闭时整条不渲染、主区自然铺满。 */}
-      {progressOpen ? <ProgressPanel conversationId={convId} onClose={() => setProgressOpen(false)} /> : null}
+      {progressOpen ? (
+        <ProgressPanel
+          conversationId={convId}
+          onClose={() => setProgressOpen(false)}
+          {...(hasRevealBridge(getFileBridge())
+            ? { onRevealPath: (path: string) => void revealTurnChange(path) }
+            : {})}
+        />
+      ) : null}
     </div>
   );
 }

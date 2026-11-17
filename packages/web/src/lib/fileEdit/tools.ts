@@ -304,7 +304,8 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
     })),
     meta: (name) => {
       const spec = specs.find((s) => s.name === name);
-      return spec ? { risk: spec.riskHint } : undefined;
+      // d.207：文件工具是长任务全程要用的本地能力，声明成核心工具，别被按需发现挤掉。
+      return spec ? { risk: spec.riskHint, core: true } : undefined;
     },
     execute: async (call) => {
       const args = parseToolArgs(call.arguments);
@@ -531,6 +532,10 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
       `路径：${rel}（根：${root.name}）`,
       `共 ${lines.length} 行，本次显示第 ${offset}–${Math.max(offset, end)} 行`,
       clipped ? `（内容过长，已截断到 ${READ_MAX_CHARS} 字符；请用 offset/limit 分段读取）` : "",
+      // d.229：GBK 文本读得到，但写回会被桌面端拒绝（否则等于悄悄改掉文件编码）
+      result.encoding === "gbk"
+        ? "（这个文件是 GBK 编码：已按 GBK 解码显示；写入会被拒绝以免改动它的编码，需要改就另存为新文件）"
+        : "",
     ].filter(Boolean);
     return {
       text: `${header.join("\n")}\n\n${body}`,

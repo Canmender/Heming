@@ -3,6 +3,8 @@ import type { FileFsBridge, FileReadResponse } from "../fileEdit/bridge.js";
 import type { FileRoot } from "../fileEdit/paths.js";
 import {
   FILE_REFS_HEADING,
+  describeFileRefIssues,
+  fileRefIssues,
   MAX_FILE_REFS,
   MAX_FILE_REF_CHARS,
   MAX_FILE_REFS_TOTAL_CHARS,
@@ -150,5 +152,45 @@ describe("引用工作区文件（d.175）", () => {
     });
     expect(got.files).toEqual([]);
     expect(got.missing).toEqual(["a.md"]);
+  });
+});
+
+describe("引用没读进来这件事要说出来（d.222）", () => {
+  it("全都读到了就没有问题，不渲染、不提示", () => {
+    expect(
+      fileRefIssues({ files: [{ rel: "a.md", path: "D:/项目/和鸣/a.md", text: "x", truncated: false }], missing: [], section: "s" }),
+    ).toBeNull();
+  });
+
+  it("没读到的按相对路径列出来，截断的单独列", () => {
+    const issues = fileRefIssues({
+      files: [
+        { rel: "a.md", path: "D:/项目/和鸣/a.md", text: "x", truncated: false },
+        { rel: "big.md", path: "D:/项目/和鸣/big.md", text: "y", truncated: true },
+      ],
+      missing: ["gone.md"],
+      section: "s",
+    });
+    expect(issues).toEqual({ missing: ["gone.md"], truncated: ["big.md"] });
+  });
+
+  it("提示原文说清「模型看不到」，并且带上截断的字数上限", () => {
+    const text = describeFileRefIssues({ missing: ["gone.md"], truncated: ["big.md"] });
+    expect(text).toContain("「gone.md」没读进来");
+    expect(text).toContain("「big.md」只给了前");
+    expect(text).toContain(String(MAX_FILE_REF_CHARS));
+    expect(text).toContain("模型看不到这些内容");
+  });
+
+  it("名字太多时压成「等 N 个」，不把提示行撑爆", () => {
+    const text = describeFileRefIssues({ missing: ["a.md", "b.md", "c.md", "d.md", "e.md"], truncated: [] });
+    expect(text).toContain("等 5 个");
+    expect(text).not.toContain("「d.md」");
+  });
+
+  it("只有截断时不说「没读进来」", () => {
+    const text = describeFileRefIssues({ missing: [], truncated: ["big.md"] });
+    expect(text).not.toContain("没读进来");
+    expect(text).toContain("只给了前");
   });
 });

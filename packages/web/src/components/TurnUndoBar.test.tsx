@@ -122,4 +122,67 @@ describe("TurnUndoBar（d.176）", () => {
     render(<TurnUndoBar paths={["D:/a.ts"]} onUndo={vi.fn()} onDismiss={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "看清单" })).toBeNull();
   });
+
+  it("给了 onPreview 才有「改动」按钮，点它回传那一个路径（d.207.4.110）", () => {
+    const onPreview = vi.fn();
+    render(
+      <TurnUndoBar
+        paths={["D:/work/src/a.ts", "D:/work/docs/说明.md"]}
+        onUndo={vi.fn()}
+        onUndoOne={vi.fn()}
+        onPreview={onPreview}
+        onDismiss={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+
+    // 每一行都有「改动」，且与「撤回」是两个按钮（撤回是动作，改动是看清楚再决定）
+    expect(screen.getAllByRole("button", { name: /^看 .* 改成了什么$/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "看 说明.md 改成了什么" }));
+    expect(onPreview).toHaveBeenCalledWith("D:/work/docs/说明.md");
+  });
+
+  it("没给 onPreview 就不出现「改动」（老安装包没有预览通道）", () => {
+    render(
+      <TurnUndoBar
+        paths={["D:/a.ts"]}
+        onUndo={vi.fn()}
+        onUndoOne={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+    expect(screen.queryByRole("button", { name: /改成了什么/ })).toBeNull();
+    // 撤回仍在，只是靠右（ml-auto 退回给撤回）
+    expect(screen.getByRole("button", { name: "撤回 a.ts" })).toHaveClass("ml-auto");
+  });
+});
+
+
+describe("TurnUndoBar · 在文件夹里显示（d.234）", () => {
+  it("接了 onReveal 才出现「定位」，点它回传整条路径", () => {
+    const onReveal = vi.fn();
+    const onUndoOne = vi.fn();
+    render(
+      <TurnUndoBar
+        paths={["D:/work/src/a.ts"]}
+        onUndo={vi.fn()}
+        onUndoOne={onUndoOne}
+        onReveal={onReveal}
+        onDismiss={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+    fireEvent.click(screen.getByRole("button", { name: "在文件夹里显示 a.ts" }));
+    expect(onReveal).toHaveBeenCalledWith("D:/work/src/a.ts");
+    expect(onUndoOne).not.toHaveBeenCalled();
+  });
+
+  it("没接 onReveal 时不出现「定位」（老安装包不留死按钮）", () => {
+    render(
+      <TurnUndoBar paths={["D:/a.ts"]} onUndo={vi.fn()} onUndoOne={vi.fn()} onDismiss={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "看清单" }));
+    expect(screen.queryByRole("button", { name: /在文件夹里显示/ })).toBeNull();
+  });
 });

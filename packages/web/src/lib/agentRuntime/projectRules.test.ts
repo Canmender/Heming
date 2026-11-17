@@ -7,6 +7,7 @@ import {
   PROJECT_RULES_HEADING,
   collectProjectRules,
   normalizeRuleText,
+  summarizeProjectRules,
 } from "./projectRules.js";
 
 const ROOT: FileRoot = { name: "工作区", path: "D:/项目/和鸣", mode: "write" };
@@ -153,5 +154,30 @@ describe("项目约定文件（d.174）", () => {
       workspace: "D:/别处",
     });
     expect(got.section).toBe("");
+  });
+});
+
+describe("约定文件的只读摘要（d.219）", () => {
+  it("摘要只给事实：文件名、字数、是否截断、省略几份", () => {
+    const summary = summarizeProjectRules({
+      files: [
+        { rel: "AGENTS.md", text: "一二三四五", truncated: false },
+        { rel: ".heming/rules.md", text: "六七八", truncated: true },
+      ],
+      section: "（不需要）",
+      omitted: ["HEMING.md"],
+    });
+    expect(summary.files).toEqual([
+      { rel: "AGENTS.md", chars: 5, truncated: false },
+      { rel: ".heming/rules.md", chars: 3, truncated: true },
+    ]);
+    // 省略的是「几个文件」，不是文件名——摘要给 `/status` 用，不展开
+    expect(summary.omitted).toBe(1);
+    // 正文不进摘要：自检不是看文件的地方
+    expect(JSON.stringify(summary)).not.toContain("一二三四五");
+  });
+
+  it("什么都没读到时给空数组（调用方据此说「无」）", () => {
+    expect(summarizeProjectRules({ files: [], section: "", omitted: [] })).toEqual({ files: [], omitted: 0 });
   });
 });

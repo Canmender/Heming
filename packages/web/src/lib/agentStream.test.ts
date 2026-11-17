@@ -2626,3 +2626,327 @@ describe("运行中插话（d.199）", () => {
   });
 });
 
+describe("上游瞬时错误自动重试（d.203.4.108）", () => {
+  /** 收集上行帧（本 describe 局部，不复用别的 describe 里的同名小工具）。 */
+  const frames = (send: ReturnType<typeof vi.fn>, type: string) =>
+    send.mock.calls.map((call) => call[0] as { type: string }).filter((frame) => frame.type === type);
+
+  it("429/503 且这一轮还没吐字：退避后自动重试，第二次成功就当没失败过", async () => {
+    let n = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: { onDelta: (t: string) => void }) => {
+      n += 1;
+      if (n === 1) throw new LlmHttpError(503, "Service Unavailable", 1);
+      o.onDelta("好");
+      return "好";
+    });
+    const onUpstreamRetry = vi.fn();
+    const { send, deps } = makeDeps({ streamChat, onUpstreamRetry });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(onUpstreamRetry).toHaveBeenCalledTimes(1);
+    expect(onUpstreamRetry.mock.calls[0][0]).toMatchObject({ attempt: 1, max: 2 });
+    expect(frames(send, "agent_error")).toHaveLength(0);
+    expect(frames(send, "agent_finish")[0]).toMatchObject({ text: "好" });
+  });
+
+  it("连续三次都失败：按上限重试两次后放弃，错误照旧上报", async () => {
+    const streamChat = vi.fn(async () => {
+      throw new LlmHttpError(502, "Bad Gateway", 1);
+    });
+    const onUpstreamRetry = vi.fn();
+    const { send, deps } = makeDeps({ streamChat, onUpstreamRetry });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(3);
+    expect(onUpstreamRetry).toHaveBeenCalledTimes(2);
+    expect(frames(send, "agent_error")).toHaveLength(1);
+  });
+
+  it("已经吐过字再断：不重试（重试会让用户看到同一段话说两遍）", async () => {
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: { onDelta: (t: string) => void }) => {
+      o.onDelta("半");
+      throw new LlmHttpError(503, "Service Unavailable", 1);
+    });
+    const onUpstreamRetry = vi.fn();
+    const { send, deps } = makeDeps({ streamChat, onUpstreamRetry });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(onUpstreamRetry).not.toHaveBeenCalled();
+    expect(frames(send, "agent_error")).toHaveLength(1);
+    expect(frames(send, "agent_finish")[0]).toMatchObject({ text: "半" });
+  });
+
+  it("400 参数错不重试：重试只是把同一个错误再花一次钱", async () => {
+    const streamChat = vi.fn(async () => {
+      throw new LlmHttpError(400, "invalid request: bad tool schema");
+    });
+    const onUpstreamRetry = vi.fn();
+    const { send, deps } = makeDeps({ streamChat, onUpstreamRetry });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(onUpstreamRetry).not.toHaveBeenCalled();
+    expect(frames(send, "agent_error")).toHaveLength(1);
+  });
+});
+
+
+describe("工具超时真的会请求取消（d.206）", () => {
+  /** 第一轮要一个工具、第二轮收口；工具行为由调用方给。 */
+  function toolRoundChat() {
+    let round = 0;
+    return vi.fn(
+      async (
+        _p: unknown,
+        _m: unknown,
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        round += 1;
+        if (round % 2 === 1) {
+          o.onToolCalls?.([{ id: `c${round}`, type: "function", function: { name: "srv__slow", arguments: "{}" } }]);
+          return "";
+        }
+        o.onDelta("好");
+        return "好";
+      },
+    );
+  }
+
+  function frames(send: ReturnType<typeof vi.fn>, type: string) {
+    return send.mock.calls.map((call: unknown[]) => call[0] as { type: string }).filter((f) => f.type === type);
+  }
+
+  function toolRows(send: ReturnType<typeof vi.fn>, streamChat: ReturnType<typeof vi.fn>) {
+    const requests = streamChat.mock.calls.map((call: unknown[]) => call[1] as ChatMessage[]);
+    const last = requests.at(-1) ?? [];
+    return last.filter((row) => row.role === "tool").map((row) => String(row.content));
+  }
+
+  it("超过兜底时限：abort 这次调用（命令/MCP 会真的停下），文案说清「能停的停了」", async () => {
+    const seen: AbortSignal[] = [];
+    const streamChat = toolRoundChat();
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      // 产品里是 180 秒；测试压到 1 秒才能验「超时那一刻真的 abort 了」。
+      toolTimeoutMs: 1000,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__slow", description: "x" } }],
+        meta: () => ({ risk: "read" as const }),
+        execute: (_call: unknown, opts?: { signal?: AbortSignal }) => {
+          if (opts?.signal) seen.push(opts.signal);
+          return new Promise<{ text: string; ok: boolean }>(() => {});
+        },
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "跑个慢工具", deps);
+
+    expect(seen).toHaveLength(1);
+    // 关键断言：超时不是「不再等」——它必须把这次调用的信号 abort 掉，
+    // 否则命令进程树、MCP 请求会在没人等之后继续跑。
+    expect(seen[0].aborted).toBe(true);
+    const texts = toolRows(send, streamChat as ReturnType<typeof vi.fn>);
+    const timeoutRow = texts.find((text) => text.includes("没有返回")) ?? "";
+    expect(timeoutRow).toContain("已经请求取消这次调用");
+    expect(timeoutRow).toContain("能停的（本机命令、MCP 调用）会真的停下");
+    expect(timeoutRow).toContain("这不算任务失败");
+    // 超时是一条工具结果，不是整轮失败：这一轮照样收口。
+    expect(frames(send, "agent_error")).toHaveLength(0);
+    expect(frames(send, "agent_finish")).toHaveLength(1);
+  });
+
+  it("在时限内返回：不加取消，正常结果照旧回给模型", async () => {
+    const seen: AbortSignal[] = [];
+    const streamChat = toolRoundChat();
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      toolTimeoutMs: 1000,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__slow", description: "x" } }],
+        meta: () => ({ risk: "read" as const }),
+        execute: async (_call: unknown, opts?: { signal?: AbortSignal }) => {
+          if (opts?.signal) seen.push(opts.signal);
+          return { text: "工具结果-正常", ok: true };
+        },
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "跑个快工具", deps);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].aborted).toBe(false);
+    expect(toolRows(send, streamChat as ReturnType<typeof vi.fn>).join("|")).toContain("工具结果-正常");
+  });
+});
+
+describe("核心工具常驻改成注册时声明（d.207）", () => {
+  /** 造一份「超过阈值」的工具目录：24 个陌生工具 + 1 个声明了 core 的工具。 */
+  function manyTools(declaredCore?: string) {
+    const tools = Array.from({ length: 24 }, (_, index) => ({
+      type: "function" as const,
+      function: { name: `srv__tool_${index}`, description: "x", parameters: { type: "object", properties: {} } },
+    }));
+    tools.push({
+      type: "function" as const,
+      function: { name: "company_search", description: "公司库检索", parameters: { type: "object", properties: {} } },
+    });
+    return {
+      tools,
+      meta: (name: string) =>
+        name === "company_search" && declaredCore === name ? { risk: "read" as const, core: true } : undefined,
+      execute: async () => ({ text: "结果", ok: true }),
+    };
+  }
+
+  /** 第一轮请求里模型的工具清单（按名字）。 */
+  function firstRequestToolNames(streamChat: unknown): string[] {
+    const first = (streamChat as { mock: { calls: unknown[][] } }).mock.calls[0];
+    const opts = first?.[2] as { tools?: { function?: { name?: string } }[] } | undefined;
+    return (opts?.tools ?? [])
+      .map((tool) => tool.function?.name)
+      .filter((name): name is string => typeof name === "string");
+  }
+
+  it("桥声明 core 的本地工具会占常驻名额（不在旧名单里也一样）", async () => {
+    const { deps } = makeDeps({ getTools: () => manyTools("company_search") });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "嗯", deps);
+
+    const names = firstRequestToolNames(deps.streamChat);
+    expect(names).toContain("company_search");
+    // 一个连 tool_search 都算上：确认确实进了「按需发现」模式（否则这条断言没有意义）
+    expect(names).toContain("tool_search");
+  });
+
+  it("没声明的工具不占常驻名额（挤掉也不该被误钉）", async () => {
+    const { deps } = makeDeps({ getTools: () => manyTools(undefined) });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "嗯", deps);
+
+    const names = firstRequestToolNames(deps.streamChat);
+    expect(names).not.toContain("company_search");
+    expect(names).toContain("tool_search");
+  });
+});
+
+describe("主对话进度上报（d.214）", () => {
+  it("每开一轮报一次，执行工具时补一条工具名（只说事实，不报百分比）", async () => {
+    const rounds = [
+      {
+        text: "",
+        calls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: { name: "srv__echo", arguments: '{"q":"hi"}' },
+          },
+        ],
+      },
+      { text: "查到了：hi", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (!r) return "";
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+    const onProgress = vi.fn();
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      onProgress,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说：hi", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 第一轮：先「在思考」，再「正在执行 srv__echo」；第二轮：进入下一轮思考。
+    // 顺序就是用户在界面上该看到的顺序——先有轮次，再有工具名。
+    expect(onProgress.mock.calls.map(([event]) => event)).toEqual([
+      { round: 1, phase: "round" },
+      { round: 1, phase: "tool", tool: "srv__echo" },
+      { round: 2, phase: "round" },
+    ]);
+  });
+
+  it("不传 onProgress 时行为不变（缺省不上报，不抛错）", async () => {
+    const { deps } = makeDeps();
+    await expect(runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps)).resolves.toMatchObject({
+      abortAll: expect.any(Function),
+    });
+  });
+});
+
+/**
+ * 上下文估算校准采样（d.215）：供应商报了 inputTokens 就把「估算 vs 实际」交出去，
+ * 让 agentContext/calibration.ts 记一条样本；没报就什么都不做（不能拿 0 当样本）。
+ */
+describe("上下文估算校准采样（d.215）", () => {
+  type Usage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+
+  it("供应商报了 inputTokens：把模型、估算值与实际值一起交出去", async () => {
+    const onContextSample = vi.fn();
+    const { deps } = makeDeps({
+      onContextSample,
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ inputTokens: 12_000, outputTokens: 40 });
+        o.onDelta("好");
+        return "好";
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(onContextSample).toHaveBeenCalledTimes(1);
+    expect(onContextSample.mock.calls[0]?.[0]).toMatchObject({ model: "m", actual: 12_000 });
+    expect(onContextSample.mock.calls[0]?.[0].estimated).toBeGreaterThan(0);
+  });
+
+  it("只报了 totalTokens：不采样（缺提示侧数字，等于不知道实际占了多少上下文）", async () => {
+    const onContextSample = vi.fn();
+    const { deps } = makeDeps({
+      onContextSample,
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ totalTokens: 99 });
+        o.onDelta("好");
+        return "好";
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(onContextSample).not.toHaveBeenCalled();
+  });
+
+  it("采样回调抛错不影响这一轮收口", async () => {
+    const { send, deps } = makeDeps({
+      onContextSample: () => {
+        throw new Error("采样炸了");
+      },
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ inputTokens: 9_000, outputTokens: 10 });
+        o.onDelta("好");
+        return "好";
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const types = send.mock.calls.map((c: unknown[]) => (c[0] as { type: string }).type);
+    expect(types).not.toContain("agent_error");
+    expect(types).toContain("agent_finish");
+  });
+});

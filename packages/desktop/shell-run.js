@@ -29,6 +29,92 @@ const path = require("node:path");
 const { normalizeRoots } = require("./file-fs.js");
 const { isInsideRoot, checkAbsoluteInside, assertNoSymlinkAncestor } = require("./path-guard.js");
 
+/* ─────────────────────────── 命令输出解码（d.228） ─────────────────────────── */
+
+/**
+ * 命令输出的解码。
+ *
+ * Windows 控制台的默认代码页是 936（GBK）：`cmd` 的内建命令（dir / type / tree）、
+ * 以及大量没有改过输出编码的老工具，吐出来的就是 GBK 字节。按 UTF-8 硬解会把中文
+ * 变成一片「�」——用户看到的是「它跑了个 dir，输出全是乱码」，比报错更让人不敢用。
+ *
+ * 三步走：UTF-8 严解 → GBK 严解 → UTF-8 容错。前两步都要求整段合法（`fatal: true`），
+ * 所以一段正常的 UTF-8 中文不会被误读成 GBK（反过来也一样：GBK 中文在 UTF-8 下
+ * 几乎必然非法）。第三步只在两种编码都不成立时兜底，宁可少量乱码也不抛异常。
+ *
+ * 不做「按行猜编码」：同一段输出里混两种编码极罕见，而按行猜会让截断位置与真实
+ * 字节错位，输出的每一行都可能对不上。
+ */
+const utf8Strict = new TextDecoder("utf-8", { fatal: true });
+let gbkStrict = null;
+let gbkUnavailable = false;
+
+/**
+ * 命令输出里的「终端痕迹」整形（d.231）。
+ *
+ * 命令的输出本来是打给终端看的：`npm`/`git`/构建工具会夹 ANSI 颜色与光标控制，
+ * 进度条则用 `\r` 回到行首反复改写同一行。这些字节落到工具结果里就是纯噪声：
+ *
+ * - 界面上显示成 `[32m` `[0m` `[2K` 这种鬼东西，用户以为输出坏了；
+ * - 模型看到一堆转义序列，判断「这一步是否通过」时要先把它过滤掉，等于白烧 token；
+ * - 进度条那一行被拼成 `10%\r50%\r100%` 长串，谁都读不出来。
+ *
+ * 这里做两件事，都是「终端本来就会做」的等价处理，不改变输出事实：
+ * ① 去掉 ANSI 转义（颜色 / 光标 / 擦除 / 窗口标题）；
+ * ② 含 `\r` 的行只保留最后一段（终端上它就是覆盖显示的最终样子）。
+ *
+ * 明确不做：合并重复行、丢掉空行、按宽度折行——那些会改动输出内容本身。
+ */
+const ANSI_CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const ANSI_OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
+function shapeTerminalText(input) {
+  if (typeof input !== "string" || input === "") return "";
+  let text = input.replace(ANSI_OSC, "").replace(ANSI_CSI, "");
+  // 零散的控制序列与退格（进度条擦字符时会发）
+  text = text.replace(/\u001b[@-_]/g, "").replace(/\u0008/g, "");
+  if (!text.includes("\r")) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (!line.includes("\r")) return line;
+      const parts = line.split("\r");
+      const last = parts[parts.length - 1];
+      // `"…\r"`：光标回到行首后没再写，终端上留下的是前一段
+      return last === "" ? (parts[parts.length - 2] ?? "") : last;
+    })
+    .join("\n");
+}
+
+function decodeCommandOutput(chunks) {
+  const buffer = Buffer.isBuffer(chunks) ? chunks : Buffer.concat(chunks);
+  if (buffer.length === 0) return "";
+  // 去掉 UTF-8 BOM：PowerShell 重定向出来的文件与部分构建工具会带
+  const body =
+    buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+      ? buffer.subarray(3)
+      : buffer;
+  try {
+    return shapeTerminalText(utf8Strict.decode(body));
+  } catch {
+    /* 不是合法 UTF-8：往下试 GBK */
+  }
+  if (!gbkUnavailable) {
+    try {
+      if (gbkStrict === null) gbkStrict = new TextDecoder("gbk", { fatal: true });
+    } catch {
+      // 运行时没带完整 ICU：GBK 解不了，直接退回容错解码
+      gbkUnavailable = true;
+      return shapeTerminalText(body.toString("utf8"));
+    }
+    try {
+      return shapeTerminalText(gbkStrict.decode(body));
+    } catch {
+      /* 也不是合法 GBK：退回容错解码 */
+    }
+  }
+  return shapeTerminalText(body.toString("utf8"));
+}
+
 /** 采集上限：超过就杀进程并回 too-large（比「截断后当成功」更安全：调用方会知道它没跑完）。 */
 const MAX_CAPTURE_BYTES = 512 * 1024;
 
@@ -81,6 +167,14 @@ const running = new Map();
 
 /** 排到队列里但还没开始的取消请求（在 await 校验目录期间用户就可能点停止）。 */
 const pendingCancel = new Set();
+
+/**
+ * 由**用户点「停止」**触发的取消（d.230）。
+ *
+ * 为什么单独记：`onAbort` 同时服务两种来源——用户主动取消、渲染层断开（窗口关闭/崩溃）。
+ * 两者的收场文案必须不同：断连时说「渲染层已断开」是事实，用户主动停还这么说就是在甩锅。
+ */
+const userCancelled = new Set();
 const MAX_PENDING_CANCEL = 50;
 
 /** 没有 runId 的调用方（测试/内部）也能跑，只是取消不了它。 */
@@ -97,6 +191,7 @@ function cancelRun(runId) {
   if (!id) return fail("unknown-run", "缺少 runId");
   const abort = running.get(id);
   if (abort) {
+    userCancelled.add(id);
     abort();
     return { ok: true };
   }
@@ -273,6 +368,7 @@ async function runCommand(params, spawnImpl = spawn) {
           if (settled) return;
           settled = true;
           running.delete(runId);
+          userCancelled.delete(runId);
           clearTimeout(timer);
           if (params && params.signal && typeof params.signal.removeEventListener === "function") {
             params.signal.removeEventListener("abort", onAbort);
@@ -299,8 +395,17 @@ async function runCommand(params, spawnImpl = spawn) {
 
         let timer = null;
         function onAbort() {
+          // 先取原因再收口：finish 会清掉 userCancelled。
+          const byUser = userCancelled.has(runId);
           killTree(child);
-          finish(fail("aborted", "渲染层已断开，命令被中止"));
+          finish(
+            fail(
+              "aborted",
+              byUser
+                ? "命令已被取消：已请求终止整个进程树（含它启动的子进程）"
+                : "渲染层已断开，命令被中止",
+            ),
+          );
         }
 
         // 排队期间被取消：不再 spawn，直接收口（否则用户点了停止，命令还是跑起来了）。
@@ -351,8 +456,8 @@ async function runCommand(params, spawnImpl = spawn) {
           finish({
             ok: true,
             exitCode: typeof code === "number" ? code : null,
-            stdout: Buffer.concat(out).toString("utf8"),
-            stderr: Buffer.concat(err).toString("utf8"),
+            stdout: decodeCommandOutput(out),
+            stderr: decodeCommandOutput(err),
             truncated,
             durationMs: Date.now() - startedAt,
             cwd: dir.cwd.replace(/\\/g, "/"),
@@ -627,8 +732,8 @@ async function readJobOutput(jobId, waitMs) {
     jobId: job.id,
     running: job.running,
     exitCode: job.exitCode,
-    stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-    stderr: Buffer.concat(stderrChunks).toString("utf8"),
+    stdout: decodeCommandOutput(stdoutChunks),
+    stderr: decodeCommandOutput(stderrChunks),
     truncated: job.truncated,
     droppedBytes: job.dropped,
   };
@@ -650,7 +755,7 @@ function tailOf(chunks, maxBytes) {
     if (end > start) kept.push(start > seen ? chunk.subarray(start - seen) : chunk);
     seen = end;
   }
-  return { text: Buffer.concat(kept).toString("utf8"), cut: keep < total };
+  return { text: decodeCommandOutput(kept), cut: keep < total };
 }
 
 /** 预览长度：缺省 16KB，夹在 512B..16KB。 */
@@ -830,4 +935,6 @@ module.exports = {
   MAX_JOB_MS,
   MAX_JOB_WAIT_MS,
   MAX_JOB_PREVIEW_BYTES,
+  decodeCommandOutput,
+  shapeTerminalText,
 };

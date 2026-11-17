@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   GOAL_COMMAND,
   HELP_COMMAND,
+  INIT_COMMAND,
   PLAN_COMMAND,
   SLASH_COMMANDS,
+  NOTIFY_COMMAND,
   STATUS_COMMAND,
   SUBAGENT_COMMAND,
   matchSlashCommands,
@@ -24,6 +26,17 @@ describe("输入框命令面板（d.184）", () => {
     expect(items.map((i) => i.command)).toContain(GOAL_COMMAND);
     // d.202：子代理写盘授权默认关，但入口要能被发现
     expect(items.map((i) => i.command)).toContain(SUBAGENT_COMMAND);
+    // d.208：系统通知开关
+    expect(items.map((i) => i.command)).toContain(NOTIFY_COMMAND);
+    // d.219：让它摸清仓库写 AGENTS.md
+    expect(items.map((i) => i.command)).toContain(INIT_COMMAND);
+  });
+
+  it("/init 的说明要点明它会写 AGENTS.md 且不覆盖手写内容（d.219）", () => {
+    const init = SLASH_COMMANDS.find((item) => item.command === INIT_COMMAND);
+    expect(init).toBeDefined();
+    expect(init!.hint).toContain("AGENTS.md");
+    expect(init!.hint).toContain("合并");
   });
 
   it("按前缀过滤，且大小写不敏感", () => {

@@ -113,6 +113,8 @@ test("denyValueFor：同步桥返回 null（preload 按不可用处理），其�
     "file:image",
     "file:undo",
     "file:backups",
+    "file:backup-preview",
+  "file:reveal",
     "file:default-root",
     "shell:run",
     "shell:cancel",

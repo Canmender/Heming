@@ -30,6 +30,33 @@ declare global {
       total: number;
       bytesPerSecond: number;
     } | null;
+    /**
+     * 安装空间检查（d.203.4.107）。主进程还没查过时为 null。
+     *
+     * ok=false 表示「这块机器现在装不下这个更新」，message 是可以直接
+     * 展示给用户的一句中文（哪块盘、还剩多少、差多少）。界面据此提前
+     * 提醒，而不是等用户点了「重启并安装」、程序被删掉之后才发现。
+     */
+    space?: {
+      ok: boolean;
+      /** 安装包大小；探测不到为 null（此时不拦） */
+      installerBytes: number | null;
+      /** 装这个版本需要多少可用空间 */
+      requiredBytes: number;
+      /** ok=false 时的中文说明；ok=true 为空串 */
+      message: string;
+      /** 具体哪块盘不够 */
+      problems: {
+        label: string;
+        path: string;
+        freeBytes: number;
+        requiredBytes: number;
+        shortBytes: number;
+      }[];
+      /** 每条检查目标当时剩多少（探测失败为 null） */
+      targets: { label: string; path: string; freeBytes: number | null }[];
+      checkedAt: number;
+    } | null;
   }
 
   interface Window {

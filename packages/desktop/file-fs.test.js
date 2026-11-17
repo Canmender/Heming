@@ -25,6 +25,7 @@ const {
   sniffImageMime,
   writeBatch,
   undoWrite,
+  previewBackup,
   listBackups,
   createBackup,
   readBackupIndex,
@@ -38,6 +39,8 @@ const {
   MAX_GREP_MATCHES,
   MAX_GREP_LINE_CHARS,
   MAX_WALK_DEPTH,
+  decodeTextBytes,
+  revealFile,
 } = require("./file-fs.js");
 
 /** 一个临时工作区：一个可写根 + 一个只读根。 */
@@ -129,6 +132,8 @@ function register(deps = {}) {
     getMainWindow: deps.getMainWindow ?? (() => null),
     isTrustedSender: deps.isTrustedSender ?? (() => true),
     defaultRootDir: deps.defaultRootDir,
+    shell: deps.shell,
+    backupDir: deps.backupDir,
   });
   return ipc;
 }
@@ -620,6 +625,51 @@ test("globFiles：跳过 node_modules / .git，但包含隐藏文件", () =>
     const result = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
     assert.equal(result.ok, true);
     assert.deepEqual(result.paths.map((p) => path.basename(p)).sort(), [".隐藏.md", "a.md"]);
+  }));
+
+test("globFiles：构建产物目录默认跳过，但结果里点名说清（d.231）", () =>
+  withWorkspace(async (ws) => {
+    for (const dir of ["src", "dist", "build", "node_modules/pkg"]) {
+      fs.mkdirSync(path.join(ws.writeRoot, dir), { recursive: true });
+    }
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "a.md"), "a");
+    fs.writeFileSync(path.join(ws.writeRoot, "dist", "bundle.md"), "b");
+    fs.writeFileSync(path.join(ws.writeRoot, "build", "gen.md"), "g");
+    fs.writeFileSync(path.join(ws.writeRoot, "node_modules", "pkg", "dep.md"), "d");
+    const result = await globFiles({ roots: ws.roots, pattern: "**/*.md" });
+    assert.equal(result.ok, true);
+    // 源码找得到，产物一个都不混进来
+    assert.deepEqual(result.paths.map((p) => path.basename(p)), ["a.md"]);
+    // 但「没搜到」不等于「不存在」：跳过了谁必须点名
+    assert.deepEqual(result.skipped, ["build", "dist", "node_modules"]);
+  }));
+
+test("globFiles：把 dir 指到被跳过的目录里，照样搜得到（不是禁地）", () =>
+  withWorkspace(async (ws) => {
+    fs.mkdirSync(path.join(ws.writeRoot, "dist"), { recursive: true });
+    fs.writeFileSync(path.join(ws.writeRoot, "dist", "bundle.md"), "b");
+    const result = await globFiles({
+      roots: ws.roots,
+      pattern: "*.md",
+      dir: path.join(ws.writeRoot, "dist"),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.paths.map((p) => path.basename(p)), ["bundle.md"]);
+    // 起点本身是被跳过的目录：不再有「跳过」可报
+    assert.deepEqual(result.skipped, []);
+  }));
+
+test("grepFiles：产物目录里的命中不算，但 skipped 说清跳过了谁（d.231）", () =>
+  withWorkspace(async (ws) => {
+    fs.mkdirSync(path.join(ws.writeRoot, "src"), { recursive: true });
+    fs.mkdirSync(path.join(ws.writeRoot, "dist"), { recursive: true });
+    fs.writeFileSync(path.join(ws.writeRoot, "src", "a.ts"), "const need = 1;\n");
+    fs.writeFileSync(path.join(ws.writeRoot, "dist", "bundle.js"), "var need=1;\n");
+    const result = await grepFiles({ roots: ws.roots, pattern: "need" });
+    assert.equal(result.ok, true);
+    assert.equal(result.matches.length, 1);
+    assert.equal(path.basename(result.matches[0].path), "a.ts");
+    assert.deepEqual(result.skipped, ["dist"]);
   }));
 
 test("globFiles：不把本模块的原子写临时文件当用户文件", () =>
@@ -1236,6 +1286,112 @@ test("IPC file:undo：正常撤销；无根回 no-roots；非可信来源回 unt
     }
   }));
 
+/* ──────────────── 预览改动（d.207.4.110 · file:backup-preview） ──────────────── */
+
+test("previewBackup：回「改动前」的原文，且只读——不消费备份、不动当前文件", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "preview.md");
+      fs.writeFileSync(target, "第一版\nsecond\n");
+      await writeBatch(ws.roots, [{ kind: "write", path: target, content: "第二版\nsecond\n" }], false, bak.dir);
+
+      const first = await previewBackup(ws.roots, target, bak.dir);
+      assert.equal(first.ok, true);
+      assert.equal(first.text, "第一版\nsecond\n", "预览必须回改动前的原文");
+      assert.equal(first.bytes, Buffer.byteLength("第一版\nsecond\n"));
+      assert.equal(first.truncated, false);
+      assert.equal(first.binary, false);
+      assert.equal(fs.readFileSync(target, "utf8"), "第二版\nsecond\n", "预览不能改目标文件");
+
+      // 只读语义：连预览两次都在，之后仍然能撤销
+      const second = await previewBackup(ws.roots, target, bak.dir);
+      assert.equal(second.ok, true);
+      const undone = await undoWrite(ws.roots, target, bak.dir);
+      assert.equal(undone.ok, true, "预览不该把备份用掉");
+      assert.equal(fs.readFileSync(target, "utf8"), "第一版\nsecond\n");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("previewBackup：新建文件没有改动前内容 → no-backup；只读根/根外 → outside-roots", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const fresh = path.join(ws.writeRoot, "brand-new.md");
+      await writeBatch(ws.roots, [{ kind: "write", path: fresh, content: "新文件\n" }], false, bak.dir);
+      const none = await previewBackup(ws.roots, fresh, bak.dir);
+      assert.equal(none.ok, false);
+      assert.equal(none.code, "no-backup");
+      assert.match(none.error, /没有/);
+
+      const readOnly = path.join(ws.readRoot, "ref.md");
+      fs.writeFileSync(readOnly, "参考\n");
+      const ro = await previewBackup(ws.roots, readOnly, bak.dir);
+      assert.equal(ro.ok, false);
+      assert.equal(ro.code, "outside-roots");
+
+      const outside = await previewBackup(ws.roots, path.join(ws.base, "..", "逃出去.md"), bak.dir);
+      assert.equal(outside.ok, false);
+      assert.equal(outside.code, "outside-roots");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("previewBackup：二进制与超大备份如实标注，不硬凑成文本", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const binPath = path.join(ws.writeRoot, "blob.bin");
+      fs.writeFileSync(binPath, Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00]));
+      await writeBatch(ws.roots, [{ kind: "write", path: binPath, content: "文本\n" }], false, bak.dir);
+      const bin = await previewBackup(ws.roots, binPath, bak.dir);
+      assert.equal(bin.ok, true);
+      assert.equal(bin.binary, true, "含 NUL 的备份按二进制处理");
+      assert.equal(bin.text, "", "二进制不硬凑文本");
+
+      const bigPath = path.join(ws.writeRoot, "big.txt");
+      fs.writeFileSync(bigPath, "x".repeat(400));
+      await writeBatch(ws.roots, [{ kind: "write", path: bigPath, content: "y\n" }], false, bak.dir);
+      const big = await previewBackup(ws.roots, bigPath, bak.dir, 100);
+      assert.equal(big.ok, true);
+      assert.equal(big.truncated, true);
+      assert.equal(big.text.length, 100, "按 maxBytes 截断");
+      assert.equal(big.bytes, 400, "bytes 报真实大小");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
+test("IPC file:backup-preview：正常预览；无根回 no-roots；非可信来源回 untrusted-sender", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    try {
+      const target = path.join(ws.writeRoot, "ipc-preview.md");
+      fs.writeFileSync(target, "旧内容\n");
+      const ipc = fakeIpc();
+      registerFileIpc(ipc, { isTrustedSender: () => true, backupDir: bak.dir });
+      await ipc.invoke("file:write", { roots: ws.roots, ops: [{ kind: "write", path: target, content: "新内容\n" }] });
+      const ok = await ipc.invoke("file:backup-preview", { roots: ws.roots, path: target });
+      assert.equal(ok.ok, true);
+      assert.equal(ok.text, "旧内容\n");
+
+      const noRoots = await ipc.invoke("file:backup-preview", { roots: [], path: target });
+      assert.equal(noRoots.ok, false);
+      assert.equal(noRoots.code, "no-roots");
+
+      const bad = fakeIpc();
+      registerFileIpc(bad, { isTrustedSender: () => false, backupDir: bak.dir });
+      const denied = await bad.invoke("file:backup-preview", { roots: ws.roots, path: target });
+      assert.equal(denied.ok, false);
+      assert.equal(denied.code, "untrusted-sender");
+    } finally {
+      bak.cleanup();
+    }
+  }));
+
 /* ──────────────── 最近改动列表（d.171 · file:backups） ──────────────── */
 
 test("listBackups：只列可写根内的最新一份备份，按时间倒序；只读根里的不列", () =>
@@ -1309,4 +1465,198 @@ test("IPC file:backups：正常列出；无根回 no-roots；非可信来源回 
     } finally {
       bak.cleanup();
     }
+  }));
+
+test("GBK 文本：读得到、搜得到，但覆盖写会被拦下（d.229）", async () => {
+  const ws = makeWorkspace();
+  try {
+    // 「中文\n测试\n」的 GBK 字节（936 代码页）——中文 Windows 上这类文件仍然常见
+    const gbkBytes = Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a, 0xb2, 0xe2, 0xca, 0xd4, 0x0a]);
+    const legacy = path.join(ws.writeRoot, "旧.txt");
+    fs.writeFileSync(legacy, gbkBytes);
+
+    // 1) 读：不再回「这不是 UTF-8 文本文件」，而是解出来并报出编码
+    const read = await readFile(ws.roots, legacy);
+    assert.equal(read.ok, true, JSON.stringify(read));
+    assert.equal(read.content, "中文\n测试\n");
+    assert.equal(read.encoding, "gbk");
+    assert.equal(read.bytes, gbkBytes.length);
+
+    // 2) 搜：grep 不再静默跳过 GBK 文件
+    const grep = await grepFiles({ roots: ws.roots, dir: ws.writeRoot, pattern: "中文" });
+    assert.equal(grep.ok, true, JSON.stringify(grep));
+    assert.equal(grep.matches.length, 1);
+    assert.equal(grep.matches[0].path.replace(/\\/g, "/"), legacy.replace(/\\/g, "/"));
+
+    // 3) 写：覆盖非 UTF-8 文件必须被拒，且**原文件一个字节都不能变**
+    const denied = await writeBatch(ws.roots, [{ kind: "write", path: legacy, content: "新内容" }]);
+    assert.equal(denied.ok, false);
+    assert.match(denied.error, /不是 UTF-8 编码/);
+    assert.deepEqual(fs.readFileSync(legacy), gbkBytes, "被拒之后原文件必须一字未改");
+
+    // 4) UTF-8 目标与新建文件不受影响
+    const utf8File = path.join(ws.writeRoot, "新.txt");
+    fs.writeFileSync(utf8File, "旧内容", "utf8");
+    const overwrite = await writeBatch(ws.roots, [{ kind: "write", path: utf8File, content: "改过了" }]);
+    assert.equal(overwrite.ok, true, JSON.stringify(overwrite));
+    assert.equal(fs.readFileSync(utf8File, "utf8"), "改过了");
+    const created = await writeBatch(ws.roots, [{ kind: "write", path: path.join(ws.writeRoot, "另一个.txt"), content: "x" }]);
+    assert.equal(created.ok, true, JSON.stringify(created));
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("GBK 的改动前备份预览也按实际编码解（d.229）", async () => {
+  const ws = makeWorkspace();
+  const backupDir = path.join(ws.base, "backups");
+  try {
+    const file = path.join(ws.writeRoot, "报告.bat");
+    const gbkBytes = Buffer.from([0xb1, 0xa8, 0xb8, 0xe6, 0x0a]); // 「报告\n」
+    fs.writeFileSync(file, gbkBytes);
+    const made = await createBackup(backupDir, file, gbkBytes);
+    assert.ok(made && made.file, JSON.stringify(made));
+
+    const preview = await previewBackup(ws.roots, file, backupDir);
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.equal(preview.text, "报告\n", "预览要解成中文，而不是一片乱码");
+    assert.equal(preview.encoding, "gbk");
+    assert.equal(preview.binary, false);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("decodeTextBytes：UTF-8 优先、GBK 兜底、BOM 剥掉、两种都不成立则失败（d.229）", () => {
+  assert.deepEqual(decodeTextBytes(Buffer.from("中文 ok", "utf8")), {
+    ok: true,
+    text: "中文 ok",
+    encoding: "utf-8",
+  });
+  assert.deepEqual(decodeTextBytes(Buffer.from([0xd6, 0xd0, 0xce, 0xc4])), {
+    ok: true,
+    text: "中文",
+    encoding: "gbk",
+  });
+  assert.deepEqual(decodeTextBytes(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("x")])), {
+    ok: true,
+    text: "x",
+    encoding: "utf-8",
+  });
+  assert.equal(decodeTextBytes(Buffer.from([0xff, 0xfe, 0x80, 0xff])).ok, false);
+});
+
+test("grepFiles：搜不了的文件要报出来（d.232 没找到 ≠ 没去找）", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "命中.md"), "needle 在这里\n");
+    // 2MB+ 的大文件、含 NUL 的二进制、两种编码都不成立的字节：以前一律静默跳过
+    fs.writeFileSync(path.join(ws.writeRoot, "巨大.log"), "x".repeat(MAX_FILE_BYTES + 10));
+    fs.writeFileSync(
+      path.join(ws.writeRoot, "图片.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]),
+    );
+    fs.writeFileSync(path.join(ws.writeRoot, "坏编码.bin"), Buffer.from([0x81, 0x20, 0xff]));
+
+    const found = await grepFiles({ roots: ws.roots, pattern: "needle", dir: ws.writeRoot });
+    assert.equal(found.ok, true);
+    assert.equal(found.matches.length, 1);
+    assert.equal(found.skippedFiles.total, 3);
+    assert.equal(found.skippedFiles.tooLarge, 1);
+    assert.equal(found.skippedFiles.binary, 1);
+    assert.equal(found.skippedFiles.undecodable, 1);
+    assert.deepEqual([...found.skippedFiles.sample].sort(), ["图片.png", "坏编码.bin", "巨大.log"].sort());
+
+    // 全都搜得到的时候不报（不能编出一条「另有 0 个」）
+    fs.writeFileSync(path.join(ws.readRoot, "干净.md"), "needle\n");
+    const clean = await grepFiles({ roots: ws.roots, pattern: "needle", dir: ws.readRoot });
+    assert.equal(clean.ok, true);
+    assert.equal(clean.skippedFiles, null);
+  }));
+
+
+/* ────────────────────────────── revealFile（d.234 在文件夹里显示） ────────────────────────────── */
+
+function fakeShell() {
+  const calls = [];
+  return {
+    calls,
+    showItemInFolder(target) {
+      calls.push(["showItemInFolder", target]);
+    },
+    async openPath(target) {
+      calls.push(["openPath", target]);
+      return "";
+    },
+  };
+}
+
+test("revealFile：文件走「选中它」，目录走「打开它」", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "a.md");
+    fs.writeFileSync(file, "a");
+    const shell = fakeShell();
+    const revealed = await revealFile(ws.roots, file, shell);
+    assert.equal(revealed.ok, true);
+    assert.equal(revealed.kind, "file");
+
+    const dir = path.join(ws.writeRoot, "子目录");
+    fs.mkdirSync(dir, { recursive: true });
+    const opened = await revealFile(ws.roots, dir, shell);
+    assert.equal(opened.ok, true);
+    assert.equal(opened.kind, "directory");
+
+    assert.deepEqual(shell.calls, [
+      ["showItemInFolder", file],
+      ["openPath", dir],
+    ]);
+  }));
+
+test("revealFile：根外路径不放行，什么都不弹", () =>
+  withWorkspace(async (ws) => {
+    const shell = fakeShell();
+    const outside = path.join(ws.base, "别人.md");
+    fs.writeFileSync(outside, "x");
+    const res = await revealFile(ws.roots, outside, shell);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "outside-roots");
+    assert.deepEqual(shell.calls, []);
+  }));
+
+test("revealFile：文件不在了说「找不到」，不弹空文件夹", () =>
+  withWorkspace(async (ws) => {
+    const shell = fakeShell();
+    const gone = path.join(ws.writeRoot, "没了.md");
+    const res = await revealFile(ws.roots, gone, shell);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "not-found");
+    assert.match(res.error, /找不到/);
+    assert.deepEqual(shell.calls, []);
+  }));
+
+test("revealFile：没有 shell 时结构化失败（老环境不崩）", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "b.md");
+    fs.writeFileSync(file, "b");
+    const res = await revealFile(ws.roots, file, null);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "unsupported");
+  }));
+
+test("IPC file:reveal：正常定位；非可信来源被拒（fail-closed）", () =>
+  withWorkspace(async (ws) => {
+    const file = path.join(ws.writeRoot, "c.md");
+    fs.writeFileSync(file, "c");
+    const shell = fakeShell();
+    const ipc = register({ shell });
+    const ok = await ipc.invoke("file:reveal", { roots: ws.roots, path: file });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.kind, "file");
+    assert.deepEqual(shell.calls, [["showItemInFolder", file]]);
+
+    const blocked = await register({ shell, isTrustedSender: () => false }).invoke("file:reveal", {
+      roots: ws.roots,
+      path: file,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.code, "untrusted-sender");
   }));

@@ -52,7 +52,7 @@ describe("run_command 工具（d.164）", () => {
     expect(spec.type).toBe("function");
     expect(spec.function.name).toBe("run_command");
     expect(spec.function.parameters.required).toEqual(["command"]);
-    expect(tool.meta?.(SHELL_TOOL)).toEqual({ risk: "danger", displayName: "运行命令" });
+    expect(tool.meta?.(SHELL_TOOL)).toEqual({ risk: "danger", displayName: "运行命令", core: true });
     expect(tool.meta?.("file_read")).toBeUndefined();
   });
 
@@ -327,9 +327,9 @@ describe("后台作业（d.180）", () => {
     const tool = buildShellToolBridge({ bridge, roots: () => [ROOT] });
     const names = tool.tools.map((spec) => (spec as { function: { name: string } }).function.name);
     expect(names).toEqual(["run_command", "command_output", "command_list", "command_kill"]);
-    expect(tool.meta?.("command_output")).toEqual({ risk: "read", displayName: "读取后台输出" });
-    expect(tool.meta?.("command_list")).toEqual({ risk: "read", displayName: "列出后台命令" });
-    expect(tool.meta?.("command_kill")).toEqual({ risk: "write", displayName: "停止后台命令" });
+    expect(tool.meta?.("command_output")).toEqual({ risk: "read", displayName: "读取后台输出", core: true });
+    expect(tool.meta?.("command_list")).toEqual({ risk: "read", displayName: "列出后台命令", core: true });
+    expect(tool.meta?.("command_kill")).toEqual({ risk: "write", displayName: "停止后台命令", core: true });
   });
 
   it("background:true 立刻起作业并回 jobId，不进前台 run()", async () => {
