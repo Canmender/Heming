@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.302.4.120.12",
+    "date": "2026-11-18",
+    "title": "上次读到的先画出来，打开模型页不再先空等半秒",
+    "bullets": [
+      "`packages/web` 全量 443 个文件 / 6347 例全绿。新增 `packages/web/src/lib/pageCache.test.ts` 5 例（测试环境不读写、存取与版本前缀、空串算没有、`clearCache` 只清自己那几份、写失败不抛）；",
+      "`node scripts/design-audit.mjs` 全门槛通过；typecheck 全项目 0 错。",
+      "没有做「缓存过期」：一个月后再打开也会先画旧数据再替换。对本地页面可以接受，但严格来说应该带个时间戳。",
+      "智能体列表、插件表、settings 还没进缓存（它们更便宜，也更容易变）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "模型页每一块内容都得单独起一个内核进程去问：`providers` 实测 629ms、`accounts` 425ms，其余 280–430ms。打开页面时哪怕已经做了「首屏两波」，第一波也要等这几百毫秒才画得出自己的来源与模型；而这段时间里，用户其实**上一次打开时就已经看过这些内容**。半秒钟的空等纯粹是重复劳动。",
+      "做了什么",
+      "| 位置 | 做的事 || --- | --- || 新 `packages/web/src/lib/pageCache.ts` | `readCache(key)` / `writeCache(key, text)` / `clearCache()`，键带版本前缀 `heming.modelpage.v1.` || 存什么 | 存**内核原话**，不存解析后的对象：解析规则一变，缓存自然失效，不会出现「旧形状 + 新逻辑」 || 什么时候写 | 每次 `providers` / `accounts --json` / `quota --json` 读成功之后 || 什么时候读 | 组件的 `useState` 初始化里，先用它画一版；真正的读取一回来就替换 || 测试环境 | `import.meta.env.MODE === \"test\"` 时完全不读写——否则同一文件里的用例会互相串数据 || 存不下时 | 隐私模式 / 配额满都直接放弃，绝不影响页面 |",
+      "怎么验证`ModelPage.test.tsx` 新增 1 例：先把一份 `providers` 原话塞进 localStorage，再让这一次的 `providers`**永远不返回**，页面仍然画出了缓存里的那一行来源。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.301.4.120.12",
     "date": "2026-11-18",
     "title": "账号为什么是空的，卡片底部自己说清楚",
@@ -37,7 +56,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "bullets": [
       "`packages/web/src/store/chat.test.ts` 54 例（新增 5 例：摘掉已删并报数量、拉取期间新到的保留、本来就一致时不重写列表、拉取失败不动本地且不写错误态、`alive` 为假不写 store）",
       "`ChatPage.test.tsx` 200 例（新增 1 例：断线 → 重连，被别处删掉的那条消失、提示出现、前一问一答不动）",
-      "web 全量 442 文件 / 6326 例；`pnpm -w typecheck` 全工程；`eval:agent` 40/40（pass@1 100%）；`design-audit` 全门槛",
+      "web 全量 442 文件 / 6341 例；`pnpm -w typecheck` 全工程；`eval:agent` 40/40（pass@1 100%）；`design-audit` 全门槛",
       "**本地还没送达的消息会被撤掉**：重连对齐以服务端为准；如果一条消息在断线那一刻还没到服务端，重连后它会从列表里消失（和「发送失败」提示是同一件事的两面）。",
       "**只对齐当前打开的会话**：其它会话等你切过去（切会话本来就会拉一次）。",
       "**不重放断线期间的 `agent_chunk`**：正在生成的那一轮在断线时已经收口，不会被续上。",

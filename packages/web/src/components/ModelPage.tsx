@@ -39,6 +39,7 @@ import {
   parseDiscovery,
   type DiscoveryState,
 } from "../lib/discovery.js";
+import { readCache, writeCache } from "../lib/pageCache.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -272,15 +273,28 @@ export function ModelPage() {
   const setNotice = useCallback((text: string, failed = false) => {
     setNoticeState({ text: engineText(text), failed });
   }, []);
-  const [providers, setProviders] = useState<ProviderRow[]>([]);
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  /**
+   * 先用上一次读到的原话画一版。
+   *
+   * `providers` 要 600ms 上下、`accounts` 400ms 上下，每次打开都空等这半秒不划算；
+   * 有缓存就先画出来，真正的读取一回来就把它替换掉。缓存里存的是内核原话，
+   * 解析规则变了它会跟着失效，不会出现「旧形状 + 新逻辑」。
+   */
+  const [providers, setProviders] = useState<ProviderRow[]>(() =>
+    parseProviders(readCache("providers") || ""),
+  );
+  const [accounts, setAccounts] = useState<AccountRow[]>(() =>
+    parseAccounts(readCache("accounts") || ""),
+  );
   /**
    * 订阅以外的额度（Key、套餐、钱包余额，内核 `quota --json`）。
    *
    * `accounts --json` 只讲订阅账号；按量付费的 Key 花到哪儿去了、还剩多少，
    * 原先页面上完全看不到，只能开终端敲命令。
    */
-  const [quotaCards, setQuotaCards] = useState<QuotaCard[]>([]);
+  const [quotaCards, setQuotaCards] = useState<QuotaCard[]>(() =>
+    parseQuotaCards(readCache("quotas") || ""),
+  );
   /** 自动收取本机登录的开关状态；空 = 这次没读到。 */
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
@@ -449,6 +463,8 @@ export function ModelPage() {
         if (!cli) return;
         const result = await cli.cli(["providers"]);
         setProviders(parseProviders(result.stdout || ""));
+        // 留一份原话给下一次打开先画：读取本身要半秒多，页面不必空等。
+        writeCache("providers", result.stdout || "");
       }),
     [cli, once],
   );
@@ -459,6 +475,7 @@ export function ModelPage() {
         if (!cli) return;
         const result = await cli.cli(["accounts", "--json"]);
         setAccounts(parseAccounts(result.stdout || ""));
+        writeCache("accounts", result.stdout || "");
       }),
     [cli, once],
   );
@@ -520,6 +537,7 @@ export function ModelPage() {
         if (!cli) return;
         const result = await cli.cli(["quota", "--json"]);
         setQuotaCards(parseQuotaCards(result.stdout || ""));
+        writeCache("quotas", result.stdout || "");
       }),
     [cli, once],
   );

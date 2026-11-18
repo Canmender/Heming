@@ -755,6 +755,30 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(inCard.getAttribute("title")).toContain("腾讯号");
   });
 
+  it("上次读到的来源先画出来，不等这一次的读取", async () => {
+    // 真机上 `providers` 要 600ms 上下：打开页面时先拿上次的原话画一版，读回来再替换。
+    // 这里让这一次的读取永远不返回，看首屏是否还画得出来。
+    vi.stubEnv("MODE", "production");
+    localStorage.setItem(
+      "heming.modelpage.v1.providers",
+      "  cached custom  mock  https://cache.example  ● •••••••  2 models  ",
+    );
+    const calls: string[][] = [];
+    const cli = vi.fn(async (args: string[]) => {
+      calls.push(args);
+      if (args[0] === "providers") return new Promise(() => {});
+      return { ok: true, stdout: "ok", stderr: "" };
+    });
+    installBridge({ cli });
+
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("cached")).toBeInTheDocument();
+
+    vi.unstubAllEnvs();
+    localStorage.clear();
+  });
+
   it("首屏不等额度：订阅账号还在读的时候，模型列表已经能用了", async () => {
     // 内核每条命令都要起一个进程（实测 280–630ms）；额度这类慢一步的东西
     // 不该把整页拖住，所以这里让它永远不返回，看首屏还出不出得来。
