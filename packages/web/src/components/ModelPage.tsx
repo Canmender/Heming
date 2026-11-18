@@ -387,6 +387,16 @@ export function ModelPage() {
    * 切号时也留在这一档上，方便连续处理同一类账号。
    */
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
+  /**
+   * 「再加一个账号」那段（登录网格与国内智能体）：有账号时默认收起——进来是看额度
+   * 的，不是来登录的；一个账号都没有时默认摊开，那才是这会儿唯一的下一步。
+   */
+  const [addAccountOpen, setAddAccountOpen] = useState(() => accounts.length === 0);
+  /** 账号从「一个都没有」变成「有了」时自动收起那段，反之摊开。 */
+  const noAccounts = accounts.length === 0;
+  useEffect(() => {
+    setAddAccountOpen(noAccounts);
+  }, [noAccounts]);
   const visibleAccounts = useMemo(
     () => filterAccounts(accounts, accountFilter),
     [accounts, accountFilter],
@@ -2175,81 +2185,6 @@ export function ModelPage() {
                     )}
                   </div>
                 </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {SUBSCRIPTIONS.map((item) => (
-                    <button
-                      key={item.agent}
-                      type="button"
-                      className="ui-card ui-card-interactive flex items-center gap-2 px-3 py-2 text-left disabled:opacity-50"
-                      disabled={!cli}
-                      onClick={() =>
-                        void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])
-                      }
-                    >
-                      <Avatar name={item.label} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-ui-md font-semibold">{item.label}</span>
-                        <span className="block ui-caption">{item.desc}</span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-0.5 text-ui-xs text-muted">
-                        登录
-                        <ChevronIcon width={14} height={14} />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-4">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="text-ui-md font-semibold">国内智能体</h3>
-                    <span className="ui-caption">接上这些软件里已经登录的账号，额度就写在卡片上</span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-ui-md font-semibold">每天自动签到</span>
-                      <span className="block ui-caption">
-                        {checkinSwitchState(settingValues) === "on"
-                          ? `${CHECKIN_VENDORS} 到点自己领，不用再点。`
-                          : `打开后和鸣每天自动领 ${CHECKIN_VENDORS} 的免费额度。`}
-                      </span>
-                    </span>
-                    <Button
-                      size="sm"
-                      variant={checkinSwitchState(settingValues) === "on" ? "ghost" : "primary"}
-                      busy={accountBusy === "checkin-switch"}
-                      onClick={() => void toggleAutoCheckin()}
-                    >
-                      {checkinSwitchState(settingValues) === "on"
-                        ? "关掉自动签到"
-                        : checkinSwitchState(settingValues) === "mixed"
-                          ? "补齐自动签到"
-                          : "开启自动签到"}
-                    </Button>
-                  </div>
-                  <div className="mt-2 grid gap-2">
-                    {DOMESTIC_AGENTS.map((item) => (
-                      <DomesticCard
-                        key={item.agent}
-                        item={item}
-                        signedIn={accounts.filter((row) => row.agent === item.agent).length}
-                        lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
-                        quota={agentQuotas.get(item.agent) ?? null}
-                        local={agents.some((agent) => agent.id === item.agent)}
-                        busy={accountBusy === `domestic:${item.agent}`}
-                        onPress={prepareDomestic}
-                      />
-                    ))}
-                  </div>
-                  <p className="mt-2 ui-caption">
-                    {DOMESTIC_KEY_NOTE}
-                    {DOMESTIC_AGENTS.filter((item) => item.risk).map((item) => (
-                      <span key={item.agent} className="mt-1 block">
-                        {item.label}：{item.risk}
-                      </span>
-                    ))}
-                  </p>
-                </div>
-
                 <MergedQuotaStrip groups={mergedAccounts} now={now} />
 
                 {accountRank && (
@@ -2312,7 +2247,7 @@ export function ModelPage() {
                         </span>
                       ) : (
                         <>
-                          还没有账号。上面这些软件里已经登录的订阅可以直接借给和鸣用：点一个登录，
+                          还没有账号。下面这些软件里已经登录的订阅可以直接借给和鸣用：点一个登录，
                           它的额度、重置时间与余额会显示在这里。
                         </>
                       )}
@@ -2333,6 +2268,93 @@ export function ModelPage() {
                     </li>
                   )}
                 </ul>
+                <details
+                  className="ui-disclosure mt-3 rounded-xl border border-line bg-subtle px-3 py-2.5"
+                  open={addAccountOpen}
+                  onToggle={(event) => setAddAccountOpen(event.currentTarget.open)}
+                >
+                  <summary className="text-ui-md font-semibold">
+                    <ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                    {accounts.length === 0 ? "登录一个账号" : "再加一个账号"}
+                  </summary>
+                  <p className="mt-1 ui-caption">
+                    这些软件里已经登录的订阅可以直接借给和鸣用：选一个登录，额度、重置时间与余额就会出现在上面。
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {SUBSCRIPTIONS.map((item) => (
+                      <button
+                        key={item.agent}
+                        type="button"
+                        className="ui-card ui-card-interactive flex items-center gap-2 px-3 py-2 text-left disabled:opacity-50"
+                        disabled={!cli}
+                        onClick={() =>
+                          void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])
+                        }
+                      >
+                        <Avatar name={item.label} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-ui-md font-semibold">{item.label}</span>
+                          <span className="block ui-caption">{item.desc}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-0.5 text-ui-xs text-muted">
+                          登录
+                          <ChevronIcon width={14} height={14} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h3 className="text-ui-md font-semibold">国内智能体</h3>
+                      <span className="ui-caption">接上这些软件里已经登录的账号，额度就写在卡片上</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-ui-md font-semibold">每天自动签到</span>
+                        <span className="block ui-caption">
+                          {checkinSwitchState(settingValues) === "on"
+                            ? `${CHECKIN_VENDORS} 到点自己领，不用再点。`
+                            : `打开后和鸣每天自动领 ${CHECKIN_VENDORS} 的免费额度。`}
+                        </span>
+                      </span>
+                      <Button
+                        size="sm"
+                        variant={checkinSwitchState(settingValues) === "on" ? "ghost" : "primary"}
+                        busy={accountBusy === "checkin-switch"}
+                        onClick={() => void toggleAutoCheckin()}
+                      >
+                        {checkinSwitchState(settingValues) === "on"
+                          ? "关掉自动签到"
+                          : checkinSwitchState(settingValues) === "mixed"
+                            ? "补齐自动签到"
+                            : "开启自动签到"}
+                      </Button>
+                    </div>
+                    <div className="mt-2 grid gap-2">
+                      {DOMESTIC_AGENTS.map((item) => (
+                        <DomesticCard
+                          key={item.agent}
+                          item={item}
+                          signedIn={accounts.filter((row) => row.agent === item.agent).length}
+                          lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
+                          quota={agentQuotas.get(item.agent) ?? null}
+                          local={agents.some((agent) => agent.id === item.agent)}
+                          busy={accountBusy === `domestic:${item.agent}`}
+                          onPress={prepareDomestic}
+                        />
+                      ))}
+                    </div>
+                    <p className="mt-2 ui-caption">
+                      {DOMESTIC_KEY_NOTE}
+                      {DOMESTIC_AGENTS.filter((item) => item.risk).map((item) => (
+                        <span key={item.agent} className="mt-1 block">
+                          {item.label}：{item.risk}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                </details>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
                   <span className="ui-caption">{discoveryText(discovery)}</span>
                   <button

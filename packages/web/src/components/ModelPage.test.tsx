@@ -696,6 +696,32 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已把 WorkBuddy 接进和鸣/)).toBeInTheDocument();
   });
 
+  it("有账号时「再加一个账号」收起来：进来先看额度，要加再点开", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const summary = await screen.findByText("再加一个账号");
+    const disclosure = summary.closest("details");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute("open");
+    // 收起不等于删掉：里面的登录卡片与国内智能体都还在，点一下就能用
+    expect(within(disclosure as HTMLElement).getByText("国内智能体")).toBeInTheDocument();
+    fireEvent.click(summary);
+    expect(disclosure).toHaveAttribute("open");
+  });
+
+  it("一个账号都没有时，「登录一个账号」是摊开的：那是这会儿唯一的下一步", async () => {
+    installBridge({}, {
+      "accounts --json": { ok: true, stdout: "[]", stderr: "" },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const summary = await screen.findByText("登录一个账号");
+    expect(summary.closest("details")).toHaveAttribute("open");
+    expect(screen.queryByText("再加一个账号")).toBeNull();
+    expect(screen.getByText(/还没有账号。下面这些软件里已经登录的订阅/)).toBeInTheDocument();
+  });
+
   it("插件已经装过时，点国内端直接登录，不再装一遍", async () => {
     const { bridge, calls } = installBridge({}, {
       "plugin list --json": {
