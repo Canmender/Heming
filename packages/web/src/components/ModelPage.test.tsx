@@ -1904,6 +1904,56 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(screen.getByText(/下拉只列它看得到的 1 个模型/)).toBeInTheDocument();
   });
 
+  it("一次给多个工具设同一个模型：先点名会写到谁，再逐个写入", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+
+    const select = await screen.findByLabelText<HTMLSelectElement>("统一设置的模型");
+    expect(calls).not.toContainEqual(["claude", "deepseek/deepseek-chat"]);
+    fireEvent.change(select, { target: { value: "deepseek/deepseek-chat" } });
+    fireEvent.click(screen.getByRole("button", { name: "统一应用" }));
+
+    // 写别人的配置文件之前先问一次，并把会写到的工具点名
+    const dialog = await screen.findByRole("dialog", {
+      name: "把 2 个工具都设成 deepseek/deepseek-chat？",
+    });
+    expect(dialog.textContent).toContain("Claude Code、Codex");
+    expect(calls).not.toContainEqual(["claude", "deepseek/deepseek-chat"]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "全部写入" }));
+    await waitFor(() => {
+      expect(calls).toContainEqual(["claude", "deepseek/deepseek-chat"]);
+      expect(calls).toContainEqual(["codex", "deepseek/deepseek-chat"]);
+    });
+    expect(
+      await screen.findByText(/已把 2 个工具都设成 deepseek\/deepseek-chat，下次启动它们时生效/),
+    ).toBeInTheDocument();
+  });
+
+  it("统一设置里有工具写不进去时，点出是哪个、带上内核原话", async () => {
+    installBridge(
+      {},
+      {
+        "codex deepseek/deepseek-chat": {
+          ok: false,
+          stdout: "",
+          stderr: "codex: 配置文件是只读的",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+
+    const select = await screen.findByLabelText<HTMLSelectElement>("统一设置的模型");
+    fireEvent.change(select, { target: { value: "deepseek/deepseek-chat" } });
+    fireEvent.click(screen.getByRole("button", { name: "统一应用" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "全部写入" }));
+
+    expect(await screen.findByText(/1 个设好了，1 个没成（Codex）：codex: 配置文件是只读的/)).toBeInTheDocument();
+  });
+
   it("只显示挑过的模型：已开启时取消就发 --show-new", async () => {
     const { calls } = installBridge(
       {},

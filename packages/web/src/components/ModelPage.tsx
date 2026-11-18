@@ -60,6 +60,7 @@ import {
 } from "../lib/discovery.js";
 import { readCache, writeCache } from "../lib/pageCache.js";
 import { readFailureDetail, readFailureText, readFailuresText, setReadError, type ReadErrors, type ReadSection } from "../lib/readErrors.js";
+import { bulkModelTargets, bulkModelText, type BulkModelOutcome } from "../lib/bulkModel.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -447,6 +448,8 @@ export function ModelPage() {
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
   /** 智能体模型选「自定义…」后手填的 provider/model。 */
   const [agentCustom, setAgentCustom] = useState<Record<string, string>>({});
+  /** 「一次给多个工具设同一个模型」里挑的那个模型。 */
+  const [bulkModel, setBulkModel] = useState("");
   const [loading, setLoading] = useState(true);
   /** 被 `model disable` 关掉的模型（glob 模式 + 当前命中）。 */
   const [disabledModels, setDisabledModels] = useState<DisabledPattern[]>([]);
@@ -1669,6 +1672,52 @@ export function ModelPage() {
     return value === AGENT_CUSTOM ? (agentCustom[agent.name] ?? "").trim() : value;
   };
 
+  /** 能被改写的工具（有 id 的），「一次性设成同一个模型」只对它们生效。 */
+  const bulkAgents = useMemo(() => bulkModelTargets(agents), [agents]);
+
+  /**
+   * 逐个写：内核没有通配符，`<agent> <model>` 一次只动一个工具自己的配置。
+   * 一个失败不打断后面的，最后用一句话说清成败。
+   */
+  const applyBulkModel = async (model: string) => {
+    if (!cli) return;
+    setBusy("统一设置模型");
+    const outcome: BulkModelOutcome = { done: [], failed: [] };
+    try {
+      for (const agent of bulkAgents) {
+        const agentId = agent.id ?? "";
+        if (!agentId) continue;
+        const result = await cli.cli([agentId, model]);
+        if (result.ok) {
+          outcome.done.push(agent.name);
+        } else {
+          outcome.failed.push({
+            name: agent.name,
+            why: readFailureDetail(result.stderr || result.error || ""),
+          });
+        }
+      }
+      await loadAgents();
+      const said = bulkModelText(model, outcome);
+      setNotice(said.text, said.failed);
+      if (said.failed) setBulkModel("");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** 写 N 个配置文件之前先确认一次，并点名会写到哪些工具。 */
+  const confirmBulkModel = (model: string) => {
+    const names = bulkAgents.map((agent) => agent.name);
+    setConfirmAction({
+      title: `把 ${names.length} 个工具都设成 ${model}？`,
+      desc: `会依次写入 ${names.join("、")} 自己的配置文件（下一次启动生效）。想撤回就逐个点「恢复默认」。`,
+      confirmLabel: "全部写入",
+      tone: "primary",
+      action: () => void applyBulkModel(model),
+    });
+  };
+
   /** 当前选中的厂商与地址类型（普通/套餐），添加前要问清楚。 */
   const activePreset = presetKey ? findPreset(presetKey.id) : undefined;
   const activePlan = presetKey ? planOptionOf(activePreset, presetKey.plan) : undefined;
@@ -1862,6 +1911,41 @@ export function ModelPage() {
                   重新检测
                 </Button>
               </div>
+              {bulkAgents.length > 1 && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
+                  <span className="ui-caption">一次给这 {bulkAgents.length} 个工具设同一个模型</span>
+                  <select
+                    className="ui-input w-52"
+                    aria-label="统一设置的模型"
+                    value={bulkModel}
+                    disabled={!cli || busy !== null}
+                    onChange={(event) => setBulkModel(event.target.value)}
+                  >
+                    <option value="">选择模型…</option>
+                    {groupModelRows(modelRows).map((group) => (
+                      <optgroup key={group.provider} label={group.provider}>
+                        {group.rows.map((row) => (
+                          <option
+                            key={row.id}
+                            value={row.id}
+                            disabled={isModelDisabled(row, disabledModels)}
+                          >
+                            {row.name ? `${row.name}（${row.id}）` : row.id}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli || busy !== null || !isModelId(bulkModel)}
+                    onClick={() => confirmBulkModel(bulkModel.trim())}
+                  >
+                    统一应用
+                  </Button>
+                </div>
+              )}
               <ul className="mt-2 divide-y divide-line">
                 {agents.map((agent) => (
                   <li key={`${agent.name}-${agent.configPath}`} className="py-3">
