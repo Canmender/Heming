@@ -34,10 +34,18 @@ export interface PromptOptions {
   apiKey?: string;
 }
 
+export interface McpOptions {
+  /** 显式给出的工作目录；缺省由 index 用 `process.cwd()` 兜底。 */
+  cwd?: string;
+  /** 放行 `run_command`（MCP 客户端能调用它真跑命令）。 */
+  allowDanger: boolean;
+}
+
 export type ParsedArgs =
   | { ok: true; action: "help" }
   | { ok: true; action: "version" }
   | { ok: true; action: "run"; options: PromptOptions }
+  | { ok: true; action: "mcp"; options: McpOptions }
   | { ok: false; error: string };
 
 /** 需要取值的选项：值不能是另一个选项（`--cwd --json` 是写错了，不该把 `--json` 当目录）。 */
@@ -52,7 +60,7 @@ function takeValue(argv: string[], index: number, inline: string | undefined): {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  let command: "run" | "exec" | null = null;
+  let command: "run" | "exec" | "mcp" | null = null;
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
@@ -154,18 +162,49 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
 
     if (command === null) {
-      if (arg === "run" || arg === "exec") {
+      if (arg === "run" || arg === "exec" || arg === "mcp") {
         command = arg;
         continue;
       }
-      return { ok: false, error: `未知命令「${arg}」（支持 run / exec，用 --help 查看用法）` };
+      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp，用 --help 查看用法）` };
     }
     promptParts.push(arg);
   }
 
   if (command === null) {
-    return { ok: false, error: "缺少命令（用 run 或 exec）" };
+    return { ok: false, error: "缺少命令（用 run、exec 或 mcp）" };
   }
+
+  /**
+   * `mcp serve`：把工具按 MCP 协议暴露给别的编辑器。
+   *
+   * 与 run/exec 的分工是刻意的：这条路**不调模型**，所以 `--model` / `--api-key` /
+   * `--max-rounds` / 输出格式在这里一律拒绝——静默忽略会让用户以为某个开关生效了。
+   */
+  if (command === "mcp") {
+    const sub = promptParts[0];
+    if (sub !== "serve") {
+      return { ok: false, error: `mcp 只支持 serve 子命令（heming mcp serve）${sub ? `，收到「${sub}」` : ""}` };
+    }
+    if (promptParts.length > 1) {
+      return { ok: false, error: "mcp serve 不接受多余的位置参数（它从 stdin 读协议消息，不读 prompt）" };
+    }
+    const notForMcp: string[] = [];
+    if (json) notForMcp.push("--json");
+    if (outputFormat !== "text") notForMcp.push("--output-format");
+    if (maxRounds !== undefined) notForMcp.push("--max-rounds");
+    if (model !== undefined) notForMcp.push("--model");
+    if (baseUrl !== undefined) notForMcp.push("--base-url");
+    if (apiKey !== undefined) notForMcp.push("--api-key");
+    if (notForMcp.length > 0) {
+      return {
+        ok: false,
+        error: `mcp serve 不接 ${notForMcp.join(" / ")}（它不调模型，只把文件工具按 MCP 协议暴露出去）`,
+      };
+    }
+    return { ok: true, action: "mcp", options: { allowDanger, ...(cwd !== undefined ? { cwd } : {}) } };
+  }
+
   const rawPrompt = promptParts.join(" ").trim();
   // `-` 表示「指令从 stdin 读」：CI 里最常见的是 `git diff | heming exec -`。
   const fromStdin = rawPrompt === "-";

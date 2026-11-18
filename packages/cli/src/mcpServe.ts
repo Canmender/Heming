@@ -1,0 +1,80 @@
+/**
+ * `heming mcp serve` 的进程侧装配：校验工作目录、装工具、把 stdio 交给协议层。
+ *
+ * 为什么和 `mcp.ts` 分开：那个文件是**纯协议**（一条消息进、一条响应出，测试不需要起进程）；
+ * 这里碰 `process.cwd()` / `process.stdin` / SIGINT，是入口才该操心的事。
+ */
+
+import { statSync } from "node:fs";
+import path from "node:path";
+import type { McpOptions } from "./args.js";
+import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
+import { createCliTooling } from "./tooling.js";
+
+export interface McpServeIO {
+  stdin: NodeJS.ReadableStream;
+  stdout: { write: (chunk: string) => unknown };
+  stderr: { write: (chunk: string) => unknown };
+  /** 包版本，报给客户端的 serverInfo（测试传固定值）。 */
+  version: string;
+  /** 进程信号注册（测试里替换成空实现，避免真的挂 SIGINT）。 */
+  onSignal?: (signal: "SIGINT", handler: () => void) => void;
+}
+
+/**
+ * 启动 MCP 服务。
+ *
+ * 退出码：0 = stdin 关闭后正常收工；2 = 用法/目录错误；130 = Ctrl+C。
+ * 注意 MCP 客户端不会看退出码判断「工具调成功没有」——那在每条响应的 `isError` 里。
+ */
+export async function startMcpServe(options: McpOptions, io: McpServeIO): Promise<number> {
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  try {
+    if (!statSync(cwd).isDirectory()) return fail(io, `--cwd 不是目录：${cwd}`);
+  } catch {
+    return fail(io, `--cwd 目录不存在：${cwd}`);
+  }
+
+  const conversationId = `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const tooling = createCliTooling({ cwd, allowDanger: options.allowDanger, conversationId });
+  const ctx: McpContext = {
+    tools: tooling.toolBridge,
+    confirm: tooling.confirm,
+    version: io.version,
+    cwd: cwd.replace(/\\/g, "/"),
+    allowDanger: options.allowDanger,
+  };
+
+  // 启动信息写 stderr：stdout 是协议通道，混一行裸文本就会让客户端解析失败并断连。
+  const names = describeMcpTools(ctx).map((tool) => tool.name);
+  io.stderr.write(
+    `[heming] mcp serve 已就绪：工作区 ${ctx.cwd}，${names.length} 个工具（${names.join("、") || "无"}）；` +
+      `危险工具${options.allowDanger ? "已放行（--allow-danger）" : "未放行"}。\n`,
+  );
+
+  let interrupted = false;
+  const onSigint = () => {
+    if (interrupted) process.exit(130);
+    interrupted = true;
+    io.stderr.write("\n[heming] 收到 Ctrl+C，停止 mcp serve（再按一次强制退出）。\n");
+    (io.stdin as unknown as { destroy?: () => void }).destroy?.();
+  };
+  (io.onSignal ?? ((signal, handler) => process.on(signal, handler)))("SIGINT", onSigint);
+
+  try {
+    const code = await serveMcp({
+      input: io.stdin,
+      output: io.stdout,
+      error: (line) => io.stderr.write(line),
+      ctx,
+    });
+    return interrupted ? 130 : code;
+  } finally {
+    (io.stdin as unknown as { destroy?: () => void }).destroy?.();
+  }
+}
+
+function fail(io: McpServeIO, message: string): number {
+  io.stderr.write(`heming: ${message}\n`);
+  return 2;
+}

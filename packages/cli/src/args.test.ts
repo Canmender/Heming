@@ -153,3 +153,52 @@ describe("parseArgs", () => {
     expect(expectRun(["exec", "读一下 - 后面的文件"]).fromStdin).toBe(false);
   });
 });
+
+/** 窄化断言：解析成功且是 MCP 服务命令。 */
+function expectMcp(argv: string[]) {
+  const parsed = parseArgs(argv);
+  if (!parsed.ok || parsed.action !== "mcp") {
+    throw new Error(`期望解析成 mcp，实际：${JSON.stringify(parsed)}`);
+  }
+  return parsed.options;
+}
+
+describe("parseArgs：mcp serve（d.288）", () => {
+  it("mcp serve 不需要 prompt，能带 --cwd / --allow-danger", () => {
+    const bare = expectMcp(["mcp", "serve"]);
+    expect(bare.cwd).toBeUndefined();
+    expect(bare.allowDanger).toBe(false);
+
+    const full = expectMcp(["mcp", "serve", "--cwd", "D:/work", "--allow-danger"]);
+    expect(full.cwd).toBe("D:/work");
+    expect(full.allowDanger).toBe(true);
+  });
+
+  it("只认 serve 子命令，且不接受多余的位置参数", () => {
+    const wrongSub = parseArgs(["mcp", "start"]);
+    expect(wrongSub.ok).toBe(false);
+    if (!wrongSub.ok) expect(wrongSub.error).toContain("serve");
+
+    const noSub = parseArgs(["mcp"]);
+    expect(noSub.ok).toBe(false);
+    if (!noSub.ok) expect(noSub.error).toContain("serve");
+
+    const extra = parseArgs(["mcp", "serve", "读一下"]);
+    expect(extra.ok).toBe(false);
+    if (!extra.ok) expect(extra.error).toContain("不接受多余的位置参数");
+  });
+
+  it("与模型相关的选项一律拒绝（这条路不调模型，静默忽略等于骗人）", () => {
+    for (const argv of [
+      ["mcp", "serve", "--model", "gpt-4o-mini"],
+      ["mcp", "serve", "--api-key", "sk-1"],
+      ["mcp", "serve", "--max-rounds", "3"],
+      ["mcp", "serve", "--json"],
+      ["mcp", "serve", "--output-format", "stream-json"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok, argv.join(" ")).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("mcp serve 不接");
+    }
+  });
+});

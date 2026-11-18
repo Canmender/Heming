@@ -12,6 +12,7 @@ import path from "node:path";
 import { parseArgs } from "./args.js";
 import { resolveModelConfig } from "./config.js";
 import { createEventSink } from "./events.js";
+import { startMcpServe } from "./mcpServe.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { readPromptFromStdin } from "./stdin.js";
 import { MAX_TOOL_ROUNDS } from "../../../packages/web/src/lib/agentStream.js";
@@ -23,6 +24,9 @@ const USAGE = `用法：
   heming exec [--json | --output-format stream-json] [选项] <prompt...>
                                              非交互执行；--json 时 stdout 只有一个 JSON 对象，
                                              stream-json 时 stdout 每行一条事件
+  heming mcp serve [--cwd <dir>] [--allow-danger]
+                                             按 MCP（Model Context Protocol）把文件工具
+                                             暴露给别的编辑器：协议消息走 stdin/stdout
   heming --version | --help
 
 常用选项：
@@ -39,7 +43,7 @@ const USAGE = `用法：
   HEMING_BASE_URL / OPENAI_BASE_URL        可选
   HEMING_MODEL / OPENAI_MODEL              可选
 
-退出码：0 成功；1 运行失败；2 用法或配置错误；130 Ctrl+C 中断。`;
+退出码：0 成功（mcp serve 在 stdin 关闭后也返回 0）；1 运行失败；2 用法或配置错误；130 Ctrl+C 中断。`;
 
 const HELP = `@heming/cli —— 和鸣的无头智能体循环
 
@@ -49,7 +53,14 @@ ${USAGE}
   - 内置文件工具（file_read / file_write / file_edit / file_patch / file_glob /
     file_grep / file_image / file_undo）、todo_write、tool_output_read；
   - run_command 仅在 --allow-danger 时提供，且每条命令都会真的执行；
-  - 不接 MCP、不接联网搜索、没有人工确认（无人值守时「问」一律按拒绝处理）。
+  - 不调外部模型的一条路：heming mcp serve 只把工具按 MCP 协议暴露出去，不替你思考；
+  - 不接联网搜索、没有人工确认（无人值守时「问」一律按拒绝处理）。
+
+MCP 服务（给别的编辑器用）：
+  heming mcp serve --cwd <dir>            stdio JSON-RPC，支持 initialize / ping /
+                                          tools/list / tools/call；stdout 只放协议消息，
+                                          诊断信息走 stderr；不加 --allow-danger 就没有
+                                          run_command（调了回「未执行」）。
 
 机器可读输出：
   heming exec --json ...                  stdout 恰好一个 JSON 对象（跑完才输出）
@@ -61,6 +72,8 @@ ${USAGE}
   pnpm cli "读一下 README 并总结三句话"
   pnpm cli exec --json "把 src 下的 TODO 列出来"
   HEMING_API_KEY=sk-... pnpm cli --allow-danger "跑一下测试并修掉失败"
+  heming mcp serve --cwd .               让 Cursor / Claude Code 之类的客户端通过 MCP
+                                         调用本机的文件工具（不需要模型凭据）
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -94,6 +107,16 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.action === "version") {
     process.stdout.write(`@heming/cli ${readVersion()}\n`);
     return 0;
+  }
+
+  // `mcp serve` 不调模型：它只把文件工具按 MCP 协议暴露给别的编辑器，所以走单独的装配。
+  if (parsed.action === "mcp") {
+    return startMcpServe(parsed.options, {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      version: readVersion(),
+    });
   }
 
   const options = parsed.options;

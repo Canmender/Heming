@@ -29,6 +29,9 @@ pnpm --silent cli exec --output-format stream-json "跑一下测试并修掉失�
 
 # 指令从 stdin 读（把上一步的产物直接喂给它）
 git diff | pnpm --silent cli exec - 
+
+# 给别的编辑器当 MCP 服务（不调模型，只把本机工具暴露出去）
+pnpm --silent cli mcp serve --cwd D:/repo
 ```
 
 ### 命令
@@ -40,6 +43,7 @@ git diff | pnpm --silent cli exec -
 | `heming exec [--json] <prompt...>` | 非交互执行。`--json` 时 stdout 只有一个 JSON 对象（日志/进度仍走 stderr）。 |
 | `heming exec --output-format stream-json <prompt...>` | 非交互执行，stdout 每行一条事件（见下文事件契约）。 |
 | `heming exec -` | 非交互执行，指令从 stdin 读。 |
+| `heming mcp serve [--cwd <dir>] [--allow-danger]` | 以 MCP 服务端身份在 stdio 上讲 JSON-RPC，把同一套文件工具交给别的编辑器/客户端（不调模型）。见下文「MCP 服务」。 |
 | `heming --version` | 打印 `@heming/cli <版本>`。 |
 | `heming --help` | 用法与能力边界。 |
 
@@ -152,6 +156,74 @@ prompt 位置写 `-` 时，指令从 stdin 读（`git diff | heming exec -`、`c
 
 `exec --json` 被中断时仍会输出一个 JSON 对象（`ok: false` + `error`），随后以 `130` 退出。
 
+## MCP 服务：`heming mcp serve`
+
+同一个可执行文件换个身份：不做智能体，只把本机文件工具按
+[MCP](https://modelcontextprotocol.io)（Model Context Protocol）暴露出去，让 Cursor、Claude Code、
+Claude Desktop 之类支持 MCP 的客户端直接调用。**这条路不调模型**，所以不需要 `--api-key`，
+也不需要 `--model` / `--max-rounds` / 输出格式——带了会报用法错误，而不是被静默忽略。
+
+```bash
+# 在 D:/repo 上开一个 stdio MCP 服务（唯一的可写根就是这个目录）
+heming mcp serve --cwd D:/repo
+```
+
+客户端配置（以 Claude Desktop 的 `claude_desktop_config.json` 为例，路径换成你的）：
+
+```json
+{
+  "mcpServers": {
+    "heming": {
+      "command": "node",
+      "args": ["D:/Heming/packages/cli/dist/index.js", "mcp", "serve", "--cwd", "D:/repo"]
+    }
+  }
+}
+```
+
+### 支持的方法
+
+| 方法 | 行为 |
+| --- | --- |
+| `initialize` | 回协议版本（客户端认识的版本原样照抄，否则回 `2025-06-18`）、`capabilities.tools`、`serverInfo`，以及一段 `instructions`：可写范围、有没有 `run_command`、当前工具清单。 |
+| `ping` | 回空对象（探活）。 |
+| `tools/list` | 把同一份工具声明转成 MCP 描述：`parameters` → `inputSchema`，并按工具声明的风险加 `annotations`（只读带 `readOnlyHint`，`run_command` 带 `destructiveHint` + `openWorldHint`）。没有风险声明的工具**不硬塞** annotations。 |
+| `tools/call` | 先过确定性闸门，再执行。 |
+
+不认识的请求回 `-32601` 并点名支持的方法；通知（没有 `id`）**绝不回包**（回了会让客户端收到一条
+无法对应请求的响应）。
+
+### stdout 是协议通道
+
+- stdout 只有 JSON-RPC 响应，一行一条；
+- 启动提示、错误、收工信息全部写 stderr（`[heming] mcp serve 已就绪：工作区 …，N 个工具…`）；
+- stdin 关闭 = 正常收工，退出码 `0`；Ctrl+C 时第一次优雅关闭 stdin，再按一次 `130`。
+
+### 错误码
+
+| 码 | 场景 |
+| --- | --- |
+| `-32700` | 这一行不是 JSON（坏消息不会断连，下一行照常处理）。 |
+| `-32600` | 不是对象 / `id` 类型非法（只接受字符串、数字、null）/ 缺 `method`。 |
+| `-32601` | 方法未知。 |
+| `-32602` | `tools/call` 的参数不合法：缺 `name`、`arguments` 不是对象、工具不存在。 |
+| `-32603` | 我们自己的内部异常（客户端可重试）。 |
+
+### 安全边界（与 `run` 完全同一条口径）
+
+- 闸门与 `run` 是**同一份代码**（`src/tooling.ts`），不会出现「CLI 拒绝、MCP 放行」的缝；
+- 工具只在一个根里干活：`--cwd` 指向的目录。根外、删除/改名、改可执行脚本等「本该问人」的写**一律拒绝**；
+- 没有 `--allow-danger` 时工具清单里**没有** `run_command`，硬调会拿到「未执行」而不是真的执行；
+- 客户端发来的绝对路径会被换算成相对工作区的写法（`D:/repo/src/a.ts` → `src/a.ts`）：契约要求相对路径，
+  但真实客户端都发绝对路径，不换算等于一次合法的写直接失败；工作区外的绝对路径换算成 `../…` 后照样被越界检查挡下。
+
+### 已知留白
+
+- 只实现了 `tools` 能力：没有 `resources` / `prompts` / `sampling`（客户端要的是工具，不是我们的提示词）。
+- 请求串行处理：stdio 上并行回包时序难调，而单机文件工具没有并发收益。
+- `file_patch` 里的多个文件路径不做换算（补丁是一段文本，逐行改写会弄坏上下文），需要补丁时请用相对路径。
+- 没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。
+
 ## 工具与审批口径
 
 默认提供真实的内置工具：
@@ -175,7 +247,8 @@ prompt 位置写 `-` 时，指令从 stdin 读（`git diff | heming exec -`、`c
 
 ## 能力边界
 
-- **不接 MCP**：没有 MCP 服务发现/调用。
+- **不接 MCP 客户端**：没有 MCP 服务发现/调用（不把别人的工具挂进来）。反过来，`heming mcp serve`
+  让我们作为 MCP **服务端**被别的编辑器调用——只出不进。
 - **不接联网搜索**：没有 web search 工具；需要联网请用 `--allow-danger` 跑命令（如 `curl`）。
 - **没有 HITL 人工确认**：无人值守时「问」一律按拒绝处理；危险能力必须由启动参数显式授权。
 - **单轮、无历史**：每次调用都是独立会话，不读写桌面端的聊天历史/记忆/任务清单。

@@ -12,6 +12,20 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.289.4.120.12",
+    "date": "2026-11-18",
+    "title": "Cursor、Claude Code 也能直接使唤和鸣的文件工具了",
+    "bullets": [
+      "新增 `heming mcp serve`：把和鸣的文件工具按 MCP 协议开在 stdio 上，Cursor / Claude Code / Claude Desktop 这些客户端配一行命令就能调用——不用填模型凭据，因为它们自己负责思考，和鸣负责动手。",
+      "配法和一段可直接抄的 JSON 写在 `packages/cli/README.md` 里；`--cwd` 指哪个目录，它就只能动那个目录。",
+      "安全口径和终端里跑的那条路**是同一份代码**：根外写、删除/改名、改可执行脚本这类本该问人的操作一律拒绝，被拒时磁盘上什么都不会发生。",
+      "不加 `--allow-danger` 时工具清单里根本没有执行命令那一项，客户端硬调也只会拿到「未执行」。",
+      "顺手修了一个一直存在的坑：模型或客户端爱发绝对路径（`D:/repo/src/a.ts`），以前会得到「不能写绝对路径」的莫名失败；现在自动换算成工作区内的相对路径，工作区外的照样拦下。",
+      "协议细节按规范走：通知不回包、坏消息回错误码但不断连、stdout 只有协议消息、诊断信息全在 stderr、stdin 关闭即正常退出。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.288.4.120.12",
     "date": "2026-11-18",
     "title": "账号能改名也能移除，模型页打开就先画出来",

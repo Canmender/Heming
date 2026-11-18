@@ -37,7 +37,7 @@
 
 ### 第三波（路线图，不在本轮承诺）
 
-- MCP server 模式（把和鸣工具暴露给其它编辑器/CLI）；
+
 - 命令白名单 + 网络域名策略 + OS 级沙箱（Windows Job Object / 受限令牌）；
 - 更新链 https + 安装包签名校验；
 - Web 端去桌面桥依赖（移动端前置）。
@@ -59,8 +59,9 @@
 
 | 轨 | 状态 | 证据 |
 |---|---|---|
-| W1 无头 CLI | 进行中 | — |
+| W1 无头 CLI | 已落地（d.243 `run`/`exec --json`/`--output-format stream-json`/`--cwd`/`--max-rounds`/`--allow-danger`） | `packages/cli/src/*` |
 | W2 服务端加固 | 进行中 | — |
 | W3 hooks | 进行中 | — |
 | W4 扩展与回滚 | 进行中（自定义命令 d.240、子代理定义 d.287 已落地；`/rewind N` 未做） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`ChatPage.test.tsx` I4i/I3z |
 | W5 界面手感 | 待第二波 | — |
+| W6 MCP server | 已落地（d.289 `heming mcp serve`：initialize/ping/tools/list/tools/call，与 `run` 共用 `src/tooling.ts` 的闸门） | `packages/cli/src/{mcp,mcpServe,tooling}.ts` + 同名 `.test.ts` |

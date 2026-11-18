@@ -16,10 +16,6 @@
 
 import path from "node:path";
 import type { FileRoot } from "../../../packages/web/src/lib/fileEdit/paths.js";
-import { assessPatchSafety } from "../../../packages/web/src/lib/fileEdit/safety.js";
-import { isFileWriteTool, targetsOfCall } from "../../../packages/web/src/lib/fileEdit/ruleTargets.js";
-import { toHitlCall } from "../../../packages/web/src/lib/hitl/classify.js";
-import type { GateOutcome } from "../../../packages/web/src/lib/hitl/types.js";
 import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
 import {
   MAX_TOOL_ROUNDS,
@@ -41,8 +37,7 @@ import {
   runtimeToolsFromSpecs,
 } from "../../../packages/web/src/lib/agentRuntime/runtimePrompt.js";
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
-import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
-import { createEvalToolBridge } from "../../../evals/runner/tools.js";
+import { createCliTooling, shellDeniedText } from "./tooling.js";
 import type { CliEvent } from "./events.js";
 
 /** 注入点：测试传脚本化 chat；生产用真实 OpenAI 兼容客户端。 */
@@ -113,14 +108,8 @@ export interface AgentRunHandle {
 /** 工具结果文本进 JSON 前的截断长度：契约要求 500。 */
 export const TOOL_TEXT_LIMIT = 500;
 
-/** 未挂命令桥时，模型硬调 `run_command` 拿到的拒绝文案。 */
-export function shellDeniedText(): string {
-  return [
-    "未执行：CLI 未授权危险工具（需要 --allow-danger）。",
-    "【该操作未执行，文件与系统状态未被修改】",
-    "这不是重试能解决的问题：要跑命令必须由用户重新用 --allow-danger 启动 CLI。不要重复调用同一命令。",
-  ].join("\n");
-}
+// 拒绝文案与闸门都在 `tooling.ts`（MCP 模式复用同一份，避免两个入口的安全口径分叉）。
+export { shellDeniedText };
 
 /** 一行化 + 截断（进度行只给人看，不承载完整参数）。 */
 function oneLine(text: string, max = 80): string {
@@ -194,87 +183,6 @@ function buildCliSystemPrompt(input: {
   }).systemPrompt;
 }
 
-/**
- * CLI 的确定性闸门（没有人类可问时，「问」必须落成一条固定规则）。
- *
- * 规则：
- * - 只读工具（`file_read` / `file_glob` / `file_grep` / `file_image` / `todo_write` /
- *   `tool_output_read`）放行；
- * - 根内文件写放行，根外/删除/改可执行脚本等「需要人确认」的写**一律拒绝**
- *   （`assessPatchSafety` 只有 `auto` 才过，`ask` 也拒绝——无人值守时自动批准一次「问」
- *   等于把 HITL 关掉）；
- * - `run_command` 交给工具桥处理：`--allow-danger` 时真跑，否则返回「未执行」；
- * - 认不出风险的调用**拒绝**（fail-closed）。宁可让一次未知工具的调用失败，
- *   也不要把它当成只读放过去——CLI 常常跑在 CI 里，没有人会盯着第一行日志。
- */
-function createCliGate(input: {
-  roots: () => FileRoot[];
-  allowDanger: boolean;
-  metaOf: (name: string) => { risk?: string } | undefined;
-}): (calls: { id: string; function: { name: string; arguments: string } }[]) => Promise<GateOutcome[]> {
-  return async (calls) =>
-    calls.map((call) => {
-      const hitlCall = toHitlCall(call);
-      const name = call.function.name;
-
-      // 命令工具由桥统一裁决：挂上了（--allow-danger）就真跑，没挂就回「未执行」。
-      if (name === SHELL_TOOL) return { kind: "allow" as const, call: hitlCall };
-
-      const meta = input.metaOf(name);
-      if (!meta || !meta.risk) {
-        return {
-          kind: "deny" as const,
-          call: hitlCall,
-          reason: `CLI 无法确认工具 ${name} 的风险，按拒绝处理（fail-closed）`,
-          cause: "gate" as const,
-        };
-      }
-      if (meta.risk === "read") return { kind: "allow" as const, call: hitlCall };
-      if (meta.risk === "danger") {
-        return input.allowDanger
-          ? { kind: "allow" as const, call: hitlCall }
-          : {
-              kind: "deny" as const,
-              call: hitlCall,
-              reason: "CLI 未授权危险工具（需要 --allow-danger）",
-              cause: "gate" as const,
-            };
-      }
-
-      // 剩下的是写类：只有明确的文件写工具才走路径安全判定，其它写工具一律拒绝。
-      if (!isFileWriteTool(name)) {
-        return {
-          kind: "deny" as const,
-          call: hitlCall,
-          reason: `CLI 不接受未声明的写工具：${name}`,
-          cause: "gate" as const,
-        };
-      }
-      const targets = targetsOfCall({ name, argsJson: call.function.arguments }, input.roots());
-      if (!targets) {
-        return {
-          kind: "deny" as const,
-          call: hitlCall,
-          reason: "无法解析这次写入的目标路径，按拒绝处理",
-          cause: "gate" as const,
-        };
-      }
-      const safety = assessPatchSafety({
-        targets: targets.absolute,
-        deletions: targets.deletions,
-        roots: input.roots(),
-        outOfRoot: "reject",
-      });
-      if (safety.verdict === "auto") return { kind: "allow" as const, call: hitlCall };
-      return {
-        kind: "deny" as const,
-        call: hitlCall,
-        reason: safety.reason,
-        cause: "gate" as const,
-      };
-    });
-}
-
 /** 把「累计文本」切成增量：`onLocalDelta` 给的是全文累积，stdout 不该重复写旧内容。 */
 function createDeltaWriter(write: ((chunk: string) => void) | undefined) {
   let lastLength = 0;
@@ -290,48 +198,24 @@ function createDeltaWriter(write: ((chunk: string) => void) | undefined) {
 export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
   const startedAt = Date.now();
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
-  const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
   const conversationId = `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-  // 真实 fs 桥：与评测用的同一份 Node 实现（根内校验、符号链接拒绝、二进制嗅探都在）。
-  const fsBridge = createNodeFsBridge();
-  const baseBridge = createEvalToolBridge({
-    bridge: fsBridge,
-    roots: () => roots,
-    // 写根外直接拒绝（不设「问一下」——这里没有人可问）。
-    outOfRoot: () => "reject",
-    // 任务清单按本次运行独立：CLI 不在两次调用之间保存会话，清单串味只会误导模型。
-    conversationId,
-    // 只有显式 --allow-danger 才挂命令工具（它同时意味着闸门放行 danger）。
-    ...(options.allowDanger ? { shell: true } : {}),
-  });
 
   /** 本回合真正成功落盘的文件（只认 ok=true 的结果，被拒/失败的写不算）。 */
   const writes: string[] = [];
   const seenWrites = new Set<string>();
-  const toolBridge: ToolBridge = {
-    tools: baseBridge.tools,
-    meta: (name) =>
-      name === SHELL_TOOL
-        ? { risk: "danger" as const, displayName: "在本机执行命令", core: true }
-        : baseBridge.meta?.(name),
-    async execute(call, execOpts) {
-      // 没挂命令工具时，模型仍可能「凭印象」调用它：回一条明确的未执行文案，
-      // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
-      if (call.name === SHELL_TOOL && !options.allowDanger) {
-        return { text: shellDeniedText(), ok: false };
-      }
-      const result = await baseBridge.execute(call, execOpts);
-      if (result.ok && result.writes?.length) {
-        for (const file of result.writes) {
-          if (seenWrites.has(file)) continue;
-          seenWrites.add(file);
-          writes.push(file);
-        }
-      }
-      return result;
+  const tooling = createCliTooling({
+    cwd,
+    allowDanger: options.allowDanger,
+    conversationId,
+    onWrite: (file) => {
+      if (seenWrites.has(file)) return;
+      seenWrites.add(file);
+      writes.push(file);
     },
-  };
+  });
+  const roots = tooling.roots;
+  const toolBridge = tooling.toolBridge;
+  const gate = tooling.confirm;
 
   const effectiveMaxRounds = options.maxRounds ?? MAX_TOOL_ROUNDS;
   const systemPrompt = buildCliSystemPrompt({
@@ -343,12 +227,6 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     allowDanger: options.allowDanger,
     conversationId,
   });
-  const gate = createCliGate({
-    roots: () => roots,
-    allowDanger: options.allowDanger,
-    metaOf: (name) => toolBridge.meta?.(name),
-  });
-
   /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
   let modelRounds = 0;
   const chat: StreamChatFn = (profile, messages, opts) => {

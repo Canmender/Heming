@@ -12,6 +12,36 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.289.4.120.12",
+    "date": "2026-11-18",
+    "title": "和鸣的工具也能被 Cursor / Claude Code 直接调用了",
+    "bullets": [
+      "`packages/cli` 全量：**6 个测试文件 / 56 个用例全绿**（新增 `mcp.test.ts` 18 例、`tooling.test.ts` 6 例、`args.test.ts` 追加 3 例；原有 `run.test.ts` 5 例仍绿，证明闸门搬家没有改动 run 的行为）。",
+      "`pnpm --filter @heming/cli exec tsc --noEmit` 退出 0。",
+      "真机装配用例（不是 mock 桥）：在工作区里 `tools/call file_write` 写 `a.md`，文件真的落盘；同一套装配下往工作区外写，被闸门拒绝且磁盘上没有文件；`--allow-danger` 前后对比工具清单里",
+      "协议用例：坏 JSON 一行不影响后面两行的响应（断言回包 `id` 序列为 `[1, null, 2]`）、通知不回包、四个错误码各一条、`initialize` 的 `instructions` 在 `--allow-danger` 前后文案不同。",
+      "只做 `tools` 能力：没有 `resources` / `prompts` / `sampling`。客户端要的是工具，不是我们的提示词。",
+      "请求串行处理：stdio 上并行回包时序难调，单机文件工具也没有并发收益；真有慢工具再谈流水线。",
+      "`file_patch` 的多文件路径不做换算（补丁是文本，逐行改写会弄坏上下文），需要补丁时请写相对路径。",
+      "没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。",
+      "反方向仍未做：和鸣自己**不接**别人的 MCP 服务（服务发现/调用），那是另一件事。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.243 的无头 CLI 把智能体循环搬进了终端，但它始终是「我们主动去跑」的东西。真实工作里还有反方向：用户在 Cursor / Claude Code / Claude Desktop 里写代码，希望模型能读写**这台机器上的真实文件**，而不是只能用编辑器自带的沙箱工具。这些客户端统一认 MCP（Model Context Protocol），而和鸣此前一直是 MCP 的缺席者——`heming --help` 里那句「不接 MCP」既是事实，也是短板。",
+      "这一轮补齐的是**服务端**这一半：`heming mcp serve` 在 stdio 上讲 JSON-RPC，把与桌面端同一套文件工具（`file_read` / `file_write` / `file_edit` / `file_patch` / `file_glob` / `file_grep` / `file_image` /`file_undo` / `todo_write` / `tool_output_read`）交给别的编辑器。它不调模型，所以不需要模型凭据——客户端负责思考，我们负责动手。",
+      "做了什么",
+      "| 能力 | 位置 | 说明 || --- | --- | --- || MCP 服务端 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | stdio JSON-RPC；支持 `initialize` / `ping` / `tools/list` / `tools/call`；协议版本协商（`2025-06-18` / `2025-03-26` / `2024-11-05`，客户端认识的照抄，否则回最新） || 工具描述 | `tools/list` | 把 OpenAI 风格的 `parameters` 原样当 `inputSchema`；按工具自报的风险补 `annotations`（只读 → `readOnlyHint`，命令 → `destructiveHint` + `openWorldHint`）；**没有风险声明就不编造** annotations || 调用 | `tools/call` | **先过闸门再执行**：拒绝时不碰磁盘，回「未执行：…／【该操作未执行，文件与系统状态未被修改】」并带 `isError` || 安全口径 | `src/tooling.ts` | 把 `run` 里的闸门与桥整体抽出，run 与 MCP 共用同一份代码——不会出现「CLI 拒绝、MCP 放行」的缝 || 路径换算 | `relativizeToolArgs` | 客户端发来的绝对路径换算成相对工作区（`D:/repo/src/a.ts` → `src/a.ts`）；工作区外的换算成 `../…` 后照样被越界检查拒绝。`run` 与 MCP 都吃这条改进 || stdout 洁净 | `src/mcpServe.ts` | stdout 只放协议消息；就绪/错误/收工信息全部走 stderr；stdin 关闭即正常收工（退出码 0），Ctrl+C 先优雅关 stdin、再按一次 `130` || 通知 | 协议层 | 没有 `id` 的消息**绝不回包**；坏 JSON 回 `-32700` 且不断连；未知方法回 `-32601` 并点名支持的方法 || 参数校验 | `args.ts` | `mcp` 只认 `serve` 子命令；`--json` / `--output-format` / `--max-rounds` / `--model` / `--base-url` / `--api-key` 一律报「mcp serve 不接 …」，不静默忽略 |",
+      "客户端配置（Claude Desktop 例子，已写进 `packages/cli/README.md`）：",
+      "```json",
+      "{ \"mcpServers\": { \"heming\": { \"command\": \"node\",",
+      "  \"args\": [\"D:/Heming/packages/cli/dist/index.js\", \"mcp\", \"serve\", \"--cwd\", \"D:/repo\"] } } }",
+      "```",
+      "怎么验证`run_command` 的有无。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.288.4.120.12",
     "date": "2026-11-18",
     "title": "账号能改名也能移除，模型页的首屏不再等额度",
