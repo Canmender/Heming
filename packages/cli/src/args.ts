@@ -48,6 +48,11 @@ export interface PromptOptions {
    * 必须显式打开：连服务等于启动仓库里写的命令，克隆来的仓库不该自动获得这个权力。
    */
   mcp: boolean;
+  /**
+   * 信任工作区的 `.heming/hooks.json`：只有信任之后，命中的工具调用才会先跑那些本机脚本。
+   * 默认不信任——配置跟着仓库走，克隆一个陌生仓库不能在你敲命令时自动执行它的脚本。
+   */
+  trustHooks: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -66,6 +71,8 @@ export interface McpOptions {
   allowDanger: boolean;
   /** 同 run：信任工作区权限规则里的 allow（deny / ask 总是生效），需要用 --trust-workspace 显式打开。 */
   trustWorkspace: boolean;
+  /** 同 run：信任工作区的 `.heming/hooks.json` 并真的执行那些脚本（`--trust-hooks`）。 */
+  trustHooks: boolean;
 }
 
 export type ParsedArgs =
@@ -93,6 +100,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
   let trustWorkspace = false;
+  let trustHooks = false;
   let cwd: string | undefined;
   let maxRounds: number | undefined;
   let model: string | undefined;
@@ -164,6 +172,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
         return { ok: false, error: "--mcp 不接受取值（直接写 --mcp 即可）" };
       }
       mcp = true;
+      continue;
+    }
+    case "trust-hooks": {
+      if (inline !== undefined) {
+        return { ok: false, error: "--trust-hooks 不接受取值（直接写 --trust-hooks 即可）" };
+      }
+      trustHooks = true;
       continue;
     }
     case "trust-workspace": {
@@ -257,6 +272,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (apiKey !== undefined) notForSessions.push("--api-key");
     if (continueSession) notForSessions.push("--continue");
     if (trustWorkspace) notForSessions.push("--trust-workspace");
+    if (trustHooks) notForSessions.push("--trust-hooks");
     if (mcp) notForSessions.push("--mcp");
     if (resume !== undefined) notForSessions.push("--resume");
     if (notForSessions.length > 0) {
@@ -310,7 +326,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return {
       ok: true,
       action: "mcp",
-      options: { allowDanger, trustWorkspace, ...(cwd !== undefined ? { cwd } : {}) },
+      options: { allowDanger, trustWorkspace, trustHooks, ...(cwd !== undefined ? { cwd } : {}) },
     };
   }
 
@@ -339,6 +355,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       fromStdin,
       allowDanger,
       trustWorkspace,
+      trustHooks,
       mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),

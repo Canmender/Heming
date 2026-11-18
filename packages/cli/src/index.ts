@@ -16,6 +16,7 @@ import { startMcpServe } from "./mcpServe.js";
 import { collectCliProjectRules, describeCliProjectRules } from "./projectRules.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
+import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
 import {
   appendTurn,
@@ -51,6 +52,7 @@ const USAGE = `用法：
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
+  --trust-hooks        允许执行 .heming/hooks.json 里的本机检查（默认只读配置、不执行）
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
@@ -109,12 +111,20 @@ MCP 服务（给别的编辑器用）：
   pnpm cli --continue "把刚才那两个失败用例修掉"
   pnpm cli --resume 20261118-144230-ab12 "继续"
   pnpm cli --trust-workspace "按仓库里的权限规则跑，别改 docs/"
+  pnpm cli --trust-hooks "按仓库里的钩子检查跑，改完 generated 前会被拦住"
 
 工作区权限规则（.heming/permissions.json，与桌面端同一份）：
   {"deny":[{"tool":"run_command","command":"git push*"}]}   仓库里写了就一定生效
   {"ask":[{"tool":"file_write","path":"docs/**"}]}           CLI 没有人可以确认，落成拒绝
   {"allow":[{"tool":"file_write","path":"src/**"}]}         只在 --trust-workspace 时生效
   文件坏了（JSON 解析失败）就不启动：宁可当场说清楚，也不要跑几轮再被全拒。
+
+工作区钩子（.heming/hooks.json，与桌面端同一份）：
+  {"hooks":[{"tool":"file_write","path":"generated/**","command":"node scripts/no-generated.js"}]}
+  命中的工具调用会先跑这条本机命令；命令末尾会追加 payload JSON 的路径作为第一个参数。
+  退出码 0 放行、2 拒绝（取 stdout/stderr 第一行作原因）、其它一律拒绝；超时也算拒绝。
+  默认**不执行**：配置跟着仓库走，克隆一个陌生仓库不该让它的脚本自动在你机器上跑，
+  要真的生效必须显式加 --trust-hooks。
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -264,6 +274,29 @@ async function main(argv: string[]): Promise<number> {
   const workspaceRules = rulesLoad && rulesLoad.ok ? rulesLoad.rules : null;
   if (workspaceRules) writeErr(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
 
+  /**
+   * 工作区钩子：`.heming/hooks.json`，与桌面端同一份配置、同一套解析与判定。
+   *
+   * 与权限规则的差别在于**默认不执行**：配置文件跟着仓库走，克隆一个陌生仓库不能在你
+   * 敲下 heming run 时自动在本机跑它的脚本。要真的生效必须显式 `--trust-hooks`。
+   * 但「有配置却不信任」也要说出来——用户该知道这次少了哪道检查。
+   *
+   * 读到了但内容坏了：只有在信任之后才拒绝启动。不信任时那些脚本根本不会跑，
+   * 一份坏 JSON 不该让「只想让它读读代码」的人连门都进不去。
+   */
+  const hooksLoad = await loadCliHooks(cwd, options.trustHooks);
+  if (hooksLoad && !hooksLoad.ok && options.trustHooks) {
+    return failEarly(`工作区钩子配置有问题：${hooksLoad.error}（${hooksLoad.source}）`);
+  }
+  const hookSet = hooksLoad && hooksLoad.ok ? hooksLoad.set : null;
+  const hookRunner = hookSet
+    ? createCliHookRunner(hookSet, { cwd, streamId: `cli-${Date.now().toString(36)}` })
+    : null;
+  if (hookSet) {
+    const line = describeCliHooks(hookSet);
+    if (line) writeErr(`[heming] ${line}\n`);
+  }
+
   /*
    * MCP 工具（`--mcp`）：把工作区 `.heming/mcp.json` 里声明的服务连上。
    *
@@ -357,6 +390,7 @@ async function main(argv: string[]): Promise<number> {
     profile,
     allowDanger: options.allowDanger,
     ...(workspaceRules ? { workspaceRules } : {}),
+    ...(hookRunner ? { hooks: hookRunner } : {}),
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     history: toHistory(prior),

@@ -39,6 +39,7 @@ import {
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createCliTooling, shellDeniedText } from "./tooling.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import type { CliHookVerdict } from "./toolHooks.js";
 import type { McpConnection } from "./mcpClient.js";
 import type { CliEvent } from "./events.js";
 
@@ -124,6 +125,13 @@ export interface AgentRunOptions {
    * 没有 `--allow-danger` 时只会拿到「未执行」，不会真的调到对方进程。
    */
   mcp?: readonly McpConnection[];
+  /**
+   * 工作区钩子（`.heming/hooks.json`，d.312）装配好的「调用前判定」函数。
+   *
+   * 同样是入口读好传进来：装载失败要在启动时就告诉用户，而不是等模型跑到第一个
+   * 工具调用才拿到「被拒绝」。`null` / 省略 = 这次运行不做钩子检查。
+   */
+  hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
 }
 
 export interface AgentRunOutcome {
@@ -243,6 +251,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     cwd,
     allowDanger: options.allowDanger,
     rules: options.workspaceRules ?? null,
+    hooks: options.hooks ?? null,
     mcp: options.mcp ?? [],
     conversationId,
     onWrite: (file) => {

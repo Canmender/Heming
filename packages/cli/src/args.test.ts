@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { parseArgs } from "./args.js";
 
 /** 窄化断言：解析成功且是运行命令。 */
@@ -308,6 +308,30 @@ describe("parseArgs：信任工作区规则（d.306）", () => {
 
   it("sessions 不接 --trust-workspace（列存档不跑工具，谈不到放行）", () => {
     const parsed = parseArgs(["sessions", "--trust-workspace"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
+  });
+});
+
+describe("parseArgs：信任工作区钩子（d.312）", () => {
+  it("默认不信任：仓库里的 hooks 脚本不执行", () => {
+    expect(expectRun(["run", "改一下"]).trustHooks).toBe(false);
+    expect(expectMcp(["mcp", "serve"]).trustHooks).toBe(false);
+  });
+
+  it("run 与 mcp serve 都认 --trust-hooks", () => {
+    expect(expectRun(["run", "--trust-hooks", "改一下"]).trustHooks).toBe(true);
+    expect(expectMcp(["mcp", "serve", "--trust-hooks"]).trustHooks).toBe(true);
+  });
+
+  it("--trust-hooks 不接受取值", () => {
+    const parsed = parseArgs(["run", "--trust-hooks=yes", "改一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--trust-hooks");
+  });
+
+  it("sessions 不接 --trust-hooks", () => {
+    const parsed = parseArgs(["sessions", "--trust-hooks"]);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
   });

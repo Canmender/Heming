@@ -56,6 +56,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--max-rounds <n>` | 最多允许 `n` 个工具轮。第 `n+1` 轮如果模型还要调工具，CLI 会提前收口（第 `n+1` 轮直接作答仍然允许）。`n` 必须是正整数。 |
 | `--allow-danger` | 放行 `run_command` 等 danger 工具。不加时命令工具**不会出现在工具清单里**；模型硬调会得到「未执行」而不是真正执行。 |
 | `--trust-workspace` | 让工作区 `.heming/permissions.json` 里的 `allow` 规则生效（`deny` / `ask` 本来就算数）。详见下文「工作区权限规则」。 |
+| `--trust-hooks` | 允许执行工作区 `.heming/hooks.json` 里的本机检查（默认只读配置、不执行）。详见下文「工作区钩子」。 |
 | `--mcp` | 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把对方的工具接进这次运行。只有显式加这个开关才连；工具还要 `--allow-danger` 才真的调过去。详见下文「MCP 客户端」。 |
 | `--output-format <f>` | stdout 格式：`text`（默认）/ `json`（= `--json`，exec 专用）/ `stream-json`（一行一条事件，run 与 exec 都可用）。 |
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
@@ -419,6 +420,77 @@ heming run --trust-workspace "把 docs/ 里过期的链接修掉"
 # 把工具开放给编辑器时，同样受这份规则约束
 heming mcp serve --cwd D:/repo
 ```
+## 工作区钩子（`.heming/hooks.json`）
+
+桌面端从 d.236 起在每次工具调用前跑仓库声明的检查；`heming run` 与 `heming mcp serve`
+现在跑同一份，解析、匹配、payload、判定全部复用桌面端那份纯逻辑。
+
+```json
+{
+  "hooks": [
+    { "match": { "tool": "file_write", "path": "generated/**" }, "command": "node .heming/check-generated.mjs" },
+    { "match": { "tool": "*" }, "command": "node .heming/check-any.mjs", "timeoutMs": 5000 }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `match.tool` | 工具名字符串或数组，或 `*`（**不做隐式通配**：`mcp__*` 只匹配字面量 `mcp__*`） |
+| `match.path` | 可选，写工具目标路径的 glob（相对工作区根、正斜杠） |
+| `command` | 本机命令；调用时**末尾追加 payload 文件的绝对路径**作为第一个参数 |
+| `timeoutMs` | 可选，夹在 1 毫秒到 15 秒之间；默认 10 秒 |
+
+payload 是个 JSON 文件（`.heming/hooks/.tmp/<runId>.json`，跑完即删），形如：
+
+```json
+{
+  "event": "PreToolUse",
+  "tool": { "name": "file_write", "arguments": "{\"path\":\"generated/a.ts\",\"content\":\"…\"}" },
+  "workspace": "D:/repo",
+  "agentId": "cli",
+  "streamId": "cli-xxxx",
+  "time": "2026-11-18T08:44:00.000Z"
+}
+```
+
+`tool.arguments` 是**模型发来的原样字符串**（不重新序列化、不相对化路径），脚本要逐字核对就靠它。
+
+判定优先级：**超时 > stdout 里的 JSON > 退出码**。
+
+| 结果 | 判定 |
+| --- | --- |
+| `{"decision":"allow"}`（可带 `reason`） | 放行，**即使退出码非 0** |
+| `{"decision":"deny","reason":"…"}` | 拒绝 |
+| 退出码 `0` | 放行 |
+| 退出码 `2` | 拒绝，原因取 stdout 第一行（没写就说「本机检查拒绝了这次调用」） |
+| 其它退出码 / 超时 / 信号 | 一律拒绝（fail-closed） |
+
+被拒绝时工具**不会执行**，回给模型的文案里明写「该操作未执行，文件与系统状态未被修改」，
+并说明这是仓库里的检查拒绝的、不是用户的选择——否则模型会当成偶发失败反复重试。
+
+与桌面端唯一有意的差异：**默认不执行仓库里的脚本**。`.heming/hooks.json` 跟着仓库走，
+克隆一个陌生仓库不该在你敲下 `heming run` 时自动在你机器上执行命令，所以要生效必须显式加
+`--trust-hooks`。加了之后，配置写坏了就**不启动**（JSON 错、超过 256 KB、同名路径是目录），
+并说清是哪一份文件、错在哪；没加时按「未启用」处理，一条也不跑、也不拦。
+
+```bash
+# 让仓库里的检查真的跑起来
+heming run --trust-hooks "把 docs/ 里过期的链接修掉"
+
+# 挂给编辑器时同样受约束
+heming mcp serve --cwd D:/repo --trust-hooks
+```
+
+启动时 stderr 会有一行：
+
+```
+[heming] 工作区钩子：2 条；已启用，命中的工具调用会先跑本机检查（来自 .heming/hooks.json）
+[heming] 工作区钩子：2 条；未启用（加 --trust-hooks 才会执行这些脚本）（来自 .heming/hooks.json）
+```
+
+钩子只覆盖 `PreToolUse` 这一类事件，且命令本身没有额外的白名单或沙箱——`--trust-hooks`
+等于「你让它跑什么它就跑什么」，只在该仓库值得信任时打开。
 ## 工具与审批口径
 
 默认提供真实的内置工具：

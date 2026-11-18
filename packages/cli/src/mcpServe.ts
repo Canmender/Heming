@@ -11,6 +11,7 @@ import type { McpOptions } from "./args.js";
 import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
 import { createCliTooling } from "./tooling.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
+import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 
 export interface McpServeIO {
   stdin: NodeJS.ReadableStream;
@@ -46,12 +47,25 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
   }
   const workspaceRules = rulesLoad && rulesLoad.ok ? rulesLoad.rules : null;
 
+  /*
+   * 工作区钩子：与 `run` 同一份配置、同一套判定。别的编辑器调我们的工具时，
+   * 仓库里的检查更该生效——那边连「我们有没有拒绝」都只能从工具结果里看到。
+   * 默认不执行，要 `--trust-hooks` 才跑。
+   */
+  const hooksLoad = await loadCliHooks(cwd, options.trustHooks);
+  if (hooksLoad && !hooksLoad.ok && options.trustHooks) {
+    return fail(io, `工作区钩子配置有问题：${hooksLoad.error}（${hooksLoad.source}）`);
+  }
+  const hookSet = hooksLoad && hooksLoad.ok ? hooksLoad.set : null;
+
   const conversationId = `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const hookRunner = hookSet ? createCliHookRunner(hookSet, { cwd, streamId: conversationId }) : null;
   const tooling = createCliTooling({
     cwd,
     allowDanger: options.allowDanger,
     conversationId,
     ...(workspaceRules ? { rules: workspaceRules } : {}),
+    ...(hookRunner ? { hooks: hookRunner } : {}),
   });
   const ctx: McpContext = {
     tools: tooling.toolBridge,
@@ -69,6 +83,10 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
   );
   if (workspaceRules) {
     io.stderr.write(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
+  }
+  if (hookSet) {
+    const line = describeCliHooks(hookSet);
+    if (line) io.stderr.write(`[heming] ${line}\n`);
   }
 
   let interrupted = false;

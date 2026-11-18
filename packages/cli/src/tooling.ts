@@ -26,6 +26,7 @@ import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { createEvalToolBridge } from "../../../evals/runner/tools.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 
 /** 一次工具调用在闸门看来需要的最小形状（与编排层给的一致）。 */
@@ -242,6 +243,13 @@ export function createCliTooling(options: {
    * 只能靠「要不要放行 danger」这一道总闸（也就是还需要 `--allow-danger` 才真的跑）。
    */
   mcp?: readonly McpConnection[];
+  /**
+   * 工作区钩子（`.heming/hooks.json`，见 `toolHooks.ts`）；`null` / 省略 = 没有要跑的检查。
+   *
+   * 传的是**已经装配好的判定函数**，不是规则本身：装载（读盘、剥 BOM、解析、信任开关）
+   * 发生在入口，与权限规则一样在启动时一次做完，避免每个工具调用都读盘。
+   */
+  hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -293,6 +301,22 @@ export function createCliTooling(options: {
       // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
       if (call.name === SHELL_TOOL && !options.allowDanger) {
         return { text: shellDeniedText(), ok: false };
+      }
+
+      /*
+       * 工作区钩子：仓库自己声明的检查，在真正动手之前跑。
+       *
+       * 放在闸门之后（调用方先 `confirm`、这里才执行）是有意的：被规则或风险判定拒掉的
+       * 调用不该再起一个子进程去跑检查，那是白花时间。
+       *
+       * 参数用**模型发来的原文**（与桌面端一致）：hook 脚本常常要逐字核对参数，
+       * 二次序列化会改掉字段顺序与空白。
+       */
+      if (options.hooks) {
+        const verdict = await options.hooks({ name: call.name, arguments: call.arguments });
+        if (verdict.decision === "deny") {
+          return { text: cliHookDeniedText(verdict, call.name), ok: false };
+        }
       }
 
       // MCP 工具：参数语义由对方定义，**不改写**（不套 relativizeToolArgs）。
