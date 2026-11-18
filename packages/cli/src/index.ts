@@ -13,6 +13,7 @@ import { parseArgs } from "./args.js";
 import { resolveModelConfig } from "./config.js";
 import { createEventSink } from "./events.js";
 import { startMcpServe } from "./mcpServe.js";
+import { collectCliProjectRules, describeCliProjectRules } from "./projectRules.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
@@ -338,6 +339,18 @@ async function main(argv: string[]): Promise<number> {
   if (prior) {
     writeErr(`[heming] 接着会话 ${prior.id}（已有 ${prior.turns.length} 条问答）\n`);
   }
+
+  // 工作区约定（AGENTS.md 一族，d.310）：与桌面端同一份口径，读不到就当没有，不阻断运行。
+  let projectRulesSection = "";
+  try {
+    const collected = await collectCliProjectRules({ cwd });
+    projectRulesSection = collected.section;
+    const line = describeCliProjectRules(collected);
+    if (line) writeErr(`[heming] ${line}\n`);
+  } catch (error) {
+    // 约定文件读挂了不该让整次运行失败：说一句，继续跑。
+    writeErr(`[heming] 项目约定没读成：${error instanceof Error ? error.message : String(error)}\n`);
+  }
   const handle = startAgentRun({
     prompt,
     cwd,
@@ -345,6 +358,7 @@ async function main(argv: string[]): Promise<number> {
     allowDanger: options.allowDanger,
     ...(workspaceRules ? { workspaceRules } : {}),
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
+    ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     history: toHistory(prior),
     sessionId,
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),

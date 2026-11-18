@@ -358,6 +358,25 @@ heming mcp serve --cwd D:/repo
 - 只接 `tools`，`resources` / `prompts` 没接。
 - 每次 `run` 现连现断，没有常驻连接池。
 - 风险等级没有按服务细分：一律 danger。
+## 项目约定：`AGENTS.md` 一族
+
+`heming run` 每一轮都会先读工作区里的约定文件，塞进系统提示词的「项目约定」段（与桌面端同一份口径）。
+
+- 认的文件（按顺序，最多读 2 份）：`AGENTS.md`、`HEMING.md`、`.heming/AGENTS.md`、`.heming/rules.md`。
+- 只读 `--cwd` 这一层和它的 `.heming/`，**不往上层目录找**（上层是别人的工作区）。
+- 单文件超过 4000 字只留开头，并在提示词里写清「需要后面的内容用 `file_read` 读 `<文件>`」；
+  总量超过 6000 字时后续文件不进正文，但会在段尾点名「还有哪些没展开」——不静默丢。
+- 启动时 stderr 有一行摘要，例如：
+
+  ```text
+  [heming] 项目约定：AGENTS.md（1234 字）、.heming/rules.md（400 字，已截断）；另有 HEMING.md 没展开
+  ```
+
+- 没有这份文件、读不了、不是文本、目录不存在：都只是「这一轮没有约定」，不阻断运行。
+- BOM 与 CRLF 会归一，Windows 下记事本写的文件也能直接读。
+
+约定只影响「它怎么做事」的措辞，不改变工具权限——要限制能改哪些文件、能跑哪些命令，
+用下文的工作区权限规则。
 ## 工作区权限规则（`.heming/permissions.json`）
 
 桌面端一直读这份仓库里的规则，`heming run` 与 `heming mcp serve` 现在读同一份——

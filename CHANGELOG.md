@@ -57,7 +57,7 @@
 ```bash
 cd packages/cli
 npx tsc --noEmit -p tsconfig.json   # 通过
-npx vitest run                      # 10 文件 / 143 例（本轮 +10）
+npx vitest run                      # 11 文件 / 145 例（本轮 +12）
 ```
 
 真机冒烟：临时工作区放一份 `AGENTS.md`，用假 OpenAI 端点接住请求。stderr 出现

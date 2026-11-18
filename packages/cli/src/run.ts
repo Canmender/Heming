@@ -112,6 +112,14 @@ export interface AgentRunOptions {
    */
   workspaceRules?: CliWorkspaceRuleSet | null;
   /**
+   * 工作区约定文件拼好的注入段（`AGENTS.md` 一族，d.310）。
+   *
+   * 由入口（`index.ts`）读好传进来，而不是在 `startAgentRun` 里现读：
+   * 读盘是异步的、失败要能提前告诉用户，而启动运行是同步返回句柄的。
+   * 缺省 = 不注入（保持「CLI 不知道仓库规矩」的旧行为）。
+   */
+  projectRules?: string;
+  /**
    * 已连上的 MCP 服务（`--mcp`）。它们的工具按 danger 处理：
    * 没有 `--allow-danger` 时只会拿到「未执行」，不会真的调到对方进程。
    */
@@ -185,6 +193,7 @@ function buildCliSystemPrompt(input: {
   maxToolRounds: number;
   allowDanger: boolean;
   conversationId: string;
+  rules?: string;
 }): string {
   const runtime = buildRuntimeSection({
     desktop: true,
@@ -205,6 +214,8 @@ function buildCliSystemPrompt(input: {
     userText: input.prompt,
     basePrompt: resolveBasePrompt(undefined),
     runtime,
+    // 仓库自己的规矩排在人设之后、运行环境之前（与桌面端同一个位置）。
+    ...(input.rules ? { rules: input.rules } : {}),
   }).systemPrompt;
 }
 
@@ -253,6 +264,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     maxToolRounds: effectiveMaxRounds,
     allowDanger: options.allowDanger,
     conversationId,
+    ...(options.projectRules ? { rules: options.projectRules } : {}),
   });
   /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
   let modelRounds = 0;

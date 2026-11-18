@@ -50,7 +50,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "```bash",
       "cd packages/cli",
       "npx tsc --noEmit -p tsconfig.json   # 通过",
-      "npx vitest run                      # 10 文件 / 143 例（本轮 +10）",
+      "npx vitest run                      # 11 文件 / 145 例（本轮 +12）",
       "```",
       "真机冒烟：临时工作区放一份 `AGENTS.md`，用假 OpenAI 端点接住请求。stderr 出现`项目约定：AGENTS.md（34 字）`；发给模型的 system 消息里确实带着约定正文与标题；换一个没有约定文件的工作区，system 消息里没有这一段（不多说）。",
       "留白"

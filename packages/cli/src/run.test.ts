@@ -243,4 +243,48 @@ describe("startAgentRun", () => {
     const roles = (seen[0] ?? []).map((m) => m.role);
     expect(roles.filter((role) => role === "user")).toHaveLength(1);
   });
+
+  it("传入项目约定时，它进系统提示词（但用户这一轮的提问不进）", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "好";
+    };
+    const section = "## 项目约定（本工作区）\n\n改完要跑 pnpm test。";
+    await startAgentRun({
+      prompt: "改一下这个函数",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      projectRules: section,
+    }).done;
+
+    const system = (seen[0] ?? []).find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("## 项目约定（本工作区）");
+    expect(system).toContain("改完要跑 pnpm test。");
+    // 约定段只算规矩，不该把「改一下这个函数」也算进去。
+    expect(system).not.toContain("改一下这个函数");
+  });
+
+  it("不传项目约定时提示词里没有这一段（保持旧行为）", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "好";
+    };
+    await startAgentRun({
+      prompt: "随便做点什么",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+    }).done;
+    const system = (seen[0] ?? []).find((message) => message.role === "system")?.content ?? "";
+    expect(system).not.toContain("## 项目约定（本工作区）");
+  });
 });
