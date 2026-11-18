@@ -28,6 +28,7 @@ import { SubscriptionRow } from "./model/SubscriptionRow.js";
 import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
+import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrend } from "./model/QuotaTrend.js";
 import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
@@ -70,6 +71,7 @@ import {
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
 import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
 import { reminderArgs, resetReminderText, usageAlertText } from "../lib/magpieReminder.js";
+import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -881,8 +883,7 @@ export function ModelPage() {
    * 额度提醒（d.283）：写的是内核 settings 的 `usageAlert` / `resetReminder`，
    * 值就是数字本身；成功后重读一次设置，失败把内核原话放进提示条。
    */
-  const setReminder = async (key: "usageAlert" | "resetReminder", value: number) => {
-    if (!cli) return;
+  const setReminder = async (key: "usageAlert" | "resetReminder", value: number) => {    if (!cli) return;
     setAccountBusy(`reminder:${key}`);
     try {
       const result = await cli.cli(reminderArgs(key, value));
@@ -903,6 +904,49 @@ export function ModelPage() {
       );
     } catch (err) {
       setNotice(`没能改提醒：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 预热档位：内核只认 ""/"week"/"all"，空值是「重置回默认」，
+   * 所以「不预热」发的是 reset，不是 set 空串。
+   */
+  const setWarmupLevel = async (levelKey: string, level: WarmupLevel) => {
+    if (!cli) return;
+    setAccountBusy(`warmup:${levelKey}`);
+    try {
+      const result = await cli.cli(warmupArgs(levelKey, level));
+      if (!result.ok) {
+        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+        setNotice(`没能改预热：${why}`, true);
+        return;
+      }
+      await loadSettings();
+      setNotice(level === "off" ? "已关掉这家厂商的预热。" : "已打开预热：窗口一重置就先替你开一次。");
+    } catch (err) {
+      setNotice(`没能改预热：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /** 每天固定开 5 小时窗口的时间点：一条都没有时把这一项重置回空列表。 */
+  const setWarmupTimes = async (timesKey: string, times: string[]) => {
+    if (!cli) return;
+    setAccountBusy(`warmup:${timesKey}`);
+    try {
+      const result = await cli.cli(warmupTimesArgs(timesKey, times));
+      if (!result.ok) {
+        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+        setNotice(`没能改时间：${why}`, true);
+        return;
+      }
+      await loadSettings();
+      setNotice(times.length > 0 ? `已记下：每天 ${times.join("、")} 各开一次。` : "已清掉固定时间。");
+    } catch (err) {
+      setNotice(`没能改时间：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -1816,6 +1860,13 @@ export function ModelPage() {
                   <QuotaTrend rows={history} now={now} />
                 </div>
               )}
+
+              <WarmupCard
+                values={settingValues}
+                busy={!cli || busy !== null || accountBusy !== null}
+                onLevel={(levelKey, level) => void setWarmupLevel(levelKey, level)}
+                onTimes={(timesKey, times) => void setWarmupTimes(timesKey, times)}
+              />
 
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">

@@ -556,6 +556,57 @@ describe("ModelPage · 账号与更多", () => {
     expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
   });
 
+  it("额度窗口预热：切一档就写内核设置，关掉时用重置（空串内核不收）", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "codexWarmup", value: "" },
+          { key: "claudeWarmup", value: "week" },
+          { key: "codexWarmAts", value: null },
+          { key: "claudeWarmAts", value: [] },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("额度窗口预热");
+    fireEvent.change(screen.getByLabelText("ChatGPT 的预热"), { target: { value: "all" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "codexWarmup", "all"]));
+    expect(await screen.findByText("已打开预热：窗口一重置就先替你开一次。")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Claude 的预热"), { target: { value: "off" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "claudeWarmup"]));
+    expect(await screen.findByText("已关掉这家厂商的预热。")).toBeInTheDocument();
+  });
+
+  it("额度窗口预热：每天的时间点按列表写进内核，清空就重置", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "codexWarmup", value: "all" },
+          { key: "codexWarmAts", value: ["06:00"] },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const input = await screen.findByLabelText("ChatGPT 每天开 5 小时窗口的时间");
+    await waitFor(() => expect(input).toHaveValue("06:00"));
+    fireEvent.change(input, { target: { value: "15:05 9:00" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "codexWarmAts", "09:00,15:05"]));
+    expect(await screen.findByText("已记下：每天 09:00、15:05 各开一次。")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "codexWarmAts"]));
+    expect(await screen.findByText("已清掉固定时间。")).toBeInTheDocument();
+  });
+
   it("国内端登录之后，额度写在它自己的卡片上，不用去上面的列表里找", async () => {
     installBridge({}, {
       "accounts --json": {
