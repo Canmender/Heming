@@ -23,6 +23,11 @@
  *    请用 file_read 读哪一份」——比悄悄少给一半内容诚实。
  *
  * 读不到（没这份文件、没权限、不是文本）就当这个工作区没有它，不阻断也不报错。
+ *
+ * d.342 起再加一类 `resources/templates/list`：上面那些是**固定名单**，模板则是
+ * `heming://workspace/{path}` —— 客户端把 `path` 换成本工作区的相对路径就能读任意文本文件。
+ * 它比固定名单多一层盘上判定：路径必须在工作区内（正斜杠相对路径、不能有 `..`）、
+ * 必须是普通文本文件、超长同样截断。模板只是「可读」，不参与订阅推送。
  */
 
 import {
@@ -31,7 +36,7 @@ import {
   type CustomCommandSource,
 } from "../../../packages/web/src/lib/agentRuntime/customCommands.js";
 import { PROJECT_RULE_FILES } from "../../../packages/web/src/lib/agentRuntime/projectRules.js";
-import type { FileFsBridge } from "../../../packages/web/src/lib/fileEdit/bridge.js";
+import type { FileFsBridge, FileReadResponse } from "../../../packages/web/src/lib/fileEdit/bridge.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { cliProjectRuleRoots } from "./projectRules.js";
 import path from "node:path";
@@ -44,6 +49,9 @@ export const MCP_CATALOG_MAX_FILE_CHARS = 60_000;
 
 /** 资源总量上限（命令 + 约定 + 配置）。命令目录本身最多 20 条，这里留足余量。 */
 export const MCP_CATALOG_MAX_RESOURCES = 40;
+
+/** 资源模板的 URI：{path} 由客户端替换成工作区内的相对路径。 */
+export const MCP_RESOURCE_TEMPLATE_URI = "heming://workspace/{path}";
 
 /** 除了约定文件之外，工作区里值得给客户端看的配置。 */
 export const MCP_CONFIG_FILES = [
@@ -243,4 +251,98 @@ export function describeCliMcpCatalog(catalog: McpCatalog): string {
     parts.push(`${catalog.resources.length} 份资源`);
   }
   return `工作区内容：${parts.join("、")}，客户端可以用 prompts / resources 直接取用`;
+}
+
+/** 一条资源模板（MCP 的 `ResourceTemplate`）：URI 里带占位符，客户端填完再来读。 */
+export interface McpResourceTemplate {
+  uriTemplate: string;
+  name: string;
+  title?: string;
+  description?: string;
+  /** 客户端据此决定当文本还是当二进制处理；具体文件的实际类型以 `resources/read` 回执为准。 */
+  mimeType?: string;
+}
+
+/**
+ * 这个服务提供的资源模板（目前只有一条：工作区里任意文本文件）。
+ *
+ * 为什么值得单开一类而不是继续往固定名单里加：固定名单能覆盖的是「命令、约定、配置」，
+ * 但客户端真正会想读的常常是普通源码文件（「把这个文件的全文读进来」）。没有模板时，
+ * 它只能退回去调 `file_read` 工具——那要多跑一轮模型调用；有了模板就能直接当上下文引用。
+ */
+export function describeResourceTemplates(): McpResourceTemplate[] {
+  return [
+    {
+      uriTemplate: MCP_RESOURCE_TEMPLATE_URI,
+      name: "工作区文件",
+      title: "工作区里的任意文本文件",
+      description:
+        "把 {path} 换成本工作区内的相对路径（用正斜杠），例如 heming://workspace/src/a.ts。" +
+        `只读；不是文本或超过 ${MCP_CATALOG_MAX_FILE_CHARS} 字会说明原因/截断，不会替客户端改文件。`,
+    },
+  ];
+}
+
+/** 读模板资源的回执：成功带正文，失败是一句人话（协议层原样转成 -32602）。 */
+export type WorkspaceResourceRead =
+  | { ok: true; uri: string; mimeType: string; text: string }
+  | { ok: false; reason: string };
+
+/**
+ * 按模板 URI 读工作区里的一份文本文件（d.342）。
+ *
+ * 三条边界都在这一个函数里，协议层不再自己拼路径：
+ *
+ * 1. **只读工作区**：URI 必须是 `heming://workspace/<相对路径>`，`relOfResourceUri` 已经挡掉
+ *    `..` 与开头的 `/`；这里再算一次相对路径，跑出工作区就拒——不依赖桥的越界判定也安全。
+ * 2. **只给文本**：桥自己会区分二进制/编码问题，回执里的 `code` 直接翻成人话。
+ * 3. **单份有上限**：与固定名单同一个上限，超了截断并指明「要看全的用 file_read 读哪个文件」。
+ */
+export async function readWorkspaceResource(input: {
+  cwd: string;
+  uri: string;
+  bridge?: FileFsBridge | null;
+}): Promise<WorkspaceResourceRead> {
+  const rel = relOfResourceUri(input.uri);
+  if (rel === null) {
+    return {
+      ok: false,
+      reason: `资源 URI 必须是 heming://workspace/<相对路径>，且不能包含 .. 或以 / 开头（收到：${input.uri}）`,
+    };
+  }
+  const clean = rel.replace(/\/+$/, "");
+  if (!clean) return { ok: false, reason: "资源 URI 里没有文件路径" };
+  if (clean.includes("\u0000")) return { ok: false, reason: "资源 URI 里有非法字符" };
+
+  const abs = path.join(input.cwd, clean).replace(/\\/g, "/");
+  const escaped = path.relative(input.cwd, abs).replace(/\\/g, "/");
+  if (escaped.startsWith("..") || path.isAbsolute(escaped)) {
+    return { ok: false, reason: `只能读工作区里的文件：${clean} 不在 ${input.cwd} 下` };
+  }
+
+  const bridge = input.bridge ?? createNodeFsBridge();
+  const roots = cliProjectRuleRoots(input.cwd);
+  let res: FileReadResponse;
+  try {
+    res = await bridge.read({ roots, path: abs });
+  } catch (error) {
+    return { ok: false, reason: `读 ${clean} 时出错：${(error as Error).message}` };
+  }
+  if (!res.ok) {
+    const reasons: Record<string, string> = {
+      "not-found": `工作区里没有这份文件：${clean}`,
+      "not-file": `${clean} 不是文件（可能是个目录）`,
+      "too-large": `${clean} 太大，一次读不完；改用 file_read 分段读`,
+      binary: `${clean} 像是二进制文件，不能当文本资源读`,
+      symlink: `${clean} 是符号链接，资源模板不跟着链接走`,
+      "invalid-path": `${clean} 这个路径不合法`,
+      "outside-roots": `只能读工作区里的文件：${clean}`,
+      "no-roots": "这个服务没有可读的工作区",
+      io: `读 ${clean} 时系统报错`,
+    };
+    return { ok: false, reason: reasons[res.code ?? ""] ?? `读不出 ${clean}：${res.error}` };
+  }
+
+  const text = normalizeCatalogText(res.content);
+  return { ok: true, uri: resourceUriOf(clean), mimeType: mimeOf(clean), text: clip(text, clean) };
 }

@@ -10,7 +10,7 @@ import path from "node:path";
 import type { McpOptions } from "./args.js";
 import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
 import { createCliTooling } from "./tooling.js";
-import { collectCliMcpCatalog, describeCliMcpCatalog } from "./mcpCatalog.js";
+import { collectCliMcpCatalog, describeCliMcpCatalog, readWorkspaceResource } from "./mcpCatalog.js";
 import { createMcpCatalogWatcher } from "./mcpWatch.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
@@ -79,6 +79,12 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     readOnly: options.readOnly === true,
     // 每次 prompts/list / resources/list 现读：中途改了命令文件，下一轮就能看到。
     catalog: () => collectCliMcpCatalog({ cwd }),
+    /*
+     * 资源模板（d.342）：`heming://workspace/{path}` —— 客户端把 path 换成本工作区的
+     * 相对路径就能读任意文本文件。越界、二进制、超大都在 readWorkspaceResource 里判，
+     * 只读，与 --read-only 无关（读本来就不受只读模式影响）。
+     */
+    readResource: (uri) => readWorkspaceResource({ cwd, uri }),
   };
 
   /*

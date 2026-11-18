@@ -13,10 +13,13 @@ import type { FileFsBridge } from "../../../packages/web/src/lib/fileEdit/bridge
 import {
   collectCliMcpCatalog,
   describeCliMcpCatalog,
+  describeResourceTemplates,
   MCP_CATALOG_MAX_FILE_CHARS,
   MCP_RESOURCE_PREFIX,
+  MCP_RESOURCE_TEMPLATE_URI,
   mimeOf,
   normalizeCatalogText,
+  readWorkspaceResource,
   relOfResourceUri,
   resourceUriOf,
 } from "./mcpCatalog.js";
@@ -161,5 +164,85 @@ describe("交给客户端之前的归一（d.325）", () => {
     expect(prompt!.description).toBe("只挑能被利用的问题");
     expect(prompt!.text).not.toContain("\uFEFF");
     expect(catalog.resources[0]!.text.startsWith("# 安全审查")).toBe(true);
+  });
+});
+describe("资源模板（d.342）", () => {
+  it("只声明一条模板，占位符是 {path}，说明里讲清怎么填", () => {
+    const templates = describeResourceTemplates();
+    expect(templates).toHaveLength(1);
+    const template = templates[0]!;
+    expect(template.uriTemplate).toBe(MCP_RESOURCE_TEMPLATE_URI);
+    expect(template.name).toBe("工作区文件");
+    expect(template.description).toContain("{path}");
+    expect(template.description).toContain("相对路径");
+  });
+
+  it("能读工作区里的任意文本文件：BOM 与 CRLF 归一、按扩展名给 MIME", async () => {
+    const dir = await tmpDir();
+    await put(dir, "src/a.ts", "\uFEFFconst a = 1;\r\nconst b = 2;\r\n");
+    await put(dir, "docs/guide.md", "# 标题\n");
+
+    const ts = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}src/a.ts` });
+    expect(ts.ok).toBe(true);
+    if (!ts.ok) return;
+    expect(ts.text).toBe("const a = 1;\nconst b = 2;\n");
+    expect(ts.mimeType).toBe("text/plain");
+    expect(ts.uri).toBe(`${MCP_RESOURCE_PREFIX}src/a.ts`);
+
+    const md = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}docs/guide.md` });
+    expect(md.ok).toBe(true);
+    if (!md.ok) return;
+    expect(md.mimeType).toBe("text/markdown");
+  });
+
+  it("工作区外、带 ..、别的命名空间一律拒绝，且不会真去读盘", async () => {
+    const dir = await tmpDir();
+    await put(dir, "a.ts", "export {};\n");
+
+    for (const uri of [
+      "file:///etc/passwd",
+      `${MCP_RESOURCE_PREFIX}../secret.ts`,
+      `${MCP_RESOURCE_PREFIX}${".."}/${".."}/etc/passwd`,
+      `${MCP_RESOURCE_PREFIX}`,
+    ]) {
+      const read = await readWorkspaceResource({ cwd: dir, uri });
+      expect(read.ok, uri).toBe(false);
+      if (read.ok) continue;
+      expect(read.reason.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("不存在、目录、二进制都回人话，而不是把错误码丢给客户端", async () => {
+    const dir = await tmpDir();
+    await mkdir(path.join(dir, "sub"), { recursive: true });
+    await put(dir, "bin.dat", "abc\u0000def");
+
+    const missing = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}nope.ts` });
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.reason).toContain("没有这份文件");
+
+    const dirRead = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}sub` });
+    expect(dirRead.ok).toBe(false);
+    if (dirRead.ok) return;
+    expect(dirRead.reason).toContain("不是文件");
+
+    const binary = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}bin.dat` });
+    expect(binary.ok).toBe(false);
+    if (binary.ok) return;
+    expect(binary.reason).toContain("二进制");
+  });
+
+  it("超长文件截断，并在末尾指回 file_read", async () => {
+    const dir = await tmpDir();
+    const long = "a".repeat(MCP_CATALOG_MAX_FILE_CHARS + 100);
+    await put(dir, "big.txt", long);
+
+    const read = await readWorkspaceResource({ cwd: dir, uri: `${MCP_RESOURCE_PREFIX}big.txt` });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.text.length).toBeGreaterThan(MCP_CATALOG_MAX_FILE_CHARS);
+    expect(read.text).toContain("file_read");
+    expect(read.text).toContain("big.txt");
   });
 });

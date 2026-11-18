@@ -26,7 +26,15 @@
 
 import type { ToolBridge } from "../../../packages/web/src/lib/agentStream.js";
 import type { ToolConfirmFn } from "./tooling.js";
-import { describeCliMcpCatalog, type McpCatalog } from "./mcpCatalog.js";
+import {
+  MCP_RESOURCE_PREFIX,
+  MCP_RESOURCE_TEMPLATE_URI,
+  describeCliMcpCatalog,
+  describeResourceTemplates,
+  type McpCatalog,
+  type McpResourceTemplate,
+  type WorkspaceResourceRead,
+} from "./mcpCatalog.js";
 
 /** 报错文案里点名的命令目录（与桌面端同一份口径）。 */
 const CUSTOM_COMMANDS_HINT = ".heming/commands/*.md";
@@ -107,6 +115,17 @@ export interface McpContext {
    * `initialize` 里也就不会声明它们。
    */
   catalog?: () => Promise<McpCatalog>;
+  /**
+   * 资源模板的读取入口（d.342）。
+   *
+   * 固定名单之外，这个服务还提供一条模板 `heming://workspace/{path}`：客户端把 `path`
+   * 换成本工作区里的相对路径，就要求读那份文件。真正的读盘在 `mcpCatalog.ts` 的
+   * `readWorkspaceResource`，这里只留一个函数位，好处是协议层仍然不认识文件系统。
+   *
+   * 缺省（`undefined`）= 不暴露模板：`resources/templates/list` 回空表，
+   * 读模板 URI 会得到「未知资源」而不是静默失败。
+   */
+  readResource?: (uri: string) => Promise<WorkspaceResourceRead>;
   /**
    * 资源的订阅登记（d.327）：客户端 `resources/subscribe` 之后，文件一变就该收到
    * `notifications/resources/updated`。缺省 = 不跟踪变化，`resources/subscribe`
@@ -191,6 +210,11 @@ function instructionsText(ctx: McpContext, catalogLine = ""): string {
         : "没有 run_command：要跑命令必须由用户用 --allow-danger 重新启动，这不是重试能解决的问题。",
     `当前工具：${tools.join("、") || "（无）"}。`,
     ...(catalogLine ? [catalogLine] : []),
+    ...(ctx.readResource
+      ? [
+          `资源模板：resources/templates/list 里有 ${MCP_RESOURCE_TEMPLATE_URI}，把 {path} 换成本工作区内的相对路径就能读任意文本文件（只读，不是文本会说明原因）。`,
+        ]
+      : []),
     ...(ctx.subscriptions
       ? ["资源可以订阅：resources/subscribe 之后，工作区里的文件一变就会收到 notifications/resources/updated，不必轮询，也不必重启客户端。"]
       : []),
@@ -314,6 +338,13 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
         const canPush = typeof ctx.notify === "function";
         capabilities.prompts = { listChanged: canPush };
         capabilities.resources = { listChanged: canPush, subscribe: ctx.subscriptions !== undefined };
+      } else if (ctx.readResource) {
+        /*
+         * 没有固定名单、但有模板时，resources 这一项仍然要声明：MCP 客户端只有看到
+         * `resources` 能力才会去问 `resources/templates/list`。模板本身不推送，所以
+         * listChanged 是 false；不跟踪文件变化，因此不给 subscribe。
+         */
+        capabilities.resources = { listChanged: false };
       }
       return okResponse(id, {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
@@ -367,6 +398,14 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
         messages: [{ role: "user", content: { type: "text", text: prompt.text } }],
       });
     }
+    case "resources/templates/list": {
+      /*
+       * 模板与固定名单是两套：名单是「这个仓库里那几份规矩」，模板是「把任意文件当资源读」。
+       * 没有开放模板时回空表而不是报错——客户端问「有哪些模板」是正常动作，空表就是答案。
+       */
+      const templates: McpResourceTemplate[] = ctx.readResource ? describeResourceTemplates() : [];
+      return okResponse(id, { resourceTemplates: templates });
+    }
     case "resources/list": {
       const catalog = await catalogOf(ctx);
       if (!catalog) return noCatalog(id, "resources");
@@ -382,25 +421,39 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
     }
     case "resources/read": {
       const catalog = await catalogOf(ctx);
-      if (!catalog) return noCatalog(id, "resources");
       const params = (request.params ?? {}) as { uri?: unknown };
       const uri = typeof params.uri === "string" ? params.uri.trim() : "";
       if (!uri) return errorResponse(id, MCP_ERROR.invalidParams, "resources/read 需要 uri");
       /*
-       * 只在这份名单里查，不拿 uri 去拼路径：`../` 之类根本没有机会变成一次越界读盘。
-       * 名单是每次请求现算的，所以用户新加的文件下一轮就能读到。
+       * 先查固定名单：那几份文件的内容已经在采集时读好了，直接回。
+       * 名单里没有、但客户端填的是模板 URI 时，再走一次真正的读盘（d.342）。
        */
-      const resource = catalog.resources.find((entry) => entry.uri === uri);
-      if (!resource) {
+      const resource = catalog?.resources.find((entry) => entry.uri === uri);
+      if (resource) {
+        return okResponse(id, {
+          contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text }],
+        });
+      }
+      if (ctx.readResource && uri.startsWith(MCP_RESOURCE_PREFIX)) {
+        const read = await ctx.readResource(uri);
+        if (read.ok) {
+          return okResponse(id, {
+            contents: [{ uri: read.uri, mimeType: read.mimeType, text: read.text }],
+          });
+        }
         return errorResponse(
           id,
           MCP_ERROR.invalidParams,
-          `未知资源：${uri}（先 resources/list 看看这个工作区有哪些；只暴露命令文件、AGENTS.md 一族与三份 .heming 配置）`,
+          `${read.reason}（模板用法见 resources/templates/list；只能读这个工作区里的文本文件）`,
         );
       }
-      return okResponse(id, {
-        contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text }],
-      });
+      if (!catalog) return noCatalog(id, "resources");
+      return errorResponse(
+        id,
+        MCP_ERROR.invalidParams,
+        `未知资源：${uri}（先 resources/list 看看这个工作区有哪些；只暴露命令文件、AGENTS.md 一族与三份 .heming 配置，` +
+          "任意文本文件请按资源模板 heming://workspace/{path} 来读）",
+      );
     }
     /*
      * 订阅：客户端说「这个资源变了告诉我」。收下之前必须确认它真在名单里，
@@ -446,7 +499,7 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
       return errorResponse(
         id,
         MCP_ERROR.methodNotFound,
-        `未知方法：${method}（本服务支持 initialize / ping / tools/list / tools/call / prompts/list / prompts/get / resources/list / resources/read / resources/subscribe / resources/unsubscribe）`,
+        `未知方法：${method}（本服务支持 initialize / ping / tools/list / tools/call / prompts/list / prompts/get / resources/list / resources/templates/list / resources/read / resources/subscribe / resources/unsubscribe）`,
       );
   }
 }

@@ -432,6 +432,8 @@ heming mcp serve --cwd D:/repo
 | `prompts/list` | 列 `.heming/commands/*.md`：名字是命令名，`title` / `description` 来自文件头 `# 标题` / `> 说明`（与桌面端同一份解析）。 |
 | `prompts/get` | 按名字回一条 `role: "user"` 的消息，正文是命令展开后真正发给模型的那段话。名字大小写不敏感；认不出回 `-32602` 并列出可用的。 |
 | `resources/list` | 列工作区里可读的文本：命令文件、`AGENTS.md` / `HEMING.md` / `.heming/AGENTS.md` / `.heming/rules.md`、`.heming/{permissions,hooks,mcp}.json`。URI 形如 `heming://workspace/AGENTS.md`。 |
+| `resources/templates/list` | 列出资源模板：目前一条 `heming://workspace/{path}`，把 `{path}` 换成本工作区的相对路径就能读任意文本文件。没有开放模板时回空表（不是错误）。 |
+| `resources/read`（模板） | 名单里没有的 URI 如果落在 `heming://workspace/` 下，按模板真读一次盘：只读工作区内的普通文本文件，越界 / 目录 / 二进制 / 符号链接各自回一句人话，超 60k 字截断并指回 `file_read`。 |
 | `resources/read` | 按 URI 回 `{contents:[{uri, mimeType, text}]}`。**只在这份名单里查**：URI 从不拿去拼路径，`../` 之类没有机会变成越界读盘。 |
 
 `prompts` 与 `resources` 只在工作区真有内容时才出现在 `initialize` 的 `capabilities` 里；没内容时这两组
@@ -444,6 +446,22 @@ heming mcp serve --cwd D:/repo
 不认识的请求回 `-32601` 并点名支持的方法；通知（没有 `id`）**绝不回包**（回了会让客户端收到一条
 无法对应请求的响应）。
 
+### 资源模板：读任意文本文件
+
+`resources/list` 是一份**写死的名单**（命令、约定、配置）。编辑器真正想读的常常是普通源码，
+所以还开了一条 MCP 资源模板：
+
+```text
+heming://workspace/{path}        # 例如 heming://workspace/src/a.ts
+```
+
+- 只读、只在工作区内：URI 里的 `..`、开头的 `/`、别的命名空间一律回 `-32602`，不会拿它去拼路径；
+- 只给文本：不存在、是目录、二进制、符号链接、读没权限，各回一句能看懂的原因；
+- 单份超 60k 字截断，并在末尾指回 `file_read`（分段读全）；
+- **固定名单优先**：`AGENTS.md` 这类已经在 `resources/list` 里的 URI 仍走名单，不会被模板再读一遍盘；
+- 模板**不参与** `resources/subscribe`：订阅仍只覆盖固定名单，普通文件的变动不会推通知。
+
+好处是客户端可以把任意文件直接当上下文引用，不必先让模型调一次读文件工具。
 ### 资源订阅：改了就推
 
 `resources/subscribe` 收下之后，工作区里的文件一变就推 `notifications/resources/updated {"uri": …}`，

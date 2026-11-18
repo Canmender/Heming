@@ -22,7 +22,8 @@ import {
   serveMcp,
   type McpContext,
 } from "./mcp.js";
-import { createCliGate, createCliTooling, type ToolConfirmFn } from "./tooling.js";
+import { createCliGate, createCliTooling, type ToolConfirmFn } from "./tooling.js"
+import { MCP_RESOURCE_PREFIX, MCP_RESOURCE_TEMPLATE_URI } from "./mcpCatalog.js";
 
 const TMP_DIRS: string[] = [];
 
@@ -754,5 +755,119 @@ describe("资源订阅（d.327）", () => {
     if (!response || !("error" in response)) throw new Error("期望错误响应");
     expect(response.error.code).toBe(MCP_ERROR.invalidParams);
     expect(response.error.message).toContain("需要 uri");
+  });
+});
+describe("资源模板（d.342）", () => {
+  /** 一个有模板能力的 ctx：files 是「相对路径 → 正文」，读不到就按真实实现的文案回。 */
+  function templateCtx(files: Record<string, string>) {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const asked: string[] = [];
+    const ctx = ctxOf(bridge, {
+      readResource: async (uri) => {
+        asked.push(uri);
+        const rel = uri.slice(MCP_RESOURCE_PREFIX.length);
+        const text = files[rel];
+        if (text === undefined) return { ok: false as const, reason: `工作区里没有这份文件：${rel}` };
+        return { ok: true as const, uri, mimeType: "text/plain", text };
+      },
+    });
+    return { ctx, asked };
+  }
+
+  it("initialize 声明 resources 能力，并在 instructions 里说明模板怎么用", async () => {
+    const { ctx } = templateCtx({});
+    const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, ctx);
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as {
+      capabilities: Record<string, unknown>;
+      instructions: string;
+    };
+    // 没有固定名单（没配 catalog）时也要声明 resources：否则客户端不会去问模板。
+    expect(result.capabilities.resources).toEqual({ listChanged: false });
+    expect(result.capabilities.prompts).toBeUndefined();
+    expect(result.instructions).toContain(MCP_RESOURCE_TEMPLATE_URI);
+  });
+
+  it("resources/templates/list 回那一条模板；没有模板能力时回空表而不是报错", async () => {
+    const { ctx } = templateCtx({});
+    const response = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "resources/templates/list" }, ctx);
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { resourceTemplates: { uriTemplate: string; name: string }[] };
+    expect(result.resourceTemplates).toHaveLength(1);
+    expect(result.resourceTemplates[0]!.uriTemplate).toBe(MCP_RESOURCE_TEMPLATE_URI);
+
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const plain = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 3, method: "resources/templates/list" },
+      ctxOf(bridge),
+    );
+    if (!plain || !("result" in plain)) throw new Error("期望成功响应");
+    expect((plain.result as { resourceTemplates: unknown[] }).resourceTemplates).toEqual([]);
+  });
+
+  it("resources/read 用模板读普通文件；没开模板能力时读到的是 -32601", async () => {
+    const { ctx, asked } = templateCtx({ "src/a.ts": "export const a = 1;\n" });
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 4, method: "resources/read", params: { uri: `${MCP_RESOURCE_PREFIX}src/a.ts` } },
+      ctx,
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const contents = (response.result as { contents: { uri: string; mimeType: string; text: string }[] })
+      .contents;
+    expect(contents[0]!.uri).toBe(`${MCP_RESOURCE_PREFIX}src/a.ts`);
+    expect(contents[0]!.text).toBe("export const a = 1;\n");
+    expect(asked).toEqual([`${MCP_RESOURCE_PREFIX}src/a.ts`]);
+
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const plain = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: `${MCP_RESOURCE_PREFIX}src/a.ts` } },
+      ctxOf(bridge),
+    );
+    if (!plain || !("error" in plain)) throw new Error("期望错误响应");
+    expect(plain.error.code).toBe(MCP_ERROR.methodNotFound);
+  });
+
+  it("固定名单优先：名单里有的 URI 不会再走一次模板读盘", async () => {
+    const catalog = {
+      prompts: [],
+      resources: [
+        {
+          uri: `${MCP_RESOURCE_PREFIX}AGENTS.md`,
+          name: "AGENTS.md",
+          mimeType: "text/markdown",
+          text: "约定正文",
+          rel: "AGENTS.md",
+        },
+      ],
+    };
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const asked: string[] = [];
+    const ctx = ctxOf(bridge, {
+      catalog: async () => catalog,
+      readResource: async (uri) => {
+        asked.push(uri);
+        return { ok: true as const, uri, mimeType: "text/plain", text: "不该走到这里" };
+      },
+    });
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: `${MCP_RESOURCE_PREFIX}AGENTS.md` } },
+      ctx,
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const contents = (response.result as { contents: { text: string }[] }).contents;
+    expect(contents[0]!.text).toBe("约定正文");
+    expect(asked).toEqual([]);
+  });
+
+  it("模板读不到时回 -32602，文案里点明原因与模板用法", async () => {
+    const { ctx } = templateCtx({});
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 7, method: "resources/read", params: { uri: `${MCP_RESOURCE_PREFIX}nope.ts` } },
+      ctx,
+    );
+    if (!response || !("error" in response)) throw new Error("期望错误响应");
+    expect(response.error.code).toBe(MCP_ERROR.invalidParams);
+    expect(response.error.message).toContain("没有这份文件");
+    expect(response.error.message).toContain("resources/templates/list");
   });
 });
