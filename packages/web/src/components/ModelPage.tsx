@@ -61,6 +61,7 @@ import {
   type AgentVisibility,
 } from "../lib/magpieVisible.js";
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
+import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -157,6 +158,27 @@ const PLAN_BADGE: Record<PlanKind, { label: string; className: string }> = {
   normal: { label: "普通地址", className: "bg-subtle-3 text-muted" },
   coding: { label: "Coding Plan", className: "bg-info-soft text-info" },
 };
+
+/**
+ * 智能体行尾的订阅额度徽标（d.282）：这里只说「还剩多少」，不说订的是哪家——
+ * 悬停里才展开每个账号、每个窗口。读不到额度时不贴，免得每行都挂一个问号。
+ */
+const AGENT_QUOTA_BADGE: Record<string, string> = {
+  ok: "bg-subtle-3 text-muted",
+  warn: "bg-warn-soft text-warn",
+  danger: "bg-danger-soft text-danger",
+  empty: "bg-subtle-3 text-muted",
+};
+
+/** 智能体名字旁边那一小枚「剩 18%」；没有账号或读不到额度时什么都不画。 */
+function AgentQuotaChip({ quota }: { quota: AgentQuota | undefined }) {
+  if (!quota) return null;
+  return (
+    <span className={`ui-chip shrink-0 ${AGENT_QUOTA_BADGE[quota.tone]}`} title={quota.detail}>
+      {quota.label}
+    </span>
+  );
+}
 
 /**
  * 选路策略的界面文案（d.140 · 审计 S1-9）。
@@ -261,6 +283,11 @@ export function ModelPage() {
    * 每分钟跳一次，没有账号就不开定时器（不白跑）。
    */
   const [now, setNow] = useState(() => Date.now());
+  /**
+   * 「智能体」分区每行贴的额度徽标（d.282）：和「来源 → 订阅账号」是同一份数据，
+   * 这样选模型时就能看见「这个智能体的免费额度还剩多少」。
+   */
+  const agentQuotas = useMemo(() => agentQuotaMap(accounts, now), [accounts, now]);
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
   const [agents, setAgents] = useState<LocalAgent[]>([]);
   const [agentConfirm, setAgentConfirm] = useState<{ id: string; name: string; model: string } | null>(
@@ -1075,7 +1102,10 @@ export function ModelPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <Avatar name={agent.name} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ui-md font-semibold">{agent.name}</span>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-ui-md font-semibold">{agent.name}</span>
+                          <AgentQuotaChip quota={agent.id ? agentQuotas.get(agent.id) : undefined} />
+                        </span>
                         <span className="block truncate ui-caption" title={agent.configPath}>
                           {agent.model}
                           {agent.detail ? ` · ${agent.detail}` : ""}

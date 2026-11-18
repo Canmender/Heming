@@ -456,6 +456,16 @@ describe("ModelPage · 账号与更多", () => {
     expect(chips.length).toBe(2);
   });
 
+  it("智能体分区把订阅额度贴在名字旁边，悬停能看每个窗口", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    const chip = await screen.findByText("剩 18%");
+    expect(chip).toBeInTheDocument();
+    expect(chip.getAttribute("title")).toContain("5 小时");
+    expect(chip.getAttribute("title")).toContain("工作号");
+  });
+
   it("高级命令在「运行」里：流式输出写进面板", async () => {
     const { bridge, calls, emit } = installBridge();
     render(<ModelPage />);
