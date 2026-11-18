@@ -7059,6 +7059,14 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     expect(line.textContent).toContain("正在执行 file_read");
     expect(line.textContent).toContain("已跑");
 
+    // d.346：这一行在输入框下方、不在输入框里面（用户要求「上一轮…」显示在对话框下面）
+    const composer = screen.getByLabelText("消息输入框").closest('div[class*="rounded-[26px]"]');
+    expect(composer).not.toBeNull();
+    expect(composer!.contains(line)).toBe(false);
+    expect(
+      screen.getByLabelText("消息输入框").compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
     release();
     // 收口后不能再显示「正在执行 / 已跑」（那是还在跑的意思），但也不能空着——
     // d.218：换成一行小结，说清这一轮跑了几轮、几次工具、用了多久。
