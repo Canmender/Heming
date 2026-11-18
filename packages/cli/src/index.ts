@@ -19,6 +19,7 @@ import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRul
 import { describeCliContext } from "./contextBudget.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { APPROVAL_ANSWER_HINTS, createTerminalApprover } from "./approvals.js";
+import { describeCliCommandUse, describeCliCommands, loadCliCommands, parseCliCommandInvocation, resolveCliCommand, summarizeCliCommands } from "./commands.js";
 import {
   addCliMemory,
   describeCliMemory,
@@ -58,6 +59,7 @@ const USAGE = `用法：
   heming sessions [--json] [--cwd <dir>]     列出本机的会话存档（id / 时间 / 条数 / 最后一句）
   heming memory [list | add <一句话> | forget <id 或序号>]
                                              看 / 加 / 删这个工作区的长期记忆
+  heming commands [--json] [--cwd <dir>]     列出 .heming/commands/*.md 里的自定义命令
   heming --version | --help
 
 常用选项：
@@ -161,6 +163,14 @@ MCP 服务（给别的编辑器用）：
   （意图 / 结论 / 待办），最近的原文照旧保留；摘要由程序生成，不额外调模型。
   折了会打一行「上下文：折叠了 N 条早期对话」；--no-compact 则整段原样发送。
   真的撞上供应商的上下文上限时，会自动收紧一次预算重试（最多两级）。
+
+工作区自定义命令（.heming/commands/*.md，与桌面端的 /名字 同一批文件）：
+  文件名就是命令名（小写字母开头，可带数字和短横线），正文就是提示词；
+  第一行可以写 # 标题，紧跟的第二行可以写 > 说明。
+  heming run /review                    这一行会被换成 review.md 的正文
+  heming run /review src/login.ts       命令行上的补充说明会接在正文之后
+  heming commands                       看这个工作区有哪些命令（--json 给脚本用）
+  形状像命令但没定义会直接报错并列出可用的，不会把 /reviwe 这种原样发给模型。
 
 工作区记忆（.heming/memory.json）：
   模型可以用 remember 工具把「以后都该记得的事」记下来（偏好、约定、踩过的坑），
@@ -302,6 +312,21 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write("删除：heming memory forget <序号或 id>\n");
     return 0;
   }
+  // `commands` 也只读盘、不调模型：列出工作区里的自定义命令。
+  if (parsed.action === "commands") {
+    const cwd = path.resolve(parsed.options.cwd ?? process.cwd());
+    const loaded = await loadCliCommands(cwd);
+    if (loaded && !loaded.ok) {
+      writeErr(`heming: 命令目录读不出来：${loaded.error}（${loaded.source}）\n`);
+      return 1;
+    }
+    if (parsed.options.json) {
+      process.stdout.write(`${JSON.stringify(summarizeCliCommands(loaded?.commands ?? []))}\n`);
+      return 0;
+    }
+    process.stdout.write(`${describeCliCommands(loaded, cwd)}\n`);
+    return 0;
+  }
   // `mcp serve` 不调模型：它只把文件工具按 MCP 协议暴露给别的编辑器，所以走单独的装配。
   if (parsed.action === "mcp") {
     return startMcpServe(parsed.options, {
@@ -379,6 +404,27 @@ async function main(argv: string[]): Promise<number> {
     }
   } catch {
     return failEarly(`--cwd 目录不存在：${cwd}`);
+  }
+
+  /*
+   * 工作区自定义命令（d.333）：`heming run /review src/login.ts` 把这一行换成命令正文，
+   * 命令行上的尾巴接在后面。形状像命令但工作区里没有定义时直接不启动——`/reviwe`
+   * 多半是打错了，把它原样发给模型只会让它对着一个陌生词瞎猜。
+   *
+   * 抄下展开之前的那一行：记忆召回要按「用户真正说了什么」去捞，而不是按命令正文
+   * （正文可能四千字，会把打分全带偏）。
+   */
+  const rawPrompt = prompt;
+  const commandInvocation = parseCliCommandInvocation(prompt);
+  if (commandInvocation !== null) {
+    const loadedCommands = await loadCliCommands(cwd);
+    if (loadedCommands && !loadedCommands.ok) {
+      return failEarly(`命令目录读不出来：${loadedCommands.error}（${loadedCommands.source}）`);
+    }
+    const resolved = resolveCliCommand(commandInvocation, loadedCommands?.commands ?? []);
+    if (!resolved.ok) return failEarly(resolved.error);
+    prompt = resolved.prompt;
+    writeErr(`[heming] ${describeCliCommandUse(resolved.command, commandInvocation.args)}\n`);
   }
 
   /**
@@ -527,7 +573,7 @@ async function main(argv: string[]): Promise<number> {
       memoryEnabled = false;
       writeErr(`[heming] 记忆读不出来，这次不带上也不写入：${loadedMemory.error}（${loadedMemory.source}）\n`);
     } else if (loadedMemory) {
-      const recalled = recallCliMemory(loadedMemory.entries, prompt);
+      const recalled = recallCliMemory(loadedMemory.entries, rawPrompt);
       recallSection = memorySection(recalled);
       // 摘要句自带句号：拼「这次带上几条」之前先把它摘掉，免得出现「。；」。
       const memoryLine = describeCliMemory(loadedMemory).replace(/。$/, "");

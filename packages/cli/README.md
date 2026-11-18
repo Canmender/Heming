@@ -46,6 +46,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | 以 MCP 服务端身份在 stdio 上讲 JSON-RPC，把同一套文件工具交给别的编辑器/客户端（不调模型）。见下文「MCP 服务」。 |
 | `heming sessions [--json] [--cwd <dir>]` | 列出本机的会话存档（id / 时间 / 条数 / 最后一句），不调模型。见下文「会话：接着上次聊」。 |
 | `heming memory [list | add <一句话> | forget <id 或序号>]` | 查看 / 添加 / 删除工作区记忆（`.heming/memory.json`），不调模型。见下文「工作区记忆」。 |
+| `heming commands [--json] [--cwd <dir>]` | 列出工作区里的自定义命令（`.heming/commands/*.md`），不调模型。见下文「工作区命令」。 |
 | `heming --version` | 打印 `@heming/cli <版本>`。 |
 | `heming --help` | 用法与能力边界。 |
 
@@ -230,6 +231,34 @@ pnpm --silent cli exec --json --resume "$sid" "按刚才看到的，改一下构
 - 不做跨机器同步：存档是本机文件，换机器或清掉目录就没了。
 - `--continue` 只按工作目录匹配，不判断「是不是同一件事」；同一目录下两个不相干的会话会被当成一条线。
 - 中断（Ctrl+C）那一轮只留提问：下次接上时模型知道你问过什么，但不知道当时答到哪。
+## 工作区命令：`/名字` 与 `heming commands`
+
+工作区里放一个 `.heming/commands/名字.md`，文件名就是命令名（小写字母开头，可带数字与短横线），
+正文就是提示词；第一行可以写 `# 标题`，紧跟的第二行可以写 `> 说明`。这与桌面端输入框里打 `/名字`
+用的是**同一批文件、同一套解析规则**。
+
+```
+pnpm cli run /review                      # 把 review.md 的正文发出去
+pnpm cli run /review src/login.ts         # 命令行上的补充说明会空一行接在正文之后
+pnpm cli commands                         # 看看这个工作区有哪些命令
+pnpm cli commands --json                  # 给脚本用（不含正文）
+```
+
+读起来会长这样：
+
+```
+[heming] 用的是工作区命令 /review（安全审查，来自 .heming/commands/review.md），并已接上你这一行里的补充说明。
+```
+
+规则与边界：
+
+- 只有 `/` 开头、且第一段形如命令名才会被当成命令；`/usr/bin/foo`、`/1abc` 照旧当普通提问发出去。
+- 形状像命令但工作区里没有定义 → 直接报错并列出可用的（`/reviwe` 不会被原样发给模型）。
+- 一次只用一条命令；`/review /perf` 里的第二段只会当补充说明，不会串起来执行。
+- 正文上限 4000 字（与桌面端一致，超出会截断并说明要用 `file_read` 读全文）；单份文件读取上限 2 万字。
+- 没有命令目录、单份文件坏了，都不影响正常运行：当作这个工作区没有那一条。
+- 想让别的编辑器（Cursor / Claude Code）也用上这批命令，用 `heming mcp serve`——它们会以 MCP
+  的 `prompts` 出现（见下文「MCP 服务」）。
 ## 工作区记忆：`remember` 与 `heming memory`
 
 长跑的项目里总有些事「说过一次就该一直算数」：以后都用中文回答、别碰 `generated` 目录、这个仓库的

@@ -109,6 +109,14 @@ export interface MemoryOptions {
   forget?: string;
 }
 
+/** `heming commands` 的选项：只列工作区里的自定义命令，不调模型。 */
+export interface CommandsOptions {
+  /** 工作目录（缺省由 index 用 `process.cwd()` 兜底）。 */
+  cwd?: string;
+  /** stdout 输出 JSON 数组（给脚本用），否则是一张给人看的表。 */
+  json: boolean;
+}
+
 export interface McpOptions {
   /** 显式给出的工作目录；缺省由 index 用 `process.cwd()` 兜底。 */
   cwd?: string;
@@ -129,6 +137,7 @@ export type ParsedArgs =
   | { ok: true; action: "mcp"; options: McpOptions }
   | { ok: true; action: "sessions"; options: SessionsOptions }
   | { ok: true; action: "memory"; options: MemoryOptions }
+  | { ok: true; action: "commands"; options: CommandsOptions }
   | { ok: false; error: string };
 
 /** 需要取值的选项：值不能是另一个选项（`--cwd --json` 是写错了，不该把 `--json` 当目录）。 */
@@ -143,7 +152,7 @@ function takeValue(argv: string[], index: number, inline: string | undefined): {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  let command: "run" | "exec" | "mcp" | "sessions" | "memory" | null = null;
+  let command: "run" | "exec" | "mcp" | "sessions" | "memory" | "commands" | null = null;
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
@@ -163,7 +172,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let sessionDir: string | undefined;
   let mcp = false;
   let memory = true;
-let subagent = true;
+  let subagent = true;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -325,11 +334,11 @@ let subagent = true;
     }
 
     if (command === null) {
-      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions" || arg === "memory") {
+      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions" || arg === "memory" || arg === "commands") {
         command = arg;
         continue;
       }
-      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions / memory，用 --help 查看用法）` };
+      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions / memory / commands，用 --help 查看用法）` };
     }
     promptParts.push(arg);
   }
@@ -435,6 +444,51 @@ let subagent = true;
    * 与 run/exec 的分工是刻意的：这条路**不调模型**，所以 `--model` / `--api-key` /
    * `--max-rounds` / 输出格式在这里一律拒绝——静默忽略会让用户以为某个开关生效了。
    */
+  /**
+   * `commands`：只列 `.heming/commands/*.md`，不调模型。
+   *
+   * 与 sessions / memory 同一条口径：模型、会话、权限、危险工具这些选项一律拒绝，
+   * 静默忽略会让人以为 `commands --cwd` 之外的开关也生效了。
+   */
+  if (command === "commands") {
+    if (promptParts.length > 0) {
+      return {
+        ok: false,
+        error: "commands 不接受位置参数（它只列命令；要用某条命令请写 heming run /名字）",
+      };
+    }
+    const notForCommands: string[] = [];
+    if (outputFormat !== "text" && !json) notForCommands.push("--output-format");
+    if (allowDanger) notForCommands.push("--allow-danger");
+    if (readOnly) notForCommands.push("--read-only");
+    if (ask) notForCommands.push("--ask");
+    if (maxRounds !== undefined) notForCommands.push("--max-rounds");
+    if (model !== undefined) notForCommands.push("--model");
+    if (baseUrl !== undefined) notForCommands.push("--base-url");
+    if (apiKey !== undefined) notForCommands.push("--api-key");
+    if (continueSession) notForCommands.push("--continue");
+    if (resume !== undefined) notForCommands.push("--resume");
+    if (sessionDir !== undefined) notForCommands.push("--session-dir");
+    if (mcp) notForCommands.push("--mcp");
+    if (trustWorkspace) notForCommands.push("--trust-workspace");
+    if (trustHooks) notForCommands.push("--trust-hooks");
+    if (contextBudget !== undefined) notForCommands.push("--context-budget");
+    if (!compact) notForCommands.push("--no-compact");
+    if (!memory) notForCommands.push("--no-memory");
+    if (!subagent) notForCommands.push("--no-subagent");
+    if (notForCommands.length > 0) {
+      return {
+        ok: false,
+        error: `commands 不接 ${notForCommands.join(" / ")}（它只列工作区里的自定义命令，不跑模型）`,
+      };
+    }
+    return {
+      ok: true,
+      action: "commands",
+      options: { json, ...(cwd !== undefined ? { cwd } : {}) },
+    };
+  }
+
   if (command === "mcp") {
     const sub = promptParts[0];
     if (sub !== "serve") {

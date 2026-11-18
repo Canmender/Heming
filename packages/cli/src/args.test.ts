@@ -524,3 +524,41 @@ describe("parseArgs：子代理（d.331）", () => {
     }
   });
 });
+
+describe("parseArgs：工作区命令（d.333）", () => {
+  it("commands 只看 --json 与 --cwd", () => {
+    const bare = parseArgs(["commands"]);
+    expect(bare.ok && bare.action).toBe("commands");
+    if (bare.ok && bare.action === "commands") {
+      expect(bare.options.json).toBe(false);
+      expect(bare.options.cwd).toBeUndefined();
+    }
+
+    const both = parseArgs(["commands", "--json", "--cwd", "D:/work/proj"]);
+    expect(both.ok && both.action).toBe("commands");
+    if (both.ok && both.action === "commands") {
+      expect(both.options.json).toBe(true);
+      expect(both.options.cwd).toBe("D:/work/proj");
+    }
+  });
+
+  it("commands 不接受位置参数", () => {
+    const parsed = parseArgs(["commands", "review"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("不接受位置参数");
+  });
+
+  for (const extra of [["--model", "m"], ["--allow-danger"], ["--read-only"], ["--ask"], ["--no-memory"], ["--mcp"], ["--continue"]]) {
+    it(`commands 不接 ${extra[0]}`, () => {
+      const parsed = parseArgs(["commands", ...extra]);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("commands 不接");
+    });
+  }
+
+  it("未知命令的提示里带上 commands", () => {
+    const parsed = parseArgs(["commandz"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("commands");
+  });
+});

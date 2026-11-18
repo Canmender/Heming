@@ -186,4 +186,43 @@ describe.skipIf(tsx === null)("heming memory 子命令", () => {
     expect(result.stdout).toContain("agent_task");
     expect(result.stdout).toContain("--no-subagent");
   }, 30_000);
+  it("commands 列出工作区里的自定义命令，--json 给脚本用（d.333）", async () => {
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, ".heming", "commands"), { recursive: true });
+    writeFileSync(
+      path.join(dir, ".heming", "commands", "review.md"),
+      "# 安全审查\n> 只挑能被利用的问题\n\n按威胁模型逐条过入口。\n",
+      "utf8",
+    );
+
+    const listed = await runCli(["commands", "--cwd", dir]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("/review");
+    expect(listed.stdout).toContain("安全审查");
+    expect(listed.stdout).toContain(".heming/commands/review.md");
+
+    const json = await runCli(["commands", "--json", "--cwd", dir]);
+    expect(json.code).toBe(0);
+    const parsed = JSON.parse(json.stdout) as { command: string; title: string }[];
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.command).toBe("/review");
+    expect(parsed[0]?.title).toBe("安全审查");
+  }, 30_000);
+
+  it("`run /没定义的名字` 直接报错并列出可用的，不把那一行发给模型（d.333）", async () => {
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, ".heming", "commands"), { recursive: true });
+    writeFileSync(
+      path.join(dir, ".heming", "commands", "review.md"),
+      "# 安全审查\n\n按威胁模型逐条过入口。\n",
+      "utf8",
+    );
+
+    const result = await runCli(["run", "--cwd", dir, "/reviwe"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("工作区里没有这个命令：/reviwe");
+    expect(result.stderr).toContain("/review");
+    // 没有凭据也会先卡在命令解析上：说明它根本没走到调模型那一步。
+    expect(result.stderr).not.toContain("缺少模型");
+  }, 30_000);
 });
