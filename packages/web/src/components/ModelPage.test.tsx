@@ -1834,6 +1834,14 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
           stdout: "off · every model takes its own window · magpie model context-cap <size>\n",
           stderr: "",
         },
+        // 裸 `model` 打 usage：里面有没有 `model context-cap` 这一行，决定摆不摆那块。
+        model: {
+          ok: true,
+          stdout:
+            "magpie model name <provider/model>             the name the model goes by\n" +
+            "magpie model context-cap <size>                no model is told a longer window\n",
+          stderr: "",
+        },
       },
     );
     render(<ModelPage />);
@@ -1858,6 +1866,33 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
 
     fireEvent.click(screen.getByRole("button", { name: "关掉上限" }));
     await waitFor(() => expect(calls).toContainEqual(["model", "context-cap", "off"]));
+  });
+
+  it("内核不认识窗口上限时，这一块不摆，也不发那条注定失败的命令", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        "model suffix": { ok: true, stdout: "on · agents' lists name a model with its provider\n", stderr: "" },
+        "model compact": { ok: true, stdout: "off · every window is whole\n", stderr: "" },
+        // 真实内核（heming.d.107）的 usage：没有任何 context-cap 字样。
+        model: {
+          ok: false,
+          stdout: "",
+          stderr:
+            'magpie: unknown command "context-cap"\n' +
+            "usage:\n" +
+            "  magpie model name <provider/model>             the name the model goes by\n",
+        },
+      },
+    );
+    render(<ModelPage />);
+    const summary = await screen.findByText(/全局模型设置/);
+    fireEvent.click(summary);
+    expect(screen.queryByLabelText("窗口上限（如 200k，或 all）")).toBeNull();
+    expect(screen.queryByRole("button", { name: "关掉上限" })).toBeNull();
+    // 后缀与压缩仍然在：不因为一块不认得就整块收起。
+    expect(screen.getByLabelText("模型名字后缀")).toBeInTheDocument();
+    expect(calls).not.toContainEqual(["model", "context-cap"]);
   });
 
   it("看图与画图模型：读现在的选择，换看图模型、关掉画图模型", async () => {

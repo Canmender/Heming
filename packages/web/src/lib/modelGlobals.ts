@@ -84,6 +84,16 @@ export function contextCapArgs(value: string): string[] {
   return ["model", "context-cap", text === "" ? "off" : text];
 }
 
+/**
+ * 「窗口上限」是 `model context-cap`：参考源码里有，但随桌面端发布的内核
+ * （magpie 0.1.3246-heming.d.107）不认识它——裸 `magpie model` 的 usage 里也没有这一行，
+ * 真发这条命令只会回 `unknown command "context-cap"`。
+ * 和「速度档」一样先看 usage 再决定摆不摆：摆一个保存必报错的控件比不摆更糟。
+ */
+export function supportsContextCap(usage: string): boolean {
+  return /magpie\s+model\s+context-cap\b/.test(usage);
+}
+
 export function suffixSummary(state: SuffixState): string {
   if (state.mode === "") return "读不到现在的设置";
   return SUFFIX_LABEL[state.mode];

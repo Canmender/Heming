@@ -126,6 +126,7 @@ import {
   parseCompact,
   parseContextCap,
   parseSuffix,
+  supportsContextCap,
   type CompactState,
   type ContextCapState,
   type SuffixState,
@@ -457,6 +458,8 @@ export function ModelPage() {
   const [suffix, setSuffix] = useState<SuffixState>({ mode: "" });
   const [compact, setCompact] = useState<CompactState>({ fullContext: false });
   const [contextCap, setContextCap] = useState<ContextCapState>({});
+  /** 内核认不认识 `model context-cap`：不认识就整块不摆，免得保存必报错。 */
+  const [capSupported, setCapSupported] = useState(false);
   /** 看图模型 / 画图模型（`magpie settings` 的 vision、imageGen；空 = 自动或关掉）。 */
   const [visionModel, setVisionModel] = useState("");
   /** 看图模型描述图片时的思考档（`settings visionEffort`；空 = 用它自己的默认）。 */
@@ -767,16 +770,24 @@ export function ModelPage() {
 
   const loadGlobals = useCallback(async () => {
     if (!cli) return;
-    const [suffix, compact, cap, modelUsage] = await Promise.all([
+    // 三条固定命令；窗口上限能不能设，先由 `model` 的 usage 说了算（内核不认识就别发）。
+    const [suffix, compact, modelUsage] = await Promise.all([
       cli.cli(["model", "suffix"]),
       cli.cli(["model", "compact"]),
-      cli.cli(["model", "context-cap"]),
       cli.cli(["model"]),
     ]);
     setSuffix(parseSuffix(suffix.stdout || ""));
     setCompact(parseCompact(compact.stdout || ""));
+    const usage = `${modelUsage.stdout || ""}${modelUsage.stderr || ""}`;
+    setTierSupported(supportsModelTier(usage));
+    const capSupported = supportsContextCap(usage);
+    setCapSupported(capSupported);
+    if (!capSupported) {
+      setContextCap({});
+      return;
+    }
+    const cap = await cli.cli(["model", "context-cap"]);
     setContextCap(parseContextCap(cap.stdout || ""));
-    setTierSupported(supportsModelTier(`${modelUsage.stdout || ""}${modelUsage.stderr || ""}`));
   }, [cli]);
 
   /** 画图模型不在默认目录里：单独问一次网关的 `?kind=image`，问不到就当没有。 */
@@ -1933,6 +1944,7 @@ export function ModelPage() {
                 suffix={suffix}
                 compact={compact}
                 contextCap={contextCap}
+                capSupported={capSupported}
                 cliReady={cli !== null}
                 onRun={async (title, args) => {
                   const result = await runDetailed(title, args);

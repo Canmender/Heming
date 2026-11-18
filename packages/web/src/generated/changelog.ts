@@ -12,6 +12,44 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.338.4.122.12",
+    "date": "2026-11-18",
+    "title": "远端 MCP 服务不用再在本地起一个代理进程",
+    "bullets": [
+      "HTTP 只做「发一条、等一条回应」：没有接服务端主动推消息（server-initiated）的那套，也没有断线重连。",
+      "仍然只接 `tools` 一组方法（作为**客户端**）；`resources` / `prompts` 只有我们作为服务端时才提供。",
+      "每次 `run` 现连现断，没有常驻连接池；远端服务的会话 id 只在一次运行内有效。",
+      "风险等级仍不按服务细分：远端工具一律按 danger 处理，要 `--allow-danger` 才真的调过去。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "`heming run --mcp`（d.309）接进来的 MCP 服务只有一种：本地进程，`.heming/mcp.json` 里写 `command` / `args` / `env` / `cwd`。可 MCP 早就有了 HTTP 传输（POST 一条 JSON-RPC，回应可以是 JSON 也可以是 SSE）——远端服务只给一个地址，而 CLI 只能靠本地再写个转发脚本才连得上，等于把「别人的服务」变回「我的进程」。这是 `--mcp` 与 codex 之间最后一个明显的传输缺口。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `.heming/mcp.json` 的声明 | 只有 `command`（本地进程） | 也可写 `url`（远端），附带可选的 `headers` || `packages/cli/src/mcpClient.ts` | `McpServerConfig` 一种形状 | 拆成 `McpStdioConfig` / `McpHttpConfig` 联合 + `isHttpConfig` 收窄；`connectMcpServer` 按形状分派 || 新 `connectHttpMcpServer` | 无 | 每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用同一条路 || 回应解析 | 只会读 stdio 的逐行 JSON | `application/json` 直接解析；`text/event-stream` 走 `pickSseMessage`，**只取 `id` 对得上的那条**，通知丢弃 || 会话与鉴权 | 无 | 服务端下发 `mcp-session-id` 后自动带上；`headers` 里的每条附加头都带上 || 失败信息 | 「连不上」一句 | 区分：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…` || 配置校验 | 只查 `command` / `args` / `env` / `cwd` | 额外查：`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 必须是字符串值、走 HTTP 时写 `args`/`env`/`cwd` 就拒 |",
+      "怎么验证",
+      "`mcpClientHttp.test.ts` 新增 7 例，起真 `node:http` 服务：JSON 回应走完四步且**只第一次不带 session、之后每次都带**、自定义 `authorization` 每条请求都在；SSE 回应里混一条通知只取 `id` 对上的；`isError` 透传；HTTP 503 报状态码与对方的话；`timeoutMs: 60` 说清「60ms 内没有回应 initialize」；`text/html` 正文报「看不懂」并带上开头；`close()` 之后不再发请求。`mcpClient.test.ts` 新增 1 例覆盖新校验（同写 command+url、`ftp://`、`headers` 是数组或非字符串、HTTP 里带 `args`/`cwd`）。真机冒烟：假模型 + 真 HTTP MCP 服务，`exec --json --mcp --allow-danger` → `exit 0`、`toolCalls` 里 `mcp__remote__upper` 成功、工具结果 `OK` 回到模型、服务端记录的方法顺序是 `initialize → notifications/initialized → tools/list → tools/call` 且后三条都带 session。CLI 全量 21 文件 / 441 例全绿；typecheck、web 全量、server 全量、`eval-agent`、`design-audit` 均通过。",
+      "留白"
+    ]
+  },
+  {
+    "version": "d.337.4.122.12",
+    "date": "2026-11-18",
+    "title": "内核不认的那个开关，就别摆出来",
+    "bullets": [
+      "内核哪天把 `model context-cap` 加回来，这一块会自动出现——判据是它自己的 usage，不是版本号。",
+      "单个模型的窗口仍然在模型目录里逐个改（`model context <provider/model> <n>`），这一块管的是「给所有模型一个上限」。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "模型页底部「全局模型设置」里一直有一块「窗口上限」（`model context-cap`），可随桌面端发布的内核（magpie 0.1.3246-heming.d.107）根本不认识这条命令：`magpie model context-cap` 回`unknown command \"context-cap\"`，裸 `magpie model` 的 usage 里也没有这一行。后果有两条：每次打开模型页都白发一条注定失败的命令（本机 246ms）；这一块的「保存上限 / 关掉上限」按下去只会得到一条错误提示——摆一个保存必报错的控件，比少一个功能更糟。单元测试一直没发现，是因为夹具把这条命令的成功回复也一起编了出来。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/modelGlobals.ts` | 无 | 新增 `supportsContextCap(usage)`：看裸 `magpie model` 的 usage 里有没有 `model context-cap` 这一行 || `packages/web/src/components/ModelPage.tsx` | 四条命令并行问，其中一条必失败 | 先问三条，再用同一次 `model` 的 usage 判断：认得才去读上限，不认得就跳过（少一次进程） || `packages/web/src/components/model/GlobalModelSettings.tsx` | 永远渲染「窗口上限」 | 只在 `capSupported` 时渲染；后缀与压缩照旧 || 说明文档 | 把这块当成「已对齐」 | 注明按内核 usage 决定摆不摆，与「速度档」的 `supportsModelTier` 同一套做法 |",
+      "怎么验证",
+      "`modelGlobals.test.ts` 新增一例：真机内核的 usage（只有 `model name/efforts/context`）判 `false`，`unknown command` 与空串判 `false`，含 `magpie model context-cap <size>` 的 usage 判 `true`。`ModelPage.test.tsx`：原「后缀、压缩窗口、窗口上限各走一条命令」补上裸 `model` 的 usage 夹具（认得 → 控件在、命令发得出去）；新增一例「内核不认识时这块不摆、也不发那条命令」，同时断言「后缀 / 压缩窗口」仍在，不因为一块不认得就整块收起。全量 451 个测试文件 / 6475 个用例全绿；typecheck、`vite build`、`design-audit.mjs`、desktop 测试均通过。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.337.4.121.12",
     "date": "2026-11-18",
     "title": "命令改的东西，也能退一部分了",

@@ -22,6 +22,8 @@ export interface GlobalModelSettingsProps {
   suffix: SuffixState;
   compact: CompactState;
   contextCap: ContextCapState;
+  /** 内核认不认识 `model context-cap`：不认识就整块不摆（保存必报错的控件比没有更糟）。 */
+  capSupported: boolean;
   cliReady: boolean;
   onRun: (title: string, args: string[]) => Promise<boolean>;
 }
@@ -31,6 +33,7 @@ export function GlobalModelSettings({
   suffix,
   compact,
   contextCap,
+  capSupported,
   cliReady,
   onRun,
 }: GlobalModelSettingsProps) {
@@ -138,37 +141,39 @@ export function GlobalModelSettings({
           </div>
         </div>
 
-        <div className="grid gap-1">
-          <span className="ui-caption">窗口上限 · {contextCapSummary(contextCap)}</span>
-          <div className="flex flex-wrap items-end gap-2">
-            <TextField
-              label="窗口上限（如 200k，或 all）"
-              placeholder="off / 200k / all"
-              value={capValue}
-              onChange={(event) => setCapValue(event.target.value)}
-            />
-            <Button
-              type="button"
-              size="sm" variant="ghost"
-              busy={busy === "cap"}
-              disabled={!cliReady || busy !== null || capValue.trim() === ""}
-              onClick={async () => {
-                const ok = await run("cap", "设置窗口上限", contextCapArgs(capValue));
-                if (ok) setCapValue("");
-              }}
-            >
-              保存上限
-            </Button>
-            <Button
-              type="button"
-              size="sm" variant="ghost"
-              disabled={!cliReady || busy !== null}
-              onClick={() => void run("cap", "关掉窗口上限", contextCapArgs(""))}
-            >
-              关掉上限
-            </Button>
+        {capSupported && (
+          <div className="grid gap-1">
+            <span className="ui-caption">窗口上限 · {contextCapSummary(contextCap)}</span>
+            <div className="flex flex-wrap items-end gap-2">
+              <TextField
+                label="窗口上限（如 200k，或 all）"
+                placeholder="off / 200k / all"
+                value={capValue}
+                onChange={(event) => setCapValue(event.target.value)}
+              />
+              <Button
+                type="button"
+                size="sm" variant="ghost"
+                busy={busy === "cap"}
+                disabled={!cliReady || busy !== null || capValue.trim() === ""}
+                onClick={async () => {
+                  const ok = await run("cap", "设置窗口上限", contextCapArgs(capValue));
+                  if (ok) setCapValue("");
+                }}
+              >
+                保存上限
+              </Button>
+              <Button
+                type="button"
+                size="sm" variant="ghost"
+                disabled={!cliReady || busy !== null}
+                onClick={() => void run("cap", "关掉窗口上限", contextCapArgs(""))}
+              >
+                关掉上限
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </details>
   );

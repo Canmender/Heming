@@ -79,12 +79,14 @@
 | --- | --- | --- |
 | 智能体列表里的模型名带不带来源 | 「名字后缀」下拉：带来源 / 自己命名的原样 / 只写模型名 | `model suffix`、`model suffix on\|own\|off` |
 | 上下文压缩：压到多少，或干脆跑满整个窗口 | 「压缩窗口」下拉 + 压缩点输入（如 500k） | `model compact`、`model compact on\|off\|<size>` |
-| 给所有模型一个窗口上限 | 「窗口上限」输入（`off` / `200k` / `all`）+「关掉上限」 | `model context-cap`、`model context-cap <size>\|off\|all` |
+| 给所有模型一个窗口上限 | 「窗口上限」输入（`off` / `200k` / `all`）+「关掉上限」——**只在 `magpie model` 的 usage 里出现 `model context-cap` 时才摆**（`supportsContextCap`）。随桌面端发的内核（magpie 0.1.3246-heming.d.107）不认识这条命令，所以真机上是隐藏的 | `model context-cap`、`model context-cap <size>\|off\|all` |
 | Images：选一个「能看图的模型」给看不了图的模型描述图片（也可以关掉，带图的请求直接拒绝）、给它指定思考档、选一个「画图模型」给 `generate_image` | 「看图与画图模型」折叠区：「看图模型」下拉（只列目录里声明了图片输入的模型，首项「不指定」，第二项「关掉」）；「看图模型的思考档」下拉（选项来自选中的看图模型自己的 `reasoningLevels`，首项「用它自己的默认」）；「画图模型」下拉（选项来自 `/v1/models?kind=image`，网关没列出能画图的来源时退回手填）；清空即 `settings reset` | `settings get vision\|visionEffort\|imageGen --json`、`settings set vision\|visionEffort\|imageGen <值>`、`settings reset vision\|visionEffort\|imageGen`；画图模型清单走 `GET /v1/models?kind=image` |
 
 - 解析在 `packages/web/src/lib/modelGlobals.ts`：只认第一条有效行（跳过 ANSI、`✓/✗`、`magpie …` 提示），
   所以「读当前设置」和「写完之后重读」用同一套解析，界面上显示的永远是刚读回来的值。
 - 写成功后重读三项，不靠本地猜状态。
+- 「能不能设窗口上限」以内核自己的 usage 为准（`supportsContextCap`，与「速度档」的 `supportsModelTier` 同一套做法）：
+  内核不认识就整块不摆，也不再发一条注定回 `unknown command` 的命令——每次打开模型页都撞一次错误、界面上还有个保存必报错的控件，比少一个功能更糟。
 - 画图模型不在默认目录里：`packages/web/src/lib/magpieClient.ts` 的 `fetchGatewayImageModels` 单独问 `?kind=image`（失败按「没有」处理，退回手填）。
 - 看图/画图的读写与解析在 `packages/web/src/lib/modelSettings.ts`：`settings get` 的 JSON 字符串（空值是 `""`）与裸文本都认；`settings set` 不接受空值，所以清空走 `settings reset`。
 

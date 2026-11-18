@@ -10,6 +10,7 @@ import {
   parseSuffix,
   suffixArgs,
   suffixSummary,
+  supportsContextCap,
 } from "./modelGlobals";
 
 describe("modelGlobals", () => {
@@ -52,6 +53,23 @@ describe("modelGlobals", () => {
     expect(contextCapSummary({ size: "200K" })).toBe("不超过 200K");
     expect(contextCapArgs("")).toEqual(["model", "context-cap", "off"]);
     expect(contextCapArgs("all")).toEqual(["model", "context-cap", "all"]);
+  });
+
+  it("窗口上限：内核的 usage 里有没有这一行，决定摆不摆这个控件", () => {
+    // 随桌面端发的内核（magpie 0.1.3246-heming.d.107）不认识 context-cap：
+    // usage 里没有这一行，真发只会回 unknown command，所以整块不摆。
+    const usage = [
+      "magpie model name <provider/model>             the name the model goes by",
+      "magpie model efforts <provider/model> <l>,<l>  offer only these of them",
+      "magpie model context <provider/model> <n>      say how long, as 200000 or 1m",
+    ].join("\n");
+    expect(supportsContextCap(usage)).toBe(false);
+    expect(supportsContextCap('magpie: unknown command "context-cap"')).toBe(false);
+    expect(supportsContextCap("")).toBe(false);
+    // 认识它的内核：usage 里会出现这一行（带参数说明也算）。
+    expect(
+      supportsContextCap("magpie model context-cap <size>   no model is told a longer window"),
+    ).toBe(true);
   });
 
   it("忽略 ANSI 与 magpie 提示行", () => {
