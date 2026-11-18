@@ -331,6 +331,35 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
+  it("自动收取的状态写在账号卡底部：关掉时说清账号为什么是空的", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        "accounts discovery": {
+          ok: true,
+          stdout:
+            "account discovery is off: magpie reads none of your agents' sign-ins and serves no subscription; API-key providers work as before",
+          stderr: "",
+        },
+        "accounts discovery on": {
+          ok: true,
+          stdout:
+            "account discovery is on: magpie reads your agents' sign-ins and serves them as subscriptions",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    expect(await screen.findByText(/已关掉自动收取：订阅账号不会自己出现/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打开自动收取" }));
+
+    await waitFor(() => expect(calls).toContainEqual(["accounts", "discovery", "on"]));
+    expect(await screen.findByText(/本机那些软件里已经登录的账号会自动收进来/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "关掉自动收取" })).toBeInTheDocument();
+  });
+
   it("手上有可重置次数时，行上就能花掉一次（先问一句，再说结果）", async () => {
     const until = new Date(Date.now() + 3 * 3600_000).toISOString();
     const { calls } = installBridge(

@@ -33,6 +33,12 @@ import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrend } from "./model/QuotaTrend.js";
 import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
 import { nonSubscriptionCards, parseQuotaCards, type QuotaCard } from "../lib/magpieQuotaCards.js";
+import {
+  discoveryArgs,
+  discoveryText,
+  parseDiscovery,
+  type DiscoveryState,
+} from "../lib/discovery.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -275,6 +281,8 @@ export function ModelPage() {
    * 原先页面上完全看不到，只能开终端敲命令。
    */
   const [quotaCards, setQuotaCards] = useState<QuotaCard[]>([]);
+  /** 自动收取本机登录的开关状态；空 = 这次没读到。 */
+  const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
   const [history, setHistory] = useState<QuotaHistoryRow[]>([]);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
@@ -512,6 +520,20 @@ export function ModelPage() {
         if (!cli) return;
         const result = await cli.cli(["quota", "--json"]);
         setQuotaCards(parseQuotaCards(result.stdout || ""));
+      }),
+    [cli, once],
+  );
+
+  /**
+   * 自动收取开关的状态。它是「订阅账号从哪来」的前提：关掉之后下拉里一个账号都不会出现，
+   * 页面得说清这件事，否则用户只会以为账号丢了。
+   */
+  const loadDiscovery = useCallback(
+    () =>
+      once("discovery", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["accounts", "discovery"]);
+        setDiscovery(parseDiscovery(`${result.stdout || ""}${result.stderr || ""}`));
       }),
     [cli, once],
   );
@@ -769,6 +791,36 @@ export function ModelPage() {
       );
     } catch (err) {
       setNotice(`没能用掉这次重置：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 打开 / 关掉「自动收取本机登录」。
+   *
+   * 关掉之后订阅账号会一起消失（内核不再把别家的登录当订阅供给），所以这里重读账号与额度，
+   * 并在提示条里说清发生了什么——否则用户只会看到列表空了。
+   */
+  const toggleDiscovery = async () => {
+    if (!cli) return;
+    const next: DiscoveryState = discovery === "off" ? "on" : "off";
+    setAccountBusy("discovery");
+    try {
+      const result = await cli.cli(discoveryArgs(next));
+      setDiscovery(parseDiscovery(`${result.stdout || ""}${result.stderr || ""}`) ?? next);
+      await Promise.all([loadAccounts(), loadQuotas()]);
+      setNow(Date.now());
+      setNotice(
+        result.ok
+          ? next === "on"
+            ? "已打开自动收取：本机软件里登录的账号会重新出现。"
+            : "已关掉自动收取：订阅账号不再自动出现，需要在这里手动登录。"
+          : `没能改这个开关：${engineText(tailText(stripAnsi(result.stderr || result.error || ""))) || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能改这个开关：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -1054,6 +1106,7 @@ export function ModelPage() {
         loadDrawers(),
         loadPlugins(),
         loadSettings(),
+        loadDiscovery(),
       ]);
     })();
     return () => {
@@ -1071,6 +1124,7 @@ export function ModelPage() {
     loadSettings,
     loadQuotas,
     loadHistory,
+    loadDiscovery,
     loadDrawers,
   ]);
 
@@ -1907,6 +1961,17 @@ export function ModelPage() {
                     </li>
                   )}
                 </ul>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
+                  <span className="ui-caption">{discoveryText(discovery)}</span>
+                  <button
+                    type="button"
+                    className="ui-link"
+                    disabled={!cli || accountBusy !== null}
+                    onClick={() => void toggleDiscovery()}
+                  >
+                    {discovery === "off" ? "打开自动收取" : "关掉自动收取"}
+                  </button>
+                </div>
                 {accounts.length > 0 && (
                   <QuotaReminder
                     values={settingValues}
