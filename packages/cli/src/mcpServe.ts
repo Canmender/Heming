@@ -13,7 +13,7 @@ import { createCliTooling } from "./tooling.js";
 import { collectCliMcpCatalog, describeCliMcpCatalog, readWorkspaceResource } from "./mcpCatalog.js";
 import { createMcpCatalogWatcher } from "./mcpWatch.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
-import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
+import { createCliHookRunner, createCliPostHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 
 export interface McpServeIO {
   stdin: NodeJS.ReadableStream;
@@ -62,12 +62,14 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
 
   const conversationId = `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const hookRunner = hookSet ? createCliHookRunner(hookSet, { cwd, streamId: conversationId }) : null;
+  const postHookRunner = hookSet ? createCliPostHookRunner(hookSet, { cwd, streamId: conversationId }) : null;
   const tooling = createCliTooling({
     cwd,
     allowDanger: options.allowDanger,
     conversationId,
     ...(workspaceRules ? { rules: workspaceRules } : {}),
     ...(hookRunner ? { hooks: hookRunner } : {}),
+    ...(postHookRunner ? { postHooks: postHookRunner } : {}),
     readOnly: options.readOnly === true,
   });
   const ctx: McpContext = {

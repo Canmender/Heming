@@ -44,6 +44,7 @@ import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import type { CliApprover } from "./approvals.js";
 import type { RewindRun } from "./rewind.js";
 import type { CliHookVerdict } from "./toolHooks.js";
+import type { ToolPostHookNote } from "../../../packages/web/src/lib/hitl/hooks.js";
 import type { McpConnection } from "./mcpClient.js";
 import type { CliEvent } from "./events.js";
 
@@ -148,6 +149,16 @@ export interface AgentRunOptions {
    * 工具调用才拿到「被拒绝」。`null` / 省略 = 这次运行不做钩子检查。
    */
   hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
+  /**
+   * 工具执行后的检查（`.heming/hooks.json` 里 `on: "post"` 的规则，d.345）。
+   * 只把检查结论附在结果后面，不改变调用本身的结果；`null` / 省略 = 没有。
+   */
+  postHooks?:
+    | ((
+        call: { name: string; arguments: string },
+        result: { ok: boolean; text: string },
+      ) => Promise<readonly ToolPostHookNote[]>)
+    | null;
   /**
    * 只读模式（`--read-only`）：写与命令一律不执行，提示词里也要说清楚，
    * 否则模型会一次次尝试、把轮数烧在注定失败的调用上。

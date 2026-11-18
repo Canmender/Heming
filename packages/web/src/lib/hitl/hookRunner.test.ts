@@ -278,3 +278,62 @@ describe("describeToolHooksState", () => {
     expect(text).toContain("允许本工区的钩子脚本在你的机器上执行");
   });
 });
+
+describe("执行后的检查：runPost（d.345）", () => {
+  const postConfig = JSON.stringify({
+    hooks: [{ match: { tool: "file_write" }, command: "node scripts/post.js", on: "post" }],
+  });
+  const ctx = { workspace: WS, agentId: "a1", streamId: "s1" };
+  const writeCall = { name: "file_write", arguments: '{"path":"src/a.ts"}' };
+
+  it("工具跑完之后才跑，退出码 2 变成说明而不是拒绝", async () => {
+    const file = fakeFileBridge({ [CONFIG_PATH]: postConfig });
+    const shell = fakeShell({
+      ok: true,
+      exitCode: 2,
+      stdout: "生成的代码没格式化",
+      stderr: "",
+      truncated: false,
+      durationMs: 2,
+      cwd: WS,
+    });
+    const runner = createToolHookRunner(
+      makeDeps({ getFileBridge: () => file.bridge, getShellBridge: () => shell.bridge }),
+    );
+
+    const notes = await runner.runPost(writeCall, { ok: true, text: "写入成功" }, ctx);
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ command: "node scripts/post.js", ruleIndex: 1 });
+    expect(notes[0]!.text).toContain("工具已执行");
+    expect(notes[0]!.text).toContain("生成的代码没格式化");
+    expect(shell.requests).toHaveLength(1);
+    // payload 里带的是「刚才那次调用的结果」，检查脚本据此判断要不要提示。
+    const payload = JSON.parse(file.writes[0]!.content ?? "{}") as Record<string, unknown>;
+    expect(payload.event).toBe("PostToolUse");
+    expect(payload.result).toEqual({ ok: true, text: "写入成功" });
+  });
+
+  it("没启用时一次都不跑（连配置都不读）", async () => {
+    const file = fakeFileBridge({ [CONFIG_PATH]: postConfig });
+    const shell = fakeShell({ ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false, durationMs: 1, cwd: WS });
+    const runner = createToolHookRunner(
+      makeDeps({ getFileBridge: () => file.bridge, getShellBridge: () => shell.bridge, isEnabled: () => false }),
+    );
+
+    expect(await runner.runPost(writeCall, { ok: true, text: "ok" }, ctx)).toEqual([]);
+    expect(shell.requests).toHaveLength(0);
+    expect(file.bridge.read).not.toHaveBeenCalled();
+  });
+
+  it("只有执行前规则时，runPost 什么都不做（两档互不串）", async () => {
+    const file = fakeFileBridge({ [CONFIG_PATH]: denyConfig });
+    const shell = fakeShell({ ok: true, exitCode: 2, stdout: "不该跑", stderr: "", truncated: false, durationMs: 1, cwd: WS });
+    const runner = createToolHookRunner(
+      makeDeps({ getFileBridge: () => file.bridge, getShellBridge: () => shell.bridge }),
+    );
+
+    expect(await runner.runPost(writeCall, { ok: true, text: "ok" }, ctx)).toEqual([]);
+    expect(shell.requests).toHaveLength(0);
+  });
+});

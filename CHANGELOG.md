@@ -1,3 +1,32 @@
+## d.345.4.128.12（2026-11-18）— 工具跑完之后，仓库自己的检查也能说话
+
+### 为什么做
+
+`.heming/hooks.json` 以前只有「动手之前」这一档：仓库能拦住「别改 generated」，却没法在改完之后说一句「现在格式不对 / 测试挂了」。写完自动格式化、跑一遍相关测试、生成物存在性检查这类事，只能靠提示词祈祷模型自觉。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| 执行后规则 | 规则多一个 `on` 字段：`"pre"`（缺省，执行前拦截）、`"post"`（执行后检查） |
+| 不改变结果 | 执行后规则**拦不住**已经发生的调用，结论只作为说明附在工具结果后面 |
+| 看得到结果 | 执行后 payload 的 `event` 是 `PostToolUse`，多一个 `result: {ok, text}`（结果超过 4000 字截断） |
+| 什么会变成说明 | 超时 / 退出码 2 / 其它非零退出码 / stdout 的 `{"note":"…"}`；退出码 0 且静默则不打扰模型 |
+| 两档互不串 | `matchHooks` 按 `phase` 过滤：执行前规则不会在 `runPost` 里重跑，反之亦然 |
+| 桌面端与 CLI 同口径 | `packages/web/src/lib/hitl/hooks.ts` 的 `interpretPostHookResult` / `postHookNoteText`、`hookRunner.ts` 的 `runPost`、`packages/cli/src/toolHooks.ts` 的 `createCliPostHookRunner` |
+| 上限 | 一次调用最多附 5 条说明、每条 400 字；检查自己坏掉只丢说明，不影响调用结果 |
+
+### 怎么验证
+
+- `packages/web/src/lib/hitl/hooks.test.ts` 28 例、`hookRunner.test.ts` 12 例（`on` 解析、payload、判定五分支、说明拼接与上限、pre/post 互不串）
+- `packages/cli/src/toolHooks.test.ts` 27 例（`createCliPostHookRunner`、说明进工具结果、检查抛错不影响结果）
+- CLI 21 文件 / 472 例全绿；web **453 文件 / 6507 例**全绿；`pnpm -w typecheck`、`eval:agent`、`design-audit` 全过
+
+### 留白
+
+- 执行后检查不能回滚、不能重试工具调用，也不能把一次成功改成失败——它只是「补充信息」。
+- 只有配置里显式写 `on: "post"` 才跑；`--trust-hooks` 的信任口径不变（默认不执行仓库脚本）。
+- 一次调用最多 5 条说明，超出只点名还剩几条。
 ## d.344.4.128.12（2026-11-18）— 按下去什么都不会变的按钮，就别亮了
 
 ### 为什么做

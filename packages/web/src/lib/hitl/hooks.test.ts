@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
+  MAX_POST_HOOK_NOTES,
+  POST_HOOK_RESULT_MAX_CHARS,
   MAX_HOOK_TIMEOUT_MS,
   MAX_TOOL_HOOKS,
   buildHookPayload,
@@ -8,9 +10,11 @@ import {
   globToRegExp,
   hookDeniedText,
   interpretHookResult,
+  interpretPostHookResult,
   matchHooks,
   matchPathGlob,
   parseHooksConfig,
+  postHookNoteText,
   workspaceRelativePath,
   type ToolHookRule,
 } from "./hooks.js";
@@ -18,7 +22,7 @@ import {
 const WS = "D:/工作区/heming";
 
 function rule(overrides: Partial<ToolHookRule> = {}): ToolHookRule {
-  return { tool: ["file_write"], command: "node check.js", timeoutMs: 10_000, ...overrides };
+  return { phase: "pre", tool: ["file_write"], command: "node check.js", timeoutMs: 10_000, ...overrides };
 }
 
 describe("parseHooksConfig", () => {
@@ -34,8 +38,8 @@ describe("parseHooksConfig", () => {
     expect(parsed).toEqual({
       ok: true,
       hooks: [
-        { tool: ["file_write"], path: "src/**", command: "node scripts/check-write.js", timeoutMs: DEFAULT_HOOK_TIMEOUT_MS },
-        { tool: ["run_command", "file_patch"], command: "node scripts/audit.js", timeoutMs: 15000 },
+        { phase: "pre", tool: ["file_write"], path: "src/**", command: "node scripts/check-write.js", timeoutMs: DEFAULT_HOOK_TIMEOUT_MS },
+        { phase: "pre", tool: ["run_command", "file_patch"], command: "node scripts/audit.js", timeoutMs: 15000 },
       ],
     });
   });
@@ -251,5 +255,91 @@ describe("多 hook 顺序（纯匹配层）", () => {
       "first",
       "second",
     ]);
+  });
+});
+
+describe("执行后的检查（d.345）", () => {
+  it("on 缺省是执行前，只有写 on: \"post\" 才算执行后", () => {
+    const parsed = parseHooksConfig(
+      JSON.stringify({
+        hooks: [
+          { match: { tool: "file_write" }, command: "node pre.js" },
+          { match: { tool: "file_write" }, command: "node post.js", on: "post" },
+        ],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.hooks.map((item) => item.phase)).toEqual(["pre", "post"]);
+  });
+
+  it("on 只认 pre / post，写别的值报错并点名", () => {
+    const parsed = parseHooksConfig(
+      JSON.stringify({ hooks: [{ match: { tool: "file_write" }, command: "node x.js", on: "after" }] }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toContain('"post"');
+    expect(parsed.error).toContain("after");
+  });
+
+  it("执行后的 payload 换成 PostToolUse，并带上刚才那次调用的结果", () => {
+    const payload = buildHookPayload({
+      name: "file_write",
+      arguments: '{"path":"src/a.ts"}',
+      workspace: WS,
+      agentId: "a1",
+      streamId: "s1",
+      time: new Date(0),
+      phase: "post",
+      result: { ok: true, text: "写入成功" },
+    });
+    expect(payload.event).toBe("PostToolUse");
+    expect(payload.result).toEqual({ ok: true, text: "写入成功" });
+  });
+
+  it("结果太长会截断，不把整篇输出塞进 payload", () => {
+    const payload = buildHookPayload({
+      name: "run_command",
+      arguments: "{}",
+      workspace: WS,
+      agentId: "a1",
+      streamId: "s1",
+      time: new Date(0),
+      phase: "post",
+      result: { ok: true, text: "x".repeat(POST_HOOK_RESULT_MAX_CHARS + 50) },
+    });
+    expect(payload.result?.text.length).toBeLessThan(POST_HOOK_RESULT_MAX_CHARS + 40);
+    expect(payload.result?.text).toContain("结果已截断");
+  });
+
+  it("interpretPostHookResult：超时 / 退出码 2 / JSON note / 静默 0 各不相同", () => {
+    expect(interpretPostHookResult(null, "", "", true)).toContain("超时");
+    expect(interpretPostHookResult(2, "没格式化", "", false)).toContain("工具已执行");
+    expect(interpretPostHookResult(2, "没格式化", "", false)).toContain("没格式化");
+    expect(interpretPostHookResult(0, '{"note":"补了一句上下文"}', "", false)).toBe("补了一句上下文");
+    expect(interpretPostHookResult(0, "", "", false)).toBeNull();
+    expect(interpretPostHookResult(1, "", "炸了", false)).toContain("退出码 1");
+  });
+
+  it("postHookNoteText：空数组是空串，多条按编号拼，超过上限点名还有几条没展开", () => {
+    expect(postHookNoteText([])).toBe("");
+    const text = postHookNoteText([
+      { command: "node a.js", ruleIndex: 1, text: "第一条" },
+      { command: "node b.js", ruleIndex: 2, text: "第二条" },
+    ]);
+    expect(text).toContain("【执行后的本机检查】");
+    expect(text).toContain("不改变调用结果");
+    expect(text).toContain("第 1 条「node a.js」：第一条");
+    expect(text).toContain("第 2 条「node b.js」：第二条");
+
+    const many = postHookNoteText(
+      Array.from({ length: MAX_POST_HOOK_NOTES + 2 }, (_, index) => ({
+        command: `node ${index}.js`,
+        ruleIndex: index + 1,
+        text: `说明 ${index}`,
+      })),
+    );
+    expect(many).toContain("另有 2 条检查说明没有展开");
   });
 });

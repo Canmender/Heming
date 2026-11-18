@@ -30,6 +30,7 @@ import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approvals.js";
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
+import { postHookNoteText, type ToolPostHookNote } from "../../../packages/web/src/lib/hitl/hooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 import { REMEMBER_TOOL, addCliMemory, rememberResultText, rememberSpec } from "./memory.js";
 import { createCliRewindJournal, type CliRewindJournal } from "./rewind.js";
@@ -433,6 +434,18 @@ export function createCliTooling(options: {
    */
   hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
   /**
+   * 工具执行后的检查（`.heming/hooks.json` 里 `on: "post"` 的规则，d.345）。
+   *
+   * 它**只补充说明、不改变结果**：工具已经真的跑过了，检查的输出只会附在结果文本后面，
+   * 让模型知道「刚才那次写入之后，仓库自己的检查说了什么」。`null` / 省略 = 没有。
+   */
+  postHooks?:
+    | ((
+        call: { name: string; arguments: string },
+        result: { ok: boolean; text: string },
+      ) => Promise<readonly ToolPostHookNote[]>)
+    | null;
+  /**
    * 只读模式：闸门拒掉一切可能改动的调用，桥也不挂命令工具（两道都上，
    * 因为 `--allow-danger` 与 `--read-only` 同时出现时不能让任何一条路径漏过去）。
    */
@@ -700,6 +713,24 @@ export function createCliTooling(options: {
       }
       if (result.ok && result.writes?.length && onWrite) {
         for (const file of result.writes) onWrite(file);
+      }
+      /*
+       * 执行后的检查（d.345）：仓库可以声明「工具跑完之后再跑一段」，比如写完自动格式化、
+       * 跑一遍相关测试，然后把结论交给模型。它拦不住已经发生的事，所以这里只是把说明
+       * 追加到结果文本后面；自己抛错也一律吞掉——不能把一次成功的调用报成失败。
+       */
+      if (options.postHooks) {
+        try {
+          const notes = await options.postHooks(
+            { name: call.name, arguments: call.arguments },
+            { ok: result.ok, text: result.text ?? "" },
+          );
+          if (notes.length > 0) {
+            return { ...result, text: `${result.text ?? ""}${postHookNoteText(notes)}` };
+          }
+        } catch {
+          // 见上：执行后的检查坏掉，只丢说明，不改结果。
+        }
       }
       return result;
     },

@@ -21,10 +21,13 @@ import {
   TOOL_HOOKS_TMP_REL,
   buildHookPayload,
   interpretHookResult,
+  interpretPostHookResult,
   matchHooks,
   parseHooksConfig,
   type ToolHookDecision,
+  type ToolHookPayload,
   type ToolHookRule,
+  type ToolPostHookNote,
 } from "./hooks.js";
 
 /** 配置加载状态。 */
@@ -87,6 +90,17 @@ export interface ToolHookRunner {
     call: { name: string; arguments: string },
     ctx: ToolHooksRunContext,
   ): Promise<ToolHookDecision>;
+  /**
+   * 工具执行**之后**跑命中的 post hooks（d.345），返回要附在结果后面的说明。
+   *
+   * 永远不会抛错、永远不会改变调用结果：工具已经真的执行过了。没启用/没配规则/
+   * 检查自己坏掉 → 返回空数组或一条说明，调用方照常收口。
+   */
+  runPost(
+    call: { name: string; arguments: string },
+    result: { ok: boolean; text: string },
+    ctx: ToolHooksRunContext,
+  ): Promise<ToolPostHookNote[]>;
   /** 清空缓存（工作区切换/测试用）。 */
   invalidate(): void;
 }
@@ -278,22 +292,27 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
     return { ...state, enabled: isEnabled(workspace) };
   }
 
+  /** 一次 hook 进程的原始结果（或「起不来」的原因）。 */
+  type HookRunOutcome =
+    | { kind: "failed"; reason: string }
+    | { kind: "ran"; exitCode: number | null; stdout: string; stderr: string; timedOut: boolean };
+
   /**
-   * 跑一条 hook。payload 文件在一次判定结束后删除；删除失败只留调试日志，
-   * 不改变判定（判定必须与工具是否执行一致，不能因为清理失败又反过来放行）。
+   * 把 payload 落盘、起子进程、跑完删掉 payload——执行前与执行后两相共用这一段。
+   *
+   * d.345 抽出：post hooks 与 pre hooks 的进程/payload 约定必须**逐字一致**（payload 路径
+   * 作为第一个参数、跑完即删、桥缺失时给明确原因），各写一份迟早会漂。
    */
-  async function runRule(
+  async function execRaw(
     rule: ToolHookRule,
-    index: number,
-    call: { name: string; arguments: string },
-    ctx: ToolHooksRunContext,
+    payload: ToolHookPayload,
     workspace: string,
-  ): Promise<ToolHookDecision> {
+  ): Promise<HookRunOutcome> {
     const fileBridge = deps.getFileBridge();
     const shellBridge = deps.getShellBridge();
     if (!fileBridge || !shellBridge) {
       return {
-        decision: "deny",
+        kind: "failed",
         reason: `hook「${rule.command}」无法执行：运行时缺少${!fileBridge ? "文件桥" : ""}${
           !fileBridge && !shellBridge ? "与" : ""
         }${!shellBridge ? "命令桥" : ""}`,
@@ -307,19 +326,10 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
     );
     if (!payloadAbs) {
       return {
-        decision: "deny",
+        kind: "failed",
         reason: `hook「${rule.command}」无法执行：payload 路径不合法（工作区 ${workspace}）`,
       };
     }
-
-    const payload = buildHookPayload({
-      name: call.name,
-      arguments: call.arguments,
-      workspace,
-      agentId: ctx.agentId,
-      streamId: ctx.streamId,
-      time: new Date(now()),
-    });
 
     let wrote = false;
     try {
@@ -331,7 +341,7 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
       const first = write.results?.[0];
       if (!write.ok || first?.ok === false) {
         return {
-          decision: "deny",
+          kind: "failed",
           reason: `hook「${rule.command}」无法执行：payload 临时文件写入失败（${
             first?.error ?? write.error ?? "未知原因"
           }）`,
@@ -344,15 +354,13 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
         res = await shellBridge.run({
           runId,
           roots,
-          // 命令在工作区根执行；桌面端要求绝对路径（不接受「自己猜一个根」）。
           cwd: workspace,
-          // 契约：命令末尾追加 payload 文件路径作为第一个参数。
           command: `${rule.command} "${payloadAbs}"`,
           timeoutMs: rule.timeoutMs,
         });
       } catch (err) {
         return {
-          decision: "deny",
+          kind: "failed",
           reason: `hook「${rule.command}」执行失败（起不来）：${(err as Error)?.message ?? String(err)}`,
         };
       }
@@ -360,30 +368,29 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
       if (!res.ok) {
         if (res.code === "timeout") {
           return {
-            decision: "deny",
+            kind: "failed",
             reason: `hook「${rule.command}」执行失败（超时，上限 ${rule.timeoutMs}ms）`,
           };
         }
         if (res.code === "aborted") {
-          return {
-            decision: "deny",
-            reason: `hook「${rule.command}」执行被中止：${res.error}`,
-          };
+          return { kind: "failed", reason: `hook「${rule.command}」执行被中止：${res.error}` };
         }
         return {
-          decision: "deny",
+          kind: "failed",
           reason: `hook「${rule.command}」执行失败（${res.code}）：${res.error}`,
         };
       }
 
-      return withRule(
-        rule,
-        index,
-        interpretHookResult(res.exitCode, res.stdout, res.stderr, false),
-      );
+      return {
+        kind: "ran",
+        exitCode: res.exitCode,
+        stdout: res.stdout,
+        stderr: res.stderr,
+        timedOut: false,
+      };
     } catch (err) {
       return {
-        decision: "deny",
+        kind: "failed",
         reason: `hook「${rule.command}」执行失败：${(err as Error)?.message ?? String(err)}`,
       };
     } finally {
@@ -402,6 +409,95 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
         }
       }
     }
+  }
+
+  /**
+   * 跑一条**执行前** hook。payload 文件在一次判定结束后删除；删除失败只留调试日志，
+   * 不改变判定（判定必须与工具是否执行一致，不能因为清理失败又反过来放行）。
+   */
+  async function runRule(
+    rule: ToolHookRule,
+    index: number,
+    call: { name: string; arguments: string },
+    ctx: ToolHooksRunContext,
+    workspace: string,
+  ): Promise<ToolHookDecision> {
+    const outcome = await execRaw(
+      rule,
+      buildHookPayload({
+        name: call.name,
+        arguments: call.arguments,
+        workspace,
+        agentId: ctx.agentId,
+        streamId: ctx.streamId,
+        time: new Date(now()),
+      }),
+      workspace,
+    );
+    if (outcome.kind === "failed") return { decision: "deny", reason: outcome.reason };
+    return withRule(
+      rule,
+      index,
+      interpretHookResult(outcome.exitCode, outcome.stdout, outcome.stderr, outcome.timedOut),
+    );
+  }
+
+  /**
+   * 跑所有命中的**执行后** hook（d.345）。
+   *
+   * 与执行前的关键差别：**这里没有「拒绝」**。工具已经真的执行过了，所以无论检查怎么说，
+   * 工具结果都不会被改；检查的输出以说明的形式附在结果后面回给模型。检查自己坏掉、
+   * 超时、桥缺失，同样只变成一条说明——不能因为「格式化脚本没配好」就把一次成功的写入
+   * 报成失败。
+   */
+  async function runPost(
+    call: { name: string; arguments: string },
+    result: { ok: boolean; text: string },
+    ctx: ToolHooksRunContext,
+  ): Promise<ToolPostHookNote[]> {
+    const workspace = normalizeWorkspace(ctx.workspace);
+    // 未显式启用：一条也不跑（与执行前同一道信任边界）。
+    if (!isEnabled(workspace)) return [];
+    let state: ToolHooksState;
+    try {
+      state = await load(workspace);
+    } catch {
+      return [];
+    }
+    if (state.status !== "ok" || state.hooks.length === 0) return [];
+    const matched = matchHooks(state.hooks, call, workspace, "post");
+    if (matched.length === 0) return [];
+
+    const notes: ToolPostHookNote[] = [];
+    for (const rule of matched) {
+      const ruleIndex = state.hooks.indexOf(rule) + 1;
+      const outcome = await execRaw(
+        rule,
+        buildHookPayload({
+          name: call.name,
+          arguments: call.arguments,
+          workspace,
+          agentId: ctx.agentId,
+          streamId: ctx.streamId,
+          time: new Date(now()),
+          phase: "post",
+          result,
+        }),
+        workspace,
+      );
+      if (outcome.kind === "failed") {
+        notes.push({ command: rule.command, ruleIndex, text: outcome.reason });
+        continue;
+      }
+      const text = interpretPostHookResult(
+        outcome.exitCode,
+        outcome.stdout,
+        outcome.stderr,
+        outcome.timedOut,
+      );
+      if (text) notes.push({ command: rule.command, ruleIndex, text });
+    }
+    return notes;
   }
 
   async function run(
@@ -456,6 +552,7 @@ export function createToolHookRunner(deps: ToolHookRunnerDeps): ToolHookRunner {
   return {
     load,
     run,
+    runPost,
     invalidate: () => {
       cached = null;
     },
@@ -515,12 +612,16 @@ export function describeToolHooksState(state: ToolHooksState): string {
   if (state.hooks.length === 0) {
     lines.push(`已加载 0 条规则（${TOOL_HOOKS_CONFIG_REL} 存在，但没有规则）。`);
   } else {
-    lines.push(`已加载 ${state.hooks.length} 条规则（按配置顺序执行）：`);
+    const preCount = state.hooks.filter((rule) => rule.phase === "pre").length;
+    const postCount = state.hooks.filter((rule) => rule.phase === "post").length;
+    const split = postCount > 0 ? `（执行前 ${preCount} 条、执行后 ${postCount} 条）` : "";
+    lines.push(`已加载 ${state.hooks.length} 条规则${split}（按配置顺序执行）：`);
     state.hooks.forEach((rule, index) => {
       const path = rule.path ? `路径 ${rule.path}` : "任意路径";
+      const when = rule.phase === "post" ? "执行后" : "执行前";
       const command = rule.command.length > 100 ? `${rule.command.slice(0, 99)}…` : rule.command;
       lines.push(
-        `  ${index + 1}. 工具 ${rule.tool.join("、")} · ${path} · 命令 ${command} · 超时 ${
+        `  ${index + 1}. ${when} · 工具 ${rule.tool.join("、")} · ${path} · 命令 ${command} · 超时 ${
           rule.timeoutMs || DEFAULT_HOOK_TIMEOUT_MS
         }ms`,
       );
@@ -533,6 +634,7 @@ export function describeToolHooksState(state: ToolHooksState): string {
   }
   lines.push(
     "判定：退出码 0 放行；2 拒绝（原因取 stdout/stderr 第一行）；其它非零或超时一律按拒绝。stdout 为 {\"decision\":\"allow|deny\",\"reason\":\"...\"} 时优先按它。",
+    "执行后规则（on: \"post\"）拦不住调用：它们的结果只作说明附在工具结果后面回给模型；退出码 2 表示「已执行，但检查指出问题」。",
   );
   return lines.join("\n");
 }

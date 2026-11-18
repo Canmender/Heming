@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 工作区钩子的 CLI 侧：装载、描述、判定、以及与工具桥的接线。
  *
  * 大部分用例注入假的「进程执行」，只验逻辑（匹配、顺序、payload、文案）；
@@ -15,6 +15,7 @@ import {
   cliHookDeniedText,
   cliHooksConfigPath,
   createCliHookRunner,
+  createCliPostHookRunner,
   describeCliHooks,
   loadCliHooks,
   type CliHookSet,
@@ -40,7 +41,7 @@ function workspaceWith(text: string): string {
 
 /** 造一份「已解析」的钩子集，省得每个用例都先落一份文件。 */
 function hookSetOf(
-  hooks: Array<{ tool: string | string[]; path?: string; command: string; timeoutMs?: number }>,
+  hooks: Array<{ tool: string | string[]; path?: string; command: string; timeoutMs?: number; on?: "pre" | "post" }>,
   enabled = true,
 ): CliHookSet {
   return {
@@ -49,6 +50,7 @@ function hookSetOf(
       ...(rule.path !== undefined ? { path: rule.path } : {}),
       command: rule.command,
       timeoutMs: rule.timeoutMs ?? 10_000,
+      phase: rule.on ?? "pre",
     })),
     source: ".heming/hooks.json",
     enabled,
@@ -374,5 +376,90 @@ describe("工具桥里的钩子（createCliTooling）", () => {
     );
     expect(seen[0]).toContain(abs);
     expect(existsSync(path.join(dir, "b.txt"))).toBe(true);
+  });
+});
+describe("执行后的检查（d.345）", () => {
+  const ctx = (dir: string) => ({ cwd: dir, streamId: "s1" });
+
+  it("没有 on: post 的规则时返回 null，调用方完全跳过", () => {
+    const dir = tmpDir();
+    const set = hookSetOf([{ tool: "file_write", command: "node pre.js" }]);
+    expect(createCliPostHookRunner(set, ctx(dir))).toBeNull();
+  });
+
+  it("没启用（没有 --trust-hooks）时也不建执行后检查", () => {
+    const dir = tmpDir();
+    const set = hookSetOf([{ tool: "file_write", command: "node post.js", on: "post" }], false);
+    expect(createCliPostHookRunner(set, ctx(dir))).toBeNull();
+  });
+
+  it("跑执行后规则：退出码 2 变成说明，带命令与序号，不改变调用结果", async () => {
+    const dir = tmpDir();
+    const set = hookSetOf([
+      { tool: "file_write", command: "node pre.js" },
+      { tool: "file_write", command: "node post.js", on: "post" },
+    ]);
+    const run = fakeProcess({ exitCode: 2, stdout: "改完没跑格式化", stderr: "", timedOut: false });
+    const runner = createCliPostHookRunner(set, { ...ctx(dir), runtime: { runProcess: run.run } });
+    expect(runner).not.toBeNull();
+
+    const notes = await runner!({ name: "file_write", arguments: '{"path":"a.ts"}' }, { ok: true, text: "写入成功" });
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ command: "node post.js", ruleIndex: 2 });
+    expect(notes[0]!.text).toContain("工具已执行");
+    expect(notes[0]!.text).toContain("改完没跑格式化");
+    expect(run.calls).toHaveLength(1);
+  });
+
+  it("执行前规则不会在 runPost 里被重跑", async () => {
+    const dir = tmpDir();
+    const set = hookSetOf([{ tool: "file_write", command: "node pre.js" }]);
+    const run = fakeProcess({ exitCode: 2, stdout: "不该跑", stderr: "", timedOut: false });
+    // 上面那个用例已证明没有 post 规则会返回 null；这里手工绕开守卫，验匹配层也不串。
+    const runner = createCliPostHookRunner({ ...set, hooks: [...set.hooks, { phase: "post" as const, tool: ["file_read"], command: "node other.js", timeoutMs: 10_000 }] }, { ...ctx(dir), runtime: { runProcess: run.run } });
+    expect(await runner!({ name: "file_write", arguments: "{}" }, { ok: true, text: "ok" })).toEqual([]);
+    expect(run.calls).toHaveLength(0);
+  });
+});
+
+describe("工具桥里的执行后检查（d.345）", () => {
+  it("说明附在结果后面，结果本身的 ok 不变", async () => {
+    const dir = tmpDir();
+    writeFileSync(path.join(dir, "a.txt"), "内容", "utf8");
+    const tooling = createCliTooling({
+      cwd: dir,
+      allowDanger: false,
+      conversationId: "post-hook-test",
+      postHooks: async () => [{ command: "node post.js", ruleIndex: 1, text: "检查说：没格式化" }],
+      rewind: false,
+    });
+
+    const result = await tooling.toolBridge.execute({ name: "file_read", arguments: JSON.stringify({ path: "a.txt" }) });
+
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("内容");
+    expect(result.text).toContain("【执行后的本机检查】");
+    expect(result.text).toContain("检查说：没格式化");
+  });
+
+  it("执行后检查自己抛错时，调用结果原样返回（不能把成功报成失败）", async () => {
+    const dir = tmpDir();
+    writeFileSync(path.join(dir, "a.txt"), "内容", "utf8");
+    const tooling = createCliTooling({
+      cwd: dir,
+      allowDanger: false,
+      conversationId: "post-hook-test",
+      postHooks: async () => {
+        throw new Error("检查脚本炸了");
+      },
+      rewind: false,
+    });
+
+    const result = await tooling.toolBridge.execute({ name: "file_read", arguments: JSON.stringify({ path: "a.txt" }) });
+
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("内容");
+    expect(result.text).not.toContain("检查脚本炸了");
   });
 });

@@ -30,10 +30,13 @@ import {
   buildHookPayload,
   hookDeniedText,
   interpretHookResult,
+  interpretPostHookResult,
   matchHooks,
   parseHooksConfig,
   type ToolHookDecision,
+  type ToolHookPayload,
   type ToolHookRule,
+  type ToolPostHookNote,
 } from "../../../packages/web/src/lib/hitl/hooks.js";
 
 /** 配置文件大小上限：一份钩子清单不该有几百 KB。 */
@@ -120,11 +123,15 @@ export async function loadCliHooks(cwd: string, enabled: boolean): Promise<CliHo
 export function describeCliHooks(set: CliHookSet): string {
   const count = set.hooks.length;
   if (count === 0) return `工作区钩子：${set.source} 里没有规则（来自 ${set.source}）`;
+  const pre = set.hooks.filter((rule) => rule.phase === "pre").length;
+  const post = count - pre;
+  // 执行前后分开数：只看条数会让人以为「写完再跑检查」也在动手之前。
+  const split = post > 0 ? `（执行前 ${pre}、执行后 ${post}）` : "";
   const state = set.enabled
     ? "已启用，命中的工具调用会先跑本机检查"
     : "未启用（加 --trust-hooks 才会执行这些脚本）";
   const capped = count >= MAX_TOOL_HOOKS ? `（已达上限 ${MAX_TOOL_HOOKS} 条）` : "";
-  return `工作区钩子：${count} 条${capped}；${state}（来自 ${set.source}）`;
+  return `工作区钩子：${count} 条${capped}${split}；${state}（来自 ${set.source}）`;
 }
 
 /** 一次 hook 进程的执行结果（`timedOut` 单独标出来，判定优先级最高）。 */
@@ -229,6 +236,53 @@ export interface CliHookRuntime {
   random?: () => number;
 }
 
+/** 一次 hook 进程的原始结果，或「起不来」的原因。 */
+type CliHookOutcome =
+  | { kind: "failed"; reason: string }
+  | { kind: "ran"; result: HookProcessResult };
+
+/**
+ * 落 payload、跑命令、删 payload——执行前与执行后两相共用。
+ *
+ * d.345 抽出：两相的 payload 契约（路径作为第一个参数、跑完即删）必须逐字一致，
+ * 各写一份迟早会漂；而执行前那套是被单测与真机冒烟钉住的，不能为了让执行后能复用
+ * 就悄悄改口径。
+ */
+async function execHookRule(
+  rule: ToolHookRule,
+  payload: ToolHookPayload,
+  workspace: string,
+  runProcess: typeof runHookProcess,
+  now: () => number,
+  random: () => number,
+): Promise<CliHookOutcome> {
+  const runId = newRunId(now(), random);
+  const payloadAbs = `${workspace}/${payloadRelPath(runId)}`;
+
+  try {
+    await fs.mkdir(path.dirname(payloadAbs), { recursive: true });
+    await fs.writeFile(payloadAbs, JSON.stringify(payload, null, 2), "utf8");
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: `hook「${rule.command}」无法执行：payload 临时文件写入失败（${messageOf(error)}）`,
+    };
+  }
+
+  try {
+    const result = await runProcess(`${rule.command} "${payloadAbs}"`, workspace, rule.timeoutMs);
+    return { kind: "ran", result };
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: `hook「${rule.command}」执行失败（起不来）：${messageOf(error)}`,
+    };
+  } finally {
+    // 删不掉不影响判定，但别把工作区的临时目录越攒越脏。
+    await fs.rm(payloadAbs, { force: true }).catch(() => undefined);
+  }
+}
+
 /**
  * 造一个「调用前跑钩子」的函数。
  *
@@ -239,7 +293,7 @@ export function createCliHookRunner(
   set: CliHookSet,
   options: { cwd: string; streamId: string; agentId?: string; runtime?: CliHookRuntime },
 ): ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null {
-  if (!set.enabled || set.hooks.length === 0) return null;
+  if (!set.enabled || !set.hooks.some((rule) => rule.phase === "pre")) return null;
 
   const workspace = path.resolve(options.cwd).replace(/\\/g, "/").replace(/\/+$/, "");
   const runProcess = options.runtime?.runProcess ?? runHookProcess;
@@ -247,15 +301,11 @@ export function createCliHookRunner(
   const random = options.runtime?.random ?? Math.random;
 
   return async (call) => {
-    const matched = matchHooks(set.hooks, call, workspace);
+    const matched = matchHooks(set.hooks, call, workspace, "pre");
     if (matched.length === 0) return { decision: "allow" };
 
     for (const rule of matched) {
       const ruleIndex = set.hooks.indexOf(rule) + 1;
-      const runId = newRunId(now(), random);
-      const rel = payloadRelPath(runId);
-      const payloadAbs = `${workspace}/${rel}`;
-
       // payload 里带的是模型实际发来的参数原文（不二次序列化），hook 脚本能逐字核对。
       const payload = buildHookPayload({
         name: call.name,
@@ -266,37 +316,78 @@ export function createCliHookRunner(
         time: new Date(now()),
       });
 
-      let wrote = false;
-      try {
-        await fs.mkdir(path.dirname(payloadAbs), { recursive: true });
-        await fs.writeFile(payloadAbs, JSON.stringify(payload, null, 2), "utf8");
-        wrote = true;
-      } catch (error) {
-        return {
-          decision: "deny",
-          reason: `hook「${rule.command}」无法执行：payload 临时文件写入失败（${messageOf(error)}）`,
-          ruleIndex,
-          command: rule.command,
-        };
+      const outcome = await execHookRule(rule, payload, workspace, runProcess, now, random);
+      if (outcome.kind === "failed") {
+        return { decision: "deny", reason: outcome.reason, ruleIndex, command: rule.command };
       }
-
-      try {
-        const result = await runProcess(`${rule.command} "${payloadAbs}"`, workspace, rule.timeoutMs);
-        const verdict = withRule(
-          rule,
-          ruleIndex,
-          interpretHookResult(result.exitCode, result.stdout, result.stderr, result.timedOut),
-        );
-        if (verdict.decision === "deny") return verdict;
-      } finally {
-        if (wrote) {
-          // 删不掉不影响判定，但别把工作区的临时目录越攒越脏。
-          await fs.rm(payloadAbs, { force: true }).catch(() => undefined);
-        }
-      }
+      const verdict = withRule(
+        rule,
+        ruleIndex,
+        interpretHookResult(
+          outcome.result.exitCode,
+          outcome.result.stdout,
+          outcome.result.stderr,
+          outcome.result.timedOut,
+        ),
+      );
+      if (verdict.decision === "deny") return verdict;
     }
 
     return { decision: "allow" };
+  };
+}
+
+/**
+ * 造一个「工具执行后跑钩子」的函数（d.345，`hooks.json` 里 `on: "post"` 的规则）。
+ *
+ * 返回 `null`：没有配置、没启用、或一条 post 规则都没有——调用方据此完全跳过。
+ * 返回的函数**永不抛错、永不改变调用结果**：工具已经真的执行过了，检查的输出只作为
+ * 说明附在结果后面（由 `postHookNoteText` 拼）。检查自己坏掉/超时/起不来，也只是
+ * 变成一条说明，不能把一次成功的写入报成失败。
+ */
+export function createCliPostHookRunner(
+  set: CliHookSet,
+  options: { cwd: string; streamId: string; agentId?: string; runtime?: CliHookRuntime },
+): ((call: { name: string; arguments: string }, result: { ok: boolean; text: string }) => Promise<ToolPostHookNote[]>) | null {
+  if (!set.enabled || !set.hooks.some((rule) => rule.phase === "post")) return null;
+
+  const workspace = path.resolve(options.cwd).replace(/\\/g, "/").replace(/\/+$/, "");
+  const runProcess = options.runtime?.runProcess ?? runHookProcess;
+  const now = options.runtime?.now ?? Date.now;
+  const random = options.runtime?.random ?? Math.random;
+
+  return async (call, result) => {
+    const matched = matchHooks(set.hooks, call, workspace, "post");
+    if (matched.length === 0) return [];
+
+    const notes: ToolPostHookNote[] = [];
+    for (const rule of matched) {
+      const ruleIndex = set.hooks.indexOf(rule) + 1;
+      const payload = buildHookPayload({
+        name: call.name,
+        arguments: call.arguments,
+        workspace,
+        agentId: options.agentId ?? "cli",
+        streamId: options.streamId,
+        time: new Date(now()),
+        phase: "post",
+        result,
+      });
+
+      const outcome = await execHookRule(rule, payload, workspace, runProcess, now, random);
+      if (outcome.kind === "failed") {
+        notes.push({ command: rule.command, ruleIndex, text: outcome.reason });
+        continue;
+      }
+      const text = interpretPostHookResult(
+        outcome.result.exitCode,
+        outcome.result.stdout,
+        outcome.result.stderr,
+        outcome.result.timedOut,
+      );
+      if (text) notes.push({ command: rule.command, ruleIndex, text });
+    }
+    return notes;
   };
 }
 

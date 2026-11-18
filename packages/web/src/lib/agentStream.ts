@@ -10,7 +10,7 @@ import {
 import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
-import { hookDeniedText } from "./hitl/hooks.js";
+import { hookDeniedText, postHookNoteText } from "./hitl/hooks.js";
 import { supportsKind } from "./capabilityNotice.js";
 import { IMAGE_TOKEN_COST, estimateRowsTokens, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
@@ -615,6 +615,21 @@ export interface TriggerDeps {
     call: { name: string; arguments: string },
     ctx: { agentId: string; streamId: string },
   ) => Promise<{ decision: "allow" | "deny"; reason?: string }>;
+  /**
+   * 工具执行**之后**的确定性 hooks（d.345，`hooks.json` 里 `on: "post"` 的规则）。
+   *
+   * 调用时机：`bridge.execute` 已经返回、且这次调用真的执行过（被闸门/hooks 拒掉的不跑——
+   * 「没发生的事」没有执行后可言）。返回的说明会附在工具结果文本后面回给模型，供它判断
+   * 「还要不要补一步」（例如格式化脚本说"已重新排版"、测试脚本说"3 个用例失败"）。
+   *
+   * 与 `preToolUse` 的语义差别必须写清：**这里没有拒绝**。工具已经跑完了，谎称没跑、
+   * 把成功改成失败都会让模型做出错误判断。抛错也一律吞掉，只当没有说明。
+   */
+  postToolUse?: (
+    call: { name: string; arguments: string },
+    result: { ok: boolean; text: string },
+    ctx: { agentId: string; streamId: string },
+  ) => Promise<{ command: string; ruleIndex: number; text: string }[]>;
   /**
    * 轮次收尾回调（设计 §3/§6）：成功 finish 记 `"ok"`；中断/失败但已有部分文本记 `"partial"`
    * （触发端据此只写工作记忆，不沉淀长期记忆）；完全无文本不回调。
@@ -1874,16 +1889,38 @@ export function runAgentMentions(
               const callKey = `${call.function.name}\u0000${call.function.arguments}`;
               const repeat = repeatedCalls.get(callKey) ?? 0;
               repeatedCalls.set(callKey, repeat + 1);
-              const tracked = job.then((result) => {
+              const tracked = job.then(async (result) => {
                 // 只在真正执行过时记耗时（被拒/复用缓存的调用没有「执行」这一段）。
                 // hooks 拒绝同样没有执行，不能记成一次耗时调用。
                 if (gated?.kind !== "deny" && !hookDenials.has(i)) {
                   toolMs.set(call.id, Math.max(0, Date.now() - startedAt));
                 }
-                if (repeat === 0) return result;
+                /**
+                 * 执行后检查（d.345）：工具已经真的跑完了才跑，输出只作为说明附加。
+                 *
+                 * 适用范围与执行前一致：被闸门/hooks 拒掉的调用不跑（没执行就没有"执行后"）。
+                 * 检查自己抛错时按"没有说明"处理——绝不能因为一条格式化脚本配错，
+                 * 就把一次成功的写入改成失败回报给模型。
+                 */
+                let finalResult = result;
+                if (deps.postToolUse && gated?.kind !== "deny" && !hookDenials.has(i)) {
+                  try {
+                    const notes = await deps.postToolUse(
+                      { name: call.function.name, arguments: call.function.arguments },
+                      { ok: result.ok === true, text: result.text ?? "" },
+                      { agentId: m.agentId, streamId },
+                    );
+                    if (notes.length > 0) {
+                      finalResult = { ...result, text: `${result.text ?? ""}${postHookNoteText(notes)}` };
+                    }
+                  } catch {
+                    // 执行后检查的失败不影响工具结果。
+                  }
+                }
+                if (repeat === 0) return finalResult;
                 return {
-                  ...result,
-                  text: `（提醒：这次调用的参数与本轮第 ${repeat} 次完全相同。如果需要看到最新状态，请先说明你在等什么变化；如果只是重复确认，可以直接用上面的结果。）\n${result.text}`,
+                  ...finalResult,
+                  text: `（提醒：这次调用的参数与本轮第 ${repeat} 次完全相同。如果需要看到最新状态，请先说明你在等什么变化；如果只是重复确认，可以直接用上面的结果。）\n${finalResult.text}`,
                 };
               });
               executed.set(call.id, tracked);

@@ -17,7 +17,7 @@ import { collectCliProjectRules, describeCliProjectRules } from "./projectRules.
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { describeCliContext } from "./contextBudget.js";
-import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
+import { createCliHookRunner, createCliPostHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { APPROVAL_ANSWER_HINTS, createTerminalApprover } from "./approvals.js";
 import { describeCliCommandUse, describeCliCommands, loadCliCommands, parseCliCommandInvocation, resolveCliCommand, summarizeCliCommands } from "./commands.js";
 import { applyCliRewind, describeCliRewindResult, describeCliRewinds, dropCliRewindRuns, listCliRewinds, planCliRewind } from "./rewind.js";
@@ -515,6 +515,10 @@ async function main(argv: string[]): Promise<number> {
   const hookRunner = hookSet
     ? createCliHookRunner(hookSet, { cwd, streamId: `cli-${Date.now().toString(36)}` })
     : null;
+  // 执行后的检查（d.345）：同一份配置里 `on: "post"` 的规则，跑完工具之后补一段说明。
+  const postHookRunner = hookSet
+    ? createCliPostHookRunner(hookSet, { cwd, streamId: `cli-${Date.now().toString(36)}` })
+    : null;
   if (hookSet) {
     const line = describeCliHooks(hookSet);
     if (line) writeErr(`[heming] ${line}\n`);
@@ -635,6 +639,7 @@ async function main(argv: string[]): Promise<number> {
     allowDanger: options.allowDanger,
     ...(workspaceRules ? { workspaceRules } : {}),
     ...(hookRunner ? { hooks: hookRunner } : {}),
+    ...(postHookRunner ? { postHooks: postHookRunner } : {}),
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(approver ? { ask: approver.ask } : {}),

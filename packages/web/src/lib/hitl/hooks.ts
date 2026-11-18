@@ -42,6 +42,15 @@ export const MAX_HOOK_TIMEOUT_MS = 15_000;
 /** 拒绝原因的最大长度（回灌给模型的文本要短到能读完）。 */
 export const MAX_HOOK_REASON_CHARS = 300;
 
+/** 执行后检查（d.345）能看到的工具结果上限（payload 里的 `result.text`）。 */
+export const POST_HOOK_RESULT_MAX_CHARS = 4000;
+
+/** 一条执行后检查的说明最长多少字（回灌给模型的文本必须短）。 */
+export const POST_HOOK_NOTE_MAX_CHARS = 400;
+
+/** 一次工具执行最多回灌几条执行后检查的说明（再多就是刷屏，不是提醒）。 */
+export const MAX_POST_HOOK_NOTES = 5;
+
 /**
  * 一条已解析的 hook 规则。
  *
@@ -49,6 +58,14 @@ export const MAX_HOOK_REASON_CHARS = 300;
  * 匹配时再归一化——展示配置时不应悄悄改掉用户写的东西。
  */
 export interface ToolHookRule {
+  /**
+   * 什么时候跑：`pre` = 执行前（可以拒绝，默认）、`post` = 执行后（只补充信息，拦不住）。
+   *
+   * d.345：PostToolUse。之前只有执行前检查，"写完跑一遍格式化 / 跑一遍测试再把结果
+   * 告诉模型" 这类需求只能靠模型自觉；执行后检查补上这一环，且**永远不改变工具结果**
+   * （工具已经真的跑过了，谎称没跑比不检查更糟）。
+   */
+  phase: "pre" | "post";
   /** 精确工具名或 `*`（不做隐式通配：`mcp__*` 只匹配字面量 `mcp__*`）。 */
   tool: string[];
   /** 可选路径 glob（相对工作区根，正斜杠）。 */
@@ -72,7 +89,8 @@ export interface HookCall {
 
 /** 一次 payload 的结构（写进工作区里的临时 JSON 文件）。 */
 export interface ToolHookPayload {
-  event: "PreToolUse";
+  /** `post` 规则的 payload 会带上 `result`；`pre` 规则没有（那时还没执行）。 */
+  event: "PreToolUse" | "PostToolUse";
   tool: { name: string; arguments: string };
   /** 工作区根的绝对 posix 路径。 */
   workspace: string;
@@ -80,6 +98,8 @@ export interface ToolHookPayload {
   streamId: string;
   /** ISO 时间戳。 */
   time: string;
+  /** 仅执行后检查（d.345）：这次调用的结果。文本已截断，够脚本判断成败与大概内容。 */
+  result?: { ok: boolean; text: string };
 }
 
 /** hook 的判定结果（`reason` 只在拒绝时有意义）。 */
@@ -214,7 +234,28 @@ export function parseHooksConfig(text: string): ParseHooksResult {
       timeoutMs = Math.round(rule.timeoutMs);
     }
 
+    /**
+     * `on`（d.345）：缺省 `pre`。
+     *
+     * 刻意不接受 `"before"`/`"after"`/大小写变体这类「差不多」的写法：这份配置是安全
+     * 边界，写错时静默按 pre 处理会让一条本想「执行后检查」的规则变成「执行前拦截」，
+     * 行为完全反过来。宁可启动时报错，让人改清楚。
+     */
+    let phase: "pre" | "post" = "pre";
+    if (rule.on !== undefined) {
+      if (rule.on !== "pre" && rule.on !== "post") {
+        return {
+          ok: false,
+          error: `${where}的 on 只能是 "pre"（执行前，缺省）或 "post"（执行后）：收到 ${JSON.stringify(
+            rule.on,
+          )}。`,
+        };
+      }
+      phase = rule.on;
+    }
+
     hooks.push({
+      phase,
       tool,
       ...(path !== undefined ? { path } : {}),
       command,
@@ -337,16 +378,21 @@ export function workspaceRelativePath(candidate: string, workspace: string): str
  *
  * 工具名是**精确匹配**或 `*`：`mcp__*` 不会隐式匹配 `mcp__foo`——隐式通配会让
  * 用户以为只拦了前缀，实际拦了一片；要拦前缀就写多条或明确列出。
+ *
+ * `phase` 缺省 `pre`：执行前与执行后是两套不同的调用方（一个在闸门里、一个在结果收口时），
+ * 各自只跑自己那一相，不能混。
  */
 export function matchHooks(
   hooks: readonly ToolHookRule[],
   call: HookCall,
   workspace: string,
+  phase: "pre" | "post" = "pre",
 ): ToolHookRule[] {
   const toolName = typeof call?.name === "string" ? call.name : "";
   const candidate = extractToolPath(call?.arguments ?? "");
   const rel = candidate ? workspaceRelativePath(candidate, workspace) : null;
   return hooks.filter((rule) => {
+    if (rule.phase !== phase) return false;
     const toolHit = rule.tool.includes("*") || rule.tool.includes(toolName);
     if (!toolHit) return false;
     if (!rule.path) return true;
@@ -368,10 +414,14 @@ export function buildHookPayload(input: {
   agentId: string;
   streamId: string;
   time?: Date;
+  /** d.345：执行后检查。`post` 时调用方必须给 `result`，`pre` 时给了也忽略。 */
+  phase?: "pre" | "post";
+  result?: { ok: boolean; text: string };
 }): ToolHookPayload {
   const time = input.time instanceof Date ? input.time : new Date();
-  return {
-    event: "PreToolUse",
+  const phase = input.phase === "post" ? "post" : "pre";
+  const payload: ToolHookPayload = {
+    event: phase === "post" ? "PostToolUse" : "PreToolUse",
     tool: {
       name: String(input.name ?? ""),
       arguments: typeof input.arguments === "string" ? input.arguments : "",
@@ -381,6 +431,17 @@ export function buildHookPayload(input: {
     streamId: String(input.streamId ?? ""),
     time: Number.isNaN(time.getTime()) ? new Date().toISOString() : time.toISOString(),
   };
+  if (phase === "post" && input.result) {
+    const text = String(input.result.text ?? "");
+    const chars = Array.from(text);
+    payload.result = {
+      ok: input.result.ok === true,
+      text: chars.length > POST_HOOK_RESULT_MAX_CHARS
+        ? `${chars.slice(0, POST_HOOK_RESULT_MAX_CHARS).join("")}…（结果已截断）`
+        : text,
+    };
+  }
+  return payload;
 }
 
 /**
@@ -448,6 +509,83 @@ export function interpretHookResult(
     decision: "deny",
     reason: `hook 执行失败（退出码 ${exitCode}）${detail ? `：${detail}` : ""}`,
   };
+}
+
+/**
+ * 解释一次**执行后检查**的结果（d.345）。
+ *
+ * 与执行前的语义刻意不同：**这里没有「拒绝」**——工具已经真的跑过了，谎称没跑、
+ * 或者把已落盘的操作说成被拒，都比不检查更糟。所以：
+ *
+ * - 退出码 0 且没有输出 → 什么都不说（脚本只是确认了一下，不需要打扰模型）；
+ * - 退出码 0 有输出 → 把第一行当说明带回去（例如「格式化已完成」「测试通过」）；
+ * - 退出码 2 → 说明「工具已执行，但本机检查指出问题」（Claude Code 同口径：post hook
+ *   用 exit 2 表达"结果有问题"）；
+ * - 其它非零 / 超时 / 被信号杀 → 说明「检查没跑完」，同样不改工具结果。
+ *
+ * stdout 是 `{"note":"..."}` 或 `{"feedback":"..."}` 时优先用那个字符串。
+ */
+export function interpretPostHookResult(
+  exitCode: number | null,
+  stdout: string,
+  stderr: string,
+  timedOut: boolean,
+): string | null {
+  if (timedOut) return "执行后的本机检查超时，没有跑完（这不会改变上面那次调用的结果）。";
+  const machine = parseStdoutNote(stdout);
+  if (machine) return machine;
+  if (exitCode === 0) return firstLine(stdout, POST_HOOK_NOTE_MAX_CHARS) || null;
+  if (exitCode === 2) {
+    const detail = firstLine(stdout, POST_HOOK_NOTE_MAX_CHARS) || firstLine(stderr, POST_HOOK_NOTE_MAX_CHARS);
+    return `工具已执行，但本机检查指出问题：${detail || "（脚本没有给出原因）"}`;
+  }
+  if (exitCode === null) return "执行后的本机检查被信号终止（这不会改变上面那次调用的结果）。";
+  const detail = firstLine(stderr, POST_HOOK_NOTE_MAX_CHARS) || firstLine(stdout, POST_HOOK_NOTE_MAX_CHARS);
+  return `执行后的本机检查失败（退出码 ${exitCode}）${detail ? `：${detail}` : ""}`;
+}
+
+/** stdout 里的机器可读说明：`{"note":"..."}` 或 `{"feedback":"..."}`。 */
+function parseStdoutNote(stdout: string): string | null {
+  const raw = String(stdout ?? "").trim();
+  if (!raw.startsWith("{") || !raw.endsWith("}")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  const value = typeof obj.note === "string" ? obj.note : typeof obj.feedback === "string" ? obj.feedback : "";
+  const text = firstLine(value, POST_HOOK_NOTE_MAX_CHARS);
+  return text || null;
+}
+
+/** 一条执行后检查的说明（规则信息只用于让人看出「是谁说的」）。 */
+export interface ToolPostHookNote {
+  command: string;
+  ruleIndex: number;
+  text: string;
+}
+
+/**
+ * 把若干条执行后检查的说明拼成附在工具结果后面的段落。
+ *
+ * 明确写「上面那次调用已经执行」：模型看到"检查指出问题"很容易理解成"被拦下了"，
+ * 于是重跑一遍——那会真的重复执行一次写操作。
+ */
+export function postHookNoteText(notes: readonly ToolPostHookNote[]): string {
+  if (notes.length === 0) return "";
+  const shown = notes.slice(0, MAX_POST_HOOK_NOTES);
+  const lines = ["", "【执行后的本机检查】", "下面这些检查在**上面那次调用已经执行之后**才跑，它们不改变调用结果："];
+  for (const note of shown) {
+    const command = note.command.length > 80 ? `${note.command.slice(0, 79)}…` : note.command;
+    lines.push(`- 第 ${note.ruleIndex} 条「${oneLine(command)}」：${oneLine(note.text)}`);
+  }
+  if (notes.length > shown.length) {
+    lines.push(`- 另有 ${notes.length - shown.length} 条检查说明没有展开（上限 ${MAX_POST_HOOK_NOTES} 条）。`);
+  }
+  return lines.join("\n");
 }
 
 /**

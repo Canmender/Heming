@@ -666,6 +666,7 @@ heming mcp serve --cwd D:/repo
 | `match.path` | 可选，写工具目标路径的 glob（相对工作区根、正斜杠） |
 | `command` | 本机命令；调用时**末尾追加 payload 文件的绝对路径**作为第一个参数 |
 | `timeoutMs` | 可选，夹在 1 毫秒到 15 秒之间；默认 10 秒 |
+| `on` | 可选，`"pre"`（缺省，动手之前，能拒绝）或 `"post"`（执行之后，只补充说明）。详见下文「执行之后也跑一段」 |
 
 payload 是个 JSON 文件（`.heming/hooks/.tmp/<runId>.json`，跑完即删），形如：
 
@@ -695,6 +696,47 @@ payload 是个 JSON 文件（`.heming/hooks/.tmp/<runId>.json`，跑完即删）
 被拒绝时工具**不会执行**，回给模型的文案里明写「该操作未执行，文件与系统状态未被修改」，
 并说明这是仓库里的检查拒绝的、不是用户的选择——否则模型会当成偶发失败反复重试。
 
+### 执行之后也跑一段：`on: "post"`
+
+有些事只能在动手之后做：写完自动格式化、跑一遍相关测试、生成物存在性检查。给规则加上
+`"on": "post"` 就变成执行后检查——**它拦不住已经发生的调用**，结论会作为一段说明附在工具
+结果后面，模型能读到，但那次调用该算成功还是失败不受影响。
+
+```json
+{
+  "hooks": [
+    { "match": { "tool": "file_write" }, "command": "node .heming/format-and-test.mjs", "on": "post" }
+  ]
+}
+```
+
+执行后 payload 的 `event` 是 `PostToolUse`，多一个 `result` 字段：
+
+```json
+{
+  "event": "PostToolUse",
+  "tool": { "name": "file_write", "arguments": "{\"path\":\"src/a.ts\",\"content\":\"…\"}" },
+  "workspace": "D:/repo",
+  "agentId": "cli",
+  "streamId": "cli-xxxx",
+  "time": "2026-11-18T08:44:00.000Z",
+  "result": { "ok": true, "text": "已写入 src/a.ts（共 42 行）" }
+}
+```
+
+`result.text` 是刚才那次工具调用的真实结果（超过 4000 字会截断），脚本据此决定要不要吭声。
+
+| 结果 | 说明里写什么 |
+| --- | --- |
+| 退出码 `0` 且 stdout 有内容 | 取 stdout 第一行作为一句提醒 |
+| stdout 是 `{"note":"…"}` 或 `{"feedback":"…"}` | 用那段文字（最长 400 字） |
+| 退出码 `2` | 「工具已执行，但本机检查指出问题：…」 |
+| 其它退出码 / 超时 / 信号 | 「执行后的本机检查失败/超时/被终止…」 |
+| 退出码 `0` 且没有输出 | 不打扰模型（什么都不附） |
+
+一次调用最多附 5 条说明。执行后检查自己抛错、超时、起不来，都只会变成一条说明——**不会把
+一次成功的写入报成失败**。
+
 与桌面端唯一有意的差异：**默认不执行仓库里的脚本**。`.heming/hooks.json` 跟着仓库走，
 克隆一个陌生仓库不该在你敲下 `heming run` 时自动在你机器上执行命令，所以要生效必须显式加
 `--trust-hooks`。加了之后，配置写坏了就**不启动**（JSON 错、超过 256 KB、同名路径是目录），
@@ -715,8 +757,8 @@ heming mcp serve --cwd D:/repo --trust-hooks
 [heming] 工作区钩子：2 条；未启用（加 --trust-hooks 才会执行这些脚本）（来自 .heming/hooks.json）
 ```
 
-钩子只覆盖 `PreToolUse` 这一类事件，且命令本身没有额外的白名单或沙箱——`--trust-hooks`
-等于「你让它跑什么它就跑什么」，只在该仓库值得信任时打开。
+钩子覆盖两类事件：`on: "pre"`（缺省，动手之前，能拒绝）与 `on: "post"`（执行之后，只补充说明）。
+命令本身没有额外的白名单或沙箱——`--trust-hooks` 等于「你让它跑什么它就跑什么」，只在该仓库值得信任时打开。
 ## 只读模式：`--read-only`
 
 只想让和鸣「先看看、别动手」时用它。`run` 与 `mcp serve` 都认：

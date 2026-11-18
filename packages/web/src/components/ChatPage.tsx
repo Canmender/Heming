@@ -3169,6 +3169,21 @@ export function ChatPage({
           streamId: ctx.streamId,
         });
       },
+      /**
+       * 工具执行后的确定性 hooks（PostToolUse，d.345）：`hooks.json` 里 `on: "post"` 的规则。
+       *
+       * 只把说明附在结果后面，不改变结果（工具已经真的跑过了）。运行器内部保证不抛错、
+       * 未启用时一条也不跑，所以这里不需要再包 try/catch。
+       */
+      postToolUse: async (call, result, ctx) => {
+        const workspace =
+          useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace ?? "";
+        return toolHooksRef.current!.runPost(call, result, {
+          workspace,
+          agentId: ctx.agentId,
+          streamId: ctx.streamId,
+        });
+      },
       // 轮次收尾写记忆（设计 §3）：成功轮次走 recordTurn（Working + 显式抽取 + 6 轮沉淀）；
       // 中断/失败只记 Working 并标 partial，不沉淀长期记忆。全程静默，绝不影响发送与流式渲染。
       // appendTurn 本身不判总开关，故这里先看 settings.enabled（关闭=不记录也不召回）。
