@@ -1037,6 +1037,55 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("保存来源设置之后，余额卡与走向图也跟着重读（写命令会动到 Key 和限额）", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.change(screen.getByLabelText("来源分发策略"), { target: { value: "rotate" } });
+    fireEvent.change(screen.getByLabelText("错误处理"), { target: { value: "pass" } });
+    calls.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "set", "mock", "routing=rotate", "errors=pass"]),
+    );
+    expect(calls).toContainEqual(["quota", "--json"]);
+    expect(calls).toContainEqual(["quota", "history", "--days", "7", "--json"]);
+  });
+
+  it("页头那个按钮真的重读整页：额度、走向、插件、设置都在里面", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    await screen.findByText(/deepseek\/deepseek-chat/);
+
+    calls.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: /重读全部/ }));
+
+    await waitFor(() => expect(calls).toContainEqual(["quota", "history", "--days", "7", "--json"]));
+    for (const args of [
+      ["providers"],
+      ["accounts", "--json"],
+      ["quota", "--json"],
+      ["plugin", "list", "--json"],
+      ["settings", "list", "--json"],
+      ["ls"],
+      ["accounts", "discovery"],
+    ]) {
+      expect(calls).toContainEqual(args);
+    }
+    expect(await screen.findByText(/已重读全部：来源、账号、额度、走向与设置/)).toBeInTheDocument();
+  });
+
+  it("重读时有一段没读到，提示条就把那一段说出来", async () => {
+    installBridge({}, { "quota --json": { ok: false, stdout: "", stderr: "读额度超时\n" } });
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /重读全部/ }));
+
+    expect(await screen.findByText("已重读，但其余额度这次没读到。")).toBeInTheDocument();
+  });
+
   it("备用链直接写在来源行上，高级里能改也能清掉", async () => {
     const { calls } = installBridge(
       {},

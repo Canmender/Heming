@@ -41,7 +41,7 @@ import {
   type DiscoveryState,
 } from "../lib/discovery.js";
 import { readCache, writeCache } from "../lib/pageCache.js";
-import { readFailureDetail, readFailureText, setReadError, type ReadErrors, type ReadSection } from "../lib/readErrors.js";
+import { readFailureDetail, readFailureText, readFailuresText, setReadError, type ReadErrors, type ReadSection } from "../lib/readErrors.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -475,11 +475,21 @@ export function ModelPage() {
     return task;
   }, []);
 
-  /** 记下这一段读失败的原因；读成功时把它抹掉。 */
+  /**
+   * 记下这一段读失败的原因；读成功时把它抹掉。
+   *
+   * state 之外再留一份 ref：一批读完之后要立刻总结「哪几段没读到」，
+   * 而那时 state 还没重新渲染，闭包里读到的是旧值。
+   */
+  const readErrorsRef = useRef<ReadErrors>({});
   const reportRead = useCallback((section: ReadSection, result: { ok: boolean; stderr?: string; error?: string }) => {
-    setReadErrors((current) =>
-      setReadError(current, section, result.ok ? null : readFailureDetail(result.stderr || "", result.error)),
+    const next = setReadError(
+      readErrorsRef.current,
+      section,
+      result.ok ? null : readFailureDetail(result.stderr || "", result.error),
     );
+    readErrorsRef.current = next;
+    setReadErrors(next);
   }, []);
 
   const loadProviders = useCallback(
@@ -637,6 +647,51 @@ export function ModelPage() {
   }, [gatewayConfig]);
 
   /**
+   * 把整页重读一遍。
+   *
+   * 页头那个按钮早先只重读「模型目录 + 来源 + 账号 + 禁用 + 可见 + 全局」，
+   * 额度、走向、插件、设置都不在列表里：改完 Key 之后余额还是旧的，
+   * 签到之后走向图也不动。既然有一个「刷新」，就不该只刷半页。
+   */
+  const reloadAll = useCallback(async () => {
+    if (!cli) return;
+    await refreshCatalog().catch(() => {});
+    await Promise.all([
+      loadProviders(),
+      loadAccounts(),
+      loadQuotas(),
+      loadHistory(),
+      loadAgents(),
+      loadPlugins(),
+      loadSettings(),
+      loadDiscovery(),
+      loadDisabledModels(),
+      loadVisibility(),
+      loadGlobals(),
+      loadDrawers(),
+    ]);
+    setNow(Date.now());
+    const failed = readFailuresText(readErrorsRef.current);
+    setNotice(failed === "" ? "已重读全部：来源、账号、额度、走向与设置都按现在的样子更新了。" : `已重读，但${failed}`);
+  }, [
+    cli,
+    refreshCatalog,
+    loadProviders,
+    loadAccounts,
+    loadQuotas,
+    loadHistory,
+    loadAgents,
+    loadPlugins,
+    loadSettings,
+    loadDiscovery,
+    loadDisabledModels,
+    loadVisibility,
+    loadGlobals,
+    loadDrawers,
+    setNotice,
+  ]);
+
+  /**
    * 执行一条内核命令并保留文本结果（可达性结论要用它说人话）。
    * 与 run 共用同一条 setBusy / output 通道，避免两套「正在运行」状态。
    */
@@ -664,6 +719,8 @@ export function ModelPage() {
           await refreshCatalog().catch(() => {});
           await loadProviders();
           await loadAccounts();
+          // 一条写命令也可能动到 Key、限额或登录态：余额卡与走向图跟着重读，不然它们是旧的。
+          await Promise.all([loadQuotas(), loadHistory()]);
         }
         return { ok: result.ok, text };
       } catch (err) {
@@ -674,7 +731,7 @@ export function ModelPage() {
         setBusy(null);
       }
     },
-    [cli, refreshCatalog, loadProviders, loadAccounts],
+    [cli, refreshCatalog, loadProviders, loadAccounts, loadQuotas, loadHistory],
   );
 
   const run = useCallback(
@@ -1392,23 +1449,17 @@ export function ModelPage() {
           onClick={async () => {
             setBusy("refresh");
             try {
-              await refreshCatalog();
-              await Promise.all([
-                loadProviders(),
-                loadAccounts(),
-                loadDisabledModels(),
-                loadVisibility(),
-                loadGlobals(),
-                loadDrawers(),
-              ]);
+              await reloadAll();
             } finally {
               setBusy(null);
             }
           }}
+          busy={busy === "refresh"}
           disabled={busy === "refresh"}
+          title="来源、订阅账号、其余额度、额度走向、插件与设置都按现在的情况重读一遍"
         >
           <RefreshIcon width={14} height={14} />
-          {busy === "refresh" ? "刷新中…" : "刷新模型"}
+          {busy === "refresh" ? "重读中…" : "重读全部"}
         </Button>
       }
       // 一级页签走 PageShell.tabs + PageTabs（下划线式，与插件页、团队页同一套结构与位置）。
@@ -1431,6 +1482,27 @@ export function ModelPage() {
           <span className="text-body">
             浏览器端只能查看可用模型。添加来源、登录账号与路由维护请打开和鸣桌面端——模型能力运行在你的电脑上。
           </span>
+        </div>
+      )}
+
+      {/* 提示条放在分区之外：页头的「重读全部」、签到底部的开关都会写它，
+          只在「来源」里显示会让在别的分区操作的人什么都看不到。 */}
+      {notice && (
+        <div
+          role="status"
+          className={`ui-alert ${notice.failed ? "ui-alert-danger" : "ui-alert-success"} rta-enter mb-4 items-center justify-between`}
+        >
+          <span className="flex items-center gap-2 text-ui-sm">
+            {notice.failed ? (
+              <AlertIcon width={14} height={14} className="shrink-0" />
+            ) : (
+              <CheckIcon width={14} height={14} className="shrink-0" />
+            )}
+            {notice.text}
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setNoticeState(null)}>
+            关闭
+          </Button>
         </div>
       )}
 
@@ -1779,29 +1851,6 @@ export function ModelPage() {
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
           <section aria-label="来源" className="space-y-4">
-            {notice && (
-              <div
-                role="status"
-                className={`ui-alert ${notice.failed ? "ui-alert-danger" : "ui-alert-success"} rta-enter items-center justify-between`}
-              >
-                <span className="flex items-center gap-2 text-ui-sm">
-                  {notice.failed ? (
-                    <AlertIcon width={14} height={14} className="shrink-0" />
-                  ) : (
-                    <CheckIcon width={14} height={14} className="shrink-0" />
-                  )}
-                  {notice.text}
-                </span>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  onClick={() => setNoticeState(null)}
-                >
-                  关闭
-                </Button>
-              </div>
-            )}
-
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
