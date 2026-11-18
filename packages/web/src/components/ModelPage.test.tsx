@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ModelPage } from "./ModelPage.js";
 import { useLlmStore, DEFAULT_GATEWAY, type LlmProfile } from "../store/llm.js";
 import { DOMESTIC_AGENTS } from "../lib/magpieDomestic.js";
@@ -483,6 +483,58 @@ describe("ModelPage · 账号与更多", () => {
     fireEvent.change(screen.getByLabelText("额度快用完时提醒"), { target: { value: "80" } });
     await waitFor(() => expect(calls).toContainEqual(["settings", "set", "usageAlert", "80"]));
     expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
+  });
+
+  it("国内端登录之后，额度写在它自己的卡片上，不用去上面的列表里找", async () => {
+    installBridge({}, {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            agent: "workbuddy",
+            user: "me@example.com",
+            alias: "腾讯号",
+            plan: "免费",
+            active: true,
+            on: true,
+            windows: [
+              { name: "Month", used: 3000, remaining: 7000, amount: 3000, limit: 10000, unit: "credits", display: "" },
+            ],
+            readAt: new Date().toISOString(),
+          },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    // 同一句会在两处出现：订阅账号那一行按窗口报，国内端卡片报它自己最紧的窗口；
+    // 两处说的是同一句话，才算「一个数字，不打架」。
+    const shown = await screen.findAllByText("剩 7,000 点");
+    expect(shown.length).toBeGreaterThanOrEqual(2);
+    expect(shown.some((node) => node.closest("button") !== null)).toBe(true);
+    // 有额度时右侧就让给徽标，不再重复「已登录」；悬停里能读到是哪个账号。
+    const inCard = shown.find((node) => node.closest("button") !== null)!;
+    expect(inCard.getAttribute("title")).toContain("腾讯号");
+  });
+
+  it("国内端的登录失效时，卡片直接说「重新登录」，不装作还有额度", async () => {
+    installBridge({}, {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { agent: "qoder", user: "me@example.com", alias: "阿里号", active: false, on: false, lapsed: "token expired" },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const name = await screen.findByText("Qoder");
+    const card = name.closest("button");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("登录已失效")).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText("重新登录")).toBeInTheDocument();
   });
 
   it("高级命令在「运行」里：流式输出写进面板", async () => {

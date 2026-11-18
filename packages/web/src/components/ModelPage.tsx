@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { PageTabs } from "./layout/PageTabs.js";
 import {
@@ -25,6 +25,7 @@ import { BackupPanel } from "./model/BackupPanel.js";
 import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { SubscriptionRow } from "./model/SubscriptionRow.js";
+import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
 import { useLlmStore } from "../store/llm.js";
@@ -162,21 +163,14 @@ const PLAN_BADGE: Record<PlanKind, { label: string; className: string }> = {
 };
 
 /**
- * 智能体行尾的订阅额度徽标（d.282）：这里只说「还剩多少」，不说订的是哪家——
+ * 智能体名字旁边那一小枚「剩 18%」（d.282）：这里只说「还剩多少」，不说订的是哪家——
  * 悬停里才展开每个账号、每个窗口。读不到额度时不贴，免得每行都挂一个问号。
+ * 配色在 model/quotaBadge.ts，和国内端卡片共用。
  */
-const AGENT_QUOTA_BADGE: Record<string, string> = {
-  ok: "bg-subtle-3 text-muted",
-  warn: "bg-warn-soft text-warn",
-  danger: "bg-danger-soft text-danger",
-  empty: "bg-subtle-3 text-muted",
-};
-
-/** 智能体名字旁边那一小枚「剩 18%」；没有账号或读不到额度时什么都不画。 */
 function AgentQuotaChip({ quota }: { quota: AgentQuota | undefined }) {
   if (!quota) return null;
   return (
-    <span className={`ui-chip shrink-0 ${AGENT_QUOTA_BADGE[quota.tone]}`} title={quota.detail}>
+    <span className={`ui-chip shrink-0 ${QUOTA_BADGE[quota.tone]}`} title={quota.detail}>
       {quota.label}
     </span>
   );
@@ -1566,7 +1560,7 @@ export function ModelPage() {
                 <div className="mt-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h3 className="text-ui-md font-semibold">国内智能体</h3>
-                    <span className="ui-caption">免费额度在账号里：先装插件，再登录</span>
+                    <span className="ui-caption">先装插件、再登录，额度就写在卡片上</span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
                     <span className="min-w-0 flex-1">
@@ -1596,6 +1590,8 @@ export function ModelPage() {
                         key={item.agent}
                         item={item}
                         signedIn={accounts.filter((row) => row.agent === item.agent).length}
+                        lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
+                        quota={agentQuotas.get(item.agent) ?? null}
                         pluginReady={pluginsChecked && pluginProviders.has(item.agent)}
                         local={agents.some((agent) => agent.id === item.agent)}
                         busy={accountBusy === `domestic:${item.agent}`}
