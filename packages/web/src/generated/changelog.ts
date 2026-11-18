@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.321.4.120.12",
+    "date": "2026-11-18",
+    "title": "打开模型页不再替「来源」页干活",
+    "bullets": [
+      "`packages/web/src/components/ModelPage.test.tsx` 加 **2 例**：①打开页面时 `quota --json`、`quota history`、`quota auto-reset`、`plugin list --json`、`accounts discovery` 一条都没发；",
+      "全量 **448 个测试文件 / 6428 个用例全绿**；`typecheck` 退出 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。",
+      "只按分区推迟，没有做「滚到哪里读哪里」：进「来源」一次就把这五路全读了。",
+      "若某个来源这次没读到，额度卡会写「这次没读到」，等页头「重读全部」或下次进页面再补。",
+      "缓存仍是「上次读到的原样」，没有按分区分别记时间戳。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "打开模型页时，页面会先把十个命令一起发出去：模型目录、智能体、账号、其余额度、额度走向、重置开关、接入组件表、自动收取、设置、看图/画图模型。其中**五条只有「来源」分区用得上**——多数人打开这一页是来看模型和智能体的，替另一页等后端没有任何理由。",
+      "本机实测（`magpie-core.exe`，同机冷跑）：",
+      "| 命令 | 耗时 || --- | --- || `quota --json` | 852 ms || `quota history --days 7 --json` | 380 ms || `quota auto-reset` | 235 ms || `quota auto-reset lead` | 240 ms || `plugin list --json` | 246 ms || `accounts discovery` | 64 ms |",
+      "它们并行发，但页面上「还有东西在跑」的尾巴由最慢那条决定：**852 ms**。",
+      "做了什么",
+      "| 位置 | 落地 || --- | --- || 首屏第二波 | 只留账号、全局设置、看图/画图设置、会话与启动器四路 || 进「来源」时 | 一次性补读额度、走向、重置开关、接入组件表、自动收取（`sourcesWarm` 只放一次） || 补读之前 | 用上次缓存先把已知的画出来（d.302/d.304 那套），不闪空 || 页头「重读全部」 | 照旧读全部，并顺手把 `sourcesWarm` 置真，进「来源」时不再重复补一遍 || 「来源」内的动作 | 签到、切换、改名、移除、重置、国内端接入都不受影响（它们本来就走自己的命令） |",
+      "怎么验证点「来源」之后五条都发。②在「模型」分区点过「重读全部」之后再进「来源」，那几条**不会再发一遍**（用 `calls.length = 0` 清空后断言不含）。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.320.4.120.12",
     "date": "2026-11-18",
     "title": "整页只留一个「重读」入口",

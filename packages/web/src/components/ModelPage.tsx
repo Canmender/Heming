@@ -700,6 +700,12 @@ export function ModelPage() {
   }, [gatewayConfig]);
 
   /**
+   * 「来源」页专用的那几路（其余额度、额度走向、重置开关、接入组件表、自动收取）
+   * 是否已经读过。首屏不读它们，进到「来源」再读一次（见下面的 effect）。
+   */
+  const sourcesWarm = useRef(false);
+
+  /**
    * 把整页重读一遍。
    *
    * 页头那个按钮早先只重读「模型目录 + 来源 + 账号 + 禁用 + 可见 + 全局」，
@@ -719,6 +725,8 @@ export function ModelPage() {
       vendors.map((vendor) => cli.cli(["quota", "refresh", vendor]).catch(() => undefined)),
     );
     await refreshCatalog().catch(() => {});
+    // 整页重读把「来源」那几路也读了：进「来源」时不必再补一次。
+    sourcesWarm.current = true;
     await Promise.all([
       loadProviders(),
       loadAccounts(),
@@ -1346,17 +1354,12 @@ export function ModelPage() {
       // 不让「额度」「画图模型」「插件表」这些慢一步的东西把整页拖住。
       await Promise.all([loadProviders(), loadAgents(), loadDisabledModels(), loadVisibility()]);
       if (alive) setLoading(false);
-      // 第二波：额度、全局设置、画图模型、接入组件表与 settings，边显示边补。
+      // 第二波：账号与全局设置，边显示边补。
       await Promise.all([
         loadAccounts(),
-        loadQuotas(),
-        loadHistory(),
-        loadAutoReset(),
         loadGlobals(),
         loadDrawers(),
-        loadPlugins(),
         loadSettings(),
-        loadDiscovery(),
       ]);
     })();
     return () => {
@@ -1370,14 +1373,25 @@ export function ModelPage() {
     loadDisabledModels,
     loadVisibility,
     loadGlobals,
-    loadPlugins,
     loadSettings,
-    loadQuotas,
-    loadHistory,
-    loadAutoReset,
-    loadDiscovery,
     loadDrawers,
   ]);
+
+  /**
+   * 真进到「来源」才读那几路；读过就不再自动补（页头的「重读全部」是显式入口）。
+   * 读之前先按上次缓存画，不闪空。
+   */
+  useEffect(() => {
+    if (!cli || tab !== "sources" || sourcesWarm.current) return;
+    sourcesWarm.current = true;
+    void Promise.all([
+      loadQuotas(),
+      loadHistory(),
+      loadAutoReset(),
+      loadPlugins(),
+      loadDiscovery(),
+    ]);
+  }, [cli, tab, loadQuotas, loadHistory, loadAutoReset, loadPlugins, loadDiscovery]);
 
   useEffect(() => {
     if (accounts.length === 0) return;

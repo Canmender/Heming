@@ -1364,6 +1364,43 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls).toContainEqual(["quota", "history", "--days", "7", "--json"]);
   });
 
+  it("打开页面只读首屏要用的：来源专用的那几路等真进去再读", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    await screen.findByText(/deepseek\/deepseek-chat/);
+
+    for (const args of [
+      ["quota", "--json"],
+      ["quota", "history", "--days", "7", "--json"],
+      ["quota", "auto-reset"],
+      ["plugin", "list", "--json"],
+      ["accounts", "discovery"],
+    ]) {
+      expect(calls).not.toContainEqual(args);
+    }
+
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await waitFor(() => expect(calls).toContainEqual(["quota", "--json"]));
+    expect(calls).toContainEqual(["quota", "auto-reset"]);
+    expect(calls).toContainEqual(["plugin", "list", "--json"]);
+    expect(calls).toContainEqual(["accounts", "discovery"]);
+  });
+
+  it("在模型分区点过「重读全部」之后，再进来源不再重复读一遍", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    await screen.findByText(/deepseek\/deepseek-chat/);
+
+    fireEvent.click(screen.getByRole("button", { name: /重读全部/ }));
+    await waitFor(() => expect(calls).toContainEqual(["quota", "--json"]));
+
+    calls.length = 0;
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("订阅账号");
+    expect(calls).not.toContainEqual(["quota", "--json"]);
+    expect(calls).not.toContainEqual(["plugin", "list", "--json"]);
+  });
+
   it("页头那个按钮真的重读整页：额度、走向、插件、设置都在里面", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
