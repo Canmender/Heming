@@ -830,6 +830,38 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("备用链直接写在来源行上，高级里能改也能清掉", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        providers: {
+          ok: true,
+          stdout:
+            "  mock  custom  mock  127.0.0.1:39001  ● •••••••  1 models  \n" +
+            "  ⤷ openrouter/deepseek-v3 → moonshot/kimi-k2  \n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    // 行上就有：不用展开高级才知道塌了会走谁。
+    expect(
+      await screen.findByText("备用 openrouter/deepseek-v3 → moonshot/kimi-k2"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    expect(await screen.findByLabelText("备用模型")).toHaveValue(
+      "openrouter/deepseek-v3, moonshot/kimi-k2",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "清掉备用" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "fallback", "mock", "none"]),
+    );
+  });
+
   it("来源模型清单：显示这个来源暴露的模型，增删与整套切换都走 provider models", async () => {
     const { calls } = installBridge(
       {},

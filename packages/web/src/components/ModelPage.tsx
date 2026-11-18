@@ -1114,6 +1114,9 @@ export function ModelPage() {
       return;
     }
     setAdvancedProvider(id);
+    // 备用链现在就在行上看得见，把已有的值填进输入框：改一处比重打一串省事。
+    const chain = providers.find((row) => row.id === id)?.fallback ?? [];
+    setProviderForm((current) => ({ ...current, fallback: chain.join(", ") }));
     if (showCache[id] || !cli) return;
     setShowLoading(id);
     try {
@@ -1998,6 +2001,15 @@ export function ModelPage() {
                             {row.host ? ` · ${row.host}` : ""}
                             {row.models !== null ? ` · ${row.models} 个模型` : ""}
                           </span>
+                          {row.fallback.length > 0 && (
+                            // 额度用完 / 被限流 / 连不上时，请求按这串顺序往下去。
+                            <span
+                              className="block truncate ui-caption"
+                              title={`没额度、被限流或连不上时，请求依次改用 ${row.fallback.join(" → ")}`}
+                            >
+                              备用 {row.fallback.join(" → ")}
+                            </span>
+                          )}
                         </span>
                         <Button
                           type="button"
@@ -2228,11 +2240,25 @@ export function ModelPage() {
                                     .split(/[,\s]+/)
                                     .map((item) => item.trim())
                                     .filter(Boolean),
-                                ])
+                                ], { refresh: true })
                               }
                             >
                               保存备用
                             </Button>
+                            {row.fallback.length > 0 && (
+                              <Button
+                                type="button"
+                                size="sm" variant="ghost" className="mt-2"
+                                disabled={!cli}
+                                onClick={() =>
+                                  void run("清掉备用", ["provider", "fallback", row.id, "none"], {
+                                    refresh: true,
+                                  })
+                                }
+                              >
+                                清掉备用
+                              </Button>
+                            )}
                           </div>
 
                           <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">

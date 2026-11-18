@@ -58,6 +58,23 @@ describe("parseProviders", () => {
     expect(parseProviders("")).toEqual([]);
     expect(parseProviders("no providers yet")).toEqual([]);
   });
+
+  it("`⤷` 那行是上一家的备用链：不算新来源，链条挂在前一行上", () => {
+    const raw = [
+      "  deepseek  preset  deepseek  api.deepseek.com  ● •••••••  6 models  ",
+      "  ⤷ openrouter/deepseek-v3 → moonshot/kimi-k2  ",
+      "  moonshot  preset  moonshot  api.moonshot.cn  ● •••••••  4 models  ",
+    ].join("\n");
+    const rows = parseProviders(raw);
+    expect(rows.map((row) => row.id)).toEqual(["deepseek", "moonshot"]);
+    expect(rows[0].fallback).toEqual(["openrouter/deepseek-v3", "moonshot/kimi-k2"]);
+    expect(rows[1].fallback).toEqual([]);
+  });
+
+  it("没有备用链时是空数组，不是 undefined（页面直接读 .length）", () => {
+    const [row] = parseProviders("  mock custom  mock  127.0.0.1:39001  ● •••••••  1 models  ");
+    expect(row.fallback).toEqual([]);
+  });
 });
 
 describe("parseAccounts", () => {

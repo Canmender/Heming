@@ -92,6 +92,11 @@ export interface ProviderRow {
   kind: string;
   host: string;
   models: number | null;
+  /**
+   * 这一家垮了（没额度、被限流、连不上）之后，请求往下走的那一串 `provider/model`。
+   * 内核在 `providers` 里用一行 `⤷ a → b` 跟在它下面，不在就别猜。
+   */
+  fallback: string[];
   raw: string;
 }
 
@@ -102,6 +107,17 @@ export function parseProviders(raw: string): ProviderRow[] {
     const trimmed = line.trim();
     if (!trimmed || /^[!✓·]/.test(trimmed)) continue;
     if (/no providers|add one/i.test(trimmed)) continue;
+    // `⤷ a → b`：上一家来源的备用链，不是新的一行（否则会造出一个 id 叫「⤷」的来源）。
+    if (trimmed.startsWith("⤷")) {
+      const chain = trimmed
+        .slice(1)
+        .split("→")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const previous = rows[rows.length - 1];
+      if (previous) previous.fallback = chain;
+      continue;
+    }
     // 上游按列对齐输出：id 与类型之间可能只有一个空格，列与列之间是多个空格。
     const tokens = trimmed.split(/\s+/);
     if (tokens.length < 2) continue;
@@ -113,7 +129,7 @@ export function parseProviders(raw: string): ProviderRow[] {
     );
     const modelIndex = tokens.findIndex((token) => /^\d+$/.test(token));
     const models = modelIndex >= 0 && /^models?$/.test(tokens[modelIndex + 1] ?? "") ? Number.parseInt(tokens[modelIndex]!, 10) : null;
-    rows.push({ id, kind, host: hostToken ?? "", models, raw: trimmed });
+    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], raw: trimmed });
   }
   return rows;
 }
