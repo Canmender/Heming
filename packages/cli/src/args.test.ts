@@ -285,3 +285,30 @@ describe("parseArgs：会话与续聊（d.303）", () => {
     }
   });
 });
+
+describe("parseArgs：信任工作区规则（d.306）", () => {
+  it("默认不信任：allow 规则不生效，也不会悄悄替用户打开", () => {
+    const run = expectRun(["run", "改一下"]);
+    expect(run.trustWorkspace).toBe(false);
+
+    const mcp = expectMcp(["mcp", "serve"]);
+    expect(mcp.trustWorkspace).toBe(false);
+  });
+
+  it("run 与 mcp serve 都认 --trust-workspace", () => {
+    expect(expectRun(["run", "--trust-workspace", "改一下"]).trustWorkspace).toBe(true);
+    expect(expectMcp(["mcp", "serve", "--trust-workspace"]).trustWorkspace).toBe(true);
+  });
+
+  it("--trust-workspace 不接受取值（写成 =true 会当成多余的位置参数报错）", () => {
+    const parsed = parseArgs(["run", "--trust-workspace=no", "改一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--trust-workspace");
+  });
+
+  it("sessions 不接 --trust-workspace（列存档不跑工具，谈不到放行）", () => {
+    const parsed = parseArgs(["sessions", "--trust-workspace"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
+  });
+});

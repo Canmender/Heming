@@ -19,11 +19,13 @@ import type { FileRoot } from "../../../packages/web/src/lib/fileEdit/paths.js";
 import { assessPatchSafety } from "../../../packages/web/src/lib/fileEdit/safety.js";
 import { isFileWriteTool, targetsOfCall } from "../../../packages/web/src/lib/fileEdit/ruleTargets.js";
 import { toHitlCall } from "../../../packages/web/src/lib/hitl/classify.js";
+import { matchWorkspaceRules } from "../../../packages/web/src/lib/hitl/workspaceRules.js";
 import type { GateOutcome } from "../../../packages/web/src/lib/hitl/types.js";
 import type { ToolBridge } from "../../../packages/web/src/lib/agentStream.js";
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { createEvalToolBridge } from "../../../evals/runner/tools.js";
+import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 
 /** 一次工具调用在闸门看来需要的最小形状（与编排层给的一致）。 */
 export interface GateCall {
@@ -46,16 +48,56 @@ export interface CliTooling {
  * 确定性闸门（_没有人可问时，「问」必须落成一条固定规则_）。
  *
  * `metaOf` 由桥提供：工具自己声明风险等级，闸门不靠名字猜。
+ *
+ * `rules` 是工作区 `.heming/permissions.json` 的解析结果（Web 端闸门认的同一份文件）：
+ * - `deny` 最先判，压过一切；
+ * - `ask` 在这里落成拒绝——没有人可以确认；
+ * - `allow` 只在 `allowActive`（`--trust-workspace`）时放宽，否则回落到下面的风险判定。
  */
 export function createCliGate(input: {
   roots: () => FileRoot[];
   allowDanger: boolean;
   metaOf: (name: string) => { risk?: string } | undefined;
+  rules?: CliWorkspaceRuleSet | null;
 }): ToolConfirmFn {
+  const rules = input.rules ?? null;
   return async (calls) =>
     calls.map((call) => {
       const hitlCall = toHitlCall(call);
       const name = call.function.name;
+
+      /*
+       * 0. 工作区规则先判。
+       *    顺序与 Web 端一致：deny > ask > allow；allow 未信任时等于没有这条规则。
+       *    注意这一层必须排在命令工具的「交给桥裁决」之前——仓库明确写了
+       *    `{"deny":[{"tool":"run_command","command":"git push*"}]}` 时，有没有
+       *    `--allow-danger` 都不该跑。
+       *
+       *    `allow` 在这里只放宽一件事：danger 工具不再要求 `--allow-danger`。
+       *    它**不**绕过写路径的越界/删除判定——路径安全是文件桥的最后一道闸，
+       *    不该被一份仓库里的 JSON 顶掉（`run_command` 本身仍然由桥是否挂载决定）。
+       */
+      let relaxedByRule = false;
+      if (rules) {
+        const verdict = matchWorkspaceRules(rules.config, hitlCall, { roots: input.roots() });
+        if (verdict.verdict === "deny") {
+          return {
+            kind: "deny" as const,
+            call: hitlCall,
+            reason: `工作区权限规则拒绝：${verdict.reason ?? "命中 deny 规则"}`,
+            cause: "rule" as const,
+          };
+        }
+        if (verdict.verdict === "ask") {
+          return {
+            kind: "deny" as const,
+            call: hitlCall,
+            reason: `工作区权限规则要求先确认（${verdict.reason ?? "命中 ask 规则"}），CLI 没有人可以确认，按拒绝处理`,
+            cause: "rule" as const,
+          };
+        }
+        relaxedByRule = verdict.verdict === "allow" && rules.allowActive;
+      }
 
       // 命令工具由桥统一裁决：挂上了（--allow-danger）就真跑，没挂就回「未执行」。
       if (name === SHELL_TOOL) return { kind: "allow" as const, call: hitlCall };
@@ -71,7 +113,7 @@ export function createCliGate(input: {
       }
       if (meta.risk === "read") return { kind: "allow" as const, call: hitlCall };
       if (meta.risk === "danger") {
-        return input.allowDanger
+        return input.allowDanger || relaxedByRule
           ? { kind: "allow" as const, call: hitlCall }
           : {
               kind: "deny" as const,
@@ -190,6 +232,8 @@ export function createCliTooling(options: {
   allowDanger: boolean;
   conversationId: string;
   onWrite?: (file: string) => void;
+  /** 工作区权限规则（`.heming/permissions.json`）；`null` / 省略 = 没有规则。 */
+  rules?: CliWorkspaceRuleSet | null;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -236,6 +280,7 @@ export function createCliTooling(options: {
     roots: () => roots,
     allowDanger: options.allowDanger,
     metaOf: (name) => toolBridge.meta?.(name),
+    rules: options.rules ?? null,
   });
 
   /**

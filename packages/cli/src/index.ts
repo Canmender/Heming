@@ -14,6 +14,7 @@ import { resolveModelConfig } from "./config.js";
 import { createEventSink } from "./events.js";
 import { startMcpServe } from "./mcpServe.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
+import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import {
   appendTurn,
   describeSession,
@@ -47,6 +48,7 @@ const USAGE = `用法：
   --cwd <dir>          工作目录（也是唯一可写根），默认当前目录
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
+  --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -102,6 +104,13 @@ MCP 服务（给别的编辑器用）：
                                          调用本机的文件工具（不需要模型凭据）
   pnpm cli --continue "把刚才那两个失败用例修掉"
   pnpm cli --resume 20261118-144230-ab12 "继续"
+  pnpm cli --trust-workspace "按仓库里的权限规则跑，别改 docs/"
+
+工作区权限规则（.heming/permissions.json，与桌面端同一份）：
+  {"deny":[{"tool":"run_command","command":"git push*"}]}   仓库里写了就一定生效
+  {"ask":[{"tool":"file_write","path":"docs/**"}]}           CLI 没有人可以确认，落成拒绝
+  {"allow":[{"tool":"file_write","path":"src/**"}]}         只在 --trust-workspace 时生效
+  文件坏了（JSON 解析失败）就不启动：宁可当场说清楚，也不要跑几轮再被全拒。
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -216,6 +225,22 @@ async function main(argv: string[]): Promise<number> {
    * 读存档不往外抛（sessions.ts 全部 try-catch）：接不上最多等于回到单轮模式，
    * 但 `--resume` 写错了要当场说清楚，否则用户会以为上下文进去了。
    */
+  /**
+   * 工作区权限规则：`.heming/permissions.json`，与桌面端认的是同一份文件。
+   *
+   * 三种口径：
+   * - deny / ask 一定生效（ask 在这里落成拒绝——CLI 没有人可以确认）；
+   * - allow 只在 `--trust-workspace` 时生效（克隆来的仓库不能自己放宽权限）；
+   * - 读到了但内容坏了 → 当场不启动：这里没人能确认，让模型白跑几轮再在第一次工具调用被全拒，
+   *   比现在说清楚更糟。
+   */
+  const rulesLoad = await loadCliWorkspaceRules(cwd, options.trustWorkspace);
+  if (rulesLoad && !rulesLoad.ok) {
+    return failEarly(`工作区权限规则有问题：${rulesLoad.error}（${rulesLoad.source}）`);
+  }
+  const workspaceRules = rulesLoad && rulesLoad.ok ? rulesLoad.rules : null;
+  if (workspaceRules) writeErr(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
+
   const sessionRoot = sessionDir(options.sessionDir);
   let prior: SessionRecord | null = null;
   if (options.resume !== undefined) {
@@ -264,6 +289,7 @@ async function main(argv: string[]): Promise<number> {
     cwd,
     profile,
     allowDanger: options.allowDanger,
+    ...(workspaceRules ? { workspaceRules } : {}),
     history: toHistory(prior),
     sessionId,
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),

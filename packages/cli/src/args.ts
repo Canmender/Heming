@@ -29,6 +29,11 @@ export interface PromptOptions {
   maxRounds?: number;
   /** 放行 `run_command` 等 danger 工具。 */
   allowDanger: boolean;
+  /**
+   * 信任工作区的 `.heming/permissions.json`：只有信任之后，里面的 **allow** 规则才生效。
+   * deny / ask 不受这个开关影响——它们是收紧方向，仓库里写了一定照做。
+   */
+  trustWorkspace: boolean;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
@@ -54,6 +59,8 @@ export interface McpOptions {
   cwd?: string;
   /** 放行 `run_command`（MCP 客户端能调用它真跑命令）。 */
   allowDanger: boolean;
+  /** 同 run：信任工作区权限规则里的 allow（deny / ask 总是生效），需要用 --trust-workspace 显式打开。 */
+  trustWorkspace: boolean;
 }
 
 export type ParsedArgs =
@@ -80,6 +87,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
+  let trustWorkspace = false;
   let cwd: string | undefined;
   let maxRounds: number | undefined;
   let model: string | undefined;
@@ -143,6 +151,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "allow-danger": {
           if (inline !== undefined) return { ok: false, error: "--allow-danger 不接受取值（直接写 --allow-danger 即可）" };
           allowDanger = true;
+          break;
+        }
+        case "trust-workspace": {
+          if (inline !== undefined) {
+            return { ok: false, error: "--trust-workspace 不接受取值（直接写 --trust-workspace 即可）" };
+          }
+          trustWorkspace = true;
           break;
         }
         case "continue": {
@@ -228,6 +243,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (baseUrl !== undefined) notForSessions.push("--base-url");
     if (apiKey !== undefined) notForSessions.push("--api-key");
     if (continueSession) notForSessions.push("--continue");
+  if (trustWorkspace) notForSessions.push("--trust-workspace");
     if (resume !== undefined) notForSessions.push("--resume");
     if (notForSessions.length > 0) {
       return {
@@ -276,7 +292,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         error: `mcp serve 不接 ${notForMcp.join(" / ")}（它不调模型，只把文件工具按 MCP 协议暴露出去）`,
       };
     }
-    return { ok: true, action: "mcp", options: { allowDanger, ...(cwd !== undefined ? { cwd } : {}) } };
+    return {
+      ok: true,
+      action: "mcp",
+      options: { allowDanger, trustWorkspace, ...(cwd !== undefined ? { cwd } : {}) },
+    };
   }
 
   const rawPrompt = promptParts.join(" ").trim();
@@ -303,6 +323,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       json,
       fromStdin,
       allowDanger,
+      trustWorkspace,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(maxRounds !== undefined ? { maxRounds } : {}),

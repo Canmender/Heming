@@ -38,7 +38,7 @@
 ### 第三波（路线图，不在本轮承诺）
 
 
-- 命令白名单 + 网络域名策略 + OS 级沙箱（Windows Job Object / 受限令牌）；
+- 命令白名单（`packages/cli/src/workspaceRules.ts`，d.307：`.heming/permissions.json` 的 deny/ask/allow 已接进 `run` 与 `mcp serve`；`ask` 在无人的 CLI 里落成拒绝）+ 网络域名策略 + OS 级沙箱（Windows Job Object / 受限令牌）——后两项仍未做；
 - 更新链 https + 安装包签名校验；
 - Web 端去桌面桥依赖（移动端前置）。
 

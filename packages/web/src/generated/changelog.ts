@@ -12,6 +12,48 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.308.4.120.12",
+    "date": "2026-11-18",
+    "title": "余额快见底也会说一声：第三个提醒",
+    "bullets": [
+      "真机确认三个键都在 `settings list --json` 里：`usageAlert=0`、`resetReminder=0`、`balanceAlert=0`（都是数字）。",
+      "`magpieReminder.test.ts` 补档位、`reminderArgs(\"balanceAlert\", 5)`、`balanceAlertText`、三句 `reminderSummary`。",
+      "`ModelPage.test.tsx` 新增「余额提醒也走同一个设置」：切到「来源」，把「余额快用完时提醒」选成 5，断言发出 `[\"settings\",\"set\",\"balanceAlert\",\"5\"]`、提示条出现「已记下：余额低到 5 或更少时提醒一次」。",
+      "全量测试与设计门槛见提交说明；typecheck 0 错。",
+      "数额只有 1/5/10/20 四档：内核收任意正数（`--balance 0.5` 也收），但「0.5 美元」这种在中文界面里读起来别扭，先给常见档位。",
+      "提醒是内核通知（应用运行时才发），页面只负责设置，不在这里弹自己的提示。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "额度提醒原来只管两件事：窗口用到多少百分比、窗口到期前几小时。但「按量付费的 Key」没有窗口，它只有一个余额——¥2.60 这种数字，用到见底时没有任何人说话。内核本来就有这个设置（`balanceAlert`，`quota alert --balance 5`），页面一直没有出口。",
+      "做了什么",
+      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/magpieReminder.ts` | 新增 `BALANCE_ALERT_CHOICES`（关/1/5/10/20）、`balanceAlertText`；`reminderArgs` 允许 `balanceAlert`；`reminderSummary` 多一段 || `packages/web/src/components/model/QuotaReminder.tsx` | 第三枚下拉「余额少」，与「快用完」「快到期」并排，窄屏自动换行 || 同一组件底部小字 | 开了余额提醒时补一句「余额按各自的币种或点数算」——内核是按每张余额卡自己的单位比的 || `packages/web/src/components/ModelPage.tsx` | `setReminder` 接受 `balanceAlert`，提示条说「已记下：余额低到 5 或更少时提醒一次，直到充值回来。」 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
+    "version": "d.307.4.120.12",
+    "date": "2026-11-18",
+    "title": "仓库里写下的权限规则，终端里也照样算数",
+    "bullets": [
+      "新增 `packages/cli/src/workspaceRules.test.ts`：加载（无文件 / 有效 / 坏 JSON / 超限 / 同名为目录 / 带 BOM）、一行说明文案、闸门（deny 挡写、deny 管命令但 `git status` 仍放行、ask 落成拒绝、`denyAll` 连只读也拒、",
+      "`packages/cli`：**8 个测试文件 / 113 个用例全绿**，`tsc --noEmit` 0 错。",
+      "真机冒烟（MCP 通道）：同一工作区里 `docs/a.md` 被 `deny` 拒（`未执行：工作区权限规则拒绝…`，磁盘上没有该文件），`src/a.md` 正常写入；坏 JSON 时 `heming run` 直接退出码 2 并指出是哪份文件。",
+      "`allow` 在 CLI 里能放宽的只有危险工具的风险判定：文件桥没挂 `run_command` 时，规则允许也跑不了命令。",
+      "网络域名策略、OS 级沙箱仍未做（规则是「允许/拒绝某个工具调用」，不是运行时隔离）。",
+      "规则只按工作区根解析 `path`，多根工作区（不同盘的第二个写根）暂不参与匹配。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "`.heming/permissions.json` 一直是桌面端的规则：`deny` 一定生效、`ask` 问你、`allow` 要你信任过工作区。可 `heming run` 和 `heming mcp serve` 从来不读它——同一份`{\"deny\":[{\"tool\":\"run_command\",\"command\":\"git push*\"}]}`，在窗口里被拦住，在终端里照跑；把服务挂给别的编辑器时更是完全不受约束。团队把规范写进仓库，结果只有一半入口遵守，这比没有规范更糟。",
+      "做了什么",
+      "| 位置 | 做的事 || --- | --- || `packages/cli/src/workspaceRules.ts` | 读 `.heming/permissions.json`：不存在当「没有规则」，存在但太大/不是文件/解析失败一律 fail-closed；顺手剥掉 UTF-8 BOM（记事本与 PowerShell 5 的默认写法） || `packages/cli/src/tooling.ts` | 闸门里加「工作区规则先判」一层，排在命令工具之前：`deny` 直接拒（带命中的规则），`ask` 在 CLI 里落成拒绝并说清「没有人可以确认」 || 同上 | `allow` 只在 `--trust-workspace` 后生效，且**只放宽 danger 工具的风险判定**，不绕过写路径的越界/删除检查——路径安全是文件桥的最后一闸，不该被仓库里的 JSON 顶掉 || `packages/cli/src/{run,mcpServe}.ts` | `run` 与 `mcp serve` 共用同一份规则；启动时把「deny N / ask N / allow N，allow 是否生效」打到 stderr || `packages/cli/src/args.ts` | 新增 `--trust-workspace`（不接受取值）；`sessions` 与 `mcp serve` 各自拒绝不相关的选项 || `packages/cli/src/index.ts` | `--help` 增加「工作区权限规则」一节：三行示例 + 「文件坏了就不启动」 |",
+      "怎么验证allow 需信任且规则要写 `allowDanger`、allow 不绕过越界写、没有规则时行为不变）。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.306.4.120.12",
     "date": "2026-11-18",
     "title": "看图与画图那三项不再各发一条命令，一次读全",

@@ -10,6 +10,7 @@ import path from "node:path";
 import type { McpOptions } from "./args.js";
 import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
 import { createCliTooling } from "./tooling.js";
+import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 
 export interface McpServeIO {
   stdin: NodeJS.ReadableStream;
@@ -35,8 +36,23 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     return fail(io, `--cwd 目录不存在：${cwd}`);
   }
 
+  /**
+   * 工作区权限规则与 `run` 共用同一份加载器：客户端那边看不见我们的 HITL，
+   * 仓库里写下的 deny / ask 就是这里唯一还起作用的人工意图。规则坏了直接不启动。
+   */
+  const rulesLoad = await loadCliWorkspaceRules(cwd, options.trustWorkspace);
+  if (rulesLoad && !rulesLoad.ok) {
+    return fail(io, `工作区权限规则有问题：${rulesLoad.error}（${rulesLoad.source}）`);
+  }
+  const workspaceRules = rulesLoad && rulesLoad.ok ? rulesLoad.rules : null;
+
   const conversationId = `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const tooling = createCliTooling({ cwd, allowDanger: options.allowDanger, conversationId });
+  const tooling = createCliTooling({
+    cwd,
+    allowDanger: options.allowDanger,
+    conversationId,
+    ...(workspaceRules ? { rules: workspaceRules } : {}),
+  });
   const ctx: McpContext = {
     tools: tooling.toolBridge,
     confirm: tooling.confirm,
@@ -51,6 +67,9 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     `[heming] mcp serve 已就绪：工作区 ${ctx.cwd}，${names.length} 个工具（${names.join("、") || "无"}）；` +
       `危险工具${options.allowDanger ? "已放行（--allow-danger）" : "未放行"}。\n`,
   );
+  if (workspaceRules) {
+    io.stderr.write(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
+  }
 
   let interrupted = false;
   const onSigint = () => {

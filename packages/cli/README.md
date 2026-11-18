@@ -55,6 +55,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--cwd <dir>` | 工作目录，同时是唯一可写根（`{ path: <cwd>, mode: "write", name: "work" }`）。默认 `process.cwd()`。 |
 | `--max-rounds <n>` | 最多允许 `n` 个工具轮。第 `n+1` 轮如果模型还要调工具，CLI 会提前收口（第 `n+1` 轮直接作答仍然允许）。`n` 必须是正整数。 |
 | `--allow-danger` | 放行 `run_command` 等 danger 工具。不加时命令工具**不会出现在工具清单里**；模型硬调会得到「未执行」而不是真正执行。 |
+| `--trust-workspace` | 让工作区 `.heming/permissions.json` 里的 `allow` 规则生效（`deny` / `ask` 本来就算数）。详见下文「工作区权限规则」。 |
 | `--output-format <f>` | stdout 格式：`text`（默认）/ `json`（= `--json`，exec 专用）/ `stream-json`（一行一条事件，run 与 exec 都可用）。 |
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
 | `--base-url <url>` | OpenAI 兼容端点，默认 `https://api.openai.com/v1`。必须以 `http://` / `https://` 开头。 |
@@ -296,6 +297,48 @@ heming mcp serve --cwd D:/repo
 - `file_patch` 里的多个文件路径不做换算（补丁是一段文本，逐行改写会弄坏上下文），需要补丁时请用相对路径。
 - 没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。
 
+## 工作区权限规则（`.heming/permissions.json`）
+
+桌面端一直读这份仓库里的规则，`heming run` 与 `heming mcp serve` 现在读同一份——
+把规范写进仓库，就不该只有窗口里生效。
+
+```json
+{
+  "deny":  [{ "tool": "run_command", "command": "git push*" }],
+  "ask":   [{ "tool": "file_write", "path": "docs/**" }],
+  "allow": [{ "tool": "file_write", "path": "src/**" }]
+}
+```
+
+| 规则 | CLI 里的行为 |
+| --- | --- |
+| `deny` | 直接拒绝，回执里带上命中的规则。**`--allow-danger` 也绕不过**——`run_command` 的 deny 排在「交给桥裁决」之前 |
+| `ask` | 命令行没有人可以回答，因此**按拒绝处理**，文案说明「工作区权限规则要求先确认…CLI 没有人可以确认」 |
+| `allow` | 需要显式 `--trust-workspace` 才生效：克隆陌生仓库时，它写的「全都允许」不该自动放宽你的机器 |
+| `denyAll` | 紧急开关，所有工具调用（含只读）一律拒绝 |
+
+`allow` 在 CLI 里**只放宽一件事**：danger 工具不再要求 `--allow-danger`（且规则里要写 `"allowDanger": true`）。
+它不绕过写路径的越界 / 删除检查——路径安全是文件桥的最后一闸，不该被一份仓库里的 JSON 顶掉；
+`run_command` 到底有没有挂上，仍然只由 `--allow-danger` 决定。
+
+启动时 stderr 会有一行，告诉你这次跑受什么约束：
+
+```
+[heming] 工作区权限规则：deny 1 / ask 1 / allow 1；allow 未生效（加 --trust-workspace 才放宽）（来自 .heming/permissions.json）
+```
+
+规则文件**写坏了就不启动**（JSON 错、超过 256 KB、同名路径是目录）：能确定规则是什么时才可以少拦，
+确定不了就当全部拒绝。带 UTF-8 BOM 的文件（记事本、PowerShell 5 的默认写法）会自动去掉 BOM 再解析。
+
+示例：
+
+```bash
+# 按仓库规则跑，并信任它的 allow（deny / ask 不需要信任也生效）
+heming run --trust-workspace "把 docs/ 里过期的链接修掉"
+
+# 把工具开放给编辑器时，同样受这份规则约束
+heming mcp serve --cwd D:/repo
+```
 ## 工具与审批口径
 
 默认提供真实的内置工具：

@@ -38,6 +38,7 @@ import {
 } from "../../../packages/web/src/lib/agentRuntime/runtimePrompt.js";
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createCliTooling, shellDeniedText } from "./tooling.js";
+import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import type { CliEvent } from "./events.js";
 
 /** 注入点：测试传脚本化 chat；生产用真实 OpenAI 兼容客户端。 */
@@ -102,6 +103,13 @@ export interface AgentRunOptions {
   history?: ChatMessage[];
   /** 本次会话 id（会写进 `exec --json`，供脚本接着 `--resume`）。 */
   sessionId?: string;
+  /**
+   * 工作区权限规则（`.heming/permissions.json` 的解析结果，由 `index.ts` / `mcpServe.ts` 读好传进来）。
+   *
+   * 这里只接「已经解析成功」的结果：解析失败的场合由入口直接拒绝启动，
+   * 免得模型白跑几轮才在第一次工具调用时被全拒。
+   */
+  workspaceRules?: CliWorkspaceRuleSet | null;
 }
 
 export interface AgentRunOutcome {
@@ -217,6 +225,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
   const tooling = createCliTooling({
     cwd,
     allowDanger: options.allowDanger,
+    rules: options.workspaceRules ?? null,
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;
