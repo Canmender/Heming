@@ -825,6 +825,20 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(calls.some((call) => call[0] === "accounts")).toBe(true);
   });
 
+  it("已经知道有哪些模型时，不再先摆骨架等来源读完", async () => {
+    // 模型清单来自本地 store，来源那几条命令还没回来时它就已经能画了。
+    // 骨架只该留给「什么都不知道」的那一屏，否则每次打开都白等半秒。
+    const cli = vi.fn(async (args: string[]) => {
+      if (args[0] === "providers") return new Promise(() => {});
+      return { ok: true, stdout: "ok", stderr: "" };
+    });
+    installBridge({ cli });
+
+    render(<ModelPage />);
+    expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
+    expect(screen.queryByLabelText("正在读取模型")).not.toBeInTheDocument();
+  });
+
   it("来源页把 Key 与套餐的余额也列出来：订阅之外的额度不再只有终端里看得到", async () => {    installBridge({}, {
       "quota --json": {
         ok: true,

@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.305.4.120.12",
+    "date": "2026-11-18",
+    "title": "知道模型就别再摆骨架：模型列表不再等来源读完",
+    "bullets": [
+      "`ModelPage.test.tsx` 新增「已经知道有哪些模型时，不再先摆骨架等来源读完」：让 `providers` 永不返回，断言模型行已出现、且 `aria-label=\"正在读取模型\"` 的骨架不存在 → 该文件 67 例全绿。",
+      "全量 `pnpm --filter @heming/web test`：**443 个测试文件 / 6351 个用例全绿**。",
+      "typecheck 0 错；`node scripts/design-audit.mjs` 全门槛通过（模型页横向溢出 0、11px 正文 0、对比度 0、命中区 <32 为 0）。",
+      "`loadGlobals` 仍单独发 `settings get vision|visionEffort|imageGen` 三条：这些值其实已经在`settings list --json` 里（同一批第二波请求），但改用它要动看图/画图设置的刷新路径与夹具，这轮没做。",
+      "骨架仍出现在「本地 store 也还没加载完」的那一瞬（新装、清过缓存），那时确实什么都不知道。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "模型清单来自本地 store，来源那几条内核命令还没回来时它其实已经能画了。但页面把整块「可用模型」都挡在一个 `loading` 后面，于是每次打开都先看半秒骨架，等的是与模型列表无关的 `providers` / `ls` / `model disabled` / `visible`。骨架的价值是「什么都不知道时先占位」，不是「知道也先藏着」。",
+      "做了什么",
+      "| 位置 | 做的事 || --- | --- || `packages/web/src/components/ModelPage.tsx` 模型分区 | 骨架只在 `loading && modelRows.length === 0` 时出现：已经有模型就直接画 || 同一文件 `refreshAccountQuota` | 「刷新额度」顺手把额度走向（`quota history`）也读一遍，图上不必等下一分钟的定时器 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.304.4.120.12",
     "date": "2026-11-18",
     "title": "缓存只借用一天，隔天的状态不再先闪一下",

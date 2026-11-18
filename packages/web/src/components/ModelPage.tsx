@@ -749,7 +749,8 @@ export function ModelPage() {
         ...new Set([...accounts.map((row) => row.agent), ...providers.map((row) => row.id)]),
       ].filter(Boolean);
       await Promise.all(targets.map((target) => cli.cli(["quota", "refresh", target])));
-      await Promise.all([loadAccounts(), loadQuotas()]);
+      // 走向图也是同一批读数：刷新完顺手把它读一遍，图上不必等下一分钟。
+      await Promise.all([loadAccounts(), loadQuotas(), loadHistory()]);
       setNow(Date.now());
       setNotice("已重新读取额度。");
     } catch (err) {
@@ -1380,7 +1381,7 @@ export function ModelPage() {
               </div>
             )}
 
-            {loading ? (
+            {loading && modelRows.length === 0 ? (
               <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">
                 {[0, 1].map((index) => (
                   // 骨架与真实内容同形同尺寸：一块 ui-card（rounded-xl）里三行列表，
