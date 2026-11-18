@@ -2,6 +2,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { createScriptedApprover } from "./approvals.js";
 import { outcomeExitCode, startAgentRun, type StreamChatFn } from "./run.js";
 import type { CliEvent } from "./events.js";
 import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
@@ -422,5 +423,91 @@ describe("续聊的上下文预算（d.317）", () => {
     expect(messages.some((m) => m.content.startsWith("【早期对话摘要】"))).toBe(false);
     // 第一轮的痕迹还在：真的是原样发送。
     expect(messages.some((m) => m.content.startsWith("第 1 轮："))).toBe(true);
+  });
+});
+/**
+ * 交互式审批（`--ask`，d.322）的端到端回路。
+ *
+ * 单测已经守住了闸门逻辑；这里要证的是**编排层真的把批准用上了**：人答「允许」之后
+ * 命令确实跑了、结果回到模型手里；人答「不要」之后命令一步都没动。
+ */
+describe("交互式审批（--ask，d.322）", () => {
+  it("人答「允许这一次」：命令真的执行，结果回到模型，退出码 0", async () => {
+    const dir = await makeSandbox();
+    const command = `node -e "require('node:fs').writeFileSync('approved.txt','ran')"`;
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "run_command", arguments: { command } }] },
+      { text: "命令跑完了。" },
+    ]);
+    const approver = createScriptedApprover(["allow-once"]);
+
+    const outcome = await startAgentRun({
+      prompt: "把 approved.txt 写出来",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      ask: approver,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(outcome.json.toolCalls[0]).toMatchObject({ name: "run_command", ok: true, denied: false });
+    // 真的跑了：文件存在。
+    expect(await readFile(path.join(dir, "approved.txt"), "utf8")).toBe("ran");
+    // 而且确实问过那次命令。
+    expect(approver.requests).toHaveLength(1);
+    expect(approver.requests[0]?.tool).toBe("run_command");
+    expect(outcomeExitCode(outcome)).toBe(0);
+  });
+
+  it("人答「不要」：命令没跑，模型收到的是「拒绝」而不是「参数错」", async () => {
+    const dir = await makeSandbox();
+    const command = `node -e "require('node:fs').writeFileSync('denied.txt','ran')"`;
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "run_command", arguments: { command } }] },
+      { text: "好的，那我先不动。" },
+    ]);
+    const approver = createScriptedApprover(["deny"]);
+
+    const outcome = await startAgentRun({
+      prompt: "写个文件",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      ask: approver,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.toolCalls[0]?.denied).toBe(true);
+    expect(outcome.json.toolCalls[0]?.ok).toBe(false);
+    // 拒绝的回灌文案要让人/模型都看出这是「用户不让」。
+    expect(outcome.json.toolCalls[0]?.text ?? "").toMatch(/拒绝|未执行/);
+    await expect(readFile(path.join(dir, "denied.txt"), "utf8")).rejects.toThrow();
+    expect(outcomeExitCode(outcome)).toBe(0);
+  });
+
+  it("答「本次运行都允许」：同一轮里第二条命令不再追问", async () => {
+    const dir = await makeSandbox();
+    const command = `node -e "require('node:fs').appendFileSync('twice.txt','x')"`;
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "run_command", arguments: { command } }] },
+      { tool_calls: [{ name: "run_command", arguments: { command } }] },
+      { text: "两条都跑了。" },
+    ]);
+    const approver = createScriptedApprover(["allow-session"]);
+
+    const outcome = await startAgentRun({
+      prompt: "跑两次",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      ask: approver,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.toolCalls.filter((call) => call.ok)).toHaveLength(2);
+    expect(await readFile(path.join(dir, "twice.txt"), "utf8")).toBe("xx");
+    // 只问了一次：这正是「本次运行都允许」的意义。
+    expect(approver.requests).toHaveLength(1);
   });
 });

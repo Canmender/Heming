@@ -5,11 +5,26 @@
  * 同时它**不放松安全边界**——工作区外的绝对路径只是被改写成 `../…`，仍然会被越界检查挡下。
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { createCliGate, relativizeToolArgs } from "./tooling.js";
+import { afterAll, describe, expect, it } from "vitest";
+import { createScriptedApprover } from "./approvals.js";
+import { createCliGate, createCliTooling, relativizeToolArgs } from "./tooling.js";
 
-const CWD = path.resolve("D:/work/proj").replace(/\\/g, "/");
+const CWD = path.resolve("D:/work/proj").replace(/\\\\/g, "/");
+
+/** 本轮建过的临时目录，跑完统一删掉。 */
+const tmpDirs: string[] = [];
+afterAll(() => {
+  for (const dir of tmpDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清不掉就算了：这是临时目录，不该让测试因此失败。
+    }
+  }
+});
 
 describe("relativizeToolArgs（d.288）", () => {
   it("相对路径、非路径字段、非 JSON 一律原样返回", () => {
@@ -134,5 +149,227 @@ describe("只读模式（d.314）", () => {
   it("不开只读时行为不变（写工具照常过闸门）", async () => {
     const outcome = (await gateOf({ risk: "write" })([call("file_write")]))[0]!;
     expect(outcome.kind).toBe("allow");
+  });
+});
+
+/**
+ * 交互式审批（`--ask`，d.322）：只有 danger 类调用会问到人。
+ *
+ * 这些用例守的是三条约束：问到的人是唯一放行来源、拒绝的 cause 必须记成 `user`、
+ * 写文件的越界检查不因为有人点头而放松。
+ */
+describe("交互式审批（d.322）", () => {
+  const shellCall = (command = "git status") => ({
+    id: "c1",
+    function: { name: "run_command", arguments: JSON.stringify({ command }) },
+  });
+
+  /** 闸门 + 脚本化审批器：`answers` 按顺序给人回答，`seen` 记录问了什么。 */
+  function askedGate(answers: Parameters<typeof createScriptedApprover>[0], options: { allowDanger?: boolean } = {}) {
+    const approver = createScriptedApprover(answers);
+    const choices: string[] = [];
+    const gate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: options.allowDanger === true,
+      metaOf: (name: string) => (name === "run_command" ? { risk: "danger", displayName: "在本机执行命令" } : { risk: "read" }),
+      ask: approver,
+      onApproval: (choice) => choices.push(choice),
+    });
+    return { gate, approver, choices };
+  }
+
+  it("没有 --ask 时 danger 仍是确定性拒绝（老行为不变）", async () => {
+    const { gate, approver } = askedGate([]);
+    const noAskGate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: false,
+      metaOf: () => ({ risk: "danger" }),
+    });
+    const outcome = (await noAskGate([shellCall()]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(outcome.kind === "deny" ? outcome.cause : "").toBe("gate");
+    expect(approver.requests).toHaveLength(0);
+    expect(gate).toBeDefined();
+  });
+
+  it("人答「允许这一次」就放行，并把这次询问记下来", async () => {
+    const { gate, approver, choices } = askedGate(["allow-once"]);
+    const outcome = (await gate([shellCall()]))[0]!;
+    expect(outcome.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(1);
+    expect(approver.requests[0]?.tool).toBe("run_command");
+    expect(approver.requests[0]?.displayName).toBe("在本机执行命令");
+    expect(approver.requests[0]?.detail).toContain("command=git status");
+    expect(choices).toEqual(["allow-once"]);
+  });
+
+  it("人答「不要」就拒绝，cause 记 user（回灌文案要说「用户拒绝」）", async () => {
+    const { gate, choices } = askedGate(["deny"]);
+    const outcome = (await gate([shellCall()]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(outcome.kind === "deny" ? outcome.cause : "").toBe("user");
+    expect(outcome.kind === "deny" ? outcome.reason : "").toContain("你在终端里拒绝了这次调用");
+    expect(choices).toEqual(["deny"]);
+  });
+
+  it("人答「停下」也是拒绝且 cause 记 user", async () => {
+    const { gate } = askedGate(["deny-all"]);
+    const outcome = (await gate([shellCall()]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(outcome.kind === "deny" ? outcome.cause : "").toBe("user");
+  });
+
+  it("只读工具不问人", async () => {
+    const approver = createScriptedApprover(["allow-once"]);
+    const gate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: false,
+      metaOf: () => ({ risk: "read" }),
+      ask: approver,
+    });
+    const outcome = (await gate([{ id: "c1", function: { name: "file_read", arguments: JSON.stringify({ path: "a.ts" }) } }]))[0]!;
+    expect(outcome.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(0);
+  });
+
+  it("写文件的越界检查不因审批而放松：根外写仍然被拒，也不问人", async () => {
+    const approver = createScriptedApprover(["allow-once", "allow-session"]);
+    const gate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: false,
+      metaOf: () => ({ risk: "write" }),
+      ask: approver,
+    });
+    const outside = path.resolve("D:/other/a.ts").replace(/\\/g, "/");
+    const outcome = (await gate([
+      { id: "c1", function: { name: "file_write", arguments: JSON.stringify({ path: outside, content: "x" }) } },
+    ]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(approver.requests).toHaveLength(0);
+  });
+
+  it("工作区规则里的 ask 在 --ask 下真的问人，答允许就放行", async () => {
+    const approver = createScriptedApprover(["allow-once"]);
+    const gate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: false,
+      metaOf: () => ({ risk: "write" }),
+      rules: {
+        source: ".heming/permissions.json",
+        trusted: false,
+        allowActive: false,
+        config: { allow: [], deny: [], ask: [{ tool: "file_write", path: "src/**" }] },
+      } as never,
+      ask: approver,
+    });
+    const outcome = (await gate([
+      { id: "c1", function: { name: "file_write", arguments: JSON.stringify({ path: "src/a.ts", content: "x" }) } },
+    ]))[0]!;
+    expect(outcome.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(1);
+    expect(approver.requests[0]?.reason).toContain("工作区权限规则要求先确认");
+  });
+
+  it("工作区规则里的 ask 被拒绝时 cause 也记 user", async () => {
+    const approver = createScriptedApprover(["deny"]);
+    const gate = createCliGate({
+      roots: () => ROOTS,
+      allowDanger: false,
+      metaOf: () => ({ risk: "write" }),
+      rules: {
+        source: ".heming/permissions.json",
+        trusted: false,
+        allowActive: false,
+        config: { allow: [], deny: [], ask: [{ tool: "file_write", path: "src/**" }] },
+      } as never,
+      ask: approver,
+    });
+    const outcome = (await gate([
+      { id: "c1", function: { name: "file_write", arguments: JSON.stringify({ path: "src/a.ts", content: "x" }) } },
+    ]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(outcome.kind === "deny" ? outcome.cause : "").toBe("user");
+    expect(outcome.kind === "deny" ? outcome.reason : "").toContain("工作区权限规则要求确认");
+  });
+
+  it("--allow-danger 时不问人（已经显式放行了）", async () => {
+    const { gate, approver } = askedGate(["deny"], { allowDanger: true });
+    const outcome = (await gate([shellCall()]))[0]!;
+    expect(outcome.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(0);
+  });
+});
+
+/**
+ * 批准状态是要**消费**的：闸门先问、桥后执行，`allow-once` 只够一次。
+ *
+ * 这一组直接走 `createCliTooling`，因为「问过一次之后还能不能跑第二次」这件事
+ * 只有在闸门 + 桥 + 命令工具三者都在场时才看得出来。
+ */
+describe("交互式审批的许可消费（d.322）", () => {
+  /** 在临时目录里跑一条几乎无害的真命令（`node -e` 只写一行到 stdout）。 */
+  const ECHO = `"${process.execPath}" -e "process.stdout.write('hi')"`;
+
+  function toolingWith(answers: Parameters<typeof createScriptedApprover>[0]) {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-ask-"));
+    tmpDirs.push(dir);
+    const approver = createScriptedApprover(answers);
+    const tooling = createCliTooling({
+      cwd: dir,
+      allowDanger: false,
+      conversationId: "ask-test",
+      ask: approver,
+    });
+    return { tooling, approver };
+  }
+
+  const shellCall = { name: "run_command", arguments: JSON.stringify({ command: ECHO }) };
+
+  it("命令工具在 --ask 下会出现在工具清单里（否则人无从放行）", () => {
+    const { tooling } = toolingWith([]);
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).toContain("run_command");
+  });
+
+  it("答「允许这一次」能跑一次，第二次仍会被拒（许可被消费掉了）", async () => {
+    const { tooling, approver } = toolingWith(["allow-once", "deny"]);
+
+    // 编排层的顺序是：闸门先问（confirm）→ 放行后桥再执行（execute）。
+    const gateOutcome = await tooling.confirm([{ id: "c1", function: shellCall }]);
+    expect(gateOutcome[0]?.kind).toBe("allow");
+    const first = await tooling.toolBridge.execute(shellCall);
+    expect(first.ok).toBe(true);
+
+    const secondGate = await tooling.confirm([{ id: "c2", function: shellCall }]);
+    expect(secondGate[0]?.kind).toBe("deny");
+    const second = await tooling.toolBridge.execute(shellCall);
+    expect(second.ok).toBe(false);
+    expect(second.text).toContain("未执行");
+    // 第二次确实又问了一次（一次性的许可用完了就得再问），拿到的是 deny。
+    expect(approver.requests).toHaveLength(2);
+  });
+
+  it("答「本次运行都允许」之后不再问，连续两次都跑", async () => {
+    const { tooling, approver } = toolingWith(["allow-session"]);
+    await tooling.confirm([{ id: "c1", function: shellCall }]);
+    expect((await tooling.toolBridge.execute(shellCall)).ok).toBe(true);
+    expect((await tooling.toolBridge.execute(shellCall)).ok).toBe(true);
+    expect(approver.requests).toHaveLength(1);
+  });
+
+  it("答「不要」时命令不执行，文案说清是被拒绝而不是参数错", async () => {
+    const { tooling } = toolingWith(["deny"]);
+    const result = await tooling.toolBridge.execute(shellCall);
+    expect(result.ok).toBe(false);
+    // 闸门在桥前面：编排层没放行的调用到不了桥，这里直接执行时由桥兜底拒绝。
+    expect(result.text).toContain("未执行");
+  });
+
+  it("没有 --ask 也没有 --allow-danger 时命令工具根本不挂（老行为）", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-noask-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "no-ask" });
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).not.toContain("run_command");
   });
 });

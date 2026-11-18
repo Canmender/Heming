@@ -37,6 +37,11 @@ export interface PromptOptions {
    */
   readOnly: boolean;
   /**
+   * 交互式审批：危险调用（命令、MCP 工具）先在终端问一句，而不是一律拒绝或一律放行。
+   * 需要真正的终端（stdin 是 TTY）；`run -`（从 stdin 读指令）不能与它同时用。
+   */
+  ask: boolean;
+  /**
    * 信任工作区的 `.heming/permissions.json`：只有信任之后，里面的 **allow** 规则才生效。
    * deny / ask 不受这个开关影响——它们是收紧方向，仓库里写了一定照做。
    */
@@ -118,6 +123,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let trustWorkspace = false;
   let trustHooks = false;
   let readOnly = false;
+  let ask = false;
   let contextBudget: number | undefined;
   let compact = true;
   let cwd: string | undefined;
@@ -189,6 +195,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "read-only": {
           if (inline !== undefined) return { ok: false, error: "--read-only 不接受取值（直接写 --read-only 即可）" };
           readOnly = true;
+          break;
+        }
+        case "ask": {
+          if (inline !== undefined) return { ok: false, error: "--ask 不接受取值（直接写 --ask 即可）" };
+          ask = true;
           break;
         }
         case "no-compact": {
@@ -309,6 +320,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (trustWorkspace) notForSessions.push("--trust-workspace");
     if (trustHooks) notForSessions.push("--trust-hooks");
   if (readOnly) notForSessions.push("--read-only");
+  if (ask) notForSessions.push("--ask");
     if (contextBudget !== undefined) notForSessions.push("--context-budget");
     if (!compact) notForSessions.push("--no-compact");
     if (mcp) notForSessions.push("--mcp");
@@ -355,6 +367,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (resume !== undefined) notForMcp.push("--resume");
     if (sessionDir !== undefined) notForMcp.push("--session-dir");
     if (mcp) notForMcp.push("--mcp");
+  if (ask) notForMcp.push("--ask");
     if (contextBudget !== undefined) notForMcp.push("--context-budget");
     if (!compact) notForMcp.push("--no-compact");
     if (notForMcp.length > 0) {
@@ -374,6 +387,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // `-` 表示「指令从 stdin 读」：CI 里最常见的是 `git diff | heming exec -`。
   const fromStdin = rawPrompt === "-";
   const prompt = fromStdin ? "" : rawPrompt;
+  if (ask && fromStdin) {
+    return {
+      ok: false,
+      error:
+        "--ask 不能和 `run -` 一起用：审批要从 stdin 读你的回答，而 `run -` 的提示词也从 stdin 来。把提示词直接写在命令行上，或去掉 --ask。",
+    };
+  }
   if (!prompt && !fromStdin) {
     return { ok: false, error: `${command} 缺少 prompt（要执行的指令；也可以写 - 从 stdin 读）` };
   }
@@ -395,6 +415,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       fromStdin,
       allowDanger,
       readOnly,
+      ask,
       trustWorkspace,
       trustHooks,
       compact,

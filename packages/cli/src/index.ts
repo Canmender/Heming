@@ -18,6 +18,7 @@ import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { describeCliContext } from "./contextBudget.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
+import { APPROVAL_ANSWER_HINTS, createTerminalApprover } from "./approvals.js";
 import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
 import {
   appendTurn,
@@ -53,6 +54,7 @@ const USAGE = `用法：
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
   --read-only          只读模式：除读取类工具外一律不执行（写、删、命令都拦住）
+  --ask                危险调用（命令 / MCP 工具）先在终端问一句（需要真终端）
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
   --trust-hooks        允许执行 .heming/hooks.json 里的本机检查（默认只读配置、不执行）
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
@@ -117,6 +119,7 @@ MCP 服务（给别的编辑器用）：
   pnpm cli --trust-workspace "按仓库里的权限规则跑，别改 docs/"
   pnpm cli --trust-hooks "按仓库里的钩子检查跑，改完 generated 前会被拦住"
   pnpm cli --read-only "先只看不改：这套代码哪里会出问题"
+  pnpm cli --ask "跑一下测试；每一步命令我都想先看一眼"
   pnpm cli --continue --context-budget 4000 "接着聊，历史只留最近一小段"
   pnpm cli --continue --no-compact "把整段历史原样发给模型"
 
@@ -234,6 +237,7 @@ async function main(argv: string[]): Promise<number> {
   if (options.readOnly && options.allowDanger) {
     writeErr("[heming] --read-only 优先：危险工具仍然不会执行（--allow-danger 这次被忽略）。\n");
   }
+
   const sink = streamMode ? createEventSink((chunk) => process.stdout.write(chunk)) : null;
   /**
    * `--mcp` 连上的子进程。
@@ -260,6 +264,20 @@ async function main(argv: string[]): Promise<number> {
     closeMcpConnections();
     return 2;
   };
+  /*
+   * `--ask` 要真的有人在终端前面：审批从 stdin 读回答，而 stdin 是管道时
+   * 下一行可能是脚本的输入（`run -` 的提示词、CI 的数据），把那些当成「y」
+   * 就等于自动批准一切。所以非终端直接拒绝启动，而不是退化成默认拒绝。
+   */
+  if (options.ask && !process.stdin.isTTY) {
+    return failEarly(
+      "--ask 需要真正的终端：当前 stdin 不是 TTY（管道、CI、重定向）。去掉 --ask（危险调用会一律拒绝），或改用 --allow-danger 显式放行。",
+    );
+  }
+  const approver = options.ask ? createTerminalApprover({ input: process.stdin, output: process.stderr }) : null;
+  if (approver) {
+    writeErr(`[heming] 审批已开启：${APPROVAL_ANSWER_HINTS}\n`);
+  }
 
   // `-` 表示指令来自 stdin：CI 里最常用的是 `git diff | heming exec -`。
   let prompt = options.prompt;
@@ -420,6 +438,7 @@ async function main(argv: string[]): Promise<number> {
     ...(hookRunner ? { hooks: hookRunner } : {}),
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
+    ...(approver ? { ask: approver.ask } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     ...(options.contextBudget !== undefined ? { contextBudget: options.contextBudget } : {}),
     ...(options.compact ? {} : { compact: false }),
@@ -510,6 +529,8 @@ async function main(argv: string[]): Promise<number> {
     writeErr(`[heming] 会话没有存下来：${error instanceof Error ? error.message : String(error)}\n`);
   }
 
+  // 审批器的 readline 也握着 stdin，不收掉同样会让进程等着。
+  approver?.close();
   // MCP 子进程要收掉：它们挂在 stdio 上，留着会让 Node 等 stdin 关闭而不退出。
   closeMcpConnections();
 

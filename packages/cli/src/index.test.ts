@@ -108,4 +108,24 @@ describe.skipIf(tsx === null)("CLI 入口的进程级行为", () => {
     expect(result.stdout).toContain(".heming/mcp.json");
     expect(result.stdout).toContain("--trust-workspace");
   }, 30_000);
+
+  /**
+   * `--ask` 的底线：没有真终端就不启动。
+   *
+   * 这里 stdin 是 `ignore`（不是 TTY），正是「管道 / CI / 重定向」那种情形。如果实现
+   * 退化成「默认拒绝但照跑」，模型会一遍遍被拒；更糟的是有人把下一行 stdin 当成 `y`。
+   */
+  it("--ask 在非终端下直接拒绝启动（exit 2）并说明为什么", async () => {
+    const result = await runCli(["run", "--ask", "跑一下测试"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("--ask 需要真正的终端");
+    expect(result.durationMs).toBeLessThan(30_000);
+  }, 30_000);
+
+  it("--help 里有 --ask 与它的示例", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("--ask");
+    expect(result.stdout).toContain("需要真终端");
+  }, 30_000);
 });

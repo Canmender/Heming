@@ -1,6 +1,6 @@
 {
   "name": "@heming/server",
-  "version": "316.4.120",
+  "version": "324.4.120",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -26,5 +26,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.316.4.120.12"
+  "hemingVersion": "d.324.4.120.12"
 }

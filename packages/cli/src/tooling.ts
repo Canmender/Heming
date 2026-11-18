@@ -26,6 +26,7 @@ import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { createEvalToolBridge } from "../../../evals/runner/tools.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approvals.js";
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 
@@ -59,7 +60,7 @@ export interface CliTooling {
 export function createCliGate(input: {
   roots: () => FileRoot[];
   allowDanger: boolean;
-  metaOf: (name: string) => { risk?: string } | undefined;
+  metaOf: (name: string) => { risk?: string; displayName?: string } | undefined;
   rules?: CliWorkspaceRuleSet | null;
   /**
    * 只读模式（`--read-only`）：除「自报只读」的工具外一律拒绝。
@@ -69,11 +70,28 @@ export function createCliGate(input: {
    * 连 `--allow-danger` 也不放开命令（两个开关同时给时只读赢，入口会提示）。
    */
   readOnly?: boolean;
+  /**
+   * 交互式审批（`--ask`）：只有 danger 类调用会走到这里。
+   *
+   * 不给就是原来的确定性闸门（一律拒绝）。给的时候闸门会**等**一个人回答，
+   * 这跟「无人值守时把 ask 落成拒绝」并不矛盾：这一路确实有人在终端前面。
+   */
+  ask?: CliApprover | null;
+  /** 审批结果回调：装配方据此更新「本次运行已放行」等状态。 */
+  onApproval?: (choice: ApprovalChoice) => void;
+  /**
+   * 「现在能不能跑危险工具」——动态版本，`--ask` 时指向装配方那份会变的状态。
+   *
+   * 必须做成函数：人答过「本次运行都允许」之后，闸门手里的 `allowDanger` 仍是 false，
+   * 只有这份闭包知道许可已经变了。不给就退回静态的 `allowDanger`。
+   */
+  dangerAllowed?: () => boolean;
 }): ToolConfirmFn {
   const rules = input.rules ?? null;
   const readOnly = input.readOnly === true;
-  return async (calls) =>
-    calls.map((call) => {
+  return async (calls) => {
+    const outcomes: GateOutcome[] = [];
+    for (const call of calls) {
       const hitlCall = toHitlCall(call);
       const name = call.function.name;
 
@@ -88,12 +106,13 @@ export function createCliGate(input: {
       if (readOnly) {
         const meta = input.metaOf(name);
         if (name === SHELL_TOOL || !meta || meta.risk !== "read") {
-          return {
-            kind: "deny" as const,
+          outcomes.push({
+            kind: "deny",
             call: hitlCall,
             reason: `CLI 以只读模式运行（--read-only）：${name} 会改动文件或执行命令，这次没有执行`,
-            cause: "gate" as const,
-          };
+            cause: "gate",
+          });
+          continue;
         }
       }
 
@@ -112,65 +131,128 @@ export function createCliGate(input: {
       if (rules) {
         const verdict = matchWorkspaceRules(rules.config, hitlCall, { roots: input.roots() });
         if (verdict.verdict === "deny") {
-          return {
-            kind: "deny" as const,
+          outcomes.push({
+            kind: "deny",
             call: hitlCall,
             reason: `工作区权限规则拒绝：${verdict.reason ?? "命中 deny 规则"}`,
-            cause: "rule" as const,
-          };
+            cause: "rule",
+          });
+          continue;
         }
         if (verdict.verdict === "ask") {
-          return {
-            kind: "deny" as const,
+          /*
+           * 规则写了「先问一下」：`--ask` 下就真的问；不问的模式（含 MCP）仍然是拒绝。
+           * 这条与下面 danger 的询问是两条路：回答「本次运行都允许」只表示「这个工具
+           * 在这个仓库里可以动」，不会顺带放行别的危险工具——两件事的风险不同。
+           */
+          const ruleDetail = approvalDetail(call.function.arguments);
+          const ruleDisplay = input.metaOf(name)?.displayName;
+          const choice = input.ask
+            ? await input.ask({
+                tool: name,
+                ...(ruleDisplay ? { displayName: ruleDisplay } : {}),
+                ...(ruleDetail ? { detail: ruleDetail } : {}),
+                reason: `工作区权限规则要求先确认（${verdict.reason ?? "命中 ask 规则"}）`,
+              })
+            : null;
+          if (choice === "allow-once" || choice === "allow-session") {
+            outcomes.push({ kind: "allow", call: hitlCall });
+            continue;
+          }
+          if (choice) {
+            outcomes.push({
+              kind: "deny",
+              call: hitlCall,
+              reason: "你在终端里拒绝了这次调用（工作区权限规则要求确认）",
+              cause: "user",
+            });
+            continue;
+          }
+          outcomes.push({
+            kind: "deny",
             call: hitlCall,
             reason: `工作区权限规则要求先确认（${verdict.reason ?? "命中 ask 规则"}），CLI 没有人可以确认，按拒绝处理`,
-            cause: "rule" as const,
-          };
-        }
-        relaxedByRule = verdict.verdict === "allow" && rules.allowActive;
+            cause: "rule",
+          });
+          continue;
+        }        relaxedByRule = verdict.verdict === "allow" && rules.allowActive;
       }
-
-      // 命令工具由桥统一裁决：挂上了（--allow-danger）就真跑，没挂就回「未执行」。
-      if (name === SHELL_TOOL) return { kind: "allow" as const, call: hitlCall };
 
       const meta = input.metaOf(name);
       if (!meta || !meta.risk) {
-        return {
-          kind: "deny" as const,
+        outcomes.push({
+          kind: "deny",
           call: hitlCall,
           reason: `CLI 无法确认工具 ${name} 的风险，按拒绝处理（fail-closed）`,
-          cause: "gate" as const,
-        };
+          cause: "gate",
+        });
+        continue;
       }
-      if (meta.risk === "read") return { kind: "allow" as const, call: hitlCall };
+      if (meta.risk === "read") {
+        outcomes.push({ kind: "allow", call: hitlCall });
+        continue;
+      }
       if (meta.risk === "danger") {
-        return input.allowDanger || relaxedByRule
-          ? { kind: "allow" as const, call: hitlCall }
-          : {
-              kind: "deny" as const,
-              call: hitlCall,
-              reason: "CLI 未授权危险工具（需要 --allow-danger）",
-              cause: "gate" as const,
-            };
+        const dangerOpen = input.dangerAllowed ? input.dangerAllowed() : input.allowDanger;
+        if (dangerOpen || relaxedByRule) {
+          outcomes.push({ kind: "allow", call: hitlCall });
+          continue;
+        }
+        /*
+         * 无人可问：确定性拒绝（原来的行为）。
+         * 有人可问（`--ask`）：把「要不要放行」交给终端，回答落成 allow / deny，
+         * 拒绝的 cause 记 `user`——回灌文案要说「用户拒绝」，不能把人的决定
+         * 说成程序判定（那会让模型去劝程序，而不是换个做法）。
+         */
+        if (!input.ask) {
+          outcomes.push({
+            kind: "deny",
+            call: hitlCall,
+            reason: "CLI 未授权危险工具（需要 --allow-danger）",
+            cause: "gate",
+          });
+          continue;
+        }
+        const detail = approvalDetail(call.function.arguments);
+        const choice = await input.ask({
+          tool: name,
+          ...(meta.displayName ? { displayName: meta.displayName } : {}),
+          ...(detail ? { detail } : {}),
+          reason: "这是在本机执行命令（或由外部服务代跑）的工具：放行之后它会真的动手。",
+        });
+        input.onApproval?.(choice);
+        if (choice === "allow-once" || choice === "allow-session") {
+          outcomes.push({ kind: "allow", call: hitlCall });
+          continue;
+        }
+        outcomes.push({
+          kind: "deny",
+          call: hitlCall,
+          reason: "你在终端里拒绝了这次调用",
+          cause: "user",
+        });
+        continue;
       }
 
       // 剩下的是写类：只有明确的文件写工具才走路径安全判定，其它写工具一律拒绝。
       if (!isFileWriteTool(name)) {
-        return {
-          kind: "deny" as const,
+        outcomes.push({
+          kind: "deny",
           call: hitlCall,
           reason: `CLI 不接受未声明的写工具：${name}`,
-          cause: "gate" as const,
-        };
+          cause: "gate",
+        });
+        continue;
       }
       const targets = targetsOfCall({ name, argsJson: call.function.arguments }, input.roots());
       if (!targets) {
-        return {
-          kind: "deny" as const,
+        outcomes.push({
+          kind: "deny",
           call: hitlCall,
           reason: "无法解析这次写入的目标路径，按拒绝处理",
-          cause: "gate" as const,
-        };
+          cause: "gate",
+        });
+        continue;
       }
       const safety = assessPatchSafety({
         targets: targets.absolute,
@@ -178,16 +260,20 @@ export function createCliGate(input: {
         roots: input.roots(),
         outOfRoot: "reject",
       });
-      if (safety.verdict === "auto") return { kind: "allow" as const, call: hitlCall };
-      return {
-        kind: "deny" as const,
+      if (safety.verdict === "auto") {
+        outcomes.push({ kind: "allow", call: hitlCall });
+        continue;
+      }
+      outcomes.push({
+        kind: "deny",
         call: hitlCall,
         reason: safety.reason,
-        cause: "gate" as const,
-      };
-    });
+        cause: "gate",
+      });
+    }
+    return outcomes;
+  };
 }
-
 /**
  * 把工具参数里的绝对路径改写成「相对 cwd」的写法。
  *
@@ -284,6 +370,13 @@ export function createCliTooling(options: {
    * 因为 `--allow-danger` 与 `--read-only` 同时出现时不能让任何一条路径漏过去）。
    */
   readOnly?: boolean;
+  /**
+   * 交互式审批（`--ask`）：危险调用先问终端。
+   *
+   * 给了它就要把命令工具挂上（否则模型连 `run_command` 都看不见，问也没得问），
+   * 但**执行**仍然逐次看批准状态：`allow-once` 只够这一次，`allow-session` 才长效。
+   */
+  ask?: CliApprover | null;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -298,10 +391,26 @@ export function createCliTooling(options: {
     // 任务清单按本次运行独立：CLI 不在两次调用之间保存会话，清单串味只会误导模型。
     conversationId: options.conversationId,
     // 只有显式 --allow-danger 才挂命令工具（它同时意味着闸门放行 danger）。
-    ...(options.allowDanger && !options.readOnly ? { shell: true } : {}),
+    // 有审批（--ask）时也要挂命令工具：否则模型看不到它，人也无从放行。
+    ...((options.allowDanger || options.ask) && !options.readOnly ? { shell: true } : {}),
   });
 
   const onWrite = options.onWrite;
+
+  /*
+   * 危险调用的批准状态（只有 `--ask` 会动它）：
+   * - `sessionAllowed`：`--allow-danger` 给的全局放行，或人回答过「本次运行都允许」；
+   * - `permits`：人回答「只允许这一次」攒下的一次性许可，**执行时消费**——
+   *   闸门先答、桥后执行，两者的顺序由编排层保证，所以用一个计数就够；
+   * - `stopped`：人回答过「停下」，之后同类调用不再打扰，直接按拒绝处理。
+   */
+  let sessionAllowed = options.allowDanger;
+  let permits = 0;
+  let stopped = false;
+  const dangerAllowed = (): boolean => sessionAllowed || permits > 0;
+  const consumePermit = (): void => {
+    if (!sessionAllowed && permits > 0) permits -= 1;
+  };
   const mcp = options.mcp ?? [];
   const mcpTools: unknown[] = [];
   const connections = new Map<string, McpConnection>();
@@ -333,7 +442,7 @@ export function createCliTooling(options: {
     async execute(call, execOpts) {
       // 没挂命令工具时，模型仍可能「凭印象」调用它：回一条明确的未执行文案，
       // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
-      if (call.name === SHELL_TOOL && !options.allowDanger) {
+      if (call.name === SHELL_TOOL && !dangerAllowed()) {
         return { text: shellDeniedText(), ok: false };
       }
 
@@ -353,12 +462,15 @@ export function createCliTooling(options: {
         }
       }
 
+      // 命令工具放行一次就消费一次许可（`allow-session` 时不动计数）。
+      if (call.name === SHELL_TOOL) consumePermit();
+
       // MCP 工具：参数语义由对方定义，**不改写**（不套 relativizeToolArgs）。
       const mcpTarget = parseMcpToolName(call.name);
       if (mcpTarget) {
         const connection = connections.get(mcpTarget.server);
         if (!connection) return { text: `MCP 服务 ${mcpTarget.server} 没有连上`, ok: false };
-        if (!options.allowDanger) {
+        if (!dangerAllowed()) {
           return {
             text: [
               `未执行：MCP 工具 ${call.name} 需要 --allow-danger（MCP 工具一律按危险工具处理）。`,
@@ -368,6 +480,7 @@ export function createCliTooling(options: {
             ok: false,
           };
         }
+        consumePermit();
         let args: unknown;
         try {
           args = call.arguments.trim() ? JSON.parse(call.arguments) : {};
@@ -397,12 +510,31 @@ export function createCliTooling(options: {
     },
   };
 
+  /*
+   * 审批包装：把人的回答翻译成「本次运行的批准状态」，顺序与闸门的判定一致——
+   * `allow-session` 之后同一运行的后续危险调用不再打扰；`stopped` 之后连问都不问。
+   */
+  const ask = options.ask
+    ? async (request: Parameters<CliApprover>[0]): Promise<ApprovalChoice> => {
+        if (stopped) return "deny-all";
+        const choice = await options.ask!(request);
+        if (choice === "allow-session") sessionAllowed = true;
+        else if (choice === "allow-once") permits += 1;
+        else if (choice === "deny-all") stopped = true;
+        return choice;
+      }
+    : null;
+
   const gate = createCliGate({
     roots: () => roots,
     allowDanger: options.allowDanger,
     metaOf: (name) => toolBridge.meta?.(name),
     rules: options.rules ?? null,
     readOnly: options.readOnly === true,
+    ask,
+    // 人答过「本次运行都允许」之后，闸门也要立刻知道：否则它手里那个静态的
+    // `allowDanger=false` 会让它把人已经授权过的调用再问一遍。
+    dangerAllowed,
   });
 
   /**

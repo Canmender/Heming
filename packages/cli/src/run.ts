@@ -41,6 +41,7 @@ import { createCliTooling, shellDeniedText } from "./tooling.js";
 import { createCliHistoryPrep, type CliContextStats } from "./contextBudget.js";
 import { estimateTokens } from "../../../packages/web/src/lib/agentContext/tokens.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import type { CliApprover } from "./approvals.js";
 import type { CliHookVerdict } from "./toolHooks.js";
 import type { McpConnection } from "./mcpClient.js";
 import type { CliEvent } from "./events.js";
@@ -88,6 +89,12 @@ export interface AgentRunOptions {
   profile: LlmProfile;
   /** 为 true 时挂真实的 `run_command` 并放行 danger 工具；否则命令工具不出现、调用也一律拒绝。 */
   allowDanger: boolean;
+  /**
+   * 交互式审批（`--ask`）：危险调用（命令 / MCP 工具）先在终端问一句。
+   *
+   * 缺省 / `null` = 不提问，与以前一样一律按拒绝处理（含 `mcp serve` 那条没有人的路）。
+   */
+  ask?: CliApprover | null;
   /** 最多允许 N 个工具轮；第 N+1 轮若还要调工具就提前收口。缺省用编排层的 12 轮上限。 */
   maxRounds?: number;
   /** 测试注入；缺省真实 `streamChat`。 */
@@ -174,31 +181,9 @@ export const TOOL_TEXT_LIMIT = 500;
 // 拒绝文案与闸门都在 `tooling.ts`（MCP 模式复用同一份，避免两个入口的安全口径分叉）。
 export { shellDeniedText };
 
-/** 一行化 + 截断（进度行只给人看，不承载完整参数）。 */
-function oneLine(text: string, max = 80): string {
-  const flat = String(text).replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
+// 进度行与审批框共用的短文本（callText.ts），两处必须说同一件事。
+import { describeCallArgs } from "./callText.js";
 
-/**
- * 从工具参数里挑「一眼能认出这次调用」的几个字段给进度行。
- *
- * 刻意不打印整段参数：`file_write` 的参数里是整份文件内容，打出来等于把文件倒进终端日志。
- */
-function describeCallArgs(raw: string): string {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
-    const record = parsed as Record<string, unknown>;
-    for (const key of ["command", "path", "pattern", "query", "url", "glob", "file"]) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim()) return ` ${key}=${oneLine(value)}`;
-    }
-  } catch {
-    /* 参数不是 JSON：进度行不展示，工具层会给出正式失败原因 */
-  }
-  return "";
-}
 
 /** 给人读的平台名（`describePlatform` 吃的是 UA 风格的字符串）。 */
 function platformLabel(platform: NodeJS.Platform): string {
@@ -295,6 +280,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     hooks: options.hooks ?? null,
     mcp: options.mcp ?? [],
     readOnly: options.readOnly === true,
+    ask: options.ask ?? null,
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;
@@ -394,7 +380,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
         return;
       }
       // 命令工具在未授权时由桥回「未执行」：这不是工具坏了，是策略拒绝。
-      const denied = event.denied === true || (event.name === SHELL_TOOL && !options.allowDanger);
+      const denied = event.denied === true || (event.name === SHELL_TOOL && !options.allowDanger && !options.ask);
       const state = event.denied ? "已拒绝" : event.ok ? "完成" : "失败";
       progress(`工具 ${event.name} ${state}`);
       options.onEvent?.({ type: "tool_end", name: event.name, ok: event.ok === true && !denied, denied });
@@ -417,7 +403,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
           name: item.name,
           ok: item.ok,
           // 命令工具在未授权时由桥回「未执行」：这不是工具坏了，是策略拒绝。
-          denied: item.denied === true || (item.name === SHELL_TOOL && !options.allowDanger),
+          denied: item.denied === true || (item.name === SHELL_TOOL && !options.allowDanger && !options.ask),
           ...(item.text ? { text: item.text.slice(0, TOOL_TEXT_LIMIT) } : {}),
         });
         return;

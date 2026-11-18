@@ -359,6 +359,40 @@ describe("parseArgs：只读模式（d.314）", () => {
     if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
   });
 });
+describe("parseArgs：交互式审批（d.322）", () => {
+  it("默认不开：危险调用仍然一律拒绝", () => {
+    expect(expectRun(["run", "跑一下"]).ask).toBe(false);
+  });
+
+  it("run 认 --ask", () => {
+    expect(expectRun(["run", "--ask", "跑一下测试"]).ask).toBe(true);
+  });
+
+  it("--ask 不接受取值", () => {
+    const parsed = parseArgs(["run", "--ask=yes", "跑一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--ask");
+  });
+
+  it("不能和 `run -` 一起用：审批与提示词抢同一个 stdin", () => {
+    const parsed = parseArgs(["run", "--ask", "-"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toContain("--ask 不能和");
+      expect(parsed.error).toContain("run -");
+    }
+  });
+
+  it("sessions 与 mcp serve 都不接 --ask", () => {
+    const sessions = parseArgs(["sessions", "--ask"]);
+    expect(sessions.ok).toBe(false);
+    if (!sessions.ok) expect(sessions.error).toContain("sessions 不接");
+
+    const mcp = parseArgs(["mcp", "serve", "--ask"]);
+    expect(mcp.ok).toBe(false);
+    if (!mcp.ok) expect(mcp.error).toContain("mcp serve 不接");
+  });
+});
 describe("parseArgs：续聊的上下文预算（d.317）", () => {
   it("默认折叠、预算交给默认值（不写字段）", () => {
     const options = expectRun(["run", "--continue", "接着聊"]);
