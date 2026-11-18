@@ -35,6 +35,33 @@ export const CLI_REWIND_MAX_RUN_CHARS = 1_000_000;
 /** 单轮最多抓多少个文件。 */
 export const CLI_REWIND_MAX_FILES = 200;
 
+/**
+ * 命令前后扫盘的上限（d.337）。
+ *
+ * 跑一条命令之前之后各扫一次工作区、比大小与改动时间，才知道它新建/改过/删掉了哪些文件——
+ * 这是「命令改的东西」唯一能拿到的证据：内容没有原文，但**改动范围**能看一眼。
+ * 扫描有上限：超过就直接放弃记录（扫不完的一份清单比没有清单更容易骗人）。
+ */
+export const CLI_REWIND_MAX_SCAN = 4000;
+
+/** 一轮里最多记多少个命令改动（三个清单加起来）。 */
+export const CLI_REWIND_MAX_COMMAND_FILES = 100;
+
+/** 扫盘时跳过的目录名：这些地方要么是产物要么是别人家的，扫了只会慢。 */
+export const CLI_REWIND_SCAN_SKIP = [
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".cache",
+  "__pycache__",
+  ".venv",
+  ".idea",
+  ".vscode",
+] as const;
+
 export type RewindSkipReason = "too-large" | "binary" | "unreadable";
 
 export interface RewindFile {
@@ -50,13 +77,35 @@ export interface RewindRun {
   id: string;
   at: string;
   files: RewindFile[];
+  /** 这一轮里的命令改了什么（没有原文，只有范围）。没有命令改动时不写这个字段。 */
+  commandChanges?: CommandChanges;
 }
+
+/**
+ * 命令改动清单：比的是「跑之前」与「跑之后」两次扫盘的差。
+ *
+ * 只有范围没有内容，所以：
+ * - `created` 能真的退——它们跑之前不存在，删掉就回到了当时的样子；
+ * - `modified` / `deleted` 退不回去（没有原文），只能点名让人用 git 核对。
+ */
+export interface CommandChanges {
+  created: string[];
+  modified: string[];
+  deleted: string[];
+}
+
+/** 一次扫盘的快照：相对路径 → 大小与改动时间（不比内容，太慢）。 */
+export type CommandManifest = Map<string, { size: number; mtimeMs: number }>;
 
 export interface CliRewindJournal {
   /** 在写工具动手之前调用：按这次调用的目标路径抓一份原文。 */
   note(call: { name: string; arguments: string }): Promise<void>;
   /** 这一轮抓了多少个文件。 */
   size(): number;
+  /** 命令动手之前扫一遍工作区（拿不到清单 → null，等于这条命令不记录范围）。 */
+  beginCommand(): Promise<CommandManifest | null>;
+  /** 命令跑完之后再扫一遍，把差集记进这一轮。 */
+  endCommand(before: CommandManifest | null): Promise<void>;
   /** 收尾：有内容才落盘，返回落盘的那一轮（没有改动 → null）。 */
   close(): Promise<RewindRun | null>;
 }
@@ -75,6 +124,8 @@ export interface CliRewindPlan {
   remove: string[];
   /** 抓不到原文、退不回去的文件。 */
   skipped: { path: string; reason: RewindSkipReason }[];
+  /** 命令改过内容或删掉的文件：没有原文，退不回去，只点名（老存档没有这一项）。 */
+  commandLost?: { path: string; how: "modified" | "deleted" }[];
 }
 
 export type CliRewindApply =
@@ -140,7 +191,95 @@ export function parseRewindRun(value: unknown): RewindRun | null {
       ...(skipped ? { skipped } : {}),
     });
   }
-  return { id: raw.id, at: raw.at, files };
+  const commandChanges = parseCommandChanges(raw.commandChanges);
+  return { id: raw.id, at: raw.at, files, ...(commandChanges ? { commandChanges } : {}) };
+}
+
+/** 解析命令改动清单；形状不对就整块丢掉（不让坏字段影响文件那半）。 */
+function parseCommandChanges(value: unknown): CommandChanges | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const pick = (list: unknown): string[] => {
+    if (!Array.isArray(list)) return [];
+    const out: string[] = [];
+    for (const item of list) {
+      if (typeof item !== "string" || !item) continue;
+      if (item.includes("..") || path.isAbsolute(item)) continue;
+      out.push(item.replace(/\\/g, "/"));
+    }
+    return out.slice(0, CLI_REWIND_MAX_COMMAND_FILES);
+  };
+  const created = pick(raw.created);
+  const modified = pick(raw.modified);
+  const deleted = pick(raw.deleted);
+  if (created.length === 0 && modified.length === 0 && deleted.length === 0) return null;
+  return { created, modified, deleted };
+}
+
+/** 扫一遍工作区：相对路径 → 大小 + 改动时间。超上限就返回 null（扫不完就别报）。 */
+export async function scanWorkspaceFiles(
+  cwd: string,
+  max: number = CLI_REWIND_MAX_SCAN,
+): Promise<CommandManifest | null> {
+  const root = path.resolve(cwd);
+  const skip = new Set<string>(CLI_REWIND_SCAN_SKIP);
+  const out: CommandManifest = new Map();
+  let truncated = false;
+  const walk = async (dir: string): Promise<void> => {
+    if (truncated) return;
+    let entries: { name: string; isDirectory(): boolean; isFile(): boolean }[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (truncated) return;
+      const abs = path.join(dir, entry.name);
+      const rel = path.relative(root, abs).replace(/\\/g, "/");
+      if (!rel) continue;
+      if (entry.isDirectory()) {
+        if (skip.has(entry.name) || rel === CLI_REWIND_DIR) continue;
+        await walk(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (out.size >= max) {
+        truncated = true;
+        return;
+      }
+      try {
+        const stat = await fs.stat(abs);
+        out.set(rel, { size: stat.size, mtimeMs: stat.mtimeMs });
+      } catch {
+        // 刚好被删掉/没权限：跳过这一个，不影响整份清单。
+      }
+    }
+  };
+  await walk(root);
+  return truncated ? null : out;
+}
+
+/** 两次扫盘的差：新建 / 改过 / 删掉。 */
+export function diffManifests(before: CommandManifest, after: CommandManifest): CommandChanges {
+  const created: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+  for (const [rel, now] of after) {
+    const then = before.get(rel);
+    if (!then) {
+      created.push(rel);
+      continue;
+    }
+    if (then.size !== now.size || then.mtimeMs !== now.mtimeMs) modified.push(rel);
+  }
+  for (const rel of before.keys()) {
+    if (!after.has(rel)) deleted.push(rel);
+  }
+  created.sort();
+  modified.sort();
+  deleted.sort();
+  return { created, modified, deleted };
 }
 
 /** 读这个工作区里的所有轮次（新的在前）。 */
@@ -196,10 +335,31 @@ export function planCliRewind(runs: readonly RewindRun[], turns: number): CliRew
     if (file.before === null) remove.push(key);
     else restore.push({ path: key, content: file.before });
   }
+  /*
+   * 命令新建的文件也能退（它们跑之前不存在，删掉就对了）；命令改过内容或删掉的，
+   * 没有原文，只能点名。写入工具也碰过的路径以工具那份原文为准，不重复处理。
+   */
+  const createdByCommand = new Set<string>();
+  const lost = new Map<string, "modified" | "deleted">();
+  for (let i = window.length - 1; i >= 0; i -= 1) {
+    const changes = window[i]!.commandChanges;
+    if (!changes) continue;
+    for (const rel of changes.created) createdByCommand.add(rel);
+    for (const rel of changes.modified) if (!lost.has(rel)) lost.set(rel, "modified");
+    for (const rel of changes.deleted) if (!lost.has(rel)) lost.set(rel, "deleted");
+  }
+  for (const rel of createdByCommand) {
+    if (earliest.has(rel) || skipped.some((item) => item.path === rel)) continue;
+    remove.push(rel);
+  }
+  const commandLost = [...lost.entries()]
+    .filter(([rel]) => !earliest.has(rel) && !createdByCommand.has(rel))
+    .map(([rel, how]) => ({ path: rel, how }))
+    .sort((a, b) => a.path.localeCompare(b.path));
   restore.sort((a, b) => a.path.localeCompare(b.path));
   remove.sort();
   skipped.sort((a, b) => a.path.localeCompare(b.path));
-  return { turns: count, restore, remove, skipped };
+  return { turns: count, restore, remove, skipped, commandLost };
 }
 
 /** 工作区内的绝对路径；越界（`..`、绝对路径）返回 null。 */
@@ -290,9 +450,17 @@ export function describeCliRewinds(load: CliRewindsLoad, cwd: string, now: Date 
       .join("、");
     const more = changed.length > 3 ? ` 等 ${changed.length} 个` : "";
     const skipNote = skipped > 0 ? `，另有 ${skipped} 个没抓到原文` : "";
-    lines.push(`  ${index + 1}. ${run.id}  ${ago}  ${changed.length} 个文件（${names || "无"}${more}）${skipNote}`);
+    const changes = run.commandChanges;
+    const commandNote = changes
+      ? `，命令新建 ${changes.created.length} / 改过 ${changes.modified.length} / 删掉 ${changes.deleted.length}`
+      : "";
+    lines.push(`  ${index + 1}. ${run.id}  ${ago}  ${changed.length} 个文件（${names || "无"}${more}）${skipNote}${commandNote}`);
   }
-  lines.push("", "退回最近一轮：heming rewind 1　退回最近三轮：heming rewind 3", "只还原写工具改过的文件；命令（run_command）改的东西退不回去。");
+  lines.push(
+    "",
+    "退回最近一轮：heming rewind 1　退回最近三轮：heming rewind 3",
+    "写工具改的文件按原文还原；命令新建的文件会删掉，命令改过内容或删掉的文件退不回去。",
+  );
   return lines.join("\n");
 }
 
@@ -329,12 +497,18 @@ export function describeCliRewindResult(
     const first = apply.failed[0]!;
     lines.push(`有 ${apply.failed.length} 个没退成功，例如 ${first.path}（${first.error}）。`);
   }
+  const lost = plan.commandLost ?? [];
+  if (lost.length > 0) {
+    const names = lost.slice(0, 3).map((item) => item.path).join("、");
+    const more = lost.length > 3 ? ` 等 ${lost.length} 个` : "";
+    lines.push(`命令改过内容或删掉的 ${lost.length} 个文件没有原文，退不回去：${names}${more}。`);
+  }
   lines.push(
     dropped > 0
       ? `这 ${dropped} 轮的记录已删除（退过一次不能退第二次）。`
       : "记录没能删除，下次还能再退一次。",
   );
-  lines.push("注意：命令（run_command）改的文件不在记录里，退不回去——那种情况用 git 或自己的备份。");
+  lines.push("注意：命令（run_command）新建的文件已经一并删掉；它改过内容或删掉的文件没有原文，退不回去——用 git 或自己的备份核对。");
   return lines.join("\n");
 }
 
@@ -350,7 +524,21 @@ export function createCliRewindJournal(options: {
   const random = options.random ?? Math.random;
   const roots: FileRoot[] = [{ path: cwd.replace(/\\/g, "/"), mode: "write", name: "work" }];
   const files = new Map<string, RewindFile>();
+  const commandChanges: CommandChanges = { created: [], modified: [], deleted: [] };
   let chars = 0;
+
+  const commandCount = (): number =>
+    commandChanges.created.length + commandChanges.modified.length + commandChanges.deleted.length;
+
+  const noteChanges = (changes: CommandChanges): void => {
+    for (const [key, list] of Object.entries(changes) as [keyof CommandChanges, string[]][]) {
+      for (const rel of list) {
+        if (commandCount() >= CLI_REWIND_MAX_COMMAND_FILES) return;
+        if (commandChanges[key].includes(rel)) continue;
+        commandChanges[key].push(rel);
+      }
+    }
+  };
 
   const record = (rel: string, file: RewindFile): void => {
     if (files.has(rel) || files.size >= CLI_REWIND_MAX_FILES) return;
@@ -407,13 +595,33 @@ export function createCliRewindJournal(options: {
       }
     },
 
+    async beginCommand() {
+      return scanWorkspaceFiles(cwd);
+    },
+
+    async endCommand(before) {
+      if (!before) return; // 前面那次扫盘没扫成（太大/读不了）：这次只当没有范围可记。
+      const after = await scanWorkspaceFiles(cwd);
+      if (!after) return;
+      noteChanges(diffManifests(before, after));
+    },
+
     async close() {
-      if (files.size === 0) return null;
+      if (files.size === 0 && commandCount() === 0) return null;
       const at = now();
       const run: RewindRun = {
         id: newRewindId(at, random),
         at: at.toISOString(),
         files: [...files.values()].sort((a, b) => a.path.localeCompare(b.path)),
+        ...(commandCount() > 0
+          ? {
+              commandChanges: {
+                created: [...commandChanges.created].sort(),
+                modified: [...commandChanges.modified].sort(),
+                deleted: [...commandChanges.deleted].sort(),
+              },
+            }
+          : {}),
       };
       const dir = rewindDir(cwd);
       const target = rewindRunPath(cwd, run.id);

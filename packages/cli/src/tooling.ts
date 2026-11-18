@@ -635,7 +635,17 @@ export function createCliTooling(options: {
       if (rewindEnabled && call.name !== SHELL_TOOL) {
         await rewind.note({ name: call.name, arguments: normalized.arguments });
       }
-      const result = await baseBridge.execute(normalized, execOpts);
+      /*
+       * 命令改的东西没有原文（d.337）：跑之前之后各扫一遍工作区，记下新建 / 改过 / 删掉的范围。
+       * 只有范围没有内容——新建的能删回去，改过与删掉的只能点名。
+       */
+      const scanBefore = rewindEnabled && call.name === SHELL_TOOL ? await rewind.beginCommand() : null;
+      let result;
+      try {
+        result = await baseBridge.execute(normalized, execOpts);
+      } finally {
+        if (rewindEnabled && call.name === SHELL_TOOL) await rewind.endCommand(scanBefore);
+      }
       if (result.ok && result.writes?.length && onWrite) {
         for (const file of result.writes) onWrite(file);
       }

@@ -632,7 +632,12 @@ async function main(argv: string[]): Promise<number> {
     // 留了回退记录才提一句：没有改动时说「能退」是骗人的。
     onRewind: (run) => {
       const changed = run.files.filter((file) => file.skipped === undefined).length;
-      writeErr(`[heming] 这次改了 ${changed} 个文件，回退记录 ${run.id}：heming rewind 1 可以退回去。` + "\n");
+      const changes = run.commandChanges;
+      const byCommand = changes ? changes.created.length + changes.modified.length + changes.deleted.length : 0;
+      const parts: string[] = [];
+      if (changed > 0) parts.push(`改了 ${changed} 个文件`);
+      if (byCommand > 0) parts.push(`命令动了 ${byCommand} 个文件（只有范围、没有原文）`);
+      writeErr(`[heming] 这次${parts.join("，")}，回退记录 ${run.id}：heming rewind 1 可以退回去。` + "\n");
     },
     ...(recallSection ? { memorySection: recallSection } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),

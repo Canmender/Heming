@@ -13,8 +13,10 @@ import {
   dropCliRewindRuns,
   listCliRewinds,
   newRewindId,
+  diffManifests,
   parseRewindRun,
   planCliRewind,
+  scanWorkspaceFiles,
   rewindDir,
   rewindRunPath,
   type RewindRun,
@@ -267,5 +269,152 @@ describe("文案", () => {
     );
     expect(text).toContain("b.ts（EACCES）");
     expect(text).toContain("记录没能删除");
+  });
+});
+
+describe("命令改动的范围（d.337）", () => {
+  it("扫盘 + 差异：新建 / 改过 / 删掉都认得出来", async () => {
+    const cwd = tmpDir();
+    writeFileSync(path.join(cwd, "keep.ts"), "same", "utf8");
+    writeFileSync(path.join(cwd, "edit.ts"), "before", "utf8");
+    writeFileSync(path.join(cwd, "gone.ts"), "bye", "utf8");
+    const before = await scanWorkspaceFiles(cwd);
+    expect(before).not.toBeNull();
+
+    writeFileSync(path.join(cwd, "edit.ts"), "after-and-longer", "utf8");
+    rmSync(path.join(cwd, "gone.ts"));
+    writeFileSync(path.join(cwd, "fresh.ts"), "new", "utf8");
+    const after = await scanWorkspaceFiles(cwd);
+    const diff = diffManifests(before!, after!);
+
+    expect(diff.created).toEqual(["fresh.ts"]);
+    expect(diff.modified).toEqual(["edit.ts"]);
+    expect(diff.deleted).toEqual(["gone.ts"]);
+  });
+
+  it("扫盘跳过产物目录，也不会把自己那份存档算进去", async () => {
+    const cwd = tmpDir();
+    mkdirSync(path.join(cwd, "node_modules"), { recursive: true });
+    writeFileSync(path.join(cwd, "node_modules", "x.js"), "x", "utf8");
+    mkdirSync(rewindDir(cwd), { recursive: true });
+    writeFileSync(path.join(rewindDir(cwd), "20261118100000-0000.json"), "{}", "utf8");
+    writeFileSync(path.join(cwd, "a.ts"), "a", "utf8");
+
+    const manifest = await scanWorkspaceFiles(cwd);
+    expect([...manifest!.keys()].sort()).toEqual(["a.ts"]);
+  });
+
+  it("条目太多时返回 null（扫不完就不报，免得清单骗人）", async () => {
+    const cwd = tmpDir();
+    for (let index = 0; index < 4; index += 1) writeFileSync(path.join(cwd, `f${index}.ts`), "x", "utf8");
+    expect(await scanWorkspaceFiles(cwd, 3)).toBeNull();
+  });
+
+  it("journal 记下命令新建/改过/删掉的文件，并落进存档", async () => {
+    const cwd = tmpDir();
+    writeFileSync(path.join(cwd, "edit.ts"), "before", "utf8");
+    writeFileSync(path.join(cwd, "gone.ts"), "bye", "utf8");
+    const journal = createCliRewindJournal({ cwd, now: () => new Date("2026-11-18T10:00:00.000Z"), random: () => 0 });
+
+    const before = await journal.beginCommand();
+    writeFileSync(path.join(cwd, "edit.ts"), "after-and-longer", "utf8");
+    rmSync(path.join(cwd, "gone.ts"));
+    writeFileSync(path.join(cwd, "fresh.ts"), "new", "utf8");
+    await journal.endCommand(before);
+
+    const run = await journal.close();
+    expect(run?.commandChanges).toEqual({ created: ["fresh.ts"], modified: ["edit.ts"], deleted: ["gone.ts"] });
+    const saved = JSON.parse(readFileSync(rewindRunPath(cwd, run!.id), "utf8")) as Record<string, unknown>;
+    expect((saved.commandChanges as Record<string, string[]>).created).toEqual(["fresh.ts"]);
+  });
+
+  it("beginCommand 失败（扫不完）时这条命令就不记范围", async () => {
+    const cwd = tmpDir();
+    writeFileSync(path.join(cwd, "a.ts"), "a", "utf8");
+    const journal = createCliRewindJournal({ cwd, random: () => 0 });
+    await journal.endCommand(null);
+    expect(await journal.close()).toBeNull();
+  });
+
+  it("规划：命令新建的进删除清单，改过/删掉的进「退不回去」", async () => {
+    const cwd = tmpDir();
+    writeRun(cwd, {
+      id: "20261118100000-0000",
+      at: "2026-11-18T10:00:00.000Z",
+      files: [],
+      commandChanges: { created: ["dist/out.js", "lib/gen.ts"], modified: ["src/app.ts"], deleted: ["src/old.ts"] },
+    });
+    const loaded = await listCliRewinds(cwd);
+    const plan = planCliRewind(loaded!.ok ? loaded!.runs : [], 1);
+    expect(plan?.remove).toEqual(["dist/out.js", "lib/gen.ts"]);
+    expect(plan?.commandLost).toEqual([
+      { path: "src/app.ts", how: "modified" },
+      { path: "src/old.ts", how: "deleted" },
+    ]);
+  });
+
+  it("命令新建的文件真的被删掉；写入工具碰过的路径以工具原文为准", async () => {
+    const cwd = tmpDir();
+    mkdirSync(path.join(cwd, "lib"), { recursive: true });
+    writeFileSync(path.join(cwd, "lib", "gen.ts"), "generated", "utf8");
+    writeFileSync(path.join(cwd, "src.ts"), "现状", "utf8");
+    writeRun(cwd, {
+      id: "20261118100000-0000",
+      at: "2026-11-18T10:00:00.000Z",
+      files: [{ path: "src.ts", before: "原文" }],
+      commandChanges: { created: ["lib/gen.ts", "src.ts"], modified: [], deleted: [] },
+    });
+    const loaded = await listCliRewinds(cwd);
+    const plan = planCliRewind(loaded!.ok ? loaded!.runs : [], 1)!;
+    expect(plan.remove).toEqual(["lib/gen.ts"]);
+    expect(plan.restore).toEqual([{ path: "src.ts", content: "原文" }]);
+
+    const applied = await applyCliRewind(cwd, plan);
+    expect(applied).toMatchObject({ ok: true, written: 1, deleted: 1 });
+    expect(existsSync(path.join(cwd, "lib", "gen.ts"))).toBe(false);
+    expect(readFileSync(path.join(cwd, "src.ts"), "utf8")).toBe("原文");
+  });
+
+  it("文案：列表点上命令改动，回执说清哪些退不回去", async () => {
+    const cwd = tmpDir();
+    writeRun(cwd, {
+      id: "20261118100000-0000",
+      at: "2026-11-18T10:00:00.000Z",
+      files: [],
+      commandChanges: { created: ["a.ts"], modified: ["b.ts", "c.ts"], deleted: [] },
+    });
+    const loaded = await listCliRewinds(cwd);
+    const list = describeCliRewinds(loaded, cwd, new Date("2026-11-18T10:10:00.000Z"));
+    expect(list).toContain("命令新建 1 / 改过 2 / 删掉 0");
+
+    const text = describeCliRewindResult(
+      {
+        turns: 1,
+        restore: [],
+        remove: ["a.ts"],
+        skipped: [],
+        commandLost: [
+          { path: "b.ts", how: "modified" },
+          { path: "c.ts", how: "modified" },
+        ],
+      },
+      { ok: true, written: 0, deleted: 1, failed: [] },
+      1,
+    );
+    expect(text).toContain("删掉 1 个当时还不存在的文件");
+    expect(text).toContain("命令改过内容或删掉的 2 个文件没有原文");
+    expect(text).toContain("b.ts、c.ts");
+  });
+
+  it("存档里形状不对的命令清单会被丢掉，不影响文件那半", () => {
+    const parsed = parseRewindRun({
+      version: 1,
+      id: "x",
+      at: "2026-11-18T10:00:00.000Z",
+      files: [{ path: "a.ts", before: "x" }],
+      commandChanges: { created: ["../evil.ts", 7], modified: "nope" },
+    });
+    expect(parsed?.files).toEqual([{ path: "a.ts", before: "x" }]);
+    expect(parsed?.commandChanges).toBeUndefined();
   });
 });

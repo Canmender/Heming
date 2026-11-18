@@ -500,3 +500,37 @@ describe("回退日志（d.336）", () => {
     expect(await tooling.rewind.close()).toBeNull();
   });
 });
+
+describe("命令改动的范围（d.337）", () => {
+  it("命令新建的文件被记进这一轮（回退时能删掉）", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-tooling-shell-"));
+    tmpDirs.push(cwd);
+    writeFileSync(path.join(cwd, "keep.ts"), "keep", "utf8");
+    const tooling = createCliTooling({ cwd, allowDanger: true, conversationId: "c-shell" });
+    const command = `"${process.execPath}" -e "require('fs').writeFileSync('made.txt','hi')"`;
+
+    const result = await tooling.toolBridge.execute({
+      name: "run_command",
+      arguments: JSON.stringify({ command }),
+    });
+    expect(result.ok).toBe(true);
+    expect(existsSync(path.join(cwd, "made.txt"))).toBe(true);
+
+    const run = await tooling.rewind.close();
+    expect(run?.commandChanges?.created).toContain("made.txt");
+    expect(run?.commandChanges?.modified ?? []).toEqual([]);
+  }, 30_000);
+
+  it("--no-rewind 时命令改动也不扫盘", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-tooling-shell-off-"));
+    tmpDirs.push(cwd);
+    const tooling = createCliTooling({ cwd, allowDanger: true, conversationId: "c-shell-off", rewind: false });
+    const command = `"${process.execPath}" -e "require('fs').writeFileSync('made.txt','hi')"`;
+    const result = await tooling.toolBridge.execute({
+      name: "run_command",
+      arguments: JSON.stringify({ command }),
+    });
+    expect(result.ok).toBe(true);
+    expect(await tooling.rewind.close()).toBeNull();
+  }, 30_000);
+});
