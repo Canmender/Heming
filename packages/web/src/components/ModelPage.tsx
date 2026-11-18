@@ -41,6 +41,7 @@ import {
   type DiscoveryState,
 } from "../lib/discovery.js";
 import { readCache, writeCache } from "../lib/pageCache.js";
+import { readFailureDetail, readFailureText, setReadError, type ReadErrors, type ReadSection } from "../lib/readErrors.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -301,6 +302,13 @@ export function ModelPage() {
   const [quotaCards, setQuotaCards] = useState<QuotaCard[]>(() =>
     parseQuotaCards(readCache("quotas") || ""),
   );
+  /**
+   * 哪一段这次没读到、内核怎么说的。
+   *
+   * 读失败（内核没起来、缺运行文件、超时）与「真的没有」在界面上必须分开：
+   * 前者要说「没读到」并给一句原因，否则用户会按「去登录一个账号」去修一个服务问题。
+   */
+  const [readErrors, setReadErrors] = useState<ReadErrors>({});
   /** 自动收取本机登录的开关状态；空 = 这次没读到。 */
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
@@ -467,16 +475,26 @@ export function ModelPage() {
     return task;
   }, []);
 
+  /** 记下这一段读失败的原因；读成功时把它抹掉。 */
+  const reportRead = useCallback((section: ReadSection, result: { ok: boolean; stderr?: string; error?: string }) => {
+    setReadErrors((current) =>
+      setReadError(current, section, result.ok ? null : readFailureDetail(result.stderr || "", result.error)),
+    );
+  }, []);
+
   const loadProviders = useCallback(
     () =>
       once("providers", async () => {
         if (!cli) return;
         const result = await cli.cli(["providers"]);
+        reportRead("providers", result);
+        // 读失败时留住上一次的读数：一次超时不该把已经看到的列表抹成空。
+        if (!result.ok) return;
         setProviders(parseProviders(result.stdout || ""));
         // 留一份原话给下一次打开先画：读取本身要半秒多，页面不必空等。
         writeCache("providers", result.stdout || "");
       }),
-    [cli, once],
+    [cli, once, reportRead],
   );
 
   const loadAccounts = useCallback(
@@ -484,10 +502,13 @@ export function ModelPage() {
       once("accounts", async () => {
         if (!cli) return;
         const result = await cli.cli(["accounts", "--json"]);
+        reportRead("accounts", result);
+        // 读失败时留住上一次的读数：一次超时不该把已经看到的列表抹成空。
+        if (!result.ok) return;
         setAccounts(parseAccounts(result.stdout || ""));
         writeCache("accounts", result.stdout || "");
       }),
-    [cli, once],
+    [cli, once, reportRead],
   );
 
   const loadAgents = useCallback(
@@ -495,10 +516,13 @@ export function ModelPage() {
       once("agents", async () => {
         if (!cli) return;
         const result = await cli.cli(["ls"]);
+        reportRead("agents", result);
+        // 读失败时留住上一次的读数：一次超时不该把已经看到的列表抹成空。
+        if (!result.ok) return;
         writeCache("agents", result.stdout || "");
         setAgents(parseAgents(result.stdout || ""));
       }),
-    [cli, once],
+    [cli, once, reportRead],
   );
 
   const loadPlugins = useCallback(
@@ -553,10 +577,13 @@ export function ModelPage() {
       once("quotas", async () => {
         if (!cli) return;
         const result = await cli.cli(["quota", "--json"]);
+        reportRead("quotas", result);
+        // 读失败时留住上一次的读数：一次超时不该把已经看到的列表抹成空。
+        if (!result.ok) return;
         setQuotaCards(parseQuotaCards(result.stdout || ""));
         writeCache("quotas", result.stdout || "");
       }),
-    [cli, once],
+    [cli, once, reportRead],
   );
 
   /**
@@ -1684,7 +1711,23 @@ export function ModelPage() {
                 ))}
                 {agents.length === 0 && (
                   <li className="py-2 ui-caption">
-                    没有检测到本机智能体。装一个 Claude Code / Codex 之类的工具后点「重新检测」。
+                    {readErrors.agents ? (
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 text-danger">
+                          {readFailureText("agents", readErrors.agents)}
+                        </span>
+                        <button
+                          type="button"
+                          className="ui-link shrink-0"
+                          disabled={!cli}
+                          onClick={() => void loadAgents()}
+                        >
+                          重新检测
+                        </button>
+                      </span>
+                    ) : (
+                      "没有检测到本机智能体。装一个 Claude Code / Codex 之类的工具后点「重新检测」。"
+                    )}
                   </li>
                 )}
               </ul>
@@ -1903,9 +1946,11 @@ export function ModelPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="ui-section-title">订阅账号</h2>
                   <div className="flex items-center gap-2">
-                    <span className="ui-caption">
-                      {latestReadAt(accounts, now) ||
-                        (accounts.length > 1 ? "多个账号自动分担" : "每分钟自动重读")}
+                    <span className={`ui-caption ${readErrors.accounts ? "text-danger" : ""}`}>
+                      {readErrors.accounts
+                        ? "这次没读到，下面是上次的读数"
+                        : latestReadAt(accounts, now) ||
+                          (accounts.length > 1 ? "多个账号自动分担" : "每分钟自动重读")}
                     </span>
                     {accounts.length > 0 && (
                       <>
@@ -2046,8 +2091,26 @@ export function ModelPage() {
                   ))}
                   {accounts.length === 0 && (
                     <li className="rounded-xl border border-dashed border-line px-3 py-2.5 ui-caption">
-                      还没有账号。上面这些软件里已经登录的订阅可以直接借给和鸣用：点一个登录，
-                      它的额度、重置时间与余额会显示在这里。
+                      {readErrors.accounts ? (
+                        <span className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="min-w-0 text-danger">
+                            {readFailureText("accounts", readErrors.accounts)}
+                          </span>
+                          <button
+                            type="button"
+                            className="ui-link shrink-0"
+                            disabled={!cli}
+                            onClick={() => void loadAccounts()}
+                          >
+                            重新读一次
+                          </button>
+                        </span>
+                      ) : (
+                        <>
+                          还没有账号。上面这些软件里已经登录的订阅可以直接借给和鸣用：点一个登录，
+                          它的额度、重置时间与余额会显示在这里。
+                        </>
+                      )}
                     </li>
                   )}
                 </ul>
@@ -2071,13 +2134,29 @@ export function ModelPage() {
                 )}
               </div>
 
-              {keyQuotas.length > 0 && (
+              {(keyQuotas.length > 0 || readErrors.quotas) && (
                 <div className="ui-card p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h2 className="ui-section-title">其余来源的额度</h2>
                     <span className="ui-caption">按量付费的 Key、套餐与钱包余额</span>
                   </div>
-                  <QuotaCards cards={keyQuotas} now={now} />
+                  {keyQuotas.length > 0 ? (
+                    <QuotaCards cards={keyQuotas} now={now} />
+                  ) : (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="ui-caption text-danger">
+                        {readFailureText("quotas", readErrors.quotas ?? "")}
+                      </span>
+                      <button
+                        type="button"
+                        className="ui-link shrink-0"
+                        disabled={!cli}
+                        onClick={() => void loadQuotas()}
+                      >
+                        重新读一次
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2572,9 +2651,25 @@ export function ModelPage() {
                 {providers.length === 0 && (
                   // d.138：方位词（「从上面选」）在滚动后失效——直接说清下一步动作名。
                   <li className="py-2 ui-caption">
-                    {cli
-                      ? "还没有来源。点上方「API Key 服务商」里的一个服务商，或展开「其他地址」填服务地址和 Key。"
-                      : "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"}
+                    {readErrors.providers ? (
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 text-danger">
+                          {readFailureText("providers", readErrors.providers)}
+                        </span>
+                        <button
+                          type="button"
+                          className="ui-link shrink-0"
+                          disabled={!cli}
+                          onClick={() => void loadProviders()}
+                        >
+                          重新读一次
+                        </button>
+                      </span>
+                    ) : cli ? (
+                      "还没有来源。点上方「API Key 服务商」里的一个服务商，或展开「其他地址」填服务地址和 Key。"
+                    ) : (
+                      "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"
+                    )}
                   </li>
                 )}
               </ul>

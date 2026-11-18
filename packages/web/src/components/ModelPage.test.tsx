@@ -1429,6 +1429,70 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("内核没起来时说「没读到」，不说成「还没有来源」——点重读就能接着看", async () => {
+    const replies: Record<string, { ok: boolean; stdout: string; stderr: string }> = {
+      providers: { ok: false, stdout: "", stderr: "模型服务没有启动\n" },
+    };
+    installBridge({}, replies);
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源" }));
+
+    expect(await screen.findByText(/这次没读到来源：模型服务没有启动/)).toBeInTheDocument();
+    expect(screen.queryByText(/还没有来源/)).not.toBeInTheDocument();
+
+    // 服务起来之后点「重新读一次」，那一行自己换成真来源。
+    replies.providers = {
+      ok: true,
+      stdout: "  relay custom  mock  127.0.0.1:39001  ● •••••••  1 models  ",
+      stderr: "",
+    };
+    fireEvent.click(screen.getByRole("button", { name: "重新读一次" }));
+
+    expect(await screen.findByText(/relay/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/这次没读到来源/)).not.toBeInTheDocument());
+  });
+
+  it("账号读不到时，卡片说「没读到」并给原因，而不是让人去登录一个账号", async () => {
+    installBridge(
+      {},
+      { "accounts --json": { ok: false, stdout: "", stderr: "没有运行文件\n" } },
+    );
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源" }));
+
+    expect(await screen.findByText(/这次没读到订阅账号：没有运行文件/)).toBeInTheDocument();
+    expect(screen.queryByText(/还没有账号/)).not.toBeInTheDocument();
+  });
+
+  it("账号读不到但上次的读数还在时，卡片顶上先说「这次没读到，下面是上次的读数」", async () => {
+    vi.stubEnv("MODE", "production");
+    localStorage.setItem(
+      "heming.modelpage.v2.accounts",
+      JSON.stringify({
+        at: Date.now(),
+        text: JSON.stringify([
+          { agent: "claude", user: "old@example.com", alias: "旧号", active: true, on: true, windows: [] },
+        ]),
+      }),
+    );
+    installBridge({}, { "accounts --json": { ok: false, stdout: "", stderr: "连不上\n" } });
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源" }));
+
+    expect(await screen.findByText("这次没读到，下面是上次的读数")).toBeInTheDocument();
+    // 上一次的行照常画着，用户知道这是旧读数而不是空账号。
+    expect(screen.getByText("旧号")).toBeInTheDocument();
+  });
+
+  it("其余额度读不到时，那张卡还在，并说明这次没读到", async () => {
+    installBridge({}, { "quota --json": { ok: false, stdout: "", stderr: "读额度超时\n" } });
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源" }));
+
+    expect(await screen.findByRole("heading", { name: "其余来源的额度" })).toBeInTheDocument();
+    expect(screen.getByText(/这次没读到其余额度：读额度超时/)).toBeInTheDocument();
+  });
+
   it("读取现在的设置：把 model spec 里的值填进编辑器，并标出哪些是你设的", async () => {
     installBridge(
       {},
