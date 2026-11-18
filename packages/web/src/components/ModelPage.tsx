@@ -70,6 +70,8 @@ import {
 } from "../lib/magpieVisible.js";
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
 import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
+import { mergeAccounts } from "../lib/mergedQuota.js";
+import { MergedQuotaStrip } from "./model/MergedQuotaStrip.js";
 import { reminderArgs, resetReminderText, usageAlertText } from "../lib/magpieReminder.js";
 import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import {
@@ -298,6 +300,8 @@ export function ModelPage() {
    * 这样选模型时就能看见「这个智能体的免费额度还剩多少」。
    */
   const agentQuotas = useMemo(() => agentQuotaMap(accounts, now), [accounts, now]);
+  /** 同一家两三个账号的窗口合计：一个账号自己的已经在下面那行。 */
+  const mergedAccounts = useMemo(() => mergeAccounts(accounts, now), [accounts, now]);
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
@@ -1809,6 +1813,8 @@ export function ModelPage() {
                     ))}
                   </p>
                 </div>
+
+                <MergedQuotaStrip groups={mergedAccounts} now={now} />
 
                 <ul className="mt-3 space-y-2" aria-label="订阅账号列表">
                   {accounts.map((row, index) => (

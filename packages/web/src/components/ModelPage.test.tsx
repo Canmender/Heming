@@ -331,7 +331,51 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
-  it("账号可以就地改名：回车写 accounts alias，列表立刻换名字", async () => {
+  it("同一家两个账号时，先把两份读成一行（平均剩多少）", async () => {
+  installBridge(
+    {},
+    {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            agent: "claude",
+            user: "work@example.com",
+            alias: "工作号",
+            plan: "Max",
+            active: true,
+            on: true,
+            windows: [{ name: "5 hours", used: 80, remaining: 20, display: "80% used" }],
+            readAt: new Date().toISOString(),
+          },
+          {
+            agent: "claude",
+            user: "home@example.com",
+            alias: "家里号",
+            plan: "Max",
+            active: true,
+            on: false,
+            windows: [{ name: "5 hours", used: 20, remaining: 80, display: "20% used" }],
+            readAt: new Date().toISOString(),
+          },
+        ]),
+        stderr: "",
+      },
+    },
+  );
+  render(<ModelPage />);
+  fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+  expect(await screen.findByText("工作号")).toBeInTheDocument();
+
+  const merged = screen.getByLabelText("账号合计");
+  expect(merged.textContent).toContain("Claude");
+  expect(merged.textContent).toContain("2 个账号");
+  expect(merged.textContent).toContain("5 小时 平均剩 50%");
+  // 明细行还在：合计是合计，各账号各写各的
+  expect(screen.getByText("家里号")).toBeInTheDocument();
+});
+
+it("账号可以就地改名：回车写 accounts alias，列表立刻换名字", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));

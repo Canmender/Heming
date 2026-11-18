@@ -68,7 +68,20 @@ const AGENT_LABELS: Record<string, string> = {
   zed: "Zed",
   factory: "Factory",
   mimo: "MiMo",
+  mimocode: "MiMo Code",
   grok: "Grok",
+  workbuddy: "WorkBuddy",
+  "workbuddy-ai": "WorkBuddy AI",
+  qoder: "Qoder",
+  "qoder-cn": "Qoder CN",
+  codebuddy: "CodeBuddy",
+  qwen: "Qwen Code",
+  kimi: "Kimi Code",
+  "minimax-code": "MiniMax Code",
+  zcode: "ZCode",
+  stepcode: "StepCode",
+  deveco: "DevEco",
+  "trae-cn": "Trae CN",
 };
 
 export function agentName(agent: string): string {
