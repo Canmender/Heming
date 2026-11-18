@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_RESET_LEVELS, autoResetArgs, autoResetLevelText, parseAutoReset } from "./autoReset.js";
+import {
+  AUTO_RESET_LEVELS,
+  autoResetArgs,
+  autoResetLevelText,
+  parseAutoReset,
+  parseResetLead,
+  resetLeadArgs,
+  resetLeadLabel,
+  resetLeadOptions,
+  spendsExpiringResets,
+} from "./autoReset.js";
 
 describe("parseAutoReset", () => {
   it("没有账号自己花时是一张空表", () => {
@@ -86,5 +96,72 @@ describe("autoResetLevelText", () => {
       "快过期就花",
       "两种时候都花",
     ]);
+  });
+});
+
+describe("parseResetLead", () => {
+  it("默认那句话说成 30 分钟", () => {
+    expect(
+      parseResetLead("a reset about to expire unused is used 30m before it expires (the default)"),
+    ).toBe(30);
+  });
+
+  it("整小时与小时加分钟都认", () => {
+    expect(parseResetLead("a reset about to expire unused is used 3h before it expires")).toBe(180);
+    expect(parseResetLead("a reset about to expire unused is used 1h30m before it expires")).toBe(90);
+  });
+
+  it("认不出就给 null，页面宁可不显示这一项", () => {
+    expect(parseResetLead("")).toBeNull();
+    expect(parseResetLead("magpie quota auto-reset lead")).toBeNull();
+  });
+
+  it("带颜色的输出也能读", () => {
+    expect(
+      parseResetLead("\u001b[2ma reset about to expire unused is used 5m before it expires\u001b[0m"),
+    ).toBe(5);
+  });
+});
+
+describe("resetLeadArgs", () => {
+  it("默认值发 default，别的值按分钟或小时发", () => {
+    expect(resetLeadArgs(30)).toEqual(["quota", "auto-reset", "lead", "default"]);
+    expect(resetLeadArgs(5)).toEqual(["quota", "auto-reset", "lead", "5m"]);
+    expect(resetLeadArgs(120)).toEqual(["quota", "auto-reset", "lead", "2h"]);
+    expect(resetLeadArgs(90)).toEqual(["quota", "auto-reset", "lead", "1h30m"]);
+  });
+});
+
+describe("resetLeadLabel", () => {
+  it("默认档写清楚它是默认", () => {
+    expect(resetLeadLabel(30)).toBe("30 分钟（默认）");
+    expect(resetLeadLabel(3)).toBe("3 分钟");
+    expect(resetLeadLabel(120)).toBe("2 小时");
+    expect(resetLeadLabel(90)).toBe("1 小时 30 分钟");
+  });
+});
+
+describe("resetLeadOptions", () => {
+  it("当前值不在候选里也补进去，免得下拉显示成别的档", () => {
+    expect(resetLeadOptions(45)).toContain(45);
+    expect(resetLeadOptions(45)).toEqual([...resetLeadOptions(45)].sort((a, b) => a - b));
+    expect(resetLeadOptions(30)).toEqual([3, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440]);
+    expect(resetLeadOptions(null)).toEqual([3, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440]);
+  });
+});
+
+describe("spendsExpiringResets", () => {
+  it("只有 expiring / both 才让「提前多久」有意义", () => {
+    expect(spendsExpiringResets(new Map())).toBe(false);
+    expect(spendsExpiringResets(new Map([["a@b.c", "week" as const]]))).toBe(false);
+    expect(spendsExpiringResets(new Map([["a@b.c", "expiring" as const]]))).toBe(true);
+    expect(
+      spendsExpiringResets(
+        new Map([
+          ["a@b.c", "week" as const],
+          ["d@e.f", "both" as const],
+        ]),
+      ),
+    ).toBe(true);
   });
 });

@@ -72,3 +72,64 @@ export function autoResetArgs(user: string, level: AutoResetLevel): string[][] {
     [...base, other, "off"],
   ];
 }
+
+/**
+ * 「快过期时提前多久花」——`quota auto-reset lead`。
+ *
+ * 这是全局一项（不是按账号）：内核默认提前 30 分钟，可设 3 分钟到 24 小时；
+ * 它同样不在 `settings list --json` 里，只能读那句
+ * 「a reset about to expire unused is used 30m before it expires (the default)」。
+ */
+export const RESET_LEAD_DEFAULT = 30;
+
+/** 内核菜单给的档位，外加默认值。 */
+export const RESET_LEAD_CHOICES: readonly number[] = [3, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
+
+/** 分钟说成中文：3 分钟 / 2 小时 / 1 小时 30 分钟。 */
+export function resetLeadLabel(minutes: number): string {
+  if (minutes === RESET_LEAD_DEFAULT) return "30 分钟（默认）";
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分钟`;
+}
+
+/**
+ * 读 `quota auto-reset lead` 的那句话，得到分钟数；认不出就是 null（页面不显示这一项）。
+ *
+ * 内核的写法是 `leadWords`：整小时写 `3h`，其余写 `30m` / `1h30m`，所以三种形态都要认。
+ */
+export function parseResetLead(output: string): number | null {
+  const match = /used ([0-9]+h[0-9]*m?|[0-9]+m) before it expires/i.exec(stripAnsi(output));
+  if (!match) return null;
+  const hours = /([0-9]+)h/.exec(match[1]);
+  const minutes = /([0-9]+)m/.exec(match[1]);
+  const total = (hours ? Number(hours[1]) * 60 : 0) + (minutes ? Number(minutes[1]) : 0);
+  return total > 0 ? total : null;
+}
+
+/**
+ * 把分钟翻成命令。默认值发 `default` 而不是 `30m`：
+ * 那样内核不用记一个等于默认的自定义值，以后的默认值也能跟着走。
+ */
+export function resetLeadArgs(minutes: number): string[] {
+  if (minutes === RESET_LEAD_DEFAULT) return ["quota", "auto-reset", "lead", "default"];
+  if (minutes < 60) return ["quota", "auto-reset", "lead", `${minutes}m`];
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return ["quota", "auto-reset", "lead", rest === 0 ? `${hours}h` : `${hours}h${rest}m`];
+}
+
+/** 下拉的候选：内核给的那几档；当前值不在里面（比如手动设过 45 分钟）就补进去，免得被悄悄改掉。 */
+export function resetLeadOptions(current: number | null): number[] {
+  if (current === null || RESET_LEAD_CHOICES.includes(current)) return [...RESET_LEAD_CHOICES];
+  return [...RESET_LEAD_CHOICES, current].sort((a, b) => a - b);
+}
+
+/** 有没有账号会在「快过期」时自动花掉——只有这时「提前多久」才影响行为。 */
+export function spendsExpiringResets(levels: ReadonlyMap<string, AutoResetLevel>): boolean {
+  for (const level of levels.values()) {
+    if (level === "expiring" || level === "both") return true;
+  }
+  return false;
+}

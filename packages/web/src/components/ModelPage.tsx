@@ -29,7 +29,16 @@ import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
 import { swapArgs, swapSuggestions, swapText, type SwapSuggestion } from "../lib/swapAccount.js";
-import { autoResetArgs, autoResetLevelText, parseAutoReset, type AutoResetLevel } from "../lib/autoReset.js";
+import {
+  autoResetArgs,
+  autoResetLevelText,
+  parseAutoReset,
+  parseResetLead,
+  resetLeadArgs,
+  resetLeadLabel,
+  spendsExpiringResets,
+  type AutoResetLevel,
+} from "../lib/autoReset.js";
 import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrend } from "./model/QuotaTrend.js";
@@ -321,6 +330,8 @@ export function ModelPage() {
    * 只能读 `quota auto-reset` 的散文输出：没读过就当作关闭，绝不替用户猜一个「开着」。
    */
   const [autoResetLevels, setAutoResetLevels] = useState<Map<string, AutoResetLevel>>(() => new Map());
+  /** 「快过期时提前多久花」（分钟，`quota auto-reset lead`）；null = 这次没读到。 */
+  const [resetLead, setResetLead] = useState<number | null>(null);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   /**
@@ -641,8 +652,12 @@ export function ModelPage() {
     () =>
       once("autoReset", async () => {
         if (!cli) return;
-        const result = await cli.cli(["quota", "auto-reset"]);
-        setAutoResetLevels(parseAutoReset(`${result.stdout || ""}${result.stderr || ""}`));
+        const [levels, lead] = await Promise.all([
+          cli.cli(["quota", "auto-reset"]),
+          cli.cli(["quota", "auto-reset", "lead"]),
+        ]);
+        setAutoResetLevels(parseAutoReset(`${levels.stdout || ""}${levels.stderr || ""}`));
+        setResetLead(parseResetLead(`${lead.stdout || ""}${lead.stderr || ""}`));
       }),
     [cli, once],
   );
@@ -1004,6 +1019,28 @@ export function ModelPage() {
       );
     } catch (err) {
       setNotice(`没能改这个设置：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 改「快过期时提前多久花」（`quota auto-reset lead`）。全局一项，只影响会「快过期就花」的账号。
+   */
+  const changeResetLead = async (minutes: number) => {
+    if (!cli) return;
+    setAccountBusy("reset-lead");
+    try {
+      const result = await cli.cli(resetLeadArgs(minutes));
+      await loadAutoReset();
+      setNotice(
+        result.ok
+          ? `已记下：一份重置在到期前 ${resetLeadLabel(minutes)}还没用上，就替你花掉。`
+          : `没能改这个提前量：${engineText(tailText(stripAnsi(result.stderr || result.stdout || result.error || ""))) || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能改这个提前量：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -2238,6 +2275,8 @@ export function ModelPage() {
                     values={settingValues}
                     disabled={!cli || busy !== null || accountBusy !== null}
                     onChange={(key, value) => void setReminder(key, value)}
+                    lead={spendsExpiringResets(autoResetLevels) ? resetLead : null}
+                    onLeadChange={(minutes) => void changeResetLead(minutes)}
                   />
                 )}
               </div>

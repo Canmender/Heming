@@ -13,6 +13,7 @@ import {
   resetReminderText,
   usageAlertText,
 } from "../../lib/magpieReminder.js";
+import { resetLeadLabel, resetLeadOptions } from "../../lib/autoReset.js";
 
 /** 订阅账号卡底部的三枚提醒（d.283、d.307）：都是内核设置，没有自己的状态。 */
 
@@ -21,6 +22,12 @@ export interface QuotaReminderProps {
   values: ReadonlyMap<string, unknown>;
   disabled: boolean;
   onChange: (key: "usageAlert" | "resetReminder" | "balanceAlert", value: number) => void;
+  /**
+   * 「快过期时提前多久花」（`quota auto-reset lead`），分钟。
+   * **null = 不显示这一项**：只有真有账号会在快过期时自动花掉，这个提前量才影响行为。
+   */
+  lead?: number | null;
+  onLeadChange?: (minutes: number) => void;
 }
 
 const USAGE_LABEL: Record<number, string> = {
@@ -47,7 +54,13 @@ const BALANCE_LABEL: Record<number, string> = {
   20: "低到 20",
 };
 
-export function QuotaReminder({ values, disabled, onChange }: QuotaReminderProps) {
+export function QuotaReminder({
+  values,
+  disabled,
+  onChange,
+  lead = null,
+  onLeadChange,
+}: QuotaReminderProps) {
   const usage = numberSetting(values, "usageAlert");
   const reset = numberSetting(values, "resetReminder");
   const balance = numberSetting(values, "balanceAlert");
@@ -110,6 +123,26 @@ export function QuotaReminder({ values, disabled, onChange }: QuotaReminderProps
             ))}
           </select>
         </label>
+        {lead !== null && onLeadChange && (
+          // 只在真有账号会「快过期时自动花掉」时才出现：否则这个提前量调了也看不出任何变化。
+          <label className="flex items-center gap-2 ui-caption">
+            重置提前
+            <select
+              className="ui-input w-36"
+              aria-label="重置快过期时提前多久花"
+              title="一份重置在到期前这么久还没用上，内核就替你花掉；只对选了「快过期就花」的账号生效"
+              value={String(lead)}
+              disabled={disabled}
+              onChange={(event) => onLeadChange(Number(event.target.value))}
+            >
+              {resetLeadOptions(lead).map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {resetLeadLabel(minutes)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <p className="mt-2 ui-caption">
         {reminderSummary(usage, reset, balance)}

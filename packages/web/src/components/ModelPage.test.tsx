@@ -450,6 +450,97 @@ describe("ModelPage · 账号与更多", () => {
     expect(await screen.findByText(/码号 自己花掉重置：周额度用完就花/)).toBeInTheDocument();
   });
 
+  it("有人选了「快过期就花」时，额度提醒卡里就能调提前多久", async () => {
+    const until = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const { calls } = installBridge(
+      {},
+      {
+        "accounts --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            {
+              agent: "codex",
+              user: "gpt@example.com",
+              alias: "码号",
+              plan: "Plus",
+              active: true,
+              on: true,
+              windows: [{ name: "week", used: 40, remaining: 60, display: "40% used" }],
+              resets: { count: 2, until },
+              readAt: new Date().toISOString(),
+            },
+          ]),
+          stderr: "",
+        },
+        "quota auto-reset": {
+          ok: true,
+          stdout: "● gpt@example.com  uses a reset by itself before one expires\n",
+          stderr: "",
+        },
+        "quota auto-reset lead": {
+          ok: true,
+          stdout: "a reset about to expire unused is used 30m before it expires (the default)\n",
+          stderr: "",
+        },
+        "quota auto-reset lead 2h": { ok: true, stdout: "✓", stderr: "" },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("码号");
+
+    const lead = await screen.findByLabelText<HTMLSelectElement>("重置快过期时提前多久花");
+    await waitFor(() => expect(lead.value).toBe("30"));
+    expect([...lead.options].map((option) => option.textContent)).toContain("30 分钟（默认）");
+
+    fireEvent.change(lead, { target: { value: "120" } });
+    await waitFor(() =>
+      expect(calls).toContainEqual(["quota", "auto-reset", "lead", "2h"]),
+    );
+    expect(await screen.findByText(/一份重置在到期前 2 小时还没用上/)).toBeInTheDocument();
+  });
+
+  it("没人会在快过期时花重置，就不摆这个提前量", async () => {
+    installBridge(
+      {},
+      {
+        "accounts --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            {
+              agent: "codex",
+              user: "gpt@example.com",
+              alias: "码号",
+              plan: "Plus",
+              active: true,
+              on: true,
+              windows: [{ name: "week", used: 40, remaining: 60, display: "40% used" }],
+              resets: { count: 2 },
+              readAt: new Date().toISOString(),
+            },
+          ]),
+          stderr: "",
+        },
+        "quota auto-reset": {
+          ok: true,
+          stdout: "● gpt@example.com  uses a reset by itself when its week runs out\n",
+          stderr: "",
+        },
+        "quota auto-reset lead": {
+          ok: true,
+          stdout: "a reset about to expire unused is used 30m before it expires (the default)\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("码号");
+    // 等这一轮读完之后再断言「没有」，否则断言的是「还没读到」。
+    await waitFor(() => expect(screen.getByLabelText("额度快用完时提醒")).toBeInTheDocument());
+    expect(screen.queryByLabelText("重置快过期时提前多久花")).not.toBeInTheDocument();
+  });
+
   it("同一家两个账号时，先把两份读成一行（平均剩多少）", async () => {
   installBridge(
     {},
