@@ -449,6 +449,32 @@ describe("工作区自定义命令（d.240）", () => {
   });
 });
 
+describe("工作区自定义子代理（d.287）", () => {
+  const base = {
+    version: "d.287.4.120.12",
+    model: "deepseek-v4-flash",
+    workspace: "D:/评测区",
+    roots: [{ name: "评测区", path: "D:/评测区", mode: "write" as const }],
+  };
+
+  it("有定义时挂在「子代理」那行后面，说清来源与用法", () => {
+    const text = buildStatusReport({ ...base, subagentDefs: 2 });
+    expect(text).toContain("子代理：只读");
+    expect(text).toContain("另有 2 个自定义子代理");
+    expect(text).toContain(".heming/agents/*.md");
+    expect(text).toContain("agent_task");
+  });
+
+  it("没有定义 / 还没读过时不追加说明（那是常态，不该占篇幅）", () => {
+    for (const value of [null, 0]) {
+      const text = buildStatusReport({ ...base, subagentDefs: value });
+      expect(text).not.toContain("自定义子代理");
+      expect(text).toContain("子代理：只读");
+    }
+    expect(buildStatusReport(base)).not.toContain("自定义子代理");
+  });
+});
+
 describe("安全范围行（d.242）", () => {
   const base = {
     version: "d.242.4.116.12",

@@ -52,6 +52,11 @@ export interface StatusInput {
   safety?: string | null;
   /** 是否已授权子代理写盘（d.202）；省略／false＝只读。 */
   subagentWritable?: boolean;
+  /**
+   * 工作区自定义子代理个数（d.287），来自 `.heming/agents/*.md` 的解析结果。
+   * 省略 / null / 0 时不追加说明——没定义自定义子代理是常态，不该占一行。
+   */
+  subagentDefs?: number | null;
   /** 系统通知是否开着（d.208）；省略＝按开处理（默认开）。 */
   notifyEnabled?: boolean;
   /** 本会话改过的文件数（d.210）；省略或 0 不出这一行。 */
@@ -223,6 +228,17 @@ export function describeCustomCommandsLine(count: StatusInput["customCommands"])
 }
 
 /**
+ * 自定义子代理（d.287）：工作区 `.heming/agents/*.md` 定义了几个角色。
+ *
+ * 只作为「子代理」那行的后缀：没有定义时返回空串（不写「0 个」，那是噪音）；
+ * 有定义时把来源与用法一并说清——用户看到这行才知道「还能让子代理按专门要求干活」。
+ */
+export function describeSubagentDefsNote(count: StatusInput["subagentDefs"]): string {
+  if (typeof count !== "number" || count <= 0) return "";
+  return `；另有 ${count} 个自定义子代理（来自 \`.heming/agents/*.md\`，派活时在 agent_task 里写它的名字）`;
+}
+
+/**
  * 工具失败归因（d.221）：这个会话失败了几次、都卡在哪些错误码上。
  *
  * 只列前 3 个错误码——再多就不像自检、像日志了；被截断的种类如实说「还有 N 种没列」。
@@ -363,7 +379,7 @@ export function buildStatusReport(input: StatusInput): string {
       input.subagentWritable
         ? "可写（只能用 file_write / file_edit，改动进「本轮可撤回」）"
         : "只读（默认；要它改文件发 /subagent write on）"
-    }`,
+    }${describeSubagentDefsNote(input.subagentDefs)}`,
   );
   lines.push(
     `系统通知：${yesNo(

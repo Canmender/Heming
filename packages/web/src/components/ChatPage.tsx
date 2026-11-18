@@ -232,6 +232,7 @@ import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
 import { GOAL_COMMAND, HOOKS_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands, SLASH_COMMANDS } from "../lib/agentRuntime/slashCommands.js";
 import { collectCustomCommands, commandsToSlash, expandCustomCommand, type CustomCommand } from "../lib/agentRuntime/customCommands.js";
+import { collectSubagentDefs, type SubagentDef } from "../lib/agentRuntime/subagentDefs.js";
 import { expandInitCommand } from "../lib/agentRuntime/initPrompt.js";
 import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
 import { notifyApprovalWait, notifyTurnEnd, resetTurnNotifyThrottle } from "../lib/agentRuntime/turnNotify.js";
@@ -804,6 +805,14 @@ export function ChatPage({
   const customCommandsRef = useRef<CustomCommand[]>([]);
   /** 是否真读过一次（区分「读到 0 条」与「还没读」：`/status` 不能把没读过说成没有）。 */
   const customCommandsLoadedRef = useRef(false);
+  /**
+   * 工作区自定义子代理（d.287）：`.heming/agents/*.md` 定义的角色，派 `agent_task` 时点名用。
+   *
+   * 只用 ref 不用 state：定义不进界面、只进工具 spec 与 `/status`，没必要为它多一轮渲染。
+   * 定义变化时必须清掉工具桥缓存，否则 `agent_task` 的 spec 里还是旧的那几个名字。
+   */
+  const subagentDefsRef = useRef<SubagentDef[]>([]);
+  const subagentDefsLoadedRef = useRef(false);
   /**
    * 输入框历史回溯位置（d.194）：`-1` = 不在回溯里（框里是用户自己的草稿）。
    * `draftStashRef` 存进入回溯前的那半句草稿，一路按 ↓ 走到头要原样放回去。
@@ -1731,6 +1740,8 @@ export function ChatPage({
           // 写盘授权（d.202）：只认用户开关，不认模型参数。打开后子代理多拿 file_write /
           // file_edit，落盘路径立刻记进「本轮可撤回」——子代理改的东西也要能整体回滚。
           ...(subagentWrite ? { writable: true } : {}),
+          // 自定义子代理（d.287）：`.heming/agents/*.md` 里的角色，点名后只追加一段要求。
+          agents: subagentDefsRef.current,
           onWrite: (path: string) => {
             setTurnWrites((current) => (current.includes(path) ? current : [...current, path]));
           },
@@ -3981,6 +3992,34 @@ export function ChatPage({
     };
   }, [convId, conv?.workspace, customCommandRootKey]);
 
+  /**
+   * 工作区自定义子代理（d.287）：`.heming/agents/*.md` → `agent_task` 的 `agent` 参数。
+   *
+   * 与自定义命令同一时机读（切会话、换工作区、根的指纹变化）：定义文件同样是仓库里的静态配置。
+   * 读到后清掉工具桥缓存——`agent_task` 的 spec 里列着可用名字，缓存不清就还是旧的那几份。
+   * 读不到就保持空列表：自定义子代理是可选项，任何失败都不该影响正常对话。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const bridge = getFileBridge();
+    const list = fileRootsFor(conv?.workspace ?? null);
+    if (!bridge || list.length === 0) {
+      subagentDefsLoadedRef.current = false;
+      subagentDefsRef.current = [];
+      toolBridgeRef.current.clear();
+      return;
+    }
+    void collectSubagentDefs({ bridge, roots: list }).then((defs) => {
+      if (cancelled) return;
+      subagentDefsLoadedRef.current = true;
+      subagentDefsRef.current = defs;
+      toolBridgeRef.current.clear();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [convId, conv?.workspace, customCommandRootKey]);
+
   // 命令面板（d.184）：只在「以 / 开头、单行」时出现——正常消息里的斜杠（路径、日期）不弹。
   const slashItems = matchSlashCommands(draft, [...SLASH_COMMANDS, ...commandsToSlash(customCommands)]);
   const slashOpen = slashItems.length > 0;
@@ -4174,6 +4213,8 @@ export function ChatPage({
       projectRules: projectRulesRef.current,
       // d.240：读过才报数字，没读过就省略（`/status` 里会写「尚未统计」，而不是「无」）。
       customCommands: customCommandsLoadedRef.current ? customCommands.length : undefined,
+      // d.287：自定义子代理只报「读过几次」，没读过就不写（`/status` 里那行本就不出现）
+      subagentDefs: subagentDefsLoadedRef.current ? subagentDefsRef.current.length : undefined,
       // d.221：这个会话失败了几次、卡在哪些错误码上（只在真失败过时才有这一行）
       toolFailures: getToolFailureStats(convId),
       roots: roots.map((root) => ({ name: root.name, path: root.path, mode: root.mode })),

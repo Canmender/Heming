@@ -6183,6 +6183,58 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   }, 30_000);
 
   /**
+   * d.287：`/status` 也要报「工作区定义了几个自定义子代理」。
+   *
+   * 定义文件躺在仓库里，用户不打开 `/status` 就没有别的入口知道「可以让子代理按
+   * 某份专门要求干活」；这一例把「effect 读定义 → 计数进自检」这条线钉住。
+   */
+  it("I3z `/status` 报工作区自定义子代理个数（d.287）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+
+    const roots = { roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" };
+    localStorage.setItem("heming.fileEdit.roots.v1", JSON.stringify(roots));
+    let agentsRead = 0;
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      glob: async ({ pattern }: { pattern: string }) =>
+        pattern.includes(".heming/agents")
+          ? { ok: true as const, paths: [".heming/agents/review.md"] }
+          : { ok: true as const, paths: [] },
+      read: async ({ path }: { path: string }) => {
+        if (path.includes("review.md")) {
+          agentsRead += 1;
+          return {
+            ok: true as const,
+            content: "# 安全审查\n> 只挑能被利用的问题\n按威胁模型逐条对入口、权限、数据落点。",
+            bytes: 30,
+          };
+        }
+        return { ok: false as const, code: "not-found" as const, error: "没有这个文件" };
+      },
+      write: async () => ({ ok: true as const, results: [], written: 0 }),
+      pickRoot: async () => null,
+    };
+
+    // 先打个字触发重渲染（根目录键变了，读定义的 effect 才会跑），等它真读完再自检——
+    // 否则 /status 会比定义先算出来，淘汰掉的就成了「功能没生效」的假红。
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/" } });
+    await waitFor(() => expect(agentsRead).toBeGreaterThan(0), { timeout: 8000 });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/另有 1 个自定义子代理/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText(/\.heming\/agents\/\*\.md/)).toBeInTheDocument();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+  }, 30_000);
+
+  /**
    * d.219：`/init` 与其它 `/` 命令不是一类东西。
    *
    * `/status`、`/goal` 是本地动作（不发模型、不落库）；`/init` 要模型真去读仓库再写

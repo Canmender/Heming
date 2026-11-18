@@ -62,5 +62,5 @@
 | W1 无头 CLI | 进行中 | — |
 | W2 服务端加固 | 进行中 | — |
 | W3 hooks | 进行中 | — |
-| W4 扩展与回滚 | 待第一波收口 | — |
+| W4 扩展与回滚 | 进行中（自定义命令 d.240、子代理定义 d.287 已落地；`/rewind N` 未做） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`ChatPage.test.tsx` I4i/I3z |
 | W5 界面手感 | 待第二波 | — |
