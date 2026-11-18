@@ -28,6 +28,7 @@ import { SubscriptionRow } from "./model/SubscriptionRow.js";
 import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
+import { swapArgs, swapSuggestions, swapText, type SwapSuggestion } from "../lib/swapAccount.js";
 import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrend } from "./model/QuotaTrend.js";
@@ -329,6 +330,8 @@ export function ModelPage() {
   const agentQuotas = useMemo(() => agentQuotaMap(accounts, now), [accounts, now]);
   /** 同一家两三个账号的窗口合计：一个账号自己的已经在下面那行。 */
   const mergedAccounts = useMemo(() => mergeAccounts(accounts, now), [accounts, now]);
+  /** 有账号用完、同门还有余量的：问一句要不要换过去（内核只替 Claude / Codex 换号）。 */
+  const swapHints = useMemo(() => swapSuggestions(accounts), [accounts]);
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
@@ -875,6 +878,42 @@ export function ModelPage() {
       confirmLabel: "切换",
       tone: "primary",
       action: () => void switchAccount(row),
+    });
+  };
+
+  /**
+   * 换到还有额度的那个账号（`accounts switch <agent> next`）。
+   *
+   * 只在 Claude / Codex 上出现：内核只替「登录态存得下来」的智能体换号。
+   * 换号会改写这个工具自己的登录，所以先问一句，和「切到这个」同一套确认。
+   */
+  const swapAccount = async (agent: string) => {
+    if (!cli) return;
+    setAccountBusy(`swap:${agent}`);
+    try {
+      const result = await cli.cli(swapArgs(agent));
+      if (!result.ok) {
+        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+        setNotice(`没能换过去：${why}`, true);
+        return;
+      }
+      await Promise.all([loadAccounts(), loadQuotas(), loadHistory()]);
+      setNow(Date.now());
+      setNotice(`已把 ${agentName(agent)} 换到还有额度的那个账号。`);
+    } catch (err) {
+      setNotice(`没能换过去：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  const confirmSwapAccount = (hint: SwapSuggestion) => {
+    setConfirmAction({
+      title: `把 ${agentName(hint.agent)} 换到还有额度的那个？`,
+      desc: `${swapText(hint, agentName)}。换过去会改写这个智能体自己的登录状态：之后它直接花那个账号的额度，随时可以再切回来。`,
+      confirmLabel: "换过去",
+      tone: "primary",
+      action: () => void swapAccount(hint.agent),
     });
   };
 
@@ -1969,6 +2008,27 @@ export function ModelPage() {
                 </div>
 
                 <MergedQuotaStrip groups={mergedAccounts} now={now} />
+
+                {swapHints.length > 0 && (
+                  <ul className="mt-2 space-y-1.5" aria-label="换到还有额度的账号">
+                    {swapHints.map((hint) => (
+                      <li
+                        key={hint.agent}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2"
+                      >
+                        <span className="ui-caption">{swapText(hint, agentName)}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          busy={accountBusy === `swap:${hint.agent}`}
+                          onClick={() => confirmSwapAccount(hint)}
+                        >
+                          换过去
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
                 <ul className="mt-3 space-y-2" aria-label="订阅账号列表">
                   {accounts.map((row, index) => (

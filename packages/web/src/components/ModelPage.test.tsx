@@ -671,6 +671,55 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
   });
 
+  it("一家用完、同门还有余量时，卡片里问一句要不要换过去", async () => {
+    const { calls } = installBridge({}, {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            agent: "claude",
+            user: "used@example.com",
+            alias: "用完的",
+            plan: "Max",
+            active: true,
+            on: true,
+            windows: [{ name: "5 hours", used: 100, remaining: 0, display: "100% used" }],
+            readAt: new Date().toISOString(),
+          },
+          {
+            agent: "claude",
+            user: "fresh@example.com",
+            alias: "还有的",
+            plan: "Max",
+            active: false,
+            on: false,
+            windows: [{ name: "5 hours", used: 20, remaining: 80, display: "20% used" }],
+            readAt: new Date().toISOString(),
+          },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    const hint = await screen.findByLabelText("换到还有额度的账号");
+    expect(hint).toHaveTextContent("Claude 有 1 个账号用完了，另有 1 个还有余量");
+
+    fireEvent.click(within(hint).getByRole("button", { name: "换过去" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "把 Claude 换到还有额度的那个？",
+    });
+    expect(dialog).toHaveTextContent(/会改写这个智能体自己的登录状态/);
+    expect(calls).not.toContainEqual(["accounts", "switch", "claude", "next"]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "换过去" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["accounts", "switch", "claude", "next"]),
+    );
+    expect(await screen.findByText(/已把 Claude 换到还有额度的那个账号/)).toBeInTheDocument();
+  });
+
   it("余额提醒也走同一个设置：选一个数额就写 balanceAlert，并说清按各自币种算", async () => {
     const { calls } = installBridge({}, {
       "settings list --json": {
