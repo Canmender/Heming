@@ -67,8 +67,8 @@ export function AgentStreamBubble({
       <div className="min-w-0 flex-1 px-0.5 text-ui-md leading-relaxed">
         {/* d.248：气泡里不再显示「我」/智能体名——名字在同一段对话里是恒定信息，
             每条都重复一遍只会挤占正文宽度、也让人误以为在强调「谁说的」。
-            生成状态仍在这里说（读屏文案保留名字，sr-only 不占视觉空间）。 */}
-        {streaming ? <div className="mb-1 text-ui-xs text-muted">生成中…</div> : null}
+            d.346：连「生成中…」也不再显形；运行状态交给正文末尾的光标与输入框下方的
+            进度行，读屏仍由上面的 sr-only 播报，视觉上不重复。 */}
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
         {tools && tools.length > 0 ? (

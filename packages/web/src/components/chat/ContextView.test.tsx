@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
@@ -8,6 +8,7 @@ import { RecallLog } from "../../lib/memory/recallLog.js";
 import { rolloutLog } from "../../lib/rollout/index.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
 import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
+import { recordContextFold, resetContextFolds } from "../../lib/agentContext/contextFold.js";
 
 /**
  * 「上下文」页签（T32）：本会话的预算用量。
@@ -39,6 +40,7 @@ beforeEach(() => {
   useChatStore.setState({ messages: {} });
   localStorage.removeItem("heming.tokenUsage");
   useTokenUsageStore.getState().reset();
+  resetContextFolds();
 });
 
 afterEach(() => cleanup());
@@ -346,5 +348,34 @@ describe("ContextView · 记忆注入（P3-T17）", () => {
     render(<ContextView conversationId="c1" />);
     expect(screen.queryByRole("list", { name: "记忆注入" })).toBeNull();
     expect(screen.queryByText("记忆注入")).toBeNull();
+  });
+});
+
+describe("ContextView · 实时用量与折叠（d.346）", () => {
+  it("传入 usage 时，预算与用量用调用方算好的值（与 ContextMeter 同一个数）", () => {
+    useChatStore.setState({ messages: { c1: [message("m1", TEXT)] } });
+    render(<ContextView conversationId="c1" usage={{ used: 1234, budget: 8000, calibrated: true }} />);
+    const bar = screen.getByRole("progressbar", { name: "上下文预算" });
+    expect(bar).toHaveAttribute("aria-valuemax", "8000");
+    expect(bar).toHaveAttribute("aria-valuenow", "1234");
+    expect(bar).toHaveAttribute("aria-valuetext", "1234 / 8000 tokens");
+    expect(screen.getByText("估算已按本机实测校准")).toBeInTheDocument();
+  });
+
+  it("没有 usage 时回落本机设置，并说明这是未校准的估算", () => {
+    render(<ContextView conversationId="c1" />);
+    expect(screen.getByText("估算值（与压缩链同一估算器）")).toBeInTheDocument();
+  });
+
+  it("有折叠记录时显示折了几条、多久之前；没有就整块省略", () => {
+    render(<ContextView conversationId="c1" />);
+    expect(screen.queryByTestId("context-fold")).toBeNull();
+
+    recordContextFold("c1", 120);
+    render(<ContextView conversationId="c1" />);
+    const fold = screen.getByTestId("context-fold");
+    expect(fold).toHaveTextContent("折成摘要");
+    expect(fold).toHaveTextContent("120");
+    expect(fold).toHaveTextContent("刚刚");
   });
 });

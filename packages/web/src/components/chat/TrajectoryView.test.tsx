@@ -105,3 +105,47 @@ describe("TrajectoryView · 本轮轨迹", () => {
     expect(items[2]).toContain("等待确认");
   });
 });
+
+describe("TrajectoryView · 事实条与工具表（d.346）", () => {
+  it("序号、类别标签、参数预览与汇总条：只报已有事实", () => {
+    const { container } = render(
+      <TrajectoryView
+        progress={progress({
+          hasData: true,
+          steps: [
+            step({ id: "s1", kind: "think", label: "想下一步", status: "ok" }),
+            step({ id: "s2", label: "调用 read_file", status: "ok", detail: "读到了 20 行" }),
+          ],
+          tools: [
+            {
+              id: "s2",
+              name: "read_file",
+              args: "{ \"path\": \"src/a.ts\" }",
+              status: "ok",
+              startedAt: 1000,
+              endedAt: 1500,
+            },
+          ],
+          counts: { total: 1, ok: 1, error: 0, denied: 0, running: 0 },
+        })}
+      />,
+    );
+    const summary = screen.getByTestId("trajectory-summary");
+    expect(summary).toHaveTextContent("2 个步骤");
+    expect(summary).toHaveTextContent("1 次工具调用");
+    const items = container.querySelectorAll("ol > li");
+    expect(items[0]!.textContent).toContain("#1");
+    expect(items[0]!.textContent).toContain("思考");
+    expect(items[1]!.textContent).toContain("工具");
+    expect(items[1]!.textContent).toContain("参数：{ \"path\": \"src/a.ts\" }");
+    // 工具表只在有 ToolTrace 时出现，且耗时取首尾时间差。
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("read_file");
+    expect(table).toHaveTextContent("500ms");
+  });
+
+  it("没有工具轨迹时不渲染工具表", () => {
+    render(<TrajectoryView progress={progress({ hasData: true, steps: [step({ id: "s1" })] })} />);
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+});

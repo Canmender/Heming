@@ -393,7 +393,7 @@ export function CollaborationPage() {
   return (
     <PageShell
       title="协作"
-      subtitle="多个智能体在同一个任务上接力、协调或互评——全部在本机运行。"
+      subtitle="多个智能体在同一个任务上接力、协调或互评——全部在本机运行。这里不是人类团队：同事、排班与看板在「团队」页。"
       width="readable"
       bodyClassName="flex flex-col gap-4"
     >

@@ -12,7 +12,14 @@ import type { RolloutTurnFailure } from "../../lib/rollout/types.js";
 import { ROW_TOKEN_OVERHEAD, estimateTokens } from "../../lib/agentContext/tokens.js";
 import { RecallLog } from "../../lib/memory/recallLog.js";
 import { RECALL_DROP_LABELS, explainRecalls, recallLayerLabel } from "../../lib/memory/explain.js";
-import { DEFAULT_BUDGET_TOKENS, DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
+import { DEFAULT_RESERVED_TOKENS } from "../../lib/agentContext/budget.js";
+import { loadContextSettings } from "../../lib/agentContext/settings.js";
+import {
+  foldAgeMinutes,
+  foldNoticeText,
+  formatFoldAgeMinutes,
+  getContextFold,
+} from "../../lib/agentContext/contextFold.js";
 
 /** 一个回合（stream）的用量 + 工具耗时（数据来自记账 + 回放日志，两处都是本机真实数据）。 */
 interface TurnUsageRow {
@@ -108,31 +115,66 @@ const FAILURE_LABELS: Record<RolloutTurnFailure, string> = {
 };
 
 /**
- * 「上下文」页签（T32）：本会话的上下文预算用量。
+ * 「上下文」页签（T32 / d.346）：本会话的上下文预算用量。
  *
  * 口径与 `lib/agentContext` 的实际预算一致，不另立一套：
  * - 每条消息 = `estimateTokens(正文) + ROW_TOKEN_OVERHEAD`（与 planContext 的 rowCost 同式）；
- * - 总预算 = DEFAULT_BUDGET_TOKENS；注入预留 = DEFAULT_RESERVED_TOKENS（系统提示词/记忆/技能）。
+ * - 预算与实测用量优先取调用方传进来的 `usage`（ChatPage 的 `refreshContextUsage`：
+ *   `applyModelBudget` 后的预算 + 按模型校准的估算），拿不到才回落到本机设置；
+ * - 注入预留 = DEFAULT_RESERVED_TOKENS（系统提示词/记忆/技能）。
  *
- * 为什么不显示「百分比 + 进度条」就够：用户真正想回答的是「还能塞多少、为什么被截断」，
- * 所以下面三行明细必须是真实计数（消息条数、工具结果条数、预留额度），
- * 取不到就是 0，不编一个看起来合理的数字。
+ * 为什么明细必须真实计数：用户真正想回答的是「还能塞多少、为什么被截断」，
+ * 所以三行明细是真实条数，取不到就是 0，不编一个看起来合理的数字。
+ * 参考 billion-context 的做法，这里补了「消息 / 工具结果各占多少 token」与
+ * 「最近一次上下文折叠」（有折叠才显示，没有就不假装有）。
  */
-export function ContextView({ conversationId }: { conversationId: string | null }) {
+export interface ContextViewUsage {
+  used: number;
+  budget: number;
+  /** 估算是否已按本机实测校准（校准前后口径不同，要在界面上说清）。 */
+  calibrated?: boolean;
+}
+
+export function ContextView({
+  conversationId,
+  usage: reported,
+}: {
+  conversationId: string | null;
+  /** 实时用量（可选）：直接渲染的测试/独立场景不传，就回落到本机设置与逐行估算。 */
+  usage?: ContextViewUsage;
+}) {
   const messages = useChatStore((s) => (conversationId ? s.messages[conversationId] : undefined));
   const rows = messages ?? [];
   const records = useTokenUsageStore((s) => s.records);
 
-  let used = 0;
+  let rowsTokens = 0;
+  /**
+   * 工具结果占的 token：消息里挂着的工具返回文本。
+   *
+   * 会话消息不带 `role`（`senderType` 只有 agent/user），工具结果只存在于
+   * `transcriptOf(row).tools[].result`；所以这里按转录归因，再把纯正文部分
+   * 反推成 `msgTokens = rowsTokens - toolTokens`。两者相加恒等于总量。
+   */
+  let toolTokens = 0;
   let toolResults = 0;
   for (const row of rows) {
-    used += estimateTokens(row.payload?.text ?? "") + ROW_TOKEN_OVERHEAD;
-    toolResults += transcriptOf(row)?.tools?.length ?? 0;
+    const cost = estimateTokens(row.payload?.text ?? "") + ROW_TOKEN_OVERHEAD;
+    rowsTokens += cost;
+    const tools = transcriptOf(row)?.tools ?? [];
+    toolResults += tools.length;
+    for (const tool of tools) {
+      if (tool.result) toolTokens += estimateTokens(tool.result);
+    }
   }
+  const msgTokens = Math.max(0, rowsTokens - toolTokens);
 
-  const budget = DEFAULT_BUDGET_TOKENS;
+  // 预算优先用真正发出去时生效的那个（含自动预算），没有就按本机设置。
+  const budget = reported?.budget ?? loadContextSettings().budgetTokens;
+  // 用量优先用调用方校准后的值：本条页签与输入框上方的 ContextMeter 必须同一个数。
+  const used = reported?.used ?? rowsTokens;
   // 进度条宽度按比例给，但 aria-valuenow 报真实用量（超预算时进度条封顶、数字说真话）。
   const ratio = budget > 0 ? Math.min(1, used / budget) : 0;
+  const fold = useMemo(() => getContextFold(conversationId ?? ""), [conversationId]);
 
   // 本会话的**真实消耗**（P0-T2）：只认显式带 conversationId 的记账，归不到的不算进来。
   const usage = useMemo(() => {
@@ -198,22 +240,40 @@ export function ContextView({ conversationId }: { conversationId: string | null 
         <p className="mt-2 text-ui-sm tabular-nums text-ink">
           {used} / {budget} tokens
         </p>
+        {/* 估算口径要说清：校准过与没校准过是两套精度，不能混成一句「约」。 */}
+        <p className="mt-0.5 text-ui-xs text-muted">
+          {reported?.calibrated ? "估算已按本机实测校准" : "估算值（与压缩链同一估算器）"}
+        </p>
       </div>
       {/* 明细三行：数字全部来自本会话真实数据（消息条数 / 工具结果条数 / 注入预留额度）。 */}
       <ul aria-label="上下文明细" className="mt-3 list-none space-y-1.5 p-0">
         <li className="flex items-baseline justify-between gap-3 text-ui-sm">
           <span className="text-muted">消息</span>
-          <span className="shrink-0 tabular-nums text-ink">{rows.length} 条</span>
+          <span className="shrink-0 tabular-nums text-ink">
+            {rows.length} 条 · {formatTokens(msgTokens)} tokens
+          </span>
         </li>
         <li className="flex items-baseline justify-between gap-3 text-ui-sm">
           <span className="text-muted">工具结果</span>
-          <span className="shrink-0 tabular-nums text-ink">{toolResults} 条</span>
+          <span className="shrink-0 tabular-nums text-ink">
+            {toolResults} 条 · {formatTokens(toolTokens)} tokens
+          </span>
         </li>
         <li className="flex items-baseline justify-between gap-3 text-ui-sm">
           <span className="text-muted">注入预留</span>
           <span className="shrink-0 tabular-nums text-ink">{DEFAULT_RESERVED_TOKENS} tokens</span>
         </li>
       </ul>
+      {/* 最近一次上下文折叠：只报本机记录到的事实（折了几条、多久之前），没有就整块省略。 */}
+      {fold ? (
+        <p
+          data-testid="context-fold"
+          className="mt-3 rounded-md border border-line-soft bg-subtle-1 px-2 py-1.5 text-ui-xs leading-5 text-muted"
+        >
+          {foldNoticeText(fold.foldedCount)}
+          <span className="ml-1 tabular-nums">（{formatFoldAgeMinutes(foldAgeMinutes(fold))}）</span>
+        </p>
+      ) : null}
       {/* 真实消耗（P0-T2）：记账按会话/回合归因，回答「这句话花了多少、贵在哪」。
           与上面的上下文预算不是一套口径：上面是「还没发出去的行会有多大」，这里是「已经花掉多少」。 */}
       <h4 className="ui-section-title mb-2 mt-5">本会话消耗</h4>

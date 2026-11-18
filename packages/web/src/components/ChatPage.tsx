@@ -386,9 +386,11 @@ async function fetchPeerKeysCached(userId: string) {
 }
 
 const COMPOSER_HEIGHT_KEY = "heming.chat.composerHeight.v1";
-const DEFAULT_COMPOSER_HEIGHT = 96;
-const MIN_COMPOSER_HEIGHT = 72;
-const MAX_COMPOSER_HEIGHT = 360;
+// d.346：默认与上下限一起加高——96px 只够两行，长提问一进来就要滚；
+// 聊天页的高频动作是「写长一点」，所以给它四行左右的默认高度。
+const DEFAULT_COMPOSER_HEIGHT = 144;
+const MIN_COMPOSER_HEIGHT = 96;
+const MAX_COMPOSER_HEIGHT = 480;
 
 /** 夹住输入栏高度（拖拽与读存储共用；非法值回落默认）。 */
 export function clampComposerHeight(n: number): number {
@@ -1380,6 +1382,38 @@ export function ChatPage({
    * 并落 msgCache（§6 缓存优先，重载后走缓存自解）。上限 200 条溢出丢最旧（Map 插入序）。
    */
   const outboxRef = useRef(new Map<string, PlainEnvelope>());
+  /**
+   * 链键明文键（d.346）：`chain:<chainKid>:<n>`。msgCache 本按消息 id 存，
+   * 但封条那一刻服务端 id 还没回来；同一 (chainKid,n) 在历史里是稳定的，
+   * 所以用它做「自己封的那封信」的副键，刷新后也能取回。
+   */
+  const chainPlainKey = (chainKid: string, n: number) => `chain:${chainKid}:${n}`;
+  /**
+   * 出站信件的两处落点（d.346）：内存出站箱 + msgCache 的链键副条目。
+   *
+   * 只记内存会漏一种很常见的场景：消息已经上行、回声（echo）还没回来时刷新/崩溃/断线。
+   * 重载后 `plainById` 是空的、msgCache 里也没有这条 id，而服务端只有密文、发送链只在对方
+   * 手里——于是一条自己刚发出去的消息永远显示「本机解不开」。链键副条目把明文（仍按
+   * msgCache 的 v2 容器加密落盘）存在本机，检查顺序见 `makeOpenHandler`。
+   */
+  const rememberOutbound = (chainKid: string | undefined, n: number | undefined, plain: PlainEnvelope) => {
+    if (chainKid === undefined || n === undefined) return;
+    const key = `${chainKid}:${n}`;
+    const ob = outboxRef.current;
+    ob.set(key, plain);
+    if (ob.size > 200) {
+      const oldest = ob.keys().next().value;
+      if (oldest !== undefined) ob.delete(oldest);
+    }
+    // 错误是流式瞬态（不入历史、不渲染消息列表）：只留内存，不占缓存额度。
+    if (plain.kind === "error") return;
+    msgCache.append(convId, {
+      id: chainPlainKey(chainKid, n),
+      senderId: me?.id ?? "me",
+      at: Date.now(),
+      plain,
+    });
+  };
   /** subtle 可用性（每渲染实测）：横幅常驻与全发送路径拦截的统一开关。 */
   const subtleOk = hasSubtle();
 
@@ -1414,10 +1448,33 @@ export function ChatPage({
       // 也是 (chainKid,n) 重放/并发 sweep 抢先解开时的补齐路径（硬验收③）。
       // P0-5b：定点取一条（内部同样 touch LRU），不再全量 list + find。
       const cached = msgCache.get(conv, env.id);
-      if (cached) return { status: "ok", plain: cached.plain };
-      // 出站箱：自己的 echo 按链索引取回明文（对方能开、自己开不了），落缓存后返回
+      if (cached) {
+        // 真实 id 已在：链键副条目没用了（同一段明文存两份会挤占 500 条额度）。
+        if (env.chainKid !== undefined && env.n !== undefined) {
+          msgCache.remove(conv, chainPlainKey(env.chainKid, env.n));
+        }
+        return { status: "ok", plain: cached.plain };
+      }
+      // 链键明文回查（d.346）：封条成功时就以 `chain:<kid>:<n>` 落了副条目，
+      // 所以「消息已上行、回声没等到」（刷新/崩溃/断线）也能自己解开，不再落到
+      // 「本机解不开这条消息」的占位。命中后用真实 id 再落一条，并删掉副条目。
       const outKey =
         env.chainKid !== undefined && env.n !== undefined ? `${env.chainKid}:${env.n}` : "";
+      if (outKey && env.chainKid !== undefined && env.n !== undefined) {
+        const chainKey = chainPlainKey(env.chainKid, env.n);
+        const sealedBefore = msgCache.get(conv, chainKey);
+        if (sealedBefore) {
+          msgCache.append(conv, {
+            id: env.id,
+            senderId: env.senderId ?? sealedBefore.senderId,
+            at: env.createdAt ? Date.parse(env.createdAt) || sealedBefore.at : sealedBefore.at,
+            plain: sealedBefore.plain,
+          });
+          msgCache.remove(conv, chainKey);
+          return { status: "ok", plain: sealedBefore.plain };
+        }
+      }
+      // 出站箱：自己的 echo 按链索引取回明文（对方能开、自己开不了），落缓存后返回
       const outPlain = outKey ? outboxRef.current.get(outKey) : undefined;
       if (outPlain) {
         outboxRef.current.delete(outKey);
@@ -1429,6 +1486,10 @@ export function ChatPage({
             at: env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now(),
             plain: outPlain,
           });
+          // 封条时写的链键副条目已经用不上了：删掉，别让一条消息占两份额度。
+          if (env.chainKid !== undefined && env.n !== undefined) {
+            msgCache.remove(conv, chainPlainKey(env.chainKid, env.n));
+          }
         }
         return { status: "ok", plain: outPlain };
       }
@@ -1485,13 +1546,8 @@ export function ChatPage({
       const members = await resolveMembers();
       const ev = await sealMessage({ id: convId, members }, plain, e2eDeps());
       if (ev.type === "send_message" && ev.cipher && ev.chainKid !== undefined && ev.n !== undefined) {
-        // 出站箱登记（echo 自解用）：Map 插入序裁最旧
-        const ob = outboxRef.current;
-        ob.set(`${ev.chainKid}:${ev.n}`, plain);
-        if (ob.size > 200) {
-          const oldest = ob.keys().next().value;
-          if (oldest !== undefined) ob.delete(oldest);
-        }
+        // 出站箱 + 链键明文落缓存（echo 自解用，刷新后也能解）
+        rememberOutbound(ev.chainKid, ev.n, plain);
       }
       wsHandleRef.current?.send(ev);
       return true;
@@ -2718,10 +2774,8 @@ export function ChatPage({
         const plain: PlainEnvelope = { kind: "text", text: full };
         const ev = await sealMessage({ id: convId, members }, plain, e2eDeps());
         if (ev.type !== "send_message" || !ev.cipher) return null;
-        // finish 的入库 echo 也是自发信封：登记出站箱（同 sealAndSend）
-        if (ev.chainKid !== undefined && ev.n !== undefined) {
-          outboxRef.current.set(`${ev.chainKid}:${ev.n}`, plain);
-        }
+        // finish 的入库 echo 也是自发信封：出站箱 + 链键明文落缓存（同 sealAndSend）
+        rememberOutbound(ev.chainKid, ev.n, plain);
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
       // E2E 错误封条（fix I2）：错误正文（可回显供应商请求片段）同款信封上行。
@@ -2737,9 +2791,7 @@ export function ChatPage({
           { aad: errorAad(convId, streamId) },
         );
         if (ev.type !== "send_message" || !ev.cipher) return null;
-        if (ev.chainKid !== undefined && ev.n !== undefined) {
-          outboxRef.current.set(`${ev.chainKid}:${ev.n}`, plain);
-        }
+        rememberOutbound(ev.chainKid, ev.n, plain);
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
       onLocalDelta: (streamId, acc) => {
@@ -5448,16 +5500,8 @@ export function ChatPage({
         retry: sendNotice.retry,
       });
     }
-    if (activeLocal.length > 0) {
-      list.push({
-        key: "running",
-        tone: "muted",
-        text: `生成中：${activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}`,
-        action: { label: "停止生成", onClick: abortRuns },
-      });
-    }
     return list;
-  }, [forkNotice, toolsNotice, sendNotice, activeLocal, nameOf, abortRuns]);
+  }, [forkNotice, toolsNotice, sendNotice]);
   // 提示变少时自动收起，避免「展开」状态挂着一个已经不存在的列表。
   useEffect(() => {
     setNoticeExpanded(false);
@@ -5477,7 +5521,7 @@ export function ChatPage({
         tasksCount={runningTaskCount}
         view={view}
         onViewChange={setView}
-        onOpenTeam={() => useUiStore.getState().setPage("team")}
+        onOpenCollab={() => useUiStore.getState().setPage("collab")}
         leading={
           <IconButton
             label="返回"
@@ -5677,9 +5721,9 @@ export function ChatPage({
         onDrop={onMessagesDrop}
         className="flex-1 overflow-y-auto px-chat-gutter pb-5 pt-6"
       >
-        {/* 消息列宽度自适应：宽屏最宽 960，窄屏跟视口走（左右由 px-chat-gutter 兜底）；
+        {/* 消息列宽度自适应：宽屏最宽 1080，窄屏跟视口走（左右由 px-chat-gutter 兜底）；
             滚动容器保持在外层。输入区/工具栏用同一宽度档（视觉上是同一根竖线）。 */}
-        <div className="mx-auto w-full max-w-[min(100%,960px)]">
+        <div className="mx-auto w-full max-w-[min(100%,1080px)]">
         {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
             但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
         {visibleMessages.length > windowCount && (
@@ -5936,8 +5980,8 @@ export function ChatPage({
       </div>
       <form onSubmit={send} className="relative shrink-0 px-chat-gutter pb-4 pt-2">
         <SlashCommandMenu items={slashItems} activeIndex={slashIndex} onPick={pickSlashCommand} />
-        {/* 输入区与消息列同宽（宽屏最宽 960 自适应）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
-        <div className="mx-auto w-full max-w-[min(100%,960px)]">
+        {/* 输入区与消息列同宽（宽屏最宽 1080 自适应）：提示条、圆角输入容器、快捷键提示对齐同一列。 */}
+        <div className="mx-auto w-full max-w-[min(100%,1080px)]">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
         {!subtleOk && (
           <p
@@ -5947,6 +5991,13 @@ export function ChatPage({
             {NO_E2E_NOTICE}
           </p>
         )}
+        {/* 运行中状态只留读屏播报：视觉上不再显示「生成中：…」（d.346），
+            状态由气泡光标与输入框下方的进度行承担，「停止」在动作行右下。 */}
+        {activeLocal.length > 0 ? (
+          <p role="status" aria-live="polite" className="sr-only">
+            {`生成中：${activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}`}
+          </p>
+        ) : null}
         {/* UX-A：未绑定模型前置提示（与任务区同源组件）；发送按钮同时置灰，
             不再等用户敲完一段话才在发送时被拦。 */}
         {unboundAgent && (
@@ -6036,6 +6087,22 @@ export function ChatPage({
             ) : null}
           </div>
         ) : null}
+        {/* 输入框上方的常驻信息（d.346）：任务清单、本轮改动与会话改动都放在框外——
+            以前它们挤在圆角容器里，等于把正文区一段段吃掉。 */}
+        <TodoPanel conversationId={convId} />
+        <SessionChangesBar changes={sessionChanges} onOpen={openSessionChanges} />
+        {turnWrites.length > 0 && !planMode ? (
+          <TurnUndoBar
+            paths={turnWrites}
+            busy={undoing}
+            busyPath={undoingPath}
+            onUndo={() => void undoTurnWrites()}
+            onUndoOne={(path) => void undoTurnFile(path)}
+            {...(hasBackupPreviewBridge(getFileBridge()) ? { onPreview: (path: string) => void previewTurnChange(path) } : {})}
+            {...(hasRevealBridge(getFileBridge()) ? { onReveal: (path: string) => void revealTurnChange(path) } : {})}
+            onDismiss={() => setTurnWrites([])}
+          />
+        ) : null}
         {/* 圆角输入容器（d.147.4.90 起仿 Codex/ChatGPT 的单框样式）：正文在上，
             工具与发送收进下方动作行（左下圆形「+」、右下圆形发送），只保留一层 border。 */}
         <div className="rounded-[26px] border border-line bg-surface transition-colors focus-within:border-line-strong">
@@ -6081,9 +6148,6 @@ export function ChatPage({
             待发附件 {pendingFiles.length} 个
           </p>
         ) : null}
-        {/* 任务清单（d.158）：模型写过多步计划才出现，空清单不占位。
-            位置在拖动把手上方——它跟输入区一起随窗口收缩，不会被消息流挤走。 */}
-        <TodoPanel conversationId={convId} />
         {/* 上下文用量（d.187）：安静档自己隐掉；到 80% 提醒可以 /compact。 */}
         <ContextMeter used={contextUsage.used} budget={contextUsage.budget} calibrated={contextUsage.calibrated} />
         {/* 「接着做」（d.189）：用户点了停止、或应用重启后发现上一轮没收口。不自动发。 */}
@@ -6185,21 +6249,6 @@ export function ChatPage({
         {/* 轮次打满（d.167.4.103）：这一轮被 36 轮上限截断时，给一次点击的「继续」。
             走 `retryStream`——续写指令作为一条用户消息落库，不重发原提问。 */}
         {/* 计划就绪（d.173）：计划模式下这一轮只给了方案，一键「接受并执行」。 */}
-        {/* 本轮改动可撤回（d.176）：刚写完就是最需要这条的时候。 */}
-        {turnWrites.length > 0 && !planMode ? (
-          <TurnUndoBar
-            paths={turnWrites}
-            busy={undoing}
-            busyPath={undoingPath}
-            onUndo={() => void undoTurnWrites()}
-            onUndoOne={(path) => void undoTurnFile(path)}
-            {...(hasBackupPreviewBridge(getFileBridge()) ? { onPreview: (path: string) => void previewTurnChange(path) } : {})}
-            {...(hasRevealBridge(getFileBridge()) ? { onReveal: (path: string) => void revealTurnChange(path) } : {})}
-            onDismiss={() => setTurnWrites([])}
-          />
-        ) : null}
-        {/* 会话级改动回顾（d.210）：撤回条只活一轮，这条能一直回到会话结束。 */}
-        <SessionChangesBar changes={sessionChanges} onOpen={openSessionChanges} />
         {changeDiff ? (
           <ChangeDiffDialog
             state={changeDiff}
@@ -6268,8 +6317,6 @@ export function ChatPage({
             onDismiss={() => setRoundLimitStreamId(null)}
           />
         ) : null}
-        {/* 主对话在跑（d.214）：第几轮、在调什么工具、已经跑了多久；只在有进度时出现。 */}
-        <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
         {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。 */}
         <SubagentRuns
           runs={subagentRuns}
@@ -6563,6 +6610,19 @@ export function ChatPage({
               ▾
             </span>
           </button>
+          {/* 停止（d.346）：运行态不再有「生成中：…」提示条，停止改由这里一键完成。 */}
+          {activeLocal.length > 0 ? (
+            <button
+              type="button"
+              aria-label="停止生成"
+              title="停止这一轮生成"
+              onClick={abortRuns}
+              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-ui-sm text-muted transition-colors hover:bg-subtle-2 hover:text-ink ${FOCUS_RING_TIGHT}`}
+            >
+              <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-[2px] bg-current" />
+              停止
+            </button>
+          ) : null}
           {/* 圆形发送按钮：图标 + aria-label（读屏名与 hover 提示仍是「发送」）。 */}
           <button
             type="submit"
@@ -6603,24 +6663,9 @@ export function ChatPage({
           </button>
         </div>
         </div>
-        {/* 「完全」常驻提醒（d.242）：不逐条确认这件事必须一直看得见，
-            否则用户会在下一次危险操作静默执行之后才发现自己开着它。 */}
-        {safetyScope === "full" ? (
-          <div
-            data-testid="safety-full-banner"
-            role="status"
-            className="mx-2.5 mb-2 flex flex-wrap items-center gap-2 rounded-md border border-warn-line bg-warn-soft px-2 py-1 text-ui-xs text-warn"
-          >
-            <span>完全权限：不再逐条确认，危险操作也会直接执行（本次运行内有效，重启回到「自动」）。</span>
-            <button
-              type="button"
-              className="ui-hit underline underline-offset-2"
-              onClick={() => chooseSafetyScope("auto")}
-            >
-              改回自动
-            </button>
-          </div>
-        ) : null}
+        {/* 主对话进度（d.346）：轮次/工具/用时放在输入框下方——用户在框里打字时
+            最不该被这条挤占视线，收口后的「上一轮」总结留在原位。 */}
+        <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
         {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。 */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2">
           <span className="ml-auto">
@@ -6637,7 +6682,7 @@ export function ChatPage({
           aria-labelledby="chat-view-tab-trail"
           className="flex-1 overflow-y-auto px-chat-gutter py-6"
         >
-          <div className="mx-auto w-full max-w-[min(100%,960px)]">
+          <div className="mx-auto w-full max-w-[min(100%,1080px)]">
             <TrajectoryView progress={progress} />
           </div>
         </div>
@@ -6649,8 +6694,12 @@ export function ChatPage({
           aria-labelledby="chat-view-tab-context"
           className="flex-1 overflow-y-auto px-chat-gutter py-6"
         >
-          <div className="mx-auto w-full max-w-[min(100%,960px)]">
-            <ContextView conversationId={convId} />
+          <div className="mx-auto w-full max-w-[min(100%,1080px)]">
+            <ContextView
+              conversationId={convId}
+              // 预算还没算出来（首次加载）就不传：让页签按本机设置回落，避免闪一下 0 / 0。
+              usage={contextUsage.budget > 0 ? contextUsage : undefined}
+            />
           </div>
         </div>
       ) : null}

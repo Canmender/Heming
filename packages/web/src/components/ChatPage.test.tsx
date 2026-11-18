@@ -600,18 +600,18 @@ describe("ChatPage", () => {
     await waitFor(() => expect(rows()).toHaveLength(DEFAULT_WINDOW * 2));
   });
 
-  it("d.62 / d.147.4.90：消息列 960 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
+  it("d.62 / d.346：消息列 1080 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
     mockMessagesFetch([msg("l1", "布局检查", "2026-10-14T00:00:00.000Z")]);
     render(<ChatPage />);
     await waitFor(() => expect(screen.getByText("布局检查")).toBeInTheDocument());
 
-    const columnSelector = '[class*="max-w-[min(100%,960px)]"]';
+    const columnSelector = '[class*="max-w-[min(100%,1080px)]"]';
     const scroller = screen.getByTestId("message-list");
     const column = scroller.querySelector(columnSelector);
     expect(column).not.toBeNull();
     expect(column!.className).toContain("mx-auto");
     expect(column!.className).toContain("w-full");
-    // 消息行确实在 960 列内部（不是直接挂在滚动容器上）
+    // 消息行确实在 1080 列内部（不是直接挂在滚动容器上）
     expect(column!.querySelector('[id^="msg-l1"]')).not.toBeNull();
 
     // 输入区、工具栏、快捷键提示共用同一宽度档
@@ -1041,8 +1041,8 @@ describe("ChatPage", () => {
     });
 
     expect(screen.getByText(/你好/)).toBeInTheDocument(); // 累积而非单段
-    // d.248：气泡里不再显示名字，只留生成状态（名字仍可能出现在顶栏，所以只断言状态行）。
-    expect(screen.getByText("生成中…")).toBeInTheDocument();
+    // d.346：气泡里不再显示「生成中…」，运行状态只在读屏播报与输入框下方的进度行里。
+    expect(screen.queryByText("生成中…")).not.toBeInTheDocument();
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 非本机流不占「生成中」行
     expect(useChatStore.getState().streaming["remote-1"]?.text).toBe("你好");
 
@@ -3634,8 +3634,42 @@ describe("ChatPage", () => {
     expect(cached.some((c) => c.plain.text === "自发密文")).toBe(true);
   });
 
-  // —— d.35.1.9.0 UX 修补 · A 路（聊天主界面）行为用例 ——
+  it("刷新后服务端只剩密文：靠「链键明文缓存」自解，不再掉成「本机解不开」（d.346）", async () => {
+    bindAssistant();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    const first = render(<ChatPage />);
+    await act(async () => {});
 
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "重载也要在" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await lastSealed(send)).toMatchObject({ kind: "text", text: "重载也要在" });
+    const ev = send.mock.calls
+      .map((c) => c[0] as { type?: string; cipher: string; chainKid: string; n: number })
+      .filter((e) => e.type === "send_message")
+      .at(-1)!;
+
+    // 模拟刷新：内存里的消息/明文映射/出站箱全部消失，服务端只剩这条密文。
+    first.unmount();
+    useChatStore.setState({ messages: {}, plainById: {} });
+    mockMessagesFetch([
+      {
+        ...msg("m-after-reload", "", "2026-10-14T01:20:00.000Z"),
+        senderId: "u1",
+        enc: "e2e",
+        cipher: ev.cipher,
+        chainKid: ev.chainKid,
+        n: ev.n,
+      },
+    ]);
+    render(<ChatPage />);
+
+    await waitFor(() => expect(screen.getByText("重载也要在")).toBeInTheDocument());
+    expect(screen.queryByText(/本机解不开这条消息/)).not.toBeInTheDocument();
+  });
+
+  // —— d.35.1.9.0 UX 修补 · A 路（聊天主界面）行为用例 ——
   it("A1 历史三态：加载中出骨架；失败给「加载失败+重试」；重试成功渲染消息", async () => {
     let attempt = 0;
     let releaseRetry: ((r: Response) => void) | null = null;
@@ -4567,10 +4601,10 @@ describe("ChatPage", () => {
 
 
 describe("输入栏高度（clampComposerHeight）", () => {
-  it("默认 96，夹在 72–360 之间并取整", () => {
-    expect(clampComposerHeight(Number.NaN)).toBe(96);
-    expect(clampComposerHeight(10)).toBe(72);
-    expect(clampComposerHeight(999)).toBe(360);
+  it("默认 144，夹在 96–480 之间并取整", () => {
+    expect(clampComposerHeight(Number.NaN)).toBe(144);
+    expect(clampComposerHeight(10)).toBe(96);
+    expect(clampComposerHeight(999)).toBe(480);
     expect(clampComposerHeight(150.6)).toBe(151);
   });
 });
@@ -5648,17 +5682,19 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(within(context).getByRole("list", { name: "上下文明细" })).toBeInTheDocument();
   });
 
-  it("chips 反映真实计数；点「智能体团队」跳到团队页", async () => {
+  it("chips 反映真实计数；点「多智能体协作」跳协作页，不再有模式 chip", async () => {
     await setup();
     const orchestration = await screen.findByTestId("chat-orchestration");
     expect(within(orchestration).getByRole("heading", { level: 2, name: "周会纪要" }))
       .toBeInTheDocument();
     expect(document.querySelector('[data-chip="tools"]')!.textContent).toMatch(/^\d+ 个工具调用$/);
     expect(document.querySelector('[data-chip="tasks"]')!.textContent).toMatch(/^\d+ 个后台任务$/);
-    expect(document.querySelector('[data-chip="mode"]')!.textContent).toBe("标准模式");
+    // d.346：没有模式区分（标准/其他），「标准模式」chip 已删除。
+    expect(document.querySelector('[data-chip="mode"]')).toBeNull();
+    expect(screen.queryByText("标准模式")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "智能体团队" }));
-    expect(useUiStore.getState().page).toBe("team");
+    fireEvent.click(screen.getByRole("button", { name: "多智能体协作" }));
+    expect(useUiStore.getState().page).toBe("collab");
   });
 
   it("切走再切回：输入框草稿仍在（面板 hidden 保活，不是重新挂载）", async () => {
@@ -7124,7 +7160,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     await waitFor(() => expect(peekPluginInstallNotices()).toHaveLength(0));
   });
 
-  it("I5d 左下角安全范围：三档可切，「完全」要点两次并常驻提醒（d.242）", async () => {
+  it("I5d 左下角安全范围：三档可切，「完全」要点两次；打开后不再挂常驻提示条（d.346）", async () => {
     await setupAgentChat();
     bindAssistant();
 
@@ -7145,14 +7181,16 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     expect(screen.getByTestId("safety-scope-label").textContent).toBe("自动");
     expect(screen.queryByTestId("safety-full-banner")).toBeNull();
 
-    // 第二次才真的打开，并出现常驻黄条
+    // 第二次才真的打开；用户要求选完「完全」后底部不再有任何提示，
+    // 开着的状态只由左下角这个按钮自己表达（警告色 + 「完全」文案）。
     fireEvent.click(fullItem);
     await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("完全"));
-    const banner = screen.getByTestId("safety-full-banner");
-    expect(banner.textContent).toContain("危险操作也会直接执行");
+    expect(screen.queryByTestId("safety-full-banner")).toBeNull();
+    expect(screen.queryByText(/危险操作也会直接执行/)).toBeNull();
 
-    // 一键改回「自动」
-    fireEvent.click(within(banner).getByRole("button", { name: "改回自动" }));
+    // 切回「自动」仍走同一个菜单
+    fireEvent.click(screen.getByRole("button", { name: "安全范围：完全" }));
+    fireEvent.click(await screen.findByTestId("safety-scope-auto"));
     await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("自动"));
     expect(screen.queryByTestId("safety-full-banner")).toBeNull();
 

@@ -50,10 +50,10 @@ describe("AgentStreamBubble 无障碍状态播报（③-2）", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/已生成回复/);
   });
 
-  it("生成中/思考过程等次级文字用可读对比度（不再用 #bbb 这类极浅灰）", () => {
+  it("流式中不再显示「生成中…」视觉提示（d.346），读屏播报保留", () => {
     render(<AgentStreamBubble name="和小鸣" text="" status="streaming" reasoning="想一想" />);
-    const streamingHint = screen.getByText("生成中…");
-    expect(streamingHint.className).not.toMatch(/#bbb|#999|#888/);
+    expect(screen.queryByText("生成中…")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/和小鸣 正在生成回复/);
   });
 });
 
@@ -536,6 +536,6 @@ describe("工具行折叠（d.243：长任务不再把正文挤没）", () => {
     render(<AgentStreamBubble name={longName} text="在做" status="streaming" />);
     // 名字不再占视觉空间：读屏文案（sr-only）里仍有，但界面文本里没有。
     expect(screen.queryByText(longName)).toBeNull();
-    expect(screen.getByText("生成中…")).toBeTruthy();
+    expect(screen.queryByText("生成中…")).toBeNull();
   });
 });

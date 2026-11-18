@@ -5,7 +5,7 @@ import { FOCUS_RING } from "../../lib/a11y/focus.js";
 /**
  * 会话页「编排条」（T32）：两行顶栏。
  *
- * 第一行是「这一轮在什么状态下编排」：会话标题 + 四个 chip（团队 / 模式 / 工具调用 /
+ * 第一行是「这一轮在什么状态下编排」：会话标题 + 三个 chip（多智能体协作 / 工具调用 /
  * 后台任务）；第二行是主区切换（对话 / 轨迹 / 上下文）。
  *
  * 为什么 chip 只用真实数据：参考实现里的「N 个子智能体」我们没有对应实体，
@@ -37,8 +37,8 @@ export interface OrchestrationBarProps {
   tasksCount: number;
   view: ChatView;
   onViewChange: (view: ChatView) => void;
-  /** 打开「智能体团队」页（导航由调用方接 store，组件不碰全局状态）。 */
-  onOpenTeam: () => void;
+  /** 打开「多智能体协作」页（导航由调用方接 store，组件不碰全局状态）；与人类的「团队」页无关。 */
+  onOpenCollab: () => void;
   /** 右侧动作槽：会话进度、会话内搜索等既有按钮原样搬进来。 */
   right?: ReactNode;
   /**
@@ -54,7 +54,7 @@ export function OrchestrationBar({
   tasksCount,
   view,
   onViewChange,
-  onOpenTeam,
+  onOpenCollab,
   right,
   leading,
 }: OrchestrationBarProps) {
@@ -70,21 +70,13 @@ export function OrchestrationBar({
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <button
             type="button"
-            data-chip="team"
-            title="打开智能体团队"
-            onClick={onOpenTeam}
+            data-chip="collab"
+            title="多智能体协作：和鸣 + 本机智能体一起排班干活。人类的团队在左侧「团队」页，两者不是一回事。"
+            onClick={onOpenCollab}
             className={`${CHIP_CLASS} transition-colors hover:border-line-strong hover:text-ink`}
           >
-            智能体团队
+            多智能体协作
           </button>
-          <span
-            data-chip="mode"
-            title="当前编排模式：标准"
-            tabIndex={0}
-            className={CHIP_CLASS}
-          >
-            标准模式
-          </span>
           <span data-chip="tools" tabIndex={0} className={CHIP_CLASS}>
             {toolsCount} 个工具调用
           </span>
