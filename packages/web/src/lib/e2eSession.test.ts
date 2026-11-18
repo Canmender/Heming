@@ -15,6 +15,7 @@ import {
   initSession,
   sealMessage,
   openMessage,
+  openOwnMessage,
   handleChainDist,
   sweepDeferred,
   deferredCount,
@@ -147,6 +148,54 @@ describe("e2eSession 会话层", () => {
     expect(cached[0].senderId).toBe("alice-t1");
     expect(cached[0].plain).toEqual({ kind: "text", text: "你好，和鸣" });
     expect(typeof cached[0].at).toBe("number");
+  });
+
+  it("①b 自己发的消息：明文缓存被清后仍能靠发送链起始键自解（d.346）", async () => {
+    const sent: WsClientEvent[] = [];
+    const deps = makeDeps(sent);
+    const snapA = await bootstrap("alice-t2");
+    const conv = { id: "t2-conv", members: ["alice-t2"] };
+
+    const ev = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "text", text: "自己也要能重解" }, deps),
+    )) as SendEvent;
+
+    // 模拟明文缓存被 500 条上限挤掉：缓存空，只剩本机链状态与服务端密文。
+    for (const row of msgCache.list(conv.id)) msgCache.remove(conv.id, row.id);
+    expect(msgCache.list(conv.id)).toHaveLength(0);
+
+    const own = await asParty(snapA, () =>
+      openOwnMessage(conv.id, toEnv(ev, "t2-m1", "alice-t2")),
+    );
+    expect(own).toEqual({ kind: "text", text: "自己也要能重解" });
+  });
+
+  it("①c 链轮换后，落在旧链上的消息仍能自解（d.346 留起始键）", async () => {
+    const sent: WsClientEvent[] = [];
+    const clock = { t: Date.parse("2026-01-01T00:00:00.000Z") };
+    const deps = makeDeps(sent, clock);
+    const snapA = await bootstrap("alice-t3");
+    const conv = { id: "t3-conv", members: ["alice-t3"] };
+
+    const first = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "text", text: "旧链第一条" }, deps),
+    )) as SendEvent;
+    clock.t += 25 * 60 * 60 * 1000; // 超过 24h：下一条触发链轮换
+    const second = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "text", text: "轮换之后" }, deps),
+    )) as SendEvent;
+    expect(second.chainKid).not.toBe(first.chainKid);
+
+    for (const row of msgCache.list(conv.id)) msgCache.remove(conv.id, row.id);
+
+    const oldPlain = await asParty(snapA, () =>
+      openOwnMessage(conv.id, toEnv(first, "t3-m1", "alice-t3")),
+    );
+    expect(oldPlain).toEqual({ kind: "text", text: "旧链第一条" });
+    const newPlain = await asParty(snapA, () =>
+      openOwnMessage(conv.id, toEnv(second, "t3-m2", "alice-t3")),
+    );
+    expect(newPlain).toEqual({ kind: "text", text: "轮换之后" });
   });
 
   it("② 缺链与超窗 n → open 返回 defer（不写明文缓存）", async () => {

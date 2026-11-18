@@ -65,6 +65,11 @@ export const CACHE_CAP = 500; // 明文缓存截尾（条/会话）
 const SWEEP_BATCH = 5; // sweepDeferred 单次重扫条数
 const ROTATE_N = 100; // 链滚动：条数阈值
 const ROTATE_MS = 24 * 60 * 60 * 1000; // 链滚动：24h
+// d.346：自己的发送链保留起始键（每条 32 字节）。留 20 条 ≈ 640 字节，
+// 够把轮换过的旧消息重新解出来，又不会让链文件无限长。
+const RECENT_SEND_CHAINS = 20;
+// 自解时最多向前推多少步（正常链 100 条就轮换；这里是防呆上界，别让坏 n 拖死算力）。
+const MAX_SELF_DERIVE = 4096;
 
 const AAD_PREFIX = "heming.e2e.v1"; // AAD 命名空间前缀
 const MSG_LABEL = "msg"; // 正文链 KDF label（agent chunk 等走独立 label，见 e2eCrypto.hkdfChain）
@@ -176,6 +181,17 @@ interface LoadedIdentity {
 interface SendChain extends ChainState {
   createdAt: number;
   distFor: string[]; // 本链已分发到的成员（轮换后清空）
+  /** 链起始键（base64）。d.346：留着自己重解本机发出去的密文，不额外存明文。 */
+  seed?: string;
+  /** seed 对应的链序号（老链没有 0，补检查点时可能从中间开始）。 */
+  seedN?: number;
+}
+
+/** 已轮换下来的发送链：只留 kid + 起始键，够把这条链上的旧消息重新解开。 */
+interface RetiredSendChain {
+  kid: string;
+  seed: string;
+  createdAt: number;
 }
 
 interface RecvChain extends ChainState {
@@ -189,6 +205,8 @@ interface RecvChain extends ChainState {
 interface ChainsFile {
   send?: SendChain;
   recv: Record<string, RecvChain>;
+  /** d.346：轮换走的发送链起始键（最多留 RECENT_SEND_CHAINS 条），用于重解自己的旧消息。 */
+  retiredSend?: RetiredSendChain[];
   /** 每认证发送设备最后接受的 chaindist 新鲜度（防旧分发重放回滚接收链） */
   lastDist?: Record<string, { ct: number; kid: string }>;
 }
@@ -891,8 +909,22 @@ export async function initSession(convId: string, deps: E2eDeps): Promise<void> 
   const chains = loadChains(convId);
   if (!chains.send) {
     const ck = randomBytes(32);
-    chains.send = { kid: await chainKidOf(ck), ck: toB64(ck), n: 0, createdAt: deps.now(), distFor: [] };
+    chains.send = {
+      kid: await chainKidOf(ck),
+      ck: toB64(ck),
+      n: 0,
+      createdAt: deps.now(),
+      distFor: [],
+      seed: toB64(ck),
+      seedN: 0,
+    };
     saveChains(convId, chains);
+  } else if (!chains.send.seed) {
+    // 老数据没有起始键（d.346 之前建的链）：以「当前链键 + 当前 n」当检查点，
+    // 之后写出的消息都能自己重解；更早的只能靠明文缓存。
+    // 这里只改内存：下一次真实落盘（seal/轮换）顺手带上，省一次加密写。
+    chains.send.seed = chains.send.ck;
+    chains.send.seedN = chains.send.n;
   }
   // 新会话首链必须落盘后再返回：否则首条 seal 前进程退出会丢链（收端永远解不开）。
   await flushChains(convId);
@@ -915,7 +947,8 @@ const sealLocks = new Map<string, Promise<void>>();
 /**
  * 封一条密文消息 → send_message{enc:"e2e"} 事件。
  * 无链/新成员 → 先经 sendRaw 分发 chaindist（X3DH 成对封装），再封正文；
- * n>=100 或 now()-createdAt>24h → 轮换新链（旧链键随覆盖删除，前向保密）。
+ * n>=100 或 now()-createdAt>24h → 轮换新链（旧链只留起始键、最多 20 条用于重解本机历史，
+ * d.346；发送用途上已作废，接收端仍按自己的 `opened` 去重）。
  * opts.aad 覆盖正文 AAD（agent chunk 用 chunkAad——同链推进、不同绑定上下文）。
  * 同会话并发调用按到达序串行（chunk/finish/正文/重加密共用一条发送链，必须排队）。
  */
@@ -955,8 +988,24 @@ async function doSealMessage(
 
   // 链滚动（§3.2）：100 条或 24h → 新链 + 重新分发（distFor 清空触发 chaindist）
   if (send.n >= ROTATE_N || now - send.createdAt > ROTATE_MS) {
+    // d.346：轮换前把旧链的起始键留下来——自己的旧消息还能按 n 重新解，
+    // 不然明文缓存一淘汰，历史就只剩「本机解不开」。只留键，不留明文。
+    if (send.seed) {
+      chains.retiredSend = [
+        { kid: send.kid, seed: send.seed, createdAt: send.createdAt },
+        ...(chains.retiredSend ?? []),
+      ].slice(0, RECENT_SEND_CHAINS);
+    }
     const ck = randomBytes(32);
-    send = { kid: await chainKidOf(ck), ck: toB64(ck), n: 0, createdAt: now, distFor: [] };
+    send = {
+      kid: await chainKidOf(ck),
+      ck: toB64(ck),
+      n: 0,
+      createdAt: now,
+      distFor: [],
+      seed: toB64(ck),
+      seedN: 0,
+    };
     chains.send = send;
     saveChains(conv.id, chains);
   }
@@ -1207,6 +1256,58 @@ async function openChainMsg(
   // 解密成功推进了接收链（opened/msgKey 窗口）：落盘后再返回，防重放窗口回退。
   await flushChains(convId);
   return plain;
+}
+
+/**
+ * 用**自己的发送链**把本机发出去的消息重新解开（d.346）。
+ *
+ * 发出去的正文只在服务端留密文，本机不回存明文；明文缓存（每会话 500 条）一淘汰，
+ * 重载后就只剩「本机解不开」。但发送链在自己手里、并且留着每条链的起始键，
+ * 所以可以按 n 重新派生 msgKey 再解一遍——不额外存明文，也不依赖服务端。
+ *
+ * 只处理自己链上的正文（chaindist/chunk 不归这里）；任何异常都返回 null，
+ * 让调用方继续走原路径（缓存/占位），不要把「解不开」升级成错误。
+ */
+export async function openOwnMessage(
+  convId: string,
+  env: SealedEnvelope,
+  opts?: { aad?: Uint8Array },
+): Promise<PlainEnvelope | null> {
+  if (!env.cipher || !env.chainKid || !Number.isInteger(env.n) || (env.n as number) < 0) return null;
+  const target = env.n as number;
+  const ownKid = env.chainKid;
+  try {
+    await ensureE2eStorageReady(convId);
+    const chains = loadChains(convId);
+    const own =
+      chains.send?.kid === ownKid ? chains.send : chains.retiredSend?.find((c) => c.kid === ownKid);
+    if (!own?.seed) return null;
+    // 轮换下来的旧链一定从 n=0 开始；只有「老数据补检查点」的当前链可能从中间起步。
+    const startN = chains.send?.kid === ownKid ? (chains.send.seedN ?? 0) : 0;
+    if (target < startN || target - startN > MAX_SELF_DERIVE) return null;
+
+    const outer = parseOuter(env.cipher);
+    if (outer.ek !== undefined) return null; // X3DH 分发信封
+    if (outer.nonce === undefined || outer.data === undefined) return null;
+
+    // 从检查点逐级推进到目标序号：msgKey_i = HKDF(CK_i)，CK_{i+1} = HKDF(CK_i)
+    let ck = own.seed;
+    let msgKey: string | null = null;
+    for (let i = startN; i <= target; i += 1) {
+      const step = await hkdfChain(ab(fromB64(ck)), MSG_LABEL);
+      if (i === target) msgKey = toB64(step.msgKey);
+      ck = toB64(step.next);
+    }
+    if (!msgKey) return null;
+    const aad = opts?.aad ?? aadMsg(convId, ownKid, target);
+    const bytes = await decryptMsg(ab(fromB64(msgKey)), fromB64(outer.nonce), fromB64(outer.data), aad);
+    const parsed = JSON.parse(textDec.decode(bytes)) as PlainEnvelope;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.kind !== "string") return null;
+    if (parsed.kind === "chaindist" || parsed.kind === "chunk") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 /** chaindist 路径：X3DH 解封（外层公参 → 成对根密钥 → GCM）。 */

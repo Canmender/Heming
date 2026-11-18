@@ -56,6 +56,7 @@ import {
   initSession,
   sealMessage,
   openMessage,
+  openOwnMessage,
   msgCache,
   migrateMsgCache,
   isForMe,
@@ -1493,13 +1494,31 @@ export function ChatPage({
         }
         return { status: "ok", plain: outPlain };
       }
+      // 发送链自解（d.346）：明文缓存按 500 条淘汰后，上面两条都落空——但发送链的
+      // 起始键留在本机，可以按 n 重新派生 msgKey，把服务端那份密文再解一遍。
+      // 这样「聊得久了，翻回旧消息只剩一句本机解不开」就不会再出现。
+      const ctxAad = ctx
+        ? ctx.kind === "error"
+          ? errorAad(conv, ctx.streamId) // fix I2：错误信封独立 AAD 命名空间
+          : chunkAad(conv, ctx.streamId, ctx.index ?? 0)
+        : undefined;
+      const own = await openOwnMessage(conv, sealed, ctxAad ? { aad: ctxAad } : undefined);
+      if (own) {
+        msgCache.append(conv, {
+          id: env.id,
+          senderId: env.senderId ?? "unknown",
+          at: env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now(),
+          plain: own,
+        });
+        if (env.chainKid !== undefined && env.n !== undefined) {
+          msgCache.remove(conv, chainPlainKey(env.chainKid, env.n));
+        }
+        return { status: "ok", plain: own };
+      }
       try {
         const opts = ctx
           ? {
-              aad:
-                ctx.kind === "error"
-                  ? errorAad(conv, ctx.streamId) // fix I2：错误信封独立 AAD 命名空间
-                  : chunkAad(conv, ctx.streamId, ctx.index ?? 0),
+              aad: ctxAad!,
               noDefer: true,
             }
           : undefined;

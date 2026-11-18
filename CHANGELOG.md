@@ -11,6 +11,7 @@
 | 能力 | 落地 |
 | --- | --- |
 | 密文回放 | `sealAndSend` / `sealFinish` / `sealError` 封条后，除内存出站箱外，再以 `chain:<chainKid>:<n>` 为键把明文写进 `msgCache`（持久化）；`makeOpenHandler` 真实消息 id 未命中时按链键回退取明文，命中即用真实 id 再入缓存并删掉副条目 |
+| 缓存淘汰也能解 | 发送链保留起始键：新链带 `seed`/`seedN`，轮换下来的旧链进 `retiredSend`（最多 20 条），老链首次启动用「当前链键 + 当前 n」补检查点；明文缓存被每会话 500 条上限挤掉后，`openOwnMessage` 按 `n` 重新派生 `msgKey`，把服务端密文再解一遍 |
 | 换设备仍在 | 本机没有发送链、也没有明文的历史消息依旧显示占位——这是 E2E 的边界，不改 |
 | 编排条 | 去掉「标准模式」chip（和鸣没有模式区分）；「智能体团队」改名「多智能体协作」，点击进协作页，title 写明「人类的团队在左侧「团队」页」 |
 | 团队与协作 | 团队页副标题写明「这里是人类队伍」；协作页副标题写明「这里不是人类团队」 |
@@ -24,13 +25,14 @@
 ### 怎么验证
 
 - `packages/web/src/components/ChatPage.test.tsx`：新增「刷新后服务端只剩密文：靠链键明文缓存自解」（发送 → 卸载 → 清空内存消息与 `plainById` → 用同一份 `cipher / chainKid / n` 换个 id 重新挂载 → 仍渲染明文，且没有「本机解不开」）；编排条、安全范围、输入栏高度、列宽用例同步改口径
+- `packages/web/src/lib/e2eSession.test.ts`：新增「明文缓存被清后仍能靠发送链起始键自解」与「链轮换后旧链消息仍能自解」（各自清空 `msgCache` 后只用 `cipher/chainKid/n` 重新解）
 - `packages/web/src/components/chat/ContextView.test.tsx` 18 例、`TrajectoryView.test.tsx` 6 例、`AgentStreamBubble.test.tsx`、`OrchestrationBar.test.tsx`
-- web **453 文件 / 6513 例**全绿；`pnpm -w typecheck`、`pnpm --filter @heming/web build` 全过
+- web **453 文件 / 6515 例**全绿；`pnpm -w typecheck`、`pnpm --filter @heming/web build` 全过
 
 ### 留白
 
-- 链键明文缓存只解决「同一台设备刷新 / 断线 / 崩溃后解不开」；换设备、清掉本机缓存仍然解不开，服务端不会拿到明文。
-- 缓存仍受每会话 500 条、最近 20 个会话的容量约束，特别久远的历史可能已被淘汰。
+- 明文缓存里仍只放最近 500 条 / 20 个会话；超出的旧消息要靠发送链自解，而 d.346 之前建的链只能从补检查点那一刻起自解，更早的仍可能显示占位。
+- 换设备、本机身份被重置仍然解不开，服务端不会拿到明文。
 - 轨迹页工具表读取的是本地转录里的工具结果，跨会话恢复的历史不一定有这份转录。
 
 ## d.345.4.128.12（2026-11-18）— 工具跑完之后，仓库自己的检查也能说话
