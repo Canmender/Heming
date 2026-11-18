@@ -174,6 +174,103 @@ describe("chat store", () => {
     expect(s.messages.c1?.map((m) => m.id)).toEqual(["m1"]);
   });
 
+  // —— d.300：断线重连后的对齐（resyncMessages）——
+
+  describe("resyncMessages：断线回来对一次齐（d.300）", () => {
+    const ids = (convId = "c1") => useChatStore.getState().messages[convId]?.map((m) => m.id) ?? [];
+
+    it("服务端已经删掉的几条会被摘掉，并给出摘掉的数量", async () => {
+      useChatStore.setState({
+        messages: {
+          c1: [
+            msgAt("m1", "一", "2026-10-13T00:00:01.000Z"),
+            msgAt("m2", "二", "2026-10-13T00:00:02.000Z"),
+            msgAt("m3", "三", "2026-10-13T00:00:03.000Z"),
+          ],
+        },
+      });
+      vi.mocked(fetchMessages).mockResolvedValue([
+        msgAt("m1", "一", "2026-10-13T00:00:01.000Z"),
+        msgAt("m3", "三", "2026-10-13T00:00:03.000Z"),
+      ]);
+
+      const res = await useChatStore.getState().resyncMessages("c1");
+
+      expect(res).toEqual({ ok: true, removed: 1, kept: 0 });
+      expect(ids()).toEqual(["m1", "m3"]);
+    });
+
+    it("拉取期间刚到的消息留下，不算「服务端没有」", async () => {
+      useChatStore.setState({
+        messages: { c1: [msgAt("m1", "一", "2026-10-13T00:00:01.000Z")] },
+      });
+      let release: (() => void) | undefined;
+      vi.mocked(fetchMessages).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve([msgAt("m1", "一", "2026-10-13T00:00:01.000Z")]);
+          }),
+      );
+
+      const pending = useChatStore.getState().resyncMessages("c1");
+      // fetch 还没回来时来了一条新回复（WS 帧）
+      useChatStore.getState().appendMessage(msgAt("m9", "刚答完", "2026-10-13T00:00:09.000Z"));
+      release?.();
+      const res = await pending;
+
+      expect(res).toEqual({ ok: true, removed: 0, kept: 1 });
+      expect(ids()).toEqual(["m1", "m9"]);
+    });
+
+    it("本来就一致：removed/kept 都是 0，且不重写列表（引用不变）", async () => {
+      useChatStore.setState({
+        messages: { c1: [msgAt("m1", "一", "2026-10-13T00:00:01.000Z")] },
+      });
+      const before = useChatStore.getState().messages;
+      vi.mocked(fetchMessages).mockResolvedValue([msgAt("m1", "一", "2026-10-13T00:00:01.000Z")]);
+
+      const res = await useChatStore.getState().resyncMessages("c1");
+
+      expect(res).toEqual({ ok: true, removed: 0, kept: 0 });
+      expect(useChatStore.getState().messages).toBe(before);
+    });
+
+    it("拉取失败：ok=false、本地一条不动、也不写 messagesError（重连失败不该显示「加载失败」）", async () => {
+      useChatStore.setState({
+        messages: {
+          c1: [
+            msgAt("m1", "一", "2026-10-13T00:00:01.000Z"),
+            msgAt("m2", "二", "2026-10-13T00:00:02.000Z"),
+          ],
+        },
+      });
+      vi.mocked(fetchMessages).mockRejectedValue(new Error("断线"));
+
+      const res = await useChatStore.getState().resyncMessages("c1");
+
+      expect(res).toEqual({ ok: false, removed: 0, kept: 0 });
+      expect(ids()).toEqual(["m1", "m2"]);
+      expect(useChatStore.getState().messagesError["c1"]).toBeUndefined();
+    });
+
+    it("alive 为假（已切会话/卸载）：不写 store，返回 ok=false", async () => {
+      useChatStore.setState({
+        messages: {
+          c1: [
+            msgAt("m1", "一", "2026-10-13T00:00:01.000Z"),
+            msgAt("m2", "二", "2026-10-13T00:00:02.000Z"),
+          ],
+        },
+      });
+      vi.mocked(fetchMessages).mockResolvedValue([msgAt("m1", "一", "2026-10-13T00:00:01.000Z")]);
+
+      const res = await useChatStore.getState().resyncMessages("c1", () => false);
+
+      expect(res).toEqual({ ok: false, removed: 0, kept: 0 });
+      expect(ids()).toEqual(["m1", "m2"]);
+    });
+  });
+
   // —— M3 Task 8：流式管道收口（streaming/streamOwner/onWsEvent）——
 
   const chunk = (streamId: string, text: string): WsServerEvent => ({

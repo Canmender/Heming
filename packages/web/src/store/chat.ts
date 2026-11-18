@@ -454,6 +454,21 @@ interface ChatState {
    */
   loadMessages: (convId: string, alive?: () => boolean) => Promise<Message[]>;
   /**
+   * 断线重连之后的「对齐」（d.300）：拉一次历史，以服务端为准**替换**这一会话的消息，
+   * 而不是只做合并。
+   *
+   * 为什么不能只合并：`/rewind` 与「重答」会在别处删消息，断线期间删掉的几条永远等不到
+   * `messages_deleted` 广播；合并语义又会把本地那些「服务端已经没有」的条目保留下来——
+   * 结果就是刷新才对齐。这里的规则是：服务端没有、且断线前就在本地的 → 视为已删，摘掉；
+   * 拉取期间刚到的（不在断线前的快照里）→ 留下，否则等于吞掉刚收到的回复。
+   *
+   * `removed` 是这次被摘掉的条数（0 表示本来就一致），供上层决定要不要提示。
+   */
+  resyncMessages: (
+    convId: string,
+    alive?: () => boolean,
+  ) => Promise<{ ok: boolean; removed: number; kept: number }>;
+  /**
    * 存量自迁移（设计 §7）：本会话 `enc:"plain"` 且 `senderId===meId` 的消息逐条
    * sealMessage 重封 → `PUT /api/messages/:id/reencrypt`，**20/s 节流**（首条立即、
    * 后续每条间隔 50ms）。成功后本地替换为服务端返回的 e2e 形态；
@@ -573,6 +588,70 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     // skip：非本机定向 chaindist / 无缓存的重放——不入列、不重试
     dropPending(convId, m.id);
+  };
+
+  /**
+   * 拉一次历史并解开（d.300）：`loadMessages` 与 `resyncMessages` 的唯一实现，
+   * 免得「刷新」和「对齐」两套解密规则慢慢走偏。
+   * 失败不写状态（要不要落错误态由调用方决定：重连对齐失败不该弹「加载失败」）。
+   */
+  const resolveHistory = async (
+    convId: string,
+  ): Promise<{ ok: true; list: Message[]; landed: boolean } | { ok: false; error: string }> => {
+    let fetched: Message[];
+    try {
+      fetched = await fetchMessages(convId);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error && err.message ? err.message : "网络异常" };
+    }
+    const h = get().openHandler;
+    const resolved: Message[] = [];
+    let landed = false; // 本次拉取里是否解开了 chaindist（落链 → 需重试占位）
+    for (const m of fetched) {
+      if (m.enc !== "e2e") {
+        resolved.push(m);
+        continue;
+      }
+      const known = get().plainById[convId]?.[m.id];
+      if (known) {
+        // 缓存优先（§6）：已解密过的信封不再回调 handler
+        if (known.kind !== "chaindist") resolved.push(toRenderable(m, known));
+        continue;
+      }
+      if (!h) {
+        resolved.push(m); // 未注入：占位 + pending，注入后冲刷
+        addPending(convId, m.id);
+        continue;
+      }
+      let out: E2eOpenOutcome;
+      try {
+        out = await h(toInput(m));
+      } catch {
+        out = { status: "failed" };
+      }
+      if (out.status === "ok") {
+        recordPlain(convId, m.id, out.plain);
+        dropPending(convId, m.id);
+        if (out.plain.kind === "chaindist") landed = true;
+        else resolved.push(toRenderable(m, out.plain));
+      } else if (out.status === "defer") {
+        resolved.push(m);
+        addPending(convId, m.id);
+      } else if (out.status === "failed") {
+        resolved.push(m); // 占位（解不开的不进 LLM 提示词，渲染层显示无法解密）
+        dropPending(convId, m.id);
+      } else {
+        dropPending(convId, m.id); // skip → 过滤出列表（非本机 chaindist 等）
+      }
+    }
+    // 历史回放带上转录（d.126-C）：思考/工具轨迹按消息 id 从本机落盘取回并贴到消息对象上。
+    // 旧消息/旧会话没有条目 → withTranscript 原样返回，渲染层不渲染任何块（向后兼容）。
+    const persistedTranscripts = readPersistedTranscripts(convId);
+    return {
+      ok: true,
+      list: resolved.map((m) => withTranscript(m, persistedTranscripts[m.id])),
+      landed,
+    };
   };
 
   return {
@@ -761,75 +840,44 @@ export const useChatStore = create<ChatState>((set, get) => {
       messagesLoading: { ...get().messagesLoading, [convId]: true },
       messagesError: { ...get().messagesError, [convId]: null },
     });
-    let fetched: Message[];
-    try {
-      fetched = await fetchMessages(convId);
-    } catch (err) {
+    const result = await resolveHistory(convId);
+    if (!result.ok) {
       // 自己吞异常并落错误（此前直接抛给未 await 的调用方 = unhandled rejection）。
       // 组件卸载/切会话后的晚到失败不写（同下方 alive 口径），但仍把结果返回给调用方。
       if (!alive || alive()) {
         set({
           messagesLoading: { ...get().messagesLoading, [convId]: false },
-          messagesError: {
-            ...get().messagesError,
-            [convId]: err instanceof Error && err.message ? err.message : "网络异常",
-          },
+          messagesError: { ...get().messagesError, [convId]: result.error },
         });
       }
       return get().messages[convId] ?? [];
     }
-    const h = get().openHandler;
-    const resolved: Message[] = [];
-    let landed = false; // 本次拉取里是否解开了 chaindist（落链 → 需重试占位）
-    for (const m of fetched) {
-      if (m.enc !== "e2e") {
-        resolved.push(m);
-        continue;
-      }
-      const known = get().plainById[convId]?.[m.id];
-      if (known) {
-        // 缓存优先（§6）：已解密过的信封不再回调 handler
-        if (known.kind !== "chaindist") resolved.push(toRenderable(m, known));
-        continue;
-      }
-      if (!h) {
-        resolved.push(m); // 未注入：占位 + pending，注入后冲刷
-        addPending(convId, m.id);
-        continue;
-      }
-      let out: E2eOpenOutcome;
-      try {
-        out = await h(toInput(m));
-      } catch {
-        out = { status: "failed" };
-      }
-      if (out.status === "ok") {
-        recordPlain(convId, m.id, out.plain);
-        dropPending(convId, m.id);
-        if (out.plain.kind === "chaindist") landed = true;
-        else resolved.push(toRenderable(m, out.plain));
-      } else if (out.status === "defer") {
-        resolved.push(m);
-        addPending(convId, m.id);
-      } else if (out.status === "failed") {
-        resolved.push(m); // 占位（解不开的不进 LLM 提示词，渲染层显示无法解密）
-        dropPending(convId, m.id);
-      } else {
-        dropPending(convId, m.id); // skip → 过滤出列表（非本机 chaindist 等）
-      }
-    }
-    // 历史回放带上转录（d.126-C）：思考/工具轨迹按消息 id 从本机落盘取回并贴到消息对象上。
-    // 旧消息/旧会话没有条目 → withTranscript 原样返回，渲染层不渲染任何块（向后兼容）。
-    const persistedTranscripts = readPersistedTranscripts(convId);
-    const withTranscripts = resolved.map((m) => withTranscript(m, persistedTranscripts[m.id]));
-    if (alive && !alive()) return withTranscripts; // 卸载/切会话后晚到：结果返回但不写 store
-    get().setMessages(convId, withTranscripts);
+    if (alive && !alive()) return result.list; // 卸载/切会话后晚到：结果返回但不写 store
+    get().setMessages(convId, result.list);
     set({
       messagesLoading: { ...get().messagesLoading, [convId]: false },
       messagesError: { ...get().messagesError, [convId]: null },
     });
-    if (landed) void retryPending(convId);
-    return withTranscripts;
+    if (result.landed) void retryPending(convId);
+    return result.list;
+  },
+  async resyncMessages(convId, alive) {
+    // 断线前的本地快照：用来区分「断线前就有、服务端却没有」（= 别处删了）
+    // 与「拉取期间刚到的」（= 新消息，不能因为快照里没有就丢掉）。
+    const before = new Set((get().messages[convId] ?? []).map((m) => m.id));
+    const result = await resolveHistory(convId);
+    if (!result.ok) return { ok: false, removed: 0, kept: 0 };
+    if (alive && !alive()) return { ok: false, removed: 0, kept: 0 };
+    const current = get().messages[convId] ?? [];
+    const fetchedIds = new Set(result.list.map((m) => m.id));
+    const arrivedDuring = current.filter((m) => !before.has(m.id) && !fetchedIds.has(m.id));
+    const removed = current.filter((m) => !fetchedIds.has(m.id) && before.has(m.id)).length;
+    // 服务端顺序为准，拉取期间新到的接在后面（它们的 createdAt 本来就更新）
+    const next = [...result.list, ...arrivedDuring];
+    const changed = removed > 0 || arrivedDuring.length > 0;
+    if (changed) set({ messages: { ...get().messages, [convId]: next } });
+    if (result.landed) void retryPending(convId);
+    return { ok: true, removed, kept: arrivedDuring.length };
   },
   async migrateOwnPlain(convId, members, deps, attempted, meId, alive) {
     const targets = (get().messages[convId] ?? []).filter(

@@ -6457,6 +6457,39 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   }, 30_000);
 
   /**
+   * d.300：断线期间的删除收不到广播（`messages_deleted` 是广播，不在线就错过了）。
+   * 重连必须对一次齐——把「服务端已经没有」的那几条摘掉，而不是只做合并。
+   */
+  it("I3-resync 断线重连按服务端对齐：别处删掉的几条消失并提示（d.300）", async () => {
+    const m1 = msg("m1", "第一轮的问题", "2026-10-14T02:00:00.000Z");
+    const m2 = agentMsg("m2", "第一轮的回答", "2026-10-14T02:01:00.000Z");
+    const m3 = agentMsg("m3", "第二轮的回答", "2026-10-14T02:02:00.000Z");
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 首拉三条；重连那一拉只剩两条（m3 在断线期间被别处删了）
+    mockMessagesFetch([m1, m2, m3], [m1, m2]);
+    render(<ChatPage />);
+    await act(async () => {});
+    expect(await screen.findByText("第二轮的回答", undefined, { timeout: 8000 })).toBeInTheDocument();
+
+    // 断线 → 重连（同一条 handlers，`hadClosed` 由此置位）
+    await act(async () => {
+      lastHandlers().onClose?.();
+    });
+    await act(async () => {
+      lastHandlers().onOpen?.();
+    });
+
+    await waitFor(() => expect(screen.queryByText("第二轮的回答")).not.toBeInTheDocument(), {
+      timeout: 8000,
+    });
+    expect(screen.getByText("第一轮的回答")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/断线期间别处删掉了 1 条消息/, undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+  }, 30_000);
+
+  /**
    * d.219：`/init` 与其它 `/` 命令不是一类东西。
    *
    * `/status`、`/goal` 是本地动作（不发模型、不落库）；`/init` 要模型真去读仓库再写

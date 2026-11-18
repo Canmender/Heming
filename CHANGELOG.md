@@ -46,7 +46,7 @@ d.298 让删除同步到别的窗口，但那是**广播**：不在线就收不�
 
 - `packages/web/src/store/chat.test.ts` 54 例（新增 5 例：摘掉已删并报数量、拉取期间新到的保留、本来就一致时不重写列表、拉取失败不动本地且不写错误态、`alive` 为假不写 store）
 - `ChatPage.test.tsx` 200 例（新增 1 例：断线 → 重连，被别处删掉的那条消失、提示出现、前一问一答不动）
-- web 全量 442 文件 / 6326 例；`pnpm -w typecheck` 全工程；`eval:agent` 40/40（pass@1 100%）；`design-audit` 全门槛
+- web 全量 442 文件 / 6341 例；`pnpm -w typecheck` 全工程；`eval:agent` 40/40（pass@1 100%）；`design-audit` 全门槛
 
 ### 留白
 

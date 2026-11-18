@@ -3734,7 +3734,21 @@ export function ChatPage({
         } else {
           setRecovered(false);
         }
-        // 断线重连成功：补拉断档消息（合并去重语义，幂等；信封同走解密合并）
+        // 断线重连成功（d.300）：以服务端为准对一次齐——断线期间别处可能删过消息
+        //（`/rewind`、重答），那些 `messages_deleted` 广播是收不到的，只合并会一直留着。
+        if (hadClosed) {
+          void useChatStore
+            .getState()
+            .resyncMessages(convId, () => alive)
+            .then((res) => {
+              if (!res.ok || res.removed === 0) return;
+              setSendNotice(`断线期间别处删掉了 ${res.removed} 条消息，已经对齐。`, "info");
+            });
+          // 会话列表同样补一次（未读数、别处新建的会话）
+          void useChatStore.getState().loadWorkspace().catch(() => undefined);
+          return;
+        }
+        // 首次连上：拉历史（合并语义，信封同走解密合并）
         void useChatStore.getState().loadMessages(convId, () => alive);
       },
       onClose: () => {
