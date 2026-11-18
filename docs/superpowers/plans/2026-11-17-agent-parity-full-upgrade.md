@@ -62,6 +62,6 @@
 | W1 无头 CLI | 已落地（d.243 `run`/`exec --json`/`--output-format stream-json`/`--cwd`/`--max-rounds`/`--allow-danger`） | `packages/cli/src/*` |
 | W2 服务端加固 | 进行中 | — |
 | W3 hooks | 进行中 | — |
-| W4 扩展与回滚 | 进行中（自定义命令 d.240、子代理定义 d.287、`/rewind N` 的**文件回滚** d.291 已落地；对话历史截断未做） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`packages/web/src/lib/fileEdit/rewindCheckpoints.ts`、`ChatPage.test.tsx` I4i/I3z/I3-rewind |
+| W4 扩展与回滚 | 已落地（自定义命令 d.240、子代理定义 d.287、`/rewind N` 的**文件回滚** d.291、**对话截断** d.293） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`packages/web/src/lib/fileEdit/rewindCheckpoints.ts`、`packages/web/src/lib/api.ts` 的 `deleteMessages`、`packages/server/src/{app,store,sqliteStore}.ts` 的 `DELETE /api/conversations/:id/messages/delete`、`ChatPage.test.tsx` I4i/I3z/I3-rewind |
 | W5 界面手感 | 待第二波 | — |
 | W6 MCP server | 已落地（d.289 `heming mcp serve`：initialize/ping/tools/list/tools/call，与 `run` 共用 `src/tooling.ts` 的闸门） | `packages/cli/src/{mcp,mcpServe,tooling}.ts` + 同名 `.test.ts` |
