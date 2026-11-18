@@ -52,4 +52,34 @@ describe("QuotaTrendCard", () => {
     render(<QuotaTrendCard rows={[thin]} now={NOW} />);
     expect(screen.getByText(/最近 7 天的读数/)).toBeInTheDocument();
   });
+
+  it("给了天数就摆一个选择器：选项、当前值、换档回调", () => {
+    const picked: number[] = [];
+    const thin: QuotaHistoryRow = {
+      provider: "codex",
+      lines: [{ name: "week", points: [{ at: new Date(NOW).toISOString(), left: 40 }] }],
+    };
+    render(
+      <QuotaTrendCard
+        rows={[thin]}
+        now={NOW}
+        days={14}
+        onDaysChange={(next) => picked.push(next)}
+      />,
+    );
+    const select = screen.getByLabelText<HTMLSelectElement>("额度走向看几天");
+    expect(select.value).toBe("14");
+    expect(screen.getByRole("option", { name: "7 天" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "30 天" })).toBeInTheDocument();
+    // 结论说不出来时，兜底那句跟着当前档位走，不写死 7 天。
+    expect(screen.getByText(/最近 14 天的读数/)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "30" } });
+    expect(picked).toEqual([30]);
+  });
+
+  it("不给天数就不摆选择器：只读用法不多一个控件", () => {
+    render(<QuotaTrendCard rows={[row(30, 8)]} now={NOW} />);
+    expect(screen.queryByLabelText("额度走向看几天")).toBeNull();
+  });
 });

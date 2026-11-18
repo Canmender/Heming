@@ -134,6 +134,9 @@
   「来源」专用的五路（`quota --json`、`quota history`、`quota auto-reset`（两条）、`plugin list --json`、
   `accounts discovery`）等真正切到「来源」分区才读一次（`sourcesWarm`，页头「重读全部」会把它置真），
   读之前先用 `lib/pageCache.ts` 的缓存画（d.321）。
+- 额度走向的天数由用户在卡头选（7/14/30，`components/model/QuotaTrendCard.tsx` 的
+  `TREND_DAY_CHOICES`）：`loadHistory(days)` 把它带进 `quota history --days n --json`，
+  去重键是 `history:<天数>`，换档即重读（d.322）。
 - `pnpm --filter @heming/web test`（vitest）：`ModelPage.test.tsx`、`modelCatalog.test.ts`、
   `magpieVisible.test.ts`、`modelGlobals.test.ts`、`modelSettings.test.ts`、`modelSpec.test.ts`、
   `modelTier.test.ts`、`providerModels.test.ts`、`magpieClient.test.ts`、`magpieDomestic.test.ts`、

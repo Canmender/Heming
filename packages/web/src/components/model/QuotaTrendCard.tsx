@@ -7,7 +7,13 @@ export interface QuotaTrendCardProps {
   rows: readonly QuotaHistoryRow[];
   now: number;
   defaultOpen?: boolean;
+  /** 看多少天的历史；不给就不显示天数选择器（只读用法）。 */
+  days?: number;
+  onDaysChange?: (days: number) => void;
 }
+
+/** 可看的天数档位：内核按天数现查，档位多一档就多一种读法，够用即可。 */
+export const TREND_DAY_CHOICES = [7, 14, 30] as const;
 
 const TONE_TEXT: Record<"danger" | "warn" | "muted", string> = {
   danger: "text-danger",
@@ -25,28 +31,54 @@ const TONE_TEXT: Record<"danger" | "warn" | "muted", string> = {
  * 用 `aria-expanded` + `aria-controls` 而不是 `<details>`：按钮要显式说明
  * 「展开走向 / 收起走向」，两端的行为也更好对齐。
  */
-export function QuotaTrendCard({ rows, now, defaultOpen = false }: QuotaTrendCardProps) {
+export function QuotaTrendCard({
+  rows,
+  now,
+  defaultOpen = false,
+  days,
+  onDaysChange,
+}: QuotaTrendCardProps) {
   const [open, setOpen] = useState(defaultOpen);
   if (rows.length === 0) return null;
   const headline = trendHeadline(rows, now);
+  const span = days ?? 7;
   return (
     <div className="ui-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="ui-section-title">额度走向</h2>
           <p className={`mt-0.5 ui-caption ${TONE_TEXT[headline.tone]}`}>
-            {headline.text || "最近 7 天的读数 · 展开看每一份的曲线"}
+            {headline.text || `最近 ${span} 天的读数 · 展开看每一份的曲线`}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-expanded={open}
-          aria-controls="quota-trend-body"
-          onClick={() => setOpen((value) => !value)}
-        >
-          {open ? "收起走向" : "展开走向"}
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {days !== undefined && onDaysChange && (
+            <label className="flex items-center gap-2 ui-caption">
+              看几天
+              <select
+                className="ui-input w-auto"
+                aria-label="额度走向看几天"
+                value={days}
+                onChange={(event) => onDaysChange(Number(event.target.value))}
+              >
+                {TREND_DAY_CHOICES.map((choice) => (
+                  <option key={choice} value={choice}>
+                    {choice} 天
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={open}
+            aria-controls="quota-trend-body"
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? "收起走向" : "展开走向"}
+          </Button>
+        </div>
       </div>
       {open && (
         <div id="quota-trend-body">

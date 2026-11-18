@@ -1284,6 +1284,40 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(screen.queryByLabelText("额度走向")).toBeNull();
   });
 
+  it("额度走向能换天数：选了 30 天就拿 30 天去问内核", async () => {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const points = [
+      { at: new Date(now - 4 * hour).toISOString(), left: 96 },
+      { at: new Date(now - 3 * hour).toISOString(), left: 80 },
+      { at: new Date(now - 2 * hour).toISOString(), left: 64 },
+      { at: new Date(now - 1 * hour).toISOString(), left: 46 },
+      { at: new Date(now).toISOString(), left: 30 },
+    ];
+    const { calls } = installBridge({}, {
+      "quota history --days 7 --json": {
+        ok: true,
+        stdout: JSON.stringify([{ provider: "claude", lines: [{ name: "5 hours", points }] }]),
+        stderr: "",
+      },
+      "quota history --days 30 --json": {
+        ok: true,
+        stdout: JSON.stringify([{ provider: "claude", lines: [{ name: "week", points }] }]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const select = await screen.findByLabelText<HTMLSelectElement>("额度走向看几天");
+    expect(select.value).toBe("7");
+
+    fireEvent.change(select, { target: { value: "30" } });
+    await waitFor(() => expect(calls).toContainEqual(["quota", "history", "--days", "30", "--json"]));
+    // 换档之后画的是 30 天那份：窗口名从「5 小时」变成「每周」。
+    expect(await screen.findByText(/（每周）/)).toBeInTheDocument();
+    expect(select.value).toBe("30");
+  });
+
   it("没有历史读数时整张「额度走向」卡都不出现", async () => {
     installBridge({}, {
       "quota history --days 7 --json": { ok: true, stdout: "[]", stderr: "" },

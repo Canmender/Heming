@@ -329,6 +329,8 @@ export function ModelPage() {
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
   const [history, setHistory] = useState<QuotaHistoryRow[]>([]);
+  /** 额度走向看几天（内核 `quota history --days n`，默认一周）。 */
+  const [historyDays, setHistoryDays] = useState(7);
   /**
    * Codex 账号「重置谁花」（账号 → 档位）。
    *
@@ -647,19 +649,20 @@ export function ModelPage() {
   );
 
   /**
-   * 额度走向：内核记下的历史读数（`quota history --json`，最近 7 天）。
+   * 额度走向：内核记下的历史读数（`quota history --days n --json`，默认最近 7 天）。
    *
    * 与 `quota --json` 分开取：历史读的是本地记录，不必等厂商；
    * 它又只在真有历史时才画，所以放第二波、失败也不吵。
+   * 天数由用户选（7/14/30），所以去重键里带上天数：同一档并发只发一条，换档照常重读。
    */
   const loadHistory = useCallback(
-    () =>
-      once("history", async () => {
+    (days: number = historyDays) =>
+      once(`history:${days}`, async () => {
         if (!cli) return;
-        const result = await cli.cli(["quota", "history", "--days", "7", "--json"]);
+        const result = await cli.cli(["quota", "history", "--days", String(days), "--json"]);
         setHistory(drawableRows(parseQuotaHistory(result.stdout || "")));
       }),
-    [cli, once],
+    [cli, once, historyDays],
   );
 
   /**
@@ -1392,6 +1395,12 @@ export function ModelPage() {
       loadDiscovery(),
     ]);
   }, [cli, tab, loadQuotas, loadHistory, loadAutoReset, loadPlugins, loadDiscovery]);
+
+  // 换了天数就重读：内核按天数现查，不重读等于选择器没生效。
+  useEffect(() => {
+    if (!cli || !sourcesWarm.current) return;
+    void loadHistory(historyDays);
+  }, [cli, historyDays, loadHistory]);
 
   useEffect(() => {
     if (accounts.length === 0) return;
@@ -2330,7 +2339,12 @@ export function ModelPage() {
               )}
 
               {history.length > 0 && (
-                <QuotaTrendCard rows={history} now={now} />
+                <QuotaTrendCard
+                  rows={history}
+                  now={now}
+                  days={historyDays}
+                  onDaysChange={setHistoryDays}
+                />
               )}
 
               <WarmupCard
