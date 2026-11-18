@@ -82,6 +82,11 @@ export function QuotaTrendCard({
       </div>
       {open && (
         <div id="quota-trend-body">
+          {/* 内核只在数字变了的时候记一笔，点稀不等于没在掉——不写这句最容易看错。 */}
+          <p className="mt-2 ui-caption">
+            读数只在数字变了的时候记一笔，所以点稀不代表没在掉；最多留 45 天。
+            Claude 的读数要等它自己应答或跑一次它的用量查询才更新，不会因为打开这一页就变。
+          </p>
           <QuotaTrend rows={rows} now={now} />
         </div>
       )}

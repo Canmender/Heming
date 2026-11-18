@@ -47,4 +47,16 @@ describe("QuotaTrend", () => {
     expect(screen.getByRole("img").getAttribute("aria-label")).not.toMatch(/重置/);
     expect(screen.getByText(/^5 小时：照这个速度/).textContent).not.toMatch(/重置/);
   });
+
+  it("一条线都画不出来时说清原因，不给一个空框", () => {
+    const thin: QuotaHistoryRow[] = [
+      {
+        provider: "codex",
+        lines: [{ name: "week", points: [{ at: at(0), left: 40 }] }],
+      },
+    ];
+    render(<QuotaTrend rows={thin} now={NOW} />);
+    expect(screen.queryByLabelText("额度走向")).toBeNull();
+    expect(screen.getByText(/至少要两份读数才画得出线/)).toBeInTheDocument();
+  });
 });

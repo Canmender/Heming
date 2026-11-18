@@ -80,6 +80,17 @@ function Spark({ line, now }: { line: QuotaLine; now: number }) {
 }
 
 export function QuotaTrend({ rows, now }: QuotaTrendProps) {
+  // 一条线都画不出来时说清楚为什么，别给一个空框：
+  // 内核只在数字变了的时候记一笔，刚开始用的账号常常只有一份读数。
+  const drawable = rows.some((row) => row.lines.some((line) => line.points.length >= 2));
+  if (!drawable) {
+    return (
+      <p className="mt-3 ui-caption">
+        每份额度至少要两份读数才画得出线，现在还没攒够。读数只在数字变了的时候记一笔，
+        用过一阵再回来看。
+      </p>
+    );
+  }
   return (
     <ul className="mt-3 space-y-2" aria-label="额度走向">
       {rows.map((row) => (

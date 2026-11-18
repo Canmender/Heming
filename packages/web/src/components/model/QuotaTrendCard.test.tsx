@@ -35,6 +35,17 @@ describe("QuotaTrendCard", () => {
     expect(screen.queryByLabelText("额度走向")).toBeNull();
   });
 
+  it("展开后说明读数的记法：变了才记一笔、最多留 45 天、点稀不代表没在掉", () => {
+    render(<QuotaTrendCard rows={[row(30, 8)]} now={NOW} />);
+    // 收起时只有一句结论，不再多一行说明（一屏高度就是这么省下来的）。
+    expect(screen.queryByText(/数字变了的时候记一笔/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开走向" }));
+    expect(screen.getByText(/数字变了的时候记一笔/)).toBeInTheDocument();
+    expect(screen.getByText(/最多留 45 天/)).toBeInTheDocument();
+    // Claude 的读数要它自己应答才更新：这句得说，否则「今天没变」会被当成「没在掉」。
+    expect(screen.getByText(/才不会因为打开这一页就变|不会因为打开这一页就变/)).toBeInTheDocument();
+  });
+
   it("defaultOpen 时直接摊开：给需要一眼看到曲线的地方留口子", () => {
     render(<QuotaTrendCard rows={[row(70, 6)]} now={NOW} defaultOpen />);
     expect(screen.getByLabelText("额度走向")).toBeInTheDocument();
