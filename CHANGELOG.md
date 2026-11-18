@@ -23,13 +23,14 @@ d.243 的无头 CLI 把智能体循环搬进了终端，但它始终是「我们
 | 路径换算 | `relativizeToolArgs` | 客户端发来的绝对路径换算成相对工作区（`D:/repo/src/a.ts` → `src/a.ts`）；工作区外的换算成 `../…` 后照样被越界检查拒绝。`run` 与 MCP 都吃这条改进 |
 | stdout 洁净 | `src/mcpServe.ts` | stdout 只放协议消息；就绪/错误/收工信息全部走 stderr；stdin 关闭即正常收工（退出码 0），Ctrl+C 先优雅关 stdin、再按一次 `130` |
 | 通知 | 协议层 | 没有 `id` 的消息**绝不回包**；坏 JSON 回 `-32700` 且不断连；未知方法回 `-32601` 并点名支持的方法 |
+| 稳定入口 | `packages/cli/bin/heming.mjs` | 给客户端一个不需要 `pnpm`、也不依赖 `dist` 的命令（本包 `build` 只做类型检查）：用仓库里装好的 `tsx` 转译 `src/index.ts`，参数透传、信号透传、退出码如实返回 |
 | 参数校验 | `args.ts` | `mcp` 只认 `serve` 子命令；`--json` / `--output-format` / `--max-rounds` / `--model` / `--base-url` / `--api-key` 一律报「mcp serve 不接 …」，不静默忽略 |
 
 客户端配置（Claude Desktop 例子，已写进 `packages/cli/README.md`）：
 
 ```json
 { "mcpServers": { "heming": { "command": "node",
-  "args": ["D:/Heming/packages/cli/dist/index.js", "mcp", "serve", "--cwd", "D:/repo"] } } }
+  "args": ["D:/Heming/packages/cli/bin/heming.mjs", "mcp", "serve", "--cwd", "D:/repo"] } } }
 ```
 
 ### 怎么验证

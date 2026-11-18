@@ -175,11 +175,19 @@ heming mcp serve --cwd D:/repo
   "mcpServers": {
     "heming": {
       "command": "node",
-      "args": ["D:/Heming/packages/cli/dist/index.js", "mcp", "serve", "--cwd", "D:/repo"]
+      "args": [
+        "D:/Heming/packages/cli/bin/heming.mjs",
+        "mcp", "serve", "--cwd", "D:/repo"
+      ]
     }
   }
 }
 ```
+
+`bin/heming.mjs` 是给客户端用的稳定入口：它用仓库里已装好的 `tsx` 转译 `src/index.ts`，
+不需要 `pnpm` 在 PATH 里、也不依赖 `dist`（本包的 `build` 只做类型检查，不产出 `dist`）。
+参数原样透传，`Ctrl+C` / 被客户端杀掉时会把信号交给真正的进程并如实返回退出码。
+在仓库里开发时用 `pnpm cli mcp serve --cwd D:/repo` 也一样。
 
 ### 支持的方法
 
