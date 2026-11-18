@@ -466,6 +466,25 @@ describe("ModelPage · 账号与更多", () => {
     expect(chip.getAttribute("title")).toContain("工作号");
   });
 
+  it("额度提醒改的是内核设置：选一档就写 settings set，并说清提醒什么", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "usageAlert", value: 0 },
+          { key: "resetReminder", value: 0 },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("额度提醒");
+    fireEvent.change(screen.getByLabelText("额度快用完时提醒"), { target: { value: "80" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "usageAlert", "80"]));
+    expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
+  });
+
   it("高级命令在「运行」里：流式输出写进面板", async () => {
     const { bridge, calls, emit } = installBridge();
     render(<ModelPage />);

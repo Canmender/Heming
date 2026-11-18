@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { PageTabs } from "./layout/PageTabs.js";
 import {
@@ -26,6 +26,7 @@ import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { SubscriptionRow } from "./model/SubscriptionRow.js";
 import { DomesticCard } from "./model/DomesticCard.js";
+import { QuotaReminder } from "./model/QuotaReminder.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -62,6 +63,7 @@ import {
 } from "../lib/magpieVisible.js";
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
 import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
+import { reminderArgs, resetReminderText, usageAlertText } from "../lib/magpieReminder.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -723,6 +725,37 @@ export function ModelPage() {
       );
     } catch (err) {
       setNotice(`没能改自动签到：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 额度提醒（d.283）：写的是内核 settings 的 `usageAlert` / `resetReminder`，
+   * 值就是数字本身；成功后重读一次设置，失败把内核原话放进提示条。
+   */
+  const setReminder = async (key: "usageAlert" | "resetReminder", value: number) => {
+    if (!cli) return;
+    setAccountBusy(`reminder:${key}`);
+    try {
+      const result = await cli.cli(reminderArgs(key, value));
+      if (!result.ok) {
+        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+        setNotice(`没能改提醒：${why}`, true);
+        return;
+      }
+      await loadSettings();
+      if (value <= 0) {
+        setNotice("已关掉这条提醒。");
+        return;
+      }
+      setNotice(
+        key === "usageAlert"
+          ? `已记下：额度${usageAlertText(value)}。`
+          : `已记下：额度${resetReminderText(value)}。`,
+      );
+    } catch (err) {
+      setNotice(`没能改提醒：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -1598,6 +1631,13 @@ export function ModelPage() {
                     </li>
                   )}
                 </ul>
+                {accounts.length > 0 && (
+                  <QuotaReminder
+                    values={settingValues}
+                    disabled={!cli || busy !== null || accountBusy !== null}
+                    onChange={(key, value) => void setReminder(key, value)}
+                  />
+                )}
               </div>
 
               <div className="ui-card p-4">
