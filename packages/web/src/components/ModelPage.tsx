@@ -68,7 +68,7 @@ import {
   visibleArgs,
   type AgentVisibility,
 } from "../lib/magpieVisible.js";
-import { agentName, latestReadAt } from "../lib/magpieQuota.js";
+import { agentName, formatResetIn, latestReadAt } from "../lib/magpieQuota.js";
 import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
 import { mergeAccounts } from "../lib/mergedQuota.js";
 import { MergedQuotaStrip } from "./model/MergedQuotaStrip.js";
@@ -745,6 +745,47 @@ export function ModelPage() {
     } finally {
       setAccountBusy(null);
     }
+  };
+
+  /**
+   * 花掉这个账号持有的一次额度重置（`quota reset`）。
+   *
+   * Codex 偶尔给账号几次「手动重置」：窗口用光了不必等到自然重置，用一次就让当前窗口从头开始。
+   * 这个动作撤不回来，所以先确认，并且把「还剩几次、什么时候到期」写进确认框。
+   */
+  const spendReset = async (row: AccountRow) => {
+    if (!cli) return;
+    setAccountBusy(`${row.agent}:${row.user ?? ""}`);
+    try {
+      const args = ["quota", "reset", ...(row.user ? [row.user] : []), "--yes"];
+      const result = await cli.cli(args);
+      await Promise.all([loadAccounts(), loadQuotas()]);
+      setNow(Date.now());
+      setNotice(
+        result.ok
+          ? `${row.label} 的窗口已经重新开始，可以接着用了。`
+          : `没能用掉这次重置：${engineText(tailText(stripAnsi(result.stderr || result.error || ""))) || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能用掉这次重置：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  const confirmSpendReset = (row: AccountRow) => {
+    const left = row.resets?.count ?? 0;
+    const due = row.resets?.until ? formatResetIn(row.resets.until, now) : "";
+    setConfirmAction({
+      title: `用掉 ${row.label} 的一次重置？`,
+      desc: `会把 ${agentName(row.agent)} 这个账号当前的额度窗口从头开始，换一次可用的量。这个动作撤不回来${
+        left > 1 ? `；这个账号还剩 ${left} 次` : "；这个账号只剩这一次"
+      }${due ? `，${due.replace("后重置", "后到期")}` : ""}。`,
+      confirmLabel: "用掉一次",
+      tone: "primary",
+      action: () => void spendReset(row),
+    });
   };
 
   const confirmSwitchAccount = (row: AccountRow) => {
@@ -1856,6 +1897,7 @@ export function ModelPage() {
                       onRelogin={reloginAccount}
                       onRename={renameAccount}
                       onForget={confirmForgetAccount}
+                      onSpendReset={confirmSpendReset}
                     />
                   ))}
                   {accounts.length === 0 && (

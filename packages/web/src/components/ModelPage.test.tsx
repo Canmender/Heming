@@ -331,6 +331,48 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
+  it("手上有可重置次数时，行上就能花掉一次（先问一句，再说结果）", async () => {
+    const until = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const { calls } = installBridge(
+      {},
+      {
+        "accounts --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            {
+              agent: "codex",
+              user: "gpt@example.com",
+              alias: "码号",
+              plan: "Plus",
+              active: true,
+              on: true,
+              windows: [{ name: "week", used: 100, remaining: 0, display: "100% used" }],
+              resets: { count: 2, until },
+              readAt: new Date().toISOString(),
+            },
+          ]),
+          stderr: "",
+        },
+        "quota reset gpt@example.com --yes": { ok: true, stdout: "✓ spent", stderr: "" },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("码号");
+
+    fireEvent.click(screen.getByRole("button", { name: "用掉一次重置" }));
+    const dialog = await screen.findByRole("dialog", { name: "用掉 码号 的一次重置？" });
+    // 确认框要说清「还剩几次」和「什么时候到期」，因为这一步撤不回来。
+    expect(dialog.textContent).toContain("还剩 2 次");
+    expect(calls.filter((args) => args[0] === "quota" && args[1] === "reset")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "用掉一次" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["quota", "reset", "gpt@example.com", "--yes"]),
+    );
+    expect(await screen.findByText(/码号 的窗口已经重新开始/)).toBeInTheDocument();
+  });
+
   it("同一家两个账号时，先把两份读成一行（平均剩多少）", async () => {
   installBridge(
     {},

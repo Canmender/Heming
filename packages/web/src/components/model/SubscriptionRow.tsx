@@ -28,6 +28,8 @@ export interface SubscriptionRowProps {
   onRename: (row: AccountRow, name: string) => void;
   /** 从列表里移除（`accounts forget`）——会二次确认，这里只负责发起。 */
   onForget: (row: AccountRow) => void;
+  /** 花掉这个账号持有的一次额度重置（`quota reset`）——会二次确认，这里只负责发起。 */
+  onSpendReset?: (row: AccountRow) => void;
 }
 
 /** 状态徽标：和页面里其它徽标同一套语义色（信息=在用，红=读不到/失效）。 */
@@ -45,6 +47,7 @@ export function SubscriptionRow({
   onRelogin,
   onRename,
   onForget,
+  onSpendReset,
 }: SubscriptionRowProps) {
   const state = accountState(row);
   const [editing, setEditing] = useState(false);
@@ -156,6 +159,16 @@ export function SubscriptionRow({
           {canSwitch && (
             <Button size="sm" variant="ghost" busy={busy} onClick={() => onSwitch(row)}>
               切到这个
+            </Button>
+          )}
+          {row.resets && row.resets.count > 0 && onSpendReset && (
+            // 窗口用光了、手里又有可重置次数时，这一步比等下一次自然重置快得多。
+            <Button
+              size="sm" variant="ghost" busy={busy}
+              title="把这个账号当前的额度窗口从头开始，用掉一次可重置次数"
+              onClick={() => onSpendReset(row)}
+            >
+              用掉一次重置
             </Button>
           )}
         </div>
