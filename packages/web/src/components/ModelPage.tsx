@@ -2686,102 +2686,95 @@ export function ModelPage() {
                 onTimes={(timesKey, times) => void setWarmupTimes(timesKey, times)}
               />
 
-              <div className="ui-card p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="ui-section-title">其他地址</h2>
-                  <span className="ui-caption">中转、局域网或自建接口</span>
-                </div>
-                {!custom.open ? (
-                  <button
-                    type="button"
-                    className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left transition-colors hover:bg-subtle disabled:opacity-50"
-                    disabled={!cli}
-                    onClick={() => setCustom({ ...custom, open: true })}
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-ui-md font-semibold">其他 OpenAI 兼容地址</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-muted">
-                      展开
-                      <ChevronIcon width={14} height={14} className="rotate-90" />
-                    </span>
-                  </button>
-                ) : (
-                  <div className="rta-enter mt-2 grid gap-2 sm:grid-cols-2">
-                    <TextField
-                      label="来源名称"
-                      placeholder="名称（如 relay）"
-                      value={custom.id}
-                      onChange={(event) => setCustom({ ...custom, id: event.target.value })}
-                    />
-                    <TextField
-                      label="接口地址"
-                      placeholder="https://host/v1"
-                      value={custom.url}
-                      error={customUrlCheck?.error ?? null}
-                      hint={
-                        customUrlCheck && !customUrlCheck.error
-                          ? customUrlCheck.hint ?? undefined
-                          : undefined
-                      }
-                      onChange={(event) => setCustom({ ...custom, url: event.target.value })}
-                      onBlur={() => {
-                        // 能识别的地址就地规范成最终会保存的样子（补 http(s)、去尾斜杠）。
-                        if (customUrlCheck && !customUrlCheck.error && customUrlCheck.url) {
-                          setCustom((current) => ({ ...current, url: customUrlCheck.url }));
-                        }
-                      }}
-                    />
-                    <TextField
-                      label="自定义 Key"
-                      type="password"
-                      placeholder="API Key（可留空：有些中转不校验 Key）"
-                      value={custom.key}
-                      error={customKeyCheck?.error ?? null}
-                      hint={
-                        !customKeyCheck?.error && customKeyCheck?.warning
-                          ? customKeyCheck.warning
-                          : undefined
-                      }
-                      onChange={(event) => setCustom({ ...custom, key: event.target.value })}
-                    />
-                    <TextField
-                      label="模型列表"
-                      className="sm:col-span-2"
-                      placeholder="模型 id，逗号分隔（可留空自动读取）"
-                      value={custom.models}
-                      onChange={(event) => setCustom({ ...custom, models: event.target.value })}
-                    />
-                    {customError && (
-                      <p role="alert" className="sm:col-span-2 ui-caption text-danger">
-                        {customError}
-                      </p>
-                    )}
-                    <div className="flex gap-2 sm:col-span-2">
-                      <Button
-                        type="button"
-                        size="md" variant="primary"
-                        disabled={!custom.id.trim()}
-                        onClick={() => void addCustom()}
-                      >
-                        保存
-                      </Button>
-                      <Button
-                        type="button"
-                        size="md" variant="ghost"
-                        onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
-                      >
-                        取消
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
             )}
 
             <div className="ui-card p-4">
-              <h2 className="ui-section-title">已添加的来源（{providers.length}）</h2>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="ui-section-title">已添加的来源（{providers.length}）</h2>
+                <Button
+                  type="button"
+                  size="sm" variant="ghost"
+                  disabled={!cli}
+                  aria-expanded={custom.open}
+                  onClick={() => setCustom({ ...custom, open: !custom.open })}
+                >
+                  {custom.open ? "收起这一栏" : "加一个其他地址"}
+                </Button>
+              </div>
+              <p className="mt-1 ui-caption">
+                现成的服务商用上面「API Key 服务商」；中转、局域网或自建接口加在这里。
+              </p>
+              {custom.open && (
+                <div className="rta-enter mt-3 grid gap-2 rounded-xl border border-line bg-subtle p-3 sm:grid-cols-2">
+                  <TextField
+                    label="来源名称"
+                    placeholder="名称（如 relay）"
+                    value={custom.id}
+                    onChange={(event) => setCustom({ ...custom, id: event.target.value })}
+                  />
+                  <TextField
+                    label="接口地址"
+                    placeholder="https://host/v1"
+                    value={custom.url}
+                    error={customUrlCheck?.error ?? null}
+                    hint={
+                      customUrlCheck && !customUrlCheck.error
+                        ? customUrlCheck.hint ?? undefined
+                        : undefined
+                    }
+                    onChange={(event) => setCustom({ ...custom, url: event.target.value })}
+                    onBlur={() => {
+                      // 能识别的地址就地规范成最终会保存的样子（补 http(s)、去尾斜杠）。
+                      if (customUrlCheck && !customUrlCheck.error && customUrlCheck.url) {
+                        setCustom((current) => ({ ...current, url: customUrlCheck.url }));
+                      }
+                    }}
+                  />
+                  <TextField
+                    label="自定义 Key"
+                    type="password"
+                    placeholder="API Key（可留空：有些中转不校验 Key）"
+                    value={custom.key}
+                    error={customKeyCheck?.error ?? null}
+                    hint={
+                      !customKeyCheck?.error && customKeyCheck?.warning
+                        ? customKeyCheck.warning
+                        : undefined
+                    }
+                    onChange={(event) => setCustom({ ...custom, key: event.target.value })}
+                  />
+                  <TextField
+                    label="模型列表"
+                    className="sm:col-span-2"
+                    placeholder="模型 id，逗号分隔（可留空自动读取）"
+                    value={custom.models}
+                    onChange={(event) => setCustom({ ...custom, models: event.target.value })}
+                  />
+                  {customError && (
+                    <p role="alert" className="sm:col-span-2 ui-caption text-danger">
+                      {customError}
+                    </p>
+                  )}
+                  <div className="flex gap-2 sm:col-span-2">
+                    <Button
+                      type="button"
+                      size="md" variant="primary"
+                      disabled={!custom.id.trim()}
+                      onClick={() => void addCustom()}
+                    >
+                      保存
+                    </Button>
+                    <Button
+                      type="button"
+                      size="md" variant="ghost"
+                      onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                </div>
+              )}
               {!cli && (
                 <p className="mt-1 ui-caption">浏览器预览下只能查看：测试、换 Key 与删除来源请用桌面版。</p>
               )}
@@ -3173,7 +3166,7 @@ export function ModelPage() {
                         </button>
                       </span>
                     ) : cli ? (
-                      "还没有来源。点上方「API Key 服务商」里的一个服务商，或展开「其他地址」填服务地址和 Key。"
+                      "还没有来源。点上面「API Key 服务商」里的一个服务商，或点「加一个其他地址」填服务地址和 Key。"
                     ) : (
                       "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"
                     )}

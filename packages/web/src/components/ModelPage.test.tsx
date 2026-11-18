@@ -297,6 +297,34 @@ describe("ModelPage · 添加来源", () => {
     await waitFor(() => expect(calls).toContainEqual(["provider", "rm", "mock"]));
   });
 
+  it("加一个其他地址：收在来源列表那张卡里，不再单独占一张卡", async () => {
+    const { calls } = installBridge({}, {});
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    // 入口就在「已添加的来源」卡头：不用先滚到页面底部找另一张卡。
+    const toggle = await screen.findByRole("button", { name: "加一个其他地址" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // 没点开之前不铺表单：一进去看到的是已有什么，而不是待填的四个框。
+    expect(screen.queryByLabelText("接口地址")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "收起这一栏" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    fireEvent.change(screen.getByLabelText("来源名称"), { target: { value: "relay" } });
+    fireEvent.change(screen.getByLabelText("接口地址"), {
+      target: { value: "relay.example.com/v1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "add", "relay", "url=https://relay.example.com/v1"]),
+    );
+    // 旧的那张「其他地址」卡已经不存在了，同一个意思只留一处。
+    expect(screen.queryByText("其他地址")).toBeNull();
+  });
+
   it("展开高级时读详细地址：Coding Plan 来源显示套餐徽标", async () => {
     installBridge(
       {},

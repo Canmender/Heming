@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.338.4.123.12",
+    "date": "2026-11-18",
+    "title": "加新来源的入口挪到了来源列表里",
+    "bullets": [
+      "「来源」页少了一张卡：以前「其他地址」单独占一块，现在并进了「已添加的来源」。",
+      "加一个中转或自建地址：点来源列表右上角的「加一个其他地址」，表单就在下面展开，填完保存。",
+      "已经有来源时也能一眼看到手上有什么，不用先滚过一张表单。",
+      "现成的服务商（DeepSeek、智谱、OpenAI 这些）还在上面那张「API Key 服务商」卡里，位置没变。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.338.4.122.12",
     "date": "2026-11-18",
     "title": "远端 MCP 服务不用再在本地起一个代理进程",
