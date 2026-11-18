@@ -505,13 +505,34 @@ heming mcp serve --cwd D:/repo
 }
 ```
 
-- 最多 8 个服务；每个必须有非空的 `command`，`args` 必须是字符串数组，`env` 的值必须是字符串。
-- 配置坏了（JSON 不合法、缺 `command`、超过 8 个）**不启动**，并说清是哪个文件；单个服务连不上只警告，其余继续。
+- 最多 8 个服务；每个要么写非空的 `command`（本地进程，走 stdio），要么写 `url`（远端，走 HTTP）：`args` 必须是字符串数组，`env` 的值必须是字符串。
+- 配置坏了（JSON 不合法、两种传输的字段混写、超过 8 个）**不启动**，并说清是哪个文件；单个服务连不上只警告，其余继续。
 - 文件带 UTF-8 BOM 也能读（记事本、PowerShell 5 写的都行）。
+
+### 远端服务：走 HTTP
+
+远端 MCP 服务只给一个地址，不用在本地起代理进程：
+
+```json
+{
+  "mcpServers": {
+    "remote": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "authorization": "Bearer …" }
+    }
+  }
+}
+```
+
+- `url` 必须是 `http://` 或 `https://`；`headers` 是可选的附加请求头（值都必须是字符串）。
+- 走 HTTP 的声明**不接** `args` / `env` / `cwd`——那是本地进程才有的；写在一起会当成配置错误，不启动。
+- 每次调用都是一条 POST JSON-RPC；回应是 `application/json` 或 `text/event-stream`（SSE）都能认，SSE 里只取 `id` 对得上的那条、忽略通知。
+- 服务端下发 `mcp-session-id` 时后续请求会自动带上；超时默认 10 秒，失败时说清「在多少毫秒内没有回应哪个方法」。
+- 没有长连接要收尾，`close()` 只是打个标记——所以远端服务不会像本地进程那样让终端卡住。
 
 ### 为什么必须显式 `--mcp`
 
-连上某个服务 = 执行仓库里写的那条命令。克隆一个陌生仓库后自动执行它，和自动跑 `postinstall` 是同一类风险。所以：
+连上某个服务 = 执行仓库里写的那条命令（远端服务则是把请求发到仓库里写的那个地址）。克隆一个陌生仓库后自动连它，和自动跑 `postinstall` 是同一类风险。所以：
 
 - 不加 `--mcp`：`.heming/mcp.json` **完全不读**；
 - 加了 `--mcp`：连接会建立，但对方的工具一律按 danger 处理，**还要 `--allow-danger`** 才真的调过去。
@@ -541,10 +562,10 @@ heming mcp serve --cwd D:/repo
 
 ### 已知留白
 
-- 只支持 stdio 传输（不接 HTTP / SSE 的 MCP 服务）。
-- 只接 `tools`，`resources` / `prompts` 没接。
-- 每次 `run` 现连现断，没有常驻连接池。
+- 只接了 `tools` 一组方法；`resources` / `prompts` / `sampling` 没接（我们作为**服务端**时接，作为客户端不接）。
+- 每次 `run` 现连现断，没有常驻连接池；HTTP 也没有断线重连。
 - 风险等级没有按服务细分：一律 danger。
+- HTTP 只支持「发一条、等一条回应」的形态，没有接服务端主动推消息（server-initiated）的那套。
 ## 项目约定：`AGENTS.md` 一族
 
 `heming run` 每一轮都会先读工作区里的约定文件，塞进系统提示词的「项目约定」段（与桌面端同一份口径）。

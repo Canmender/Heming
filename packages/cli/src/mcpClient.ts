@@ -37,12 +37,31 @@ export const MCP_CLIENT_TIMEOUT_MS = 10_000;
 /** 工具名前缀：`mcp__<服务>__<工具>`，与其它工具在同一张表里不冲突。 */
 export const MCP_TOOL_PREFIX = "mcp__";
 
-/** 服务声明（`.heming/mcp.json` 的 `mcpServers.<名字>`）。 */
-export interface McpServerConfig {
+/** 本地进程形式（stdio）：我们 spawn 一个子进程，用它的 stdin/stdout 说 JSON-RPC。 */
+export interface McpStdioConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+}
+
+/**
+ * 远端服务形式（HTTP）：直接 POST JSON-RPC，回应可以是 `application/json`，
+ * 也可以是 `text/event-stream`（流式那份只取 id 对得上的那一条）。
+ *
+ * 与 stdio 的区别只在传输：工具清单、调用结果的形状完全一样，所以上层不用区分。
+ */
+export interface McpHttpConfig {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** 服务声明（`.heming/mcp.json` 的 `mcpServers.<名字>`）。 */
+export type McpServerConfig = McpStdioConfig | McpHttpConfig;
+
+/** 这条声明是 HTTP 还是 stdio（两者只能写一个）。 */
+export function isHttpConfig(config: McpServerConfig): config is McpHttpConfig {
+  return typeof (config as McpHttpConfig).url === "string";
 }
 
 /** 一个已声明的服务。 */
@@ -145,10 +164,36 @@ function checkServerDecl(
   }
   const record = decl as Record<string, unknown>;
   const command = record.command;
-  if (typeof command !== "string" || !command.trim()) {
-    return { ok: false, error: `MCP 服务 ${name} 缺少 command（要启动什么）` };
+  const url = record.url;
+  if (url !== undefined) {
+    if (command !== undefined) return { ok: false, error: `MCP 服务 ${name} 不能同时写 command 与 url（一个走本地进程、一个走 HTTP）` };
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) {
+      return { ok: false, error: `MCP 服务 ${name} 的 url 必须是 http(s) 地址` };
+    }
+    const config: McpHttpConfig = { url: url.trim() };
+    if (record.headers !== undefined) {
+      const headers = record.headers;
+      if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+        return { ok: false, error: `MCP 服务 ${name} 的 headers 必须是对象` };
+      }
+      const map: Record<string, string> = {};
+      for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+        if (typeof value !== "string") return { ok: false, error: `MCP 服务 ${name} 的 headers.${key} 必须是字符串` };
+        map[key] = value;
+      }
+      config.headers = map;
+    }
+    for (const key of ["args", "env", "cwd"] as const) {
+      if (record[key] !== undefined) {
+        return { ok: false, error: `MCP 服务 ${name} 走 HTTP 时不接 ${key}（那是本地进程才有的）` };
+      }
+    }
+    return { ok: true, config };
   }
-  const config: McpServerConfig = { command };
+  if (typeof command !== "string" || !command.trim()) {
+    return { ok: false, error: `MCP 服务 ${name} 需要 command（要启动什么）或 url（远端地址）` };
+  }
+  const config: McpStdioConfig = { command };
 
   if (record.args !== undefined) {
     if (!Array.isArray(record.args) || record.args.some((arg) => typeof arg !== "string")) {
@@ -198,11 +243,13 @@ function sanitizePiece(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
 }
 
-/** 连一个服务：spawn → initialize → tools/list。失败时返回人能读懂的原因。 */
+/** 连一个服务：本地进程走 stdio，声明了 url 的走 HTTP；之后都是 initialize → tools/list。 */
 export async function connectMcpServer(
   entry: McpServerEntry,
   options: { cwd?: string; version: string; timeoutMs?: number; env?: NodeJS.ProcessEnv },
 ): Promise<McpConnectResult> {
+  if (isHttpConfig(entry.config)) return connectHttpMcpServer(entry, entry.config, options);
+
   const timeoutMs = options.timeoutMs ?? MCP_CLIENT_TIMEOUT_MS;
   const { command, args = [], env = {}, cwd } = entry.config;
   const baseCwd = options.cwd ?? process.cwd();
@@ -343,6 +390,155 @@ export async function connectMcpServer(
       } catch {
         // 已经退出时 kill 会抛：忽略。
       }
+    },
+  };
+
+  return { ok: true, connection };
+}
+
+/** 从一段 SSE 文本里挑出 id 对得上的那条 JSON-RPC 回应（其它的跳过，包括通知）。 */
+function pickSseMessage(text: string, wantId: number): { result?: unknown; error?: { message?: string } } | null {
+  for (const block of text.split(/\r?\n\r?\n/)) {
+    const data = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    if (!data) continue;
+    let message: unknown;
+    try {
+      message = JSON.parse(data);
+    } catch {
+      continue; // 非 JSON 的心跳/注释行：忽略。
+    }
+    if (!message || typeof message !== "object") continue;
+    const record = message as { id?: unknown; result?: unknown; error?: { message?: string } };
+    if (record.id === wantId) return record;
+  }
+  return null;
+}
+
+/**
+ * HTTP 形式的连接（d.339）。
+ *
+ * 与 stdio 的差别只在传输：每次都 POST 一条 JSON-RPC，回应可能是 JSON，也可能是一段 SSE。
+ * 没有长连接，所以 `close()` 只是打个标记——没有进程要收、也没有 socket 要留。
+ */
+async function connectHttpMcpServer(
+  entry: McpServerEntry,
+  config: McpHttpConfig,
+  options: { version: string; timeoutMs?: number },
+): Promise<McpConnectResult> {
+  const timeoutMs = options.timeoutMs ?? MCP_CLIENT_TIMEOUT_MS;
+  let sessionId: string | null = null;
+  let closed = false;
+  let nextId = 1;
+
+  const headersOf = (): Record<string, string> => ({
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    ...(config.headers ?? {}),
+    ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+  });
+
+  const send = async (body: unknown, waitMs: number, what: string): Promise<unknown> => {
+    if (closed) throw new Error(`MCP 服务 ${entry.name} 已关闭`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), waitMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetch(config.url, {
+          method: "POST",
+          headers: headersOf(),
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if ((error as { name?: string }).name === "AbortError") {
+          throw new Error(`MCP 服务 ${entry.name} 在 ${waitMs}ms 内没有回应 ${what}`);
+        }
+        throw new Error(`连不上 MCP 服务 ${entry.name}（${config.url}）：${messageOf(error)}`);
+      }
+      const nextSession = response.headers.get("mcp-session-id");
+      if (nextSession) sessionId = nextSession;
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).trim().slice(0, 200);
+        throw new Error(`MCP 服务 ${entry.name} 返回 HTTP ${response.status}${detail ? `：${detail}` : ""}`);
+      }
+      let text: string;
+      try {
+        text = await response.text();
+      } catch (error) {
+        if ((error as { name?: string }).name === "AbortError") {
+          throw new Error(`MCP 服务 ${entry.name} 在 ${waitMs}ms 内没有把 ${what} 的回应读完`);
+        }
+        throw error;
+      }
+      const type = (response.headers.get("content-type") ?? "").toLowerCase();
+      let message: { result?: unknown; error?: { message?: string } } | null;
+      if (type.includes("text/event-stream")) {
+        message = pickSseMessage(text, (body as { id?: number }).id ?? -1);
+      } else {
+        try {
+          message = JSON.parse(text) as typeof message;
+        } catch {
+          message = null;
+        }
+      }
+      if (!message) {
+        throw new Error(`MCP 服务 ${entry.name} 的回应看不懂（${what}）：${text.trim().slice(0, 200)}`);
+      }
+      if (message.error) throw new Error(message.error.message ?? "MCP 调用失败");
+      return message.result;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const request = (method: string, params: unknown, waitMs = timeoutMs): Promise<unknown> =>
+    send({ jsonrpc: "2.0", id: nextId++, method, params }, waitMs, method);
+
+  const notify = async (method: string, params: unknown): Promise<void> => {
+    try {
+      await fetch(config.url, {
+        method: "POST",
+        headers: headersOf(),
+        body: JSON.stringify({ jsonrpc: "2.0", method, params }),
+      });
+    } catch {
+      // 通知发不出去不影响后面：对方最多是少收一条 initialized。
+    }
+  };
+
+  let tools: McpToolInfo[] = [];
+  try {
+    await request("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "heming-cli", version: options.version },
+    });
+    await notify("notifications/initialized", {});
+    const listed = (await request("tools/list", {})) as { tools?: unknown } | undefined;
+    tools = normalizeTools(listed?.tools);
+  } catch (error) {
+    return { ok: false, error: messageOf(error) };
+  }
+
+  const connection: McpConnection = {
+    server: entry.name,
+    tools,
+    async callTool(tool, args, waitMs) {
+      const result = (await request(
+        "tools/call",
+        { name: tool, arguments: args ?? {} },
+        waitMs ?? timeoutMs,
+      )) as { content?: unknown; isError?: boolean } | undefined;
+      const text = textOfContent(result?.content);
+      return { text: text || "（对方没有返回内容）", isError: result?.isError === true };
+    },
+    close() {
+      closed = true;
     },
   };
 

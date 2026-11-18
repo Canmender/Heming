@@ -15,6 +15,7 @@ import { createCliTooling } from "./tooling.js";
 import {
   MCP_CLIENT_CONFIG_FILE,
   connectMcpServer,
+  isHttpConfig,
   loadMcpServers,
   mcpToolName,
   normalizeTools,
@@ -117,8 +118,10 @@ describe("loadMcpServers", () => {
     const loaded = await loadMcpServers(dir);
     if (!loaded || !loaded.ok) throw new Error("应当加载成功");
     expect(loaded.servers.map((server) => server.name)).toEqual(["doctor", "zed"]);
-    expect(loaded.servers[0]?.config.env).toEqual({ TOKEN: "t" });
-    expect(loaded.servers[0]?.config.cwd).toBe("./sub");
+    const doctor = loaded.servers[0]!.config;
+    if (isHttpConfig(doctor)) throw new Error("这条声明不是 HTTP 的");
+    expect(doctor.env).toEqual({ TOKEN: "t" });
+    expect(doctor.cwd).toBe("./sub");
   });
 
   it("带 UTF-8 BOM 也能读（记事本写的）", async () => {
@@ -148,10 +151,19 @@ describe("parseMcpConfig 的错误文案", () => {
   });
 
   it("缺 command / args 不是字符串数组 / env 值不是字符串 / cwd 是空串", () => {
-    expect(bad({ mcpServers: { a: {} } })).toContain("缺少 command");
+    expect(bad({ mcpServers: { a: {} } })).toContain("需要 command");
     expect(bad({ mcpServers: { a: { command: "node", args: [1] } } })).toContain("args");
     expect(bad({ mcpServers: { a: { command: "node", env: { K: 1 } } } })).toContain("env.K");
     expect(bad({ mcpServers: { a: { command: "node", cwd: "  " } } })).toContain("cwd");
+  });
+
+  it("HTTP 声明：url 顶替 command，两种传输的字段不能混写（d.339）", () => {
+    expect(bad({ mcpServers: { a: { command: "node", url: "https://x" } } })).toContain("不能同时写");
+    expect(bad({ mcpServers: { a: { url: "ftp://x" } } })).toContain("必须是 http(s)");
+    expect(bad({ mcpServers: { a: { url: "https://x", headers: [] } } })).toContain("headers 必须是对象");
+    expect(bad({ mcpServers: { a: { url: "https://x", headers: { A: 1 } } } })).toContain("headers.A");
+    expect(bad({ mcpServers: { a: { url: "https://x", args: [] } } })).toContain("不接 args");
+    expect(bad({ mcpServers: { a: { url: "https://x", cwd: "." } } })).toContain("不接 cwd");
   });
 });
 

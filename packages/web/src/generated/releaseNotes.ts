@@ -12,6 +12,20 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.339.4.126.12",
+    "date": "2026-11-18",
+    "title": "远端 MCP 服务不用再在本地起一个代理进程",
+    "bullets": [
+      "以前终端只能接「本地跑起来」的 MCP 服务，远端服务得自己在本地写个转发脚本才连得上。",
+      "现在 `.heming/mcp.json` 里也能写 `\"url\": \"https://…\"`，直接连远端服务；要鉴权就加 `\"headers\"`，例如 `{\"authorization\": \"Bearer …\"}`。",
+      "服务端要是有会话（会发一个 `mcp-session-id` 回来），后续请求会自动带上，不需要你管。",
+      "对方回 JSON 或 SSE 都能认；连不上、超时、回应看不懂会分别说清是哪一步出的问题。",
+      "远端工具照旧按危险工具处理：不加 `--allow-danger` 不会被真的调过去。",
+      "老写法（`command` / `args` / `env` / `cwd`）完全不变，两种可以在同一份文件里混着写，但不能写在同一个服务上。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.338.4.126.12",
     "date": "2026-11-18",
     "title": "账号一多，一眼只看额度",
@@ -58,20 +72,6 @@ export const RELEASE_NOTES: ReleaseNoteEntry[] = [
       "加一个中转或自建地址：点来源列表右上角的「加一个其他地址」，表单就在下面展开，填完保存。",
       "已经有来源时也能一眼看到手上有什么，不用先滚过一张表单。",
       "现成的服务商（DeepSeek、智谱、OpenAI 这些）还在上面那张「API Key 服务商」卡里，位置没变。"
-    ],
-    "paragraphs": []
-  },
-  {
-    "version": "d.338.4.122.12",
-    "date": "2026-11-18",
-    "title": "远端 MCP 服务不用再在本地起一个代理进程",
-    "bullets": [
-      "以前终端只能接「本地跑起来」的 MCP 服务，远端服务得自己在本地写个转发脚本才连得上。",
-      "现在 `.heming/mcp.json` 里也能写 `\"url\": \"https://…\"`，直接连远端服务；要鉴权就加 `\"headers\"`，例如 `{\"authorization\": \"Bearer …\"}`。",
-      "服务端要是有会话（会发一个 `mcp-session-id` 回来），后续请求会自动带上，不需要你管。",
-      "对方回 JSON 或 SSE 都能认；连不上、超时、回应看不懂会分别说清是哪一步出的问题。",
-      "远端工具照旧按危险工具处理：不加 `--allow-danger` 不会被真的调过去。",
-      "老写法（`command` / `args` / `env` / `cwd`）完全不变，两种可以在同一份文件里混着写，但不能写在同一个服务上。"
     ],
     "paragraphs": []
   },
