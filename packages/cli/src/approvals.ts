@@ -38,9 +38,25 @@ export interface ApprovalRequest {
   displayName?: string;
   /** 参数摘要，如 `command=git status`；可为空。 */
   detail?: string;
+  /**
+   * 逐行预览（`--ask-writes` 用：写文件时是增删对照）。
+   *
+   * 和 `detail` 分开是因为形状不同：`detail` 是一行摘要，会被压成一行；预览天生多行，
+   * 压成一行就没法看改了什么。最多画 `APPROVAL_PREVIEW_MAX_LINES` 行。
+   */
+  preview?: readonly string[];
+  /**
+   * 这次为什么被问：`danger`（命令 / 危险工具）还是 `write`（写文件）。
+   *
+   * 装配方靠它决定「本次运行都允许」的范围——放过一次写，不该顺手放过命令。
+   */
+  kind?: "danger" | "write";
   /** 为什么来问你（一行）。 */
   reason: string;
 }
+
+/** 审批框里最多画几行预览：这里是「扫一眼」，看全的请去 diff。 */
+export const APPROVAL_PREVIEW_MAX_LINES = 20;
 
 /** 审批函数：把人给的回答交回来。 */
 export type CliApprover = (request: ApprovalRequest) => Promise<ApprovalChoice>;
@@ -70,7 +86,12 @@ export function describeApprovalRequest(request: ApprovalRequest): string {
     ? `${request.displayName}（${request.tool}）`
     : request.tool;
   const head = `[heming] 需要你确认：${label}${request.detail ? oneLine(request.detail, 120) : ""}`;
-  return [head, `  ${request.reason}`, `  ${APPROVAL_ANSWER_HINTS}`].join("\n");
+  const preview = (request.preview ?? []).slice(0, APPROVAL_PREVIEW_MAX_LINES);
+  const lines = [head, ...preview.map((line) => `  ${line}`), `  ${request.reason}`, `  ${APPROVAL_ANSWER_HINTS}`];
+  if ((request.preview?.length ?? 0) > preview.length) {
+    lines.splice(1 + preview.length, 0, `  …（只画了前 ${preview.length} 行）`);
+  }
+  return lines.join("\n");
 }
 
 /** 终端审批器：`ask` 提问、`close` 收尾（交给入口在结束前调用）。 */

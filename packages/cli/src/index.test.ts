@@ -122,6 +122,16 @@ describe.skipIf(tsx === null)("CLI 入口的进程级行为", () => {
     expect(result.durationMs).toBeLessThan(30_000);
   }, 30_000);
 
+  it("--ask-writes 非终端下也直接拒绝，且 --help 里有它", async () => {
+    const rejected = await runCli(["run", "--ask", "--ask-writes", "改一下"]);
+    expect(rejected.code).toBe(2);
+    expect(rejected.stderr).toContain("--ask 需要真正的终端");
+
+    const help = await runCli(["--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain("--ask-writes");
+    expect(help.stdout).toContain("增删对照");
+  }, 30_000);
   it("--help 里有 --ask 与它的示例", async () => {
     const result = await runCli(["--help"]);
     expect(result.code).toBe(0);

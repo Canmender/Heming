@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -431,6 +431,57 @@ describe("续聊的上下文预算（d.317）", () => {
  * 单测已经守住了闸门逻辑；这里要证的是**编排层真的把批准用上了**：人答「允许」之后
  * 命令确实跑了、结果回到模型手里；人答「不要」之后命令一步都没动。
  */
+describe("写文件也先问（--ask-writes，d.340）", () => {
+  it("放行之后才真的落盘，且审批框里带着改了什么", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "file_write", arguments: { path: "made.ts", content: "export const a = 1;\n" } }] },
+      { text: "写好了。" },
+    ]);
+    const approver = createScriptedApprover(["allow-once"]);
+
+    const outcome = await startAgentRun({
+      prompt: "新建 made.ts",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      ask: approver,
+      askWrites: true,
+      streamChat: chat,
+      }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(outcome.json.writes).toHaveLength(1);
+    expect(await readFile(path.join(dir, "made.ts"), "utf8")).toContain("export const a = 1;");
+    expect(approver.requests).toHaveLength(1);
+    expect(approver.requests[0]?.kind).toBe("write");
+    expect(approver.requests[0]?.detail).toContain("新增 1 行");
+    expect(approver.requests[0]?.preview?.[0]).toBe("+ export const a = 1;");
+  });
+
+  it("拒绝之后文件不存在，模型拿到的是「用户拒绝」", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "file_write", arguments: { path: "nope.ts", content: "x" } }] },
+      { text: "那我先不写。" },
+    ]);
+    const approver = createScriptedApprover(["deny"]);
+
+    const outcome = await startAgentRun({
+      prompt: "新建 nope.ts",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      ask: approver,
+      askWrites: true,
+      streamChat: chat,
+      }).done;
+
+    expect(outcome.json.toolCalls[0]).toMatchObject({ name: "file_write", ok: false, denied: true });
+    expect(await readdir(dir)).not.toContain("nope.ts");
+    expect(approver.requests).toHaveLength(1);
+  });
+});
 describe("交互式审批（--ask，d.322）", () => {
   it("人答「允许这一次」：命令真的执行，结果回到模型，退出码 0", async () => {
     const dir = await makeSandbox();

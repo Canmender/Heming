@@ -359,6 +359,43 @@ describe("parseArgs：只读模式（d.314）", () => {
     if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
   });
 });
+describe("parseArgs：写文件也先问（d.340）", () => {
+  it("默认不开；和 --ask 一起给才认", () => {
+    expect(expectRun(["run", "改一下"]).askWrites).toBe(false);
+    const parsed = expectRun(["run", "--ask", "--ask-writes", "逐笔给我看"]);
+    expect(parsed.ask).toBe(true);
+    expect(parsed.askWrites).toBe(true);
+  });
+
+  it("--ask-writes 不接受取值", () => {
+    const parsed = parseArgs(["run", "--ask-writes=1", "改一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--ask-writes 不接受取值");
+  });
+
+  it("单独给 --ask-writes 会被拒：没有人就没人回答", () => {
+    const parsed = parseArgs(["run", "--ask-writes", "改一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toContain("--ask-writes 要配合 --ask");
+      expect(parsed.error).toContain("--ask");
+    }
+  });
+
+  it("不跑模型的子命令都不接", () => {
+    for (const argv of [
+      ["sessions", "--ask-writes"],
+      ["memory", "--ask-writes"],
+      ["rewind", "--ask-writes"],
+      ["commands", "--ask-writes"],
+      ["mcp", "serve", "--ask-writes"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("--ask-writes");
+    }
+  });
+});
 describe("parseArgs：交互式审批（d.322）", () => {
   it("默认不开：危险调用仍然一律拒绝", () => {
     expect(expectRun(["run", "跑一下"]).ask).toBe(false);

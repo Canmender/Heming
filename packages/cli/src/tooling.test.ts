@@ -534,3 +534,87 @@ describe("命令改动的范围（d.337）", () => {
     expect(await tooling.rewind.close()).toBeNull();
   }, 30_000);
 });
+
+/**
+ * 写文件也先问（`--ask-writes`，d.340）：
+ * 「改了什么」在审批框里要看得见，且人的点头不能把越界写变成合法。
+ */
+describe("逐笔确认写入（d.340）", () => {
+  function toolingWithWrites(answers: Parameters<typeof createScriptedApprover>[0]) {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-ask-writes-"));
+    tmpDirs.push(cwd);
+    const approver = createScriptedApprover(answers);
+    const tooling = createCliTooling({
+      cwd,
+      allowDanger: false,
+      conversationId: "ask-writes-test",
+      ask: approver,
+      askWrites: true,
+    });
+    return { tooling, approver, cwd };
+  }
+
+  const writeCall = (rel: string, content: string) => ({
+    name: "file_write",
+    arguments: JSON.stringify({ path: rel, content }),
+  });
+
+  it("根内写也会问，并画出增删对照", async () => {
+    const { tooling, approver, cwd } = toolingWithWrites(["allow-once"]);
+    const call = writeCall("a.ts", "第一行\n第二行");
+    const gateOutcome = await tooling.confirm([{ id: "c1", function: call }]);
+    expect(gateOutcome[0]?.kind).toBe("allow");
+
+    expect(approver.requests).toHaveLength(1);
+    const request = approver.requests[0]!;
+    expect(request.kind).toBe("write");
+    expect(request.tool).toBe("file_write");
+    expect(request.detail).toContain("新增 2 行");
+    expect(request.preview?.slice(0, 2)).toEqual(["+ 第一行", "+ 第二行"]);
+    expect(request.reason).toContain("--ask-writes");
+
+    const result = await tooling.toolBridge.execute(call);
+    expect(result.ok).toBe(true);
+    expect(readFileSync(path.join(cwd, "a.ts"), "utf8")).toContain("第二行");
+  });
+
+  it("答「不要」就不写，cause 记 user", async () => {
+    const { tooling, cwd } = toolingWithWrites(["deny"]);
+    const call = writeCall("b.ts", "不该出现");
+    const gateOutcome = await tooling.confirm([{ id: "c1", function: call }]);
+    expect(gateOutcome[0]?.kind).toBe("deny");
+    expect(gateOutcome[0]?.kind === "deny" ? gateOutcome[0].cause : "").toBe("user");
+    expect(gateOutcome[0]?.kind === "deny" ? gateOutcome[0].reason : "").toContain("拒绝了这次写入");
+    // 编排层只对放行的调用执行桥；这里确认闸门拒了、文件仍不存在。
+    expect(existsSync(path.join(cwd, "b.ts"))).toBe(false);
+  });
+
+  it("答「本次运行都允许写」之后不再挨个问（命令仍要单独问）", async () => {
+    const { tooling, approver } = toolingWithWrites(["allow-session"]);
+    expect((await tooling.confirm([{ id: "c1", function: writeCall("c.ts", "一") }]))[0]?.kind).toBe("allow");
+    expect((await tooling.confirm([{ id: "c2", function: writeCall("d.ts", "二") }]))[0]?.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(1);
+  });
+
+  it("写根之外仍然直接拒绝，不会因为开了 --ask-writes 就问人", async () => {
+    const { tooling, approver } = toolingWithWrites(["allow-once"]);
+    const outside = path.resolve("D:/other/out.ts").replace(/\\/g, "/");
+    const outcome = (await tooling.confirm([
+      { id: "c1", function: { name: "file_write", arguments: JSON.stringify({ path: outside, content: "x" }) } },
+    ]))[0]!;
+    expect(outcome.kind).toBe("deny");
+    expect(approver.requests).toHaveLength(0);
+  });
+
+  it("不开 --ask-writes 时写文件照旧不问（老行为不变）", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-ask-writes-off-"));
+    tmpDirs.push(cwd);
+    const approver = createScriptedApprover(["deny"]);
+    const tooling = createCliTooling({ cwd, allowDanger: false, conversationId: "no-ask-writes", ask: approver });
+    const outcome = (await tooling.confirm([
+      { id: "c1", function: { name: "file_write", arguments: JSON.stringify({ path: "e.ts", content: "x" }) } },
+    ]))[0]!;
+    expect(outcome.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(0);
+  });
+});

@@ -18,6 +18,7 @@ import path from "node:path";
 import type { FileRoot } from "../../../packages/web/src/lib/fileEdit/paths.js";
 import { assessPatchSafety } from "../../../packages/web/src/lib/fileEdit/safety.js";
 import { isFileWriteTool, targetsOfCall } from "../../../packages/web/src/lib/fileEdit/ruleTargets.js";
+import { argDiff, formatArgDiffStat, type ArgDiff } from "../../../packages/web/src/lib/fileEdit/argDiff.js";
 import { toHitlCall } from "../../../packages/web/src/lib/hitl/classify.js";
 import { matchWorkspaceRules } from "../../../packages/web/src/lib/hitl/workspaceRules.js";
 import type { GateOutcome } from "../../../packages/web/src/lib/hitl/types.js";
@@ -105,6 +106,16 @@ export function createCliGate(input: {
    * 只有这份闭包知道许可已经变了。不给就退回静态的 `allowDanger`。
    */
   dangerAllowed?: () => boolean;
+  /**
+   * 写文件也要问（`--ask-writes`）：路径安全通过之后仍然问一句。
+   *
+   * 和 `--ask` 的区别是「问什么」：`--ask` 只问危险类调用，写文件照旧自动放行；
+   * 打开这个开关之后，**根内合法的写入**也会停下来让你看一眼增删对照。
+   * 安全性没有变化（越界写仍然直接拒绝，不会因为你点头就放行）。
+   */
+  askWrites?: boolean;
+  /** 「本次运行是否已放行所有写入」——动态版本，理由同 `dangerAllowed`。 */
+  writesAllowed?: () => boolean;
 }): ToolConfirmFn {
   const rules = input.rules ?? null;
   const readOnly = input.readOnly === true;
@@ -289,6 +300,34 @@ export function createCliGate(input: {
         outOfRoot: "reject",
       });
       if (safety.verdict === "auto") {
+        /*
+         * 写文件也要问（--ask-writes）。
+         * 注意位置：放在路径安全**之后**，所以越界写在这里之前就被拒了——
+         * 人的点头只能确认「这次改动我认可」，不能把「根外写」变成合法。
+         */
+        if (input.askWrites && input.ask && !(input.writesAllowed?.() ?? false)) {
+          const preview = writePreview(name, call.function.arguments);
+          const choice = await input.ask({
+            tool: name,
+            kind: "write",
+            ...(meta.displayName ? { displayName: meta.displayName } : {}),
+            ...(preview.detail ? { detail: preview.detail } : {}),
+            ...(preview.preview.length > 0 ? { preview: preview.preview } : {}),
+            reason: "这次运行开了 --ask-writes：写文件之前先让你看一眼改了什么。",
+          });
+          input.onApproval?.(choice);
+          if (choice === "allow-once" || choice === "allow-session") {
+            outcomes.push({ kind: "allow", call: hitlCall });
+            continue;
+          }
+          outcomes.push({
+            kind: "deny",
+            call: hitlCall,
+            reason: "你在终端里拒绝了这次写入",
+            cause: "user",
+          });
+          continue;
+        }
         outcomes.push({ kind: "allow", call: hitlCall });
         continue;
       }
@@ -406,6 +445,13 @@ export function createCliTooling(options: {
    */
   ask?: CliApprover | null;
   /**
+   * 写文件也要问（`--ask-writes`）：根内合法的写入也停下来让人看增删对照。
+   *
+   * 依赖 `ask`（总得有人在终端前面才问得出来）；入口会强制两个一起给。
+   * 放行状态与危险调用**分开记**：放过一次写不该顺手放过命令，反之亦然。
+   */
+  askWrites?: boolean;
+  /**
    * 工作区记忆（`.heming/memory.json`，d.329）：给 `true` 就挂 `remember` 工具。
    *
    * 不挂的时候模型硬调它会拿到「这次没开记忆」的明确回复，而不是「未知工具」——
@@ -463,6 +509,12 @@ export function createCliTooling(options: {
   let sessionAllowed = options.allowDanger;
   let permits = 0;
   let stopped = false;
+  /*
+   * 写入的批准状态与危险调用分开：`--ask-writes` 下回答过「本次运行都允许」之后，
+   * 后面的写不再挨个问；但这不等于放行命令（两件事的风险完全不同）。
+   */
+  let writesAllowed = false;
+  const askWrites = options.askWrites === true && options.ask !== null && options.ask !== undefined;
   const dangerAllowed = (): boolean => sessionAllowed || permits > 0;
   const consumePermit = (): void => {
     if (!sessionAllowed && permits > 0) permits -= 1;
@@ -660,10 +712,19 @@ export function createCliTooling(options: {
   const ask = options.ask
     ? async (request: Parameters<CliApprover>[0]): Promise<ApprovalChoice> => {
         if (stopped) return "deny-all";
+        /*
+         * 写文件已经「本次运行都允许」之后不再挨个问：模型一次任务常要改十几个文件，
+         * 每个都弹一次的结果是人开始闭眼按 y——那比不问更危险。
+         */
+        if (request.kind === "write" && writesAllowed) return "allow-session";
         const choice = await options.ask!(request);
-        if (choice === "allow-session") sessionAllowed = true;
-        else if (choice === "allow-once") permits += 1;
-        else if (choice === "deny-all") stopped = true;
+        if (choice === "allow-session") {
+          if (request.kind === "write") writesAllowed = true;
+          else sessionAllowed = true;
+        } else if (choice === "allow-once") {
+          // 写不需要一次性许可：闸门放行后桥立刻执行，中间没有第二个门。
+          if (request.kind !== "write") permits += 1;
+        } else if (choice === "deny-all") stopped = true;
         return choice;
       }
     : null;
@@ -675,6 +736,8 @@ export function createCliTooling(options: {
     rules: options.rules ?? null,
     readOnly: options.readOnly === true,
     ask,
+    askWrites,
+    writesAllowed: () => writesAllowed,
     // 人答过「本次运行都允许」之后，闸门也要立刻知道：否则它手里那个静态的
     // `allowDanger=false` 会让它把人已经授权过的调用再问一遍。
     dangerAllowed,
@@ -703,6 +766,24 @@ function specNameOf(spec: unknown): string | null {
   if (!fn || typeof fn !== "object") return null;
   const name = (fn as { name?: unknown }).name;
   return typeof name === "string" && name ? name : null;
+}
+
+/**
+ * 写工具的「改了什么」预览（`--ask-writes` 的审批框用）。
+ *
+ * 复用桌面端那份参数对照（`argDiff`）：`file_write` 是整段新增，`file_edit` 走行级
+ * diff，`file_patch` 按补丁文法画。拿不到对照（参数坏了、没有内容字段）就只给摘要，
+ * 不给假预览——空着比画错好。
+ */
+function writePreview(name: string, argsJson: string): { detail: string; preview: string[] } {
+  const diff: ArgDiff | null = argDiff(name, argsJson);
+  if (!diff) return { detail: "", preview: [] };
+  const rows = diff.rows.map((row) => {
+    const marker = row.kind === "add" ? "+ " : row.kind === "del" ? "- " : "  ";
+    return `${marker}${row.text}`;
+  });
+  if (diff.truncated) rows.push(`…（只画了前 ${diff.rows.length} 行）`);
+  return { detail: formatArgDiffStat(diff), preview: rows };
 }
 /** 未挂命令桥时，模型硬调 `run_command` 拿到的拒绝文案（`run` 与 MCP 共用同一条口径）。 */
 export function shellDeniedText(): string {

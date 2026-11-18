@@ -96,6 +96,12 @@ export interface AgentRunOptions {
    * 缺省 / `null` = 不提问，与以前一样一律按拒绝处理（含 `mcp serve` 那条没有人的路）。
    */
   ask?: CliApprover | null;
+  /**
+   * 写文件也要问（`--ask-writes`）：根内合法的写入也停下来让人看增删对照。
+   *
+   * 只有配合 `ask` 才有意义（入口强制两个一起给）；越界写仍直接拒绝。
+   */
+  askWrites?: boolean;
   /** 最多允许 N 个工具轮；第 N+1 轮若还要调工具就提前收口。缺省用编排层的 12 轮上限。 */
   maxRounds?: number;
   /** 测试注入；缺省真实 `streamChat`。 */
@@ -332,6 +338,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     // 记忆工具与只读模式互斥：只读时连 `remember` 都不挂（列出来等于承诺能写）。
     memory: options.memory !== false && options.readOnly !== true,
     ask: options.ask ?? null,
+    ...(options.askWrites ? { askWrites: true } : {}),
     // 子代理用同一份 chat：modelRounds 因此把它的调用也算进去，成本不会凭空消失。
     subagent: options.subagent === false ? null : { chat, profile: options.profile },
     conversationId,

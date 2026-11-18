@@ -60,6 +60,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--allow-danger` | 放行 `run_command` 等 danger 工具。不加时命令工具**不会出现在工具清单里**；模型硬调会得到「未执行」而不是真正执行。 |
 | `--read-only` | 只读模式：除自报 `risk:"read"` 的工具外一律不执行（写、删、打补丁、跑命令都拦住），与 `--allow-danger` 同时给时只读赢。详见下文「只读模式」。 |
 | `--ask` | 交互式审批：危险调用（`run_command`、MCP 工具）执行前在终端问一句。**需要真正的终端**，与 `run -` 互斥。详见下文「交互式审批」。 |
+| `--ask-writes` | 写文件也先问一句，并画出增删对照（最多 20 行）。必须与 `--ask` 一起用；`sessions` / `memory` / `rewind` / `commands` / `mcp serve` 都不接。越界写仍然直接拒绝，不因为有人点头就放行。 |
 | `--trust-workspace` | 让工作区 `.heming/permissions.json` 里的 `allow` 规则生效（`deny` / `ask` 本来就算数）。详见下文「工作区权限规则」。 |
 | `--trust-hooks` | 允许执行工作区 `.heming/hooks.json` 里的本机检查（默认只读配置、不执行）。详见下文「工作区钩子」。 |
 | `--mcp` | 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把对方的工具接进这次运行。只有显式加这个开关才连；工具还要 `--allow-danger` 才真的调过去。详见下文「MCP 客户端」。 |
@@ -790,6 +791,30 @@ pnpm cli --ask "跑一下测试；每一步命令我都想先看一眼"
 审批框写到 **stderr**（stdout 可能是 `--output-format stream-json` 的协议通道），摘要行与进度行
 共用同一份短文本（`packages/cli/src/callText.ts`），所以「你批准的是什么」和「终端里显示的是什么」
 不会对不上。
+
+### 写文件也先问：`--ask-writes`
+
+`--ask` 只管命令。想让**每一笔写入**也停下来看一眼，加 `--ask-writes`（必须和 `--ask` 一起用）：
+
+```bash
+pnpm cli --ask --ask-writes "把登录改成扫码登录，我要逐笔看它改哪个文件"
+```
+
+```text
+[heming] 审批已开启：[y] 允许这一次 / [a] 本次运行都允许 / [n] 不要 / [q] 停下（后面不再问）（写文件也会问，并画出增删对照）
+[heming] 需要你确认：写文件（file_write） 新增 2 行
+  + export function scan() {
+  +   return token();
+  这次运行开了 --ask-writes：写文件之前先让你看一眼改了什么。
+  [y] 允许这一次 / [a] 本次运行都允许 / [n] 不要 / [q] 停下（后面不再问）
+> 
+```
+
+- 预览复用桌面端那份参数对照（`argDiff`）：`file_write` 画整段新增，`file_edit` 画行级增删，`file_patch` 按补丁文法画。最多 20 行，超了会写「只画了前 20 行」。
+- 排在路径安全**之后**：越界写在前一步就被拒了，不会问你——人的点头只能确认「这一笔我认可」，不能把「写到工作区外」变成合法。
+- 写入的「本次运行都允许」与命令的分开记：答 `a` 放过写，命令照样要单独问；危险调用那边的 `a` 也不会替你放过写。
+- `q`（停下）两边都停：之后写和命令都不再问，直接拒绝。
+- 单独给 `--ask-writes` 会直接报错（`--ask-writes 要配合 --ask 一起用`）：没有人回答就等于没问。
 
 `.heming/permissions.json` 里的 `ask` 规则也会在 `--ask` 下真的问到人；没有 `--ask` 时它仍然落成
 拒绝（终端里没有人可问）。`--read-only` 与 `--ask` 同时给时只读赢：不问、也不执行。

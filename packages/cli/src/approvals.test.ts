@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   APPROVAL_ANSWER_HINTS,
+  APPROVAL_PREVIEW_MAX_LINES,
   approvalDetail,
   createScriptedApprover,
   createTerminalApprover,
@@ -103,6 +104,36 @@ describe("describeApprovalRequest", () => {
   });
 });
 
+describe("审批框里的增删预览（d.340）", () => {
+  it("预览逐行缩进画出来，且排在原因之前", () => {
+    const text = describeApprovalRequest({
+      tool: "file_write",
+      displayName: "写文件",
+      detail: " 新增 2 行",
+      preview: ["+ 第一行", "+ 第二行"],
+      reason: "这次运行开了 --ask-writes。",
+    });
+    const lines = text.split("\n");
+    expect(lines[0]).toContain("需要你确认：写文件（file_write）");
+    expect(lines[1]).toBe("  + 第一行");
+    expect(lines[2]).toBe("  + 第二行");
+    expect(lines[3]).toContain("--ask-writes");
+    expect(lines[4]).toBe(`  ${APPROVAL_ANSWER_HINTS}`);
+  });
+
+  it("预览超过上限只画前若干行，并明说被截断了", () => {
+    const preview = Array.from({ length: APPROVAL_PREVIEW_MAX_LINES + 3 }, (_, index) => `+ 第 ${index + 1} 行`);
+    const text = describeApprovalRequest({ tool: "file_write", preview, reason: "r" });
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(1 + APPROVAL_PREVIEW_MAX_LINES + 1 + 2);
+    expect(text).toContain(`…（只画了前 ${APPROVAL_PREVIEW_MAX_LINES} 行）`);
+    expect(text).not.toContain(`第 ${APPROVAL_PREVIEW_MAX_LINES + 1} 行`);
+  });
+
+  it("没有预览时不留空行（老的三行形状不变）", () => {
+    expect(describeApprovalRequest(REQUEST).split("\n")).toHaveLength(3);
+  });
+});
 describe("approvalDetail", () => {
   it("从参数里挑出最有信息量的那个字段（带前导空格，直接拼进一行）", () => {
     expect(approvalDetail(JSON.stringify({ command: "git status" }))).toBe(" command=git status");

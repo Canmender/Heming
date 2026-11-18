@@ -70,6 +70,7 @@ const USAGE = `用法：
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
   --read-only          只读模式：除读取类工具外一律不执行（写、删、命令都拦住）
   --ask                危险调用（命令 / MCP 工具）先在终端问一句（需要真终端）
+  --ask-writes         写文件也先问一句并画出增删对照（要配合 --ask；越界写仍直接拒绝）
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
   --trust-hooks        允许执行 .heming/hooks.json 里的本机检查（默认只读配置、不执行）
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
@@ -138,6 +139,7 @@ MCP 服务（给别的编辑器用）：
   pnpm cli --trust-hooks "按仓库里的钩子检查跑，改完 generated 前会被拦住"
   pnpm cli --read-only "先只看不改：这套代码哪里会出问题"
   pnpm cli --ask "跑一下测试；每一步命令我都想先看一眼"
+  pnpm cli --ask --ask-writes "我要逐笔看它改哪个文件、改了什么"
   pnpm cli --continue --context-budget 4000 "接着聊，历史只留最近一小段"
   pnpm cli --continue --no-compact "把整段历史原样发给模型"
 
@@ -159,6 +161,14 @@ MCP 服务（给别的编辑器用）：
   被拒的调用会回一句「CLI 以只读模式运行」，模型会转而把改动写成说明交回来。
   它的作用范围比权限规则更靠前：即使仓库写了 allow、即使同时给了 --allow-danger，
   也只读。适合「先让它看看、别动手」和 CI 里的预演。
+
+逐笔确认（--ask / --ask-writes，需要真终端）：
+  --ask          命令与 MCP 工具执行前先问一句：y 这一次 / a 本次运行都允许 / n 不要 / q 停下。
+                 同一个运行里答过 a 之后，同类危险调用不再挨个问。
+  --ask-writes   写文件之前也问一句，并画出增删对照（最多 20 行，看全的请用 diff）。
+                 它排在路径安全之后：写根之外的文件仍然直接拒绝，不会因为你点头就放行。
+                 写作「本次运行都允许」与危险调用的许可分开记——放过写不等于放过命令。
+  stdin 不是终端（管道、CI、重定向）时 --ask 会直接报错退出，不会把管道里的下一行当 y。
 
 续聊的上下文预算（--context-budget / --no-compact）：
   --continue / --resume 会把上次会话的文字问答带进来，最多可有 200 轮。
@@ -421,7 +431,9 @@ async function main(argv: string[]): Promise<number> {
   }
   const approver = options.ask ? createTerminalApprover({ input: process.stdin, output: process.stderr }) : null;
   if (approver) {
-    writeErr(`[heming] 审批已开启：${APPROVAL_ANSWER_HINTS}\n`);
+    writeErr(
+      `[heming] 审批已开启：${APPROVAL_ANSWER_HINTS}${options.askWrites ? "（写文件也会问，并画出增删对照）" : ""}\n`,
+    );
   }
 
   // `-` 表示指令来自 stdin：CI 里最常用的是 `git diff | heming exec -`。
@@ -626,6 +638,7 @@ async function main(argv: string[]): Promise<number> {
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(approver ? { ask: approver.ask } : {}),
+    ...(options.askWrites ? { askWrites: true } : {}),
     ...(memoryEnabled ? {} : { memory: false }),
     ...(options.subagent ? {} : { subagent: false }),
     ...(options.rewind ? {} : { rewind: false }),

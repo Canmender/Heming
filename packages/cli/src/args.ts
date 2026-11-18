@@ -42,6 +42,11 @@ export interface PromptOptions {
    */
   ask: boolean;
   /**
+   * 写文件也先问（`--ask-writes`）：根内合法的写入会停下来让人看增删对照。
+   * 必须与 `--ask` 一起用（没有人就没人回答）；越界写仍然直接拒绝，不会因为你点头就放行。
+   */
+  askWrites: boolean;
+  /**
    * 信任工作区的 `.heming/permissions.json`：只有信任之后，里面的 **allow** 规则才生效。
    * deny / ask 不受这个开关影响——它们是收紧方向，仓库里写了一定照做。
    */
@@ -171,6 +176,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let trustHooks = false;
   let readOnly = false;
   let ask = false;
+  let askWrites = false;
   let contextBudget: number | undefined;
   let compact = true;
   let cwd: string | undefined;
@@ -250,6 +256,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "ask": {
           if (inline !== undefined) return { ok: false, error: "--ask 不接受取值（直接写 --ask 即可）" };
           ask = true;
+          break;
+        }
+        case "ask-writes": {
+          if (inline !== undefined) return { ok: false, error: "--ask-writes 不接受取值（直接写 --ask-writes 即可）" };
+          askWrites = true;
           break;
         }
         case "no-subagent": {
@@ -397,6 +408,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (!subagent) notForSessions.push("--no-subagent");
   if (!keepRewind) notForSessions.push("--no-rewind");
   if (ask) notForSessions.push("--ask");
+    if (askWrites) notForSessions.push("--ask-writes");
     if (contextBudget !== undefined) notForSessions.push("--context-budget");
     if (!compact) notForSessions.push("--no-compact");
     if (mcp) notForSessions.push("--mcp");
@@ -432,6 +444,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (allowDanger) notForMemory.push("--allow-danger");
     if (readOnly) notForMemory.push("--read-only");
     if (ask) notForMemory.push("--ask");
+  if (askWrites) notForMemory.push("--ask-writes");
     if (maxRounds !== undefined) notForMemory.push("--max-rounds");
     if (model !== undefined) notForMemory.push("--model");
     if (baseUrl !== undefined) notForMemory.push("--base-url");
@@ -487,6 +500,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (allowDanger) notForRewind.push("--allow-danger");
     if (readOnly) notForRewind.push("--read-only");
     if (ask) notForRewind.push("--ask");
+  if (askWrites) notForRewind.push("--ask-writes");
     if (maxRounds !== undefined) notForRewind.push("--max-rounds");
     if (model !== undefined) notForRewind.push("--model");
     if (baseUrl !== undefined) notForRewind.push("--base-url");
@@ -541,6 +555,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (allowDanger) notForCommands.push("--allow-danger");
     if (readOnly) notForCommands.push("--read-only");
     if (ask) notForCommands.push("--ask");
+  if (askWrites) notForCommands.push("--ask-writes");
     if (maxRounds !== undefined) notForCommands.push("--max-rounds");
     if (model !== undefined) notForCommands.push("--model");
     if (baseUrl !== undefined) notForCommands.push("--base-url");
@@ -589,6 +604,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (sessionDir !== undefined) notForMcp.push("--session-dir");
     if (mcp) notForMcp.push("--mcp");
   if (ask) notForMcp.push("--ask");
+  if (askWrites) notForMcp.push("--ask-writes");
     if (contextBudget !== undefined) notForMcp.push("--context-budget");
     if (!compact) notForMcp.push("--no-compact");
     if (!memory) notForMcp.push("--no-memory");
@@ -617,6 +633,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
         "--ask 不能和 `run -` 一起用：审批要从 stdin 读你的回答，而 `run -` 的提示词也从 stdin 来。把提示词直接写在命令行上，或去掉 --ask。",
     };
   }
+  if (askWrites && !ask) {
+    return {
+      ok: false,
+      error: "--ask-writes 要配合 --ask 一起用：写文件前要问人，总得先允许它从终端问。",
+    };
+  }
   if (!prompt && !fromStdin) {
     return { ok: false, error: `${command} 缺少 prompt（要执行的指令；也可以写 - 从 stdin 读）` };
   }
@@ -639,6 +661,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       allowDanger,
       readOnly,
       ask,
+      askWrites,
       trustWorkspace,
       trustHooks,
       compact,
