@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.339.4.127.12",
+    "date": "2026-11-18",
+    "title": "每个工具的下拉直接显示它现在用的模型",
+    "bullets": [
+      "`packages/web/src/components/ModelPage.test.tsx` 新增一例「没挑过时下拉就显示它现在用的模型；没改动时「应用」灰着」：`ls` 夹具让 Codex 用 `openai/gpt-4o` → 下拉初始值就是它；`应用` 灰着且 `title` 对；重选同一个仍灰；改选 `deepseek/deepseek-chat` 后变可点。",
+      "全量 452 个测试文件 / 6485 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。",
+      "只有「和应用按钮同一行」的写模型受这条约束；「统一应用」「恢复默认」不判脏（它们本身就是全局动作，语义清楚）。",
+      "不判脏「推断强度」这类没有独立输入框的字段：`magpie ls` 的 `effort` 只读展示。",
+      "当前模型不在目录里（比如工具自己配了一个网关没有的模型）时下拉仍显示「选择模型…」——宁可空着，也不给一个它其实选不了的选项。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「智能体」分区每一行原来有两处说同一件事，而其中一处还是假的：",
+      "1. 下拉框在没挑过时显示 `选择模型…`，看上去像**这个工具还没配模型**；它此刻真正用的模型其实写在下面那行小字里——同一个事实分两处看，第一处还是空的。2. 「应用」按钮一直亮着：挑的是它现在就用的那个模型也亮，点下去还照样弹二次确认，确认完写进配置的内容和原来一模一样。用户只能靠记性判断「我到底改了没有」。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/ModelPage.tsx` 智能体下拉 | `value={agentModelOf(agent)}`，没挑过就是空 → 显示「选择模型…」 | 新增 `agentSelectValue(agent)`：没挑过就显示 `magpie ls` 报的当前模型；只有当前模型确实在可选项里才回填（被「可见模型」挡住的仍留空，不给出一个它选不了的选项） || 同一行的「应用」 | `disabled={!cli \\|\\| !isModelId(...)}`，永远亮 | 新增 `agentDirtyOf(agent)`：选的和它现在用的不一样才可点；一样时灰掉，`title` 写「和它现在用的模型一样，不用再写一次」 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.339.4.126.12",
     "date": "2026-11-18",
     "title": "远端 MCP 服务不用再在本地起一个代理进程",

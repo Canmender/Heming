@@ -1756,6 +1756,32 @@ export function ModelPage() {
     const value = agentModelOf(agent);
     return value === AGENT_CUSTOM ? (agentCustom[agent.name] ?? "").trim() : value;
   };
+  /**
+   * 选中的模型和它现在用的不是同一个、才需要写（d.339）。
+   * 顺着「可见模型」那条规矩：没改动就不亮按钮，省掉一次没有意义的二次确认。
+   * 注意 `agent.model` 来自 `magpie ls`，它写的是这个工具此刻真正在用的模型。
+   */
+  const agentDirtyOf = (agent: LocalAgent) => {
+    const pending = agentEffectiveModel(agent).trim();
+    if (!pending) return false;
+    return pending !== agent.model.trim();
+  };
+  /**
+   * 下拉里显示什么：挑过就用挑的，没挑过就显示它现在用的那个模型（d.339）。
+   *
+   * 以前没挑过一律显示「选择模型…」，看上去像这个工具还没配模型；
+   * 但当前模型其实写在下面那行小字里——同一个事实不该分两处看。
+   * 只在当前模型确实在可选项里时才回填：被「可见模型」挡在外面的那种不回填，
+   * 否则下拉里会多出一个它其实选不了的选项。
+   */
+  const agentSelectValue = (agent: LocalAgent) => {
+    const draft = agentModelOf(agent);
+    if (draft) return draft;
+    const current = agent.model.trim();
+    if (!current) return "";
+    const options = rowsForAgent(modelRows, agentVisibleNames(agent));
+    return options.some((row) => row.id === current) ? current : "";
+  };
 
   /** 能被改写的工具（有 id 的），「一次性设成同一个模型」只对它们生效。 */
   const bulkAgents = useMemo(() => bulkModelTargets(agents), [agents]);
@@ -2055,7 +2081,7 @@ export function ModelPage() {
                           <select
                             className="ui-input w-52"
                             aria-label={`${agent.name} 模型`}
-                            value={agentModelOf(agent)}
+                            value={agentSelectValue(agent)}
                             onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
                           >
                             <option value="">选择模型…</option>
@@ -2090,7 +2116,8 @@ export function ModelPage() {
                           <Button
                             type="button"
                             size="sm" variant="primary"
-                            disabled={!cli || !isModelId(agentEffectiveModel(agent))}
+                            disabled={!cli || !isModelId(agentEffectiveModel(agent)) || !agentDirtyOf(agent)}
+                            title={agentDirtyOf(agent) ? "把这次选的模型写进它自己的配置，下次启动生效" : "和它现在用的模型一样，不用再写一次"}
                             onClick={() => {
                               const model = agentEffectiveModel(agent).trim();
                               if (!agent.id || !model) return;

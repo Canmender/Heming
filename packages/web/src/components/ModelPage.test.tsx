@@ -2444,6 +2444,36 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
 });
 
 describe("ModelPage · 智能体改模型", () => {
+  it("没挑过时下拉就显示它现在用的模型；没改动时「应用」灰着", async () => {
+    installBridge(
+      {},
+      {
+        // Codex 此刻用的就是目录里有的这个模型。
+        ls: {
+          ok: true,
+          stdout:
+            "  Claude Code       —  ·  effort —   ~/.claude/settings.json\n" +
+            "  Codex             openai/gpt-4o  ·  effort high   ~/.codex/config.toml\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    const select = (await screen.findByLabelText("Codex 模型")) as HTMLSelectElement;
+    // 不再显示「选择模型…」：那个事实本来只写在小字里
+    expect(select.value).toBe("openai/gpt-4o");
+    const apply = screen.getAllByRole("button", { name: "应用" })[1]!;
+    expect(apply).toBeDisabled();
+    expect(apply).toHaveAttribute("title", "和它现在用的模型一样，不用再写一次");
+
+    // 挑同一个也不亮；挑另一个才亮，点下去照样要确认
+    fireEvent.change(select, { target: { value: "openai/gpt-4o" } });
+    expect(screen.getAllByRole("button", { name: "应用" })[1]!).toBeDisabled();
+    fireEvent.change(select, { target: { value: "deepseek/deepseek-chat" } });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "应用" })[1]!).toBeEnabled());
+  });
+
   it("列出本机智能体；应用与恢复默认都要二次确认", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
