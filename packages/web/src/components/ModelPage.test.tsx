@@ -2385,6 +2385,48 @@ describe("ModelPage · 智能体改模型", () => {
     await waitFor(() => expect(calls).toContainEqual(["visible", "claude", "deepseek"]));
     await waitFor(() => expect(screen.queryByText("改过了，点「保存可见范围」才生效")).toBeNull());
   });
+
+  it("这份勾选也能一次写给别的工具：先点名，再逐个写", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        providers: {
+          ok: true,
+          stdout:
+            "  deepseek  deepseek  api.deepseek.com  ● sk-…  2 models\n" +
+            "  relay     custom    relay.test        ● sk-…  1 models\n",
+          stderr: "",
+        },
+        visible: {
+          ok: true,
+          stdout: "  claude        deepseek, relay        12 shown, 3 not\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    await screen.findByText(/收窄到 deepseek、relay/);
+
+    // 没有改动就不给这个出口：写别人的配置总得先有一份值得抄的勾选
+    expect(screen.queryByRole("button", { name: /同样写给其它/ })).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Claude Code 可见 relay"));
+    const share = screen.getByRole("button", { name: "同样写给其它 1 个" });
+    fireEvent.click(share);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "把 Claude Code 的这份勾选同样写给其它 1 个工具？",
+    });
+    expect(dialog.textContent).toContain("覆盖 Codex");
+    expect(calls).not.toContainEqual(["visible", "codex", "deepseek"]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "一起写" }));
+    await waitFor(() => expect(calls).toContainEqual(["visible", "codex", "deepseek"]));
+    expect(await screen.findByText(/已把这份可见范围写给 1 个工具/)).toBeInTheDocument();
+    // 来源那一行自己还是「改过没保存」：抄给别人不等于替自己保存
+    expect(screen.getByText("改过了，点「保存可见范围」才生效")).toBeInTheDocument();
+  });
 });
 
 describe("ModelPage · 网关密钥与会话", () => {

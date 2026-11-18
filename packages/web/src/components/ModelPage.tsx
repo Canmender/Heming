@@ -60,7 +60,7 @@ import {
 } from "../lib/discovery.js";
 import { readCache, writeCache } from "../lib/pageCache.js";
 import { readFailureDetail, readFailureText, readFailuresText, setReadError, type ReadErrors, type ReadSection } from "../lib/readErrors.js";
-import { bulkModelTargets, bulkModelText, type BulkModelOutcome } from "../lib/bulkModel.js";
+import { bulkModelTargets, bulkModelText, bulkWriteText, siblingTargets, type BulkModelOutcome } from "../lib/bulkModel.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -972,11 +972,71 @@ export function ModelPage() {
 
   const saveVisible = async (agent: LocalAgent) => {
     if (!cli || !agent.id) return;
+    const { names } = visibleArgsOf(agent);
+    await runVisibleCommand(agent, visibleArgs(agent.id, names));
+  };
+
+  /** 这一行勾选对应的 `visible` 参数：全勾时名字为空（内核写作 `all`）。 */
+  const visibleArgsOf = (agent: LocalAgent): { names: string[]; everything: boolean } => {
     const all = providers.map((provider) => provider.id);
     const picked = visibleSelectionOf(agent);
     const everything =
       all.length > 0 && all.every((id) => picked.includes(id)) && picked.length === all.length;
-    await runVisibleCommand(agent, visibleArgs(agent.id, everything ? [] : picked));
+    return { names: everything ? [] : picked, everything };
+  };
+
+  /**
+   * 把这一行的勾选同样写给别的工具。
+   *
+   * 逐个发（内核一次只改一个工具自己的配置），一个失败不打断后面的；
+   * 写完把那几行的草稿丢掉，让界面回到内核的真值上。
+   */
+  const applyVisibleToSiblings = async (agent: LocalAgent) => {
+    if (!cli || !agent.id) return;
+    const { names } = visibleArgsOf(agent);
+    const others = siblingTargets(agent, agents);
+    setBusy("统一可见范围");
+    const outcome: BulkModelOutcome = { done: [], failed: [] };
+    try {
+      for (const other of others) {
+        const otherId = other.id ?? "";
+        if (!otherId) continue;
+        const result = await cli.cli(visibleArgs(otherId, names));
+        if (result.ok) {
+          outcome.done.push(other.name);
+        } else {
+          outcome.failed.push({
+            name: other.name,
+            why: readFailureDetail(result.stderr || result.error || ""),
+          });
+        }
+      }
+      setVisibleDraft((current) => {
+        const next = { ...current };
+        for (const other of others) {
+          if (other.id) delete next[other.id];
+        }
+        return next;
+      });
+      await loadVisibility();
+      await loadAgents();
+      const said = bulkWriteText(`已把这份可见范围写给 ${outcome.done.length} 个工具。`, outcome);
+      setNotice(said.text, said.failed);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** 改写别人的配置之前先确认，并点名会写到哪些工具。 */
+  const confirmShareVisible = (agent: LocalAgent) => {
+    const others = siblingTargets(agent, agents);
+    setConfirmAction({
+      title: `把 ${agent.name} 的这份勾选同样写给其它 ${others.length} 个工具？`,
+      desc: `会覆盖 ${others.map((other) => other.name).join("、")} 自己的可见范围；想撤回就在各自的「可见模型」里点「恢复全部」。`,
+      confirmLabel: "一起写",
+      tone: "primary",
+      action: () => void applyVisibleToSiblings(agent),
+    });
   };
 
   const runTerminal = async (title: string, args: string[]) => {
@@ -2108,6 +2168,17 @@ export function ModelPage() {
                             >
                               恢复全部
                             </Button>
+                            {visibleDirtyOf(agent) && siblingTargets(agent, agents).length > 0 && (
+                              <Button
+                                type="button"
+                                size="sm" variant="ghost"
+                                disabled={!cli || busy !== null}
+                                title="把这行勾选同样写进其它已经接好的工具，只是也写一遍"
+                                onClick={() => confirmShareVisible(agent)}
+                              >
+                                同样写给其它 {siblingTargets(agent, agents).length} 个
+                              </Button>
+                            )}
                             {visibleDirtyOf(agent) && (
                               <span className="ui-caption text-warn">改过了，点「保存可见范围」才生效</span>
                             )}
