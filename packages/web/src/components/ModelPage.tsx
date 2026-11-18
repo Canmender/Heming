@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { PageTabs } from "./layout/PageTabs.js";
 import {
@@ -28,6 +28,8 @@ import { SubscriptionRow } from "./model/SubscriptionRow.js";
 import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
+import { QuotaCards } from "./model/QuotaCards.js";
+import { nonSubscriptionCards, parseQuotaCards, type QuotaCard } from "../lib/magpieQuotaCards.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -260,6 +262,13 @@ export function ModelPage() {
   }, []);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  /**
+   * 订阅以外的额度（Key、套餐、钱包余额，内核 `quota --json`）。
+   *
+   * `accounts --json` 只讲订阅账号；按量付费的 Key 花到哪儿去了、还剩多少，
+   * 原先页面上完全看不到，只能开终端敲命令。
+   */
+  const [quotaCards, setQuotaCards] = useState<QuotaCard[]>([]);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   /**
@@ -283,6 +292,8 @@ export function ModelPage() {
    * 这样选模型时就能看见「这个智能体的免费额度还剩多少」。
    */
   const agentQuotas = useMemo(() => agentQuotaMap(accounts, now), [accounts, now]);
+  /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
+  const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
   const [agents, setAgents] = useState<LocalAgent[]>([]);
   const [agentConfirm, setAgentConfirm] = useState<{ id: string; name: string; model: string } | null>(
@@ -394,47 +405,102 @@ export function ModelPage() {
     });
   }, [cli]);
 
-  const loadProviders = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["providers"]);
-    setProviders(parseProviders(result.stdout || ""));
-  }, [cli]);
+  /**
+   * 同一个加载器同时只跑一份。
+   *
+   * 每次加载都要起一个内核进程（实测 `providers` 629ms、`accounts` 425ms、
+   * 其余 280–430ms），首屏与「刷新」撞在一起时重复起进程既慢又会让旧读数
+   * 覆盖新读数。同键的并发请求直接复用前一份。
+   */
+  const inflight = useRef(new Map<string, Promise<void>>());
+  const once = useCallback((key: string, run: () => Promise<void>): Promise<void> => {
+    const pending = inflight.current.get(key);
+    if (pending) return pending;
+    const task = run().finally(() => inflight.current.delete(key));
+    inflight.current.set(key, task);
+    return task;
+  }, []);
 
-  const loadAccounts = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["accounts", "--json"]);
-    setAccounts(parseAccounts(result.stdout || ""));
-  }, [cli]);
+  const loadProviders = useCallback(
+    () =>
+      once("providers", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["providers"]);
+        setProviders(parseProviders(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
-  const loadAgents = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["ls"]);
-    setAgents(parseAgents(result.stdout || ""));
-  }, [cli]);
+  const loadAccounts = useCallback(
+    () =>
+      once("accounts", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["accounts", "--json"]);
+        setAccounts(parseAccounts(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
-  const loadPlugins = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["plugin", "list", "--json"]);
-    setPluginProviders(parsePluginProviders(result.stdout || ""));
-  }, [cli]);
+  const loadAgents = useCallback(
+    () =>
+      once("agents", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["ls"]);
+        setAgents(parseAgents(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
-  const loadSettings = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["settings", "list", "--json"]);
-    setSettingValues(parseSettingValues(result.stdout || ""));
-  }, [cli]);
+  const loadPlugins = useCallback(
+    () =>
+      once("plugins", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["plugin", "list", "--json"]);
+        setPluginProviders(parsePluginProviders(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
-  const loadDisabledModels = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["model", "disabled"]);
-    setDisabledModels(parseDisabledModels(result.stdout || ""));
-  }, [cli]);
+  const loadSettings = useCallback(
+    () =>
+      once("settings", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["settings", "list", "--json"]);
+        setSettingValues(parseSettingValues(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
-  const loadVisibility = useCallback(async () => {
-    if (!cli) return;
-    const result = await cli.cli(["visible"]);
-    setVisibility(parseAgentVisibility(result.stdout || ""));
-  }, [cli]);
+  const loadDisabledModels = useCallback(
+    () =>
+      once("disabled", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["model", "disabled"]);
+        setDisabledModels(parseDisabledModels(result.stdout || ""));
+      }),
+    [cli, once],
+  );
+
+  const loadVisibility = useCallback(
+    () =>
+      once("visibility", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["visible"]);
+        setVisibility(parseAgentVisibility(result.stdout || ""));
+      }),
+    [cli, once],
+  );
+
+  /** 其余来源（Key/套餐/钱包）的额度：`accounts` 只讲订阅，这些只在这里出现。 */
+  const loadQuotas = useCallback(
+    () =>
+      once("quotas", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["quota", "--json"]);
+        setQuotaCards(parseQuotaCards(result.stdout || ""));
+      }),
+    [cli, once],
+  );
 
   const loadGlobals = useCallback(async () => {
     if (!cli) return;
@@ -605,11 +671,14 @@ export function ModelPage() {
     if (!cli) return;
     setAccountBusy("refresh");
     try {
-      const agents = [...new Set(accounts.map((row) => row.agent))];
-      await Promise.all(agents.map((agent) => cli.cli(["quota", "refresh", agent])));
-      await loadAccounts();
+      // 订阅账号与 Key 的用量是两份数据，都要让内核现在去问一次厂商。
+      const targets = [
+        ...new Set([...accounts.map((row) => row.agent), ...providers.map((row) => row.id)]),
+      ].filter(Boolean);
+      await Promise.all(targets.map((target) => cli.cli(["quota", "refresh", target])));
+      await Promise.all([loadAccounts(), loadQuotas()]);
       setNow(Date.now());
-      setNotice("已重新读取订阅额度。");
+      setNotice("已重新读取额度。");
     } catch (err) {
       setNotice(`刷新额度失败：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
@@ -793,18 +862,19 @@ export function ModelPage() {
     if (!cli) return;
     let alive = true;
     void (async () => {
+      // 第一波：首屏（模型 / 智能体两个分区）真正要用的四样。齐了就撤骨架，
+      // 不让「额度」「画图模型」「插件表」这些慢一步的东西把整页拖住。
+      await Promise.all([loadProviders(), loadAgents(), loadDisabledModels(), loadVisibility()]);
+      if (alive) setLoading(false);
+      // 第二波：额度、全局设置、画图模型、接入组件表与 settings，边显示边补。
       await Promise.all([
-        loadProviders(),
         loadAccounts(),
-        loadAgents(),
-        loadDisabledModels(),
-        loadVisibility(),
+        loadQuotas(),
         loadGlobals(),
         loadDrawers(),
         loadPlugins(),
         loadSettings(),
       ]);
-      if (alive) setLoading(false);
     })();
     return () => {
       alive = false;
@@ -819,6 +889,8 @@ export function ModelPage() {
     loadGlobals,
     loadPlugins,
     loadSettings,
+    loadQuotas,
+    loadDrawers,
   ]);
 
   useEffect(() => {
@@ -1632,6 +1704,16 @@ export function ModelPage() {
                   />
                 )}
               </div>
+
+              {keyQuotas.length > 0 && (
+                <div className="ui-card p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="ui-section-title">其余来源的额度</h2>
+                    <span className="ui-caption">按量付费的 Key、套餐与钱包余额</span>
+                  </div>
+                  <QuotaCards cards={keyQuotas} now={now} />
+                </div>
+              )}
 
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">

@@ -534,8 +534,55 @@ describe("ModelPage · 账号与更多", () => {
     expect(inCard.getAttribute("title")).toContain("腾讯号");
   });
 
-  it("国内端的登录失效时，卡片直接说「重新登录」，不装作还有额度", async () => {
+  it("首屏不等额度：订阅账号还在读的时候，模型列表已经能用了", async () => {
+    // 内核每条命令都要起一个进程（实测 280–630ms）；额度这类慢一步的东西
+    // 不该把整页拖住，所以这里让它永远不返回，看首屏还出不出得来。
+    const hanging = vi.fn(async (args: string[]) => {
+      calls.push(args);
+      if (args[0] === "accounts" || args[0] === "quota") return new Promise(() => {});
+      if (args[0] === "providers") {
+        return { ok: true, stdout: "  mock custom  mock  127.0.0.1:39001  ● •••••••  1 models  ", stderr: "" };
+      }
+      if (args[0] === "ls") return { ok: true, stdout: "  Claude Code       —  ·  effort —   ~/.claude/settings.json\n", stderr: "" };
+      return { ok: true, stdout: "ok", stderr: "" };
+    });
+    const { calls } = installBridge({ cli: hanging });
+    render(<ModelPage />);
+    expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
+    expect(screen.queryByTestId("page-fallback")).not.toBeInTheDocument();
+    // 慢的那些确实发出去了，只是没挡住首屏。
+    expect(calls.some((call) => call[0] === "accounts")).toBe(true);
+  });
+
+  it("来源页把 Key 与套餐的余额也列出来：订阅之外的额度不再只有终端里看得到", async () => {
     installBridge({}, {
+      "quota --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            provider: "deepseek",
+            name: "DeepSeek",
+            kind: "balance",
+            windows: [],
+            balance: "¥2.60",
+            last: true,
+          },
+          { provider: "claude", name: "Claude", kind: "subscription", windows: [] },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("其余来源的额度")).toBeInTheDocument();
+    expect(await screen.findByText("¥2.60")).toBeInTheDocument();
+    // 订阅在「订阅账号」卡里按账号列，这里不再重复一遍。
+    const list = screen.getByLabelText("其余来源的额度");
+    expect(within(list).queryByText("Claude")).not.toBeInTheDocument();
+    expect(within(list).getByText("DeepSeek")).toBeInTheDocument();
+  });
+
+  it("国内端的登录失效时，卡片直接说「重新登录」，不装作还有额度", async () => {    installBridge({}, {
       "accounts --json": {
         ok: true,
         stdout: JSON.stringify([

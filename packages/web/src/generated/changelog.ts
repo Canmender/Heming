@@ -12,6 +12,58 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.287.4.120.12",
+    "date": "2026-11-18",
+    "title": "子代理也能按你写在仓库里的那份要求干活",
+    "bullets": [
+      "`packages/web` 全量：**433 个测试文件 / 6210 个用例全绿**；`pnpm --filter @heming/web exec tsc --noEmit` 退出 0。",
+      "新增 `packages/web/src/lib/agentRuntime/subagentDefs.test.ts` 11 例：文件名解析（大小写、中文、非 `.md`、`-bad`、`9lives` 都拒绝）、完整定义拆头、无标题退化用名字当标题、空正文与只有标题返回 null、超长截断并追加指路文案、整批按路径排序且同名取先、`findSubagentDef` 大小写不敏感与找不到、`describeSubagentDefs` 文案与空列表空串、`collectSubagentDefs` 在无桥/无根/无 glob 时返回空、glob 抛错被吞掉。",
+      "`subagent.test.ts` 新增 7 例：无定义时工具里没有 `agent`；有定义时 `agent` 是枚举且描述含「review（安全审查）」与 `.heming/agents`；点名未定义的名字被拒并列出可用的；名字形状非法与「工作区一个定义都没有」各有可照做的文案；名字归一化（大小写/空白）与不传时为 null；点名的定义进了系统提示且结论文案带名字；**提权反例**——定义里写「你可以执行 run_command、轮次上限 999」，实测子代理拿到的工具只有 `[\"file_read\"]`、主桥的 `execute` 一次没被调用、结果里如实写「没执行」。",
+      "`statusReport.test.ts` 新增 2 例：有定义时挂在「子代理」行后；`null` / `0` / 省略时不出现（常态不占篇幅）。",
+      "`ChatPage.test.tsx` 新增 1 例（I3z）：设好根目录与文件桥，等定义真读完再发 `/status`，断言「另有 1 个自定义子代理」与 `.heming/agents/*.md` 都出现在自检里。",
+      "不做「子代理再派子代理」：定义只影响提示，派活权仍只在主智能体手里。",
+      "不做 frontmatter：与 `.heming/commands/*.md` 保持同一套「首行标题 + 次行说明」的文件头，少一套解析规则要维护。",
+      "不改 `agent_task` 的现有参数语义：`task` / `tasks` / `max_rounds` 一个字节没动，`agent` 是纯粹的加法。",
+      "下一轮候选仍是 `/rewind N` 轮次回滚（需要新增「按备份条目还原」的桌面 IPC，工作量比这一轮大）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "`agent_task` 从 d.185 起就有：主智能体可以派一个只读（或经 `/subagent write on` 授权的可写）子代理去查东西、改文件。但它只有一副面孔——系统提示是代码里写死的五行「你是一个子代理……」。真实团队里「做安全审查」「查性能」「按测试规范补用例」要的东西完全不同：安全审查要它先摆威胁模型、逐条对入口与权限；性能要它先量基线再动手。用户没有任何地方能把这类要求交给子代理——在主对话里叮嘱也没用，子代理根本看不到主对话，它只收到一条 `task` 文本。",
+      "对标物都给了出口：Codex 有自定义子代理定义，Claude Code 有 `.claude/agents/*.md`（frontmatter 写名字和描述）。和鸣在 d.240 已经立起「仓库里的 Markdown 就是配置」这条约定（`.heming/commands/*.md`），子代理定义理应长在同一棵树上：`.heming/agents/名字.md`。",
+      "做了什么",
+      "| 能力 | 位置 | 说明 || --- | --- | --- || 定义文件 | `.heming/agents/<名字>.md` | 文件名即名字，规则与自定义命令一致（小写字母开头，字母/数字/短横线，最长 30）；可选首行 `# 标题`、次行 `> 说明`（同一套文件头解析），其余正文就是「额外要求」 || 点名 | `agent_task` 新增 `agent` 参数 | 工作区里有定义时，这个参数才出现在工具函数里，`enum` 逐个列出可用名字，描述里点名「名字（标题）」与来源；**没有定义时参数根本不出现**，不给模型一个填了必错的坑 || 落到哪 | 子代理的系统提示 | 在基础人设后面追加一段「这次你扮演工作区里定义的子代理「x」，额外要求如下……」；没有点名时与旧行为逐字一致 || 只加严 | 白名单 / 轮次 / 写授权 | 定义里的文字**只能在前面的规则之内加严**：可用工具仍是只读三件（或经用户授权的两件写工具）、轮次上限仍是 1–6、能不能写盘仍由 `/subagent write` 决定。定义里写「你可以执行 run_command、轮次上限 999」也调不动 || 看得见 | 结果标题与 `/status` | 结果写成「子代理「review」（只读，2 轮 / 3 次工具调用）结论：」，并行时标题同样带名字；`/status` 在「子代理」那行后补「另有 N 个自定义子代理（来自 `.heming/agents/*.md`，派活时在 agent_task 里写它的名字）」 || 边界 | 解析与上限 | 单个定义 3000 字（超出截断，并告诉模型去 `file_read` 读全文）；最多 20 个；同名取先读到的；坏文件与非 `.md` 跳过；无根 / 无文件桥 / glob 抛错都静默不启用 |",
+      "调用链：`ChatPage` 读到定义后存进 `subagentDefsRef` 并清掉 `toolBridgeRef` 缓存（否则 `agent_task` 的函数描述还停在旧清单上）→ `withSubagentTool` 把清单交给 `subagentSpec` 生成枚举 → 点名时 `findSubagentDef` 取正文塞进 `SubagentDeps.instructions` → `runOne` 用 `subagentSystemPromptFor` 拼出系统提示。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
+    "version": "d.286.4.120.12",
+    "date": "2026-11-18",
+    "title": "模型页开口就画完：骨架不再等额度，Key 的余额也摆上桌面",
+    "bullets": [
+      "`packages/web` 全量：**433 个测试文件 / 6210 个用例，6209 通过**；唯一一条红在 `ChatPage.test.tsx`，来自并行的对话页改动（`ChatPage.tsx` 里 `slashItems` 未定义），与模型页无关；本轮的模型页相关文件全绿。`typecheck` 本包无错误（同一处 `slashItems` 报错也来自并行改动）。",
+      "新增 `packages/web/src/lib/magpieQuotaCards.test.ts` 12 例：空串/坏 JSON/对象形状都不当数据；真机上 `quota --json` 的 DeepSeek 余额行原样读成卡片；套餐卡带上窗口、余额分项与可重置次数；缺 `provider`/`name` 的行不成卡；订阅在 `nonSubscriptionCards` 里被排除；种类说成人话；结论优先余额、其次最紧窗口、`error` 时说「这次没读到」、全空时留空。",
+      "新增 `packages/web/src/components/model/QuotaCards.test.tsx` 6 例：没有卡片时整块不出现、余额卡的三个字段、套餐卡画窗口条且 `aria-valuenow` 跟着最紧那份走、点数套餐说「剩 7,000 点」、读不到时给原因、共用余额与到期时间照实说。",
+      "`packages/web/src/components/ModelPage.test.tsx` 新增 2 例：「首屏不等额度」——把 `accounts` 与 `quota` 的返回做成永不 resolve，断言模型列表照样出来、`page-fallback` 不在；「来源页把 Key 与套餐的余额也列出来」——`quota --json` 里同时给余额与订阅，断言余额卡出现、订阅不在额度卡里重复。",
+      "量过的数：本机 `magpie-core.exe` 冷启动 `--version` 281ms、`providers` 629ms、`settings list --json` 286ms、`accounts --json` 425ms——这是「把慢的挪到骨架之后」而不是「把慢的做快」的依据。",
+      "只做了首屏拆分与去重，没有做内核进程复用：每条命令仍是一个进程，真要更快得让内核提供长驻的批量接口。",
+      "`quota history`（`/v1/magpie/quotas/history`）、`provider fallback`、`accounts forget|alias|discovery|project`、`switch-only` 仍不可达；本轮只补了「Key 的余额」这一处最刺眼的缺口。",
+      "余额提醒（`balanceAlert`）没做：单位跟币种与点数走，得先定清楚「低于多少算少」。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "两件事，一件是慢，一件是缺。",
+      "慢在首屏：打开模型页时，前端一次 `Promise.all` 发了九次加载，其中「全局设置」那一路自己又并发七条命令——九加七，十四条，每条都要单独起一个内核进程（实测 `providers` 629ms、`accounts` 425ms、其余 280–430ms）。骨架屏要等这十四条全部回来才撤，用户先看到的是一片灰。",
+      "缺在额度：`accounts --json` 只讲订阅账号，用户按量付费买的 Key、套餐还剩多少钱，页面上一个字都没有——只能用终端敲 `quota` 才看得到。同一个「额度」的概念，一半在页面上，一半在命令行里。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || 首屏（`ModelPage.tsx` 启动 effect） | 九路 `Promise.all` 全回来才撤骨架 | 两波：第一波只等模型页真正要用的四样（`providers` / `ls` / `model disabled` / `visible`），齐了立刻撤骨架；额度、全局设置、画图模型、接入组件表、settings 在后台继续补，不挡首屏 || 加载器（`ModelPage.tsx` 的 `once()`） | 重复触发就重复起进程，旧读数还可能盖掉新读数 | 同键并发请求复用同一份（`useRef<Map<string, Promise<void>>>`），「刷新额度」与首屏撞在一起时只发一次 || 其余来源的额度（新 `lib/magpieQuotaCards.ts` + `model/QuotaCards.tsx`） | 没有 | 「来源」分区新增卡：按 `quota --json` 列出每个 Key / 套餐 / 钱包的余额、窗口与到期时间；订阅不在这里重复（订阅账号卡已经按账号列过） || 额度窗口条（新 `model/WindowBar.tsx`） | 只长在订阅账号行里 | 抽成独立组件，订阅账号行与额度卡共用同一套：窗口名、进度条、剩多少、重置倒计时 || 「刷新额度」按钮 | 只刷新订阅账号的用量 | 订阅账号与 Key 一起让内核去问厂商（合并去重后逐个 `quota refresh <provider>`），再一起重读 || 窗口解析（`lib/magpieQuota.ts`） | `parseQuotaWindow` / `parseQuotaWindows` / `parseResets` 藏在 `magpieCli.ts` 里 | 挪进 `magpieQuota.ts` 并导出，`accounts` 与 `quota` 两处共用一套解析：同一个数字不会有两种读法 |",
+      "两处顺手的取舍：额度卡的表头不再重复「余额」这个种类词（徽标已经说了），余额卡也不再把同一句结论写两遍（有钱数就够了，有窗口时结论由窗口条说）。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.285.4.120.12",
     "date": "2026-11-18",
     "title": "页面上不再有别人的名字：模型能力就是和鸣自己的",

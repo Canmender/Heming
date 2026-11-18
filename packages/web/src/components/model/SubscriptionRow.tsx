@@ -1,21 +1,9 @@
 import { Button } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
+import { WindowBar } from "./WindowBar.js";
 import { engineText } from "../../lib/engineText.js";
 import type { AccountRow } from "../../lib/magpieCli.js";
-import {
-  accountState,
-  agentName,
-  formatReadAt,
-  hasQuota,
-  resetsText,
-  windowDetailText,
-  windowLeftText,
-  windowName,
-  windowPercent,
-  windowTone,
-  type QuotaTone,
-  type QuotaWindow,
-} from "../../lib/magpieQuota.js";
+import { accountState, agentName, formatReadAt, hasQuota, resetsText } from "../../lib/magpieQuota.js";
 
 /**
  * 订阅账号的一行（模型页 → 来源 → 订阅账号）。
@@ -42,18 +30,6 @@ const STATE_BADGE: Record<ReturnType<typeof accountState>["tone"], string> = {
   info: "bg-info-soft text-info",
   muted: "bg-subtle-3 text-muted",
   danger: "bg-danger-soft text-danger",
-};
-
-/** 进度条与结论文字：剩余越少越红，正常时用墨色（结论比下面那行小字重要一档）。 */
-const BAR_TONE: Record<QuotaTone, string> = {
-  ok: "bg-muted",
-  warn: "bg-warn",
-  danger: "bg-danger",
-};
-const TEXT_TONE: Record<QuotaTone, string> = {
-  ok: "text-ink",
-  warn: "text-warn",
-  danger: "text-danger",
 };
 
 export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: SubscriptionRowProps) {
@@ -108,40 +84,6 @@ export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: Subscri
           )}
         </div>
       </div>
-    </li>
-  );
-}
-
-function WindowBar({ window, now }: { window: QuotaWindow; now: number }) {
-  const percent = windowPercent(window);
-  const left = windowLeftText(window);
-  const tone = windowTone(window);
-  const detail = windowDetailText(window, now);
-  const name = windowName(window.name);
-  return (
-    // 小字（厂商原话 + 重置倒计时）另起一行：卡片窄的时候单行放不下，
-    // 挤在一起会把进度条压成一条缝，倒计时还会被截掉。
-    <li>
-      <div className="flex items-center gap-2">
-        <span className="w-14 shrink-0 ui-caption">{name}</span>
-        {window.unlimited || window.text ? (
-          <span className="min-w-0 flex-1" />
-        ) : (
-          <div
-            role="progressbar"
-            aria-label={`${name} 用量`}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={percent}
-            aria-valuetext={`${name} 已用 ${percent}%，${left}`}
-            className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-subtle-3"
-          >
-            <div className={`h-full rounded-full ${BAR_TONE[tone]}`} style={{ width: `${percent}%` }} />
-          </div>
-        )}
-        <span className={`shrink-0 ui-numeric text-ui-sm font-medium ${TEXT_TONE[tone]}`}>{left}</span>
-      </div>
-      {detail && <p className="pl-16 ui-caption">{detail}</p>}
     </li>
   );
 }

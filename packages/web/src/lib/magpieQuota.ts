@@ -323,3 +323,58 @@ export function latestReadAt(
   const rel = now - newest < 60_000 ? "刚刚" : `${formatDuration(now - newest)}前`;
   return `最近读数 ${rel}`;
 }
+
+/**
+ * 一个窗口：内核 `provider.QuotaSpan` 的子集，值缺失时给安全默认。
+ *
+ * 订阅账号（`accounts --json`）与额度总览（`quota --json`）给的是同一种窗口，
+ * 所以解析放在这里，两处共用一套：同一个数字不会在页面上有两种读法。
+ */
+export function parseQuotaWindow(value: unknown): QuotaWindow | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  const text = (key: string): string =>
+    typeof item[key] === "string" ? (item[key] as string).trim() : "";
+  const number = (key: string): number | null =>
+    typeof item[key] === "number" && Number.isFinite(item[key]) ? (item[key] as number) : null;
+  const used = number("used");
+  const remaining = number("remaining");
+  const display = text("display");
+  const unlimited = item.unlimited === true;
+  // 内核偶尔只给一句厂商原话（`text` 窗口）；三个数一个都没有的窗口画不出条，
+  // 留着会让页面上多一行「剩 100%」的假读数，所以直接丢掉。
+  if (!unlimited && used === null && remaining === null && !display) return null;
+  return {
+    ...emptyWindow(),
+    name: text("name"),
+    unlimited,
+    used: used ?? (remaining === null ? 0 : 100 - remaining),
+    remaining: remaining ?? (used === null ? 100 : 100 - used),
+    resetsAt: text("resetsAt") || null,
+    display,
+    text: item.text === true,
+    amount: number("amount"),
+    limit: number("limit"),
+    unit: text("unit"),
+    pool: text("pool"),
+    runsOutAt: text("runsOutAt") || null,
+    balance: number("balance"),
+  };
+}
+
+export function parseQuotaWindows(value: unknown): QuotaWindow[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(parseQuotaWindow)
+    .filter((window): window is QuotaWindow => window !== null);
+}
+
+/** 可手动重置的次数（Codex 那类）；0 或读不到时当作没有。 */
+export function parseResets(value: unknown): { count: number; until?: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
+  if (count <= 0) return undefined;
+  const until = typeof item.until === "string" ? item.until.trim() : "";
+  return until ? { count, until } : { count };
+}

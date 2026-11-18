@@ -6,7 +6,11 @@
  * 浏览器端没有这个桥 → 页面显示「仅桌面端可用」，但网关状态/模型目录仍可看。
  */
 
-import { emptyWindow, type QuotaWindow } from "./magpieQuota.js";
+import {
+  parseQuotaWindows,
+  parseResets,
+  type QuotaWindow,
+} from "./magpieQuota.js";
 
 export interface MagpieCliResult {
   ok: boolean;
@@ -147,56 +151,6 @@ export interface AccountRow {
   readAt?: string;
   asOf?: string;
   raw: Record<string, unknown>;
-}
-
-/** 一个窗口：内核 `provider.QuotaSpan` 的子集，值缺失时给安全默认。 */
-function parseQuotaWindow(value: unknown): QuotaWindow | null {
-  if (!value || typeof value !== "object") return null;
-  const item = value as Record<string, unknown>;
-  const text = (key: string): string =>
-    typeof item[key] === "string" ? (item[key] as string).trim() : "";
-  const number = (key: string): number | null =>
-    typeof item[key] === "number" && Number.isFinite(item[key]) ? (item[key] as number) : null;
-  const used = number("used");
-  const remaining = number("remaining");
-  const display = text("display");
-  const unlimited = item.unlimited === true;
-  // 内核偶尔只给一句厂商原话（`text` 窗口）；三个数一个都没有的窗口画不出条，
-  // 留着会让页面上多一行「剩 100%」的假读数，所以直接丢掉。
-  if (!unlimited && used === null && remaining === null && !display) return null;
-  const window = emptyWindow();
-  return {
-    ...window,
-    name: text("name"),
-    unlimited,
-    used: used ?? (remaining === null ? 0 : 100 - remaining),
-    remaining: remaining ?? (used === null ? 100 : 100 - used),
-    resetsAt: text("resetsAt") || null,
-    display,
-    text: item.text === true,
-    amount: number("amount"),
-    limit: number("limit"),
-    unit: text("unit"),
-    pool: text("pool"),
-    runsOutAt: text("runsOutAt") || null,
-    balance: number("balance"),
-  };
-}
-
-function parseQuotaWindows(value: unknown): QuotaWindow[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map(parseQuotaWindow)
-    .filter((window): window is QuotaWindow => window !== null);
-}
-
-function parseResets(value: unknown): { count: number; until?: string } | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const item = value as Record<string, unknown>;
-  const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
-  if (count <= 0) return undefined;
-  const until = typeof item.until === "string" ? item.until.trim() : "";
-  return until ? { count, until } : { count };
 }
 
 export function parseAccounts(stdout: string): AccountRow[] {
