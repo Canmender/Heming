@@ -12,6 +12,20 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.327.4.120.12",
+    "date": "2026-11-18",
+    "title": "约定改了，编辑器那边不用重启",
+    "bullets": [
+      "在 Cursor / Claude Code 里连上和鸣之后，可以「订阅」仓库里的那份约定文件了。",
+      "你改了 `AGENTS.md`、`.heming/rules.md` 或某条命令，编辑器那边会自己刷新——不用断开重连。",
+      "新增或删掉一条 `.heming/commands/*.md`，命令列表也会跟着更新。",
+      "只盯着工作区、`.heming`、`.heming/commands` 这三处，不会去翻 `node_modules` 那几万个文件。",
+      "没人订阅的时候不占系统资源，退订或断开就全部关掉。",
+      "如果你连的客户端不支持订阅，一切照旧：还是只能读，只是读不到「刚改的」那一版。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.326.4.120.12",
     "date": "2026-11-18",
     "title": "账号多了，先看哪句：谁最宽裕、谁最紧",

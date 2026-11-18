@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.327.4.120.12",
+    "date": "2026-11-18",
+    "title": "仓库里的约定改了，编辑器那边不用重启也能看到",
+    "bullets": [
+      "`packages/cli` 全量 **16 文件 / 281 例**（新增 `mcpWatch.test.ts` 8 例，用真临时目录与真 `fs.watch`；`mcp.test.ts` 加 6 例）",
+      "真机冒烟（`mcp serve` + 真子进程）：`capabilities.resources = {\"listChanged\":true,\"subscribe\":true}`；改 `AGENTS.md` → `notifications/resources/updated {\"uri\":\"heming://workspace/AGENTS.md\"}`；",
+      "`pnpm -w typecheck`、web 全量、`eval:agent` 40/40、`design-audit` 全门槛",
+      "只推「变了」，不推「变成什么」：客户端收到通知后自己 `resources/read`（协议就是这么设计的）。",
+      "不监听工作区之外的路径；`.heming` 深层子目录（比如命令文件放在 `.heming/commands/sub/`）不在监听范围内。",
+      "推送没有重放：客户端断线期间的变化不会补发，重连后重新 `resources/read` 一次即可。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.325 把 `.heming/commands/*.md` 和 `AGENTS.md` 一族交给了 MCP 客户端，但只交了一次：客户端读到的是「连接那一刻的样子」。用户在编辑器里改了约定、加了一条命令，得断开重连才生效——而这恰恰是`resources/subscribe` 存在的理由。之前我们在 `initialize` 里把 `subscribe` 与 `listChanged` 都写成`false`，等于明确告诉客户端「别指望我推送」。",
+      "做了什么",
+      "| 能力 | 落地 || --- | --- || 订阅 | `resources/subscribe` / `resources/unsubscribe`；只接受 `resources/list` 里真有的 URI，名单外回 `-32602` 并列出可订的 || 变更推送 | 订阅过的文件一改，推 `notifications/resources/updated {uri}`（防抖 150ms，编辑器保存一次常触发多条事件） || 清单变化 | 命令文件新增/删除时推 `notifications/resources/list_changed` 与 `notifications/prompts/list_changed`——只在清单真的变了才推（比对前后签名） || 能力声明 | `initialize` 里 `resources: {listChanged: true, subscribe: true}`；没有 watcher 时仍然声明 `false`，不做空头承诺 || 监听范围 | 只有工作区、`.heming`、`.heming/commands` 三个目录，**不递归**（工作区里常有 `node_modules`，递归监听既慢又容易打回文件句柄上限） || 资源占用 | 按需建 watcher：一个订阅都没有时不占系统资源；退订到零就全部关掉，`close()` 一并清 timer || 文档 | `instructions` 里加一句「资源可以订阅」，客户端不必猜 |",
+      "实现落在新文件 `packages/cli/src/mcpWatch.ts`（`createMcpCatalogWatcher` / `relOfResourceUri` /`watchTargetsOf`），协议层 `packages/cli/src/mcp.ts` 只多两个方法分支与两个上下文字段（`subscriptions` / `notify`），装配在 `packages/cli/src/mcpServe.ts`。",
+      "怎么验证新增命令文件 → `resources/list_changed` + `prompts/list_changed`；退订后再改 → 一条都没有；订阅 `heming://workspace/../x.md` → `-32602 未知资源`",
+      "留白"
+    ]
+  },
+  {
     "version": "d.326.4.120.12",
     "date": "2026-11-18",
     "title": "账号一多，先告诉你哪个最宽裕、哪个最紧",

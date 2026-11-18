@@ -638,3 +638,121 @@ describe("prompts / resources（d.325）", () => {
     expect(result.capabilities.prompts).toBeUndefined();
   });
 });
+describe("资源订阅（d.327）", () => {
+  const catalog = {
+    prompts: [],
+    resources: [
+      {
+        uri: "heming://workspace/AGENTS.md",
+        name: "AGENTS.md",
+        description: "工作区里的 AGENTS.md",
+        mimeType: "text/markdown",
+        text: "改完要跑 pnpm test。",
+        rel: "AGENTS.md",
+      },
+    ],
+  };
+
+  function watchStub() {
+    const calls: string[] = [];
+    return {
+      calls,
+      watch: {
+        subscribe: (uri: string) => calls.push(`sub:${uri}`),
+        unsubscribe: (uri: string) => calls.push(`unsub:${uri}`),
+      },
+    };
+  }
+
+  it("能推送时 initialize 声明 listChanged 与 subscribe（不推就不声明）", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { watch } = watchStub();
+    const pushed: string[] = [];
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      ctxOf(bridge, {
+        catalog: async () => catalog,
+        subscriptions: watch,
+        notify: (message) => pushed.push(message.method),
+      }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as {
+      capabilities: { prompts?: unknown; resources?: unknown };
+      instructions: string;
+    };
+    expect(result.capabilities.resources).toEqual({ listChanged: true, subscribe: true });
+    expect(result.capabilities.prompts).toEqual({ listChanged: true });
+    expect(result.instructions).toContain("资源可以订阅");
+    expect(pushed).toEqual([]);
+  });
+
+  it("resources/subscribe 收下名单里的 uri", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { calls, watch } = watchStub();
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 2, method: "resources/subscribe", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctxOf(bridge, { catalog: async () => catalog, subscriptions: watch }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    expect(response.result).toEqual({});
+    expect(calls).toEqual(["sub:heming://workspace/AGENTS.md"]);
+  });
+
+  it("名单外的 uri 订阅不了，并列出这个工作区有哪些", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { calls, watch } = watchStub();
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 3, method: "resources/subscribe", params: { uri: "heming://workspace/../x.md" } },
+      ctxOf(bridge, { catalog: async () => catalog, subscriptions: watch }),
+    );
+    if (!response || !("error" in response)) throw new Error("期望错误响应");
+    expect(response.error.code).toBe(MCP_ERROR.invalidParams);
+    expect(response.error.message).toContain("未知资源");
+    expect(response.error.message).toContain("heming://workspace/AGENTS.md");
+    expect(calls).toEqual([]);
+  });
+
+  it("没有订阅能力时两种方法都回 -32601，说清为什么", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const ctx = ctxOf(bridge, { catalog: async () => catalog });
+    const sub = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 4, method: "resources/subscribe", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctx,
+    );
+    if (!sub || !("error" in sub)) throw new Error("期望错误响应");
+    expect(sub.error.code).toBe(MCP_ERROR.methodNotFound);
+    expect(sub.error.message).toContain("没有跟踪资源变化");
+
+    const unsub = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 5, method: "resources/unsubscribe", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctx,
+    );
+    if (!unsub || !("error" in unsub)) throw new Error("期望错误响应");
+    expect(unsub.error.code).toBe(MCP_ERROR.methodNotFound);
+  });
+
+  it("取消订阅是幂等的（没订过也回成功）", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { calls, watch } = watchStub();
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 6, method: "resources/unsubscribe", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctxOf(bridge, { catalog: async () => catalog, subscriptions: watch }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    expect(response.result).toEqual({});
+    expect(calls).toEqual(["unsub:heming://workspace/AGENTS.md"]);
+  });
+
+  it("缺 uri 时回 -32602", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { watch } = watchStub();
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 7, method: "resources/subscribe", params: {} },
+      ctxOf(bridge, { catalog: async () => catalog, subscriptions: watch }),
+    );
+    if (!response || !("error" in response)) throw new Error("期望错误响应");
+    expect(response.error.code).toBe(MCP_ERROR.invalidParams);
+    expect(response.error.message).toContain("需要 uri");
+  });
+});

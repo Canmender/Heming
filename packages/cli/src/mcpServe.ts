@@ -11,6 +11,7 @@ import type { McpOptions } from "./args.js";
 import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
 import { createCliTooling } from "./tooling.js";
 import { collectCliMcpCatalog, describeCliMcpCatalog } from "./mcpCatalog.js";
+import { createMcpCatalogWatcher } from "./mcpWatch.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 
@@ -80,6 +81,46 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     catalog: () => collectCliMcpCatalog({ cwd }),
   };
 
+  /*
+   * 资源订阅（d.327）：客户端 `resources/subscribe` 之后，工作区里的 AGENTS.md 或命令文件
+   * 一变，就推一条 `notifications/resources/updated`。写 stdout 的回调放在这里，
+   * 因为只有这一层知道「协议通道是哪个流」。
+   */
+  ctx.notify = (message) => {
+    io.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+  };
+  const signatureOf = async (): Promise<string> => {
+    try {
+      const catalog = await collectCliMcpCatalog({ cwd });
+      return [
+        ...catalog.prompts.map((entry) => `p:${entry.name}`),
+        ...catalog.resources.map((entry) => `r:${entry.uri}`),
+      ].join("|");
+    } catch {
+      return "";
+    }
+  };
+  // 清单本身变了（新增/删掉命令文件）才通知刷新；内容改了由 resources/updated 负责。
+  let listSignature = await signatureOf();
+  const watcher = createMcpCatalogWatcher({
+    cwd: ctx.cwd,
+    onUpdated: (uri) => {
+      ctx.notify?.({ method: "notifications/resources/updated", params: { uri } });
+    },
+    onListChanged: () => {
+      void (async () => {
+        const next = await signatureOf();
+        if (next === listSignature) return;
+        listSignature = next;
+        ctx.notify?.({ method: "notifications/resources/list_changed", params: {} });
+        ctx.notify?.({ method: "notifications/prompts/list_changed", params: {} });
+      })().catch(() => {
+        // 推送失败不该影响服务：下一条 list 请求照样是新的。
+      });
+    },
+  });
+  ctx.subscriptions = watcher;
+
   // 启动信息写 stderr：stdout 是协议通道，混一行裸文本就会让客户端解析失败并断连。
   const names = describeMcpTools(ctx).map((tool) => tool.name);
   io.stderr.write(
@@ -122,6 +163,7 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     });
     return interrupted ? 130 : code;
   } finally {
+    watcher.close();
     (io.stdin as unknown as { destroy?: () => void }).destroy?.();
   }
 }

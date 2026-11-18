@@ -325,6 +325,17 @@ heming mcp serve --cwd D:/repo
 不认识的请求回 `-32601` 并点名支持的方法；通知（没有 `id`）**绝不回包**（回了会让客户端收到一条
 无法对应请求的响应）。
 
+### 资源订阅：改了就推
+
+`resources/subscribe` 收下之后，工作区里的文件一变就推 `notifications/resources/updated {"uri": …}`，
+客户端不必轮询、也不必重启；命令文件新增或删除会推 `resources/list_changed` 与
+`prompts/list_changed`（只有清单真的变了才推：内部比对前后签名）。
+
+- 只接受 `resources/list` 里真有的 URI，名单外回 `-32602` 并列出可订项；
+- 只监听工作区、`.heming`、`.heming/commands` 三个目录，**不递归**——工作区里的 `node_modules` 不值得盯；
+- 按需建 watcher：没人订阅时不占系统资源，退订到零或进程退出时全部关掉；
+- 推送只报「变了」，不报「变成什么」：客户端收到通知后自己 `resources/read`；
+- 断线期间的变化不补发，重连后读一次即可。
 ### stdout 是协议通道
 
 - stdout 只有 JSON-RPC 响应，一行一条；
@@ -338,7 +349,7 @@ heming mcp serve --cwd D:/repo
 | `-32700` | 这一行不是 JSON（坏消息不会断连，下一行照常处理）。 |
 | `-32600` | 不是对象 / `id` 类型非法（只接受字符串、数字、null）/ 缺 `method`。 |
 | `-32601` | 方法未知。 |
-| `-32602` | `tools/call` 的参数不合法：缺 `name`、`arguments` 不是对象、工具不存在；`prompts/get` 名字认不出；`resources/read` 的 URI 不在名单里。 |
+| `-32602` | `tools/call` 的参数不合法：缺 `name`、`arguments` 不是对象、工具不存在；`prompts/get` 名字认不出；`resources/read` / `resources/subscribe` 的 URI 不在 `resources/list` 名单里。 |
 | `-32603` | 我们自己的内部异常（客户端可重试）。 |
 
 ### 安全边界（与 `run` 完全同一条口径）
@@ -351,7 +362,7 @@ heming mcp serve --cwd D:/repo
 
 ### 已知留白
 
-- 只实现了 `tools` 能力：没有 `resources` / `prompts` / `sampling`（客户端要的是工具，不是我们的提示词）。
+- 只实现了 `tools` / `prompts` / `resources` 三组能力：没有 `sampling`（不让客户端反过来借我们的模型）、没有 `resources/templates`（路径模板对我们的静态文件没有意义）。
 - 请求串行处理：stdio 上并行回包时序难调，而单机文件工具没有并发收益。
 - `file_patch` 里的多个文件路径不做换算（补丁是一段文本，逐行改写会弄坏上下文），需要补丁时请用相对路径。
 - 没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。

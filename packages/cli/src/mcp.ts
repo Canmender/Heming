@@ -107,6 +107,30 @@ export interface McpContext {
    * `initialize` 里也就不会声明它们。
    */
   catalog?: () => Promise<McpCatalog>;
+  /**
+   * 资源的订阅登记（d.327）：客户端 `resources/subscribe` 之后，文件一变就该收到
+   * `notifications/resources/updated`。缺省 = 不跟踪变化，`resources/subscribe`
+   * 会明确回「这个服务没有跟踪资源变化」，而不是收下就装作答应了。
+   */
+  subscriptions?: McpResourceSubscriptions;
+  /**
+   * 主动推送一条 JSON-RPC 通知（没有 id，客户端不回包）。
+   *
+   * 只有 stdio 主循环知道自己往哪儿写，所以由它注入；纯协议层只负责组装消息。
+   */
+  notify?: (message: McpNotification) => void;
+}
+
+/** 一条服务端主动通知：`notifications/resources/updated` 之类。 */
+export interface McpNotification {
+  method: string;
+  params: Record<string, unknown>;
+}
+
+/** 订阅登记的最小接口（真正的 watcher 在 `mcpWatch.ts`，这里只认这两个动作）。 */
+export interface McpResourceSubscriptions {
+  subscribe(uri: string): void;
+  unsubscribe(uri: string): void;
 }
 
 /** 从 OpenAI 风格的 tools 数组里取出 `{type:"function", function:{...}}` 的 name/描述/参数。 */
@@ -167,6 +191,9 @@ function instructionsText(ctx: McpContext, catalogLine = ""): string {
         : "没有 run_command：要跑命令必须由用户用 --allow-danger 重新启动，这不是重试能解决的问题。",
     `当前工具：${tools.join("、") || "（无）"}。`,
     ...(catalogLine ? [catalogLine] : []),
+    ...(ctx.subscriptions
+      ? ["资源可以订阅：resources/subscribe 之后，工作区里的文件一变就会收到 notifications/resources/updated，不必轮询，也不必重启客户端。"]
+      : []),
   ].join("\n");
 }
 
@@ -283,8 +310,10 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
       const catalog = await catalogOf(ctx);
       const capabilities: Record<string, unknown> = { tools: { listChanged: false } };
       if (catalog) {
-        capabilities.prompts = { listChanged: false };
-        capabilities.resources = { listChanged: false, subscribe: false };
+        // listChanged 只在真会推送时才声明：答应了却不推，客户端会一直等。
+        const canPush = typeof ctx.notify === "function";
+        capabilities.prompts = { listChanged: canPush };
+        capabilities.resources = { listChanged: canPush, subscribe: ctx.subscriptions !== undefined };
       }
       return okResponse(id, {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
@@ -373,11 +402,51 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
         contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text }],
       });
     }
+    /*
+     * 订阅：客户端说「这个资源变了告诉我」。收下之前必须确认它真在名单里，
+     * 否则等于答应了一件不会发生的事（名单外的 URI 永远不会被推送）。
+     */
+    case "resources/subscribe": {
+      const catalog = await catalogOf(ctx);
+      if (!catalog) return noCatalog(id, "resources");
+      if (!ctx.subscriptions) {
+        return errorResponse(
+          id,
+          MCP_ERROR.methodNotFound,
+          "这个服务没有跟踪资源变化（没有开启订阅），resources/subscribe 收不了；请改用 resources/read 主动读",
+        );
+      }
+      const params = (request.params ?? {}) as { uri?: unknown };
+      const uri = typeof params.uri === "string" ? params.uri.trim() : "";
+      if (!uri) return errorResponse(id, MCP_ERROR.invalidParams, "resources/subscribe 需要 uri");
+      const known = catalog.resources.find((entry) => entry.uri === uri);
+      if (!known) {
+        const available = catalog.resources.map((entry) => entry.uri).join("、") || "无";
+        return errorResponse(
+          id,
+          MCP_ERROR.invalidParams,
+          `未知资源：${uri}（只能订阅 resources/list 里有的；这个工作区有：${available}）`,
+        );
+      }
+      ctx.subscriptions.subscribe(uri);
+      return okResponse(id, {});
+    }
+    case "resources/unsubscribe": {
+      if (!ctx.subscriptions) {
+        return errorResponse(id, MCP_ERROR.methodNotFound, "这个服务没有跟踪资源变化，没有什么可取消的");
+      }
+      const params = (request.params ?? {}) as { uri?: unknown };
+      const uri = typeof params.uri === "string" ? params.uri.trim() : "";
+      if (!uri) return errorResponse(id, MCP_ERROR.invalidParams, "resources/unsubscribe 需要 uri");
+      // 取消订阅是幂等的：本来没订也回成功，客户端断线重连时不必先查一遍。
+      ctx.subscriptions.unsubscribe(uri);
+      return okResponse(id, {});
+    }
     default:
       return errorResponse(
         id,
         MCP_ERROR.methodNotFound,
-        `未知方法：${method}（本服务支持 initialize / ping / tools/list / tools/call / prompts/list / prompts/get / resources/list / resources/read）`,
+        `未知方法：${method}（本服务支持 initialize / ping / tools/list / tools/call / prompts/list / prompts/get / resources/list / resources/read / resources/subscribe / resources/unsubscribe）`,
       );
   }
 }
