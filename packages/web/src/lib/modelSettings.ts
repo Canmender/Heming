@@ -26,8 +26,16 @@ export function parseSettingsValue(raw: string): string {
   return text;
 }
 
-/** 保存一项：有值就 set，清空就 reset（`settings set` 不接受空值）。 */
-export function settingArgs(key: string, value: string): string[] {
+/**
+ * `settings list --json` 里的 `value` 是原始值（字符串 / 布尔 / 数组），
+ * 不是 `settings get` 那种 JSON：这里只取字符串，别的类型一律当没设置。
+ */
+export function textSetting(values: ReadonlyMap<string, unknown>, key: string): string {
+  const value = values.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** 保存一项：有值就 set，清空就 reset（`settings set` 不接受空值）。 */export function settingArgs(key: string, value: string): string[] {
   const clean = value.trim();
   return clean ? ["settings", "set", key, clean] : ["settings", "reset", key];
 }

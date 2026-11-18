@@ -1118,8 +1118,16 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     const { calls } = installBridge(
       {},
       {
-        "settings get vision --json": { ok: true, stdout: '""\n', stderr: "" },
-        "settings get imageGen --json": { ok: true, stdout: '"relay/relay-draw"\n', stderr: "" },
+        // 看图 / 画图这两项现在从这份表里读，不再各发一条 `settings get`。
+        "settings list --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            { key: "vision", type: "string", value: "", default: "" },
+            { key: "visionEffort", type: "string", value: "", default: "" },
+            { key: "imageGen", type: "string", value: "relay/relay-draw", default: "" },
+          ]),
+          stderr: "",
+        },
       },
     );
     useLlmStore.setState({
@@ -1153,6 +1161,35 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
 
     fireEvent.click(screen.getByRole("button", { name: "关掉" }));
     await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "imageGen"]));
+  });
+
+  it("看图与画图的那三项不另外发命令，一次 settings list 就够了", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        "settings list --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            { key: "vision", type: "string", value: "deepseek/deepseek-chat", default: "" },
+            { key: "visionEffort", type: "string", value: "high", default: "" },
+            { key: "imageGen", type: "string", value: "", default: "" },
+          ]),
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+
+    fireEvent.click(await screen.findByText("看图与画图模型"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("看图模型")).toHaveValue("deepseek/deepseek-chat"),
+    );
+    await waitFor(() => expect(screen.getByLabelText("看图模型的思考档")).toHaveValue("high"));
+
+    const perSettingGets = calls.filter(
+      (args) => args[0] === "settings" && args[1] === "get",
+    );
+    expect(perSettingGets).toEqual([]);
   });
 
   it("模型速度档：内核支持时才摆出来，选了值才发 model tier", async () => {

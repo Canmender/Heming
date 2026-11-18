@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.306.4.120.12",
+    "date": "2026-11-18",
+    "title": "看图与画图那三项不再各发一条命令，一次读全",
+    "bullets": [
+      "新增「看图与画图的那三项不另外发命令，一次 settings list 就够了」：设置表里给 `vision` / `visionEffort` 赋值，断言两个下拉都回填了，且 `calls` 里**没有任何** `settings get`。",
+      "新 `textSetting` 单测：带空格的字符串取回原值，布尔、数组、缺失都取空串。",
+      "全量 `pnpm --filter @heming/web test`：**443 个测试文件 / 6353 个用例全绿**。",
+      "typecheck 0 错；`node scripts/design-audit.mjs` 全门槛通过。",
+      "只认字符串：内核现在这三项就是字符串，将来若改成对象（比如带参数），这里要跟着解析。",
+      "`loadGlobals` 那四条仍是独立命令（`model suffix` 之类没有合并入口）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "打开模型页，第二波请求里有七个进程，其中三个只做一件事：问「看图模型」「思考档」「画图模型」当前是什么。可这三项的值本来就在同一波的 `settings list --json` 里——那是整张设置表，一次就全给了。等于同样的答案问了四遍。",
+      "做了什么",
+      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/modelSettings.ts` | 新增 `textSetting(values, key)`：从设置表里取字符串值，布尔/数组/缺失都当没设置 || `packages/web/src/components/ModelPage.tsx` `loadSettings` | 读完设置表顺手写这三项，不再单独发 `settings get` || 同一文件 `loadGlobals` | 只剩 `model suffix` / `model compact` / `model context-cap` / `model` 四条 || 保存看图、画图设置之后 | 同时重读设置表与这四条，改完的值当场生效（原来只重读四条） |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.305.4.120.12",
     "date": "2026-11-18",
     "title": "知道模型就别再摆骨架：模型列表不再等来源读完",

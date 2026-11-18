@@ -105,7 +105,7 @@ import {
 } from "../lib/modelGlobals.js";
 import { GlobalModelSettings } from "./model/GlobalModelSettings.js";
 import { ImageModelSettings } from "./model/ImageModelSettings.js";
-import { parseSettingsValue } from "../lib/modelSettings.js";
+import { textSetting } from "../lib/modelSettings.js";
 import { supportsModelTier } from "../lib/modelTier.js";
 import {
   PROVIDER_MODELS_CHOICE_HINT,
@@ -508,7 +508,13 @@ export function ModelPage() {
       once("settings", async () => {
         if (!cli) return;
         const result = await cli.cli(["settings", "list", "--json"]);
-        setSettingValues(parseSettingValues(result.stdout || ""));
+        const values = parseSettingValues(result.stdout || "");
+        setSettingValues(values);
+        // 看图/画图这三项本来各发一条 `settings get`，其实就在这份表里：
+        // 一次读全，省下三个进程；值原样是字符串，取不到就是没设置。
+        setVisionModel(textSetting(values, "vision"));
+        setVisionEffort(textSetting(values, "visionEffort"));
+        setImageGenModel(textSetting(values, "imageGen"));
       }),
     [cli, once],
   );
@@ -577,22 +583,16 @@ export function ModelPage() {
 
   const loadGlobals = useCallback(async () => {
     if (!cli) return;
-    const [suffix, compact, cap, vision, visionEffort, imageGen, modelUsage] = await Promise.all([
+    const [suffix, compact, cap, modelUsage] = await Promise.all([
       cli.cli(["model", "suffix"]),
       cli.cli(["model", "compact"]),
       cli.cli(["model", "context-cap"]),
-      cli.cli(["settings", "get", "vision", "--json"]),
-      cli.cli(["settings", "get", "visionEffort", "--json"]),
-      cli.cli(["settings", "get", "imageGen", "--json"]),
       cli.cli(["model"]),
     ]);
     setSuffix(parseSuffix(suffix.stdout || ""));
     setCompact(parseCompact(compact.stdout || ""));
     setContextCap(parseContextCap(cap.stdout || ""));
-    setVisionModel(parseSettingsValue(vision.stdout || ""));
-    setVisionEffort(parseSettingsValue(visionEffort.stdout || ""));
     setTierSupported(supportsModelTier(`${modelUsage.stdout || ""}${modelUsage.stderr || ""}`));
-    setImageGenModel(parseSettingsValue(imageGen.stdout || ""));
   }, [cli]);
 
   /** 画图模型不在默认目录里：单独问一次网关的 `?kind=image`，问不到就当没有。 */
@@ -1426,7 +1426,7 @@ export function ModelPage() {
                 cliReady={cli !== null}
                 onRun={async (title, args) => {
                   const result = await runDetailed(title, args);
-                  if (result.ok) await loadGlobals();
+                  if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
                   return result.ok;
                 }}
               />
@@ -1441,7 +1441,7 @@ export function ModelPage() {
                 cliReady={cli !== null}
                 onRun={async (title, args) => {
                   const result = await runDetailed(title, args);
-                  if (result.ok) await loadGlobals();
+                  if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
                   return result.ok;
                 }}
               />
