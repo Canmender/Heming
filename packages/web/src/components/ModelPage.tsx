@@ -359,6 +359,10 @@ export function ModelPage() {
     Record<string, { chat: string; plan: PlanKind; models: ProviderModel[]; note: string }>
   >({});
   const [showLoading, setShowLoading] = useState<string | null>(null);
+  /** 来源的连通性测试结论，按来源 id 记：行上直接写「通过 · 1.2 秒」或「连不上」。 */
+  const [testState, setTestState] = useState<
+    Record<string, { state: "running" | "ok" | "bad"; label: string; detail: string }>
+  >({});
   const [live, setLive] = useState("");
   const liveRef = useRef("");
   const [runId, setRunId] = useState<string | null>(null);
@@ -1133,6 +1137,28 @@ export function ModelPage() {
       await readShowIntoCache(id).catch(() => {});
       await loadProviders();
     }
+    return result;
+  };
+
+  /**
+   * 点一下「测试」就在这里给结论，不用去下面翻输出。
+   *
+   * 原来点完只是把内核输出塞进页面底部的终端面板：想知道「通不通」得自己找那句话，
+   * 测三个来源就要来回看三次。结论写回行上，失败时把原因挂在悬停里。
+   */
+  const testProvider = async (id: string) => {
+    const startedAt = Date.now();
+    setTestState((current) => ({ ...current, [id]: { state: "running", label: "正在测…", detail: "正在向这个来源发一个很小的请求。" } }));
+    const result = await runDetailed(`测试 ${id}`, ["provider", "test", id]);
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    setTestState((current) => ({
+      ...current,
+      [id]: {
+        state: result.ok ? "ok" : "bad",
+        label: result.ok ? `通过 · ${seconds} 秒` : "连不上",
+        detail: providerTestVerdict(result.ok, result.text),
+      },
+    }));
     return result;
   };
 
@@ -2010,6 +2036,22 @@ export function ModelPage() {
                               备用 {row.fallback.join(" → ")}
                             </span>
                           )}
+                          {testState[row.id] && (
+                            // 测试结论就写在行上：通过带耗时，失败写「连不上」，原因在悬停里。
+                            <span
+                              role="status"
+                              className={`block truncate ui-caption ${
+                                testState[row.id].state === "ok"
+                                  ? "text-success"
+                                  : testState[row.id].state === "bad"
+                                    ? "text-danger"
+                                    : "text-muted"
+                              }`}
+                              title={testState[row.id].detail}
+                            >
+                              {testState[row.id].label}
+                            </span>
+                          )}
                         </span>
                         <Button
                           type="button"
@@ -2024,7 +2066,8 @@ export function ModelPage() {
                           type="button"
                           size="sm" variant="ghost"
                           disabled={!cli}
-                          onClick={() => void run("测试来源", ["provider", "test", row.id])}
+                          busy={testState[row.id]?.state === "running"}
+                          onClick={() => void testProvider(row.id)}
                         >
                           测试
                         </Button>

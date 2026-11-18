@@ -862,6 +862,38 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("点「测试」就在行上给结论：通过带耗时，失败写「连不上」", async () => {
+    installBridge(
+      {},
+      { "provider test mock": { ok: true, stdout: "✓ mock · 1 model", stderr: "" } },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+
+    fireEvent.click(screen.getByRole("button", { name: "测试" }));
+    const passed = await screen.findByRole("status");
+    expect(passed.textContent).toMatch(/^通过 · \d\.\d 秒$/);
+    expect(passed.getAttribute("title")).toMatch(/连通正常/);
+    expect(passed.className).toContain("text-success");
+  });
+
+  it("测试失败时行上写「连不上」，原因挂在悬停里", async () => {
+    installBridge(
+      {},
+      { "provider test mock": { ok: false, stdout: "", stderr: "401 Unauthorized" } },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+
+    fireEvent.click(screen.getByRole("button", { name: "测试" }));
+    const failed = await screen.findByRole("status");
+    expect(failed.textContent).toBe("连不上");
+    expect(failed.getAttribute("title")).toContain("401 Unauthorized");
+    expect(failed.className).toContain("text-danger");
+  });
+
   it("来源模型清单：显示这个来源暴露的模型，增删与整套切换都走 provider models", async () => {
     const { calls } = installBridge(
       {},
