@@ -44,6 +44,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `heming exec --output-format stream-json <prompt...>` | 非交互执行，stdout 每行一条事件（见下文事件契约）。 |
 | `heming exec -` | 非交互执行，指令从 stdin 读。 |
 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | 以 MCP 服务端身份在 stdio 上讲 JSON-RPC，把同一套文件工具交给别的编辑器/客户端（不调模型）。见下文「MCP 服务」。 |
+| `heming sessions [--json] [--cwd <dir>]` | 列出本机的会话存档（id / 时间 / 条数 / 最后一句），不调模型。见下文「会话：接着上次聊」。 |
 | `heming --version` | 打印 `@heming/cli <版本>`。 |
 | `heming --help` | 用法与能力边界。 |
 
@@ -58,6 +59,9 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
 | `--base-url <url>` | OpenAI 兼容端点，默认 `https://api.openai.com/v1`。必须以 `http://` / `https://` 开头。 |
 | `--api-key <key>` | API Key，优先于环境变量。 |
+| `--continue` | 接着这个工作目录下最近一次会话聊（没有同目录的就接全局最近一次）。 |
+| `--resume <id>` | 接着指定会话聊。支持唯一前缀（如 `--resume 20261118-14`）；匹配到多份会列出来让你挑。 |
+| `--session-dir <dir>` | 会话存档目录，默认 `~/.heming/cli-sessions`（也可用环境变量 `HEMING_CLI_SESSION_DIR`）。 |
 
 选项同时支持 `--x value` 与 `--x=value`；`--` 之后的所有内容都按 prompt 处理
 （prompt 里出现 `--foo` 时用 `--` 保命）。未知选项是用法错误，不会被静默忽略。
@@ -99,6 +103,7 @@ stdout **只有一个 JSON 对象**（一行），所有进度/日志都在 stde
   "writes": ["D:/repo/notes.md"],
   "usage": { "input": 1800, "output": 240, "cacheRead": 0 },
   "durationMs": 4321,
+  "sessionId": "20261118-144230-ab12",
   "error": "仅失败时出现"
 }
 ```
@@ -116,6 +121,7 @@ stdout **只有一个 JSON 对象**（一行），所有进度/日志都在 stde
 | `usage.input` / `usage.output` | 各轮上报的 token 之和；供应商没上报时是 `0`。 |
 | `usage.cacheRead` / `usage.cacheWrite` | 仅当网关上报过缓存口径时出现（`0` 与「没上报」靠字段是否存在区分）。 |
 | `durationMs` | 从启动到收口的墙钟耗时。 |
+| `sessionId` | 本次会话的存档 id。下次 `--resume <id>` 就接着这份聊（见「会话：接着上次聊」）。 |
 | `error` | 运行级失败原因（仅 `ok: false` 时出现）。 |
 
 ## `--output-format stream-json` 事件契约
@@ -156,6 +162,64 @@ prompt 位置写 `-` 时，指令从 stdin 读（`git diff | heming exec -`、`c
 
 `exec --json` 被中断时仍会输出一个 JSON 对象（`ok: false` + `error`），随后以 `130` 退出。
 
+## 会话：接着上次聊
+
+`run` 默认是单轮的：跑完一次就忘掉上一次说过什么。要让终端里的和鸣接着上一轮，
+用 `--continue` 或 `--resume`；`sessions` 用来看有哪些会话可接。
+
+### 三条用法
+
+```bash
+# 接这个目录下最近一次会话
+pnpm --silent cli run --continue "把刚才那两个失败用例修掉"
+
+# 接指定会话（支持唯一前缀）
+pnpm --silent cli run --resume 20261118-144230-ab12 "继续"
+
+# 看有哪些会话
+pnpm --silent cli sessions
+pnpm --silent cli sessions --json --cwd D:/repo
+```
+
+`heming run --continue "…"` 与 `heming run "…" --continue` 等价。
+
+### 存档里有什么
+
+- **只有文字问答**：你的提问 + 模型的最终回答。工具调用、中间话术、思考过程不进存档
+  ——它们体积大，而且旧的工具结果里提到的文件可能已经不在当前目录，重放只会误导下一轮。
+- **一个会话一个文件**：`<dir>/<id>.json`，`<id>` 形如 `20261118-144230-ab12`。
+  写盘用「临时文件 + rename」，不会留下半截 JSON。
+- **容量**：最多 50 个会话（按更新时间淘汰）、单会话最多 200 条轮次、单条最多 20000 字
+  （超了会截断并在存档里注明）。
+- **坏存档不会挡住运行**：读侧全部容错，坏文件跳过、目录不存在当空；写失败只在 stderr
+  提示一句，本次结果与退出码都不受影响。
+
+### 存档放哪
+
+默认 `~/.heming/cli-sessions/`，按优先级：
+
+1. `--session-dir <dir>`
+2. 环境变量 `HEMING_CLI_SESSION_DIR`
+3. `~/.heming/cli-sessions`（Windows 上是 `%USERPROFILE%\.heming\cli-sessions`）
+
+`--continue` 优先接**同一工作目录**下最近一次会话，没有同目录的才退到全局最近一次。
+`--resume` 只认 id（整串或唯一前缀），不看工作目录。
+
+### 脚本里接着跑
+
+`heming exec --json` 的返回值多一个 `sessionId` 字段：
+
+```bash
+sid=$(pnpm --silent cli exec --json "读一遍仓库结构" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).sessionId))')
+pnpm --silent cli exec --json --resume "$sid" "按刚才看到的，改一下构建脚本"
+```
+
+### 已知留白
+
+- 只接文字问答：`--continue` 后模型看到的是「你问过什么、它答了什么」，不是「它用过哪些工具」。
+- 不做跨机器同步：存档是本机文件，换机器或清掉目录就没了。
+- `--continue` 只按工作目录匹配，不判断「是不是同一件事」；同一目录下两个不相干的会话会被当成一条线。
+- 中断（Ctrl+C）那一轮只留提问：下次接上时模型知道你问过什么，但不知道当时答到哪。
 ## MCP 服务：`heming mcp serve`
 
 同一个可执行文件换个身份：不做智能体，只把本机文件工具按

@@ -72,6 +72,8 @@ export interface ExecJson {
   };
   durationMs: number;
   error?: string;
+  /** 本次会话的存档 id：下次 `--resume <id>` 就接着这份聊（单轮模式也有）。 */
+  sessionId?: string;
 }
 
 export interface AgentRunOptions {
@@ -91,6 +93,15 @@ export interface AgentRunOptions {
   onProgress?: (line: string) => void;
   /** 结构化事件（`--output-format stream-json` 时写到 stdout）。缺省不发。 */
   onEvent?: (event: CliEvent) => void;
+  /**
+   * 上一次会话的历史（`--continue` / `--resume` 载入的文字问答）。
+   *
+   * 缺省是空数组，也就是原来的单轮语义。这里只接「文字问答」，不重放工具调用：
+   * 旧的工具结果里可能提到某个已经不在当前目录的文件，重放反而让模型照着旧事实干活。
+   */
+  history?: ChatMessage[];
+  /** 本次会话 id（会写进 `exec --json`，供脚本接着 `--resume`）。 */
+  sessionId?: string;
 }
 
 export interface AgentRunOutcome {
@@ -255,8 +266,8 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
   const deps: TriggerDeps = {
     getProfile: () => options.profile,
     getPrompt: () => systemPrompt,
-    // CLI 是单轮命令：没有历史、没有会话。要接上下文就多次调用或自己拼 prompt。
-    fetchHistory: async (): Promise<ChatMessage[]> => [],
+    // 单轮模式返回空数组；`--continue` / `--resume` 时是上一次会话的文字问答。
+    fetchHistory: async (): Promise<ChatMessage[]> => options.history ?? [],
     send: () => {},
     streamChat: chat,
     onLocalDelta: (_streamId, accumulated) => stream(accumulated),
@@ -402,6 +413,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
       },
       durationMs: Math.max(0, Date.now() - startedAt),
       ...(error !== undefined ? { error } : {}),
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     };
     return { json, settled, capHit };
   })();

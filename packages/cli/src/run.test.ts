@@ -194,4 +194,53 @@ describe("startAgentRun", () => {
     }).done;
     expect(outcome.json).toMatchObject({ ok: true, stopReason: "ok" });
   });
+
+  it("传入 history 时，上一轮问答在同一份 messages 里（--continue/--resume 的数据通路）", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "按上次的结论继续做完了";
+    };
+    const outcome = await startAgentRun({
+      prompt: "继续",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      history: [
+        { role: "user", content: "把登录改成扫码" },
+        { role: "assistant", content: "改好了" },
+      ],
+      sessionId: "20261118-144230-ab12",
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(outcome.json.sessionId).toBe("20261118-144230-ab12");
+    const messages = seen[0] ?? [];
+    expect(messages.some((m) => m.role === "user" && m.content === "把登录改成扫码")).toBe(true);
+    expect(messages.some((m) => m.role === "assistant" && m.content === "改好了")).toBe(true);
+    // 本轮提问在最后：历史在前、当前在后，模型才知道「继续」是在接着什么。
+    expect(messages.at(-1)?.content).toBe("继续");
+  });
+
+  it("不传 history 时保持单轮语义：没有上一轮的东西混进来", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "好";
+    };
+    await startAgentRun({
+      prompt: "第一次",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+    }).done;
+    const roles = (seen[0] ?? []).map((m) => m.role);
+    expect(roles.filter((role) => role === "user")).toHaveLength(1);
+  });
 });

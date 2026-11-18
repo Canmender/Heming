@@ -14,6 +14,19 @@ import { resolveModelConfig } from "./config.js";
 import { createEventSink } from "./events.js";
 import { startMcpServe } from "./mcpServe.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
+import {
+  appendTurn,
+  describeSession,
+  latestSession,
+  listSessions,
+  newSessionId,
+  resolveSession,
+  sessionDir,
+  summarize,
+  toHistory,
+  writeSession,
+  type SessionRecord,
+} from "./sessions.js";
 import { readPromptFromStdin } from "./stdin.js";
 import { MAX_TOOL_ROUNDS } from "../../../packages/web/src/lib/agentStream.js";
 import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
@@ -27,6 +40,7 @@ const USAGE = `用法：
   heming mcp serve [--cwd <dir>] [--allow-danger]
                                              按 MCP（Model Context Protocol）把文件工具
                                              暴露给别的编辑器：协议消息走 stdin/stdout
+  heming sessions [--json] [--cwd <dir>]     列出本机的会话存档（id / 时间 / 条数 / 最后一句）
   heming --version | --help
 
 常用选项：
@@ -34,6 +48,9 @@ const USAGE = `用法：
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
+  --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
+  --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
+  --session-dir <dir>  会话存档目录（默认 ~/.heming/cli-sessions）
   --model <id>         模型 id（默认 gpt-4o-mini）
   --base-url <url>     OpenAI 兼容端点（默认 https://api.openai.com/v1）
   --api-key <key>      API Key（优先于环境变量）
@@ -42,6 +59,7 @@ const USAGE = `用法：
   HEMING_API_KEY / OPENAI_API_KEY          必填
   HEMING_BASE_URL / OPENAI_BASE_URL        可选
   HEMING_MODEL / OPENAI_MODEL              可选
+  HEMING_CLI_SESSION_DIR                   可选（会话存档目录，同 --session-dir）
 
 退出码：0 成功（mcp serve 在 stdin 关闭后也返回 0）；1 运行失败；2 用法或配置错误；130 Ctrl+C 中断。`;
 
@@ -62,6 +80,14 @@ MCP 服务（给别的编辑器用）：
                                           诊断信息走 stderr；不加 --allow-danger 就没有
                                           run_command（调了回「未执行」）。
 
+会话（接着上次聊）：
+  heming run --continue "接着刚才那步继续"   接这个工作目录下最近一次会话
+  heming run --resume 20261118-144230-ab12 "继续"  接指定会话（支持唯一前缀）
+  heming sessions                         看有哪些会话（id / 时间 / 条数 / 最后一句）
+  说明：存档只含文字问答（不含工具调用），默认放在 ~/.heming/cli-sessions/；
+        用 --session-dir 或 HEMING_CLI_SESSION_DIR 换目录。
+        --continue 优先接同一工作目录的最近一次，没有才退到全局最近一次。
+
 机器可读输出：
   heming exec --json ...                  stdout 恰好一个 JSON 对象（跑完才输出）
   heming exec --output-format stream-json ...  stdout 每行一条事件：start / round /
@@ -74,6 +100,8 @@ MCP 服务（给别的编辑器用）：
   HEMING_API_KEY=sk-... pnpm cli --allow-danger "跑一下测试并修掉失败"
   heming mcp serve --cwd .               让 Cursor / Claude Code 之类的客户端通过 MCP
                                          调用本机的文件工具（不需要模型凭据）
+  pnpm cli --continue "把刚才那两个失败用例修掉"
+  pnpm cli --resume 20261118-144230-ab12 "继续"
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -94,6 +122,12 @@ function writeErr(text: string): void {
   process.stderr.write(text);
 }
 
+/** 比较两个工作目录是否同一个：统一正斜杠、去末尾斜杠，Windows 下忽略大小写。 */
+function normalizeCwd(value: string): string {
+  const resolved = path.resolve(value.trim() || ".").replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
 async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
@@ -106,6 +140,35 @@ async function main(argv: string[]): Promise<number> {
   }
   if (parsed.action === "version") {
     process.stdout.write(`@heming/cli ${readVersion()}\n`);
+    return 0;
+  }
+
+  /**
+   * `sessions`：只读存档目录。
+   *
+   * 空目录不是错误：第一次用的人正是最需要看「还没有会话」这句话的时候，
+   * 所以给一句怎么产生第一条的提示，退出码仍是 0。
+   */
+  if (parsed.action === "sessions") {
+    const dir = sessionDir(parsed.options.sessionDir);
+    const records = await listSessions(dir);
+    const cwdFilter = parsed.options.cwd;
+    const filtered = cwdFilter
+      ? records.filter((record) => normalizeCwd(record.cwd) === normalizeCwd(cwdFilter))
+      : records;
+    if (parsed.options.json) {
+      process.stdout.write(`${JSON.stringify(filtered.map(summarize), null, 2)}\n`);
+      return 0;
+    }
+    if (filtered.length === 0) {
+      const scope = cwdFilter ? `这个目录（${cwdFilter}）下` : "本机";
+      writeErr(`[heming] ${scope}还没有会话存档（目录：${dir}）。跑一次 heming run 就会有一份。\n`);
+      return 0;
+    }
+    process.stdout.write(`[heming] 会话存档（目录：${dir}，共 ${filtered.length} 条）：\n`);
+    for (const record of filtered) {
+      process.stdout.write(`${describeSession(record)}\n`);
+    }
     return 0;
   }
 
@@ -147,6 +210,28 @@ async function main(argv: string[]): Promise<number> {
     return failEarly(`--cwd 目录不存在：${cwd}`);
   }
 
+  /**
+   * 会话存档：`--resume <id>` / `--continue` 决定接哪一份，都没给就是新会话。
+   *
+   * 读存档不往外抛（sessions.ts 全部 try-catch）：接不上最多等于回到单轮模式，
+   * 但 `--resume` 写错了要当场说清楚，否则用户会以为上下文进去了。
+   */
+  const sessionRoot = sessionDir(options.sessionDir);
+  let prior: SessionRecord | null = null;
+  if (options.resume !== undefined) {
+    const resolvedSession = await resolveSession(sessionRoot, options.resume);
+    if (!resolvedSession.ok) return failEarly(resolvedSession.error);
+    prior = resolvedSession.record;
+  } else if (options.continueSession) {
+    prior = await latestSession(sessionRoot, cwd);
+    if (!prior) {
+      return failEarly(
+        `--continue 没找到可接的会话（目录：${sessionRoot}）。先跑一次 heming run，或不带 --continue 开一个新的。`,
+      );
+    }
+  }
+  const sessionId = prior?.id ?? newSessionId();
+
   const resolved = resolveModelConfig(options);
   if (!resolved.ok) {
     return failEarly(resolved.error);
@@ -171,11 +256,16 @@ async function main(argv: string[]): Promise<number> {
   });
   /** 已写出的最后一个字符：结束后补换行用（回答本身不一定以换行结尾）。 */
   let lastChar = "";
+  if (prior) {
+    writeErr(`[heming] 接着会话 ${prior.id}（已有 ${prior.turns.length} 条问答）\n`);
+  }
   const handle = startAgentRun({
     prompt,
     cwd,
     profile,
     allowDanger: options.allowDanger,
+    history: toHistory(prior),
+    sessionId,
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
     ...(jsonMode
       ? {}
@@ -237,6 +327,21 @@ async function main(argv: string[]): Promise<number> {
       `${outcome.json.toolCalls.length} 次工具调用，写入 ${outcome.json.writes.length} 个文件，` +
       `用时 ${(outcome.json.durationMs / 1000).toFixed(1)}s\n`,
   );
+
+  // 存档：只放文字问答，失败也只说一句——stdout 契约和退出码都已经定了，不该被存档影响。
+  try {
+    const record = appendTurn(prior, {
+      id: sessionId,
+      cwd,
+      model: resolved.config.model,
+      prompt,
+      answer: result.text ?? "",
+    });
+    await writeSession(sessionRoot, record);
+    writeErr(`[heming] 会话 ${sessionId}（接着聊：heming run --continue，或 --resume ${sessionId}）\n`);
+  } catch (error) {
+    writeErr(`[heming] 会话没有存下来：${error instanceof Error ? error.message : String(error)}\n`);
+  }
 
   return outcomeExitCode(outcome, interrupted);
 }

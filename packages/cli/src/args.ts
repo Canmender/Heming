@@ -32,6 +32,21 @@ export interface PromptOptions {
   model?: string;
   baseUrl?: string;
   apiKey?: string;
+  /** 接上一次会话（当前工作目录下最近一次）。 */
+  continueSession: boolean;
+  /** 显式接某个会话：整串 id 或唯一前缀。 */
+  resume?: string;
+  /** 存档目录（缺省 `~/.heming/cli-sessions`，也可用 HEMING_CLI_SESSION_DIR）。 */
+  sessionDir?: string;
+}
+
+/** `heming sessions` 的选项：只列存档，不调模型。 */
+export interface SessionsOptions {
+  /** stdout 输出 JSON 数组（给脚本用），否则是一张给人看的表。 */
+  json: boolean;
+  /** 只看这个目录下跑过的会话。 */
+  cwd?: string;
+  sessionDir?: string;
 }
 
 export interface McpOptions {
@@ -46,6 +61,7 @@ export type ParsedArgs =
   | { ok: true; action: "version" }
   | { ok: true; action: "run"; options: PromptOptions }
   | { ok: true; action: "mcp"; options: McpOptions }
+  | { ok: true; action: "sessions"; options: SessionsOptions }
   | { ok: false; error: string };
 
 /** 需要取值的选项：值不能是另一个选项（`--cwd --json` 是写错了，不该把 `--json` 当目录）。 */
@@ -60,7 +76,7 @@ function takeValue(argv: string[], index: number, inline: string | undefined): {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  let command: "run" | "exec" | "mcp" | null = null;
+  let command: "run" | "exec" | "mcp" | "sessions" | null = null;
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
@@ -69,6 +85,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let model: string | undefined;
   let baseUrl: string | undefined;
   let apiKey: string | undefined;
+  let continueSession = false;
+  let resume: string | undefined;
+  let sessionDir: string | undefined;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -126,6 +145,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
           allowDanger = true;
           break;
         }
+        case "continue": {
+          if (inline !== undefined) return { ok: false, error: "--continue 不接受取值（直接写 --continue 即可）" };
+          continueSession = true;
+          break;
+        }
+        case "resume":
+        case "session-dir": {
+          const taken = takeValue(argv, i, inline);
+          i = taken.next;
+          if (taken.value === undefined || taken.value.trim() === "") {
+            return { ok: false, error: `--${name} 需要一个值（例如 --${name} <值>）` };
+          }
+          if (name === "resume") resume = taken.value;
+          else sessionDir = taken.value;
+          break;
+        }
         case "cwd":
         case "max-rounds":
         case "model":
@@ -162,17 +197,53 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
 
     if (command === null) {
-      if (arg === "run" || arg === "exec" || arg === "mcp") {
+      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions") {
         command = arg;
         continue;
       }
-      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp，用 --help 查看用法）` };
+      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions，用 --help 查看用法）` };
     }
     promptParts.push(arg);
   }
 
   if (command === null) {
-    return { ok: false, error: "缺少命令（用 run、exec 或 mcp）" };
+    return { ok: false, error: "缺少命令（用 run、exec、mcp 或 sessions）" };
+  }
+
+  /**
+   * `sessions`：只列存档，不调模型。
+   *
+   * 与 run/exec 的选项在这里一律拒绝——静默忽略会让人以为 `--model` 之类
+   * 能筛出「某个模型跑过的会话」，而它其实什么都没做。
+   */
+  if (command === "sessions") {
+    if (promptParts.length > 0) {
+      return { ok: false, error: "sessions 不接受位置参数（它只列会话；要看某一份用 run --resume）" };
+    }
+    const notForSessions: string[] = [];
+    if (outputFormat === "stream-json") notForSessions.push("--output-format stream-json");
+    if (allowDanger) notForSessions.push("--allow-danger");
+    if (maxRounds !== undefined) notForSessions.push("--max-rounds");
+    if (model !== undefined) notForSessions.push("--model");
+    if (baseUrl !== undefined) notForSessions.push("--base-url");
+    if (apiKey !== undefined) notForSessions.push("--api-key");
+    if (continueSession) notForSessions.push("--continue");
+    if (resume !== undefined) notForSessions.push("--resume");
+    if (notForSessions.length > 0) {
+      return {
+        ok: false,
+        error: `sessions 不接 ${notForSessions.join(" / ")}（它只列存档，不跑模型也不接会话）`,
+      };
+    }
+    return {
+      ok: true,
+      action: "sessions",
+      options: {
+        json,
+        ...(cwd !== undefined ? { cwd } : {}),
+        ...(sessionDir !== undefined ? { sessionDir } : {}),
+      },
+    };
   }
 
   /**
@@ -196,6 +267,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (model !== undefined) notForMcp.push("--model");
     if (baseUrl !== undefined) notForMcp.push("--base-url");
     if (apiKey !== undefined) notForMcp.push("--api-key");
+    if (continueSession) notForMcp.push("--continue");
+    if (resume !== undefined) notForMcp.push("--resume");
+    if (sessionDir !== undefined) notForMcp.push("--session-dir");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -215,6 +289,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (command === "run" && json) {
     return { ok: false, error: "run 不支持 --json；需要机器可读结果请用 exec --json（要事件流用 --output-format stream-json）" };
   }
+  if (continueSession && resume !== undefined) {
+    return { ok: false, error: "--continue 与 --resume 只能选一个：前者接「这个目录下最近一次」，后者接指定会话" };
+  }
 
   return {
     ok: true,
@@ -226,11 +303,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
       json,
       fromStdin,
       allowDanger,
+      continueSession,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(maxRounds !== undefined ? { maxRounds } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(baseUrl !== undefined ? { baseUrl } : {}),
       ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(resume !== undefined ? { resume } : {}),
+      ...(sessionDir !== undefined ? { sessionDir } : {}),
     },
   };
 }

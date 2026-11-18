@@ -202,3 +202,86 @@ describe("parseArgs：mcp serve（d.288）", () => {
     }
   });
 });
+
+/** 窄化断言：解析成功且是 listings 命令。 */
+function expectSessions(argv: string[]) {
+  const parsed = parseArgs(argv);
+  if (!parsed.ok || parsed.action !== "sessions") {
+    throw new Error(`期望解析成 sessions，实际：${JSON.stringify(parsed)}`);
+  }
+  return parsed.options;
+}
+
+describe("parseArgs：会话与续聊（d.303）", () => {
+  it("--continue / --resume / --session-dir 都能解析", () => {
+    const cont = expectRun(["run", "--continue", "接着改"]);
+    expect(cont.continueSession).toBe(true);
+    expect(cont.resume).toBeUndefined();
+    expect(cont.prompt).toBe("接着改");
+
+    const resumed = expectRun(["run", "--resume", "20261118-144230-ab12", "继续"]);
+    expect(resumed.continueSession).toBe(false);
+    expect(resumed.resume).toBe("20261118-144230-ab12");
+
+    const dir = expectRun(["run", "--session-dir", "D:/sessions", "hi"]);
+    expect(dir.sessionDir).toBe("D:/sessions");
+    expect(dir.continueSession).toBe(false);
+    expect(dir.resume).toBeUndefined();
+  });
+
+  it("--continue 与 --resume 只能选一个（两个都要等于没说清接哪份）", () => {
+    const parsed = parseArgs(["run", "--continue", "--resume", "20261118-144230-ab12", "hi"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toContain("--continue");
+      expect(parsed.error).toContain("--resume");
+    }
+  });
+
+  it("--resume 缺值时当场报错，而不是静默开新会话", () => {
+    const parsed = parseArgs(["run", "--resume"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--resume 需要一个值");
+  });
+
+  it("heming sessions 只列存档：--json / --cwd / --session-dir 可用", () => {
+    const bare = expectSessions(["sessions"]);
+    expect(bare.json).toBe(false);
+    expect(bare.cwd).toBeUndefined();
+
+    const full = expectSessions(["sessions", "--json", "--cwd", "D:/repo", "--session-dir", "D:/s"]);
+    expect(full.json).toBe(true);
+    expect(full.cwd).toBe("D:/repo");
+    expect(full.sessionDir).toBe("D:/s");
+  });
+
+  it("sessions 不接位置参数与跑模型的选项（列存档不该偷偷调模型）", () => {
+    const extra = parseArgs(["sessions", "读一下"]);
+    expect(extra.ok).toBe(false);
+    if (!extra.ok) expect(extra.error).toContain("不接受位置参数");
+
+    for (const argv of [
+      ["sessions", "--model", "gpt-4o-mini"],
+      ["sessions", "--max-rounds", "3"],
+      ["sessions", "--allow-danger"],
+      ["sessions", "--continue"],
+      ["sessions", "--resume", "20261118-144230-ab12"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok, argv.join(" ")).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
+    }
+  });
+
+  it("mcp serve 也不接会话选项（它不跑模型，没有会话可接）", () => {
+    for (const argv of [
+      ["mcp", "serve", "--continue"],
+      ["mcp", "serve", "--resume", "20261118-144230-ab12"],
+      ["mcp", "serve", "--session-dir", "D:/s"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok, argv.join(" ")).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("mcp serve 不接");
+    }
+  });
+});

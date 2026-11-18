@@ -59,7 +59,7 @@
 
 | 轨 | 状态 | 证据 |
 |---|---|---|
-| W1 无头 CLI | 已落地（d.243 `run`/`exec --json`/`--output-format stream-json`/`--cwd`/`--max-rounds`/`--allow-danger`） | `packages/cli/src/*` |
+| W1 无头 CLI | 已落地（d.243 `run`/`exec --json`/`--output-format stream-json`/`--cwd`/`--max-rounds`/`--allow-danger`；d.289 `mcp serve` 服务端；d.303 会话存档与 `--continue`/`--resume`，`sessions` 列出存档） | `packages/cli/src/{index,args,run,sessions,mcp,mcpServe,tooling}.ts` |
 | W2 服务端加固 | 已落地（d.236 `/api/metrics` + 请求 id + 结构化日志 `obs.ts`、登录/注册限流、d.297 前的 token 刷新与吊销 `/api/auth/refresh`；会话 FTS5 搜索 d.197 `GET /api/conversations/search` + `searchMessages` 线性兜底） | `packages/server/src/{obs.ts,app.ts,store.ts,sqliteStore.ts}` + 各 `.test.ts` |
 | W3 hooks | 已落地（`.heming/hooks.json` 的 pre/post 工具钩子，默认不信任仓库脚本，带审计） | `packages/web/src/lib/hitl/{hooks,hookRunner,gate,audit}.ts` |
 | W4 扩展与回滚 | 已落地（自定义命令 d.240、子代理定义 d.287、`/rewind N` 的**文件回滚** d.291、**对话截断** d.293、删除跨窗口同步 d.298、断线重连对齐 d.300） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`packages/web/src/lib/fileEdit/rewindCheckpoints.ts`、`packages/web/src/lib/api.ts` 的 `deleteMessages`、`packages/web/src/store/chat.ts` 的 `resyncMessages`（d.300）、`packages/server/src/{app,store,sqliteStore}.ts` 的 `DELETE /api/conversations/:id/messages/delete`、`ChatPage.test.tsx` I4i/I3z/I3-rewind |
