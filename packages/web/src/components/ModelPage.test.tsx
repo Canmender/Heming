@@ -2164,11 +2164,50 @@ describe("ModelPage · 智能体改模型", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "保存可见范围" })[0]!);
     await waitFor(() => expect(calls).toContainEqual(["visible", "claude", "deepseek"]));
 
-    // 两个都不勾等于「什么都收窄掉」，按 magpie 的约定写回 all
+    // 两个都不勾：内核里「空名单」就是「全部」，与已经保存的样子等价，
+// 所以这次不需要保存（按钮是灰的），别白发一条命令去重写别人的配置。
     fireEvent.click(screen.getByLabelText("Claude Code 可见 deepseek"));
     fireEvent.click(screen.getByLabelText("Claude Code 可见 relay"));
+    expect(screen.getAllByRole("button", { name: "保存可见范围" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "保存可见范围" })[0]).toHaveAttribute(
+      "title",
+      "还没有改动",
+    );
+  });
+
+  it("勾选一改就说明「改过没保存」，保存之后这句话消失", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        providers: {
+          ok: true,
+          stdout:
+            "  deepseek  deepseek  api.deepseek.com  ● sk-…  2 models\n" +
+            "  relay     custom    relay.test        ● sk-…  1 models\n",
+          stderr: "",
+        },
+        visible: {
+          ok: true,
+          stdout: "  claude        deepseek, relay        12 shown, 3 not\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    await screen.findByText(/收窄到 deepseek、relay/);
+
+    // 还没动勾选：没有这句提示，按钮说明是「还没有改动」。
+    expect(screen.queryByText("改过了，点「保存可见范围」才生效")).toBeNull();
+    expect(screen.queryByText(/改过没保存/)).toBeNull();
+
+    // 勾掉一个来源：折叠标题与按钮旁都立刻说清「改了但没保存」。
+    fireEvent.click(screen.getByLabelText("Claude Code 可见 relay"));
+    expect(screen.getByText("改过了，点「保存可见范围」才生效")).toBeInTheDocument();
+    expect(screen.getByText(/改过没保存/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "保存可见范围" })[0]!);
-    await waitFor(() => expect(calls).toContainEqual(["visible", "claude", "all"]));
+    await waitFor(() => expect(calls).toContainEqual(["visible", "claude", "deepseek"]));
+    await waitFor(() => expect(screen.queryByText("改过了，点「保存可见范围」才生效")).toBeNull());
   });
 });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAgentVisibility,
   pickedOnlyArgs,
+  sameVisibleRange,
   visibilityOf,
   visibilitySummary,
   visibleArgs,
@@ -75,5 +76,24 @@ describe("magpieVisible", () => {
   it("只显示挑过的模型：开与关各一条命令", () => {
     expect(pickedOnlyArgs("claude", true)).toEqual(["visible", "claude", "--only-picked"]);
     expect(pickedOnlyArgs("codex", false)).toEqual(["visible", "codex", "--show-new"]);
+  });
+
+  it("判断有没有改动：全勾与「没勾过」是同一份，顺序也不影响", () => {
+    const all = ["deepseek", "relay", "workbuddy"];
+    // 保存的是「全部」（空名单），现在勾满 => 没改动。
+    expect(sameVisibleRange([], all, all)).toBe(true);
+    // 保存的就是同一份子集 => 没改动（不是只有「全部」才算没改）。
+    expect(sameVisibleRange(["relay"], ["relay"], ["relay", "deepseek"])).toBe(true);
+    // 保存的是子集、现在勾满了 => 改过了（从「收窄」放开成「全部」）。
+    expect(sameVisibleRange(["relay"], ["relay", "deepseek"], ["relay", "deepseek"])).toBe(false);
+    expect(sameVisibleRange(["deepseek", "relay"], ["relay", "deepseek"], all)).toBe(true);
+    // 少勾一个 => 改过了。
+    expect(sameVisibleRange([], ["deepseek", "relay"], all)).toBe(false);
+    // 两人都空 => 没改动。
+    expect(sameVisibleRange([], [], all)).toBe(true);
+    // 勾了目录里没有的旧名字、但目录里每一个都在里面：仍算「全部」。
+    expect(sameVisibleRange([], ["deepseek", "relay", "workbuddy", "old"], all)).toBe(true);
+    // 少勾一个、其余照旧 => 真的改过了。
+    expect(sameVisibleRange([], ["deepseek", "relay"], all)).toBe(false);
   });
 });

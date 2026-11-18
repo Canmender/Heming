@@ -89,6 +89,32 @@ export function pickedOnlyArgs(agent: string, onlyPicked: boolean): string[] {
   return ["visible", agent, onlyPicked ? "--only-picked" : "--show-new"];
 }
 
+/**
+ * 把一组「可见来源」压成可比较的键：勾满（或一个都没勾）与「空」是同一种意思。
+ *
+ * 内核里「全部」写作空名单，界面上一律画成全勾。不先归一化，「全勾」和「没勾过」
+ * 会被判成不同的两份，保存按钮就一直亮着、说「有改动」。
+ */
+function visibleKey(names: readonly string[], allIds: readonly string[]): string {
+  const unique = [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort();
+  const everything = allIds.length > 0 && allIds.every((id) => unique.includes(id));
+  return everything || unique.length === 0 ? "" : unique.join("|");
+}
+
+/**
+ * 现在勾的与已经保存的是不是同一个范围。
+ *
+ * 用来判断「有改动没保存」：没改动就不该让「保存可见范围」可点——
+ * 那会白发一条命令、再把别家工具自己的配置重写一遍。
+ */
+export function sameVisibleRange(
+  saved: readonly string[],
+  picked: readonly string[],
+  allIds: readonly string[],
+): boolean {
+  return visibleKey(saved, allIds) === visibleKey(picked, allIds);
+}
+
 /** 一行说明：`收窄到 deepseek、relay · 12 个可见，3 个被挡住`。 */export function visibilitySummary(item: AgentVisibility | undefined): string {
   if (!item) return "能看到全部模型";
   const parts: string[] = [];

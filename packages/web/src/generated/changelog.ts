@@ -18,7 +18,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "bullets": [
       "`lib/magpieVisible.test.ts` 新增 1 例（14 个断言组合：全勾 vs 空名单、顺序不同、少勾一个、目录外的旧名字、两边都空）。",
       "`components/ModelPage.test.tsx`：改写「可见模型：显示收窄情况」的第二步（两个都不勾 →按钮灰着、`title=\"还没有改动\"`，不再断言会发 `all`）；新增「勾选一改就说明「改过没保存」，",
-      "`pnpm --filter @heming/web test` 全量 449 个测试文件 / 6438 个用例全绿；`typecheck` 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。",
+      "`pnpm --filter @heming/web test` 全量 448 个测试文件 / 6433 个用例全绿；`typecheck` 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。",
       "只判断「有没有改动」，没有做「撤销这批勾选」的按钮：取消勾选就是撤销，再点一次折叠标题也能收起来。",
       "草稿仍然只在内存里，切走分区再回来还在，刷新页面就丢——与「没保存」的语义一致，没另存。",
       "`visibleDirtyOf` 只被这个折叠区用到；如果以后别处也要「改了没保存」的提示，再往上提一层。"

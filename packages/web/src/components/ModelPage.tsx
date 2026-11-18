@@ -91,6 +91,7 @@ import {
   visibilityOf,
   visibilitySummary,
   visibleArgs,
+  sameVisibleRange,
   type AgentVisibility,
 } from "../lib/magpieVisible.js";
 import { agentName, formatResetIn, latestReadAt } from "../lib/magpieQuota.js";
@@ -862,6 +863,23 @@ export function ModelPage() {
   const agentVisibleNames = useCallback(
     (agent: LocalAgent): string[] => visibilityOf(visibility, agent.id ?? "")?.names ?? [],
     [visibility],
+  );
+
+  /**
+   * 勾选改过了还没保存？
+   *
+   * 勾选框是本地的草稿（`visibleDraft`），不点「保存可见范围」不会写进别人的配置。
+   * 所以没改动时那个按钮就该是灰的：白发一条命令、还顺手把人家配置重写一遍，
+   * 是这一页最容易让人误会的地方。
+   */
+  const visibleDirtyOf = useCallback(
+    (agent: LocalAgent): boolean => {
+      const agentId = agent.id ?? "";
+      if (!(agentId in visibleDraft)) return false;
+      const allIds = providers.map((provider) => provider.id);
+      return !sameVisibleRange(agentVisibleNames(agent), visibleSelectionOf(agent), allIds);
+    },
+    [agentVisibleNames, providers, visibleDraft, visibleSelectionOf],
   );
 
   /** `magpie visible <agent> <names…|all>`：写完刷新可见范围（它也会改写智能体自己的配置）。 */
@@ -1830,6 +1848,9 @@ export function ModelPage() {
                         <summary className="cursor-pointer ui-caption">
                           <ChevronIcon width={12} height={12} className="ui-disclosure-chevron" />
                           可见模型 · {visibilitySummary(visibilityOf(visibility, agent.id))}
+                          {visibleDirtyOf(agent) && (
+                            <span className="text-warn"> · 改过没保存</span>
+                          )}
                         </summary>
                         <div className="mt-2 rounded-lg border border-line bg-subtle px-3 py-2">
                           <p className="ui-caption">
@@ -1881,7 +1902,12 @@ export function ModelPage() {
                             <Button
                               type="button"
                               size="sm" variant="primary"
-                              disabled={!cli || busy !== null}
+                              disabled={!cli || busy !== null || !visibleDirtyOf(agent)}
+                              title={
+                                visibleDirtyOf(agent)
+                                  ? "把这次勾选写进这个工具自己的配置"
+                                  : "还没有改动"
+                              }
                               onClick={() => void saveVisible(agent)}
                             >
                               保存可见范围
@@ -1896,6 +1922,9 @@ export function ModelPage() {
                             >
                               恢复全部
                             </Button>
+                            {visibleDirtyOf(agent) && (
+                              <span className="ui-caption text-warn">改过了，点「保存可见范围」才生效</span>
+                            )}
                           </div>
                         </div>
                       </details>
