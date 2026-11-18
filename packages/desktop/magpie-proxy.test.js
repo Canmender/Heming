@@ -155,7 +155,7 @@ test("非本机来源 403；OPTIONS 预检 204 且带 CORS", async () => {
   }
 });
 
-test("上游不可用：502 且说明是 magpie 网关不可用", async () => {
+test("上游不可用：502 且说明是模型服务不可用", async () => {
   const proxy = await startMagpieProxy({ upstreamPort: 1 });
   try {
     const response = await fetch(`http://127.0.0.1:${proxy.port}/v1/models`, {
@@ -163,7 +163,7 @@ test("上游不可用：502 且说明是 magpie 网关不可用", async () => {
     });
     assert.equal(response.status, 502);
     const body = await response.json();
-    assert.match(body.error, /magpie 网关不可用/);
+    assert.match(body.error, /模型服务不可用/);
   } finally {
     await proxy.close();
   }

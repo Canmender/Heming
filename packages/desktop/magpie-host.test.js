@@ -88,7 +88,7 @@ test("没有二进制：启动给出可执行提示，不自称运行中", async
   const { host } = hostWith({ exists: () => false });
   assert.equal(host.status().available, false);
   assert.equal(host.status().running, false);
-  await assert.rejects(() => host.start(), /没有找到内置模型网关内核/);
+  await assert.rejects(() => host.start(), /安装包不完整/);
 });
 
 test("端口上已有 magpie（用户自己开的）→ 直接采用：不 spawn、stop 不杀它", async () => {

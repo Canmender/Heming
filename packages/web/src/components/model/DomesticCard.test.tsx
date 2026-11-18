@@ -14,20 +14,15 @@ function quota(patch: Partial<AgentQuota> = {}): AgentQuota {
 }
 
 describe("国内端卡片", () => {
-  it("没登录时只说下一步，不贴额度", () => {
-    render(<DomesticCard item={workbuddy} signedIn={0} pluginReady={false} busy={false} onPress={() => {}} />);
-    expect(screen.getByText("先装插件")).toBeInTheDocument();
+  it("还没接入也还没登录时，右侧只说「接入」，不贴额度", () => {
+    render(<DomesticCard item={workbuddy} signedIn={0} busy={false} onPress={() => {}} />);
+    expect(screen.getByText("接入")).toBeInTheDocument();
     expect(screen.queryByText("剩 70%")).not.toBeInTheDocument();
-  });
-
-  it("装好插件没登录时写「登录」", () => {
-    render(<DomesticCard item={workbuddy} signedIn={0} pluginReady busy={false} onPress={() => {}} />);
-    expect(screen.getByText("登录")).toBeInTheDocument();
   });
 
   it("登录之后把最紧的额度写在标题行，颜色跟着余量走", () => {
     const { container } = render(
-      <DomesticCard item={workbuddy} signedIn={1} pluginReady quota={quota({ label: "剩 8%", tone: "danger" })} busy={false} onPress={() => {}} />,
+      <DomesticCard item={workbuddy} signedIn={1} quota={quota({ label: "剩 8%", tone: "danger" })} busy={false} onPress={() => {}} />,
     );
     const chip = container.querySelector(".ui-chip.bg-danger-soft");
     expect(chip).not.toBeNull();
@@ -37,35 +32,26 @@ describe("国内端卡片", () => {
 
   it("点数窗口的文案原样搬上来（剩 7,000 点）", () => {
     render(
-      <DomesticCard
-        item={workbuddy}
-        signedIn={1}
-        pluginReady
-        quota={quota({ label: "剩 7,000 点", tone: "ok" })}
-        busy={false}
-        onPress={() => {}}
-      />,
+      <DomesticCard item={workbuddy} signedIn={1} quota={quota({ label: "剩 7,000 点", tone: "ok" })} busy={false} onPress={() => {}} />,
     );
     expect(screen.getByText("剩 7,000 点")).toBeInTheDocument();
   });
 
   it("登录全都失效时，右侧改成「重新登录」，并贴「登录已失效」", () => {
-    render(
-      <DomesticCard item={workbuddy} signedIn={2} lapsed={2} pluginReady busy={false} onPress={() => {}} />,
-    );
+    render(<DomesticCard item={workbuddy} signedIn={2} lapsed={2} busy={false} onPress={() => {}} />);
     expect(screen.getByText("重新登录")).toBeInTheDocument();
     expect(screen.getByText("登录已失效")).toBeInTheDocument();
   });
 
   it("只有一部分账号失效时，仍说「已登录」，不喊整张卡失效", () => {
-    render(<DomesticCard item={workbuddy} signedIn={2} lapsed={1} pluginReady busy={false} onPress={() => {}} />);
+    render(<DomesticCard item={workbuddy} signedIn={2} lapsed={1} busy={false} onPress={() => {}} />);
     expect(screen.getByText("已登录 2 个")).toBeInTheDocument();
     expect(screen.queryByText("登录已失效")).not.toBeInTheDocument();
   });
 
-  it("点一下就走 onPress，也就是「装插件 → 登录」那条路", () => {
+  it("点一下就走 onPress：接入与登录是同一次点击里的事", () => {
     const onPress = vi.fn();
-    render(<DomesticCard item={workbuddy} signedIn={0} pluginReady busy={false} onPress={onPress} />);
+    render(<DomesticCard item={workbuddy} signedIn={0} busy={false} onPress={onPress} />);
     fireEvent.click(screen.getByRole("button"));
     expect(onPress).toHaveBeenCalledWith(workbuddy);
   });

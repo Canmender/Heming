@@ -106,7 +106,7 @@ describe("checkinVendorName", () => {
     expect(checkinVendorName("")).toBe("WorkBuddy");
     expect(checkinVendorName("trae")).toBe("Trae CN");
     expect(checkinVendorName("plugin:qoder")).toBe("qoder");
-    expect(checkinVendorName("plugin:")).toBe("插件");
+    expect(checkinVendorName("plugin:")).toBe("接入组件");
     expect(checkinVendorName("workbuddy")).toBe("workbuddy");
   });
 });

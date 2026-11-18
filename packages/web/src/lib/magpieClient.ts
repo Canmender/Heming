@@ -186,13 +186,13 @@ export async function fetchGatewayCatalog(
     });
   } catch (err) {
     throw new MagpieGatewayError(
-      `连不上 magpie 网关（${base}）：${err instanceof Error ? err.message : String(err)}`,
+      `连不上和鸣的模型服务（${base}）：${err instanceof Error ? err.message : String(err)}`,
     );
   }
   if (!response.ok) {
     throw new MagpieGatewayError(
       response.status === 401 || response.status === 403
-        ? `网关拒绝了这个 Key（HTTP ${response.status}）：请核对 magpie 网关 Key`
+        ? `模型服务拒绝了这个 Key（HTTP ${response.status}）：请在「模型 → 来源」里核对这个 Key`
         : `读取模型目录失败（HTTP ${response.status}）`,
     );
   }

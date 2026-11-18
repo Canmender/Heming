@@ -68,7 +68,7 @@ export async function resolveDesktopGateway(
       return {
         supported: true,
         baseUrl: null,
-        error: first.lastError || "内置 magpie 还没有准备好（缺少二进制，先运行 node scripts/fetch-magpie.mjs）",
+        error: first.lastError || "内置模型服务还没有准备好：安装包里缺少运行文件",
       };
     }
     if (first.running) {
@@ -77,7 +77,7 @@ export async function resolveDesktopGateway(
     }
     const started = await bridge.start();
     if (started.error || !started.baseUrl) {
-      return { supported: true, baseUrl: null, error: started.error || "内置 magpie 启动失败" };
+      return { supported: true, baseUrl: null, error: started.error || "内置模型服务没能启动" };
     }
     return { supported: true, baseUrl: started.baseUrl, version: started.status.version };
   } catch (err) {

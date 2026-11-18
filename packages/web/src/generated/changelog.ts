@@ -12,6 +12,30 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.285.4.120.12",
+    "date": "2026-11-18",
+    "title": "页面上不再有别人的名字：模型能力就是和鸣自己的",
+    "bullets": [
+      "`packages/web` 全量：**430 个测试文件 / 6169 个用例全绿**；`typecheck` 退出 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过；`pnpm --filter @heming/desktop test` 12/12。",
+      "新增 `packages/web/src/lib/engineText.test.ts` 7 例：空串与普通中文原样、`magpie-core` 与大写 `Magpie` 都换名、包名换「接入组件「xxx」」、拒绝登录那句翻成中文、无签到账号那句翻成中文且厂商名保留、混合输入输出里 `not.toMatch(/magpie/i)`。",
+      "反例测试：`ModelPage.test.tsx` 新增「内核的英文拒绝在提示条里说成中文，且不再出现外部引擎名」（让 `accounts checkin --json` 回 `ok:false` 与 `stderr: \"magpie can't sign in to workbuddy accounts\"`），断言提示条含「不能直接登录 workbuddy 的账号」且不含 `magpie`。",
+      "grep 复核：`packages/web/src` 与 `packages/desktop` 里剩下的 `magpie` 全是内部标识（桥名 `__heming_magpie`、文件名、npm 包名常量、解析守卫、`[magpie]` 控制台日志），不会再出现在页面上。",
+      "内部标识不改：`getMagpieCliBridge`、`magpieCli.ts`、`__heming_magpie`、localStorage 键这些是桥与历史存储的名字，改动面大于收益，用户也看不见。",
+      "历史 `CHANGELOG.md` / `docs/RELEASE-NOTES.md` 条目不改写：那是当时的记录，改了就失真；从 d.285 起的新条目不再出现该词。",
+      "内核命令与设置键名（`accounts checkin`、`workbuddyCheckin` 等）保持不变：它们是契约，不是文案。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "需求原话：「不要携带什么 magpie 和 magpie 的插件等字样，要把他完美集成为和鸣内核的一部分。」",
+      "上一轮虽然把额度、签到、切换都做进了模型页，但页面仍在几处漏出外部引擎的名字：提示条里原样打印的英文拒绝（`magpie can't sign in to workbuddy accounts`、`npm couldn't install @magpie-community/…`）、桌面端启动失败的「magpie 退出」、国内端卡片上「先装插件 → 登录」这两步、悬停提示里的 `magpie ls`。用户看到这些会得出一个错误结论：还得自己去装别人的东西。事实上这些能力随安装包一起到，属于和鸣自己的一部分。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || 提示条、控制台、会话输出（`ModelPage.tsx`、`ConsolePanel.tsx`、`SubscriptionRow.tsx`） | 内核英文原话，带 `magpie` | 统一过 `packages/web/src/lib/engineText.ts`：包名 → 「接入组件「xxx」」；`magpie can't sign in to X accounts` → 「模型服务不能直接登录 X 的账号：先装上它的接入组件」；`no … account is signed in` → 「还没有登录任何 … 账号」；`magpie-core` / `magpie` → 「模型服务」 || 国内端卡片（`model/DomesticCard.tsx`） | 「先装插件」→「登录」两步 | 一步「接入」：接入组件在背后装好，用户只看见「接入」与「已登录 N 个」 || 桌面端启动失败（`packages/desktop/magpie-host.js`） | `magpie 退出（code=…）`、`magpie 网关没有在规定时间内就绪` | 「模型服务意外退出」「模型服务没有在规定时间内就绪」；缺运行文件时直接说「安装包不完整」并给出重装建议 || 反代拒绝（`packages/desktop/magpie-proxy.js`） | `只接受和鸣本机页面访问 magpie 反代` | `只接受和鸣本机页面访问模型服务` || 连不上 / Key 被拒（`lib/magpieClient.ts`） | `连不上 magpie 网关`、`核对 magpie 网关 Key` | `连不上和鸣的模型服务`、`在「模型 → 来源」里核对这个 Key` || 智能体页说明（`model/GlobalModelSettings.tsx`） | `和原版 magpie 的 Settings › Models 一样` | `这三项是全局的，会影响所有智能体看到的模型。` || 协作页（`collaboration/CollaborationPage.tsx`） | `由 magpie 检测` | `由和鸣在本机检测` || 卡片悬停（`model/DomesticCard.tsx`） | `magpie ls 在本机找到了它` | `本机扫描时找到了它` || 订阅账号行（`model/SubscriptionRow.tsx`） | `额度未知，内核这次没读到`、`内核没有说明原因` | `额度未知，这次没读到`、`没有说明原因` || 签到厂商兜底（`lib/magpieDomestic.ts`） | `插件` | `接入组件` |",
+      "顺带收掉的东西：`DomesticCard` 的 `pluginReady` prop 与 `ModelPage` 的 `pluginsChecked` 状态只为「先装插件」那一态存在，现在整条删掉；`engineText` 只在展示层换词，命令、参数、包名一个字节不改，页面上照抄出去仍然有效。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.284.4.120.12",
     "date": "2026-11-18",
     "title": "国内端的额度就写在它自己的卡片上，不用再去上面找",

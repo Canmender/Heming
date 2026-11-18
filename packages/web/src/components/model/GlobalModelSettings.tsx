@@ -55,7 +55,7 @@ export function GlobalModelSettings({
       </summary>
       <div className="mt-2 grid gap-4 rounded-lg border border-line bg-subtle px-3 py-3">
         <p className="ui-caption">
-          这三项和原版 magpie 的 Settings › Models 一样，是全局的，会影响所有智能体看到的模型。
+          这三项是全局的，会影响所有智能体看到的模型。
         </p>
 
         <div className="grid gap-1">

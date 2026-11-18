@@ -539,7 +539,7 @@ export function CollaborationPage() {
         <div className="mt-4">
           <h3 className="ui-micro">本机其他智能体</h3>
           <p className="ui-caption mt-1">
-            由 magpie 检测。它们不会被启动成命令行进程；以自己的配置模型、经本机网关以「声音」参与。
+            由和鸣在本机检测。它们不会被启动成命令行进程；以自己的配置模型、经本机模型服务以「声音」参与。
             没有同名可用档案的会禁用。
           </p>
 

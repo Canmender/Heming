@@ -261,7 +261,7 @@ export async function readProviderShow(cli: MagpieCliBridge, id: string): Promis
 
 /** 把参数数组拼成可读命令（仅展示用，不执行）。 */
 export function formatCommand(args: readonly string[]): string {
-  return `magpie-core ${args.join(" ")}`;
+  return `模型服务 ${args.join(" ")}`;
 }
 
 /** 输出里的 ANSI 颜色/光标控制去掉，页面按纯文本展示。 */

@@ -7,13 +7,12 @@ import type { AgentQuota } from "../../lib/agentQuota.js";
 /**
  * 国内智能体的一张卡片（模型页 → 来源 → 订阅账号 → 国内智能体）。
  *
- * 这些端的账号由社区插件供给（内核的登录流只认 Claude/ChatGPT/Copilot/Gemini/
- * Antigravity），所以卡片右侧要如实说清下一步：还没装插件是「先装插件」，
- * 装好没登录是「登录」，登录过就报一共有几个账号——三句话对应三种状态，
+ * 这些端的账号来自它们自己的登录态：点一下就把这份登录接进和鸣，登录过就报一共
+ * 有几个账号，全都失效了才说「重新登录」——接入这一步对用户是不可见的，
  * 不拿「登录」两个字糊住一条走不通的路。
  *
- * `local` 是「这台机器上装了它的客户端」（从 `magpie ls` 读出来的）：装了却还没
- * 登录，比一张孤零零的「先装插件」更能说明「这里本来就有一个账号可以借」。
+ * `local` 是「这台机器上装了它的客户端」（本机扫描时读出来的）：装了却还没
+ * 登录，比一张孤零零的「接入」更能说明「这里本来就有一个账号可以借」。
  *
  * `quota`（d.284）把「这份免费额度还剩多少」直接搬到卡片上：登录之后不必再往
  * 上面的订阅账号列表里找——国内端的免费额度就是这一组卡片的事，就地看他一眼。
@@ -26,8 +25,6 @@ export interface DomesticCardProps {
   signedIn: number;
   /** 这个端里有几个账号的登录已经失效（要重新登录才能读额度）。 */
   lapsed?: number;
-  /** 有插件在服务这个端：没有它，登录与额度都读不到。 */
-  pluginReady: boolean;
   /** 本机检测到这个端的客户端。 */
   local?: boolean;
   /** 这个端最紧的那份额度；没有账号或读不到时是 null。 */
@@ -40,7 +37,6 @@ export function DomesticCard({
   item,
   signedIn,
   lapsed = 0,
-  pluginReady,
   local = false,
   quota = null,
   busy,
@@ -48,16 +44,10 @@ export function DomesticCard({
 }: DomesticCardProps) {
   const allLapsed = signedIn > 0 && lapsed >= signedIn;
   // 悬停一句话说全：额度怎么分的、本机装没装、这家的风险。
-  const hint = [quota?.detail, local ? "magpie ls 在本机找到了它的客户端" : "", item.risk]
+  const hint = [quota?.detail, local ? "本机扫描时找到了它的客户端" : "", item.risk]
     .filter((part) => part)
     .join(" · ");
-  const state = allLapsed
-    ? "重新登录"
-    : signedIn > 0
-      ? `已登录${signedIn > 1 ? ` ${signedIn} 个` : ""}`
-      : pluginReady
-        ? "登录"
-        : "先装插件";
+  const state = allLapsed ? "重新登录" : signedIn > 0 ? `已登录${signedIn > 1 ? ` ${signedIn} 个` : ""}` : "接入";
   return (
     <button
       type="button"
@@ -77,7 +67,7 @@ export function DomesticCard({
           )}
           {item.checkin && <span className="ui-chip shrink-0">签到</span>}
           {local && !quota && (
-            <span className="ui-chip shrink-0 border-success-line bg-success-soft text-success" title="magpie ls 在本机找到了它">
+            <span className="ui-chip shrink-0 border-success-line bg-success-soft text-success" title="本机扫描时找到了它">
               本机已装
             </span>
           )}

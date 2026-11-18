@@ -331,15 +331,15 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
-  it("来源页列出国内智能体：没装插件就先装，再登录", async () => {
+  it("来源页列出国内智能体：点一下就接入并登录，两步合成一次点击", async () => {
     const { bridge, calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("国内智能体")).toBeInTheDocument();
     expect(screen.getByText("WorkBuddy")).toBeInTheDocument();
     expect(screen.getByText("Qoder CN")).toBeInTheDocument();
-    // 没有插件在服务这些端：卡片说「先装插件」，不给一个走不通的「登录」
-    expect(screen.getAllByText("先装插件").length).toBe(DOMESTIC_AGENTS.length);
+    // 还没接进来的端一律写「接入」：接入与登录是同一次点击里的事，不摆两步
+    expect(screen.getAllByText("接入").length).toBe(DOMESTIC_AGENTS.length);
 
     fireEvent.click(screen.getByText("WorkBuddy"));
     await waitFor(() =>
@@ -348,7 +348,7 @@ describe("ModelPage · 账号与更多", () => {
     await waitFor(() =>
       expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "workbuddy"]),
     );
-    expect(await screen.findByText(/已装上 WorkBuddy 的插件/)).toBeInTheDocument();
+    expect(await screen.findByText(/已把 WorkBuddy 接进和鸣/)).toBeInTheDocument();
   });
 
   it("插件已经装过时，点国内端直接登录，不再装一遍", async () => {
@@ -399,6 +399,22 @@ describe("ModelPage · 账号与更多", () => {
     expect(notice).toHaveClass("ui-alert-danger");
   });
 
+  it("内核的英文拒绝在提示条里说成中文，且不再出现外部引擎名", async () => {
+    installBridge({}, {
+      "accounts checkin --json": {
+        ok: false,
+        stdout: "",
+        stderr: "magpie can't sign in to workbuddy accounts",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "今日签到" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/不能直接登录 workbuddy 的账号/);
+    expect(notice.textContent ?? "").not.toMatch(/magpie/i);
+  });
+
   it("每天自动签到：把四个厂商开关一起打开，并说清覆盖哪几家", async () => {
     const { calls } = installBridge({}, {
       "settings list --json": {
@@ -414,7 +430,7 @@ describe("ModelPage · 账号与更多", () => {
     });
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    expect(await screen.findByText(/打开后由内核每天自动领/)).toBeInTheDocument();
+    expect(await screen.findByText(/打开后和鸣每天自动领/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开启自动签到" }));
     for (const key of ["workbuddyCheckin", "qoderCheckin", "traeCheckin", "minimaxCheckin"]) {
       await waitFor(() => expect(calls).toContainEqual(["settings", "set", key, "on"]));

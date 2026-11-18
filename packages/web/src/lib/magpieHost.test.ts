@@ -93,7 +93,7 @@ describe("resolveDesktopGateway", () => {
     });
     const result = await resolveDesktopGateway(bridge);
     expect(result.baseUrl).toBeNull();
-    expect(result.error).toMatch(/缺少二进制/);
+    expect(result.error).toMatch(/安装包里缺少运行文件/);
   });
 
   it("运行中：直接取反代地址；未运行：先启动再取", async () => {

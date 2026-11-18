@@ -161,7 +161,7 @@ describe("fetchGatewayCatalog", () => {
           return new Response("{}", { status: 401 });
         },
       }),
-    ).rejects.toThrow(/网关拒绝了这个 Key/);
+    ).rejects.toThrow(/模型服务拒绝了这个 Key/);
 
     await expect(
       fetchGatewayCatalog(DEFAULT_GATEWAY, {
@@ -169,7 +169,7 @@ describe("fetchGatewayCatalog", () => {
           throw new TypeError("fetch failed");
         },
       }),
-    ).rejects.toThrow(/连不上 magpie 网关/);
+    ).rejects.toThrow(/连不上和鸣的模型服务/);
   });
 
   it("地址不合法时直接拒绝（不猜协议）", async () => {

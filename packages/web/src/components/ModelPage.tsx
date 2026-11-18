@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { PageTabs } from "./layout/PageTabs.js";
 import {
@@ -45,6 +45,7 @@ import {
   type ProviderRow,
 } from "../lib/magpieCli.js";
 import { isModelId, parseAgents, type LocalAgent } from "../lib/magpieAgents.js";
+import { engineText } from "../lib/engineText.js";
 import {
   buildModelRows,
   groupModelRows,
@@ -255,20 +256,18 @@ export function ModelPage() {
    * 保留 setNotice(字符串) 的老签名，新增的两步动作才传第二个参数。
    */
   const setNotice = useCallback((text: string, failed = false) => {
-    setNoticeState({ text, failed });
+    setNoticeState({ text: engineText(text), failed });
   }, []);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   /**
-   * 已装插件在服务的 agent id。国内端（WorkBuddy、Qoder…）的登录与额度都由社区
-   * 插件供给，内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity：
-   * 没有这张表，卡片只能给出「登录」这个走不通的动作。
+   * 已经接进来的国内端 agent id。WorkBuddy、Qoder 这些端的登录与额度由接入组件
+   * 供给，内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity；
+   * 这张表决定点下去是「直接登录」还是「先接进来再登录」，页面上不区分这两种情况。
    */
   const [pluginProviders, setPluginProviders] = useState<Set<string>>(() => new Set());
-  /** 问过插件了：没问过时不把「没有插件」当成事实说出来。 */
-  const [pluginsChecked, setPluginsChecked] = useState(false);
   /**
    * settings 的现值（key → value）：国内端的「每天自动签到」是四个厂商开关，
    * 读一次 `settings list --json` 就有全部，不必逐个 get。
@@ -391,7 +390,7 @@ export function ModelPage() {
       }
       if (event.type !== "stdout" && event.type !== "stderr") return;
       liveRef.current += event.text ?? "";
-      setLive(tailText(stripAnsi(liveRef.current)));
+      setLive(engineText(tailText(stripAnsi(liveRef.current))));
     });
   }, [cli]);
 
@@ -417,7 +416,6 @@ export function ModelPage() {
     if (!cli) return;
     const result = await cli.cli(["plugin", "list", "--json"]);
     setPluginProviders(parsePluginProviders(result.stdout || ""));
-    setPluginsChecked(true);
   }, [cli]);
 
   const loadSettings = useCallback(async () => {
@@ -640,7 +638,7 @@ export function ModelPage() {
       setNotice(
         result.ok
           ? `已把 ${agentName(row.agent)} 切到 ${row.label}。`
-          : `切换失败：${(result.error || result.stderr || "").trim() || "内核没有说明原因"}`,
+          : `切换失败：${(result.error || result.stderr || "").trim() || "没有说明原因"}`,
         !result.ok,
       );
     } catch (err) {
@@ -674,7 +672,7 @@ export function ModelPage() {
       const entries = parseCheckin(result.stdout || "");
       if (!result.ok && entries.length === 0) {
         const why = tailText(stripAnsi((result.stderr || result.error || "").trim()));
-        setNotice(`签到失败：${why || "内核没有说明原因"}`, true);
+        setNotice(`签到失败：${why || "没有说明原因"}`, true);
         return;
       }
       setNotice(checkinSummary(entries), checkinFailed(entries));
@@ -772,11 +770,11 @@ export function ModelPage() {
         const result = await cli.cli(["plugin", "add", item.pkg]);
         if (!result.ok) {
           const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
-          setNotice(`没能装上 ${item.label} 的插件：${why || "内核没有说明原因"}`, true);
+          setNotice(`没能接入 ${item.label}：${why || "没有说明原因"}`, true);
           return;
         }
         await loadPlugins();
-        setNotice(`已装上 ${item.label} 的插件，接着登录一次就好。`);
+        setNotice(`已把 ${item.label} 接进和鸣，接着登录一次就好。`);
       }
     } finally {
       setAccountBusy(null);
@@ -1560,7 +1558,7 @@ export function ModelPage() {
                 <div className="mt-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h3 className="text-ui-md font-semibold">国内智能体</h3>
-                    <span className="ui-caption">先装插件、再登录，额度就写在卡片上</span>
+                    <span className="ui-caption">接上这些软件里已经登录的账号，额度就写在卡片上</span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
                     <span className="min-w-0 flex-1">
@@ -1568,7 +1566,7 @@ export function ModelPage() {
                       <span className="block ui-caption">
                         {checkinSwitchState(settingValues) === "on"
                           ? `${CHECKIN_VENDORS} 到点自己领，不用再点。`
-                          : `打开后由内核每天自动领 ${CHECKIN_VENDORS} 的免费额度。`}
+                          : `打开后和鸣每天自动领 ${CHECKIN_VENDORS} 的免费额度。`}
                       </span>
                     </span>
                     <Button
@@ -1592,7 +1590,6 @@ export function ModelPage() {
                         signedIn={accounts.filter((row) => row.agent === item.agent).length}
                         lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
                         quota={agentQuotas.get(item.agent) ?? null}
-                        pluginReady={pluginsChecked && pluginProviders.has(item.agent)}
                         local={agents.some((agent) => agent.id === item.agent)}
                         busy={accountBusy === `domestic:${item.agent}`}
                         onPress={prepareDomestic}
@@ -2436,7 +2433,7 @@ export function ModelPage() {
             <details className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
               <p className="mt-1 ui-caption">
-                看各智能体最近的会话记录；启动器命令由模型服务提供（终端里 `claude-magpie` 之类），
+                看各智能体最近的会话记录；启动器命令由模型服务提供（在终端里直接运行它给出的那条），
                 只影响那一次会话，不改配置。
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -2572,4 +2569,3 @@ export function ModelPage() {
 
 /* 统计卡已抽到 ui/Stat.tsx（d.138）：此前这里的数字是 26px/p-4，首页同名卡片是
    20px/p-3，同一套「数字卡」两个页面不一样大。 */
-

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getMagpieCliBridge, stripAnsi, tailText, type MagpieCliEvent } from "../../lib/magpieCli.js";
+import { engineText } from "../../lib/engineText.js";
 import { Button } from "../../components/ui/Button.js";
 
 /**
@@ -45,14 +46,14 @@ export function ConsolePanel({
       }
       if (event.type === "stdout" || event.type === "stderr") {
         bufferRef.current += event.text ?? "";
-        if (alive) setOutput(tailText(stripAnsi(bufferRef.current)));
+        if (alive) setOutput(engineText(tailText(stripAnsi(bufferRef.current))));
         return;
       }
       if (event.type === "exit") {
         if (!alive) return;
         const ok = (event as { ok?: boolean }).ok === true;
         setStatus(ok ? "done" : "error");
-        if (!ok) setError((event as { error?: string }).error || "命令失败");
+        if (!ok) setError(engineText((event as { error?: string }).error || "命令失败"));
         doneRef.current?.({ ok, error: (event as { error?: string }).error });
       }
     });

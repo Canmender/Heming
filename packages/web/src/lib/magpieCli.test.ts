@@ -176,7 +176,7 @@ describe("展示辅助", () => {
 
   it("formatCommand 仅供展示", () => {
     expect(formatCommand(["provider", "add", "deepseek", "sk-x"])).toBe(
-      "magpie-core provider add deepseek sk-x",
+      "模型服务 provider add deepseek sk-x",
     );
   });
 });

@@ -157,7 +157,7 @@ export function parseCheckin(stdout: string): CheckinEntry[] {
 export function checkinVendorName(vendor: string): string {
   if (!vendor) return "WorkBuddy";
   if (vendor === "trae") return "Trae CN";
-  if (vendor.startsWith("plugin:")) return vendor.slice("plugin:".length) || "插件";
+  if (vendor.startsWith("plugin:")) return vendor.slice("plugin:".length) || "接入组件";
   return vendor;
 }
 

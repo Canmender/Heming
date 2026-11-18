@@ -131,8 +131,8 @@ function createMagpieHost(opts) {
     if (starting) return starting;
     if (!exists(binaryPath)) {
       throw new Error(
-        `没有找到内置模型网关内核（${binaryPath}）。开发态先运行 node scripts/build-magpie-core.mjs 构建；` +
-          "或在设置里改用手动网关地址。",
+        `安装包不完整：缺少模型服务的运行文件（${binaryPath}）。` +
+          "重新安装一次通常就能补上；开发态请先构建它。",
       );
     }
     starting = (async () => {
@@ -165,7 +165,7 @@ function createMagpieHost(opts) {
         log(`[magpie] 启动失败：${lastError}`);
       });
       spawned.on("exit", (code, signal) => {
-        if (!stopping && code !== 0 && code !== null) lastError = `magpie 退出（code=${code}）`;
+        if (!stopping && code !== 0 && code !== null) lastError = `模型服务意外退出（code=${code}）`;
         log(`[magpie] 已退出（code=${code}, signal=${signal}）`);
         child = null;
       });
@@ -183,7 +183,7 @@ function createMagpieHost(opts) {
       }
       const tail = stderrTail.length ? `；输出：${stderrTail[stderrTail.length - 1]}` : "";
       await stop();
-      throw new Error(`magpie 网关没有在规定时间内就绪（端口 ${port}）${tail}`);
+      throw new Error(`模型服务没有在规定时间内就绪（端口 ${port}）${tail}`);
     })().finally(() => {
       starting = null;
     });

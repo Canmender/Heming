@@ -112,7 +112,7 @@ function startMagpieProxy(opts = {}) {
     const origin = req.headers.origin;
     if (!originAllowed(origin, { isWidgetOriginAllowed })) {
       res.writeHead(403, { "content-type": "application/json", ...corsHeaders(null) });
-      res.end(JSON.stringify({ error: "只接受和鸣本机页面访问 magpie 反代" }));
+      res.end(JSON.stringify({ error: "只接受和鸣本机页面访问模型服务" }));
       return;
     }
     if (req.method === "OPTIONS") {
@@ -140,7 +140,7 @@ function startMagpieProxy(opts = {}) {
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "application/json", ...corsHeaders(origin) });
       }
-      res.end(JSON.stringify({ error: `magpie 网关不可用：${err?.message ?? err}` }));
+      res.end(JSON.stringify({ error: `模型服务不可用：${err?.message ?? err}` }));
     });
     req.on("error", () => upstream.destroy());
     req.pipe(upstream);

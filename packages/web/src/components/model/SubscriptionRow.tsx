@@ -1,5 +1,6 @@
 import { Button } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
+import { engineText } from "../../lib/engineText.js";
 import type { AccountRow } from "../../lib/magpieCli.js";
 import {
   accountState,
@@ -88,11 +89,11 @@ export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: Subscri
               ))}
             </ul>
           ) : (
-            !row.error && <p className="mt-1.5 ui-caption">额度未知，内核这次没读到</p>
+            !row.error && <p className="mt-1.5 ui-caption">额度未知，这次没读到</p>
           )}
           {extras.length > 0 && <p className="mt-1.5 ui-caption">{extras.join(" · ")}</p>}
-          {row.lapsed && <p className="mt-1.5 text-ui-sm text-warn">登录已经过期：{row.lapsed}</p>}
-          {row.error && <p className="mt-1.5 text-ui-sm text-danger">{row.error}</p>}
+          {row.lapsed && <p className="mt-1.5 text-ui-sm text-warn">登录已经过期：{engineText(row.lapsed)}</p>}
+          {row.error && <p className="mt-1.5 text-ui-sm text-danger">{engineText(row.error)}</p>}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {row.lapsed && (
