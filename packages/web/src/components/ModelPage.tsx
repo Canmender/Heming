@@ -327,7 +327,9 @@ export function ModelPage() {
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
-  const [agents, setAgents] = useState<LocalAgent[]>([]);
+  const [agents, setAgents] = useState<LocalAgent[]>(() =>
+    parseAgents(readCache("agents") || ""),
+  );
   const [agentConfirm, setAgentConfirm] = useState<{ id: string; name: string; model: string } | null>(
     null,
   );
@@ -485,6 +487,7 @@ export function ModelPage() {
       once("agents", async () => {
         if (!cli) return;
         const result = await cli.cli(["ls"]);
+        writeCache("agents", result.stdout || "");
         setAgents(parseAgents(result.stdout || ""));
       }),
     [cli, once],

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CACHE_VERSION, cacheEnabled, clearCache, readCache, writeCache } from "./pageCache.js";
+import {
+  CACHE_MAX_AGE_MS,
+  CACHE_VERSION,
+  cacheEnabled,
+  clearCache,
+  readCache,
+  writeCache,
+} from "./pageCache.js";
 
 describe("pageCache", () => {
   afterEach(() => {
@@ -16,10 +23,11 @@ describe("pageCache", () => {
 
   it("打开缓存后能存能取，键上带版本号", () => {
     vi.stubEnv("MODE", "production");
-    writeCache("providers", "mock custom");
-    expect(readCache("providers")).toBe("mock custom");
+    writeCache("providers", "mock custom", 1000);
+    expect(readCache("providers", 2000)).toBe("mock custom");
     // 版本换了要读不到上一版的缓存，否则解析规则和数据的形状会对不上。
-    expect(localStorage.getItem(`heming.modelpage.v${CACHE_VERSION}.providers`)).toBe("mock custom");
+    const stored = localStorage.getItem(`heming.modelpage.v${CACHE_VERSION}.providers`);
+    expect(JSON.parse(stored ?? "null")).toEqual({ at: 1000, text: "mock custom" });
     expect(localStorage.getItem(`heming.modelpage.v${CACHE_VERSION + 1}.providers`)).toBeNull();
   });
 
@@ -28,6 +36,26 @@ describe("pageCache", () => {
     expect(readCache("accounts")).toBeNull();
     writeCache("accounts", "");
     expect(readCache("accounts")).toBeNull();
+  });
+
+  it("放太久的缓存不用：隔天的状态不该先闪一下", () => {
+    vi.stubEnv("MODE", "production");
+    writeCache("providers", "昨天的来源", 0);
+    expect(readCache("providers", CACHE_MAX_AGE_MS - 1)).toBe("昨天的来源");
+    expect(readCache("providers", CACHE_MAX_AGE_MS + 1)).toBeNull();
+  });
+
+  it("形状不对的缓存当没有（旧版没时间戳的、时间戳坏掉的）", () => {
+    vi.stubEnv("MODE", "production");
+    localStorage.setItem(`heming.modelpage.v${CACHE_VERSION}.providers`, "直接写的字符串");
+    expect(readCache("providers")).toBeNull();
+    localStorage.setItem(`heming.modelpage.v${CACHE_VERSION}.accounts`, JSON.stringify({ text: "x" }));
+    expect(readCache("accounts")).toBeNull();
+    localStorage.setItem(
+      `heming.modelpage.v${CACHE_VERSION}.quotas`,
+      JSON.stringify({ at: null, text: "x" }),
+    );
+    expect(readCache("quotas")).toBeNull();
   });
 
   it("clearCache 只清自己这几份", () => {

@@ -760,8 +760,11 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     // 这里让这一次的读取永远不返回，看首屏是否还画得出来。
     vi.stubEnv("MODE", "production");
     localStorage.setItem(
-      "heming.modelpage.v1.providers",
-      "  cached custom  mock  https://cache.example  ● •••••••  2 models  ",
+      "heming.modelpage.v2.providers",
+      JSON.stringify({
+        at: Date.now(),
+        text: "  cached custom  mock  https://cache.example  ● •••••••  2 models  ",
+      }),
     );
     const calls: string[][] = [];
     const cli = vi.fn(async (args: string[]) => {
@@ -774,6 +777,29 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("cached")).toBeInTheDocument();
+
+    vi.unstubAllEnvs();
+    localStorage.clear();
+  });
+
+  it("上次读到的智能体列表也先画出来", async () => {
+    vi.stubEnv("MODE", "production");
+    localStorage.setItem(
+      "heming.modelpage.v2.agents",
+      JSON.stringify({
+        at: Date.now(),
+        text: "  Cached Agent       —  ·  effort —   ~/.cached/settings.json\n",
+      }),
+    );
+    const cli = vi.fn(async (args: string[]) => {
+      if (args[0] === "ls") return new Promise(() => {});
+      return { ok: true, stdout: "ok", stderr: "" };
+    });
+    installBridge({ cli });
+
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    expect(await screen.findByText("Cached Agent")).toBeInTheDocument();
 
     vi.unstubAllEnvs();
     localStorage.clear();
