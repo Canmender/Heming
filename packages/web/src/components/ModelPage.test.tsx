@@ -1480,6 +1480,44 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(within(list).getByText("DeepSeek")).toBeInTheDocument();
   });
 
+  it("来源行能动手的地方就写着它的额度，同一份额度不再在两张卡里各说一遍", async () => {
+    installBridge({}, {
+      "quota --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            provider: "mock",
+            name: "Mock",
+            kind: "plan",
+            plan: "Coding",
+            windows: [
+              { name: "5 hours", used: 70, remaining: 30, display: "70% used" },
+            ],
+            last: true,
+          },
+          {
+            provider: "deepseek",
+            name: "DeepSeek",
+            kind: "balance",
+            windows: [],
+            balance: "¥2.60",
+            last: true,
+          },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    // 有来源行的那一份，额度就写在那一行里。
+    const row = (await screen.findByText("mock")).closest("li")!;
+    expect(within(row).getByText("剩 30%")).toBeInTheDocument();
+    // 没有来源行的（钱包余额）才留在「其余来源的额度」里，且不再重复 mock。
+    const list = await screen.findByLabelText("其余来源的额度");
+    expect(within(list).getByText("DeepSeek")).toBeInTheDocument();
+    expect(within(list).queryByText("Mock")).not.toBeInTheDocument();
+  });
+
   it("来源页把额度走向收成一句话：最急的那份写在标题下，想看曲线再展开", async () => {
     const now = Date.now();
     const hour = 60 * 60 * 1000;

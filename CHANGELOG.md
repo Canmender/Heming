@@ -1,3 +1,69 @@
+## d.341.4.127.12（2026-11-18）— 额度写在能动手的那一行，同一份额度不再说两遍
+
+### 为什么做
+
+「来源」页把同一个 provider 说了两遍：一遍是「其余来源的额度」卡（只有额度、没有按钮），
+一遍是「已添加的来源」列表（有测试、换 Key、高级、删除，却没有额度）。
+想知道「这个 Key 还剩多少、要不要续」，得上下对着看；想动手又得回到另一张卡。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| `packages/web/src/lib/magpieQuotaCards.ts` | 只有 `cardSummary` 一句结论 | 新增 `cardTone(card)`：颜色跟着最紧的那份窗口走（见底红、偏紧黄、其余中性；读不到按红；钱包余额与厂商原话没有份额可比，走中性） |
+| `packages/web/src/components/ModelPage.tsx` 来源行 | 名称后只有计划徽标 | 同一个 provider 有额度时，紧跟一枚额度徽标（`剩 30%`），悬停写「种类 · 套餐」，读不到写原因 |
+| 同上「其余来源的额度」卡 | 列所有 Key / 套餐 / 余额 | 只列**没有对应来源行**的（钱包余额、没有 Key 的套餐）；卡头副标题改成「没有对应来源行的 Key、套餐与钱包余额」 |
+
+### 怎么验证
+
+- `packages/web/src/lib/magpieQuotaCards.test.ts` 新增 `describe("cardTone")` 3 例：最紧窗口决定颜色；读不到按红；余额与厂商原话走中性。
+- `packages/web/src/components/ModelPage.test.tsx` 新增一例「来源行能动手的地方就写着它的额度，同一份额度不再在两张卡里各说一遍」：`mock` 有来源行 → 那一行里有「剩 30%」，额度卡里只剩 `DeepSeek` 的 `¥2.60`、没有 `Mock`。
+- 全量 452 个测试文件 / 6489 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。
+
+### 留白
+
+- 来源行上只放最紧那一句，不展开每个窗口；要看全部窗口仍去额度卡或「订阅账号」。
+- 邮箱分开的多份 Key（同一个 provider、不同 user）在来源行上也只显示一份——来源行按 provider 一行，这一点没有改。
+- 额度卡没有改名，「其余来源的额度」现在实际含义是「没有对应来源行的额度」。
+
+## d.340.4.127.12（2026-11-18）— 每一笔写入都能先看一眼增删对照再决定
+
+### 为什么做
+
+`--ask`（d.323）只把**命令**交给了人，写文件这条路仍然是「根内合法就自动写」。可真正把
+仓库改坏的多半是写：模型一次任务连着改十几个文件，中间某一笔改错了，人是在跑完之后翻
+diff 才发现的——那时它已经落盘，只能用 `heming rewind` 或 git 往回退。
+
+终端里缺的是「动手之前看一眼这一笔改了什么」。桌面端早就有这个位（工具卡片展开就是
+增删对照），CLI 一直没有。
+
+### 做了什么
+
+| 位置 | 做了什么 |
+| --- | --- |
+| `packages/cli/src/args.ts` | 新增 `--ask-writes`（不接受取值）。必须与 `--ask` 同时给——没有 `--ask` 就没人回答，直接报错而不是悄悄退化成自动放行。`sessions` / `memory` / `rewind` / `commands` / `mcp serve` 都拒收它 |
+| `packages/cli/src/tooling.ts` | 闸门的写入分支在**路径安全通过之后**增加一道询问：`--ask-writes` 打开时，根内合法写入也停下来问。越界写仍在前一步直接拒绝，人的点头不能把根外写变成合法 |
+| `packages/cli/src/tooling.ts` | 复用桌面端的参数对照 `argDiff`（`file_write` 整段新增、`file_edit` 行级 diff、`file_patch` 按补丁文法），生成 `detail`（「新增 2 行 / 删除 1 行」）与 `preview`（`+ / - / 空格` 前缀的逐行对照，最多 20 行，超出明说截断） |
+| `packages/cli/src/approvals.ts` | `ApprovalRequest` 新增 `preview` 与 `kind`（`danger` / `write`）。审批框按行画预览，排在「为什么问你」之前 |
+| `packages/cli/src/tooling.ts` | **许可范围分开记**：写文件答「本次运行都允许」只放行写入，不放行命令；命令那边的一次性许可也照旧要消费。`deny-all` 仍然两边都停 |
+| `packages/cli/src/index.ts` / `run.ts` | 接线、USAGE/HELP 文案、「审批已开启」那行在开了写入审批时补一句「（写文件也会问，并画出增删对照）」 |
+
+### 怎么验证
+
+- `packages/cli/src/tooling.test.ts` 新增 5 例：根内写会问且 `preview` 是 `+ 第一行` 这样的逐行对照；答「不要」不落盘且 `cause` 记 `user`；答「本次运行都允许写」之后连续两笔不再问（问的次数是 1）；根外写仍直接拒绝且**一次都没问**；不开 `--ask-writes` 时写文件照旧不问。
+- `packages/cli/src/approvals.test.ts` 新增 3 例：预览排在原因之前、超出 20 行只画前 20 行并明说截断、没有预览时仍是原来的三行形状。
+- `packages/cli/src/run.test.ts` 新增 2 例（真落盘）：放行后文件存在且审批框里带「新增 1 行」与 `+ export const a = 1;`；拒绝后 `toolCalls[0]` 的 `denied` 为 true 且文件不存在。
+- `packages/cli/src/args.test.ts` +4 例、`index.test.ts` +1 例（非终端下 `--ask --ask-writes` 直接 exit 2；`--help` 里有它）。
+- **CLI 全量 21 文件 / 456 例全绿**；`npx tsc --noEmit -p tsconfig.json` 干净。
+
+### 留白
+
+- 只覆盖三个文件写工具（`file_write` / `file_edit` / `file_patch`）；`run_command` 与 MCP 工具的副作用不画预览（它们的预览是「命令文本」，`--ask` 那一档已经在问）。
+- 预览最多 20 行，看全的仍要走 `git diff` 或桌面端的「查看改动」。
+- 一笔一次询问是**串行**的：批量改十几个文件而没有答「本次运行都允许」时，人要点十几次——这是有意的（闭眼按 y 比不问更危险），但确实吵。
+- 不做「只放行这个目录」这类细粒度许可：要那个就用 `.heming/permissions.json` 的 allow 规则。
+
+
 ## d.339.4.127.12（2026-11-18）— 每个工具的下拉直接显示它现在用的模型
 
 ### 为什么做

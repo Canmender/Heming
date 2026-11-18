@@ -13,6 +13,8 @@ import {
   parseResets,
   windowLeftPercent,
   windowLeftText,
+  windowTone,
+  type QuotaTone,
   type QuotaWindow,
 } from "./magpieQuota.js";
 
@@ -170,4 +172,20 @@ export function cardSummary(card: QuotaCard, now: number): string {
     windowLeftPercent(window) < windowLeftPercent(worst) ? window : worst,
   );
   return windowLeftText(tightest);
+}
+
+/**
+ * 这张卡该用什么颜色说（d.340）：跟着最紧的那份窗口走。
+ *
+ * 给定一个 provider 的额度时，来源行上只放一枚小徽标，颜色就是这句话的轻重：
+ * 见底红、偏紧黄、其余中性。读不到不装作「还宽裕」，按红走。
+ */
+export function cardTone(card: QuotaCard): QuotaTone {
+  if (card.error) return "danger";
+  const windows = card.windows.filter((window) => !window.unlimited && !window.text);
+  if (windows.length === 0) return "ok";
+  const tightest = windows.reduce((worst, window) =>
+    windowLeftPercent(window) < windowLeftPercent(worst) ? window : worst,
+  );
+  return windowTone(tightest);
 }

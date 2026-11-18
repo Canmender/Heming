@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cardSummary,
+  cardTone,
   nonSubscriptionCards,
   parseQuotaCards,
   quotaKindLabel,
@@ -141,5 +142,54 @@ describe("cardSummary", () => {
   it("什么都读不到时留空，不画一行假结论", () => {
     const cards = parseQuotaCards(JSON.stringify([{ provider: "mimo", name: "MiMo", kind: "plan" }]));
     expect(cardSummary(cards[0] as QuotaCard, now)).toBe("");
+  });
+});
+
+describe("cardTone", () => {
+  it("颜色跟着最紧的那份窗口走，跟结论同一把尺子", () => {
+    const cards = parseQuotaCards(
+      JSON.stringify([
+        {
+          provider: "zed",
+          name: "Zed",
+          kind: "plan",
+          windows: [
+            { name: "week", used: 10, remaining: 90 },
+            { name: "month", used: 93, remaining: 7 },
+          ],
+        },
+        {
+          provider: "glm",
+          name: "GLM",
+          kind: "plan",
+          windows: [{ name: "day", used: 80, remaining: 20 }],
+        },
+      ]),
+    );
+    expect(cardTone(cards[0] as QuotaCard)).toBe("danger");
+    expect(cardTone(cards[1] as QuotaCard)).toBe("warn");
+  });
+
+  it("读不到按红走：不装作还宽裕", () => {
+    const cards = parseQuotaCards(
+      JSON.stringify([{ provider: "grok", name: "Grok", kind: "plan", error: "HTTP 401" }]),
+    );
+    expect(cardTone(cards[0] as QuotaCard)).toBe("danger");
+  });
+
+  it("钱包余额与厂商原话没有份额可比，走中性", () => {
+    const cards = parseQuotaCards(
+      JSON.stringify([
+        { provider: "deepseek", name: "DeepSeek", kind: "balance", balance: "¥2.60" },
+        {
+          provider: "wb",
+          name: "WorkBuddy",
+          kind: "plan",
+          windows: [{ name: "积分余额", text: true, display: "还剩 3000 积分" }],
+        },
+      ]),
+    );
+    expect(cardTone(cards[0] as QuotaCard)).toBe("ok");
+    expect(cardTone(cards[1] as QuotaCard)).toBe("ok");
   });
 });

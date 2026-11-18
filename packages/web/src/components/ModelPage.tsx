@@ -51,7 +51,14 @@ import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrendCard } from "./model/QuotaTrendCard.js";
 import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
-import { nonSubscriptionCards, parseQuotaCards, type QuotaCard } from "../lib/magpieQuotaCards.js";
+import {
+  cardSummary,
+  cardTone,
+  nonSubscriptionCards,
+  parseQuotaCards,
+  quotaKindLabel,
+  type QuotaCard,
+} from "../lib/magpieQuotaCards.js";
 import {
   discoveryArgs,
   discoveryText,
@@ -403,6 +410,23 @@ export function ModelPage() {
   };
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
+  /**
+   * provider id → 这份额度（d.340）。
+   *
+   * 「已添加的来源」每一行本来就是那个 provider 的操作位（测试、换 Key、删除），
+   * 额度写在那儿才挨着能动手的地方；所以额度卡只留没有来源行的那些（钱包余额、
+   * 没有 Key 的套餐），同一个 provider 不再在两张卡里各说一遍。
+   */
+  const quotaByProvider = useMemo(() => {
+    const map = new Map<string, QuotaCard>();
+    for (const card of keyQuotas) map.set(card.provider, card);
+    return map;
+  }, [keyQuotas]);
+  /** 没有对应来源行的额度卡（钱包余额、没有 Key 的套餐）。 */
+  const orphanQuotas = useMemo(
+    () => keyQuotas.filter((card) => !providers.some((provider) => provider.id === card.provider)),
+    [keyQuotas, providers],
+  );
   /**
    * 账号列表的筛选项（`all` = 不筛）。
    *
@@ -2671,14 +2695,14 @@ export function ModelPage() {
                 )}
               </div>
 
-              {(keyQuotas.length > 0 || readErrors.quotas) && (
+              {(orphanQuotas.length > 0 || readErrors.quotas) && (
                 <div className="ui-card p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h2 className="ui-section-title">其余来源的额度</h2>
-                    <span className="ui-caption">按量付费的 Key、套餐与钱包余额</span>
+                    <span className="ui-caption">没有对应来源行的 Key、套餐与钱包余额</span>
                   </div>
-                  {keyQuotas.length > 0 ? (
-                    <QuotaCards cards={keyQuotas} now={now} />
+                  {orphanQuotas.length > 0 ? (
+                    <QuotaCards cards={orphanQuotas} now={now} />
                   ) : (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <span className="ui-caption text-danger">
@@ -2808,6 +2832,7 @@ export function ModelPage() {
               <ul className="mt-2">
                 {providers.map((row) => {
                   const info = showCache[row.id];
+                  const quota = quotaByProvider.get(row.id);
                   const badge =
                     showLoading === row.id
                       ? { label: "读取地址…", className: "bg-subtle-3 text-muted" }
@@ -2824,6 +2849,17 @@ export function ModelPage() {
                             >
                               {badge.label}
                             </span>
+                            {quota && (
+                              // 额度就写在这一行：测试、换 Key、删除都在这儿，不用去另一张卡里对。
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${QUOTA_BADGE[cardTone(quota)]}`}
+                                title={`${quotaKindLabel(quota.kind)}${quota.plan ? ` · ${quota.plan}` : ""}${
+                                  quota.error ? `：${engineText(quota.error)}` : ""
+                                }`}
+                              >
+                                {engineText(cardSummary(quota, now)) || "额度未知"}
+                              </span>
+                            )}
                           </span>
                           <span className="block truncate ui-caption">
                             {row.kind}
