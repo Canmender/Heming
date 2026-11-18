@@ -43,6 +43,11 @@ export interface PromptOptions {
   resume?: string;
   /** 存档目录（缺省 `~/.heming/cli-sessions`，也可用 HEMING_CLI_SESSION_DIR）。 */
   sessionDir?: string;
+  /**
+   * 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把它们的工具一起交给模型。
+   * 必须显式打开：连服务等于启动仓库里写的命令，克隆来的仓库不该自动获得这个权力。
+   */
+  mcp: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -96,6 +101,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let continueSession = false;
   let resume: string | undefined;
   let sessionDir: string | undefined;
+  let mcp = false;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -153,7 +159,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
           allowDanger = true;
           break;
         }
-        case "trust-workspace": {
+        case "mcp": {
+      if (inline !== undefined) {
+        return { ok: false, error: "--mcp 不接受取值（直接写 --mcp 即可）" };
+      }
+      mcp = true;
+      continue;
+    }
+    case "trust-workspace": {
           if (inline !== undefined) {
             return { ok: false, error: "--trust-workspace 不接受取值（直接写 --trust-workspace 即可）" };
           }
@@ -243,7 +256,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (baseUrl !== undefined) notForSessions.push("--base-url");
     if (apiKey !== undefined) notForSessions.push("--api-key");
     if (continueSession) notForSessions.push("--continue");
-  if (trustWorkspace) notForSessions.push("--trust-workspace");
+    if (trustWorkspace) notForSessions.push("--trust-workspace");
+    if (mcp) notForSessions.push("--mcp");
     if (resume !== undefined) notForSessions.push("--resume");
     if (notForSessions.length > 0) {
       return {
@@ -286,6 +300,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (continueSession) notForMcp.push("--continue");
     if (resume !== undefined) notForMcp.push("--resume");
     if (sessionDir !== undefined) notForMcp.push("--session-dir");
+    if (mcp) notForMcp.push("--mcp");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -324,6 +339,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       fromStdin,
       allowDanger,
       trustWorkspace,
+      mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(maxRounds !== undefined ? { maxRounds } : {}),

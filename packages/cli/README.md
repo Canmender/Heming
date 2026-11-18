@@ -56,6 +56,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--max-rounds <n>` | 最多允许 `n` 个工具轮。第 `n+1` 轮如果模型还要调工具，CLI 会提前收口（第 `n+1` 轮直接作答仍然允许）。`n` 必须是正整数。 |
 | `--allow-danger` | 放行 `run_command` 等 danger 工具。不加时命令工具**不会出现在工具清单里**；模型硬调会得到「未执行」而不是真正执行。 |
 | `--trust-workspace` | 让工作区 `.heming/permissions.json` 里的 `allow` 规则生效（`deny` / `ask` 本来就算数）。详见下文「工作区权限规则」。 |
+| `--mcp` | 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把对方的工具接进这次运行。只有显式加这个开关才连；工具还要 `--allow-danger` 才真的调过去。详见下文「MCP 客户端」。 |
 | `--output-format <f>` | stdout 格式：`text`（默认）/ `json`（= `--json`，exec 专用）/ `stream-json`（一行一条事件，run 与 exec 都可用）。 |
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
 | `--base-url <url>` | OpenAI 兼容端点，默认 `https://api.openai.com/v1`。必须以 `http://` / `https://` 开头。 |
@@ -297,6 +298,66 @@ heming mcp serve --cwd D:/repo
 - `file_patch` 里的多个文件路径不做换算（补丁是一段文本，逐行改写会弄坏上下文），需要补丁时请用相对路径。
 - 没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。
 
+## MCP 客户端：`heming run --mcp`
+
+`heming mcp serve`（见下文）是**我们提供服务**给别的编辑器；`--mcp` 是反方向：让 CLI 用上别人写好的 MCP 工具。
+
+### 声明
+
+在仓库里放 `.heming/mcp.json`（与桌面端同一份习惯写法）：
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "command": "node",
+      "args": ["D:/tools/docs-server.js"],
+      "env": { "DOCS_ROOT": "D:/repo/docs" }
+    }
+  }
+}
+```
+
+- 最多 8 个服务；每个必须有非空的 `command`，`args` 必须是字符串数组，`env` 的值必须是字符串。
+- 配置坏了（JSON 不合法、缺 `command`、超过 8 个）**不启动**，并说清是哪个文件；单个服务连不上只警告，其余继续。
+- 文件带 UTF-8 BOM 也能读（记事本、PowerShell 5 写的都行）。
+
+### 为什么必须显式 `--mcp`
+
+连上某个服务 = 执行仓库里写的那条命令。克隆一个陌生仓库后自动执行它，和自动跑 `postinstall` 是同一类风险。所以：
+
+- 不加 `--mcp`：`.heming/mcp.json` **完全不读**；
+- 加了 `--mcp`：连接会建立，但对方的工具一律按 danger 处理，**还要 `--allow-danger`** 才真的调过去。
+
+### 工具长什么样
+
+- 名字：`mcp__<服务名>__<工具名>`（非法字符换成 `_`），例如 `mcp__docs__search`。
+- 描述：`MCP · docs / search：…`，参数表沿用对方声明的 `inputSchema`。
+- 参数**原样转发**：CLI 内部那套「绝对路径改成工作区相对路径」只适用于自己的文件工具，不会替别人的服务改写参数。
+
+### 没有 `--allow-danger` 时
+
+调用会立刻得到：
+
+```text
+未执行：MCP 工具 docs/search 属于危险工具，需要 --allow-danger 才放行。
+【该操作未执行，文件与系统状态未被修改】
+```
+
+这段文本会作为工具结果回到模型，它会知道这条路被挡住，而不是以为调用成功了。
+
+### 失败与收尾
+
+- 参数不是合法 JSON：当场说明，不会调对方。
+- 对方返回错误：变成工具结果里的「MCP 调用失败（docs/search）：…」，模型可以据此改做法。
+- 退出前关掉所有 MCP 子进程：它们挂在 stdio 管道上，不关的话终端会一直不返回。
+
+### 已知留白
+
+- 只支持 stdio 传输（不接 HTTP / SSE 的 MCP 服务）。
+- 只接 `tools`，`resources` / `prompts` 没接。
+- 每次 `run` 现连现断，没有常驻连接池。
+- 风险等级没有按服务细分：一律 danger。
 ## 工作区权限规则（`.heming/permissions.json`）
 
 桌面端一直读这份仓库里的规则，`heming run` 与 `heming mcp serve` 现在读同一份——
@@ -362,12 +423,13 @@ heming mcp serve --cwd D:/repo
 
 ## 能力边界
 
-- **不接 MCP 客户端**：没有 MCP 服务发现/调用（不把别人的工具挂进来）。反过来，`heming mcp serve`
-  让我们作为 MCP **服务端**被别的编辑器调用——只出不进。
+- **MCP 两头都能接，但都要显式打开**：`heming mcp serve` 让我们作为 MCP **服务端**被别的编辑器调用
+  （只出不进）；`heming run --mcp` 让我们作为 MCP **客户端**用上 `.heming/mcp.json` 里的服务（还要
+  `--allow-danger` 才真的调过去）。没有自动发现、没有常驻连接。
 - **不接联网搜索**：没有 web search 工具；需要联网请用 `--allow-danger` 跑命令（如 `curl`）。
 - **没有 HITL 人工确认**：无人值守时「问」一律按拒绝处理；危险能力必须由启动参数显式授权。
-- **单轮、无历史**：每次调用都是独立会话，不读写桌面端的聊天历史/记忆/任务清单。
-  需要多轮请把上下文写进 prompt，或分多次调用。
+- **CLI 自己的会话存档，不碰桌面端历史**：默认单轮；`--continue` / `--resume` 只接 CLI 自己存在
+  `~/.heming/cli-sessions/` 的文字问答，不读写桌面端的聊天历史/记忆/任务清单。
 - **不是 Electron**：系统提示词按「文件工具会真的改本机文件」描述运行环境；
   不包含桌面端 UI、通知、文件选择器等能力。
 - **路径写法**：目前在 Windows（Git Bash / PowerShell）上验证过；路径统一转成绝对路径 + 正斜杠。

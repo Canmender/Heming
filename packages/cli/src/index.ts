@@ -15,6 +15,7 @@ import { createEventSink } from "./events.js";
 import { startMcpServe } from "./mcpServe.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
+import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
 import {
   appendTurn,
   describeSession,
@@ -49,6 +50,7 @@ const USAGE = `用法：
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
+  --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -74,6 +76,7 @@ ${USAGE}
     file_grep / file_image / file_undo）、todo_write、tool_output_read；
   - run_command 仅在 --allow-danger 时提供，且每条命令都会真的执行；
   - 不调外部模型的一条路：heming mcp serve 只把工具按 MCP 协议暴露出去，不替你思考；
+  - 反方向：--mcp 让我们自己当 MCP 客户端，把工作区 .heming/mcp.json 里的服务工具接进来；
   - 不接联网搜索、没有人工确认（无人值守时「问」一律按拒绝处理）。
 
 MCP 服务（给别的编辑器用）：
@@ -194,10 +197,29 @@ async function main(argv: string[]): Promise<number> {
   const options = parsed.options;
   const streamMode = options.outputFormat === "stream-json";
   const sink = streamMode ? createEventSink((chunk) => process.stdout.write(chunk)) : null;
+  /**
+   * `--mcp` 连上的子进程。
+   *
+   * 必须声明在 failEarly 之前：MCP 子进程挂在 stdio 管道上，只要它们还活着，
+   * 父进程就不会退出。中途因为「没配模型」「--continue 没找到会话」之类失败时，
+   * failEarly 要负责把已经连上的连接全部关掉，否则终端会一直挂着等 Ctrl+C。
+   */
+  const mcpConnections: McpConnection[] = [];
+  const closeMcpConnections = (): void => {
+    for (const connection of mcpConnections) {
+      try {
+        connection.close();
+      } catch {
+        // 对方已经退了：这里只求不留孤儿进程。
+      }
+    }
+  };
+
   /** 运行前的用法/配置错误：stream-json 模式下也给一条机器可读的事件。 */
   const failEarly = (message: string): number => {
     writeErr(`heming: ${message}\n`);
     sink?.emit({ type: "error", message });
+    closeMcpConnections();
     return 2;
   };
 
@@ -241,6 +263,38 @@ async function main(argv: string[]): Promise<number> {
   const workspaceRules = rulesLoad && rulesLoad.ok ? rulesLoad.rules : null;
   if (workspaceRules) writeErr(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
 
+  /*
+   * MCP 工具（`--mcp`）：把工作区 `.heming/mcp.json` 里声明的服务连上。
+   *
+   * 为什么必须显式打开：连接等于「启动仓库里写的命令」。克隆一个陌生仓库就自动执行它，
+   * 和自动运行 postinstall 是同一类风险。连上之后它们的工具也不会直接可用——
+   * MCP 工具一律按 danger 处理，还要 `--allow-danger` 才真的调过去。
+   */
+  if (options.mcp) {
+    const config = await loadMcpServers(cwd);
+    if (config === null) {
+      return failEarly(
+        `--mcp 需要工作区里有 ${MCP_CLIENT_CONFIG_FILE}（声明 {\"mcpServers\":{\"名字\":{\"command\":\"…\"}}}）。这次没有找到，所以一个服务也没连。`,
+      );
+    }
+    if (!config.ok) return failEarly(`MCP 配置有问题：${config.error}（${config.source}）`);
+    for (const server of config.servers) {
+      const connected = await connectMcpServer(server, { cwd, version: readVersion() });
+      if (!connected.ok) {
+        writeErr(`[heming] MCP 服务 ${server.name} 没连上：${connected.error}\n`);
+        continue;
+      }
+      mcpConnections.push(connected.connection);
+      const names = connected.connection.tools.slice(0, 6).map((tool) => tool.name);
+      const more = connected.connection.tools.length > names.length ? ` 等 ${connected.connection.tools.length} 个` : "";
+      writeErr(
+        `[heming] MCP 已连上 ${server.name}：${names.map((tool) => mcpToolName(server.name, tool)).join("、")}${more}${options.allowDanger ? "" : "（未加 --allow-danger：这批工具现在调用会得到「未执行」）"}\n`,
+      );
+    }
+    if (mcpConnections.length === 0) {
+      writeErr(`[heming] MCP：${config.servers.length} 个服务一个都没连上，这次只用自己的工具。\n`);
+    }
+  }
   const sessionRoot = sessionDir(options.sessionDir);
   let prior: SessionRecord | null = null;
   if (options.resume !== undefined) {
@@ -290,6 +344,7 @@ async function main(argv: string[]): Promise<number> {
     profile,
     allowDanger: options.allowDanger,
     ...(workspaceRules ? { workspaceRules } : {}),
+    ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     history: toHistory(prior),
     sessionId,
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
@@ -368,6 +423,9 @@ async function main(argv: string[]): Promise<number> {
   } catch (error) {
     writeErr(`[heming] 会话没有存下来：${error instanceof Error ? error.message : String(error)}\n`);
   }
+
+  // MCP 子进程要收掉：它们挂在 stdio 上，留着会让 Node 等 stdin 关闭而不退出。
+  closeMcpConnections();
 
   return outcomeExitCode(outcome, interrupted);
 }

@@ -26,6 +26,7 @@ import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { createEvalToolBridge } from "../../../evals/runner/tools.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 
 /** 一次工具调用在闸门看来需要的最小形状（与编排层给的一致）。 */
 export interface GateCall {
@@ -234,6 +235,13 @@ export function createCliTooling(options: {
   onWrite?: (file: string) => void;
   /** 工作区权限规则（`.heming/permissions.json`）；`null` / 省略 = 没有规则。 */
   rules?: CliWorkspaceRuleSet | null;
+  /**
+   * 已连上的 MCP 服务（`--mcp` 时由入口连接，见 `mcpClient.ts`）。
+   *
+   * 它们的工具一律按 **danger** 处理：真正的操作发生在对方进程里，我们的闸门管不到，
+   * 只能靠「要不要放行 danger」这一道总闸（也就是还需要 `--allow-danger` 才真的跑）。
+   */
+  mcp?: readonly McpConnection[];
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -252,18 +260,73 @@ export function createCliTooling(options: {
   });
 
   const onWrite = options.onWrite;
+  const mcp = options.mcp ?? [];
+  const mcpTools: unknown[] = [];
+  const connections = new Map<string, McpConnection>();
+  for (const connection of mcp) {
+    connections.set(connection.server, connection);
+    for (const tool of connection.tools) {
+      mcpTools.push({
+        type: "function",
+        function: {
+          name: mcpToolName(connection.server, tool.name),
+          description: `MCP · ${connection.server} / ${tool.name}${tool.description ? `：${tool.description}` : ""}`,
+          // 对方给的 schema 原样转发；没给就用宽松的 object（别假装知道参数长什么样）。
+          parameters: tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
+        },
+      });
+    }
+  }
+
   const toolBridge: ToolBridge = {
-    tools: baseBridge.tools,
-    meta: (name) =>
-      name === SHELL_TOOL
-        ? { risk: "danger" as const, displayName: "在本机执行命令", core: true }
-        : baseBridge.meta?.(name),
+    tools: [...baseBridge.tools, ...mcpTools],
+    meta: (name) => {
+      if (name === SHELL_TOOL) return { risk: "danger" as const, displayName: "在本机执行命令", core: true };
+      const mcpTarget = parseMcpToolName(name);
+      if (mcpTarget) {
+        return { risk: "danger" as const, displayName: `MCP · ${mcpTarget.server}/${mcpTarget.tool}`, core: true };
+      }
+      return baseBridge.meta?.(name);
+    },
     async execute(call, execOpts) {
       // 没挂命令工具时，模型仍可能「凭印象」调用它：回一条明确的未执行文案，
       // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
       if (call.name === SHELL_TOOL && !options.allowDanger) {
         return { text: shellDeniedText(), ok: false };
       }
+
+      // MCP 工具：参数语义由对方定义，**不改写**（不套 relativizeToolArgs）。
+      const mcpTarget = parseMcpToolName(call.name);
+      if (mcpTarget) {
+        const connection = connections.get(mcpTarget.server);
+        if (!connection) return { text: `MCP 服务 ${mcpTarget.server} 没有连上`, ok: false };
+        if (!options.allowDanger) {
+          return {
+            text: [
+              `未执行：MCP 工具 ${call.name} 需要 --allow-danger（MCP 工具一律按危险工具处理）。`,
+              "【该操作未执行，文件与系统状态未被修改】",
+              "这不是重试能解决的问题：要让模型用这些工具，请用 --mcp --allow-danger 重新启动。",
+            ].join("\n"),
+            ok: false,
+          };
+        }
+        let args: unknown;
+        try {
+          args = call.arguments.trim() ? JSON.parse(call.arguments) : {};
+        } catch {
+          return { text: `MCP 工具 ${call.name} 的参数不是合法 JSON`, ok: false };
+        }
+        try {
+          const result = await connection.callTool(mcpTarget.tool, args);
+          return { text: result.text, ok: !result.isError };
+        } catch (error) {
+          return {
+            text: `MCP 调用失败（${mcpTarget.server}/${mcpTarget.tool}）：${error instanceof Error ? error.message : String(error)}`,
+            ok: false,
+          };
+        }
+      }
+
       const normalized =
         call.name === SHELL_TOOL
           ? call
@@ -290,7 +353,7 @@ export function createCliTooling(options: {
   const confirm: ToolConfirmFn = async (calls) =>
     gate(
       calls.map((call) =>
-        call.function.name === SHELL_TOOL
+        call.function.name === SHELL_TOOL || parseMcpToolName(call.function.name)
           ? call
           : { ...call, function: { ...call.function, arguments: relativizeToolArgs(call.function.arguments, cwd) } },
       ),

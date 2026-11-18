@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.309.4.120.12",
+    "date": "2026-11-18",
+    "title": "终端也能用上别人写好的 MCP 工具",
+    "bullets": [
+      "只支持 stdio 传输，没接 HTTP / SSE 的 MCP 服务。",
+      "只接 `tools`，`resources` / `prompts` 没接。",
+      "每次 `run` 现连现断，没有常驻连接池（启动一次多几百毫秒，换来「不跑的时候不留进程」）。",
+      "风险等级没有按服务细分：现在一律 danger，想更细只能等 `permissions.json` 支持按 MCP 服务写规则。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.289 让和鸣**被**别的编辑器调用（`heming mcp serve`：Cursor / Claude Code 调我们的文件工具）。但反方向一直空着：终端里跑 `heming run` 时，`--help` 写着「不接 MCP」，能用的只有内置那几个文件工具。团队已经把数据库查询、内部 API 包成了 MCP 服务，桌面端连得上，终端里却用不了——同一个仓库，两条路能力不一样。",
+      "做了什么",
+      "| 能力 | 落地 || --- | --- || 声明位置 | `.heming/mcp.json` 的 `mcpServers`，与桌面端那份配置同一个习惯写法（`command` / `args` / `env` / `cwd`） || 什么时候连 | 只有显式 `--mcp` 才连。连上等于执行仓库里写的命令，克隆来的陌生仓库不该自动拿到这个权力 || 工具长什么样 | `mcp__<服务>__<工具>`，描述里写清来源；对方给的 `inputSchema` 原样当参数表 || 授权 | MCP 工具一律按 danger 处理：没有 `--allow-danger` 时调用得到「未执行」，并把原因写回给模型 || 参数 | **原样转发**，不做 CLI 内部那套绝对路径改相对路径（那是我们自己的文件工具约定，不能替别人的服务改写） || 失败 | 单个服务连不上只警告、继续跑；配置坏了（JSON 坏 / 缺 `command` / 超过 8 个服务）直接不启动，说清是哪个文件 || 收尾 | 退出前关掉所有 MCP 子进程——它们挂在 stdio 上，留着会让终端一直不返回（这一条有进程级回归测试钉着） |",
+      "怎么验证",
+      "```bash",
+      "cd packages/cli",
+      "npx tsc --noEmit -p tsconfig.json   # 通过",
+      "npx vitest run                      # 9 文件 / 133 例（本轮 +22）",
+      "```",
+      "真机冒烟：临时工作区放一个假 MCP 服务 + 一个假的 OpenAI 兼容端点，让模型主动要求调用 `mcp__demo__echo`。加 `--allow-danger` 时工具结果回传、模型据此给出最终答复、退出码 0；去掉 `--allow-danger` 时同一个调用变成「未执行」且模型收到原因。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.308.4.120.12",
     "date": "2026-11-18",
     "title": "余额快见底也会说一声：第三个提醒",
@@ -19,7 +44,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "真机确认三个键都在 `settings list --json` 里：`usageAlert=0`、`resetReminder=0`、`balanceAlert=0`（都是数字）。",
       "`magpieReminder.test.ts` 补档位、`reminderArgs(\"balanceAlert\", 5)`、`balanceAlertText`、三句 `reminderSummary`。",
       "`ModelPage.test.tsx` 新增「余额提醒也走同一个设置」：切到「来源」，把「余额快用完时提醒」选成 5，断言发出 `[\"settings\",\"set\",\"balanceAlert\",\"5\"]`、提示条出现「已记下：余额低到 5 或更少时提醒一次」。",
-      "全量测试与设计门槛见提交说明；typecheck 0 错。",
+      "全量 `pnpm --filter @heming/web test`：**443 个测试文件 / 6354 个用例全绿**；typecheck 0 错；`node scripts/design-audit.mjs` 全门槛通过（三个下拉换行后横向溢出 0）。",
       "数额只有 1/5/10/20 四档：内核收任意正数（`--balance 0.5` 也收），但「0.5 美元」这种在中文界面里读起来别扭，先给常见档位。",
       "提醒是内核通知（应用运行时才发），页面只负责设置，不在这里弹自己的提示。"
     ],

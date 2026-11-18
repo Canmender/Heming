@@ -39,6 +39,7 @@ import {
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createCliTooling, shellDeniedText } from "./tooling.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
+import type { McpConnection } from "./mcpClient.js";
 import type { CliEvent } from "./events.js";
 
 /** 注入点：测试传脚本化 chat；生产用真实 OpenAI 兼容客户端。 */
@@ -110,6 +111,11 @@ export interface AgentRunOptions {
    * 免得模型白跑几轮才在第一次工具调用时被全拒。
    */
   workspaceRules?: CliWorkspaceRuleSet | null;
+  /**
+   * 已连上的 MCP 服务（`--mcp`）。它们的工具按 danger 处理：
+   * 没有 `--allow-danger` 时只会拿到「未执行」，不会真的调到对方进程。
+   */
+  mcp?: readonly McpConnection[];
 }
 
 export interface AgentRunOutcome {
@@ -226,6 +232,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     cwd,
     allowDanger: options.allowDanger,
     rules: options.workspaceRules ?? null,
+    mcp: options.mcp ?? [],
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;

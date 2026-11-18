@@ -12,6 +12,21 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.309.4.120.12",
+    "date": "2026-11-18",
+    "title": "终端也能用上别人写好的 MCP 工具",
+    "bullets": [
+      "`heming run --mcp` 会读工作区里的 `.heming/mcp.json`，把声明的 MCP 服务连上（stdio）。",
+      "对方的工具以 `mcp__<服务>__<工具>` 出现在工具表里，描述里写清来自哪个服务。",
+      "必须显式加 `--mcp` 才连：连接等于执行仓库里写的命令，陌生仓库不该自动获得这个权力。",
+      "MCP 工具一律按危险工具处理，还要 `--allow-danger` 才真的调过去；否则调用会得到「未执行」并把原因告诉模型。",
+      "参数原样转发给对方的服务，和鸣不替你改写路径。",
+      "没有 `--allow-danger` 时也不会偷偷跳过：拒绝原因会回到模型那里，它会知道这条路被挡住了。",
+      "退出时会把 MCP 子进程关掉，不会留下挂住的终端。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.308.4.120.12",
     "date": "2026-11-18",
     "title": "余额快见底也会说一声：第三个提醒",
