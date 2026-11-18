@@ -402,6 +402,54 @@ describe("ModelPage · 账号与更多", () => {
     expect(await screen.findByText(/码号 的窗口已经重新开始/)).toBeInTheDocument();
   });
 
+  it("重置快到期时可以让它自己花掉：只开一档时把另一档显式关掉", async () => {
+    const until = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const { calls } = installBridge(
+      {},
+      {
+        "accounts --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            {
+              agent: "codex",
+              user: "gpt@example.com",
+              alias: "码号",
+              plan: "Plus",
+              active: true,
+              on: true,
+              windows: [{ name: "week", used: 40, remaining: 60, display: "40% used" }],
+              resets: { count: 2, until },
+              readAt: new Date().toISOString(),
+            },
+          ]),
+          stderr: "",
+        },
+        "quota auto-reset": {
+          ok: true,
+          stdout: "● gpt@example.com  uses a reset by itself before one expires\n",
+          stderr: "",
+        },
+        "quota auto-reset gpt@example.com week on": { ok: true, stdout: "✓", stderr: "" },
+        "quota auto-reset gpt@example.com expiring off": { ok: true, stdout: "✓", stderr: "" },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("码号");
+
+    // 内核此刻说的是「快过期才花」，下拉就得停在这一档，而不是页面自己猜的「不自己花」。
+    const select = await screen.findByLabelText<HTMLSelectElement>("码号 的重置怎么花");
+    await waitFor(() => expect(select.value).toBe("expiring"));
+
+    fireEvent.change(select, { target: { value: "week" } });
+    await waitFor(() =>
+      expect(calls).toContainEqual(["quota", "auto-reset", "gpt@example.com", "week", "on"]),
+    );
+    // 只发 week on 会变成两档都开：另一档必须显式关掉。
+    expect(calls).toContainEqual(["quota", "auto-reset", "gpt@example.com", "expiring", "off"]);
+    expect(await screen.findByText(/码号 自己花掉重置：周额度用完就花/)).toBeInTheDocument();
+  });
+
   it("同一家两个账号时，先把两份读成一行（平均剩多少）", async () => {
   installBridge(
     {},

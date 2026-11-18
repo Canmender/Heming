@@ -29,6 +29,7 @@ import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
 import { swapArgs, swapSuggestions, swapText, type SwapSuggestion } from "../lib/swapAccount.js";
+import { autoResetArgs, autoResetLevelText, parseAutoReset, type AutoResetLevel } from "../lib/autoReset.js";
 import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrend } from "./model/QuotaTrend.js";
@@ -313,6 +314,13 @@ export function ModelPage() {
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
   const [history, setHistory] = useState<QuotaHistoryRow[]>([]);
+  /**
+   * Codex 账号「重置谁花」（账号 → 档位）。
+   *
+   * 内核把这个开关存在 settings 里，但 `settings list --json` 与 `accounts --json` 都不报它，
+   * 只能读 `quota auto-reset` 的散文输出：没读过就当作关闭，绝不替用户猜一个「开着」。
+   */
+  const [autoResetLevels, setAutoResetLevels] = useState<Map<string, AutoResetLevel>>(() => new Map());
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   /**
@@ -626,6 +634,19 @@ export function ModelPage() {
     [cli, once],
   );
 
+  /**
+   * Codex 的「重置谁花」：内核只以散文报告（见 `lib/autoReset.ts`），读一次很便宜，放第二波。
+   */
+  const loadAutoReset = useCallback(
+    () =>
+      once("autoReset", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["quota", "auto-reset"]);
+        setAutoResetLevels(parseAutoReset(`${result.stdout || ""}${result.stderr || ""}`));
+      }),
+    [cli, once],
+  );
+
   const loadGlobals = useCallback(async () => {
     if (!cli) return;
     const [suffix, compact, cap, modelUsage] = await Promise.all([
@@ -661,6 +682,7 @@ export function ModelPage() {
       loadAccounts(),
       loadQuotas(),
       loadHistory(),
+      loadAutoReset(),
       loadAgents(),
       loadPlugins(),
       loadSettings(),
@@ -680,6 +702,7 @@ export function ModelPage() {
     loadAccounts,
     loadQuotas,
     loadHistory,
+    loadAutoReset,
     loadAgents,
     loadPlugins,
     loadSettings,
@@ -952,6 +975,38 @@ export function ModelPage() {
       tone: "primary",
       action: () => void spendReset(row),
     });
+  };
+
+  /**
+   * 改一个 Codex 账号的「重置谁花」（`quota auto-reset`）。
+   *
+   * 内核的重置次数会过期作废：周窗口用完、又没有别的账号能接时用掉一次，或者快过期时提前用掉，
+   * 都比让它白白到期划算。只发档位命令、不碰窗口本身；改完重读一次，用内核的回答当准。
+   */
+  const changeAutoReset = async (row: AccountRow, level: AutoResetLevel) => {
+    if (!cli || !row.user) return;
+    setAccountBusy(`${row.agent}:${row.user}`);
+    try {
+      for (const args of autoResetArgs(row.user, level)) {
+        const result = await cli.cli(args);
+        if (!result.ok) {
+          const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+          setNotice(`没能改这个设置：${why || "没有说明原因"}`, true);
+          await loadAutoReset();
+          return;
+        }
+      }
+      await loadAutoReset();
+      setNotice(
+        level === "off"
+          ? `${row.label} 的重置不再自己花，要用时点「用掉一次重置」。`
+          : `已让 ${row.label} 自己花掉重置：${autoResetLevelText(level)}。`,
+      );
+    } catch (err) {
+      setNotice(`没能改这个设置：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
   };
 
   const confirmSwitchAccount = (row: AccountRow) => {
@@ -1255,6 +1310,7 @@ export function ModelPage() {
         loadAccounts(),
         loadQuotas(),
         loadHistory(),
+        loadAutoReset(),
         loadGlobals(),
         loadDrawers(),
         loadPlugins(),
@@ -1277,6 +1333,7 @@ export function ModelPage() {
     loadSettings,
     loadQuotas,
     loadHistory,
+    loadAutoReset,
     loadDiscovery,
     loadDrawers,
   ]);
@@ -2136,6 +2193,8 @@ export function ModelPage() {
                       onRename={renameAccount}
                       onForget={confirmForgetAccount}
                       onSpendReset={confirmSpendReset}
+                      autoReset={autoResetLevels.get((row.user ?? "").toLowerCase()) ?? "off"}
+                      onAutoReset={changeAutoReset}
                     />
                   ))}
                   {accounts.length === 0 && (

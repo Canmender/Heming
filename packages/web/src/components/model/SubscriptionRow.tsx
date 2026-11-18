@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
 import { WindowBar } from "./WindowBar.js";
+import { AUTO_RESET_LEVELS, autoResetLevelText, type AutoResetLevel } from "../../lib/autoReset.js";
 import { engineText } from "../../lib/engineText.js";
 import type { AccountRow } from "../../lib/magpieCli.js";
 import { accountState, agentName, formatReadAt, hasQuota, resetsText } from "../../lib/magpieQuota.js";
@@ -30,6 +31,10 @@ export interface SubscriptionRowProps {
   onForget: (row: AccountRow) => void;
   /** 花掉这个账号持有的一次额度重置（`quota reset`）——会二次确认，这里只负责发起。 */
   onSpendReset?: (row: AccountRow) => void;
+  /** 这个账号的「重置谁花」现在停在哪一档（`quota auto-reset`），没读过就是关闭。 */
+  autoReset?: AutoResetLevel;
+  /** 改「重置谁花」——内核按账号存，所以这里带上这一行。 */
+  onAutoReset?: (row: AccountRow, level: AutoResetLevel) => void;
 }
 
 /** 状态徽标：和页面里其它徽标同一套语义色（信息=在用，红=读不到/失效）。 */
@@ -48,6 +53,8 @@ export function SubscriptionRow({
   onRename,
   onForget,
   onSpendReset,
+  autoReset = "off",
+  onAutoReset,
 }: SubscriptionRowProps) {
   const state = accountState(row);
   const [editing, setEditing] = useState(false);
@@ -147,6 +154,28 @@ export function SubscriptionRow({
             !row.error && <p className="mt-1.5 ui-caption">额度未知，这次没读到</p>
           )}
           {extras.length > 0 && <p className="mt-1.5 ui-caption">{extras.join(" · ")}</p>}
+          {row.resets && row.resets.count > 0 && onAutoReset && (
+            // 重置放着不用就到期作废：让它「该花的时候自己花」，是这批账号里最实在的一项。
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2">
+                <span className="ui-caption">重置谁花</span>
+                <select
+                  className="ui-input w-auto"
+                  aria-label={`${row.label} 的重置怎么花`}
+                  title="周额度用完、又没有别的账号能接时自己花掉；快过期的也会提前花掉。一周最多一次。"
+                  value={autoReset}
+                  disabled={busy}
+                  onChange={(event) => onAutoReset(row, event.target.value as AutoResetLevel)}
+                >
+                  {AUTO_RESET_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {autoResetLevelText(level)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
           {row.lapsed && <p className="mt-1.5 text-ui-sm text-warn">登录已经过期：{engineText(row.lapsed)}</p>}
           {row.error && <p className="mt-1.5 text-ui-sm text-danger">{engineText(row.error)}</p>}
         </div>
