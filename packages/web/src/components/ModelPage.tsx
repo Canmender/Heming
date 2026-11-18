@@ -84,6 +84,7 @@ import {
   type MagpieCliEvent,
   type ProviderRow,
 } from "../lib/magpieCli.js";
+import { agentSummary } from "../lib/agentSummary.js";
 import { isModelId, parseAgents, type LocalAgent } from "../lib/magpieAgents.js";
 import { engineText } from "../lib/engineText.js";
 import {
@@ -1806,6 +1807,21 @@ export function ModelPage() {
     const options = rowsForAgent(modelRows, agentVisibleNames(agent));
     return options.some((row) => row.id === current) ? current : "";
   };
+  /**
+   * 「智能体」顶部那句待办汇总（d.343）。
+   *
+   * 只数能改写的工具（有 id 的）：改了没写进配置的下次启动不生效，
+   * 还没配模型的仍在用它自己的默认。两类都为 0 时 `agentSummary` 给空串，页面不多一行。
+   */
+  const agentCounts = (() => {
+    const writable = agents.filter((agent) => agent.id);
+    return {
+      total: writable.length,
+      dirty: writable.filter((agent) => agentDirtyOf(agent)).length,
+      unset: writable.filter((agent) => !agentModelOf(agent) && !isModelId(agent.model.trim())).length,
+    };
+  })();
+  const agentSummaryText = agentSummary(agentCounts);
 
   /** 能被改写的工具（有 id 的），「一次性设成同一个模型」只对它们生效。 */
   const bulkAgents = useMemo(() => bulkModelTargets(agents), [agents]);
@@ -2047,6 +2063,14 @@ export function ModelPage() {
                   重新检测
                 </Button>
               </div>
+              {agentSummaryText && (
+                <p
+                  role="status"
+                  className={`mt-1 ui-caption ${agentCounts.dirty > 0 ? "text-warn" : ""}`}
+                >
+                  {agentSummaryText}
+                </p>
+              )}
               {bulkAgents.length > 1 && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
                   <span className="ui-caption">一次给这 {bulkAgents.length} 个工具设同一个模型</span>

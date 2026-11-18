@@ -1,3 +1,67 @@
+## d.344.4.127.12（2026-11-18）— 「智能体」顶上先说清还有几件没做完的事
+
+### 为什么做
+
+「智能体」分区里每行都能改模型，但改完要按「应用」才写进那个工具自己的配置。
+工具一多，常见的情况是：改了两个、忘了按应用，或者某个工具其实还空着没配模型，
+却要一行一行往下翻才看得出来。这些都不是设置项，而是**待办**，应该一眼看到。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| 新 `packages/web/src/lib/agentSummary.ts` | 没有汇总 | `agentSummary({ total, dirty, unset })` → `2 个工具改了还没写进去；3 个还没配模型。`；两类都是 0 时返回空串 |
+| `packages/web/src/components/ModelPage.tsx` 「本机智能体」卡头 | 只有标题与「重新检测」 | 标题下多一行 `role="status"` 的汇总；有没落盘的改动时用告警色；没有待办就不显示 |
+
+判据：`dirty` = 选了但和 `magpie ls` 报的当前模型不同的工具数；`unset` = 既没选、`magpie ls` 也没报出可用模型（`—`）的工具数；只数能改写的（有 id 的）。
+
+### 怎么验证
+
+- `packages/web/src/lib/agentSummary.test.ts` 4 例（无待办留空、只报没落盘、只报没配模型、两类都有且顺序固定）。
+- `packages/web/src/components/ModelPage.test.tsx` 新增一例：默认夹具里 Claude Code 是 `—` → 出现「1 个还没配模型。」；挑一个模型但还没应用 → 变成「1 个工具改了还没写进去。」。
+- 全量 453 个测试文件 / 6497 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。
+
+### 留白
+
+- 只数不点名：往下翻时每行自己会说（比如可见模型那栏的「改过没保存」），点名会把这一行撑长。
+- 「恢复默认」的待确认不算没落盘：它本身就是一次写入动作，不是草稿。
+- 只读展示的工具（没有 id）不计入，因为它们改不了。
+
+## d.343.4.127.12（2026-11-18）— 工作区里任何一份文本文件，都能当资源直接读
+
+### 为什么做
+
+d.325 起 `heming mcp serve` 会把「这个仓库的规矩」按 MCP 的 `resources` 交出去：命令文件、
+`AGENTS.md` 一族、三份 `.heming` 配置。但那份名单是**写死的**。编辑器真正想读的常常是普通
+源码（「把这个文件全文读进来当上下文」），它只能退回去调 `file_read` 工具——那要多跑一轮
+模型调用，还得让模型把路径拼对。MCP 本身给了这类需求一个标准答案：**资源模板**。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| `packages/cli/src/mcpCatalog.ts` | 只有固定名单 | 新增 `MCP_RESOURCE_TEMPLATE_URI = "heming://workspace/{path}"`、`McpResourceTemplate`、`describeResourceTemplates()`、`readWorkspaceResource({ cwd, uri, bridge? })` |
+| `packages/cli/src/mcp.ts` | 没有 `resources/templates/list`；`resources/read` 只查固定名单 | `McpContext` 新增 `readResource?`；新增 `resources/templates/list`；`resources/read` 先查名单、再走模板读盘；`initialize` 在只有模板时也声明 `resources` 能力；`instructions` 写明模板用法；未知方法清单补上新方法 |
+| `packages/cli/src/mcpServe.ts` | 只注入 `catalog` | 注入 `readResource: (uri) => readWorkspaceResource({ cwd, uri })` |
+
+模板读盘的几条边界都在 `readWorkspaceResource` 一个函数里：URI 必须是 `heming://workspace/<相对路径>`
+（`..`、开头 `/`、别的命名空间一律拒）、算一次相对路径确认没跑出工作区、只给文本
+（不存在/目录/二进制/超大/符号链接各自一句人话）、单份超 `MCP_CATALOG_MAX_FILE_CHARS` 截断并
+指回 `file_read`。模板**只读、不参与订阅推送**：`resources/subscribe` 仍只认固定名单里的 URI。
+
+### 怎么验证
+
+- `packages/cli/src/mcpCatalog.test.ts` 新增 5 例：模板形状与说明、读普通文件（BOM 与 CRLF 归一、按扩展名给 MIME）、越界 URI 全部拒绝、不存在/目录/二进制的人话、超长截断指回 `file_read`。
+- `packages/cli/src/mcp.test.ts` 新增 5 例：`initialize` 只开模板时也声明 `resources` 且 `instructions` 带模板用法、`resources/templates/list`（有/无模板能力两种）、模板读取成功、固定名单优先（名单命中的 URI 不再读盘）、模板读不到回 `-32602` 并点明原因。
+- 真机：临时工作区放 `src/hello.ts` 与 `AGENTS.md`，`mcp serve` 喂五条消息——`resources/templates/list` 回那一条模板；`resources/read heming://workspace/src/hello.ts` 回正文；`heming://workspace/../../../etc/passwd` 回 `-32602` 且不去读盘；`resources/list` 仍只有 `AGENTS.md`。
+- 全量：CLI 21 文件 / 466 例全绿，`tsc --noEmit` 干净。
+
+### 留白
+
+- 模板只有「整个文件」一种，没有按行区间读（大文件推荐 `file_read` 的 offset/limit）。
+- 模板读盘不缓存：每次 `resources/read` 都真读一次，适合按需读、不适合反复轮询。
+- 模板不参与 `resources/subscribe`：订阅仍只覆盖固定名单，普通文件的变动不会推 `notifications/resources/updated`。
+- 只按工作区根读，不跟随符号链接（与桌面端读文件同口径）。
 ## d.342.4.127.12（2026-11-18）— 额度走向的横轴把两端写出来：数据从哪儿开始、还剩多久到重置
 
 ### 为什么做

@@ -2482,6 +2482,21 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
 });
 
 describe("ModelPage · 智能体改模型", () => {
+  it("顶部一句话就说清还有几件事没做：没落盘的、没配模型的", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    // 默认夹具里 Claude Code 还没配模型（—），Codex 已经在用 space-bunny。
+    expect(await screen.findByText("1 个还没配模型。")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Claude Code 模型"), {
+      target: { value: "deepseek/deepseek-chat" },
+    });
+    // 挑了还没应用：改成「改了没写进去」，未配模型那条随之消失。
+    expect(
+      await screen.findByText("1 个工具改了还没写进去。"),
+    ).toBeInTheDocument();
+  });
+
   it("没挑过时下拉就显示它现在用的模型；没改动时「应用」灰着", async () => {
     installBridge(
       {},
