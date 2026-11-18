@@ -1005,4 +1005,71 @@ for (const f of factories) {
       expect(snapshot?.tasks.find((item) => item.id === task.id)?.assigneeId).toBeNull();
     });
   });
+
+  describe(`Store 按 id 删消息（d.291 /rewind 的对话那一半）: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    function seedConversation(userId: string) {
+      const conv = store.createAgentConversation(userId, SYSTEM_AGENT_ID);
+      const m1 = store.addMessage(conv.id, "user", userId, { text: "第一句" });
+      const m2 = store.addMessage(conv.id, "agent", SYSTEM_AGENT_ID, { text: "答一句" });
+      const m3 = store.addMessage(conv.id, "user", userId, { text: "第二句" });
+      return { convId: conv.id, m1, m2, m3 };
+    }
+
+    it("删掉指定 id：只删这些，剩下的顺序不变，返回真实删掉的条数", () => {
+      const user = store.createUser("alice", "h", "爱丽丝");
+      const { convId, m1, m2, m3 } = seedConversation(user.id);
+
+      expect(store.deleteMessages(convId, [m2.id])).toBe(1);
+      expect(store.listMessages(convId).map((m) => m.id)).toEqual([m1.id, m3.id]);
+      // 同一个 id 再删一次：已经没了，不该再算一条（幂等）
+      expect(store.deleteMessages(convId, [m2.id])).toBe(0);
+    });
+
+    it("别的会话的 id / 重复 id / 空数组都安全：不误删，计数如实", () => {
+      const user = store.createUser("bob", "h", "鲍勃");
+      const other = store.createUser("erin", "h", "艾琳");
+      const one = seedConversation(user.id);
+      // 智能体会话按「用户 + 智能体」唯一，所以「另一个会话」必须换个人开
+      const two = seedConversation(other.id);
+
+      expect(store.deleteMessages(one.convId, [two.m1.id, two.m2.id])).toBe(0);
+      expect(store.listMessages(two.convId)).toHaveLength(3);
+      expect(store.deleteMessages(one.convId, [])).toBe(0);
+      // 重复 id 只算一条（内存实现按集合、SQLite 走去重后的 IN）
+      expect(store.deleteMessages(one.convId, [one.m1.id, one.m1.id])).toBe(1);
+      expect(store.listMessages(one.convId)).toHaveLength(2);
+    });
+
+    it("会话不存在 → conversation not found（与 listMessages 同口径）", () => {
+      const user = store.createUser("carol", "h", "卡萝");
+      seedConversation(user.id);
+      expect(() => store.deleteMessages("nope", ["x"])).toThrow("conversation not found");
+    });
+
+    it("删掉的消息不再出现在搜索里（SQLite 侧 FTS 索引同事务清理）", () => {
+      const user = store.createUser("dave", "h", "戴夫");
+      const conv = store.createAgentConversation(user.id, SYSTEM_AGENT_ID);
+      const kept = store.addMessage(conv.id, "user", user.id, { text: "保留的锚点词" });
+      const dropped = store.addMessage(conv.id, "user", user.id, { text: "要删掉的锚点词" });
+      store.deleteMessages(conv.id, [dropped.id]);
+      const hits = store.searchMessages("锚点词", { conversationIds: [conv.id], limit: 10, maxScanned: 100 });
+      // 内存实现没有 FTS（searchMessages 返回 null 或命中列表都可能），只在有结果时断言
+      if (hits) {
+        const ids = hits.hits.map((h) => h.messageId);
+        expect(ids).not.toContain(dropped.id);
+        expect(ids).toContain(kept.id);
+      }
+      expect(store.listMessages(conv.id).map((m) => m.id)).toEqual([kept.id]);
+    });
+  });
 }

@@ -12,6 +12,7 @@ import {
   CreateFileBodySchema,
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
+  DeleteMessagesBodySchema,
   CreateTeamActivitiesBodySchema,
   CreateTeamUsageBodySchema,
   TeamUsageRangeSchema,
@@ -1763,6 +1764,26 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     res.json(store.listMessages(req.params.id));
+  });
+
+  /**
+   * 按 id 删会话里的消息（d.291，`/rewind` 的对话那一半）。
+   *
+   * 语义：400 body 非法 / 401 未登录 / 403 非成员 / 200 `{ ok, removed }`。
+   * 只删属于这个会话的 id（别的会话、已经删掉的 id 静默忽略）→ 重复请求幂等，
+   * 客户端重试不会多删。这里**不发广播**：删除是本地窗口的主动作，别的端刷新即可看到。
+   */
+  app.post("/api/conversations/:id/messages/delete", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const parsed = DeleteMessagesBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    res.json({ ok: true, removed: store.deleteMessages(req.params.id, parsed.data.ids) });
   });
 
   // —— M4：共享文件从 app.ts 闭包 Map 迁入 Store（memory/sqlite 双实现持久化）——

@@ -14,6 +14,7 @@ import type { ToolBridge } from "../agentStream.js";
 import {
   REWIND_CHECKPOINTS_KEY,
   REWIND_MAX_FILE_CHARS,
+  REWIND_MAX_PROMPT_CHARS,
   REWIND_MAX_TURNS,
   beginRewindTurn,
   captureFileBefore,
@@ -203,7 +204,9 @@ describe("describeTurnCheckpoints", () => {
     expect(text).toContain("5 分钟前");
     expect(text).toContain("2 个文件（a.ts、b.ts）");
     expect(text).toContain("/rewind 1");
-    expect(text).toContain("对话历史不会一起退");
+    // d.292 起对话也一起退（只留提问），文案不能再写「对话历史不会一起退」
+    expect(text).toContain("这几轮的对话也一起退掉");
+    expect(text).not.toContain("对话历史不会一起退");
   });
 
   it("抓不到原文的文件会在列表里标出来", () => {
@@ -243,6 +246,64 @@ describe("一轮的抓取缓冲", () => {
     const closed = closeRewindTurn("c1", 2_000);
     expect(closed).not.toBeNull();
     expect(closed!.files.length).toBeLessThan(8);
+  });
+});
+
+/**
+ * d.292：检查点里还要记「对话边界」与这一轮的提问。
+ *
+ * 回退时要按边界把对话截断（只留提问），所以边界的两种「空」必须分清：
+ * `null` 是「那一轮之前会话是空的」（退到底），`undefined` 是「老数据不知道」（只退文件）。
+ * 这两者混淆的后果是：老记录被当成空会话，一退就把整段对话删光。
+ */
+describe("对话边界与提问（d.292）", () => {
+  it("begin/close 把边界与提问带进检查点", () => {
+    beginRewindTurn("c1", 1_000, "stream-1", "msg-42", "  帮我改一下这个函数  ");
+    noteRewindFile("c1", { path: "D:/评测区/a.ts", before: "旧" });
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed).toMatchObject({ afterMessageId: "msg-42", prompt: "帮我改一下这个函数" });
+    expect(getTurnCheckpoints("c1")[0]).toMatchObject({ afterMessageId: "msg-42" });
+  });
+
+  it("空会话记 null（退到底），不记 prompt 时也没有该字段", () => {
+    beginRewindTurn("c1", 1_000, undefined, null);
+    noteRewindFile("c1", { path: "D:/评测区/a.ts", before: "旧" });
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed?.afterMessageId).toBeNull();
+    expect(closed && "prompt" in closed).toBe(false);
+    // 重新从 localStorage 读也认得出 null
+    expect(getTurnCheckpoints("c1")[0]?.afterMessageId).toBeNull();
+  });
+
+  it("没传边界时是 undefined：plan 里也必须是 undefined，不能退化成空会话", () => {
+    beginRewindTurn("c1", 1_000);
+    noteRewindFile("c1", { path: "D:/评测区/a.ts", before: "旧" });
+    closeRewindTurn("c1", 2_000);
+    const plan = planRewind("c1", 1);
+    expect(plan).not.toBeNull();
+    expect(plan!.afterMessageId).toBeUndefined();
+  });
+
+  it("同一轮先到的边界不被后来的覆盖（重试/续跑不改变边界）", () => {
+    beginRewindTurn("c1", 1_000, "stream-1", "msg-7");
+    beginRewindTurn("c1", 1_500, "stream-1", "msg-9", "别的提问");
+    noteRewindFile("c1", { path: "D:/评测区/a.ts", before: "旧" });
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed?.afterMessageId).toBe("msg-7");
+  });
+
+  it("多轮时取窗口里最早那条有定义的边界（回到最早那轮动手之前）", () => {
+    recordTurnCheckpoint("c1", { ...turn(1_000, [{ path: "D:/评测区/a.ts", before: "第零版" }]), afterMessageId: "msg-1" });
+    recordTurnCheckpoint("c1", { ...turn(2_000, [{ path: "D:/评测区/a.ts", before: "第一版" }]), afterMessageId: "msg-5", prompt: "第二次提问" });
+    expect(planRewind("c1", 1)!.afterMessageId).toBe("msg-5");
+    expect(planRewind("c1", 2)!.afterMessageId).toBe("msg-1");
+  });
+
+  it("提问超长会截断，避免把整篇贴进来的东西写进 localStorage", () => {
+    beginRewindTurn("c1", 1_000, "stream-1", "msg-1", "长".repeat(REWIND_MAX_PROMPT_CHARS + 50));
+    noteRewindFile("c1", { path: "D:/评测区/a.ts", before: "旧" });
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed?.prompt).toHaveLength(REWIND_MAX_PROMPT_CHARS);
   });
 });
 

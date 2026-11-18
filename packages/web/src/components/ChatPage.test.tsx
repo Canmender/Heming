@@ -6308,6 +6308,63 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   }, 30_000);
 
   /**
+   * d.292：`/rewind 1` 连对话一起退。
+   *
+   * 只退文件是半个回滚——用户得自己翻上去删掉那几轮、再把说过的话重新打一遍。
+   * 这一例锁三件事：边界之后的消息真的删了（服务端接口 + 本地镜像）、
+   * 当时的提问被放回输入框、老检查点（没记边界）绝不当作「空会话全删」。
+   */
+  it("I3-rewind `/rewind 1` 把对话也退到那一轮之前，并把提问放回输入框（d.292）", async () => {
+    await setupAgentChat([msg("m1", "第一轮的问题", "2026-10-14T01:00:00.000Z"), msg("m2", "第二轮的问题", "2026-10-14T01:01:00.000Z")]);
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    resetRewindCheckpoints();
+    localStorage.setItem(
+      "heming.fileEdit.roots.v1",
+      JSON.stringify({ roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" }),
+    );
+    recordTurnCheckpoint("c1", {
+      at: Date.now() - 60_000,
+      files: [{ path: "D:/评测区/a.ts", before: "旧内容" }],
+      afterMessageId: "m1",
+      prompt: "把这段改成异步",
+    });
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: async () => ({ ok: false as const, code: "not-found" as const, error: "没有这个文件" }),
+      write: vi.fn(async () => ({ ok: true as const, results: [], written: 1, deleted: 0 })),
+      pickRoot: async () => null,
+    };
+    // 在底座 fetch 上补一条删除接口，并记下请求体（既有分支原样转发）
+    const deletes: { convId: string; ids: string[] }[] = [];
+    const baseFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const match = /^\/api\/conversations\/([^/]+)\/messages\/delete$/.exec(url);
+      if (match) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { ids: string[] };
+        deletes.push({ convId: match[1]!, ids: body.ids });
+        return Promise.resolve(jsonRes({ ok: true, removed: body.ids.length }));
+      }
+      return baseFetch(input, init) as Promise<Response>;
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/对话退了 1 条，你那句提问已放回输入框/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(deletes).toEqual([{ convId: "c1", ids: ["m2"] }]);
+    // 本地镜像同步摘掉：不刷新也不该再看到第二轮
+    expect(screen.queryByText("第二轮的问题")).not.toBeInTheDocument();
+    expect(screen.getByText("第一轮的问题")).toBeInTheDocument();
+    expect((screen.getByPlaceholderText("输入消息…") as HTMLTextAreaElement).value).toBe("把这段改成异步");
+    expect(streamChat).not.toHaveBeenCalled();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+    resetRewindCheckpoints();
+  }, 30_000);
+
+  /**
    * d.219：`/init` 与其它 `/` 命令不是一类东西。
    *
    * `/status`、`/goal` 是本地动作（不发模型、不落库）；`/init` 要模型真去读仓库再写

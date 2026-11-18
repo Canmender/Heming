@@ -1089,3 +1089,66 @@ describe("登录/注册限流（d.236）", () => {
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
   });
 });
+
+describe("POST /api/conversations/:id/messages/delete（d.291 /rewind 的对话那一半）", () => {
+  let store: ReturnType<typeof createMemoryStore>;
+  let app: App;
+  let a: { token: string; user: { id: string; username: string } };
+  let b: { token: string; user: { id: string; username: string } };
+  let convId: string;
+  let m1: string;
+  let m2: string;
+  let m3: string;
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    app = createApp(store, { allowRegister: true });
+    a = await register(app, "alice");
+    b = await register(app, "bob");
+    convId = store.createAgentConversation(a.user.id, SYSTEM_AGENT_ID).id;
+    m1 = store.addMessage(convId, "user", a.user.id, { text: "第一句" }).id;
+    m2 = store.addMessage(convId, "agent", SYSTEM_AGENT_ID, { text: "答一句" }).id;
+    m3 = store.addMessage(convId, "user", a.user.id, { text: "第二句" }).id;
+  });
+
+  const del = (token: string, ids: unknown) =>
+    request(app)
+      .post(`/api/conversations/${convId}/messages/delete`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ ids } as object);
+
+  it("成员删指定 id → 200 {ok, removed}；GET 只剩没删的那些", async () => {
+    const res = await del(a.token, [m2, m3]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 2 });
+    const left = await request(app)
+      .get(`/api/conversations/${convId}/messages`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(left.body.map((m: { id: string }) => m.id)).toEqual([m1]);
+  });
+
+  it("重复请求幂等：已经删掉的 id 不再计数", async () => {
+    expect((await del(a.token, [m3])).body).toEqual({ ok: true, removed: 1 });
+    expect((await del(a.token, [m3])).body).toEqual({ ok: true, removed: 0 });
+  });
+
+  it("非成员 → 403，且什么都没删；未登录 → 401", async () => {
+    expect((await del(b.token, [m1])).status).toBe(403);
+    expect(store.listMessages(convId)).toHaveLength(3);
+    const anon = await request(app)
+      .post(`/api/conversations/${convId}/messages/delete`)
+      .send({ ids: [m1] });
+    expect(anon.status).toBe(401);
+  });
+
+  it("body 非法 → 400（空数组 / 不是数组 / 缺字段都拒）", async () => {
+    expect((await del(a.token, [])).status).toBe(400);
+    expect((await del(a.token, "not-an-array")).status).toBe(400);
+    const missing = await request(app)
+      .post(`/api/conversations/${convId}/messages/delete`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({});
+    expect(missing.status).toBe(400);
+    expect(store.listMessages(convId)).toHaveLength(3);
+  });
+});

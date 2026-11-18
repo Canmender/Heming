@@ -49,6 +49,7 @@ import {
   NO_E2E_MESSAGE,
   fetchMyTeamBriefs,
   fetchMyTeamTasks,
+  deleteMessages,
 } from "../lib/api.js";
 import { hasSubtle } from "../lib/e2eCrypto.js";
 import {
@@ -2760,7 +2761,11 @@ export function ChatPage({
         setTurnWrites([]);
         // d.290：新一轮开始记检查点缓冲——写工具执行前会把原内容抓进来，
         // 收口时（closeRewindTurn）落成一轮 `/rewind` 能退回去的记录。
-        beginRewindTurn(convId, Date.now(), streamId);
+        // d.292：顺带记下「对话边界」（这一轮之前最后一条消息）与这一轮的提问，
+        // 回退时把边界之后的消息删掉、把提问放回输入框。
+        const localMessages = useChatStore.getState().messages[convId] ?? [];
+        const boundary = localMessages.length > 0 ? localMessages[localMessages.length - 1]!.id : null;
+        beginRewindTurn(convId, Date.now(), streamId, boundary, text.trim() ? text : undefined);
         // 上一轮的对照窗口不该跨到新一轮（那时的文件状态已经不是现在这个）
         setChangeDiff(null);
         setSessionChangesOpen(false);
@@ -4310,7 +4315,13 @@ export function ChatPage({
     attachment?: TurnAttachment,
     /** d.199：这一轮还在跑时发的纯文本 = 插话（入队，不另起流）。 */
     options?: { steer?: boolean },
-  ): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> => {
+  /**
+   * `restoreDraft`：本地命令处理完要放回输入框的文字（d.292 的 `/rewind`）。
+   *
+   * 为什么不在命令里直接 `setDraft`：`send()` 拿到结果后会调 `resetComposer()` 清输入区，
+   * 命令里设的值当场就被抹掉。所以文字跟着结果回到 `send()`，在清空之后落位。
+   */
+  ): Promise<{ ok: true; notice?: string; restoreDraft?: string } | { ok: false; error: string }> => {
     const text = rawText.trim();
     if (!text) return { ok: false, error: "消息为空" };
     // d.232：用户亲自开口 → 收尾自检的「这次已经催过几次」重新起算（`retryStream` 也走这里，
@@ -4480,11 +4491,11 @@ export function ChatPage({
       };
     }
     /**
-     * 轮次回滚（d.290）：`/rewind` 看检查点、`/rewind N` 把最近 N 轮改过的文件退回去。
+     * 轮次回滚（d.290）：`/rewind` 看检查点、`/rewind N` 把最近 N 轮退回去。
      *
-     * 全本地：不发模型、不动对话历史。为什么只还原文件：消息截断要服务端新接口
-     * （现在只有增和改，没有删），所以文案里每次都明说「对话历史未回退」，
-     * 不让用户以为聊天也退了。
+     * 全本地，不发模型。d.292 起**文件与对话一起退**：每轮记了「这一轮之前的最后一条消息」，
+     * 回退时把边界之后的消息删掉（服务端 `POST /api/conversations/:id/messages/delete`），
+     * 并把这一轮的提问放回输入框——否则你退回去还得把说过的话再打一遍。
      */
     if (text === REWIND_COMMAND || text.startsWith(`${REWIND_COMMAND} `)) {
       const rest = text.slice(REWIND_COMMAND.length).trim();
@@ -4503,6 +4514,43 @@ export function ChatPage({
           notice: `没有 ${turns} 轮可退（要么还没跑过改文件的轮次，要么已经退过了）。发 \`/rewind\` 看现在有哪些检查点。`,
         };
       }
+      /**
+       * 退对话：把边界之后的消息删掉。
+       *
+       * 边界可能落在三种状态：`null`（那一轮之前会话是空的 → 全删）、
+       * 消息 id（删它之后的）、`undefined`（老检查点没记边界 → 只退文件，如实说明）。
+       * 服务端删不到（本地还没同步过去）也算成功：本地镜像照样摘掉，刷新后也不会回来。
+       */
+      let restoreDraft: string | undefined;
+      const rewindDialogue = async (): Promise<string> => {
+        const boundary = rewindPlan.afterMessageId;
+        if (boundary === undefined) return "这几轮是老记录、没存对话边界，对话没有退。";
+        const list = useChatStore.getState().messages[convId] ?? [];
+        let ids: string[];
+        if (boundary === null) {
+          ids = list.map((item) => item.id);
+        } else {
+          const at = list.findIndex((item) => item.id === boundary);
+          if (at === -1) return "本地找不到那一轮的分界消息，对话没有退（文件已退回）。";
+          ids = list.slice(at + 1).map((item) => item.id);
+        }
+        if (ids.length === 0) return "对话本来就已经在这一轮之前了，没有要删的消息。";
+        try {
+          await deleteMessages(convId, ids);
+        } catch (err) {
+          return `对话没有退（${(err as Error).message}），文件已退回。`;
+        } finally {
+          // 服务端成功与否都把本地镜像摘掉：它是「服务端已删」的投影，留着会让人以为没退
+          useChatStore.getState().removeMessages(convId, ids);
+        }
+        if (rewindPlan.prompt) {
+          // 交给 send() 在 resetComposer 之后落位：在这设会被紧接着的清空抹掉
+          restoreDraft = rewindPlan.prompt;
+          return `对话退了 ${ids.length} 条，你那句提问已放回输入框。`;
+        }
+        return `对话退了 ${ids.length} 条。`;
+      };
+
       const fileBridge = getFileBridge();
       if (!fileBridge) {
         return { ok: true, notice: "当前环境没有文件桥（浏览器里没有本地文件权限），回滚只能在桌面端用。" };
@@ -4523,30 +4571,32 @@ export function ChatPage({
               .map((item) => item.path.split("/").pop() ?? item.path)
               .join("、")}）`
           : "";
+      let fileNote: string;
       if (ops.length === 0) {
-        // 全是跳过的轮次也照样记账：否则用户会一直看到这几轮「可退」，退了又什么都没发生。
-        dropTurnCheckpoints(convId, rewindPlan.turns);
-        return {
-          ok: true,
-          notice: `退回了 ${rewindPlan.turns} 轮：这些改动都抓不到原文，没有文件被还原${skippedNote}。对话历史未回退。`,
-        };
+        // 全是跳过的轮次：文件没得退，但对话照样退——否则用户看到的那几轮会一直挂着。
+        fileNote = `这些改动都抓不到原文，没有文件被还原${skippedNote}`;
+      } else {
+        const result = await fileBridge.write({ roots, ops });
+        if (!result.ok) {
+          return {
+            ok: true,
+            notice: `回滚没有完成：${result.error ?? "写盘失败"}（文件可能只还原了一部分，对话没有动）。`,
+          };
+        }
+        const restored = result.written ?? rewindPlan.restore.length;
+        const removed = result.deleted ?? rewindPlan.remove.length;
+        const parts: string[] = [];
+        if (restored > 0) parts.push(`还原 ${restored} 个文件`);
+        if (removed > 0) parts.push(`删掉 ${removed} 个当时还不存在的文件`);
+        fileNote = `${parts.join("、") || "没有文件需要改"}${skippedNote}`;
       }
-      const result = await fileBridge.write({ roots, ops });
-      if (!result.ok) {
-        return {
-          ok: true,
-          notice: `回滚没有完成：${result.error ?? "写盘失败"}（文件可能只还原了一部分，对话历史未回退）。`,
-        };
-      }
+      // 记账要在退对话之前：对话退失败也不该让这几轮一直显示成「还能退」
       dropTurnCheckpoints(convId, rewindPlan.turns);
-      const restored = result.written ?? rewindPlan.restore.length;
-      const removed = result.deleted ?? rewindPlan.remove.length;
-      const parts: string[] = [];
-      if (restored > 0) parts.push(`还原 ${restored} 个文件`);
-      if (removed > 0) parts.push(`删掉 ${removed} 个当时还不存在的文件`);
+      const dialogueNote = await rewindDialogue();
       return {
         ok: true,
-        notice: `已退回 ${rewindPlan.turns} 轮：${parts.join("、") || "没有文件需要改"}${skippedNote}。对话历史未回退。`,
+        notice: `已退回 ${rewindPlan.turns} 轮：${fileNote}；${dialogueNote}`,
+        ...(restoreDraft ? { restoreDraft } : {}),
       };
     }
     /**
@@ -4771,6 +4821,11 @@ export function ChatPage({
     // 本地命令（如 `/compact`）不产生消息，但它的结果要留在这条「提示位」上：
     // resetComposer 会清 sendNotice，所以在它之后再落位。
     if (result.notice) setSendNotice(result.notice, "info");
+    // `/rewind` 把当时那句提问放回输入框（必须在 resetComposer 之后，否则当场被清掉）
+    if (result.restoreDraft) {
+      setDraft(result.restoreDraft);
+      saveDraft(convId, result.restoreDraft);
+    }
   };
 
   // 任务区投递：把目标写进输入区并排队自动发送（连接可能还没就绪，见下一个 effect）。

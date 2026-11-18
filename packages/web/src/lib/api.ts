@@ -254,6 +254,18 @@ export const updateConversationTitle = (convId: string, title: string) =>
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
 
+/**
+ * 按 id 删会话里的几条消息（d.292，`/rewind` 的对话那一半）。
+ *
+ * 只认本会话的 id：别的会话的 id、已经删过的 id 都会被静默忽略，
+ * 所以重试是安全的（服务端返回真实删掉的条数 `removed`）。
+ */
+export const deleteMessages = (convId: string, ids: string[]) =>
+  api<{ ok: boolean; removed: number }>(
+    `/api/conversations/${encodeURIComponent(convId)}/messages/delete`,
+    { method: "POST", body: JSON.stringify({ ids }) },
+  );
+
 /** 会话内容搜索的一条命中（d.197）：只带片段，不带整条正文。 */
 export interface ConversationContentHit {
   conversationId: string;

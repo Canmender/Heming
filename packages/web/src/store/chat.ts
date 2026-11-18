@@ -430,6 +430,11 @@ interface ChatState {
   /** 历史消息入列（按 id 与本地独有条目合并；不改动消息的转录字段）。 */
   setMessages: (convId: string, msgs: Message[]) => void;
   /**
+   * 从本地消息列表里摘掉几条（d.292，`/rewind` 的对话那一半）：
+   * 服务端已经删掉了，这里只做本地镜像，避免刷新前还看得见。
+   */
+  removeMessages: (convId: string, ids: string[]) => void;
+  /**
    * 记录一条消息的转录附加信息（思考过程 + 工具调用轨迹）：
    * 清洗截断后写本机 localStorage（`heming.transcript.<convId>`），
    * 并给内存里同 id 的消息贴上字段——刚收口的回复与历史回放都能展开查看。
@@ -723,6 +728,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       else merged.splice(at, 0, m);
     }
     set({ messages: { ...get().messages, [convId]: merged } });
+  },
+  removeMessages(convId, ids) {
+    if (ids.length === 0) return;
+    const list = get().messages[convId] ?? [];
+    const drop = new Set(ids);
+    const kept = list.filter((m) => !drop.has(m.id));
+    // 一条都没少就不写 state：避免无意义的整树重渲染
+    if (kept.length === list.length) return;
+    set({ messages: { ...get().messages, [convId]: kept } });
   },
   recordTranscript(convId, messageId, transcript) {
     const clean = truncateTranscript(transcript);

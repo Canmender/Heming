@@ -9,11 +9,14 @@
  * **在写之前**用文件桥把目标文件的原内容读下来，按轮存进 localStorage。
  * 回滚时把 `before` 原样写回去，原本不存在的文件则删掉。
  *
+ * d.292 起每轮还记一个「对话边界」（`afterMessageId`）：回退时把那之后的消息删掉，
+ * 对话和文件一起退（只留你发的那句）。老数据没有边界信息，那就只退文件。
+ *
  * 已知边界（写进用户可见的文案，不藏）：
  * - 只覆盖和鸣自己的写工具（`file_write` / `file_edit` / `file_patch`）；
  *   `run_command` 之类绕过工具桥的改动抓不到。
  * - 单个文件超过 200k 字符、或读出来是二进制 / GBK（写回会改编码）时不硬还原，记成 skipped。
- * - **对话历史不回退**：这里只还原文件，消息照旧留在会话里（截断要服务端新接口，另做）。
+ * - 对话只退「这一轮之后的消息」：别的窗口在这期间新发的消息也会一起消失（本地窗口优先）。
  * - localStorage 不可用或配额满时静默降级——宁可不记，也不能打断正在跑的一轮。
  */
 
@@ -36,6 +39,9 @@ export const REWIND_MAX_FILE_CHARS = 200_000;
 /** 单轮抓取的总字符预算：一轮改了几十个大文件时，超出部分不记。 */
 export const REWIND_MAX_TURN_CHARS = 1_000_000;
 
+/** 每一轮顺手记下的那句提问最多留多少字（回退后放回输入框用）。 */
+export const REWIND_MAX_PROMPT_CHARS = 2000;
+
 /** 抓不到 / 不能安全还原的原因。 */
 export type RewindSkipReason = "too-large" | "binary" | "encoding" | "unreadable";
 
@@ -56,6 +62,18 @@ export interface TurnCheckpoint {
   at: number;
   /** 关联的助手消息 id（有就记，方便以后把「回退到哪条消息」接起来）。 */
   messageId?: string;
+  /**
+   * 这一轮开始之前的「对话边界」：发这句之前会话里最后一条消息的 id
+   * （`null` = 当时会话是空的，`undefined` = 老数据不知道边界）。
+   *
+   * 回退时把边界之后的消息删掉，就等于把对话退回到这一轮之前。
+   */
+  afterMessageId?: string | null;
+  /**
+   * 这一轮你发的那句（最多 2000 字）。回退后放回输入框：
+   * 它的消息跟着对话一起退掉了，不还回去就等于让你重打一遍。
+   */
+  prompt?: string;
   files: CheckpointFile[];
 }
 
@@ -66,6 +84,13 @@ export interface RewindPlan {
   restore: { path: string; content: string }[];
   remove: string[];
   skipped: { path: string; reason: RewindSkipReason }[];
+  /**
+   * 对话要退到哪一条之后（窗口里最早那条有边界的检查点的 `afterMessageId`）；
+   * 整窗都没有边界信息时是 `undefined` —— 那就只退文件、不动对话。
+   */
+  afterMessageId?: string | null;
+  /** 这一轮你发的那句（窗口里最早那条有记录的），回退后放回输入框。 */
+  prompt?: string;
 }
 
 type Store = Record<string, TurnCheckpoint[]>;
@@ -79,6 +104,8 @@ let store: Store = {};
 interface TurnBuffer {
   at: number;
   messageId?: string;
+  afterMessageId?: string | null;
+  prompt?: string;
   /** 按路径去重、保留最早那份 `before`（这一轮第一次动它之前的样子才是要回到的样子）。 */
   files: Map<string, CheckpointFile>;
   chars: number;
@@ -109,7 +136,9 @@ function isTurnCheckpoint(value: unknown): value is TurnCheckpoint {
     Number.isFinite(item.at) &&
     Array.isArray(item.files) &&
     item.files.every(isCheckpointFile) &&
-    (item.messageId === undefined || typeof item.messageId === "string")
+    (item.messageId === undefined || typeof item.messageId === "string") &&
+    (item.afterMessageId === undefined || item.afterMessageId === null || typeof item.afterMessageId === "string") &&
+    (item.prompt === undefined || typeof item.prompt === "string")
   );
 }
 
@@ -130,6 +159,8 @@ function readStorage(): Store {
           file.skipped ? { path: file.path, before: file.before, skipped: file.skipped } : { path: file.path, before: file.before },
         ),
         ...(item.messageId ? { messageId: item.messageId } : {}),
+        ...(item.afterMessageId !== undefined ? { afterMessageId: item.afterMessageId } : {}),
+        ...(item.prompt ? { prompt: item.prompt } : {}),
       }));
       if (checkpoints.length > 0) out[conversationId] = checkpoints;
     }
@@ -208,6 +239,9 @@ export function recordTurnCheckpoint(
       file.skipped ? { path: file.path, before: file.before, skipped: file.skipped } : { path: file.path, before: file.before },
     ),
     ...(checkpoint.messageId ? { messageId: checkpoint.messageId } : {}),
+    // d.292：边界与提问必须跟着落盘，否则「退文件也退对话」只在内存里成立
+    ...(checkpoint.afterMessageId !== undefined ? { afterMessageId: checkpoint.afterMessageId } : {}),
+    ...(checkpoint.prompt ? { prompt: checkpoint.prompt } : {}),
   };
   const current = store[conversationId] ?? [];
   // 同一轮重复落（收口可能被调两次）就替换，不叠加。
@@ -271,6 +305,11 @@ export function planRewind(conversationId: string, turns: number): RewindPlan | 
   const seen = new Set<string>();
   const plan: RewindPlan = { turns: total, restore: [], remove: [], skipped: [] };
   for (const checkpoint of window) {
+    // 对话边界取窗口里最早那条有记录的：退到那一轮开始之前，才是这一整个窗口之前
+    if (plan.afterMessageId === undefined && checkpoint.afterMessageId !== undefined) {
+      plan.afterMessageId = checkpoint.afterMessageId;
+    }
+    if (plan.prompt === undefined && checkpoint.prompt) plan.prompt = checkpoint.prompt;
     for (const file of checkpoint.files) {
       if (seen.has(file.path)) continue;
       seen.add(file.path);
@@ -312,7 +351,7 @@ export function describeTurnCheckpoints(conversationId: string, now = Date.now()
   return [
     `可回滚的检查点（共 ${list.length} 轮）：`,
     ...lines,
-    `发 \`/rewind 1\` 退回最近一轮、\`/rewind ${Math.min(2, list.length)}\` 退回 ${Math.min(2, list.length)} 轮（数字越大退得越多）。只还原文件，对话历史不会一起退。`,
+    `发 \`/rewind 1\` 退回最近一轮、\`/rewind ${Math.min(2, list.length)}\` 退回 ${Math.min(2, list.length)} 轮（数字越大退得越多）。文件退回去，这几轮的对话也一起退掉（只留你发的那句）。`,
   ].join("\n");
 }
 
@@ -355,10 +394,22 @@ function openBuffer(conversationId: string, now: number): TurnBuffer {
 }
 
 /** 这一轮已经开始抓取了（同一轮重复调用不重置，否则最早那份 before 会被覆盖）。 */
-export function beginRewindTurn(conversationId: string, now = Date.now(), messageId?: string): void {
+export function beginRewindTurn(
+  conversationId: string,
+  now = Date.now(),
+  messageId?: string,
+  afterMessageId?: string | null,
+  prompt?: string,
+): void {
   if (!conversationId) return;
   const buffer = openBuffer(conversationId, now);
   if (messageId && !buffer.messageId) buffer.messageId = messageId;
+  // `null`（当时会话是空的）也要记下，才与「不知道边界」的 undefined 区分开
+  if (afterMessageId !== undefined && buffer.afterMessageId === undefined) {
+    buffer.afterMessageId = afterMessageId;
+  }
+  const trimmedPrompt = prompt?.trim();
+  if (trimmedPrompt && !buffer.prompt) buffer.prompt = trimmedPrompt.slice(0, REWIND_MAX_PROMPT_CHARS);
 }
 
 /** 记一个文件（同路径只留最早那份；超预算直接丢，返回是否记下）。 */
@@ -384,6 +435,8 @@ export function closeRewindTurn(conversationId: string, now = Date.now()): TurnC
     at: buffer.at,
     files,
     ...(buffer.messageId ? { messageId: buffer.messageId } : {}),
+    ...(buffer.afterMessageId !== undefined ? { afterMessageId: buffer.afterMessageId } : {}),
+    ...(buffer.prompt ? { prompt: buffer.prompt } : {}),
   };
   const count = recordTurnCheckpoint(conversationId, entry, now);
   return count > 0 ? entry : null;

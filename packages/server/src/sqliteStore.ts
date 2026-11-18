@@ -683,6 +683,34 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const ordered = limit ? [...rows].reverse() : rows;
       return ordered.map(rowToMessage);
     },
+    deleteMessages(conversationId, ids) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      // 去重 + 丢空串：同一个 id 传两次不该让 changes 少算；空 id 直接忽略（不让 SQL 里出现 "" 条件）。
+      const unique = [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))];
+      if (unique.length === 0) return 0;
+      // 分批跑 IN：SQLite 的变量上限是 999，请求体上限 500 已经挡住大部分，
+      // 这里再切一次更稳（调用方也可能不是 HTTP，比如测试直接传大数组）。
+      const CHUNK = 400;
+      let removed = 0;
+      for (let start = 0; start < unique.length; start += CHUNK) {
+        const slice = unique.slice(start, start + CHUNK);
+        const placeholders = slice.map(() => "?").join(",");
+        const rows = db
+          .prepare(`SELECT rowid AS rid FROM messages WHERE conv_id = ? AND id IN (${placeholders})`)
+          .all(conversationId, ...slice) as { rid: number }[];
+        if (rows.length === 0) continue;
+        runTx(() => {
+          db.prepare(`DELETE FROM messages WHERE conv_id = ? AND id IN (${placeholders})`).run(
+            conversationId,
+            ...slice,
+          );
+          for (const row of rows) unindexMessage(row.rid);
+        });
+        removed += rows.length;
+      }
+      return removed;
+    },
     reencryptMessage(messageId, userId, envelope) {
       // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段，
       // 并在**同一条 UPDATE** 内清明文：payload 置 {"text":""} 占位（列 NOT NULL 不能

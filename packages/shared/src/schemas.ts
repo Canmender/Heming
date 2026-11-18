@@ -470,6 +470,18 @@ export const ReencryptBodySchema = z.object({
 });
 export type ReencryptBody = z.infer<typeof ReencryptBodySchema>;
 
+/**
+ * 按 id 删消息（d.291，`/rewind` 的对话那一半）。
+ *
+ * 为什么按 id 而不是按「第几条」：客户端可能只加载了最近一段消息，用序号会让
+ * 「删后面 N 条」在不同窗口下删错东西；id 是它真正看见的那几条，删不到就当作已经没了。
+ * 上限 500：一次回退通常只有几十条，上限只用来挡住畸形的大数组。
+ */
+export const DeleteMessagesBodySchema = z.object({
+  ids: z.array(z.string().min(1).max(64)).min(1).max(500),
+});
+export type DeleteMessagesBody = z.infer<typeof DeleteMessagesBodySchema>;
+
 // —— d.54 团队系统（去 IM）：名册、在线状态与动向摘要 ——
 
 /** 动向类型：任务 / AI 对话 / 幕僚 / 日程里程碑 / 成员加入。 */

@@ -217,6 +217,13 @@ export interface Store {
   ): Message;
   listMessages(conversationId: string, limit?: number): Message[];
   /**
+   * 按 id 删掉这段会话里的消息（d.291，`/rewind` 的对话那一半），返回真正删掉的条数。
+   *
+   * 口径：只认属于这个会话的 id——别的会话的 id、已经删掉的 id 一律静默忽略，
+   * 所以同一个请求重复发是幂等的（客户端重试不会删多）。会话不存在 → conversation not found。
+   */
+  deleteMessages(conversationId: string, ids: string[]): number;
+  /**
    * 明文重加密（E2E Task 2，设计 §7）：按 messageId 定位，仅当 sender=userId 且当前
    * enc="plain" 时**原子**替换信封（enc/cipher/chain_kid/n），并在**同一更新内**清掉明文：
    * payload 置 {"text":""} 占位（设计 §1/§7：e2e 消息服务端不留内容，
@@ -848,6 +855,16 @@ export function createMemoryStore(): Store {
       const all = messages.get(conversationId);
       if (!all) throw new Error("conversation not found");
       return limit ? all.slice(-limit) : [...all];
+    },
+    deleteMessages(conversationId, ids) {
+      const all = messages.get(conversationId);
+      if (!all) throw new Error("conversation not found");
+      if (ids.length === 0) return 0;
+      const drop = new Set(ids);
+      const kept = all.filter((m) => !drop.has(m.id));
+      const removed = all.length - kept.length;
+      if (removed > 0) messages.set(conversationId, kept);
+      return removed;
     },
     reencryptMessage(messageId, userId, envelope) {
       // 单线程同步段内「检查 + 替换」即原子（sqlite 侧用条件 UPDATE 同语义）
