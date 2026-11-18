@@ -18,10 +18,18 @@
  * 协议版本：客户端请求的版本在支持列表里就照抄，否则回我们支持的最新版本（MCP 规定
  * 由服务端选一个它支持的版本）。2024-11-05 起 `tools/list` 的形状一直没变，所以三个版本
  * 共用同一份实现。
+ *
+ * d.325 起除了工具还暴露两类**只读**内容：`prompts/list` + `prompts/get`（工作区
+ * `.heming/commands/*.md`，用户能直接在编辑器里选用），`resources/list` + `resources/read`
+ * （命令文件、AGENTS.md 一族、`.heming` 三份配置）。采集在 `mcpCatalog.ts`，这里只做协议翻译。
  */
 
 import type { ToolBridge } from "../../../packages/web/src/lib/agentStream.js";
 import type { ToolConfirmFn } from "./tooling.js";
+import { describeCliMcpCatalog, type McpCatalog } from "./mcpCatalog.js";
+
+/** 报错文案里点名的命令目录（与桌面端同一份口径）。 */
+const CUSTOM_COMMANDS_HINT = ".heming/commands/*.md";
 
 /** serverInfo.name：客户端日志里会显示它，用包名而不是「和鸣」，便于排查。 */
 export const MCP_SERVER_NAME = "heming";
@@ -91,6 +99,14 @@ export interface McpContext {
    * 那就不该把写能力挂在别人机器上的菜单里。
    */
   readOnly?: boolean;
+  /**
+   * 工作区里的提示词与资源（`.heming/commands/*.md`、AGENTS.md 一族、三份配置）。
+   *
+   * 是个函数而不是一份快照：`mcp serve` 是长驻进程，用户中途改了命令文件，
+   * 下一次 `prompts/list` 就该看到新版本。缺省（`undefined`）= 不暴露这两类能力，
+   * `initialize` 里也就不会声明它们。
+   */
+  catalog?: () => Promise<McpCatalog>;
 }
 
 /** 从 OpenAI 风格的 tools 数组里取出 `{type:"function", function:{...}}` 的 name/描述/参数。 */
@@ -139,7 +155,7 @@ export function describeMcpTools(ctx: McpContext): McpToolDescriptor[] {
 }
 
 /** 初始化回执里给客户端的一段说明：它决定客户端会不会「先问我再动手」。 */
-function instructionsText(ctx: McpContext): string {
+function instructionsText(ctx: McpContext, catalogLine = ""): string {
   const tools = describeMcpTools(ctx).map((tool) => tool.name);
   return [
     `这是和鸣（heming）的本地工具服务：工具直接操作 ${ctx.cwd} 下的文件。`,
@@ -150,7 +166,18 @@ function instructionsText(ctx: McpContext): string {
         ? "已用 --allow-danger 启动：run_command 会真的在本机执行命令。"
         : "没有 run_command：要跑命令必须由用户用 --allow-danger 重新启动，这不是重试能解决的问题。",
     `当前工具：${tools.join("、") || "（无）"}。`,
+    ...(catalogLine ? [catalogLine] : []),
   ].join("\n");
+}
+
+/** 取一次工作区目录；取不到（没配、或读盘出错）就当没有，绝不因此让 initialize 失败。 */
+async function catalogOf(ctx: McpContext): Promise<McpCatalog | null> {
+  if (!ctx.catalog) return null;
+  try {
+    return await ctx.catalog();
+  } catch {
+    return null;
+  }
 }
 
 /** 协议版本协商：认识就用客户端的，不认识就回我们最新的那个。 */
@@ -253,11 +280,17 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
   switch (method) {
     case "initialize": {
       const params = (request.params ?? {}) as { protocolVersion?: unknown; clientInfo?: unknown };
+      const catalog = await catalogOf(ctx);
+      const capabilities: Record<string, unknown> = { tools: { listChanged: false } };
+      if (catalog) {
+        capabilities.prompts = { listChanged: false };
+        capabilities.resources = { listChanged: false, subscribe: false };
+      }
       return okResponse(id, {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        capabilities: { tools: { listChanged: false } },
+        capabilities,
         serverInfo: { name: MCP_SERVER_NAME, title: "和鸣", version: ctx.version },
-        instructions: instructionsText(ctx),
+        instructions: instructionsText(ctx, catalog ? describeCliMcpCatalog(catalog) : ""),
       });
     }
     case "ping":
@@ -274,9 +307,88 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
         ...(outcome.isError ? { isError: true } : {}),
       });
     }
+    case "prompts/list": {
+      const catalog = await catalogOf(ctx);
+      if (!catalog) return noCatalog(id, "prompts");
+      return okResponse(id, {
+        prompts: catalog.prompts.map((prompt) => ({
+          name: prompt.name,
+          ...(prompt.title ? { title: prompt.title } : {}),
+          ...(prompt.description ? { description: prompt.description } : {}),
+        })),
+      });
+    }
+    case "prompts/get": {
+      const catalog = await catalogOf(ctx);
+      if (!catalog) return noCatalog(id, "prompts");
+      const params = (request.params ?? {}) as { name?: unknown };
+      const name = typeof params.name === "string" ? params.name.trim().toLowerCase() : "";
+      if (!name) return errorResponse(id, MCP_ERROR.invalidParams, "prompts/get 需要 name（提示词名）");
+      const prompt = catalog.prompts.find((entry) => entry.name === name);
+      if (!prompt) {
+        const available = catalog.prompts.map((entry) => entry.name).join("、") || "无";
+        return errorResponse(
+          id,
+          MCP_ERROR.invalidParams,
+          `未知提示词：${name}（这个工作区只有：${available}；它们来自 ${CUSTOM_COMMANDS_HINT}）`,
+        );
+      }
+      return okResponse(id, {
+        ...(prompt.description ? { description: prompt.description } : {}),
+        messages: [{ role: "user", content: { type: "text", text: prompt.text } }],
+      });
+    }
+    case "resources/list": {
+      const catalog = await catalogOf(ctx);
+      if (!catalog) return noCatalog(id, "resources");
+      return okResponse(id, {
+        resources: catalog.resources.map((resource) => ({
+          uri: resource.uri,
+          name: resource.name,
+          ...(resource.title ? { title: resource.title } : {}),
+          ...(resource.description ? { description: resource.description } : {}),
+          mimeType: resource.mimeType,
+        })),
+      });
+    }
+    case "resources/read": {
+      const catalog = await catalogOf(ctx);
+      if (!catalog) return noCatalog(id, "resources");
+      const params = (request.params ?? {}) as { uri?: unknown };
+      const uri = typeof params.uri === "string" ? params.uri.trim() : "";
+      if (!uri) return errorResponse(id, MCP_ERROR.invalidParams, "resources/read 需要 uri");
+      /*
+       * 只在这份名单里查，不拿 uri 去拼路径：`../` 之类根本没有机会变成一次越界读盘。
+       * 名单是每次请求现算的，所以用户新加的文件下一轮就能读到。
+       */
+      const resource = catalog.resources.find((entry) => entry.uri === uri);
+      if (!resource) {
+        return errorResponse(
+          id,
+          MCP_ERROR.invalidParams,
+          `未知资源：${uri}（先 resources/list 看看这个工作区有哪些；只暴露命令文件、AGENTS.md 一族与三份 .heming 配置）`,
+        );
+      }
+      return okResponse(id, {
+        contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text }],
+      });
+    }
     default:
-      return errorResponse(id, MCP_ERROR.methodNotFound, `未知方法：${method}（本服务只支持 initialize / ping / tools/list / tools/call）`);
+      return errorResponse(
+        id,
+        MCP_ERROR.methodNotFound,
+        `未知方法：${method}（本服务支持 initialize / ping / tools/list / tools/call / prompts/list / prompts/get / resources/list / resources/read）`,
+      );
   }
+}
+
+/** 没有暴露这类能力时的统一回执：说清「为什么没有」，而不是一句冷冰冰的 methodNotFound。 */
+function noCatalog(id: string | number | null, kind: "prompts" | "resources"): McpResponse {
+  const hint =
+    kind === "prompts"
+      ? `没有可用的提示词：工作区里没有 ${CUSTOM_COMMANDS_HINT}`
+      : "没有可用的资源：工作区里没有命令文件、AGENTS.md 一族或 .heming 配置";
+  return errorResponse(id, MCP_ERROR.methodNotFound, `${hint}（这个服务没有暴露 ${kind}）`);
 }
 
 /**

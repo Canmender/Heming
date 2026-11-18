@@ -306,10 +306,21 @@ heming mcp serve --cwd D:/repo
 
 | 方法 | 行为 |
 | --- | --- |
-| `initialize` | 回协议版本（客户端认识的版本原样照抄，否则回 `2025-06-18`）、`capabilities.tools`、`serverInfo`，以及一段 `instructions`：可写范围、有没有 `run_command`、当前工具清单。 |
+| `initialize` | 回协议版本（客户端认识的版本原样照抄，否则回 `2025-06-18`）、`capabilities`（`tools`，工作区有内容时另加 `prompts` / `resources`）、`serverInfo`，以及一段 `instructions`：可写范围、有没有 `run_command`、当前工具清单。 |
 | `ping` | 回空对象（探活）。 |
 | `tools/list` | 把同一份工具声明转成 MCP 描述：`parameters` → `inputSchema`，并按工具声明的风险加 `annotations`（只读带 `readOnlyHint`，`run_command` 带 `destructiveHint` + `openWorldHint`）。没有风险声明的工具**不硬塞** annotations。 |
 | `tools/call` | 先过确定性闸门，再执行。 |
+| `prompts/list` | 列 `.heming/commands/*.md`：名字是命令名，`title` / `description` 来自文件头 `# 标题` / `> 说明`（与桌面端同一份解析）。 |
+| `prompts/get` | 按名字回一条 `role: "user"` 的消息，正文是命令展开后真正发给模型的那段话。名字大小写不敏感；认不出回 `-32602` 并列出可用的。 |
+| `resources/list` | 列工作区里可读的文本：命令文件、`AGENTS.md` / `HEMING.md` / `.heming/AGENTS.md` / `.heming/rules.md`、`.heming/{permissions,hooks,mcp}.json`。URI 形如 `heming://workspace/AGENTS.md`。 |
+| `resources/read` | 按 URI 回 `{contents:[{uri, mimeType, text}]}`。**只在这份名单里查**：URI 从不拿去拼路径，`../` 之类没有机会变成越界读盘。 |
+
+`prompts` 与 `resources` 只在工作区真有内容时才出现在 `initialize` 的 `capabilities` 里；没内容时这两组
+方法回 `-32601` 并说明「工作区里没有 `.heming/commands/*.md` / 约定文件」。
+
+内容是**每次请求现读**的：中途改了命令文件，下一次 `prompts/list` 就是新的。交出去之前只做两件归一——
+去掉开头的 BOM、CRLF 折成 LF（记事本和 PowerShell 5 默认就写 BOM，否则 `# 标题` 这种首行约定认不出来）；
+单份超过 60k 字会截断，并在末尾写明「要看全的请用 `file_read` 读哪一份」。
 
 不认识的请求回 `-32601` 并点名支持的方法；通知（没有 `id`）**绝不回包**（回了会让客户端收到一条
 无法对应请求的响应）。
@@ -327,7 +338,7 @@ heming mcp serve --cwd D:/repo
 | `-32700` | 这一行不是 JSON（坏消息不会断连，下一行照常处理）。 |
 | `-32600` | 不是对象 / `id` 类型非法（只接受字符串、数字、null）/ 缺 `method`。 |
 | `-32601` | 方法未知。 |
-| `-32602` | `tools/call` 的参数不合法：缺 `name`、`arguments` 不是对象、工具不存在。 |
+| `-32602` | `tools/call` 的参数不合法：缺 `name`、`arguments` 不是对象、工具不存在；`prompts/get` 名字认不出；`resources/read` 的 URI 不在名单里。 |
 | `-32603` | 我们自己的内部异常（客户端可重试）。 |
 
 ### 安全边界（与 `run` 完全同一条口径）

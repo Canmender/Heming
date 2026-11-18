@@ -10,6 +10,7 @@ import path from "node:path";
 import type { McpOptions } from "./args.js";
 import { describeMcpTools, serveMcp, type McpContext } from "./mcp.js";
 import { createCliTooling } from "./tooling.js";
+import { collectCliMcpCatalog, describeCliMcpCatalog } from "./mcpCatalog.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 
@@ -75,6 +76,8 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     cwd: cwd.replace(/\\/g, "/"),
     allowDanger: options.allowDanger,
     readOnly: options.readOnly === true,
+    // 每次 prompts/list / resources/list 现读：中途改了命令文件，下一轮就能看到。
+    catalog: () => collectCliMcpCatalog({ cwd }),
   };
 
   // 启动信息写 stderr：stdout 是协议通道，混一行裸文本就会让客户端解析失败并断连。
@@ -85,6 +88,14 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
         ? "只读模式（--read-only）：只暴露读取类工具。\n"
         : `危险工具${options.allowDanger ? "已放行（--allow-danger）" : "未放行"}。\n`),
   );
+  // 工作区里的提示词与资源（命令文件、AGENTS.md 一族、三份配置）：统计一行，便于用户确认接上了。
+  try {
+    const catalog = await collectCliMcpCatalog({ cwd });
+    const line = describeCliMcpCatalog(catalog);
+    if (line) io.stderr.write(`[heming] ${line}\n`);
+  } catch {
+    // 采集失败就当没有：不阻断服务启动。
+  }
   if (workspaceRules) {
     io.stderr.write(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);
   }

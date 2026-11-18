@@ -288,9 +288,12 @@ describe("坏消息与通知（d.288）", () => {
 
   it("未知方法回 -32601，并点名支持哪些", async () => {
     const { bridge } = readBridge(async () => ({ text: "", ok: true }));
-    const response = await handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "resources/list" }, ctxOf(bridge));
+    // d.325 起 resources/list 已是真方法，这里换一个确实不存在的方法名。
+    const response = await handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "tools/whatever" }, ctxOf(bridge));
     expect(response).toMatchObject({ error: { code: MCP_ERROR.methodNotFound } });
-    expect((response as { error: { message: string } }).error.message).toContain("tools/call");
+    const message = (response as { error: { message: string } }).error.message;
+    expect(message).toContain("tools/call");
+    expect(message).toContain("resources/read");
   });
 });
 
@@ -455,5 +458,183 @@ describe("与真实工具装配一起跑（d.288）", () => {
     const result = response.result as { instructions: string };
     expect(result.instructions).toContain("只读模式");
     expect(result.instructions).toContain("只暴露读取类工具");
+  });
+});
+
+
+describe("prompts / resources（d.325）", () => {
+  /** 一份固定的工作区内容：一条命令、一份约定文件。 */
+  const catalog = {
+    prompts: [
+      {
+        name: "review",
+        title: "安全审查",
+        description: "只挑能被利用的问题",
+        text: "按威胁模型逐条过入口。",
+        source: ".heming/commands/review.md",
+      },
+    ],
+    resources: [
+      {
+        uri: "heming://workspace/.heming/commands/review.md",
+        name: "review.md",
+        description: "工作区里的 .heming/commands/review.md",
+        mimeType: "text/markdown",
+        text: "# 安全审查\n按威胁模型逐条过入口。",
+        rel: ".heming/commands/review.md",
+      },
+      {
+        uri: "heming://workspace/AGENTS.md",
+        name: "AGENTS.md",
+        description: "工作区里的 AGENTS.md",
+        mimeType: "text/markdown",
+        text: "改完要跑 pnpm test。",
+        rel: "AGENTS.md",
+      },
+    ],
+  };
+
+  it("有工作区内容时 initialize 声明 prompts 与 resources 能力，并把统计写进说明", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      ctxOf(bridge, { catalog: async () => catalog }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as {
+      capabilities: { tools?: unknown; prompts?: unknown; resources?: unknown };
+      instructions: string;
+    };
+    expect(result.capabilities.tools).toBeDefined();
+    expect(result.capabilities.prompts).toEqual({ listChanged: false });
+    expect(result.capabilities.resources).toEqual({ listChanged: false, subscribe: false });
+    expect(result.instructions).toContain("1 条提示词（review）");
+    expect(result.instructions).toContain("2 份资源");
+  });
+
+  it("没有工作区内容时不声明这两类能力（客户端就不会去问）", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      ctxOf(bridge),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { capabilities: Record<string, unknown>; instructions: string };
+    expect(result.capabilities.prompts).toBeUndefined();
+    expect(result.capabilities.resources).toBeUndefined();
+    expect(result.instructions).not.toContain("提示词");
+  });
+
+  it("prompts/list 只给名字、标题与说明，不把正文塞进清单", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 2, method: "prompts/list" },
+      ctxOf(bridge, { catalog: async () => catalog }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { prompts: Record<string, unknown>[] };
+    expect(result.prompts).toEqual([
+      { name: "review", title: "安全审查", description: "只挑能被利用的问题" },
+    ]);
+  });
+
+  it("prompts/get 返回一条 user 消息，名字大小写不敏感", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 3, method: "prompts/get", params: { name: " REVIEW " } },
+      ctxOf(bridge, { catalog: async () => catalog }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as {
+      description: string;
+      messages: { role: string; content: { type: string; text: string } }[];
+    };
+    expect(result.description).toBe("只挑能被利用的问题");
+    expect(result.messages).toEqual([
+      { role: "user", content: { type: "text", text: "按威胁模型逐条过入口。" } },
+    ]);
+  });
+
+  it("prompts/get 认不出名字时回 -32602 并列出可用的", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 4, method: "prompts/get", params: { name: "nope" } },
+      ctxOf(bridge, { catalog: async () => catalog }),
+    );
+    if (!response || !("error" in response)) throw new Error("期望错误响应");
+    expect(response.error.code).toBe(MCP_ERROR.invalidParams);
+    expect(response.error.message).toContain("未知提示词：nope");
+    expect(response.error.message).toContain("review");
+  });
+
+  it("resources/list 带上 uri / 名字 / MIME", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 5, method: "resources/list" },
+      ctxOf(bridge, { catalog: async () => catalog }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { resources: Record<string, unknown>[] };
+    expect(result.resources.map((r) => r.uri)).toEqual([
+      "heming://workspace/.heming/commands/review.md",
+      "heming://workspace/AGENTS.md",
+    ]);
+    expect(result.resources[1]).toMatchObject({ name: "AGENTS.md", mimeType: "text/markdown" });
+  });
+
+  it("resources/read 按 URI 取正文；不认识的 URI（含 ..）一律 -32602", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const ctx = ctxOf(bridge, { catalog: async () => catalog });
+    const ok = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctx,
+    );
+    if (!ok || !("result" in ok)) throw new Error("期望成功响应");
+    const result = ok.result as { contents: { uri: string; mimeType: string; text: string }[] };
+    expect(result.contents).toEqual([
+      { uri: "heming://workspace/AGENTS.md", mimeType: "text/markdown", text: "改完要跑 pnpm test。" },
+    ]);
+
+    // 名单里没有的 URI：不拼路径、不读盘，直接拒绝。
+    const bad = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 7, method: "resources/read", params: { uri: "heming://workspace/../secrets.md" } },
+      ctx,
+    );
+    if (!bad || !("error" in bad)) throw new Error("期望错误响应");
+    expect(bad.error.code).toBe(MCP_ERROR.invalidParams);
+    expect(bad.error.message).toContain("未知资源");
+  });
+
+  it("没有配置 catalog 时这两组方法回 -32601，并说清为什么", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const prompts = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 8, method: "prompts/list" },
+      ctxOf(bridge),
+    );
+    if (!prompts || !("error" in prompts)) throw new Error("期望错误响应");
+    expect(prompts.error.code).toBe(MCP_ERROR.methodNotFound);
+    expect(prompts.error.message).toContain(".heming/commands/*.md");
+
+    const resources = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 9, method: "resources/read", params: { uri: "heming://workspace/AGENTS.md" } },
+      ctxOf(bridge),
+    );
+    if (!resources || !("error" in resources)) throw new Error("期望错误响应");
+    expect(resources.error.code).toBe(MCP_ERROR.methodNotFound);
+  });
+
+  it("采集抛错不影响 initialize（当没有这两类能力）", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 10, method: "initialize", params: {} },
+      ctxOf(bridge, {
+        catalog: async () => {
+          throw new Error("盘读不了");
+        },
+      }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { capabilities: Record<string, unknown> };
+    expect(result.capabilities.prompts).toBeUndefined();
   });
 });
