@@ -1,10 +1,12 @@
 import { Avatar } from "./Avatar.js";
-import { agentName, windowName } from "../../lib/magpieQuota.js";
+import { agentName, formatResetIn, windowName } from "../../lib/magpieQuota.js";
 import {
+  lineLastAt,
   lineLatestLeft,
   lineResetsAt,
   paceText,
   quotaPace,
+  resetAt,
   sparkPath,
   type QuotaHistoryRow,
   type QuotaLine,
@@ -35,13 +37,21 @@ function percentText(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-function Spark({ line }: { line: QuotaLine }) {
+function Spark({ line, now }: { line: QuotaLine; now: number }) {
   const left = lineLatestLeft(line) ?? 0;
   const tone = leftTone(left);
-  const path = sparkPath(line.points, 100, 24);
+  // 线画到最后一个读数为止；重置还在将来时把 x 轴延到那一刻，
+  // 右边空出来的虚线就是「从现在到重置还剩多久」。
+  const reset = resetAt(line);
+  const last = lineLastAt(line);
+  const until = reset !== null && last !== null && reset > last ? reset : null;
+  const path = sparkPath(line.points, 100, 24, until);
   const first = line.points[0];
-  const last = line.points[line.points.length - 1];
-  const label = `${windowName(line.name)} 的额度走向：从 ${percentText(first?.left ?? left)} 到 ${percentText(last?.left ?? left)}`;
+  const tail = line.points[line.points.length - 1];
+  const resetText = until !== null ? formatResetIn(new Date(until).toISOString(), now) : "";
+  const label =
+    `${windowName(line.name)} 的额度走向：从 ${percentText(first?.left ?? left)} 到 ${percentText(tail?.left ?? left)}` +
+    (resetText ? `，${resetText}` : "");
   return (
     <svg
       className={`h-6 w-full ${tone.stroke}`}
@@ -51,6 +61,19 @@ function Spark({ line }: { line: QuotaLine }) {
       aria-label={label}
     >
       <title>{label}</title>
+      {until !== null && (
+        <line
+          x1={99}
+          y1={0}
+          x2={99}
+          y2={24}
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeDasharray="2 2"
+          opacity={0.45}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
       <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   );
@@ -79,7 +102,7 @@ export function QuotaTrend({ rows, now }: QuotaTrendProps) {
                   <div key={line.name} className="flex items-center gap-2">
                     <span className="w-14 shrink-0 ui-caption">{windowName(line.name)}</span>
                     <span className="min-w-0 flex-1">
-                      <Spark line={line} />
+                      <Spark line={line} now={now} />
                     </span>
                     <span className={`shrink-0 ui-numeric text-ui-sm font-medium ${tone.text}`}>
                       剩 {percentText(left)}
@@ -94,9 +117,16 @@ export function QuotaTrend({ rows, now }: QuotaTrendProps) {
               .map((line) => {
                 const pace = paceText(quotaPace(line, now, lineResetsAt(line)), now);
                 if (!pace) return null;
+                // 重置时刻单独写一句：曲线右端那条虚线说的就是它。
+                const reset = resetAt(line);
+                const resetText =
+                  reset !== null && reset > now - 60 * 1000
+                    ? formatResetIn(new Date(reset).toISOString(), now)
+                    : "";
                 return (
                   <p key={`${line.name}-pace`} className="ui-caption">
                     {windowName(line.name)}：{pace}
+                    {resetText ? ` · ${resetText}` : ""}
                   </p>
                 );
               })}

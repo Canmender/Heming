@@ -113,8 +113,17 @@ export function historySpan(rows: readonly QuotaHistoryRow[]): { from: number; t
  *
  * `width`/`height` 是用于 `viewBox` 的整数坐标，组件再按 CSS 缩放，
  * 这样不必在运行时量 DOM，单测也能直接断言字符串。
+ *
+ * 给了 `until`（通常就是这次重置的时刻）且它晚于最后一个点时，x 轴延到那一刻：
+ * 线在重置前就停住，右边空出来的那一段就是「从现在到重置」——曲线要不要撞到底，
+ * 一眼就能对上重置的位置。
  */
-export function sparkPath(points: readonly QuotaPoint[], width: number, height: number): string {
+export function sparkPath(
+  points: readonly QuotaPoint[],
+  width: number,
+  height: number,
+  until?: number | null,
+): string {
   const times: number[] = [];
   const values: number[] = [];
   for (const point of points) {
@@ -125,7 +134,8 @@ export function sparkPath(points: readonly QuotaPoint[], width: number, height: 
   }
   if (times.length < 2) return "";
   const minAt = Math.min(...times);
-  const maxAt = Math.max(...times);
+  const lastAt = Math.max(...times);
+  const maxAt = Number.isFinite(until) && (until as number) > lastAt ? (until as number) : lastAt;
   const span = maxAt - minAt;
   const x = (at: number): number => (span > 0 ? ((at - minAt) / span) * width : width / 2);
   const y = (left: number): number => {
@@ -133,6 +143,22 @@ export function sparkPath(points: readonly QuotaPoint[], width: number, height: 
     return height - (clamped / 100) * height;
   };
   return times.map((at, index) => `${index === 0 ? "M" : "L"}${x(at).toFixed(1)} ${y(values[index]).toFixed(1)}`).join(" ");
+}
+
+/** 这条线记录的重置时刻（毫秒）；没有或读不懂就是 null。 */
+export function resetAt(line: QuotaLine): number | null {
+  const value = lineResetsAt(line);
+  if (!value) return null;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? at : null;
+}
+
+/** 最后一个读数的时间（毫秒）；没有就是 null。 */
+export function lineLastAt(line: QuotaLine): number | null {
+  const last = line.points[line.points.length - 1];
+  if (!last) return null;
+  const at = Date.parse(last.at);
+  return Number.isFinite(at) ? at : null;
 }
 
 export type QuotaPace =

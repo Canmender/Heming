@@ -3,10 +3,12 @@ import {
   drawableRows,
   historySpan,
   lineLatestLeft,
+  lineLastAt,
   lineResetsAt,
   paceText,
   parseQuotaHistory,
   quotaPace,
+  resetAt,
   sparkPath,
   trendHeadline,
   type QuotaHistoryRow,
@@ -111,6 +113,37 @@ describe("sparkPath", () => {
   it("一个点或坏时间不给路径（不画半条线）", () => {
     expect(sparkPath([{ at: "2026-11-18T10:00:00Z", left: 50 }], 100, 24)).toBe("");
     expect(sparkPath([{ at: "坏时间", left: 50 }, { at: "也坏", left: 40 }], 100, 24)).toBe("");
+  });
+
+  it("给了重置时刻就把 x 轴延到那一刻：线停在左边，右边那段留给「到重置」", () => {
+    const points = [
+      { at: "2026-11-18T10:00:00Z", left: 100 },
+      { at: "2026-11-18T11:00:00Z", left: 50 },
+    ];
+    const until = Date.parse("2026-11-18T13:00:00Z");
+    // 读数跨 1 小时，重置在 3 小时后：第二个点落在 1/3 处，不再贴右边。
+    expect(sparkPath(points, 100, 24, until)).toBe("M0.0 0.0 L33.3 12.0");
+    // 重置已经过去（早于最后一个点）时不多留那一段。
+    expect(sparkPath(points, 100, 24, Date.parse("2026-11-18T10:30:00Z"))).toBe(
+      "M0.0 0.0 L100.0 12.0",
+    );
+    // 不给就是原来的铺满。
+    expect(sparkPath(points, 100, 24, null)).toBe("M0.0 0.0 L100.0 12.0");
+  });
+
+  it("resetAt / lineLastAt：读得出毫秒，读不出就是 null", () => {
+    const line: QuotaLine = {
+      name: "5 hours",
+      points: [
+        { at: "2026-11-18T10:00:00Z", left: 100, resetsAt: "2026-11-18T16:00:00Z" },
+        { at: "2026-11-18T11:00:00Z", left: 80 },
+      ],
+    };
+    // 取最后一条带 resetsAt 的读数（内核只在知道时才写）。
+    expect(resetAt(line)).toBe(Date.parse("2026-11-18T16:00:00Z"));
+    expect(lineLastAt(line)).toBe(Date.parse("2026-11-18T11:00:00Z"));
+    expect(resetAt({ name: "week", points: [{ at: "2026-11-18T10:00:00Z", left: 5 }] })).toBeNull();
+    expect(lineLastAt({ name: "week", points: [{ at: "坏时间", left: 5 }] })).toBeNull();
   });
 });
 

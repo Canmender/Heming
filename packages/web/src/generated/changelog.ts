@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.338.4.124.12",
+    "date": "2026-11-18",
+    "title": "曲线右端那条虚线，就是这次重置",
+    "bullets": [
+      "`quotaHistory.test.ts`：两条读数跨 1 小时、重置在 3 小时后 → 路径 `M0.0 0.0 L33.3 12.0`（第二个点落到 1/3 处，不再贴右边）；重置早于最后一个点、或 `until` 为 null 时仍是原来的 `M0.0 0.0 L100.0 12.0`；`resetAt`/`lineLastAt` 读毫秒、坏时间给 null。",
+      "新建 `packages/web/src/components/model/QuotaTrend.test.tsx` 两例：知道重置时刻 → 图里有虚线、`aria-label` 里带「后重置」、结论行末尾也有；内核没给重置时刻 → 没有虚线，图与结论都不出现「重置」二字。",
+      "全量 451 个测试文件 / 6476 个用例全绿；typecheck、`vite build`、`design-audit.mjs` 均通过。",
+      "虚线固定在右端（它就是 x 轴的终点），不画在曲线「内部」——曲线本身不会跨过重置点。",
+      "只画一条：同一条线的多个读数各自带着 `resetsAt`，取最后一条有值的（`resetAt` 复用 `lineResetsAt` 的取值口径）。",
+      "重置超过「一天」时不特殊标注，仍写「N 天后重置」，与「重置提前」那档的措辞一致。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「额度走向」的曲线只画到最后一个读数为止，x 轴也止于那里。于是它答不了自己最该答的那个问题：**这条线到底是在这次重置之前撞到底，还是能撑过去？**——因为重置那一刻根本不在图上，用户得自己把「照这个速度 6 小时用完」和标题里那句「5 小时后重置」在脑子里对一遍。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/quotaHistory.ts` 的 `sparkPath` | x 轴范围 = 第一个点到最后一个点 | 多一个可选 `until`：给了且晚于最后一个点，x 轴延到那一刻，线就停在左边 || 同文件 | 无 | 新增 `resetAt(line)` / `lineLastAt(line)`：这条线记的重置时刻、最后一个读数时刻（毫秒，读不出是 null） || `packages/web/src/components/model/QuotaTrend.tsx` | 图里只有一条折线 | 重置还在将来时，右端补一条竖直虚线（`stroke-dasharray`、`vector-effect: non-scaling-stroke`）；图的朗读文案与 `<title>` 都带上「N 小时后重置」 || 同文件 | 结论行「5 小时：照这个速度…」 | 末尾补「· N 小时后重置」（重置已经过去/没记录时不补，不编） |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.338.4.123.12",
     "date": "2026-11-18",
     "title": "加 Key 的地方就挨着已有 Key",
