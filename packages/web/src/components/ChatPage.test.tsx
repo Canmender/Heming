@@ -6365,6 +6365,98 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   }, 30_000);
 
   /**
+   * d.294：单条消息重答。
+   *
+   * 这一例锁「最后一轮不用二次确认」：用户点重答的意思已经很明确，再问一句只是挡路。
+   * 同时锁住删除范围必须是**成对的**（提问 + 回答）——只删回答会留下一句没人答的提问，
+   * 再把同一句发一遍就变成问了两遍。
+   */
+  it("I3-regen 最后一个回答：点重答就撤掉这一问一答并重新答（d.294）", async () => {
+    await setupAgentChat([
+      msg("m1", "把登录改成扫码", "2026-10-14T01:00:00.000Z"),
+      agentMsg("m2", "改好了", "2026-10-14T01:01:00.000Z"),
+    ]);
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    const deletes: string[][] = [];
+    const deleted = new Set<string>();
+    const baseFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const match = /^\/api\/conversations\/([^/]+)\/messages\/delete$/.exec(url);
+      if (match) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { ids: string[] };
+        deletes.push(body.ids);
+        body.ids.forEach((id) => deleted.add(id));
+        return jsonRes({ ok: true, removed: body.ids.length });
+      }
+      const response = (await baseFetch(input, init)) as Response;
+      // 删过的消息不该再出现在历史接口里（真服务端就是这样；否则重答后会「复活」）
+      if (deleted.size > 0 && /\/messages$/.test(url)) {
+        const rows = (await response.clone().json()) as { id: string }[];
+        return jsonRes(rows.filter((row) => !deleted.has(row.id)));
+      }
+      return response;
+    });
+
+    fireEvent.click(screen.getByLabelText("重新回答这一轮"));
+    await waitFor(() => expect(deletes).toEqual([["m1", "m2"]]), { timeout: 8000 });
+    // 本地镜像同步摘掉：不刷新也不该再看到刚才那句回答
+    await waitFor(() => expect(screen.queryByText("改好了")).not.toBeInTheDocument(), { timeout: 8000 });
+    expect(await screen.findByText("正在重答。", undefined, { timeout: 8000 })).toBeInTheDocument();
+    // 真的又发了一次同一句提问（不是「删完就完了」）
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalled(), { timeout: 8000 });
+    const outbound = vi.mocked(streamChat).mock.calls.at(-1)![1].map((r) => String(r.content ?? "")).join("\n");
+    expect(outbound).toContain("把登录改成扫码");
+  }, 30_000);
+
+  /**
+   * d.294：中间那条回答的重答要二次确认。
+   *
+   * 删掉后面几轮是不可撤销的（服务端没有软删除），所以先把「会删几条」说具体；
+   * 取消必须真的什么都不做——不能先删后问。
+   */
+  it("I3-regen 中间的回答：先问清会删后面几条，取消则什么都不动（d.294）", async () => {
+    await setupAgentChat([
+      msg("m1", "第一问", "2026-10-14T01:00:00.000Z"),
+      agentMsg("m2", "第一答", "2026-10-14T01:01:00.000Z"),
+      msg("m3", "第二问", "2026-10-14T01:02:00.000Z"),
+      agentMsg("m4", "第二答", "2026-10-14T01:03:00.000Z"),
+    ]);
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    const deletes: string[][] = [];
+    const baseFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const match = /^\/api\/conversations\/([^/]+)\/messages\/delete$/.exec(String(input));
+      if (match) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { ids: string[] };
+        deletes.push(body.ids);
+        return Promise.resolve(jsonRes({ ok: true, removed: body.ids.length }));
+      }
+      return baseFetch(input, init) as Promise<Response>;
+    });
+
+    fireEvent.click(screen.getAllByLabelText("重新回答这一轮")[0]!);
+    const group = await screen.findByRole("group", { name: "重答确认" }, { timeout: 8000 });
+    expect(group).toHaveTextContent("后面还有 2 条消息");
+
+    fireEvent.click(within(group).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "重答确认" })).not.toBeInTheDocument(), {
+      timeout: 8000,
+    });
+    expect(deletes).toEqual([]);
+    expect(streamChat).not.toHaveBeenCalled();
+
+    // 再点一次、这次确认：删的是这条提问之后的全部消息
+    fireEvent.click(screen.getAllByLabelText("重新回答这一轮")[0]!);
+    const again = await screen.findByRole("group", { name: "重答确认" }, { timeout: 8000 });
+    fireEvent.click(within(again).getByRole("button", { name: "确认重答" }));
+    await waitFor(() => expect(deletes).toEqual([["m1", "m2", "m3", "m4"]]), { timeout: 8000 });
+    expect(await screen.findByText(/已撤掉这一轮和它后面的 2 条/, undefined, { timeout: 8000 })).toBeInTheDocument();
+  }, 30_000);
+
+  /**
    * d.219：`/init` 与其它 `/` 命令不是一类东西。
    *
    * `/status`、`/goal` 是本地动作（不发模型、不落库）；`/init` 要模型真去读仓库再写

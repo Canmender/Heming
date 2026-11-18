@@ -243,6 +243,11 @@ import { GOAL_COMMAND, HOOKS_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COM
 import { collectCustomCommands, commandsToSlash, expandCustomCommand, type CustomCommand } from "../lib/agentRuntime/customCommands.js";
 import { collectSubagentDefs, type SubagentDef } from "../lib/agentRuntime/subagentDefs.js";
 import { expandInitCommand } from "../lib/agentRuntime/initPrompt.js";
+import {
+  describeRegenerateConfirm,
+  planRegenerate,
+  type RegeneratePlan,
+} from "../lib/agentRuntime/regenerate.js";
 import { clearGoal, getGoal, goalForPrompt, setGoal } from "../lib/agentRuntime/goal.js";
 import { notifyApprovalWait, notifyTurnEnd, resetTurnNotifyThrottle } from "../lib/agentRuntime/turnNotify.js";
 import { isDesktopNotifyEnabled, onDesktopNotifyOpen, setDesktopNotifyEnabled } from "../lib/desktopNotify.js";
@@ -1345,6 +1350,15 @@ export function ChatPage({
   /** A5：刚复制过的消息 id（短暂显示「已复制」）。 */
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * d.294 单条消息重答：待确认的重答（消息 id + 方案），以及正在跑的那条（按钮转「重答中」）。
+   *
+   * 确认态放在这里而不是每个按钮内部：一次只可能确认一条（用户点了这条就会盖掉上一条），
+   * 放消息级 state 反而要处理「取消时清哪一条」。方案随确认态一起存，避免确认期间
+   * 目录里的消息变了、点确认时删掉另一批。
+   */
+  const [regenConfirm, setRegenConfirm] = useState<{ id: string; plan: RegeneratePlan } | null>(null);
+  const [regenBusyId, setRegenBusyId] = useState<string | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
   /**
@@ -4747,6 +4761,58 @@ export function ChatPage({
     setSendNotice("已重新发送", "info");
   };
 
+  /**
+   * d.294 单条消息重答：撤掉那一轮（提问 + 它之后的全部消息），再用同一句提问重跑。
+   *
+   * 顺序是有讲究的：**先删再发**。反过来的话 `fetchHistory` 读到的还是旧对话，
+   * 模型会看见「同一句提问问了两遍」——这正是重答要避免的东西。
+   * 删除失败就整件事不做：宁可没重答，也不要留下「删了一半」的会话。
+   * 重答本身发不出去时把提问放回输入框，用户不至于连原文都找不回（消息已经删了）。
+   */
+  const regenerateFrom = async (plan: RegeneratePlan, messageId: string) => {
+    if (activeLocal.length > 0) {
+      setSendNotice("还在生成中：等这一轮结束再重答。", "info");
+      return;
+    }
+    setRegenConfirm(null);
+    setRegenBusyId(messageId);
+    try {
+      await deleteMessages(convId, plan.ids);
+    } catch (err) {
+      setRegenBusyId(null);
+      setSendNotice(`没能删掉旧回答（${(err as Error).message}），这次没有重答。`, "error");
+      return;
+    }
+    // 服务端已删：本地镜像同步摘掉，否则这一轮还会出现在列表里、也会被算进 fetchHistory。
+    useChatStore.getState().removeMessages(convId, plan.ids);
+    const result = await submitMessage(plan.prompt, effectiveMentions);
+    setRegenBusyId(null);
+    if (!result.ok) {
+      setDraft(plan.prompt);
+      saveDraft(convId, plan.prompt);
+      setSendNotice(`旧回答已撤掉，但重答没发出去：${result.error}。提问已放回输入框。`, "error");
+      return;
+    }
+    setSendNotice(
+      plan.later > 0 ? `已撤掉这一轮和它后面的 ${plan.later} 条，正在重答。` : "正在重答。",
+      "info",
+    );
+  };
+
+  /** 点「重答」：能直接算清楚的先问一句（会删后面几条），最后一条则不用二次确认那么重。 */
+  const askRegenerate = (messageId: string, plan: RegeneratePlan) => {
+    if (activeLocal.length > 0) {
+      setSendNotice("还在生成中：等这一轮结束再重答。", "info");
+      return;
+    }
+    // 只有最后一条回答：删的就是这一问一答，不涉及「后面的消息也没了」，不值得再点一次确认。
+    if (plan.later === 0) {
+      void regenerateFrom(plan, messageId);
+      return;
+    }
+    setRegenConfirm({ id: messageId, plan });
+  };
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红。
@@ -5639,6 +5705,15 @@ export function ChatPage({
           const showSeparator = needsTimeSeparator(prevMsg?.createdAt, m.createdAt);
           // 转录（d.126-C）：思考过程 + 工具调用轨迹。旧消息没有这两个字段 → undefined，不渲染。
           const transcript = mine ? undefined : transcriptOf(m);
+          /**
+           * d.294：这条回答能不能重答。方案在这里算好，点击时直接用它——
+           * 确认期间列表若变了（别的窗口删了消息），至少删的仍是用户看到的那一批。
+           */
+          const regenPlan = (() => {
+            if (mine) return null;
+            const outcome = planRegenerate(visibleMessages, m.id);
+            return outcome.ok ? outcome.plan : null;
+          })();
           // 图表：正文里的 ```chart 围栏块。解析失败的块被跳过（不显示也不报错——
           // 模型偶尔会写出不合法的 JSON，那是它的问题，不该让整条消息看起来坏了）。
           const messageCharts = extractCharts(m.payload.text).map((c, i) => ({
@@ -5736,18 +5811,60 @@ export function ChatPage({
                 </div>
                 {/* A5 整条复制：有文本才出（附件只有元信息，复制结果没意义）。
                     用 opacity 而不是 hidden：hidden 会把按钮移出键盘 Tab 序，键盘用户永远复制不了；
-                    放在消息体右侧（self-end）而不是 absolute -top-2，避免 hover 时压住署名行的时间戳。 */}
-                {(m.payload.text?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    aria-label="复制消息"
-                    className="ui-hit pointer-events-none shrink-0 self-end rounded-sm border border-line bg-surface px-1.5 py-0.5 text-ui-xs text-muted opacity-0 transition-opacity duration-fast hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
-                    onClick={() => void copyMessage(m)}
-                  >
-                    {copiedMsgId === m.id ? "已复制" : "复制"}
-                  </button>
-                )}
+                    放在消息体右侧（self-end）而不是 absolute -top-2，避免 hover 时压住署名行的时间戳。
+                    d.294：按钮竖排——「重答」放在「复制」上面，两者都用同一套 hover 显隐。 */}
+                {regenPlan || (m.payload.text?.length ?? 0) > 0 ? (
+                  <div className="flex shrink-0 flex-col items-end gap-1 self-end">
+                    {regenPlan ? (
+                      <button
+                        type="button"
+                        aria-label="重新回答这一轮"
+                        title={
+                          regenPlan.later > 0
+                            ? `这条后面还有 ${regenPlan.later} 条消息，重答会一起删掉`
+                            : "撤掉这个回答，用同一句提问重新答一次"
+                        }
+                        disabled={regenBusyId === m.id || activeLocal.length > 0}
+                        className="ui-hit pointer-events-none shrink-0 rounded-sm border border-line bg-surface px-1.5 py-0.5 text-ui-xs text-muted opacity-0 transition-opacity duration-fast hover:text-ink disabled:cursor-not-allowed disabled:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
+                        onClick={() => askRegenerate(m.id, regenPlan)}
+                      >
+                        {regenBusyId === m.id ? "重答中…" : "重答"}
+                      </button>
+                    ) : null}
+                    {(m.payload.text?.length ?? 0) > 0 ? (
+                      <button
+                        type="button"
+                        aria-label="复制消息"
+                        className="ui-hit pointer-events-none shrink-0 rounded-sm border border-line bg-surface px-1.5 py-0.5 text-ui-xs text-muted opacity-0 transition-opacity duration-fast hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
+                        onClick={() => void copyMessage(m)}
+                      >
+                        {copiedMsgId === m.id ? "已复制" : "复制"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
+              {/* d.294 重答确认：删掉后面几条是不可撤销的，所以中间那条要问一句再动手。 */}
+              {regenConfirm?.id === m.id ? (
+                <div
+                  role="group"
+                  aria-label="重答确认"
+                  className="mb-4 flex flex-wrap items-center justify-end gap-2 text-ui-sm text-body"
+                >
+                  <span>{describeRegenerateConfirm(regenConfirm.plan)}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    onClick={() => void regenerateFrom(regenConfirm.plan, m.id)}
+                  >
+                    确认重答
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setRegenConfirm(null)}>
+                    取消
+                  </Button>
+                </div>
+              ) : null}
             </Fragment>
           );
         })}
