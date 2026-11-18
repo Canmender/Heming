@@ -1,3 +1,74 @@
+## d.326.4.120.12（2026-11-18）— 账号一多，先告诉你哪个最宽裕、哪个最紧
+
+### 为什么做
+
+「订阅账号」卡里每个账号都画了进度条，一个账号一眼能看出快用完，三四个账号就得自己
+从上扫到下，比一遍才知道该把活往哪家放。额度走向那句结论只讲「照这个速度会怎样」，
+不讲「现在谁最宽裕」。
+
+### 做了什么
+
+| 位置 | 内容 |
+| --- | --- |
+| 「订阅账号」卡、同门合计条下面 | 一句话：`最宽裕的是 Claude 工作号（剩 82%）；最紧的是 ChatGPT 个人（剩 6%）` |
+| 中间那几个 | 三个账号以上时只报个数：`；还有 2 个在中间` |
+| 都差不多时 | 不硬分高低：`2 个账号都差不多，最宽的 Claude a 也只剩 40%` |
+| 颜色 | 最紧的 ≤10% 红、≤25% 黄，其余不额外强调 |
+
+比的是每个账号**最紧的那一份**（5 小时窗口剩 20% 就按 20% 算，不看它每周还有 90%）。
+不算进来的三种：不限量的窗口（说不清比例）、只有厂商原话的积分/签到行（没有数）、
+登录失效或这次没读到的账号——免得把「不知道」算成「最紧」。只有一个可比账号时不说话。
+
+### 怎么验证
+
+- `lib/quotaRank.ts` 配 6 例单测：最紧那份决定名次、不限量/原话/失效/读不到都不参与、
+  同分按名字稳下来、两个账号才说话、三个以上中间只报个数、都差不多时不硬分高低。
+- `components/ModelPage.test.tsx` 新增 1 例：两个账号（82% 与 6%）时这句话出现在卡里。
+- `pnpm --filter @heming/web test` 全量 449 个测试文件 / 6440 个用例全绿；`typecheck` 0；
+  `vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。
+
+### 留白
+
+- 只排名、不给建议：换号仍是人点「换过去」，内核自动换号的时机也不由这句话决定。
+- 只比「还剩多少百分比」，不比金额：钱包余额那种没有份额的窗口不参与排名。
+- 这句话跟着账号筛选一起变吗——不，它看的是全部账号（筛选是给人翻列表用的）。
+
+## d.325.4.120.12（2026-11-18）— 编辑器里也能直接用上你写在仓库里的命令和约定
+
+### 为什么做
+
+`heming mcp serve`（d.289）之前只把**工具**交出去：读文件、写文件、跑命令。但一个工作区里真正决定「和鸣会怎么干活」的其实是另外几份文本——`.heming/commands/*.md` 里写好的固定指令（桌面端 `/名字` 用的就是它们）、`AGENTS.md` 一族里的仓库约定、`.heming` 下的权限 / 钩子 / 外部服务配置。这些对 Cursor、Claude Code 这类 MCP 客户端此前完全不可见：没人能在那儿选用你的 `/review`，也看不到「这个仓库改完要跑 pnpm test」。工具通了、规矩不通，等于只接了半条胳膊。
+
+这一轮按 MCP 的两类只读能力把它们补上：`prompts`（可被用户直接选用的指令模板）与 `resources`（可被引用/读入上下文的文档）。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| `prompts/list` | 列出 `.heming/commands/*.md`，名字就是命令名，标题与说明来自文件头的 `# 标题` / `> 说明`（与桌面端同一份解析） |
+| `prompts/get` | 按名字回一条 `role: "user"` 的消息，正文是命令展开后真正发给模型的那段话 |
+| `resources/list` | 命令文件 + `AGENTS.md` / `HEMING.md` / `.heming/AGENTS.md` / `.heming/rules.md` + `.heming/{permissions,hooks,mcp}.json`，URI 形如 `heming://workspace/AGENTS.md` |
+| `resources/read` | 按 URI 返正文与 MIME（`.md` → `text/markdown`，`.json` → `application/json`） |
+| 能力声明 | 只有工作区真有内容时才在 `initialize` 里声明 `prompts` / `resources`，客户端就不会白问 |
+| 现读不缓存 | 每次 `prompts/list` / `resources/list` 重新读盘——中途改了命令文件，下一轮就见效 |
+| 归一 | 去掉开头 BOM、CRLF 折成 LF（记事本 / PowerShell 5 默认就写 BOM，否则 `# 标题` 这种首行约定认不出来），其余一律照原样 |
+| 安全边界 | `resources/read` 只在 `resources/list` 报过的名单里查：URI 从不拿去拼路径，`../` 之类根本没有机会变成越界读盘 |
+| 上限 | 单份文件 60k 字截断并在末尾写明「要看全的请用 `file_read` 读哪一份」；资源总数 40 份 |
+
+采集逻辑在新增的 `packages/cli/src/mcpCatalog.ts`（`collectCliMcpCatalog` / `resourceUriOf` / `relOfResourceUri` / `normalizeCatalogText` / `describeCliMcpCatalog`），协议翻译在 `packages/cli/src/mcp.ts`（四个新方法与能力声明），装配在 `packages/cli/src/mcpServe.ts`（启动时往 stderr 打一行「工作区内容：1 条提示词（review）、2 份资源」）。
+
+### 怎么验证
+
+- `packages/cli`：15 文件 / 266 例全绿（新增 `mcpCatalog.test.ts` 11 例、`mcp.test.ts` 的 prompts/resources 9 例；把原来拿 `resources/list` 当「未知方法」的旧用例换成了真正不存在的方法名）。
+- 真机端到端：临时工作区放一份带 BOM 的 `.heming/commands/review.md` 与 `AGENTS.md`，`mcp serve` 回 `prompts` 的 `title: "安全审查"`、`description: "只挑能被利用的问题"`，`prompts/get` 的正文是 `按威胁模型逐条过入口。`（BOM 与文件头都没漏进正文），`resources/read` 拿到 `AGENTS.md` 的正文，`heming://workspace/../x.md` 回 `-32602 未知资源`。
+- 全量门禁：`pnpm -w typecheck`、web 全量、server `--maxWorkers=1`、`eval:agent`、`design-audit`。
+
+### 留白
+
+- 只读：`prompts` / `resources` 都不接受写入，且不受 `--read-only` 影响（它们本来就是读）。
+- 没有 `resources/subscribe`：文件变了客户端不会收到通知，要拿新版就得重新 `resources/read`。
+- 名单是写死的三类：工作区里别的文件请走 `file_read` 工具，而不是指望它出现在 `resources/list` 里。
+- `prompts` 没有参数模板：`.heming/commands/*.md` 是静态指令，没有占位符替换。
 ## d.324.4.120.12（2026-11-18）— 勾选没改就不给按，改了就明说「还没保存」
 
 ### 为什么做

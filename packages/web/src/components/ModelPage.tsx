@@ -35,6 +35,7 @@ import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
 import { swapArgs, swapSuggestions, swapText, type SwapSuggestion } from "../lib/swapAccount.js";
+import { rankText } from "../lib/quotaRank.js";
 import {
   autoResetArgs,
   autoResetLevelText,
@@ -251,6 +252,13 @@ const SYNC_COMMAND_LABEL: Record<string, string> = {
   set: "写入配置项",
 };
 
+/** 账号排名那句的色调：最紧的已经见底就红，偏紧就黄，都还宽裕就不额外强调。 */
+const RANK_TONE: Record<"danger" | "warn" | "muted", string> = {
+  danger: "text-danger",
+  warn: "text-warn",
+  muted: "",
+};
+
 const GROUP_ROUTING = [
   "smart",
   "order",
@@ -368,6 +376,8 @@ export function ModelPage() {
   const mergedAccounts = useMemo(() => mergeAccounts(accounts, now), [accounts, now]);
   /** 有账号用完、同门还有余量的：问一句要不要换过去（内核只替 Claude / Codex 换号）。 */
   const swapHints = useMemo(() => swapSuggestions(accounts), [accounts]);
+  /** 哪个账号最宽裕、哪个最紧：账号多时不必自己一行行扫进度条。 */
+  const accountRank = useMemo(() => rankText(accounts), [accounts]);
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /**
@@ -2241,6 +2251,10 @@ export function ModelPage() {
                 </div>
 
                 <MergedQuotaStrip groups={mergedAccounts} now={now} />
+
+                {accountRank && (
+                  <p className={`mt-2 ui-caption ${RANK_TONE[accountRank.tone]}`}>{accountRank.text}</p>
+                )}
 
                 {swapHints.length > 0 && (
                   <ul className="mt-2 space-y-1.5" aria-label="换到还有额度的账号">

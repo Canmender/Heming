@@ -331,6 +331,42 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
+  it("账号多了就把「最宽裕」与「最紧」写成一句话", async () => {
+    installBridge(
+      {},
+      {
+        "accounts --json": {
+          ok: true,
+          stdout: JSON.stringify([
+            {
+              agent: "claude",
+              user: "work@example.com",
+              alias: "工作号",
+              plan: "Max",
+              active: true,
+              on: true,
+              windows: [{ name: "5 hours", used: 18, remaining: 82, display: "18% used" }],
+            },
+            {
+              agent: "codex",
+              user: "me@example.com",
+              alias: "个人",
+              active: true,
+              on: false,
+              windows: [{ name: "week", used: 94, remaining: 6, display: "94% used" }],
+            },
+          ]),
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(
+      await screen.findByText("最宽裕的是 Claude 工作号（剩 82%）；最紧的是 ChatGPT 个人（剩 6%）"),
+    ).toBeInTheDocument();
+  });
+
   it("自动收取的状态写在账号卡底部：关掉时说清账号为什么是空的", async () => {
     const { calls } = installBridge(
       {},
