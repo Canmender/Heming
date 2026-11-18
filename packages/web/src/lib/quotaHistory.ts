@@ -253,6 +253,14 @@ export function lineResetsAt(line: QuotaLine): string | null {
   return null;
 }
 
+/** 这条线第一次读数的时刻（毫秒；读不出就是 null）。 */
+export function lineFirstAt(line: QuotaLine): number | null {
+  const first = line.points[0];
+  if (!first) return null;
+  const at = Date.parse(first.at);
+  return Number.isFinite(at) ? at : null;
+}
+
 export interface TrendHeadline {
   /** 一句话结论；空串表示「没有能下结论的东西」，调用方自己兜底。 */
   text: string;

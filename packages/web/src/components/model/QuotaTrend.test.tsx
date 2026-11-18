@@ -41,6 +41,19 @@ describe("QuotaTrend", () => {
     expect(screen.getByText(/^5 小时：照这个速度/).textContent).toMatch(/· .*后重置$/);
   });
 
+  it("横轴两端写出来：第一份读数是多少小时前，重置还有多久", () => {
+    render(<QuotaTrend rows={row()} now={NOW} />);
+    // 左端是这份数据从哪儿开始，右端是那段空白到什么时候结束。
+    expect(screen.getByText("2 小时前")).toBeInTheDocument();
+    expect(screen.getByText(/^4 小时后重置$/)).toBeInTheDocument();
+  });
+
+  it("不知道什么时候重置时，横轴不硬写一个端点", () => {
+    render(<QuotaTrend rows={row(false)} now={NOW} />);
+    expect(screen.queryByText("2 小时前")).toBeNull();
+    expect(screen.queryByText(/后重置$/)).toBeNull();
+  });
+
   it("内核没给重置时刻时，不画虚线，也不编一句重置", () => {
     const { container } = render(<QuotaTrend rows={row(false)} now={NOW} />);
     expect(container.querySelector("line[stroke-dasharray]")).toBeNull();

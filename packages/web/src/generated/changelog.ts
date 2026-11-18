@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.342.4.127.12",
+    "date": "2026-11-18",
+    "title": "额度走向的横轴把两端写出来：数据从哪儿开始、还剩多久到重置",
+    "bullets": [
+      "`packages/web/src/lib/quotaHistory.test.ts` 新增一例（第一份读数时刻、空线、坏时间戳都各有一种结果）。",
+      "`packages/web/src/components/model/QuotaTrend.test.tsx` 新增两例：知道重置时刻 → 两端文字都在；不知道 → 两个端点都不出现。",
+      "版式用无头 Edge 量过（`.tmp/preview/trend-preview.tsx` + `trend-measure.mjs`）：520/440/380 三种宽度横向溢出都是 0；带刻度的那一行高了 20px（152px → 172px），没有刻度的行不变。",
+      "全量 452 个测试文件 / 6492 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。",
+      "只标两端，中间没有网格线：曲线只有几份读数，画满刻度反而更花。",
+      "左端是「第一份读数」而不是「这个窗口开始」：内核的读数从它第一次看到变化才记，窗口开始那一刻没有数据。",
+      "收起状态不显示刻度（曲线本身在收起时也不渲染）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「额度走向」展开后只有一条曲线和右端一段虚线。虚线代表「离重置还有一段」，可那段空白到底是一小时还是一天，图上没有任何刻度——同一张图，5 小时的窗口和每周的窗口看起来一模一样。结论行虽然写了「2 小时后重置」，但要拿它去换算曲线左端是什么时候，只能自己心算。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/quotaHistory.ts` | 有 `lineLastAt` / `lineResetsAt`，没有「第一份读数是什么时候」 | 新增 `lineFirstAt(line): number \\| null`（读不出或时间戳坏了返回 null） || `packages/web/src/components/model/QuotaTrend.tsx` | 曲线下方没有刻度 | 知道重置时刻时，曲线下方补一行两端文字：左端 `2 小时前`（第一份读数）、右端 `4 小时后重置`；不知道重置时刻就不硬写端点 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.341.4.127.12",
     "date": "2026-11-18",
     "title": "额度写在能动手的那一行，同一份额度不再说两遍",

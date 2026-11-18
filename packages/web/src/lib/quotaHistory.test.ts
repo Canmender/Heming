@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   drawableRows,
   historySpan,
+  lineFirstAt,
   lineLatestLeft,
   lineLastAt,
   lineResetsAt,
@@ -256,6 +257,19 @@ describe("historySpan / 最后一次读数", () => {
     expect(lineLatestLeft(line)).toBe(65);
     expect(lineResetsAt(line)).toBe("2026-11-20T00:00:00Z");
     expect(lineLatestLeft({ name: "week", points: [] })).toBeNull();
+  });
+
+  it("给出第一份读数的时刻：横轴左端从哪儿开始", () => {
+    const line: QuotaLine = {
+      name: "week",
+      points: [
+        { at: iso(3), left: 80 },
+        { at: iso(1), left: 60 },
+      ],
+    };
+    expect(lineFirstAt(line)).toBe(NOW - 3 * HOUR);
+    expect(lineFirstAt({ name: "week", points: [] })).toBeNull();
+    expect(lineFirstAt({ name: "week", points: [{ at: "不是时间", left: 50 }] })).toBeNull();
   });
 });
 

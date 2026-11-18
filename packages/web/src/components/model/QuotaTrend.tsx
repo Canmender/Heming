@@ -1,6 +1,7 @@
 import { Avatar } from "./Avatar.js";
-import { agentName, formatResetIn, windowName } from "../../lib/magpieQuota.js";
+import { agentName, formatResetIn, relativeTime, windowName } from "../../lib/magpieQuota.js";
 import {
+  lineFirstAt,
   lineLastAt,
   lineLatestLeft,
   lineResetsAt,
@@ -52,30 +53,42 @@ function Spark({ line, now }: { line: QuotaLine; now: number }) {
   const label =
     `${windowName(line.name)} 的额度走向：从 ${percentText(first?.left ?? left)} 到 ${percentText(tail?.left ?? left)}` +
     (resetText ? `，${resetText}` : "");
+  // 横轴读不出来时没人知道那段空白是一小时还是一天：把两端写出来。
+  const firstAt = lineFirstAt(line);
+  const axisFrom = firstAt !== null ? relativeTime(new Date(firstAt).toISOString(), now) : "";
+  const axis = axisFrom && resetText ? { from: axisFrom, to: resetText } : null;
   return (
-    <svg
-      className={`h-6 w-full ${tone.stroke}`}
-      viewBox="0 0 100 24"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={label}
-    >
-      <title>{label}</title>
-      {until !== null && (
-        <line
-          x1={99}
-          y1={0}
-          x2={99}
-          y2={24}
-          stroke="currentColor"
-          strokeWidth={1}
-          strokeDasharray="2 2"
-          opacity={0.45}
-          vectorEffect="non-scaling-stroke"
-        />
+    <>
+      <svg
+        className={`h-6 w-full ${tone.stroke}`}
+        viewBox="0 0 100 24"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={label}
+      >
+        <title>{label}</title>
+        {until !== null && (
+          <line
+            x1={99}
+            y1={0}
+            x2={99}
+            y2={24}
+            stroke="currentColor"
+            strokeWidth={1}
+            strokeDasharray="2 2"
+            opacity={0.45}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {axis && (
+        <span className="mt-0.5 flex justify-between ui-caption">
+          <span>{axis.from}</span>
+          <span>{axis.to}</span>
+        </span>
       )}
-      <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
+    </>
   );
 }
 
