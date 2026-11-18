@@ -5,6 +5,7 @@ import { SYSTEM_AGENT_ID } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp, searchSnippet } from "./app.js";
 import { issueToken } from "./auth.js";
+import { subscribeBroadcasts } from "./events.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -1150,5 +1151,45 @@ describe("POST /api/conversations/:id/messages/delete（d.291 /rewind 的对话�
       .send({});
     expect(missing.status).toBe(400);
     expect(store.listMessages(convId)).toHaveLength(3);
+  });
+
+  it("删掉之后广播一条 messages_deleted，带会话与 id（d.298）", async () => {
+    const seen: unknown[] = [];
+    const off = subscribeBroadcasts((broadcast) => seen.push(broadcast));
+    try {
+      await del(a.token, [m2, m3]);
+    } finally {
+      off();
+    }
+    expect(seen).toEqual([
+      {
+        conversationId: convId,
+        event: { type: "messages_deleted", conversationId: convId, ids: [m2, m3] },
+      },
+    ]);
+  });
+
+  it("没有真的删掉东西时不广播（removed === 0：别端没有变化可做）", async () => {
+    const seen: unknown[] = [];
+    const off = subscribeBroadcasts((broadcast) => seen.push(broadcast));
+    try {
+      await del(a.token, [m2]);
+      await del(a.token, [m2]);
+    } finally {
+      off();
+    }
+    expect(seen).toHaveLength(1);
+  });
+
+  it("被拒的请求（403 / 400）不广播", async () => {
+    const seen: unknown[] = [];
+    const off = subscribeBroadcasts((broadcast) => seen.push(broadcast));
+    try {
+      await del(b.token, [m1]);
+      await del(a.token, []);
+    } finally {
+      off();
+    }
+    expect(seen).toHaveLength(0);
   });
 });

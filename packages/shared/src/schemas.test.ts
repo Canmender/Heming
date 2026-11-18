@@ -121,8 +121,7 @@ describe("MessageSchema", () => {
 
 describe("WsServerEventSchema", () => {
   it("接受 message_new / agent_chunk / agent_error / error", () => {
-    expect(WsServerEventSchema.safeParse({ type: "message_new", message }).success).toBe(true);
-    expect(
+    expect(WsServerEventSchema.safeParse({ type: "message_new", message }).success).toBe(true);    expect(
       WsServerEventSchema.safeParse({
         type: "agent_chunk",
         conversationId: "c1",
@@ -142,6 +141,29 @@ describe("WsServerEventSchema", () => {
       }).success,
     ).toBe(true);
     expect(WsServerEventSchema.safeParse({ type: "error", code: "x", message: "y" }).success).toBe(true);
+  });
+
+  it("接受 messages_deleted（d.298 跨窗口删除同步）", () => {
+    const ok = WsServerEventSchema.safeParse({
+      type: "messages_deleted",
+      conversationId: "c1",
+      ids: ["m1", "m2"],
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it("messages_deleted：空 ids / 缺会话 / 超 500 条都拒绝", () => {
+    expect(
+      WsServerEventSchema.safeParse({ type: "messages_deleted", conversationId: "c1", ids: [] }).success,
+    ).toBe(false);
+    expect(WsServerEventSchema.safeParse({ type: "messages_deleted", ids: ["m1"] }).success).toBe(false);
+    expect(
+      WsServerEventSchema.safeParse({
+        type: "messages_deleted",
+        conversationId: "c1",
+        ids: Array.from({ length: 501 }, (_, i) => `m${i}`),
+      }).success,
+    ).toBe(false);
   });
 
   it("已删除的 read_update / typing / message_recalled / voice_call_* 不再属于服务端契约", () => {

@@ -4,6 +4,7 @@ import { WsClientEventSchema, type WsServerEvent } from "@heming/shared";
 import type { Store } from "./store.js";
 import { userIdFromToken } from "./auth.js";
 import { presence } from "./presence.js";
+import { subscribeBroadcasts } from "./events.js";
 
 /** 首帧鉴权超时（d.30 · P0-3）：连上后 10s 内没等到 auth 帧 → 服务端主动断开。 */
 export const AUTH_TIMEOUT_MS = 10_000;
@@ -56,6 +57,20 @@ export function attachWs(
     if (!sockets) return;
     for (const ws of sockets) send(ws, event);
   }
+
+  /**
+   * HTTP 路由的会话事件 → WebSocket 广播（d.298）。
+   *
+   * 删除消息是 HTTP 接口（`POST /api/conversations/:id/messages/delete`），但「谁需要知道」
+   * 由这里决定：同一个会话的所有在线连接。订阅在 `attachWs` 里建立、`wss` 关闭时退订，
+   * 避免测试或热重启反复 attach 之后留下指向旧 `socketsByUser` 的监听器。
+   */
+  const unsubscribeBroadcasts = subscribeBroadcasts(({ conversationId, event }) => {
+    broadcastToConversation(conversationId, event);
+  });
+  wss.on("close", () => {
+    unsubscribeBroadcasts();
+  });
 
   // 注：@types/ws 的 "connection" 特化重载只声明 2 参（websocket, request），
   // 本实现经 wss.emit("connection", ws, req) 触发；_req 显式注解以通过 strict 检查。

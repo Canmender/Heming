@@ -922,6 +922,16 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (e.streamId) get().removeStream(e.streamId);
       return;
     }
+    /**
+     * 消息被删掉了（d.298）：`/rewind` 的对话那一半在另一个窗口/另一台设备上执行了。
+     *
+     * 只摘本地镜像，不再回打服务端——删除的发起方已经把库改好了，广播只是通知。
+     * 按 id 摘是幂等的：同一条广播重放一次也只是白过滤一遍。
+     */
+    if (e.type === "messages_deleted") {
+      get().removeMessages(e.conversationId, e.ids);
+      return;
+    }
     if (e.type === "agent_chunk") {
       // 本机流已在触发端本地累积（onLocalDelta），回声不再重复 upsert
       if (get().streamOwner[e.streamId]) return;

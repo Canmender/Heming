@@ -7,6 +7,7 @@ import WebSocket from "ws";
 import type { Store } from "./store.js";
 import { startServer } from "./index.js";
 import { issueToken } from "./auth.js";
+import { publishBroadcast } from "./events.js";
 import type { WsServerEvent } from "@heming/shared";
 import { SYSTEM_AGENT_ID } from "@heming/shared";
 
@@ -377,8 +378,35 @@ describe("WS 鉴权", () => {
   });
 });
 
-describe("团队在线状态", () => {
-  it("WS 连接登记在线，最后一个连接断开后下线", async () => {
+describe("消息删除的跨端广播（d.298）", () => {
+  it("会话成员会收到 messages_deleted，非成员收不到", async () => {
+    const dave = store.createUser("dave", "h", "戴夫");
+    const daveToken = issueToken(store, dave.id);
+    const member = await connect(aliceToken);
+    const outsider = await connect(daveToken);
+    const memberFrame = nextEvent(member);
+    /** 非成员**不该**收到：用一个短超时确认它没有来。 */
+    const outsiderFrame = Promise.race([
+      nextEvent(outsider),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 300)),
+    ]);
+
+    publishBroadcast({
+      conversationId: convId,
+      event: { type: "messages_deleted", conversationId: convId, ids: [store.listMessages(convId)[0]!.id] },
+    });
+
+    expect(await memberFrame).toMatchObject({ type: "messages_deleted", conversationId: convId });
+    expect(await outsiderFrame).toBe("timeout");
+
+    member.close();
+    outsider.close();
+    await waitClose(member);
+    await waitClose(outsider);
+  });
+});
+
+describe("团队在线状态", () => {  it("WS 连接登记在线，最后一个连接断开后下线", async () => {
     // 独立用户：其他用例的 socket 关闭是异步的，混用 alice 会让在线计数不确定。
     const carol = store.createUser("carol", "h", "卡萝");
     const carolToken = issueToken(store, carol.id);

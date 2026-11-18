@@ -235,6 +235,23 @@ describe("chat store", () => {
     expect(useChatStore.getState().streaming["s1"]).toBeUndefined();
   });
 
+  it("onWsEvent messages_deleted：按 id 摘掉本地镜像，只动那条会话（d.298）", () => {
+    useChatStore.getState().setMessages("c1", [
+      msgAt("m1", "第一句", "2026-10-13T00:00:01.000Z"),
+      msgAt("m2", "答一句", "2026-10-13T00:00:02.000Z"),
+      msgAt("m3", "第二句", "2026-10-13T00:00:03.000Z"),
+    ]);
+    useChatStore.getState().setMessages("c2", [msgAt("x1", "别的会话", "2026-10-13T00:00:01.000Z")]);
+
+    useChatStore.getState().onWsEvent({ type: "messages_deleted", conversationId: "c1", ids: ["m2", "m3"] });
+
+    expect(useChatStore.getState().messages["c1"].map((m) => m.id)).toEqual(["m1"]);
+    expect(useChatStore.getState().messages["c2"].map((m) => m.id)).toEqual(["x1"]);
+    // 幂等：同一条广播重放一次不该出错，也不该把剩下的删掉
+    useChatStore.getState().onWsEvent({ type: "messages_deleted", conversationId: "c1", ids: ["m2"] });
+    expect(useChatStore.getState().messages["c1"].map((m) => m.id)).toEqual(["m1"]);
+  });
+
   it("onWsEvent agent_error：本机流置 error 保留供重试，他机流短暂显示后自清", () => {
     vi.useFakeTimers();
     useChatStore.getState().markStreamOwner("mine");

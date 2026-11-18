@@ -311,6 +311,18 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     n: z.number().int().min(0).optional(),
     index: z.number().int().min(0).optional(),
   }),
+  /**
+   * 消息被删掉了（d.298）：现在只有「按 id 删」这一条路（`/rewind` 的对话那一半），
+   * 删除是**幂等**的——别的窗口收到后按 id 摘本地镜像即可，重复收到也只是白摘一次。
+   *
+   * 为什么必须广播：d.293 的删除只回了发起方，另一个窗口/另一台设备上的同一段对话
+   * 会一直留着，直到手动刷新才「突然消失」。
+   */
+  z.object({
+    type: z.literal("messages_deleted"),
+    conversationId: z.string().min(1),
+    ids: z.array(z.string().min(1).max(64)).min(1).max(500),
+  }),
   z.object({
     type: z.literal("agent_error"),
     conversationId: z.string().min(1),

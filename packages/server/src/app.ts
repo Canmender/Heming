@@ -40,6 +40,7 @@ import {
   sessionExpiryFromNow,
 } from "./auth.js";
 import { createObservability } from "./obs.js";
+import { publishBroadcast } from "./events.js";
 import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 import { createPluginCatalog } from "./pluginCatalog.js";
@@ -1771,7 +1772,11 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
    *
    * 语义：400 body 非法 / 401 未登录 / 403 非成员 / 200 `{ ok, removed }`。
    * 只删属于这个会话的 id（别的会话、已经删掉的 id 静默忽略）→ 重复请求幂等，
-   * 客户端重试不会多删。这里**不发广播**：删除是本地窗口的主动作，别的端刷新即可看到。
+   * 客户端重试不会多删。
+   *
+   * 删除之后广播一条 `messages_deleted`（d.298）：同一个会话在别的窗口/另一台设备上
+   * 也开着时，那边会一直留着这段对话，直到手动刷新才「突然消失」。广播只带 id（不带内容），
+   * 收到的一方按 id 摘本地镜像即可；`removed === 0` 时不广播——没有任何变化，不值得打扰。
    */
   app.post("/api/conversations/:id/messages/delete", authOnly, (req, res) => {
     if (!store.isMember(req.params.id, userId(req))) {
@@ -1783,7 +1788,14 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
       return;
     }
-    res.json({ ok: true, removed: store.deleteMessages(req.params.id, parsed.data.ids) });
+    const removed = store.deleteMessages(req.params.id, parsed.data.ids);
+    if (removed > 0) {
+      publishBroadcast({
+        conversationId: req.params.id,
+        event: { type: "messages_deleted", conversationId: req.params.id, ids: parsed.data.ids },
+      });
+    }
+    res.json({ ok: true, removed });
   });
 
   // —— M4：共享文件从 app.ts 闭包 Map 迁入 Store（memory/sqlite 双实现持久化）——
