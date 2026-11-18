@@ -204,3 +204,70 @@ export function checkinSummary(entries: readonly CheckinEntry[]): string {
 export function checkinFailed(entries: readonly CheckinEntry[]): boolean {
   return entries.some((entry) => entry.outcome === "failed");
 }
+
+/**
+ * 每日自动签到的开关（`settings` 里的四个厂商开关）。
+ *
+ * 内核的定时器按北京时间每天跑一次：把厂商开关打开，`accounts checkin`
+ * 覆盖的那几家（WorkBuddy、Trae CN、MiniMax Code、Qoder）到点自己领，
+ * 不用等人想起来点按钮。MiMo Code、ZCode 的签到归插件自己
+ * （`pluginCheckins`，按 provider id），没有厂商开关，这里不替它们写。
+ */
+export interface CheckinSwitch {
+  /** settings 的 key。 */
+  key: string;
+  /** 这个开关管哪几家（写给人看）。 */
+  label: string;
+}
+
+export const CHECKIN_SWITCHES: readonly CheckinSwitch[] = [
+  { key: "workbuddyCheckin", label: "WorkBuddy" },
+  { key: "qoderCheckin", label: "Qoder" },
+  { key: "traeCheckin", label: "Trae CN" },
+  { key: "minimaxCheckin", label: "MiniMax Code" },
+];
+
+/** 四个开关的全貌：全开、全关、还是有几扇开着一半。 */
+export type CheckinSwitchState = "on" | "off" | "mixed";
+
+/** `settings list --json` 的 key → 当前值；坏 JSON 当空表，不抛。 */
+export function parseSettingValues(stdout: string): Map<string, unknown> {
+  const values = new Map<string, unknown>();
+  const text = stdout.trim();
+  if (!text) return values;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return values;
+  }
+  if (!Array.isArray(parsed)) return values;
+  for (const row of parsed) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const key = readString(record.key);
+    if (key) values.set(key, record.value);
+  }
+  return values;
+}
+
+/** 四个厂商开关现在是什么状态（认不出的值按关）。 */
+export function checkinSwitchState(values: ReadonlyMap<string, unknown>): CheckinSwitchState {
+  const on = CHECKIN_SWITCHES.filter((item) => values.get(item.key) === true).length;
+  if (on === 0) return "off";
+  return on === CHECKIN_SWITCHES.length ? "on" : "mixed";
+}
+
+/** 打开或关掉每日自动签到要发的命令（一条一扇开关，谁失败谁报错）。 */
+export function checkinSwitchArgs(enabled: boolean): string[][] {
+  const value = enabled ? "on" : "off";
+  return CHECKIN_SWITCHES.map((item) => ["settings", "set", item.key, value]);
+}
+
+/** 开关状态的人话。 */
+export function checkinSwitchText(state: CheckinSwitchState): string {
+  if (state === "on") return "每天自动签到";
+  if (state === "mixed") return "部分自动签到";
+  return "每天自动签到";
+}
+

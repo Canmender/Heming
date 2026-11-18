@@ -1,3 +1,38 @@
+﻿## d.281.4.120.12（2026-11-18）— 国内端的免费额度不用再惦记：每天自动签到，装过的端一眼认出来
+
+### 为什么做
+
+上一轮把 WorkBuddy、Qoder 这些国内端接进了「来源 → 订阅账号」，但免费额度这件事还差两步没说透：
+
+1. **每日额度要每天领一次，人总会忘。** 内核其实早就有这件事的常开状态——`settings` 里的 `workbuddyCheckin` / `qoderCheckin` / `traeCheckin` / `minimaxCheckin` 四个开关，打开后内核按北京时间每天自己点一遍签到（`accounts checkin` 覆盖的就是这四家）。页面原来只有一个「今日签到」按钮，等于把「记住每天点」交给用户。
+2. **卡片看不出「这台机器本来就有这个账号」。** 本机 `magpie ls` 明明认出了 WorkBuddy、Qoder，卡片却和别的端一样只写「先装插件」，用户得自己回想「我是不是登录过 Qoder」。
+
+顺手修了一处会改错文件的地方：`magpie ls` 里的「Qoder CN」原来映射成 `qoder`，在「智能体」分区给它改模型会写到 Qoder 国际站的配置里去。
+
+### 做了什么
+
+| 能力 | 位置 | 背后的命令 / 数据 |
+| --- | --- | --- |
+| 「每天自动签到」开关：一次打开四家，关掉就都关 | 来源 → 订阅账号 → 国内智能体 卡片组上方 | `settings list --json` 读，`settings set workbuddyCheckin\|qoderCheckin\|traeCheckin\|minimaxCheckin on\|off` 写 |
+| 开关打开的说明会点明覆盖哪几家（WorkBuddy、Qoder、Trae CN、MiniMax Code） | 同上 | 同上 |
+| 「本机已装」徽标：本机检测到这个端的客户端就标出来 | 国内智能体卡片标题行 | `magpie ls` 的展示名 → agent id |
+| 登录完成后立刻读一次该端额度，不用等一分钟缓存 | 国内端登录之后 | `quota refresh <agent>` → `accounts --json` |
+| Qoder CN 的 agent id 修正为 `qoder-cn` | 「智能体」分区的模型写入 | `magpie ls` 名称映射表 |
+
+自动签到逐个写、谁失败就停下来说清楚，不谎报「全部打开」；状态是「有一部分开着」时按钮写「补齐自动签到」。四个开关的键名与取值都是真机验证过的：`magpie-core.exe settings set workbuddyCheckin on` → `settings get` 回 `on`，写完再还原成 `off`。
+
+### 怎么验证
+
+- `packages/web` 全量 `vitest run`：**426 个测试文件 / 6141 个用例全绿**；`tsc -p tsconfig.json --noEmit` 退出码 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。
+- `packages/web/src/lib/magpieDomestic.test.ts` 补 4 例：四个开关的 key 与内核一致、`settings list --json` 的解析（含坏 JSON/对象形状都不当数据）、三种状态（全开/全关/开一半，字符串 `"on"` 不算开）、写命令的形状。
+- `packages/web/src/components/ModelPage.test.tsx` 补 3 例：没开时点「开启自动签到」会依次 `settings set … on` 四条并提示覆盖范围；已全开时按钮变「关掉自动签到」并写 `off`；`ls` 认出 WorkBuddy 与 Qoder 时卡片上有两个「本机已装」。
+- 版式：无头 Edge 在 380/440/520 三种卡片宽度量过，自动签到行与六张卡片**横向溢出 0**，卡片仍是 56px 高、标签不截断。
+
+### 留白（有依据，不是没做）
+
+- **MiMo Code、ZCode 的签到开关**：它们的签到归插件自己（`settings` 的 `pluginCheckins`，按 provider id 写 map），键名要按插件实际的 provider id 才安全，vendored 内核副本里核实不到这两家的 id，宁可不写错键。
+- **Trae CN、MiniMax Code 的卡片**：内核的签到覆盖它们，但它们没有可核实的插件包名（movers 表里没有），卡片无从「装插件」，所以只享受自动签到，不单列卡片。
+
 ## d.280.4.120.12（2026-11-18）— 国内智能体的免费额度也能借：WorkBuddy、Qoder 先装插件再登录，还能每天签到
 
 ### 为什么做

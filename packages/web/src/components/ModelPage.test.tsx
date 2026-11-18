@@ -399,6 +399,63 @@ describe("ModelPage · 账号与更多", () => {
     expect(notice).toHaveClass("ui-alert-danger");
   });
 
+  it("每天自动签到：把四个厂商开关一起打开，并说清覆盖哪几家", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "workbuddyCheckin", value: false },
+          { key: "qoderCheckin", value: false },
+          { key: "traeCheckin", value: false },
+          { key: "minimaxCheckin", value: false },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText(/打开后由内核每天自动领/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开启自动签到" }));
+    for (const key of ["workbuddyCheckin", "qoderCheckin", "traeCheckin", "minimaxCheckin"]) {
+      await waitFor(() => expect(calls).toContainEqual(["settings", "set", key, "on"]));
+    }
+    expect(await screen.findByText(/已开启每天自动签到/)).toBeInTheDocument();
+  });
+
+  it("自动签到已经开着时，按钮是「关掉」并把四个开关关回去", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "workbuddyCheckin", value: true },
+          { key: "qoderCheckin", value: true },
+          { key: "traeCheckin", value: true },
+          { key: "minimaxCheckin", value: true },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "关掉自动签到" }));
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "workbuddyCheckin", "off"]));
+    expect(await screen.findByText(/已关掉每天自动签到/)).toBeInTheDocument();
+  });
+
+  it("本机装过的国内端在卡片上标出来", async () => {
+    installBridge({}, {
+      ls: {
+        ok: true,
+        stdout: "WorkBuddy    glm-5.3-flash  ~/.workbuddy/models.json\nQoder    auto  ~/.qoder/settings.json",
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const chips = await screen.findAllByText("本机已装");
+    expect(chips.length).toBe(2);
+  });
+
   it("高级命令在「运行」里：流式输出写进面板", async () => {
     const { bridge, calls, emit } = installBridge();
     render(<ModelPage />);

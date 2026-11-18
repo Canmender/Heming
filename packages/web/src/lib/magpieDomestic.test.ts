@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   DOMESTIC_AGENTS,
   DOMESTIC_KEY_NOTE,
   checkinFailed,
   checkinLine,
   checkinSummary,
+  checkinSwitchArgs,
+  checkinSwitchState,
   checkinVendorName,
   parseCheckin,
   parsePluginProviders,
+  parseSettingValues,
   type CheckinEntry,
 } from "./magpieDomestic.js";
 
@@ -140,5 +144,55 @@ describe("checkinLine / checkinSummary", () => {
     expect(checkinFailed([])).toBe(false);
     expect(checkinFailed([entry({ outcome: "claimed" })])).toBe(false);
     expect(checkinFailed([entry({ outcome: "failed" })])).toBe(true);
+  });
+});
+
+describe("每天自动签到（settings 的四个厂商开关）", () => {
+  it("四个开关都来自内核的 settings key", () => {
+    expect(CHECKIN_SWITCHES.map((item) => item.key)).toEqual([
+      "workbuddyCheckin",
+      "qoderCheckin",
+      "traeCheckin",
+      "minimaxCheckin",
+    ]);
+  });
+
+  it("读 settings list --json：取 key 与 value，坏 JSON 当空表", () => {
+    const values = parseSettingValues(
+      JSON.stringify([
+        { key: "workbuddyCheckin", value: true },
+        { key: "qoderCheckin", value: false },
+        { key: "vision", value: "x" },
+      ]),
+    );
+    expect(values.get("workbuddyCheckin")).toBe(true);
+    expect(values.get("qoderCheckin")).toBe(false);
+    expect(values.get("vision")).toBe("x");
+    expect(parseSettingValues("").size).toBe(0);
+    expect(parseSettingValues("not json").size).toBe(0);
+    expect(parseSettingValues(JSON.stringify({ workbuddyCheckin: true })).size).toBe(0);
+  });
+
+  it("状态：全开、全关、开着一半", () => {
+    const all = new Map<string, unknown>([
+      ["workbuddyCheckin", true],
+      ["qoderCheckin", true],
+      ["traeCheckin", true],
+      ["minimaxCheckin", true],
+    ]);
+    expect(checkinSwitchState(all)).toBe("on");
+    expect(checkinSwitchState(new Map())).toBe("off");
+    expect(checkinSwitchState(new Map([["workbuddyCheckin", true]]))).toBe("mixed");
+    expect(checkinSwitchState(new Map([["workbuddyCheckin", "on"]]))).toBe("off");
+  });
+
+  it("改写：一条命令一扇开关，开或关同一个形状", () => {
+    expect(checkinSwitchArgs(true)).toEqual([
+      ["settings", "set", "workbuddyCheckin", "on"],
+      ["settings", "set", "qoderCheckin", "on"],
+      ["settings", "set", "traeCheckin", "on"],
+      ["settings", "set", "minimaxCheckin", "on"],
+    ]);
+    expect(checkinSwitchArgs(false)[0]).toEqual(["settings", "set", "workbuddyCheckin", "off"]);
   });
 });

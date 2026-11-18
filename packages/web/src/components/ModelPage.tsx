@@ -62,12 +62,17 @@ import {
 } from "../lib/magpieVisible.js";
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
 import {
+  CHECKIN_SWITCHES,
+  CHECKIN_VENDORS,
   checkinFailed,
   checkinSummary,
+  checkinSwitchArgs,
+  checkinSwitchState,
   DOMESTIC_AGENTS,
   DOMESTIC_KEY_NOTE,
   parseCheckin,
   parsePluginProviders,
+  parseSettingValues,
   type DomesticAgent,
 } from "../lib/magpieDomestic.js";
 import {
@@ -247,6 +252,11 @@ export function ModelPage() {
   /** 问过插件了：没问过时不把「没有插件」当成事实说出来。 */
   const [pluginsChecked, setPluginsChecked] = useState(false);
   /**
+   * settings 的现值（key → value）：国内端的「每天自动签到」是四个厂商开关，
+   * 读一次 `settings list --json` 就有全部，不必逐个 get。
+   */
+  const [settingValues, setSettingValues] = useState<Map<string, unknown>>(() => new Map());
+  /**
    * 重置倒计时与「读数几分钟前」都要跟着时间走。集中一个时钟：
    * 每分钟跳一次，没有账号就不开定时器（不白跑）。
    */
@@ -385,6 +395,12 @@ export function ModelPage() {
     const result = await cli.cli(["plugin", "list", "--json"]);
     setPluginProviders(parsePluginProviders(result.stdout || ""));
     setPluginsChecked(true);
+  }, [cli]);
+
+  const loadSettings = useCallback(async () => {
+    if (!cli) return;
+    const result = await cli.cli(["settings", "list", "--json"]);
+    setSettingValues(parseSettingValues(result.stdout || ""));
   }, [cli]);
 
   const loadDisabledModels = useCallback(async () => {
@@ -649,6 +665,43 @@ export function ModelPage() {
   };
 
   /**
+   * 「每天自动签到」：把四个厂商开关写进 settings，内核按北京时间每天自己领一次。
+   *
+   * 每日免费额度只在当天有效，靠人记得点按钮拿不全；这四个开关就是内核给
+   * 这件事留的常开状态（`workbuddyCheckin`/`qoderCheckin`/`traeCheckin`/
+   * `minimaxCheckin`）。逐个写、谁失败就停下来说清楚，不谎报全部打开。
+   */
+  const toggleAutoCheckin = async () => {
+    if (!cli) return;
+    const enable = checkinSwitchState(settingValues) !== "on";
+    setAccountBusy("checkin-switch");
+    try {
+      let why = "";
+      for (const args of checkinSwitchArgs(enable)) {
+        const result = await cli.cli(args);
+        if (!result.ok) {
+          why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+          break;
+        }
+      }
+      await loadSettings();
+      if (why) {
+        setNotice(`没能改自动签到：${why}`, true);
+        return;
+      }
+      setNotice(
+        enable
+          ? `已开启每天自动签到：${CHECKIN_VENDORS} 到点自己领，不用再点。`
+          : "已关掉每天自动签到；每日额度要手动点「今日签到」。",
+      );
+    } catch (err) {
+      setNotice(`没能改自动签到：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
    * 国内端的两步走：先装社区插件，再登录。
    *
    * 内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity（国内端是
@@ -675,6 +728,13 @@ export function ModelPage() {
       setAccountBusy(null);
     }
     await runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent]);
+    // 刚登录完，额度缓存可能还是空的：现在就问一次厂商，卡片上立刻有数。
+    try {
+      await cli.cli(["quota", "refresh", item.agent]);
+      await loadAccounts();
+    } catch {
+      // 刷新失败不影响登录本身，下一次「刷新额度」会补上。
+    }
   };
 
   useEffect(() => {
@@ -690,6 +750,7 @@ export function ModelPage() {
         loadGlobals(),
         loadDrawers(),
         loadPlugins(),
+        loadSettings(),
       ]);
       if (alive) setLoading(false);
     })();
@@ -705,6 +766,7 @@ export function ModelPage() {
     loadVisibility,
     loadGlobals,
     loadPlugins,
+    loadSettings,
   ]);
 
   useEffect(() => {
@@ -1443,6 +1505,28 @@ export function ModelPage() {
                     <h3 className="text-ui-md font-semibold">国内智能体</h3>
                     <span className="ui-caption">免费额度在账号里：先装插件，再登录</span>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-ui-md font-semibold">每天自动签到</span>
+                      <span className="block ui-caption">
+                        {checkinSwitchState(settingValues) === "on"
+                          ? `${CHECKIN_VENDORS} 到点自己领，不用再点。`
+                          : `打开后由内核每天自动领 ${CHECKIN_VENDORS} 的免费额度。`}
+                      </span>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant={checkinSwitchState(settingValues) === "on" ? "ghost" : "primary"}
+                      busy={accountBusy === "checkin-switch"}
+                      onClick={() => void toggleAutoCheckin()}
+                    >
+                      {checkinSwitchState(settingValues) === "on"
+                        ? "关掉自动签到"
+                        : checkinSwitchState(settingValues) === "mixed"
+                          ? "补齐自动签到"
+                          : "开启自动签到"}
+                    </Button>
+                  </div>
                   <div className="mt-2 grid gap-2">
                     {DOMESTIC_AGENTS.map((item) => (
                       <DomesticCard
@@ -1450,6 +1534,7 @@ export function ModelPage() {
                         item={item}
                         signedIn={accounts.filter((row) => row.agent === item.agent).length}
                         pluginReady={pluginsChecked && pluginProviders.has(item.agent)}
+                        local={agents.some((agent) => agent.id === item.agent)}
                         busy={accountBusy === `domestic:${item.agent}`}
                         onPress={prepareDomestic}
                       />
