@@ -1387,6 +1387,32 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(await screen.findByText(/已重读全部：来源、账号、额度、走向与设置/)).toBeInTheDocument();
   });
 
+  it("重读全部会先向各家重新问一遍额度，不吃内核那一分钟缓存", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    await screen.findByText(/deepseek\/deepseek-chat/);
+
+    calls.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: /重读全部/ }));
+
+    // 订阅账号（claude）与 Key 的 provider（mock）都要问；问完才去读额度。
+    await waitFor(() => expect(calls).toContainEqual(["quota", "refresh", "mock"]));
+    expect(calls).toContainEqual(["quota", "refresh", "claude"]);
+    expect(calls.findIndex((args) => args[0] === "quota" && args[1] === "refresh")).toBeLessThan(
+      calls.findIndex((args) => args[0] === "quota" && args[1] === "--json"),
+    );
+  });
+
+  it("订阅账号卡里不再有第二个「刷新」：整页只有页头一个重读入口", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("订阅账号")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新额度" })).toBeNull();
+    // 签到是另一件事，留着。
+    expect(screen.getByRole("button", { name: "今日签到" })).toBeInTheDocument();
+  });
+
   it("重读时有一段没读到，提示条就把那一段说出来", async () => {
     installBridge({}, { "quota --json": { ok: false, stdout: "", stderr: "读额度超时\n" } });
     render(<ModelPage />);

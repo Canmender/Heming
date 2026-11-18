@@ -705,9 +705,19 @@ export function ModelPage() {
    * 页头那个按钮早先只重读「模型目录 + 来源 + 账号 + 禁用 + 可见 + 全局」，
    * 额度、走向、插件、设置都不在列表里：改完 Key 之后余额还是旧的，
    * 签到之后走向图也不动。既然有一个「刷新」，就不该只刷半页。
+   *
+   * 内核读用量有 1 分钟缓存，所以先让它现在就去问一遍厂商
+   * （`quota refresh <provider>`），否则「重读全部」拿回的可能还是刚才那份；
+   * 某个厂商问不到不影响别的，失败原因由各自的读取结果写进提示条。
    */
   const reloadAll = useCallback(async () => {
     if (!cli) return;
+    const vendors = [
+      ...new Set([...accounts.map((row) => row.agent), ...providers.map((row) => row.id)]),
+    ].filter(Boolean);
+    await Promise.all(
+      vendors.map((vendor) => cli.cli(["quota", "refresh", vendor]).catch(() => undefined)),
+    );
     await refreshCatalog().catch(() => {});
     await Promise.all([
       loadProviders(),
@@ -729,6 +739,8 @@ export function ModelPage() {
     setNotice(failed === "" ? "已重读全部：来源、账号、额度、走向与设置都按现在的样子更新了。" : `已重读，但${failed}`);
   }, [
     cli,
+    accounts,
+    providers,
     refreshCatalog,
     loadProviders,
     loadAccounts,
@@ -880,31 +892,6 @@ export function ModelPage() {
     });
     // 登录成功后账号列表会多一行（额度也要重读）：直接刷一次，不用用户再点。
     if (result.ok) await loadAccounts();
-  };
-
-  /**
-   * 「刷新额度」：内核读用量有 1 分钟缓存，只调 `accounts --json` 可能还是刚才那份。
-   * 先让内核现在就问一次厂商（`quota refresh <provider>`），再重新读账号列表；
-   * 某个厂商问不到不影响别的厂商，结论写在来源区的提示条里。
-   */
-  const refreshAccountQuota = async () => {
-    if (!cli) return;
-    setAccountBusy("refresh");
-    try {
-      // 订阅账号与 Key 的用量是两份数据，都要让内核现在去问一次厂商。
-      const targets = [
-        ...new Set([...accounts.map((row) => row.agent), ...providers.map((row) => row.id)]),
-      ].filter(Boolean);
-      await Promise.all(targets.map((target) => cli.cli(["quota", "refresh", target])));
-      // 走向图也是同一批读数：刷新完顺手把它读一遍，图上不必等下一分钟。
-      await Promise.all([loadAccounts(), loadQuotas(), loadHistory()]);
-      setNow(Date.now());
-      setNotice("已重新读取额度。");
-    } catch (err) {
-      setNotice(`刷新额度失败：${err instanceof Error ? err.message : String(err)}`, true);
-    } finally {
-      setAccountBusy(null);
-    }
   };
 
   /** 失效的账号重新登录：与登录卡片同一条命令，只是从这一行发起。 */
@@ -1347,7 +1334,7 @@ export function ModelPage() {
       await cli.cli(["quota", "refresh", item.agent]);
       await loadAccounts();
     } catch {
-      // 刷新失败不影响登录本身，下一次「刷新额度」会补上。
+      // 刷新失败不影响登录本身，下一次「重读全部」会补上。
     }
   };
 
@@ -2113,27 +2100,16 @@ export function ModelPage() {
                           (accounts.length > 1 ? "多个账号自动分担" : "每分钟自动重读")}
                     </span>
                     {accounts.length > 0 && (
-                      <>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          leadingIcon={<CheckIcon width={14} height={14} />}
-                          busy={accountBusy === "checkin"}
-                          onClick={() => void checkinNow()}
-                          title="WorkBuddy、Qoder、Trae CN、MiniMax Code 的每日免费额度要点一下才到账"
-                        >
-                          今日签到
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          leadingIcon={<RefreshIcon width={14} height={14} />}
-                          busy={accountBusy === "refresh"}
-                          onClick={() => void refreshAccountQuota()}
-                        >
-                          刷新额度
-                        </Button>
-                      </>
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        leadingIcon={<CheckIcon width={14} height={14} />}
+                        busy={accountBusy === "checkin"}
+                        onClick={() => void checkinNow()}
+                        title="WorkBuddy、Qoder、Trae CN、MiniMax Code 的每日免费额度要点一下才到账"
+                      >
+                        今日签到
+                      </Button>
                     )}
                   </div>
                 </div>
