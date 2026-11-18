@@ -346,3 +346,81 @@ describe("只读模式（--read-only，d.314）", () => {
     await expect(readFile(path.join(dir, "ro.txt"), "utf8")).rejects.toThrow();
   });
 });
+describe("续聊的上下文预算（d.317）", () => {
+  /** 一段够长的中文：1 字 ≈ 1 token，几轮就能顶出小预算。 */
+  const LONG = "这次改动要把会话过期的分支补上，并补一个回归用例，避免以后又改回去，".repeat(8);
+
+  function longHistory(turns: number) {
+    const rows: { role: "user" | "assistant"; content: string }[] = [];
+    for (let i = 1; i <= turns; i += 1) {
+      rows.push({ role: "user", content: `第 ${i} 轮：${LONG}` });
+      rows.push({ role: "assistant", content: `第 ${i} 轮做完了：${LONG}` });
+    }
+    return rows;
+  }
+
+  it("历史超预算时早期对话被折成摘要，最近一轮与本轮提问都还在", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const stats: unknown[] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "接着做完了";
+    };
+    const history = longHistory(10);
+    const outcome = await startAgentRun({
+      prompt: "继续",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      history,
+      contextBudget: 3000,
+      onContext: (value) => stats.push(value),
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    const messages = seen[0] ?? [];
+    // 早期对话被换成摘要段：这是「省 token」的可见证据。
+    // 摘要在系统提示词里——多条 system 会被编排层合并成一条，所以查「包含」而不是「开头」。
+    const systemText = messages.find((m) => m.role === "system")?.content ?? "";
+    expect(systemText).toContain("【早期对话摘要】");
+    // 最后一轮的原文仍然完整（折到它就等于把刚说的话忘了）。
+    expect(messages.some((m) => m.role === "assistant" && m.content.startsWith("第 10 轮做完了"))).toBe(true);
+    // 本轮提问永远在最后。
+    expect(messages.at(-1)?.content).toBe("继续");
+    // 上报的统计与实际一致。
+    expect(stats).toHaveLength(1);
+    const first = stats[0] as { folded: number; enabled: boolean };
+    expect(first.enabled).toBe(true);
+    expect(first.folded).toBeGreaterThan(0);
+  });
+
+  it("--no-compact 时整段历史原样发送，不出现摘要头", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "好";
+    };
+    const history = longHistory(10);
+    const outcome = await startAgentRun({
+      prompt: "继续",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      history,
+      contextBudget: 3000,
+      compact: false,
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    const messages = seen[0] ?? [];
+    expect(messages.some((m) => m.content.startsWith("【早期对话摘要】"))).toBe(false);
+    // 第一轮的痕迹还在：真的是原样发送。
+    expect(messages.some((m) => m.content.startsWith("第 1 轮："))).toBe(true);
+  });
+});

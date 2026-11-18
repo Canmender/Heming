@@ -16,6 +16,7 @@ import { startMcpServe } from "./mcpServe.js";
 import { collectCliProjectRules, describeCliProjectRules } from "./projectRules.js";
 import { outcomeExitCode, startAgentRun } from "./run.js";
 import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRules.js";
+import { describeCliContext } from "./contextBudget.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
 import {
@@ -55,6 +56,8 @@ const USAGE = `用法：
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
   --trust-hooks        允许执行 .heming/hooks.json 里的本机检查（默认只读配置、不执行）
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
+  --context-budget <n> 续聊历史的 token 预算（默认 12000），超出就把早期对话折成摘要
+  --no-compact         不折叠历史：整段发给模型（会更快烧钱，也更早撞上下文上限）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -114,6 +117,8 @@ MCP 服务（给别的编辑器用）：
   pnpm cli --trust-workspace "按仓库里的权限规则跑，别改 docs/"
   pnpm cli --trust-hooks "按仓库里的钩子检查跑，改完 generated 前会被拦住"
   pnpm cli --read-only "先只看不改：这套代码哪里会出问题"
+  pnpm cli --continue --context-budget 4000 "接着聊，历史只留最近一小段"
+  pnpm cli --continue --no-compact "把整段历史原样发给模型"
 
 工作区权限规则（.heming/permissions.json，与桌面端同一份）：
   {"deny":[{"tool":"run_command","command":"git push*"}]}   仓库里写了就一定生效
@@ -133,6 +138,13 @@ MCP 服务（给别的编辑器用）：
   被拒的调用会回一句「CLI 以只读模式运行」，模型会转而把改动写成说明交回来。
   它的作用范围比权限规则更靠前：即使仓库写了 allow、即使同时给了 --allow-danger，
   也只读。适合「先让它看看、别动手」和 CI 里的预演。
+
+续聊的上下文预算（--context-budget / --no-compact）：
+  --continue / --resume 会把上次会话的文字问答带进来，最多可有 200 轮。
+  默认按 12000 tokens 给历史留预算：放不下时把**早期**对话折成三段摘要
+  （意图 / 结论 / 待办），最近的原文照旧保留；摘要由程序生成，不额外调模型。
+  折了会打一行「上下文：折叠了 N 条早期对话」；--no-compact 则整段原样发送。
+  真的撞上供应商的上下文上限时，会自动收紧一次预算重试（最多两级）。
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -409,6 +421,16 @@ async function main(argv: string[]): Promise<number> {
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
+    ...(options.contextBudget !== undefined ? { contextBudget: options.contextBudget } : {}),
+    ...(options.compact ? {} : { compact: false }),
+    // 折叠只在真折了时说一句：没折、也没关掉的时候，用户不需要看到「历史都在预算内」。
+    onContext: (stats) => {
+      if (!stats.enabled) {
+        writeErr("[heming] 上下文：不折叠（--no-compact），历史原样发送。\n");
+        return;
+      }
+      if (stats.folded > 0) writeErr(`[heming] ${describeCliContext(stats)}\n`);
+    },
     history: toHistory(prior),
     sessionId,
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),

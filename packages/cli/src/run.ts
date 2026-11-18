@@ -38,6 +38,8 @@ import {
 } from "../../../packages/web/src/lib/agentRuntime/runtimePrompt.js";
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createCliTooling, shellDeniedText } from "./tooling.js";
+import { createCliHistoryPrep, type CliContextStats } from "./contextBudget.js";
+import { estimateTokens } from "../../../packages/web/src/lib/agentContext/tokens.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import type { CliHookVerdict } from "./toolHooks.js";
 import type { McpConnection } from "./mcpClient.js";
@@ -137,6 +139,21 @@ export interface AgentRunOptions {
    * 否则模型会一次次尝试、把轮数烧在注定失败的调用上。
    */
   readOnly?: boolean;
+  /**
+   * 续聊历史的 token 预算（`--context-budget`）。缺省 12k，超出就把早期对话折成摘要。
+   *
+   * 只在 `history` 非空时有意义：单轮运行的历史是空的，折与不折都一样。
+   */
+  contextBudget?: number;
+  /** `false` = `--no-compact`：历史原样发送，不折叠。 */
+  compact?: boolean;
+  /**
+   * 一次运行结束后回报折叠情况（`NULL`/省略 = 不回报）。
+   *
+   * 走回调而不是在这里打印：`run` 的输出渠道由入口决定（stdout 可能是流式 JSON），
+   * 这类诊断行必须落在 stderr，只有入口知道该往哪写。
+   */
+  onContext?: (stats: CliContextStats) => void;
 }
 
 export interface AgentRunOutcome {
@@ -301,6 +318,15 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     ...(options.projectRules ? { rules: options.projectRules } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
   });
+  /**
+   * 续聊历史的预算与折叠（d.317）：系统提示词在这里才算得出来，
+   * 所以预算也要在这儿造——两本账（系统 + 历史）必须共用同一个上限。
+   */
+  const historyPrep = createCliHistoryPrep({
+    ...(options.contextBudget !== undefined ? { budgetTokens: options.contextBudget } : {}),
+    ...(options.compact === false ? { enabled: false } : {}),
+    systemTokens: estimateTokens(systemPrompt),
+  });
   /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
   let modelRounds = 0;
   const chat: StreamChatFn = (profile, messages, opts) => {
@@ -331,6 +357,8 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     getPrompt: () => systemPrompt,
     // 单轮模式返回空数组；`--continue` / `--resume` 时是上一次会话的文字问答。
     fetchHistory: async (): Promise<ChatMessage[]> => options.history ?? [],
+    // 历史超出预算时折掉早期对话（d.317）；溢出重试由编排层带 `aggressive` 再调一次。
+    prepareHistory: historyPrep.prepare,
     send: () => {},
     streamChat: chat,
     onLocalDelta: (_streamId, accumulated) => stream(accumulated),
@@ -478,6 +506,8 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
       ...(error !== undefined ? { error } : {}),
       ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     };
+    // 折叠情况在运行收口时回报一次（只报事实：入口决定要不要打给用户）。
+    options.onContext?.(historyPrep.stats);
     return { json, settled, capHit };
   })();
 

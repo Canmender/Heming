@@ -12,6 +12,8 @@
  *   会让用户在 CI 里以为某个开关生效了。
  */
 
+import { parseCliContextBudget } from "./contextBudget.js";
+
 export interface PromptOptions {
   /** `run` 流式给人看；`exec` 非交互（可与 `--json` 组合给机器读）。 */
   command: "run" | "exec";
@@ -58,6 +60,13 @@ export interface PromptOptions {
    * 默认不信任——配置跟着仓库走，克隆一个陌生仓库不能在你敲命令时自动执行它的脚本。
    */
   trustHooks: boolean;
+  /**
+   * 续聊历史的 token 预算（`--context-budget`）：超出就把早期对话折成摘要。
+   * 缺省 12k；只在 `--continue` / `--resume` 这类带历史的运行里起作用。
+   */
+  contextBudget?: number;
+  /** `false` = `--no-compact`：历史原样发送，不做折叠。 */
+  compact: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -109,6 +118,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let trustWorkspace = false;
   let trustHooks = false;
   let readOnly = false;
+  let contextBudget: number | undefined;
+  let compact = true;
   let cwd: string | undefined;
   let maxRounds: number | undefined;
   let model: string | undefined;
@@ -180,6 +191,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
           readOnly = true;
           break;
         }
+        case "no-compact": {
+          if (inline !== undefined) return { ok: false, error: "--no-compact 不接受取值（直接写 --no-compact 即可）" };
+          compact = false;
+          break;
+        }
         case "mcp": {
       if (inline !== undefined) {
         return { ok: false, error: "--mcp 不接受取值（直接写 --mcp 即可）" };
@@ -219,6 +235,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         }
         case "cwd":
         case "max-rounds":
+        case "context-budget":
         case "model":
         case "base-url":
         case "api-key": {
@@ -232,7 +249,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
           else if (name === "model") model = value;
           else if (name === "base-url") baseUrl = value;
           else if (name === "api-key") apiKey = value;
-          else {
+          else if (name === "context-budget") {
+            // 预算必须是正整数，且要在能用的区间里：太小会把最后一轮也切碎，太大等于没设。
+            const budget = parseCliContextBudget(value);
+            if (!budget.ok) return { ok: false, error: budget.error };
+            contextBudget = budget.value;
+          } else {
             // 轮次上限必须是正整数：0/负数/小数都说明用户理解错了语义，当场报错比默默夹逼诚实。
             if (!/^\d+$/.test(value) || Number(value) < 1) {
               return { ok: false, error: `--max-rounds 需要正整数，收到「${value}」` };
@@ -287,6 +309,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (trustWorkspace) notForSessions.push("--trust-workspace");
     if (trustHooks) notForSessions.push("--trust-hooks");
   if (readOnly) notForSessions.push("--read-only");
+    if (contextBudget !== undefined) notForSessions.push("--context-budget");
+    if (!compact) notForSessions.push("--no-compact");
     if (mcp) notForSessions.push("--mcp");
     if (resume !== undefined) notForSessions.push("--resume");
     if (notForSessions.length > 0) {
@@ -331,6 +355,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (resume !== undefined) notForMcp.push("--resume");
     if (sessionDir !== undefined) notForMcp.push("--session-dir");
     if (mcp) notForMcp.push("--mcp");
+    if (contextBudget !== undefined) notForMcp.push("--context-budget");
+    if (!compact) notForMcp.push("--no-compact");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -371,10 +397,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       readOnly,
       trustWorkspace,
       trustHooks,
+      compact,
       mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(maxRounds !== undefined ? { maxRounds } : {}),
+      ...(contextBudget !== undefined ? { contextBudget } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(baseUrl !== undefined ? { baseUrl } : {}),
       ...(apiKey !== undefined ? { apiKey } : {}),

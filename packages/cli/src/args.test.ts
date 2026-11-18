@@ -359,3 +359,45 @@ describe("parseArgs：只读模式（d.314）", () => {
     if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
   });
 });
+describe("parseArgs：续聊的上下文预算（d.317）", () => {
+  it("默认折叠、预算交给默认值（不写字段）", () => {
+    const options = expectRun(["run", "--continue", "接着聊"]);
+    expect(options.compact).toBe(true);
+    expect(options.contextBudget).toBeUndefined();
+  });
+
+  it("--context-budget 认 4000，也认 --context-budget=4000", () => {
+    expect(expectRun(["run", "--continue", "--context-budget", "4000", "接着聊"]).contextBudget).toBe(4000);
+    expect(expectRun(["run", "--context-budget=4000", "接着聊"]).contextBudget).toBe(4000);
+  });
+
+  it("--context-budget 的非法值当场报错（不夹逼）", () => {
+    for (const value of ["0", "abc", "4000.5"]) {
+      const parsed = parseArgs(["run", "--context-budget", value, "接着聊"]);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("正整数");
+    }
+    const tooSmall = parseArgs(["run", "--context-budget", "100", "接着聊"]);
+    expect(tooSmall.ok).toBe(false);
+    if (!tooSmall.ok) expect(tooSmall.error).toContain("--no-compact");
+  });
+
+  it("--no-compact 不接受取值；sessions 与 mcp serve 都不接这两个选项", () => {
+    const inline = parseArgs(["run", "--no-compact=1", "接着聊"]);
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error).toContain("--no-compact");
+
+    expect(expectRun(["run", "--no-compact", "接着聊"]).compact).toBe(false);
+
+    for (const argv of [
+      ["sessions", "--no-compact"],
+      ["sessions", "--context-budget", "4000"],
+      ["mcp", "serve", "--no-compact"],
+      ["mcp", "serve", "--context-budget", "4000"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("不接");
+    }
+  });
+});
