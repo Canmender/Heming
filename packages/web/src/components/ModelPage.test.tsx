@@ -12,16 +12,18 @@ import { DOMESTIC_AGENTS } from "../lib/magpieDomestic.js";
  */
 
 type CliCall = string[];
+type CliReply = { ok: boolean; stdout: string; stderr: string };
 function installBridge(
   overrides: Record<string, unknown> = {},
-  replies: Record<string, { ok: boolean; stdout: string; stderr: string }> = {},
+  // 值可以是固定回复，也可以是函数：需要在同一条命令上模拟「第二次读到的和第一次不同」时用它。
+  replies: Record<string, CliReply | (() => CliReply)> = {},
 ) {
   const calls: CliCall[] = [];
   const listeners: ((event: Record<string, unknown>) => void)[] = [];
   const cli = vi.fn(async (args: string[]) => {
     calls.push(args);
     const reply = replies[args.join(" ")];
-    if (reply) return reply;
+    if (reply) return typeof reply === "function" ? reply() : reply;
     // `settings get` 打的是 JSON：没设置过的键回 `""`，别让它变成 "ok"。
     if (args[0] === "settings" && args[1] === "get") {
       return { ok: true, stdout: '""', stderr: "" };
@@ -934,6 +936,97 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     await screen.findByText("工作号");
     expect(screen.queryByLabelText("工作号 用到多少换下一个")).toBeNull();
+  });
+
+  it("同一批来源下账号刷新，不再重问一遍「用到多少换下一个」", async () => {
+    const account = (user: string, alias: string) => ({
+      agent: "claude",
+      user,
+      alias,
+      plan: "Max",
+      active: true,
+      on: true,
+      windows: [{ name: "5 hours", used: 40, remaining: 60, display: "40% used" }],
+      readAt: new Date().toISOString(),
+    });
+    let reads = 0;
+    const { calls } = installBridge({}, {
+      // 第一次读到 1 个账号，签到之后读到 2 个——来源还是同一家。
+      "accounts --json": () => {
+        reads += 1;
+        const rows = reads === 1 ? [account("work@example.com", "工作号")] : [
+          account("work@example.com", "工作号"),
+          account("backup@example.com", "备用号"),
+        ];
+        return { ok: true, stdout: JSON.stringify(rows), stderr: "" };
+      },
+      "accounts checkin --json": {
+        ok: true,
+        stdout: JSON.stringify([{ user: "work@example.com", outcome: "claimed", credit: 100 }]),
+        stderr: "",
+      },
+      "provider account-cap claude": {
+        ok: true,
+        stdout: "work@example.com · capped at 80% of each usage window",
+        stderr: "",
+      },
+    });
+    const capReads = () =>
+      calls.filter((args) => args[0] === "provider" && args[1] === "account-cap" && args.length === 3)
+        .length;
+
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("工作号");
+    await waitFor(() => expect(capReads()).toBe(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "今日签到" }));
+    // 名单确实换成了两个账号，但来源没变：档位是按来源存的，不重问。
+    expect(await screen.findByText("备用号")).toBeInTheDocument();
+    expect(capReads()).toBe(1);
+  });
+
+  it("多出一家来源的账号，档位会补问那一家", async () => {
+    const base = {
+      plan: "Max",
+      active: true,
+      on: true,
+      windows: [{ name: "5 hours", used: 40, remaining: 60, display: "40% used" }],
+      readAt: new Date().toISOString(),
+    };
+    let reads = 0;
+    const { calls } = installBridge({}, {
+      "accounts --json": () => {
+        reads += 1;
+        const rows =
+          reads === 1
+            ? [{ agent: "claude", user: "work@example.com", alias: "工作号", ...base }]
+            : [
+                { agent: "claude", user: "work@example.com", alias: "工作号", ...base },
+                { agent: "codex", user: "gpt@example.com", alias: "个人号", ...base },
+              ];
+        return { ok: true, stdout: JSON.stringify(rows), stderr: "" };
+      },
+      "accounts checkin --json": {
+        ok: true,
+        stdout: JSON.stringify([{ user: "work@example.com", outcome: "claimed", credit: 100 }]),
+        stderr: "",
+      },
+      "provider account-cap codex": {
+        ok: true,
+        stdout: "gpt@example.com · no cap: used to 100%",
+        stderr: "",
+      },
+    });
+
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("工作号");
+    fireEvent.click(screen.getByRole("button", { name: "今日签到" }));
+    await screen.findByText("个人号");
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "account-cap", "codex"]),
+    );
   });
 
   it("一家用完、同门还有余量时，卡片里问一句要不要换过去", async () => {

@@ -731,17 +731,26 @@ export function ModelPage() {
    * 每个账号「用到百分之几就换下一个」：内核按 provider 报告（带账号名与档位），
    * 所以按账号里的 agent 去重后各问一次，合并成一张表。
    */
+  const capAgents = useMemo(
+    () => [...new Set(accounts.map((row) => row.agent))].filter(Boolean).sort(),
+    [accounts],
+  );
+  // 档位是按来源存的：同一批来源下多一个账号，答案不会变，不必再问一遍。
+  // 这个键记的就是「上回问过的来源集合」，未变时 loadCaps 直接返回。
+  const capAgentsKey = capAgents.join(",");
+  const capsLoaded = useRef<string | null>(null);
   const loadCaps = useCallback(
-    () =>
-      once("caps", async () => {
+    (force = false) => {
+      if (cli && !force && capsLoaded.current === capAgentsKey) return Promise.resolve();
+      return once("caps", async () => {
         if (!cli) return;
-        const agents = [...new Set(accounts.map((row) => row.agent))].filter(Boolean);
-        if (agents.length === 0) {
+        if (capAgents.length === 0) {
+          capsLoaded.current = capAgentsKey;
           setAccountCaps(new Map());
           return;
         }
         const results = await Promise.all(
-          agents.map((agent) => cli.cli(["provider", "account-cap", agent])),
+          capAgents.map((agent) => cli.cli(["provider", "account-cap", agent])),
         );
         const merged = new Map<string, number>();
         for (const result of results) {
@@ -749,9 +758,11 @@ export function ModelPage() {
             merged.set(key, value);
           }
         }
+        capsLoaded.current = capAgentsKey;
         setAccountCaps(merged);
-      }),
-    [accounts, cli, once],
+      });
+    },
+    [capAgents, capAgentsKey, cli, once],
   );
 
   const loadGlobals = useCallback(async () => {
@@ -808,7 +819,8 @@ export function ModelPage() {
       loadQuotas(),
       loadHistory(),
       loadAutoReset(),
-      loadCaps(),
+      // 重读全部是显式动作：档位也重新问一遍，不受「来源集合没变」的跳过影响。
+      loadCaps(true),
       loadAgents(),
       loadPlugins(),
       loadSettings(),
@@ -1199,7 +1211,8 @@ export function ModelPage() {
     setAccountBusy(`${row.agent}:${row.user}`);
     try {
       const result = await cli.cli(capArgs(row.agent, row.user, cap));
-      await loadCaps();
+      // 刚写过档位，来源集合没变也得重读，否则下拉还显示旧值。
+      await loadCaps(true);
       setNotice(
         result.ok
           ? cap > 0
@@ -1580,6 +1593,7 @@ export function ModelPage() {
   }, [cli, historyDays, loadHistory]);
 
   // 账号变了（登录完、自动收取到新账号）也要重读档位：它是按账号存的。
+  // 来源集合没变时 loadCaps 自己会跳过——同一批来源多一个账号，答案是一样的。
   useEffect(() => {
     if (!cli || !sourcesWarm.current) return;
     void loadCaps();
