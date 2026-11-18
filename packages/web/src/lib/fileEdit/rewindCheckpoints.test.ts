@@ -13,15 +13,19 @@ import type { FileRoot } from "./paths.js";
 import type { ToolBridge } from "../agentStream.js";
 import {
   REWIND_CHECKPOINTS_KEY,
+  REWIND_MAX_COMMANDS,
+  REWIND_MAX_COMMAND_CHARS,
   REWIND_MAX_FILE_CHARS,
   REWIND_MAX_PROMPT_CHARS,
   REWIND_MAX_TURNS,
   beginRewindTurn,
   captureFileBefore,
   closeRewindTurn,
+  describeShellCommandsNote,
   describeTurnCheckpoints,
   dropTurnCheckpoints,
   getTurnCheckpoints,
+  noteRewindCommand,
   noteRewindFile,
   planRewind,
   recordTurnCheckpoint,
@@ -372,5 +376,74 @@ describe("withRewindCapture", () => {
     const wrapped = withRewindCapture(inner, { conversationId: () => "c1", roots: () => ROOTS });
     expect(wrapped.tools).toBe(inner.tools);
     expect(wrapped.meta?.("file_write")).toEqual({ risk: "write" });
+  });
+});
+
+describe("命令也记下来（d.335）", () => {
+  it("命令压成一行、同一条只记一次、最多记 10 条", () => {
+    expect(noteRewindCommand("c1", "  git   status \n --short ")).toBe(true);
+    expect(noteRewindCommand("c1", "git status --short")).toBe(false);
+    for (let index = 0; index < 12; index += 1) noteRewindCommand("c1", `echo ${index}`);
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed?.commands).toHaveLength(REWIND_MAX_COMMANDS);
+    expect(closed?.commands?.[0]).toBe("git status --short");
+  });
+
+  it("只跑命令、没写文件的轮次也留下检查点（这正是最该提醒「退不回去」的那种）", () => {
+    beginRewindTurn("c1", 1_000);
+    noteRewindCommand("c1", "pnpm build");
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed).not.toBeNull();
+    expect(closed?.files).toEqual([]);
+    expect(closed?.commands).toEqual(["pnpm build"]);
+    expect(getTurnCheckpoints("c1")).toHaveLength(1);
+    expect(localStorage.getItem(REWIND_CHECKPOINTS_KEY) ?? "").toContain("pnpm build");
+  });
+
+  it("命令超长会截断，不把整段脚本塞进 localStorage", () => {
+    noteRewindCommand("c1", "x".repeat(REWIND_MAX_COMMAND_CHARS + 80));
+    const closed = closeRewindTurn("c1", 2_000);
+    expect(closed?.commands?.[0]).toHaveLength(REWIND_MAX_COMMAND_CHARS + 1);
+  });
+
+  it("planRewind 汇总窗口里的命令：去重、按时间先后", () => {
+    recordTurnCheckpoint("c1", { ...turn(1_000, [{ path: "D:/评测区/a.ts", before: "第零版" }]), commands: ["pnpm test"] });
+    recordTurnCheckpoint("c1", {
+      ...turn(2_000, [{ path: "D:/评测区/b.ts", before: "第零版" }]),
+      commands: ["pnpm test", "pnpm build"],
+    });
+    const plan = planRewind("c1", 2);
+    expect(plan?.commands).toEqual(["pnpm test", "pnpm build"]);
+    expect(planRewind("c1", 1)?.commands).toEqual(["pnpm test", "pnpm build"]);
+  });
+
+  it("describeTurnCheckpoints 点名「跑过几条命令」", () => {
+    recordTurnCheckpoint("c1", {
+      ...turn(1_000, [{ path: "D:/评测区/a.ts", before: "旧" }]),
+      commands: ["pnpm test", "pnpm build"],
+    });
+    const text = describeTurnCheckpoints("c1", 2_000);
+    expect(text).toContain("跑过 2 条命令（改的东西退不回去）");
+  });
+
+  it("describeShellCommandsNote：没有命令就什么都不说，多了就说「等 N 条」", () => {
+    expect(describeShellCommandsNote([])).toBe("");
+    expect(describeShellCommandsNote(["pnpm test"])).toContain("`pnpm test`");
+    const many = describeShellCommandsNote(["a", "b", "c", "d"]);
+    expect(many).toContain("跑过 4 条命令");
+    expect(many).toContain("等 4 条");
+    expect(many).not.toContain("`d`");
+  });
+
+  it("withRewindCapture 把 run_command 记进这一轮（不读文件、不影响执行）", async () => {
+    const inner: ToolBridge = {
+      tools: [],
+      execute: vi.fn(async () => ({ text: "跑完了", ok: true })),
+    };
+    const wrapped = withRewindCapture(inner, { conversationId: () => "c1", roots: () => ROOTS, now: () => 1_000 });
+    await expect(
+      wrapped.execute({ name: "run_command", arguments: JSON.stringify({ command: "pnpm test" }) }),
+    ).resolves.toEqual({ text: "跑完了", ok: true });
+    expect(closeRewindTurn("c1", 2_000)?.commands).toEqual(["pnpm test"]);
   });
 });

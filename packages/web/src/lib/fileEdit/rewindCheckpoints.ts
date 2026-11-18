@@ -12,9 +12,12 @@
  * d.292 起每轮还记一个「对话边界」（`afterMessageId`）：回退时把那之后的消息删掉，
  * 对话和文件一起退（只留你发的那句）。老数据没有边界信息，那就只退文件。
  *
+ * d.335 起每轮还记下「跑过哪些命令」（`commands`）：`run_command` 改了什么文件抓不到原文，
+ * 但至少要让人知道这一轮跑过命令——否则 `/rewind` 说「都退回去了」会让人误以为命令的破坏也退了。
+ *
  * 已知边界（写进用户可见的文案，不藏）：
  * - 只覆盖和鸣自己的写工具（`file_write` / `file_edit` / `file_patch`）；
- *   `run_command` 之类绕过工具桥的改动抓不到。
+ *   `run_command` 之类绕过工具桥的改动抓不到，只能把命令本身列出来让人自己核对。
  * - 单个文件超过 200k 字符、或读出来是二进制 / GBK（写回会改编码）时不硬还原，记成 skipped。
  * - 对话只退「这一轮之后的消息」：别的窗口在这期间新发的消息也会一起消失（本地窗口优先）。
  * - localStorage 不可用或配额满时静默降级——宁可不记，也不能打断正在跑的一轮。
@@ -24,6 +27,7 @@ import type { ToolBridge } from "../agentStream.js";
 import { getFileBridge } from "./bridge.js";
 import type { FileRoot } from "./paths.js";
 import { FILE_EDIT_TOOL, FILE_PATCH_TOOL, FILE_WRITE_TOOL, targetsOfCall } from "./ruleTargets.js";
+import { SHELL_TOOL } from "../shell/tool.js";
 
 export const REWIND_CHECKPOINTS_KEY = "heming.rewindCheckpoints.v1";
 
@@ -41,6 +45,12 @@ export const REWIND_MAX_TURN_CHARS = 1_000_000;
 
 /** 每一轮顺手记下的那句提问最多留多少字（回退后放回输入框用）。 */
 export const REWIND_MAX_PROMPT_CHARS = 2000;
+
+/** 每轮最多记几条命令（`run_command` 的改动抓不到原文，至少要记下跑过什么）。 */
+export const REWIND_MAX_COMMANDS = 10;
+
+/** 单条命令描述最多留多少字（多行命令压成一行）。 */
+export const REWIND_MAX_COMMAND_CHARS = 200;
 
 /** 抓不到 / 不能安全还原的原因。 */
 export type RewindSkipReason = "too-large" | "binary" | "encoding" | "unreadable";
@@ -74,6 +84,13 @@ export interface TurnCheckpoint {
    * 它的消息跟着对话一起退掉了，不还回去就等于让你重打一遍。
    */
   prompt?: string;
+  /**
+   * 这一轮在本机跑过的命令（最多 `REWIND_MAX_COMMANDS` 条，每条一句话）。
+   *
+   * 命令改了哪些文件、改之前是什么样，这里**都不知道**——记下来是为了回退时如实说清
+   * 「这几条命令带来的改动没有原文可还原」，而不是让人以为整轮都退干净了。
+   */
+  commands?: string[];
   files: CheckpointFile[];
 }
 
@@ -91,6 +108,8 @@ export interface RewindPlan {
   afterMessageId?: string | null;
   /** 这一轮你发的那句（窗口里最早那条有记录的），回退后放回输入框。 */
   prompt?: string;
+  /** 窗口里跑过的命令（去重、按时间先后，最多 10 条）：它们改的东西退不回去。 */
+  commands: string[];
 }
 
 type Store = Record<string, TurnCheckpoint[]>;
@@ -106,6 +125,8 @@ interface TurnBuffer {
   messageId?: string;
   afterMessageId?: string | null;
   prompt?: string;
+  /** 这一轮跑过的命令（见 `TurnCheckpoint.commands`）。 */
+  commands: string[];
   /** 按路径去重、保留最早那份 `before`（这一轮第一次动它之前的样子才是要回到的样子）。 */
   files: Map<string, CheckpointFile>;
   chars: number;
@@ -138,8 +159,30 @@ function isTurnCheckpoint(value: unknown): value is TurnCheckpoint {
     item.files.every(isCheckpointFile) &&
     (item.messageId === undefined || typeof item.messageId === "string") &&
     (item.afterMessageId === undefined || item.afterMessageId === null || typeof item.afterMessageId === "string") &&
-    (item.prompt === undefined || typeof item.prompt === "string")
+    (item.prompt === undefined || typeof item.prompt === "string") &&
+    (item.commands === undefined ||
+      (Array.isArray(item.commands) && item.commands.every((command) => typeof command === "string")))
   );
+}
+
+/** 命令压成一行并截断：检查点里存的是一句人话，不是完整脚本。 */
+function normalizeCommandText(raw: string): string {
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "";
+  return oneLine.length > REWIND_MAX_COMMAND_CHARS ? `${oneLine.slice(0, REWIND_MAX_COMMAND_CHARS)}…` : oneLine;
+}
+
+/** 去重、保序、限量：同一轮跑两次同样的命令只记一条。 */
+function normalizeCommands(value: readonly string[] | undefined): string[] {
+  if (!value || value.length === 0) return [];
+  const out: string[] = [];
+  for (const raw of value) {
+    const text = normalizeCommandText(raw);
+    if (!text || out.includes(text)) continue;
+    out.push(text);
+    if (out.length >= REWIND_MAX_COMMANDS) break;
+  }
+  return out;
 }
 
 function readStorage(): Store {
@@ -161,6 +204,7 @@ function readStorage(): Store {
         ...(item.messageId ? { messageId: item.messageId } : {}),
         ...(item.afterMessageId !== undefined ? { afterMessageId: item.afterMessageId } : {}),
         ...(item.prompt ? { prompt: item.prompt } : {}),
+        ...(item.commands && item.commands.length > 0 ? { commands: item.commands } : {}),
       }));
       if (checkpoints.length > 0) out[conversationId] = checkpoints;
     }
@@ -229,7 +273,9 @@ export function recordTurnCheckpoint(
 ): number {
   ensureLoaded();
   const files = checkpoint.files.filter(isCheckpointFile);
-  if (!conversationId || files.length === 0) return store[conversationId]?.length ?? 0;
+  const commands = normalizeCommands(checkpoint.commands);
+  // 只跑了命令、没走写工具的轮次也要留：不然回退时连「这轮跑过命令」都不会被提起。
+  if (!conversationId || (files.length === 0 && commands.length === 0)) return store[conversationId]?.length ?? 0;
   const at = Number.isFinite(checkpoint.at) ? checkpoint.at : now;
   const id = checkpoint.id && checkpoint.id.length > 0 ? checkpoint.id : `turn-${at}-${(sequence += 1)}`;
   const entry: TurnCheckpoint = {
@@ -242,6 +288,8 @@ export function recordTurnCheckpoint(
     // d.292：边界与提问必须跟着落盘，否则「退文件也退对话」只在内存里成立
     ...(checkpoint.afterMessageId !== undefined ? { afterMessageId: checkpoint.afterMessageId } : {}),
     ...(checkpoint.prompt ? { prompt: checkpoint.prompt } : {}),
+    // d.335：命令本身要留下来，回退时才能说清「哪些改动抓不到原文」
+    ...(commands.length > 0 ? { commands } : {}),
   };
   const current = store[conversationId] ?? [];
   // 同一轮重复落（收口可能被调两次）就替换，不叠加。
@@ -303,13 +351,18 @@ export function planRewind(conversationId: string, turns: number): RewindPlan | 
   if (newest.length === 0 || total > newest.length) return null;
   const window = newest.slice(0, total).sort((a, b) => a.at - b.at);
   const seen = new Set<string>();
-  const plan: RewindPlan = { turns: total, restore: [], remove: [], skipped: [] };
+  const plan: RewindPlan = { turns: total, restore: [], remove: [], skipped: [], commands: [] };
   for (const checkpoint of window) {
     // 对话边界取窗口里最早那条有记录的：退到那一轮开始之前，才是这一整个窗口之前
     if (plan.afterMessageId === undefined && checkpoint.afterMessageId !== undefined) {
       plan.afterMessageId = checkpoint.afterMessageId;
     }
     if (plan.prompt === undefined && checkpoint.prompt) plan.prompt = checkpoint.prompt;
+    // 命令按时间先后拼起来（去重、限量）：它们改的东西一律退不回去，必须让人看见。
+    for (const command of checkpoint.commands ?? []) {
+      if (plan.commands.includes(command) || plan.commands.length >= REWIND_MAX_COMMANDS) continue;
+      plan.commands.push(command);
+    }
     for (const file of checkpoint.files) {
       if (seen.has(file.path)) continue;
       seen.add(file.path);
@@ -346,7 +399,9 @@ export function describeTurnCheckpoints(conversationId: string, now = Date.now()
     const more = checkpoint.files.length > names.length ? ` 等 ${checkpoint.files.length} 个` : "";
     const skipped = checkpoint.files.filter((file) => file.skipped).length;
     const skippedText = skipped > 0 ? `，其中 ${skipped} 个抓不到原文（会跳过）` : "";
-    return `${index + 1}. ${describeAgo(checkpoint.at, now)} · ${checkpoint.files.length} 个文件（${names.join("、")}${more}）${skippedText}`;
+    const commandCount = checkpoint.commands?.length ?? 0;
+    const commandText = commandCount > 0 ? `，跑过 ${commandCount} 条命令（改的东西退不回去）` : "";
+    return `${index + 1}. ${describeAgo(checkpoint.at, now)} · ${checkpoint.files.length} 个文件（${names.join("、")}${more}）${skippedText}${commandText}`;
   });
   return [
     `可回滚的检查点（共 ${list.length} 轮）：`,
@@ -388,7 +443,7 @@ export async function captureFileBefore(
 function openBuffer(conversationId: string, now: number): TurnBuffer {
   const existing = buffers.get(conversationId);
   if (existing) return existing;
-  const created: TurnBuffer = { at: now, files: new Map(), chars: 0 };
+  const created: TurnBuffer = { at: now, files: new Map(), chars: 0, commands: [] };
   buffers.set(conversationId, created);
   return created;
 }
@@ -424,11 +479,23 @@ export function noteRewindFile(conversationId: string, file: CheckpointFile, now
   return true;
 }
 
+/** 记一条这一轮跑过的命令（同一条只记一次；超过上限就丢，返回是否记下）。 */
+export function noteRewindCommand(conversationId: string, command: string, now = Date.now()): boolean {
+  if (!conversationId) return false;
+  const text = normalizeCommandText(command);
+  if (!text) return false;
+  const buffer = openBuffer(conversationId, now);
+  if (buffer.commands.includes(text) || buffer.commands.length >= REWIND_MAX_COMMANDS) return false;
+  buffer.commands.push(text);
+  return true;
+}
+
 /** 收口：把这一轮抓到的落成检查点并清空缓冲。没抓到东西就返回 null（不留空轮）。 */
 export function closeRewindTurn(conversationId: string, now = Date.now()): TurnCheckpoint | null {
   const buffer = buffers.get(conversationId);
   buffers.delete(conversationId);
-  if (!buffer || buffer.files.size === 0) return null;
+  // 只跑了命令、一个文件也没写工具的轮次也要留：它恰恰是最需要提醒「退不回去」的那种。
+  if (!buffer || (buffer.files.size === 0 && buffer.commands.length === 0)) return null;
   const files = [...buffer.files.values()].sort((a, b) => a.path.localeCompare(b.path));
   const entry: TurnCheckpoint = {
     id: `turn-${buffer.at}-${(sequence += 1)}`,
@@ -437,6 +504,7 @@ export function closeRewindTurn(conversationId: string, now = Date.now()): TurnC
     ...(buffer.messageId ? { messageId: buffer.messageId } : {}),
     ...(buffer.afterMessageId !== undefined ? { afterMessageId: buffer.afterMessageId } : {}),
     ...(buffer.prompt ? { prompt: buffer.prompt } : {}),
+    ...(buffer.commands.length > 0 ? { commands: [...buffer.commands] } : {}),
   };
   const count = recordTurnCheckpoint(conversationId, entry, now);
   return count > 0 ? entry : null;
@@ -467,11 +535,43 @@ export function withRewindCapture(
 
 const CAPTURED_TOOLS: readonly string[] = [FILE_WRITE_TOOL, FILE_EDIT_TOOL, FILE_PATCH_TOOL];
 
+/** 从 `run_command` 的参数里取出那句命令（拿不到就退回整段参数，至少让人看出跑过什么）。 */
+function commandOfCall(argsJson: string): string {
+  try {
+    const parsed: unknown = JSON.parse(argsJson);
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const key of ["command", "cmd", "script"]) {
+        const value = record[key];
+        if (typeof value === "string" && value.trim()) return value;
+      }
+    }
+  } catch {
+    // 参数不是 JSON：照原样记下来
+  }
+  return argsJson;
+}
+
+/** 回退时补一句：这一轮回退覆盖不到命令造成的改动。没有命令返回空串。 */
+export function describeShellCommandsNote(commands: readonly string[]): string {
+  if (commands.length === 0) return "";
+  const shown = commands.slice(0, 3).map((command) => `\`${command}\``);
+  const more = commands.length > shown.length ? ` 等 ${commands.length} 条` : "";
+  return `另外这一轮跑过 ${commands.length} 条命令（${shown.join("、")}${more}）：命令改了哪些文件这里看不到，也没有原文，退不回去——需要的话用 git 或自己的备份核对。`;
+}
+
 async function captureForCall(
   call: { name: string; arguments: string },
   options: { conversationId: () => string; roots: () => FileRoot[] },
   now: number,
 ): Promise<void> {
+  // 命令不抓原文（抓不到），但要把命令本身记下来：回退时才能如实说「这部分退不回去」。
+  if (call.name === SHELL_TOOL) {
+    const conversationId = options.conversationId();
+    if (!conversationId) return;
+    noteRewindCommand(conversationId, commandOfCall(call.arguments), now);
+    return;
+  }
   if (!CAPTURED_TOOLS.includes(call.name)) return;
   const conversationId = options.conversationId();
   if (!conversationId) return;

@@ -154,6 +154,7 @@ import {
 import {
   beginRewindTurn,
   closeRewindTurn,
+  describeShellCommandsNote,
   describeTurnCheckpoints,
   dropTurnCheckpoints,
   planRewind,
@@ -4621,9 +4622,11 @@ export function ChatPage({
       // 记账要在退对话之前：对话退失败也不该让这几轮一直显示成「还能退」
       dropTurnCheckpoints(convId, rewindPlan.turns);
       const dialogueNote = await rewindDialogue();
+      // d.335：命令造成的改动没有原文可还原，必须明说，别让人以为整轮都退干净了
+      const commandNote = describeShellCommandsNote(rewindPlan.commands);
       return {
         ok: true,
-        notice: `已退回 ${rewindPlan.turns} 轮：${fileNote}；${dialogueNote}`,
+        notice: `已退回 ${rewindPlan.turns} 轮：${fileNote}；${dialogueNote}${commandNote ? `\n${commandNote}` : ""}`,
         ...(restoreDraft ? { restoreDraft } : {}),
       };
     }

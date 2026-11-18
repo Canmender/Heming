@@ -6308,6 +6308,44 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   }, 30_000);
 
   /**
+   * d.335：命令造成的改动没有原文，`/rewind` 必须把它说出来。
+   *
+   * 只跑命令、没走写工具的那一轮以前连检查点都不留，于是 `/rewind` 会说「都退回去了」——
+   * 用户以为脚本生成/删除的东西也回来了。这一例锁两件事：命令进检查点、回执里点名。
+   */
+  it("I3-rewind `/rewind 1` 会讲清命令改的东西退不回去（d.335）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    resetRewindCheckpoints();
+    localStorage.setItem(
+      "heming.fileEdit.roots.v1",
+      JSON.stringify({ roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" }),
+    );
+    // 只跑了命令、一个文件也没写工具改过——正是最容易被误以为「退干净了」的那一轮
+    recordTurnCheckpoint("c1", { at: Date.now() - 60_000, files: [], commands: ["pnpm build", "rm -rf dist"] });
+    // 有桥才走得到回退流程（这一轮没有文件要写，write 不该被调用）
+    const write = vi.fn(async () => ({ ok: true as const, results: [], written: 0, deleted: 0 }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: async () => ({ ok: false as const, code: "not-found" as const, error: "没有这个文件" }),
+      write,
+      pickRoot: async () => null,
+    };
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/跑过 2 条命令/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText(/命令改了哪些文件这里看不到，也没有原文，退不回去/)).toBeInTheDocument();
+    expect(screen.getByText(/`pnpm build`、`rm -rf dist`/)).toBeInTheDocument();
+    expect(streamChat).not.toHaveBeenCalled();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+    resetRewindCheckpoints();
+  }, 30_000);
+
+  /**
    * d.292：`/rewind 1` 连对话一起退。
    *
    * 只退文件是半个回滚——用户得自己翻上去删掉那几轮、再把说过的话重新打一遍。
