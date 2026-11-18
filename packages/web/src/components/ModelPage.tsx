@@ -29,6 +29,8 @@ import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
 import { QuotaCards } from "./model/QuotaCards.js";
+import { QuotaTrend } from "./model/QuotaTrend.js";
+import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
 import { nonSubscriptionCards, parseQuotaCards, type QuotaCard } from "../lib/magpieQuotaCards.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
@@ -269,6 +271,8 @@ export function ModelPage() {
    * 原先页面上完全看不到，只能开终端敲命令。
    */
   const [quotaCards, setQuotaCards] = useState<QuotaCard[]>([]);
+  /** 额度走向：内核记下的历史读数（只在真有两条以上读数的窗口上画）。 */
+  const [history, setHistory] = useState<QuotaHistoryRow[]>([]);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   /**
@@ -498,6 +502,22 @@ export function ModelPage() {
         if (!cli) return;
         const result = await cli.cli(["quota", "--json"]);
         setQuotaCards(parseQuotaCards(result.stdout || ""));
+      }),
+    [cli, once],
+  );
+
+  /**
+   * 额度走向：内核记下的历史读数（`quota history --json`，最近 7 天）。
+   *
+   * 与 `quota --json` 分开取：历史读的是本地记录，不必等厂商；
+   * 它又只在真有历史时才画，所以放第二波、失败也不吵。
+   */
+  const loadHistory = useCallback(
+    () =>
+      once("history", async () => {
+        if (!cli) return;
+        const result = await cli.cli(["quota", "history", "--days", "7", "--json"]);
+        setHistory(drawableRows(parseQuotaHistory(result.stdout || "")));
       }),
     [cli, once],
   );
@@ -936,6 +956,7 @@ export function ModelPage() {
       await Promise.all([
         loadAccounts(),
         loadQuotas(),
+        loadHistory(),
         loadGlobals(),
         loadDrawers(),
         loadPlugins(),
@@ -956,6 +977,7 @@ export function ModelPage() {
     loadPlugins,
     loadSettings,
     loadQuotas,
+    loadHistory,
     loadDrawers,
   ]);
 
@@ -1780,6 +1802,18 @@ export function ModelPage() {
                     <span className="ui-caption">按量付费的 Key、套餐与钱包余额</span>
                   </div>
                   <QuotaCards cards={keyQuotas} now={now} />
+                </div>
+              )}
+
+              {history.length > 0 && (
+                <div className="ui-card p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="ui-section-title">额度走向</h2>
+                    <span className="ui-caption">
+                      最近 7 天的读数 · 照这个速度会不会用完
+                    </span>
+                  </div>
+                  <QuotaTrend rows={history} now={now} />
                 </div>
               )}
 

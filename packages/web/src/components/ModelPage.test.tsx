@@ -609,8 +609,7 @@ describe("ModelPage · 账号与更多", () => {
     expect(calls.some((call) => call[0] === "accounts")).toBe(true);
   });
 
-  it("来源页把 Key 与套餐的余额也列出来：订阅之外的额度不再只有终端里看得到", async () => {
-    installBridge({}, {
+  it("来源页把 Key 与套餐的余额也列出来：订阅之外的额度不再只有终端里看得到", async () => {    installBridge({}, {
       "quota --json": {
         ok: true,
         stdout: JSON.stringify([
@@ -635,6 +634,53 @@ describe("ModelPage · 账号与更多", () => {
     const list = screen.getByLabelText("其余来源的额度");
     expect(within(list).queryByText("Claude")).not.toBeInTheDocument();
     expect(within(list).getByText("DeepSeek")).toBeInTheDocument();
+  });
+
+  it("来源页按历史读数画出额度走向，并说清照这个速度会不会用完", async () => {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const at = (hoursAgo: number): string => new Date(now - hoursAgo * hour).toISOString();
+    installBridge({}, {
+      "quota history --days 7 --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            provider: "claude",
+            user: "work@example.com",
+            lines: [
+              {
+                name: "5 hours",
+                points: [
+                  { at: at(4), left: 96 },
+                  { at: at(3), left: 80 },
+                  { at: at(2), left: 64 },
+                  { at: at(1), left: 46 },
+                  { at: at(0), left: 30 },
+                ],
+              },
+            ],
+          },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("额度走向")).toBeInTheDocument();
+    const trend = screen.getByLabelText("额度走向");
+    expect(await within(trend).findByText("5 小时")).toBeInTheDocument();
+    expect(within(trend).getByText("剩 30%")).toBeInTheDocument();
+    expect(within(trend).getByText(/^5 小时：照这个速度，/)).toBeInTheDocument();
+  });
+
+  it("没有历史读数时整张「额度走向」卡都不出现", async () => {
+    installBridge({}, {
+      "quota history --days 7 --json": { ok: true, stdout: "[]", stderr: "" },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("订阅账号")).toBeInTheDocument();
+    expect(screen.queryByText("额度走向")).not.toBeInTheDocument();
   });
 
   it("国内端的登录失效时，卡片直接说「重新登录」，不装作还有额度", async () => {    installBridge({}, {
