@@ -671,6 +671,29 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
   });
 
+  it("余额提醒也走同一个设置：选一个数额就写 balanceAlert，并说清按各自币种算", async () => {
+    const { calls } = installBridge({}, {
+      "settings list --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { key: "usageAlert", value: 0 },
+          { key: "resetReminder", value: 0 },
+          { key: "balanceAlert", value: 0 },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    const select = (await screen.findByLabelText("余额快用完时提醒")) as HTMLSelectElement;
+    expect(select.value).toBe("0");
+
+    fireEvent.change(select, { target: { value: "5" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "balanceAlert", "5"]));
+    expect(await screen.findByText(/已记下：余额低到 5 或更少时提醒一次/)).toBeInTheDocument();
+  });
+
   it("额度窗口预热：切一档就写内核设置，关掉时用重置（空串内核不收）", async () => {
     const { calls } = installBridge({}, {
       "settings list --json": {

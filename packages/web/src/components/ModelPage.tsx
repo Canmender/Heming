@@ -79,7 +79,12 @@ import { agentName, formatResetIn, latestReadAt } from "../lib/magpieQuota.js";
 import { agentQuotaMap, type AgentQuota } from "../lib/agentQuota.js";
 import { mergeAccounts } from "../lib/mergedQuota.js";
 import { MergedQuotaStrip } from "./model/MergedQuotaStrip.js";
-import { reminderArgs, resetReminderText, usageAlertText } from "../lib/magpieReminder.js";
+import {
+  balanceAlertText,
+  reminderArgs,
+  resetReminderText,
+  usageAlertText,
+} from "../lib/magpieReminder.js";
 import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import {
   CHECKIN_SWITCHES,
@@ -1006,7 +1011,10 @@ export function ModelPage() {
    * 额度提醒（d.283）：写的是内核 settings 的 `usageAlert` / `resetReminder`，
    * 值就是数字本身；成功后重读一次设置，失败把内核原话放进提示条。
    */
-  const setReminder = async (key: "usageAlert" | "resetReminder", value: number) => {    if (!cli) return;
+  const setReminder = async (
+    key: "usageAlert" | "resetReminder" | "balanceAlert",
+    value: number,
+  ) => {    if (!cli) return;
     setAccountBusy(`reminder:${key}`);
     try {
       const result = await cli.cli(reminderArgs(key, value));
@@ -1021,9 +1029,9 @@ export function ModelPage() {
         return;
       }
       setNotice(
-        key === "usageAlert"
-          ? `已记下：额度${usageAlertText(value)}。`
-          : `已记下：额度${resetReminderText(value)}。`,
+        key === "balanceAlert"
+          ? `已记下：${balanceAlertText(value)}。`
+          : `已记下：额度${key === "usageAlert" ? usageAlertText(value) : resetReminderText(value)}。`,
       );
     } catch (err) {
       setNotice(`没能改提醒：${err instanceof Error ? err.message : String(err)}`, true);
