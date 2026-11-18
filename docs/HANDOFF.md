@@ -1,4 +1,4 @@
-- 当前版本：`d.277.4.120.12`（semver `277.4.120` / Windows `277.4.120.12`；工作树未提交 / 未打包 / 未部署；d.203.4.107.12 起的八十四版都未发布；线上仍是 **d.203.4.106.12**（安装包 r110））
+- 当前版本：`d.277.4.120.12`（semver `277.4.120` / Windows `277.4.120.12`；**已发布 r111**（2026-11-18 08:09）：云端已部署、更新源已发布、公网五项核验通过；工作树只剩这条发版记录待提交）
 - 本轮标签：服务端测试门禁不再靠运气：逐文件进程 + 只对 worker 原生崩溃重试（分支 `main`，版本 d.277.4.118.12 → d.277.4.120.12）——服务端全量测试会在随机文件上崩 worker（Windows 0xC0000409），只能人工单跑重试。试遍 fork/threads/isolate/stack-size 都偶发；改为 `scripts/test-each.mjs` 逐文件独立进程、只对原生崩溃做有界重试并打印重试次数，连跑两次 exit 0。
 - 上一轮标签：人走了，活要归位：解绑早就有，缺的是「为什么」（分支 `main`，版本 d.277.4.117.12 → d.277.4.118.12）——移除成员/自己退出时 `store` 本会把名下任务解绑成待认领，但动态只有「谁走了」，单件历史里这件活变成待认领没有任何解释。本轮补 `pushUnassignedTaskEvents`（只记没做完的、逐件最多 10 条再汇总、事件带 taskId），并把这条契约写进 storeContract 回归网。
 - 上上轮标签：今天谁该交什么：按截止日把没做完的活摊开（分支 `main`，版本 d.276.4.117.12 → d.277.4.117.12）——任务板按状态/负责人分，回答「谁在做什么」；组长每天要问的是「今天谁该交、哪件已经拖」。新增 `schedule.ts` 六档分组 + 「近期要交的活」面板（默认收起、只读），已完成不占位置，按日历日而非小时算。
@@ -2212,7 +2212,7 @@ MCP 工具出现在工具清单里，不等于那台服务此刻连得上。服�
 | `packages/web/src/lib/mcp/summary.ts`（新） | `summarizeMcpStatus(servers, statusOf, enabledTools)` 纯函数 → `{ total; enabled; connected; failed[{name,state,error}]; pending; tools }`；只统计已启用服务、无记录算 pending、失败原因原样带出、工具数非法归零 |
 | `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeMcpLine(mcp)` 与 `StatusInput.mcp`：零配置 / 全停用 / 全连上（给工具数）/ 有问题点名 + 原因 + 指路「能力 → MCP」；行插在「本轮工具」之后 |
 | `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 读 `mcpRegistry.servers()`、`status(id)`、`enabledTools().length` 组快照——只读，不发请求、不触发重连 |
-| 测试 | 桌面 pnpm test 56 组 / 1010 例（1009 passed / 1 skip）+ 真机冒烟 56/56；web 424 files / 6089 passed；server 18 files / 435 例（scripts/test-each.mjs 逐文件独立进程，连跑两次 exit 0；偶发 worker 原生崩溃会重跑并打印）；deterministic eval 40/40 |
+| 测试 | 桌面 pnpm test 56 组 / 1010 例（1009 passed / 1 skip）+ 真机冒烟 56/56；web 424 files / 6089 passed；server 18 files / 435 例（逐文件 runner，原生崩溃有界重试）；deterministic eval 40/40 |
 
 ### 0.3 验证
 
@@ -5820,10 +5820,23 @@ server 15 files / 271 tests；shared 8 files / 119 tests；`pnpm build` 全包�
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-18 04:0x） | d.277.4.120.12（工作树未提交 / 未打包 / 未部署；d.203.4.107.12 起的八十四版都未发布） |
+| 当前版本（2026-11-18 08:1x） | d.277.4.120.12（**已发布 r111**：安装包 370,674,041 字节、云端已部署、更新源已发布、公网五项核验通过；工作树只剩发版记录） |
 | 版本 | 当前 d.277.4.120.12（semver 277.4.120）· 最近一条 CHANGELOG 为「服务端测试门禁不再靠运气」 |
 | 测试 | 桌面 pnpm test 56 组 / 1010 例（1009 passed / 1 skip）+ 真机冒烟 56/56；web 423 files / 6073 passed；server 18 files / 426 passed；deterministic eval 40/40 |
-| 线上 | d.240.4.116.12（r110）已发布；d.241.4.116.12–d.277.4.120.12 均未打包、未部署 |
+| 线上 | **d.277.4.120.12（r111）已发布并部署**（2026-11-18 08:09）：health `{"ok":true}`、主 bundle 与本地同名同 md5、latest.yml 与安装包 sha512 一致（370,674,041 字节）、更新源 `application/octet-stream` + Range 206、远端目录三文件校验通过 |
+
+## 2.1 发版记录（最近一条）
+
+| 项 | 值 |
+|---|---|
+| 版本 | d.277.4.120.12 |
+| 时间 | 2026-11-18 08:09 |
+| 分支/提交 | main @ e34fc2b3 |
+| 门禁 | build 通过；逐包测试 6/6；版本无 bump（沿用 d.277.4.120.12） |
+| 安装包 sha512 | cBr8l5IoXfRaqbRkSLHTvQF5b40kXw9ZrcLEVXN+eO4UUCRwVmlDAKoeUx9JLKJi58hoQZFqVzd2Xiu3x7zklQ== |
+| 部署包 sha256 | a95d710ef30a2a4ab30e4e2f5bbb4358d8057687cf997244ee2cbe3bf9132943 |
+| 产物目录 | D:\Heming\packages\desktop\release\r111 |
+| 公网核验 | health ok；bundle 同名同 md5；latest.yml sha512=安装包；Content-Type octet-stream；Range 206 |
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。
