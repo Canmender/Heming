@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.344.4.128.12",
+    "date": "2026-11-18",
+    "title": "按下去什么都不会变的按钮，就别亮了",
+    "bullets": [
+      "`packages/web/src/components/ModelPage.test.tsx` 新增一例：默认夹具里 Claude Code 是 `—`（没配过）→ 它的「恢复默认」灰着且 `title` 是那句话；Codex 已经在用 `space-bunny` → 仍然可点。",
+      "全量 453 个测试文件 / 6498 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。",
+      "只判「现在有没有模型」，不判那个模型是谁写的：`magpie ls` 只报当前值，分不出是模型服务写的还是这个工具自己配的；宁可让它可点，也不要把真能恢复的按钮灰掉。",
+      "「应用」的判据没动：它仍然要求选了模型、且和当前不同。",
+      "只读展示的工具（没有 id）本来就没有这两个按钮。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「智能体」分区每行都有「恢复默认」。它做的是**撤掉模型服务写进那个工具配置里的模型**。可有些工具本来就没被写过（`magpie ls` 那栏报的就是 `—`），按下去是一次空操作：还会弹一次二次确认，等于让人认真确认一件不会发生的事。一行里最显眼的两个按钮，其中一个常年无效，读起来就像页面坏了。",
+      "做了什么",
+      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/ModelPage.tsx` 新增 `agentIsDefault(agent)` | 没有判断 | `magpie ls` 报的当前模型是空或 `—` 时算「没被写过」 || 同一文件的「恢复默认」按钮 | 只要命令行可用就能点 | 没被写过的工具上灰着，悬停说明「它现在没有用模型服务写入的模型，不用恢复」；真正被写过的工具照旧可点、照旧二次确认 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.344.4.127.12",
     "date": "2026-11-18",
     "title": "「智能体」顶上先说清还有几件没做完的事",

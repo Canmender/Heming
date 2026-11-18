@@ -1792,6 +1792,16 @@ export function ModelPage() {
     return pending !== agent.model.trim();
   };
   /**
+   * 它现在是不是「没被模型服务写过」（d.345）。
+   *
+   * `magpie ls` 对没配过模型的工具报 `—`，空的也算。这种情况下「恢复默认」什么都不会改变，
+   * 按下去只是把「本来就没有」再确认一遍，所以按钮该灰着。
+   */
+  const agentIsDefault = (agent: LocalAgent) => {
+    const current = agent.model.trim();
+    return !current || current === "—";
+  };
+  /**
    * 下拉里显示什么：挑过就用挑的，没挑过就显示它现在用的那个模型（d.339）。
    *
    * 以前没挑过一律显示「选择模型…」，看上去像这个工具还没配模型；
@@ -2177,7 +2187,8 @@ export function ModelPage() {
                           <Button
                             type="button"
                             size="sm" variant="ghost"
-                            disabled={!cli}
+                            disabled={!cli || agentIsDefault(agent)}
+                            title={agentIsDefault(agent) ? "它现在没有用模型服务写入的模型，不用恢复" : "撤掉模型服务写进它配置里的模型，回到它自己的默认"}
                             onClick={() => {
                               if (!agent.id) return;
                               setAgentConfirm({ id: agent.id, name: agent.name, model: "default" });

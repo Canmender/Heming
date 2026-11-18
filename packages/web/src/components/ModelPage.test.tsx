@@ -2527,6 +2527,18 @@ describe("ModelPage · 智能体改模型", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: "应用" })[1]!).toBeEnabled());
   });
 
+  it("没被模型服务写过的工具，「恢复默认」是灰的：按下去什么都不会变", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    await screen.findByText("Claude Code");
+    const buttons = screen.getAllByRole("button", { name: "恢复默认" });
+    // 默认夹具：Claude Code 是 —（没配过），Codex 已经在用 space-bunny。
+    expect(buttons[0]).toBeDisabled();
+    expect(buttons[0]).toHaveAttribute("title", "它现在没有用模型服务写入的模型，不用恢复");
+    expect(buttons[1]).toBeEnabled();
+  });
+
   it("列出本机智能体；应用与恢复默认都要二次确认", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
