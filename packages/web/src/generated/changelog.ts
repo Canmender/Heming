@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.280.4.120.12",
+    "date": "2026-11-18",
+    "title": "国内智能体的免费额度也能借：WorkBuddy、Qoder 先装插件再登录，还能每天签到",
+    "bullets": [
+      "`packages/web` 全量 `vitest run`：**426 个测试文件 / 6134 个用例全绿**；`tsc -p tsconfig.json --noEmit` 退出码 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过（model 页字号档 4、11px 正文 0、对比度不合格 0、横向溢出 0）；`pnpm --filter @heming/desktop test` 12 例通过。",
+      "新增 `packages/web/src/lib/magpieDomestic.test.ts`（12 例）：清单只认内核确认过的 id/包名、风险端与签到端各有标注、`plugin list --json` 两种形状、签到结果的七种 `outcome`（`claimed` / `done` / `ineligible` / `inactive` / `captcha` / `own-app` / `failed`）、坏 JSON 不抛。",
+      "`packages/web/src/lib/magpieQuota.test.ts` 补 5 例点数窗口：`formatCount` 千分位、`unitLabel` 把 `credits` 说成「点」、`hasCount` 只在 `limit > 0` 且 `amount` 有值时成立、三个方向的文案、点数用尽时说「已用完」而不是「剩 0 点」。",
+      "`packages/web/src/components/ModelPage.test.tsx` 补 4 例：国内端一组全渲染且没插件时六张卡片都写「先装插件」、点 WorkBuddy 先 `plugin add @magpie-community/opencode-workbuddy-auth` 再 `accounts add workbuddy`、插件已装时点 Qoder 只走登录、今日签到走 `accounts checkin --json` 并把「已签到 +100 · 连续 3 天」写进提示条、签到失败用告警色。",
+      "本机 `magpie-core.exe plugin list --json` 仍是 `[]`、`accounts --json` 仍是 `[]`，所以国内端卡片在这台机器上全部显示「先装插件」：这是真实状态，不是占位。",
+      "**Trae CN、MiniMax Code**：内核的签到覆盖它们（`trae_checkin.go` / `minimax_checkin.go`），但它们不在 `retiredBuiltins` 里、也没有 movers 包名，页面没有可核实的安装路径，所以不摆卡片；卡片下面的签到按钮仍然会把它们签到的结果读出来。",
+      "**插件装上之后可否直接登录**：取决于插件自己（`provider api` 里的登录能力），页面按内核的退出码说话，不预先假定成功。",
+      "**CodeBuddy、Qwen、Kimi、StepCode、DevEco、ZCode 之外的国内端**：内核认识这些 id，但它们的账号不是「订阅」而是 Key / 套餐，归「其他地址」，不在这一组。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "上一轮把「订阅账号」接到了内核的真实契约上，能显示额度了；但那一组卡片只有 Claude、ChatGPT、Copilot、Gemini、Antigravity 五家，用户点名的 WorkBuddy、Qoder 这些国内端不在里面。查内核源码发现两件事：这些端它都认识（`workbuddy`、`workbuddy-ai`、`qoder`、`qoder-cn`、`mimo`、`zcode` 都在 agent 表里，额度窗口也会读），但它们的账号由社区插件供给——内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity（`internal/provider/logins.go` 的 `loginAgents` 只有 claude 与 codex，`signin.go` 的 switch 只有五家），国内端在 `migrate.go` 的 `retiredBuiltins` 里，`loginsNow()` 对它们走 `pluginOfAgent`。**直接摆一个「登录」按钮只会让用户撞见「magpie can't sign in to workbuddy accounts」**，所以这一组要按「先装插件、再登录」两步走，并且插件包名取内核 movers 表里写死的那几个（`@magpie-community/opencode-workbuddy-auth` 等），不拿端名去猜 npm 包——猜错的名字会被当成同名包装进来。",
+      "另外两件顺手补齐的事：WorkBuddy、Qoder 的免费额度是**点数**（`tencent_usage.go` 给的 `QuotaWindow{Amount, Limit, Unit: \"credits\"}`），原来按百分比显示会说「剩 70%」而不说「剩 7,000 点」；而每日免费额度要**点一下签到**才到账（内核 `accounts checkin` 覆盖 WorkBuddy、Qoder、Trae CN、MiniMax Code 与插件自己的签到）。",
+      "做了什么",
+      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 国内智能体一组卡片：WorkBuddy、WorkBuddy AI、Qoder、Qoder CN、MiMo Code、ZCode | 来源 tab → 订阅账号 → 国内智能体 | 内核 agent id（`workbuddy` / `workbuddy-ai` / `qoder` / `qoder-cn` / `mimo` / `zcode`） || 卡片右侧如实说下一步：先装插件 / 登录 / 已登录 N 个 | 同上一行 | `plugin list --json` 的 `providers[].id`；`accounts --json` 的 `agent` || 点一下装插件再登录 | 同上 | `plugin add <包名>` → `accounts add <agent>` || 今日签到（每日免费额度到账） | 订阅账号卡头「今日签到」 | `accounts checkin --json` || 点数窗口按点数说：剩 7,000 点 / 已用 3,000 点 共 10,000 点 | 每个账号的窗口行 | `windows[].amount` / `limit` / `unit`（`credits` → 点） || 只有厂商原话、没有份额的窗口不再画一条假的 0% 进度条 | 同上 | `windows[].text` || 提示条分成功/失败两种颜色 | 来源区顶部 | 「刷新额度」「切换」「签到」「装插件」的失败都走告警色 |",
+      "插件包名全部来自 `vendor/magpie-core/internal/provider/migrate_*.go` 的 `pkg` 字段（`workbuddy` 与 `workbuddy-ai` 共用一个包，`qoder` 与 `qoder-cn` 共用一个包）。风险端按内核自己的说法写：WorkBuddy 与国际版 WorkBuddy AI 卡片下面直接写「腾讯可能封禁在 WorkBuddy 之外使用的账号」，登录前就能看到，不用等点了才知道。走 Key 的国内端（Qwen Code、Kimi Code、MiniMax Code）不混进这一组，卡片下面一句话说明它们要在「其他地址」加 Key。",
+      "怎么验证",
+      "留白（有依据，不是没做）"
+    ]
+  },
+  {
     "version": "d.279.4.120.12",
     "date": "2026-11-18",
     "title": "订阅账号显示真实额度：窗口、重置时间、余额，还能一键刷新与切换",

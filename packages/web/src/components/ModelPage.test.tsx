@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ModelPage } from "./ModelPage.js";
 import { useLlmStore, DEFAULT_GATEWAY, type LlmProfile } from "../store/llm.js";
+import { DOMESTIC_AGENTS } from "../lib/magpieDomestic.js";
 
 /**
  * 模型页（d.103）：加来源 → 看模型，五个分区。
@@ -328,6 +329,74 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("5 小时")).toBeInTheDocument();
     expect(screen.getByText("剩 18%")).toBeInTheDocument();
     expect(screen.getByText("82% used")).toBeInTheDocument();
+  });
+
+  it("来源页列出国内智能体：没装插件就先装，再登录", async () => {
+    const { bridge, calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("国内智能体")).toBeInTheDocument();
+    expect(screen.getByText("WorkBuddy")).toBeInTheDocument();
+    expect(screen.getByText("Qoder CN")).toBeInTheDocument();
+    // 没有插件在服务这些端：卡片说「先装插件」，不给一个走不通的「登录」
+    expect(screen.getAllByText("先装插件").length).toBe(DOMESTIC_AGENTS.length);
+
+    fireEvent.click(screen.getByText("WorkBuddy"));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["plugin", "add", "@magpie-community/opencode-workbuddy-auth"]),
+    );
+    await waitFor(() =>
+      expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "workbuddy"]),
+    );
+    expect(await screen.findByText(/已装上 WorkBuddy 的插件/)).toBeInTheDocument();
+  });
+
+  it("插件已经装过时，点国内端直接登录，不再装一遍", async () => {
+    const { bridge, calls } = installBridge({}, {
+      "plugin list --json": {
+        ok: true,
+        stdout: JSON.stringify({ plugins: [], loaded: [], providers: [{ id: "qoder" }], middleware: [] }),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByText("Qoder"));
+    await waitFor(() => expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "qoder"]));
+    expect(calls).not.toContainEqual(["plugin", "add", "@magpie-community/opencode-qoder-auth"]);
+  });
+
+  it("今日签到：走 accounts checkin，把领到多少写进提示条", async () => {
+    const { calls } = installBridge({}, {
+      "accounts checkin --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { user: "a@example.com", by: "", outcome: "claimed", credit: 100, streak: 3 },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "今日签到" }));
+    await waitFor(() => expect(calls).toContainEqual(["accounts", "checkin", "--json"]));
+    expect(await screen.findByText(/已签到 \+100 · 连续 3 天/)).toBeInTheDocument();
+  });
+
+  it("签到失败用告警色，不冒充完成", async () => {
+    installBridge({}, {
+      "accounts checkin --json": {
+        ok: true,
+        stdout: JSON.stringify([{ by: "plugin:qoder", outcome: "failed", msg: "timeout" }]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "今日签到" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/签到失败：timeout/);
+    expect(notice).toHaveClass("ui-alert-danger");
   });
 
   it("高级命令在「运行」里：流式输出写进面板", async () => {

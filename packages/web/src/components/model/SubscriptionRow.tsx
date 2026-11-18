@@ -123,7 +123,7 @@ function WindowBar({ window, now }: { window: QuotaWindow; now: number }) {
     <li>
       <div className="flex items-center gap-2">
         <span className="w-14 shrink-0 ui-caption">{name}</span>
-        {window.unlimited ? (
+        {window.unlimited || window.text ? (
           <span className="min-w-0 flex-1" />
         ) : (
           <div

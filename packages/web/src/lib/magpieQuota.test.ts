@@ -3,14 +3,18 @@ import {
   accountState,
   agentName,
   emptyWindow,
+  formatCount,
   formatDuration,
   formatReadAt,
   formatResetIn,
+  hasCount,
   hasQuota,
   latestReadAt,
   parseTime,
   relativeTime,
   resetsText,
+  unitLabel,
+  windowCountText,
   windowDetailText,
   windowLeftPercent,
   windowLeftText,
@@ -147,6 +151,57 @@ describe("windowDetailText", () => {
     expect(
       windowDetailText(window({ unlimited: true, display: "Unlimited", resetsAt: "2026-11-18T10:00:00Z" }), NOW),
     ).toBe("Unlimited");
+  });
+});
+
+describe("点数窗口（WorkBuddy、MiniMax 这类端点数据）", () => {
+  const credits = window({
+    name: "Month",
+    used: 30,
+    remaining: 70,
+    amount: 3000,
+    limit: 10000,
+    unit: "credits",
+    display: "3k / 10k",
+  });
+
+  it("formatCount 加千分位，unitLabel 把 credits 说成点", () => {
+    expect(formatCount(3000)).toBe("3,000");
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(1234567)).toBe("1,234,567");
+    expect(formatCount(Number.NaN)).toBe("0");
+    expect(unitLabel("credits")).toBe("点");
+    expect(unitLabel("Credits")).toBe("点");
+    expect(unitLabel("tokens")).toBe("tokens");
+    expect(unitLabel("")).toBe("");
+  });
+
+  it("有 limit 与 amount 才算点数窗口", () => {
+    expect(hasCount(credits)).toBe(true);
+    expect(hasCount(window({ amount: 10 }))).toBe(false);
+    expect(hasCount(window({ limit: 0, amount: 0 }))).toBe(false);
+    expect(hasCount(window({ limit: 10, amount: null }))).toBe(false);
+  });
+
+  it("三个方向的说法：已用 / 剩 / 共", () => {
+    expect(windowCountText(credits, "used")).toBe("3,000 点");
+    expect(windowCountText(credits, "left")).toBe("7,000 点");
+    expect(windowCountText(credits, "total")).toBe("10,000 点");
+    expect(windowCountText(window({}), "left")).toBe("");
+  });
+
+  it("结论先说点数，不把「剩 70%」当结论", () => {
+    expect(windowLeftText(credits)).toBe("剩 7,000 点");
+    expect(windowLeftText(window({ ...credits, amount: 10000 }))).toBe("已用完");
+    expect(windowLeftText(window({ ...credits, amount: -5 }))).toBe("剩 10,000 点");
+    expect(windowLeftText(window({ ...credits, amount: 20000 }))).toBe("已用完");
+  });
+
+  it("明细写「已用 / 共」，不抄厂商的 3k / 10k", () => {
+    expect(windowDetailText(credits, NOW)).toBe("已用 3,000 点 / 共 10,000 点");
+    expect(
+      windowDetailText(window({ ...credits, resetsAt: "2026-11-18T10:00:00Z" }), NOW),
+    ).toBe("已用 3,000 点 / 共 10,000 点 · 1 小时后重置");
   });
 });
 

@@ -142,10 +142,53 @@ export function windowTone(window: QuotaWindow): QuotaTone {
   return "ok";
 }
 
+/** 千分位：3000 → "3,000"。点数窗口的厂商原话常是 "3k / 10k"，页面写全。 */
+export function formatCount(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  const whole = Math.round(value);
+  return String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/** 单位的中文说法：内核的 credits 就是「点」；tokens、GB 这类照原样。 */
+export function unitLabel(unit: string): string {
+  const text = unit.trim();
+  if (!text) return "";
+  if (/^credits?$/i.test(text)) return "点";
+  return text;
+}
+
+/**
+ * 点数窗口：内核把 WorkBuddy、MiniMax 这类端点数据成 amount / limit（单位 credits），
+ * 只按百分比读会丢掉「还剩几个点」这个真正要紧的数字。
+ */
+export function hasCount(window: QuotaWindow): boolean {
+  return (
+    window.limit !== null && Number.isFinite(window.limit) && window.limit > 0 && window.amount !== null
+  );
+}
+
+/** 点数窗口的结论与明细；没有点数时回空串，调用方按百分比走。 */
+export function windowCountText(window: QuotaWindow, side: "used" | "left" | "total"): string {
+  if (!hasCount(window)) return "";
+  const limit = window.limit ?? 0;
+  const amount = Math.min(limit, Math.max(0, window.amount ?? 0));
+  const unit = unitLabel(window.unit);
+  const value = side === "used" ? amount : side === "left" ? limit - amount : limit;
+  return `${formatCount(value)}${unit ? ` ${unit}` : ""}`;
+}
+
 /** 窗口左侧的结论文字：剩多少、不限、或者厂商自己那句话。 */
 export function windowLeftText(window: QuotaWindow): string {
   if (window.unlimited) return "不限";
   if (window.text && window.display.trim()) return window.display.trim();
+  if (hasCount(window)) {
+    // 点数窗口按点数说；点数刚好用尽时说「已用完」，别说「剩 0 点」。
+    const limit = window.limit ?? 0;
+    const amount = Math.min(limit, Math.max(0, window.amount ?? 0));
+    if (limit - amount <= 0) return "已用完";
+    const left = windowCountText(window, "left");
+    if (left) return `剩 ${left}`;
+  }
   const left = windowLeftPercent(window);
   return left <= 0 ? "已用完" : `剩 ${left}%`;
 }
@@ -200,7 +243,15 @@ export function formatReadAt(
 export function windowDetailText(window: QuotaWindow, now: number): string {
   const parts: string[] = [];
   const display = window.display.trim();
-  if (display && !(window.text && display === windowLeftText(window))) parts.push(display);
+  if (hasCount(window)) {
+    // 点数窗口写全「已用 3,000 / 共 10,000 点」：厂商原话可能是 "3k / 10k"，
+    // 和左边「剩 7,000 点」对不上，读起来像两个额度。
+    const used = windowCountText(window, "used");
+    const total = windowCountText(window, "total");
+    if (used) parts.push(`已用 ${used}${total ? ` / 共 ${total}` : ""}`);
+  } else if (display && !(window.text && display === windowLeftText(window))) {
+    parts.push(display);
+  }
   if (window.unlimited) return parts.join(" · ");
   const reset = formatResetIn(window.resetsAt, now);
   if (reset) parts.push(reset);

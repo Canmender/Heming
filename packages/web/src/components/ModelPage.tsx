@@ -25,6 +25,7 @@ import { BackupPanel } from "./model/BackupPanel.js";
 import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { SubscriptionRow } from "./model/SubscriptionRow.js";
+import { DomesticCard } from "./model/DomesticCard.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -60,6 +61,15 @@ import {
   type AgentVisibility,
 } from "../lib/magpieVisible.js";
 import { agentName, latestReadAt } from "../lib/magpieQuota.js";
+import {
+  checkinFailed,
+  checkinSummary,
+  DOMESTIC_AGENTS,
+  DOMESTIC_KEY_NOTE,
+  parseCheckin,
+  parsePluginProviders,
+  type DomesticAgent,
+} from "../lib/magpieDomestic.js";
 import {
   parseCompact,
   parseContextCap,
@@ -216,11 +226,26 @@ export function ModelPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   /** 来源区的就地反馈：加完一个来源给一句话，用户还要继续加，所以不跳页。 */
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<{ text: string; failed: boolean } | null>(null);
+  /**
+   * 提示条：普通消息与失败用两种颜色，别让「签到失败」长成完成的样子。
+   * 保留 setNotice(字符串) 的老签名，新增的两步动作才传第二个参数。
+   */
+  const setNotice = useCallback((text: string, failed = false) => {
+    setNoticeState({ text, failed });
+  }, []);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
+  /**
+   * 已装插件在服务的 agent id。国内端（WorkBuddy、Qoder…）的登录与额度都由社区
+   * 插件供给，内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity：
+   * 没有这张表，卡片只能给出「登录」这个走不通的动作。
+   */
+  const [pluginProviders, setPluginProviders] = useState<Set<string>>(() => new Set());
+  /** 问过插件了：没问过时不把「没有插件」当成事实说出来。 */
+  const [pluginsChecked, setPluginsChecked] = useState(false);
   /**
    * 重置倒计时与「读数几分钟前」都要跟着时间走。集中一个时钟：
    * 每分钟跳一次，没有账号就不开定时器（不白跑）。
@@ -353,6 +378,13 @@ export function ModelPage() {
     if (!cli) return;
     const result = await cli.cli(["ls"]);
     setAgents(parseAgents(result.stdout || ""));
+  }, [cli]);
+
+  const loadPlugins = useCallback(async () => {
+    if (!cli) return;
+    const result = await cli.cli(["plugin", "list", "--json"]);
+    setPluginProviders(parsePluginProviders(result.stdout || ""));
+    setPluginsChecked(true);
   }, [cli]);
 
   const loadDisabledModels = useCallback(async () => {
@@ -542,7 +574,7 @@ export function ModelPage() {
       setNow(Date.now());
       setNotice("已重新读取订阅额度。");
     } catch (err) {
-      setNotice(`刷新额度失败：${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`刷新额度失败：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -570,9 +602,10 @@ export function ModelPage() {
         result.ok
           ? `已把 ${agentName(row.agent)} 切到 ${row.label}。`
           : `切换失败：${(result.error || result.stderr || "").trim() || "内核没有说明原因"}`,
+        !result.ok,
       );
     } catch (err) {
-      setNotice(`切换失败：${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`切换失败：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -589,6 +622,61 @@ export function ModelPage() {
     });
   };
 
+  /**
+   * 「今日签到」：WorkBuddy、Qoder、Trae CN、MiniMax Code 的每日免费额度要点一下才到账。
+   * 内核按账号挨个点（`accounts checkin --json`），结果只有「领到 / 今天签过 /
+   * 不能参加 / 要验证码」几种，翻成一句话写进提示条；签完顺手重读额度。
+   */
+  const checkinNow = async () => {
+    if (!cli) return;
+    setAccountBusy("checkin");
+    try {
+      const result = await cli.cli(["accounts", "checkin", "--json"]);
+      const entries = parseCheckin(result.stdout || "");
+      if (!result.ok && entries.length === 0) {
+        const why = tailText(stripAnsi((result.stderr || result.error || "").trim()));
+        setNotice(`签到失败：${why || "内核没有说明原因"}`, true);
+        return;
+      }
+      setNotice(checkinSummary(entries), checkinFailed(entries));
+      await loadAccounts();
+      setNow(Date.now());
+    } catch (err) {
+      setNotice(`签到失败：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 国内端的两步走：先装社区插件，再登录。
+   *
+   * 内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity（国内端是
+   * 搬到插件上的内置端），所以没装插件时 `accounts add workbuddy` 只会答
+   * 「magpie can't sign in to …」——那不是一个用户能自己解开的错，先把插件装上。
+   * 装插件失败就把内核的原话写进提示条，不假装已经装好。
+   */
+  const prepareDomestic = async (item: DomesticAgent) => {
+    if (!cli) return;
+    const key = `domestic:${item.agent}`;
+    setAccountBusy(key);
+    try {
+      if (!pluginProviders.has(item.agent)) {
+        const result = await cli.cli(["plugin", "add", item.pkg]);
+        if (!result.ok) {
+          const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
+          setNotice(`没能装上 ${item.label} 的插件：${why || "内核没有说明原因"}`, true);
+          return;
+        }
+        await loadPlugins();
+        setNotice(`已装上 ${item.label} 的插件，接着登录一次就好。`);
+      }
+    } finally {
+      setAccountBusy(null);
+    }
+    await runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent]);
+  };
+
   useEffect(() => {
     if (!cli) return;
     let alive = true;
@@ -601,6 +689,7 @@ export function ModelPage() {
         loadVisibility(),
         loadGlobals(),
         loadDrawers(),
+        loadPlugins(),
       ]);
       if (alive) setLoading(false);
     })();
@@ -615,6 +704,7 @@ export function ModelPage() {
     loadDisabledModels,
     loadVisibility,
     loadGlobals,
+    loadPlugins,
   ]);
 
   useEffect(() => {
@@ -1131,16 +1221,20 @@ export function ModelPage() {
             {notice && (
               <div
                 role="status"
-                className="ui-alert ui-alert-success rta-enter items-center justify-between"
+                className={`ui-alert ${notice.failed ? "ui-alert-danger" : "ui-alert-success"} rta-enter items-center justify-between`}
               >
                 <span className="flex items-center gap-2 text-ui-sm">
-                  <CheckIcon width={14} height={14} className="shrink-0" />
-                  {notice}
+                  {notice.failed ? (
+                    <AlertIcon width={14} height={14} className="shrink-0" />
+                  ) : (
+                    <CheckIcon width={14} height={14} className="shrink-0" />
+                  )}
+                  {notice.text}
                 </span>
                 <Button
                   type="button"
                   size="sm" variant="ghost"
-                  onClick={() => setNotice(null)}
+                  onClick={() => setNoticeState(null)}
                 >
                   关闭
                 </Button>
@@ -1296,15 +1390,27 @@ export function ModelPage() {
                         (accounts.length > 1 ? "多个账号自动分担" : "每分钟自动重读")}
                     </span>
                     {accounts.length > 0 && (
-                      <Button
-                        type="button"
-                        size="sm" variant="ghost"
-                        leadingIcon={<RefreshIcon width={14} height={14} />}
-                        busy={accountBusy === "refresh"}
-                        onClick={() => void refreshAccountQuota()}
-                      >
-                        刷新额度
-                      </Button>
+                      <>
+                        <Button
+                          type="button"
+                          size="sm" variant="ghost"
+                          leadingIcon={<CheckIcon width={14} height={14} />}
+                          busy={accountBusy === "checkin"}
+                          onClick={() => void checkinNow()}
+                          title="WorkBuddy、Qoder、Trae CN、MiniMax Code 的每日免费额度要点一下才到账"
+                        >
+                          今日签到
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm" variant="ghost"
+                          leadingIcon={<RefreshIcon width={14} height={14} />}
+                          busy={accountBusy === "refresh"}
+                          onClick={() => void refreshAccountQuota()}
+                        >
+                          刷新额度
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1331,6 +1437,34 @@ export function ModelPage() {
                     </button>
                   ))}
                 </div>
+
+                <div className="mt-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-ui-md font-semibold">国内智能体</h3>
+                    <span className="ui-caption">免费额度在账号里：先装插件，再登录</span>
+                  </div>
+                  <div className="mt-2 grid gap-2">
+                    {DOMESTIC_AGENTS.map((item) => (
+                      <DomesticCard
+                        key={item.agent}
+                        item={item}
+                        signedIn={accounts.filter((row) => row.agent === item.agent).length}
+                        pluginReady={pluginsChecked && pluginProviders.has(item.agent)}
+                        busy={accountBusy === `domestic:${item.agent}`}
+                        onPress={prepareDomestic}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-2 ui-caption">
+                    {DOMESTIC_KEY_NOTE}
+                    {DOMESTIC_AGENTS.filter((item) => item.risk).map((item) => (
+                      <span key={item.agent} className="mt-1 block">
+                        {item.label}：{item.risk}
+                      </span>
+                    ))}
+                  </p>
+                </div>
+
                 <ul className="mt-3 space-y-2" aria-label="订阅账号列表">
                   {accounts.map((row, index) => (
                     <SubscriptionRow
