@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -224,5 +224,55 @@ describe.skipIf(tsx === null)("heming memory 子命令", () => {
     expect(result.stderr).toContain("/review");
     // 没有凭据也会先卡在命令解析上：说明它根本没走到调模型那一步。
     expect(result.stderr).not.toContain("缺少模型");
+  }, 30_000);
+
+  it("rewind 列出记录，并按轮数把文件退回去（d.336）", async () => {
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, ".heming", "rewind"), { recursive: true });
+    writeFileSync(path.join(dir, "a.ts"), "现在的内容\n", "utf8");
+    writeFileSync(path.join(dir, "gone.ts"), "我不该在\n", "utf8");
+    // 手工造一轮存档：这里验证的是「读 + 退」，抓取由 tooling 的用例负责。
+    writeFileSync(
+      path.join(dir, ".heming", "rewind", "20261118100000-0000.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          id: "20261118100000-0000",
+          at: "2026-11-18T10:00:00.000Z",
+          files: [
+            { path: "a.ts", before: "原来的内容\n" },
+            { path: "gone.ts", before: null },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const listed = await runCli(["rewind", "--cwd", dir]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("共 1 轮");
+    expect(listed.stdout).toContain("a.ts");
+
+    const applied = await runCli(["rewind", "1", "--cwd", dir]);
+    expect(applied.code).toBe(0);
+    expect(applied.stdout).toContain("已退回 1 轮：还原 1 个文件、删掉 1 个当时还不存在的文件");
+    expect(applied.stdout).toContain("run_command");
+    expect(readFileSync(path.join(dir, "a.ts"), "utf8")).toBe("原来的内容\n");
+    expect(existsSync(path.join(dir, "gone.ts"))).toBe(false);
+
+    // 退过之后记录被删掉：再退一次会明确说没有可退的轮次。
+    const again = await runCli(["rewind", "1", "--cwd", dir]);
+    expect(again.code).toBe(1);
+    expect(again.stderr).toContain("没有 1 轮可退");
+  }, 30_000);
+
+  it("--help 里有 heming rewind 与 --no-rewind", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("heming rewind");
+    expect(result.stdout).toContain("--no-rewind");
+    expect(result.stdout).toContain(".heming/rewind/");
   }, 30_000);
 });

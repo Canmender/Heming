@@ -86,6 +86,8 @@ export interface PromptOptions {
    * 但省一次模型调用。MCP 模式本来就没有它（那条路不调模型）。
    */
   subagent: boolean;
+  /** 回退日志（d.336）：默认开；`--no-rewind` 关掉（关掉只是不抓原文）。 */
+  rewind: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -117,6 +119,14 @@ export interface CommandsOptions {
   json: boolean;
 }
 
+/** `heming rewind` 的选项：只读写 `.heming/rewind/`，不调模型。 */
+export interface RewindOptions {
+  /** 工作目录（缺省由 index 用 `process.cwd()` 兜底）。 */
+  cwd?: string;
+  /** 退最近几轮；省略 = 只列出来看（不动文件）。 */
+  runs?: number;
+}
+
 export interface McpOptions {
   /** 显式给出的工作目录；缺省由 index 用 `process.cwd()` 兜底。 */
   cwd?: string;
@@ -138,6 +148,7 @@ export type ParsedArgs =
   | { ok: true; action: "sessions"; options: SessionsOptions }
   | { ok: true; action: "memory"; options: MemoryOptions }
   | { ok: true; action: "commands"; options: CommandsOptions }
+  | { ok: true; action: "rewind"; options: RewindOptions }
   | { ok: false; error: string };
 
 /** 需要取值的选项：值不能是另一个选项（`--cwd --json` 是写错了，不该把 `--json` 当目录）。 */
@@ -152,7 +163,7 @@ function takeValue(argv: string[], index: number, inline: string | undefined): {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  let command: "run" | "exec" | "mcp" | "sessions" | "memory" | "commands" | null = null;
+  let command: "run" | "exec" | "mcp" | "sessions" | "memory" | "commands" | "rewind" | null = null;
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
@@ -173,6 +184,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let mcp = false;
   let memory = true;
   let subagent = true;
+  let keepRewind = true;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -243,6 +255,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "no-subagent": {
           if (inline !== undefined) return { ok: false, error: "--no-subagent 不接受取值（直接写 --no-subagent 即可）" };
           subagent = false;
+          break;
+        }
+        case "no-rewind": {
+          if (inline !== undefined) return { ok: false, error: "--no-rewind 不接受取值（直接写 --no-rewind 即可）" };
+          keepRewind = false;
           break;
         }
         case "no-memory": {
@@ -334,17 +351,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
 
     if (command === null) {
-      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions" || arg === "memory" || arg === "commands") {
+      if (
+        arg === "run" ||
+        arg === "exec" ||
+        arg === "mcp" ||
+        arg === "sessions" ||
+        arg === "memory" ||
+        arg === "commands" ||
+        arg === "rewind"
+      ) {
         command = arg;
         continue;
       }
-      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions / memory / commands，用 --help 查看用法）` };
+      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions / memory / commands / rewind，用 --help 查看用法）` };
     }
     promptParts.push(arg);
   }
 
   if (command === null) {
-    return { ok: false, error: "缺少命令（用 run、exec、mcp 或 sessions）" };
+    return { ok: false, error: "缺少命令（用 run、exec、mcp、sessions、memory、commands 或 rewind）" };
   }
 
   /**
@@ -370,6 +395,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (readOnly) notForSessions.push("--read-only");
   if (!memory) notForSessions.push("--no-memory");
   if (!subagent) notForSessions.push("--no-subagent");
+  if (!keepRewind) notForSessions.push("--no-rewind");
   if (ask) notForSessions.push("--ask");
     if (contextBudget !== undefined) notForSessions.push("--context-budget");
     if (!compact) notForSessions.push("--no-compact");
@@ -420,6 +446,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!compact) notForMemory.push("--no-compact");
     if (!memory) notForMemory.push("--no-memory");
   if (!subagent) notForMemory.push("--no-subagent");
+  if (!keepRewind) notForMemory.push("--no-rewind");
     if (notForMemory.length > 0) {
       return {
         ok: false,
@@ -444,6 +471,58 @@ export function parseArgs(argv: string[]): ParsedArgs {
    * 与 run/exec 的分工是刻意的：这条路**不调模型**，所以 `--model` / `--api-key` /
    * `--max-rounds` / 输出格式在这里一律拒绝——静默忽略会让用户以为某个开关生效了。
    */
+  /**
+   * `rewind`：只看/回退 `.heming/rewind/` 里记下的轮次，不调模型。
+   *
+   * 位置参数只有一个可选的轮数：省略 = 列出来看，给了数字 = 真的动手（会改文件）。
+   * 不接受 `--json`：回退的结果是给人看的一句话，机器要读的话直接看 `.heming/rewind/*.json`。
+   */
+  if (command === "rewind") {
+    if (json) return { ok: false, error: "rewind 不接受 --json（它要改文件；要看有哪些轮次直接读 .heming/rewind/*.json）" };
+    if (promptParts.length > 1) {
+      return { ok: false, error: "rewind 最多接一个数字（要退最近几轮），例如 heming rewind 2" };
+    }
+    const notForRewind: string[] = [];
+    if (outputFormat !== "text") notForRewind.push("--output-format");
+    if (allowDanger) notForRewind.push("--allow-danger");
+    if (readOnly) notForRewind.push("--read-only");
+    if (ask) notForRewind.push("--ask");
+    if (maxRounds !== undefined) notForRewind.push("--max-rounds");
+    if (model !== undefined) notForRewind.push("--model");
+    if (baseUrl !== undefined) notForRewind.push("--base-url");
+    if (apiKey !== undefined) notForRewind.push("--api-key");
+    if (continueSession) notForRewind.push("--continue");
+    if (resume !== undefined) notForRewind.push("--resume");
+    if (sessionDir !== undefined) notForRewind.push("--session-dir");
+    if (mcp) notForRewind.push("--mcp");
+    if (trustWorkspace) notForRewind.push("--trust-workspace");
+    if (trustHooks) notForRewind.push("--trust-hooks");
+    if (contextBudget !== undefined) notForRewind.push("--context-budget");
+    if (!compact) notForRewind.push("--no-compact");
+    if (!memory) notForRewind.push("--no-memory");
+    if (!subagent) notForRewind.push("--no-subagent");
+    if (!keepRewind) notForRewind.push("--no-rewind");
+    if (notForRewind.length > 0) {
+      return {
+        ok: false,
+        error: `rewind 不接 ${notForRewind.join(" / ")}（它只读写 .heming/rewind/，不调模型也不改会话）`,
+      };
+    }
+    const rawRuns = promptParts[0];
+    let runs: number | undefined;
+    if (rawRuns !== undefined) {
+      if (!/^[0-9]+$/.test(rawRuns) || Number(rawRuns) < 1) {
+        return { ok: false, error: `rewind 需要正整数（要退最近几轮），收到「${rawRuns}」` };
+      }
+      runs = Number(rawRuns);
+    }
+    return {
+      ok: true,
+      action: "rewind",
+      options: { ...(runs !== undefined ? { runs } : {}), ...(cwd !== undefined ? { cwd } : {}) },
+    };
+  }
+
   /**
    * `commands`：只列 `.heming/commands/*.md`，不调模型。
    *
@@ -476,6 +555,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!compact) notForCommands.push("--no-compact");
     if (!memory) notForCommands.push("--no-memory");
     if (!subagent) notForCommands.push("--no-subagent");
+    if (!keepRewind) notForCommands.push("--no-rewind");
     if (notForCommands.length > 0) {
       return {
         ok: false,
@@ -564,6 +644,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       compact,
       memory,
       subagent,
+      rewind: keepRewind,
       mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),

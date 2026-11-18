@@ -5,12 +5,13 @@
  * 同时它**不放松安全边界**——工作区外的绝对路径只是被改写成 `../…`，仍然会被越界检查挡下。
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createScriptedApprover } from "./approvals.js";
 import { createCliGate, createCliTooling, relativizeToolArgs } from "./tooling.js";
+import { listCliRewinds, rewindDir } from "./rewind.js";
 
 const CWD = path.resolve("D:/work/proj").replace(/\\\\/g, "/");
 
@@ -453,5 +454,49 @@ describe("工作区记忆工具（d.329）", () => {
     });
     const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
     expect(names).not.toContain("remember");
+  });
+});
+
+describe("回退日志（d.336）", () => {
+  it("写工具动手之前抓到原文，收尾时落盘", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-tooling-rewind-"));
+    tmpDirs.push(cwd);
+    writeFileSync(path.join(cwd, "a.ts"), "原来的内容`n", "utf8");
+    const tooling = createCliTooling({ cwd, allowDanger: false, conversationId: "c-rewind" });
+
+    const result = await tooling.toolBridge.execute({
+      name: "file_write",
+      arguments: JSON.stringify({ path: "a.ts", content: "改过的内容" }),
+    });
+    expect(result.ok).toBe(true);
+    expect(readFileSync(path.join(cwd, "a.ts"), "utf8")).toBe("改过的内容");
+
+    const run = await tooling.rewind.close();
+    expect(run?.files).toEqual([{ path: "a.ts", before: "原来的内容`n" }]);
+    const loaded = await listCliRewinds(cwd);
+    expect(loaded?.ok && loaded.runs.length).toBe(1);
+  });
+
+  it("--no-rewind 时一条也不抓", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-tooling-norewind-"));
+    tmpDirs.push(cwd);
+    writeFileSync(path.join(cwd, "a.ts"), "x`n", "utf8");
+    const tooling = createCliTooling({ cwd, allowDanger: false, conversationId: "c-norewind", rewind: false });
+    const result = await tooling.toolBridge.execute({
+      name: "file_write",
+      arguments: JSON.stringify({ path: "a.ts", content: "y" }),
+    });
+    expect(result.ok).toBe(true);
+    expect(await tooling.rewind.close()).toBeNull();
+    expect(existsSync(rewindDir(cwd))).toBe(false);
+  });
+
+  it("只读工具不产生回退记录", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-tooling-read-"));
+    tmpDirs.push(cwd);
+    writeFileSync(path.join(cwd, "a.ts"), "x`n", "utf8");
+    const tooling = createCliTooling({ cwd, allowDanger: false, conversationId: "c-read" });
+    await tooling.toolBridge.execute({ name: "file_read", arguments: JSON.stringify({ path: "a.ts" }) });
+    expect(await tooling.rewind.close()).toBeNull();
   });
 });

@@ -20,6 +20,7 @@ import { describeCliContext } from "./contextBudget.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { APPROVAL_ANSWER_HINTS, createTerminalApprover } from "./approvals.js";
 import { describeCliCommandUse, describeCliCommands, loadCliCommands, parseCliCommandInvocation, resolveCliCommand, summarizeCliCommands } from "./commands.js";
+import { applyCliRewind, describeCliRewindResult, describeCliRewinds, dropCliRewindRuns, listCliRewinds, planCliRewind } from "./rewind.js";
 import {
   addCliMemory,
   describeCliMemory,
@@ -60,6 +61,7 @@ const USAGE = `用法：
   heming memory [list | add <一句话> | forget <id 或序号>]
                                              看 / 加 / 删这个工作区的长期记忆
   heming commands [--json] [--cwd <dir>]     列出 .heming/commands/*.md 里的自定义命令
+  heming rewind [轮数] [--cwd <dir>]          看/退回前面几轮改过的文件（只含写工具，命令退不回去）
   heming --version | --help
 
 常用选项：
@@ -75,6 +77,7 @@ const USAGE = `用法：
   --no-compact         不折叠历史：整段发给模型（会更快烧钱，也更早撞上下文上限）
   --no-memory          不读写 .heming/memory.json（既不注入召回，也不提供 remember 工具）
   --no-subagent        不给 agent_task：查证类任务只能自己翻，省一次模型调用
+  --no-rewind          不留回退记录（默认会抓写工具的原文，供 heming rewind 用）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -163,6 +166,14 @@ MCP 服务（给别的编辑器用）：
   （意图 / 结论 / 待办），最近的原文照旧保留；摘要由程序生成，不额外调模型。
   折了会打一行「上下文：折叠了 N 条早期对话」；--no-compact 则整段原样发送。
   真的撞上供应商的上下文上限时，会自动收紧一次预算重试（最多两级）。
+
+回退（.heming/rewind/，只覆盖写工具）：
+  每次运行改文件之前，会先把它原来的内容抓一份存起来（一次运行一份，最多留 20 轮）。
+  heming rewind                         看有哪些轮次可以退
+  heming rewind 1                       退回最近一轮改过的文件
+  heming rewind 3                       退回最近三轮（回到这三轮开始之前）
+  只还原 file_write / file_edit / file_patch 动过的文件；run_command 改的东西抓不到，
+  退不回去——那种情况请用 git 或自己的备份。抓不到原文的（太大 / 二进制）会点名跳过。
 
 工作区自定义命令（.heming/commands/*.md，与桌面端的 /名字 同一批文件）：
   文件名就是命令名（小写字母开头，可带数字和短横线），正文就是提示词；
@@ -326,6 +337,31 @@ async function main(argv: string[]): Promise<number> {
     }
     process.stdout.write(`${describeCliCommands(loaded, cwd)}\n`);
     return 0;
+  }
+  // `rewind` 只读写盘：列出以前的轮次，或真的把文件退回去。
+  if (parsed.action === "rewind") {
+    const cwd = path.resolve(parsed.options.cwd ?? process.cwd());
+    const loaded = await listCliRewinds(cwd);
+    if (loaded && !loaded.ok) {
+      writeErr(`heming: 回退记录读不出来：${loaded.error}（${loaded.source}）` + "\n");
+      return 1;
+    }
+    const runs = loaded?.runs ?? [];
+    const wanted = parsed.options.runs;
+    if (wanted === undefined) {
+      process.stdout.write(`${describeCliRewinds(loaded, cwd)}` + "\n");
+      return 0;
+    }
+    const plan = planCliRewind(runs, wanted);
+    if (!plan) {
+      writeErr(`heming: 没有 ${wanted} 轮可退（现在只有 ${runs.length} 轮记录）` + "\n");
+      return 1;
+    }
+    const apply = await applyCliRewind(cwd, plan);
+    const dropped = apply.ok ? await dropCliRewindRuns(cwd, runs.slice(0, plan.turns)) : 0;
+    const text = describeCliRewindResult(plan, apply, dropped);
+    (apply.ok ? process.stdout : process.stderr).write(`${text}` + "\n");
+    return apply.ok ? 0 : 1;
   }
   // `mcp serve` 不调模型：它只把文件工具按 MCP 协议暴露给别的编辑器，所以走单独的装配。
   if (parsed.action === "mcp") {
@@ -592,6 +628,12 @@ async function main(argv: string[]): Promise<number> {
     ...(approver ? { ask: approver.ask } : {}),
     ...(memoryEnabled ? {} : { memory: false }),
     ...(options.subagent ? {} : { subagent: false }),
+    ...(options.rewind ? {} : { rewind: false }),
+    // 留了回退记录才提一句：没有改动时说「能退」是骗人的。
+    onRewind: (run) => {
+      const changed = run.files.filter((file) => file.skipped === undefined).length;
+      writeErr(`[heming] 这次改了 ${changed} 个文件，回退记录 ${run.id}：heming rewind 1 可以退回去。` + "\n");
+    },
     ...(recallSection ? { memorySection: recallSection } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     ...(options.contextBudget !== undefined ? { contextBudget: options.contextBudget } : {}),

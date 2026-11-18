@@ -562,3 +562,66 @@ describe("parseArgs：工作区命令（d.333）", () => {
     if (!parsed.ok) expect(parsed.error).toContain("commands");
   });
 });
+
+describe("parseArgs：回退（d.336）", () => {
+  it("rewind 不带数字时只是列出来看", () => {
+    const parsed = parseArgs(["rewind"]);
+    expect(parsed.ok && parsed.action).toBe("rewind");
+    if (parsed.ok && parsed.action === "rewind") {
+      expect(parsed.options.runs).toBeUndefined();
+      expect(parsed.options.cwd).toBeUndefined();
+    }
+  });
+
+  it("rewind 接一个轮数与 --cwd", () => {
+    const parsed = parseArgs(["rewind", "3", "--cwd", "D:/work/proj"]);
+    expect(parsed.ok && parsed.action).toBe("rewind");
+    if (parsed.ok && parsed.action === "rewind") {
+      expect(parsed.options.runs).toBe(3);
+      expect(parsed.options.cwd).toBe("D:/work/proj");
+    }
+  });
+
+  it("rewind 的轮数必须是正整数", () => {
+    for (const bad of ["0", "abc", "1.5"]) {
+      const parsed = parseArgs(["rewind", bad]);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("rewind 需要正整数");
+    }
+    const tooMany = parseArgs(["rewind", "1", "2"]);
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) expect(tooMany.error).toContain("最多接一个数字");
+  });
+
+  it("rewind 不接受 --json（它要改文件）", () => {
+    const parsed = parseArgs(["rewind", "--json"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("不接受 --json");
+  });
+
+  for (const extra of [["--model", "m"], ["--allow-danger"], ["--ask"], ["--no-rewind"], ["--mcp"]]) {
+    it(`rewind 不接 ${extra[0]}`, () => {
+      const parsed = parseArgs(["rewind", ...extra]);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("rewind 不接");
+    });
+  }
+
+  it("--no-rewind 关掉回退日志（默认开）", () => {
+    const on = parseArgs(["run", "看看"]);
+    expect(on.ok && on.action === "run" && on.options.rewind).toBe(true);
+    const off = parseArgs(["run", "--no-rewind", "看看"]);
+    expect(off.ok && off.action === "run" && off.options.rewind).toBe(false);
+    const inline = parseArgs(["run", "--no-rewind=1", "看看"]);
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error).toContain("不接受取值");
+  });
+
+  it("sessions / memory / commands 都拒收 --no-rewind", () => {
+    for (const args of [["sessions", "--no-rewind"], ["memory", "--no-rewind"], ["commands", "--no-rewind"]]) {
+      const parsed = parseArgs(args);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("--no-rewind");
+    }
+  });
+});

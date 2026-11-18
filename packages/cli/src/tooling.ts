@@ -31,6 +31,7 @@ import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approva
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 import { REMEMBER_TOOL, addCliMemory, rememberResultText, rememberSpec } from "./memory.js";
+import { createCliRewindJournal, type CliRewindJournal } from "./rewind.js";
 import {
   SUBAGENT_READ_ONLY_TOOLS,
   SUBAGENT_TOOL,
@@ -56,6 +57,13 @@ export interface CliTooling {
   roots: FileRoot[];
   toolBridge: ToolBridge;
   confirm: ToolConfirmFn;
+  /**
+   * 回退日志（d.336）：写工具动手之前抓的原文。
+   *
+   * 它是「这次运行改了什么」的唯一凭据，所以交给调用方收尾（`close()`）——什么时候算一轮结束
+   * 只有编排层知道；抓取则由本函数做，因为只有这里同时看得到闸门、桥与相对路径换算。
+   */
+  rewind: CliRewindJournal;
 }
 
 /**
@@ -412,6 +420,12 @@ export function createCliTooling(options: {
    * 调方想放宽也放宽不了。`null` / 省略 = 没有这个工具。
    */
   subagent?: { chat: SubagentChatFn; profile: LlmProfile } | null;
+  /**
+   * 回退日志（d.336）：默认开，`--no-rewind` 关掉。
+   *
+   * 关掉只是不抓原文；`heming rewind` 仍然能列出以前的轮次。
+   */
+  rewind?: boolean;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -431,6 +445,13 @@ export function createCliTooling(options: {
   });
 
   const onWrite = options.onWrite;
+
+  /*
+   * 回退日志：写工具动手之前抓原文（`.heming/rewind/<运行 id>.json`）。
+   * 只读模式下永远抓不到东西（它写不了），所以不用特意关；`--no-rewind` 才真的关。
+   */
+  const rewindEnabled = options.rewind !== false;
+  const rewind = createCliRewindJournal({ cwd, conversationId: options.conversationId });
 
   /*
    * 危险调用的批准状态（只有 `--ask` 会动它）：
@@ -607,6 +628,13 @@ export function createCliTooling(options: {
         call.name === SHELL_TOOL
           ? call
           : { ...call, arguments: relativizeToolArgs(call.arguments, cwd) };
+      /*
+       * 写工具动手之前先留一份原文：之后再抓就来不及了（文件已经被改写）。
+       * 抓不到（太大 / 二进制 / 读失败）会记成 skipped，回退时跳过并点名，不硬盖。
+       */
+      if (rewindEnabled && call.name !== SHELL_TOOL) {
+        await rewind.note({ name: call.name, arguments: normalized.arguments });
+      }
       const result = await baseBridge.execute(normalized, execOpts);
       if (result.ok && result.writes?.length && onWrite) {
         for (const file of result.writes) onWrite(file);
@@ -655,7 +683,7 @@ export function createCliTooling(options: {
       ),
     );
 
-  return { roots, toolBridge, confirm };
+  return { roots, toolBridge, confirm, rewind };
 }
 
 /** 从 OpenAI 风格的工具声明里取名字；不是这个形状就返回 null（不猜）。 */

@@ -42,6 +42,7 @@ import { createCliHistoryPrep, type CliContextStats } from "./contextBudget.js";
 import { estimateTokens } from "../../../packages/web/src/lib/agentContext/tokens.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import type { CliApprover } from "./approvals.js";
+import type { RewindRun } from "./rewind.js";
 import type { CliHookVerdict } from "./toolHooks.js";
 import type { McpConnection } from "./mcpClient.js";
 import type { CliEvent } from "./events.js";
@@ -182,6 +183,18 @@ export interface AgentRunOptions {
    * 这类诊断行必须落在 stderr，只有入口知道该往哪写。
    */
   onContext?: (stats: CliContextStats) => void;
+  /**
+   * 回退日志（d.336）：默认开，`--no-rewind` 关掉。
+   *
+   * 关掉只是不抓原文；`heming rewind` 仍然能列出以前的轮次。
+   */
+  rewind?: boolean;
+  /**
+   * 这次运行留下了回退记录时回调一次（入口据此告诉用户 `heming rewind 1` 能退）。
+   *
+   * 没有改动、或存档写不进去时不会回调——那两种情况下说「可以退」都是骗人的。
+   */
+  onRewind?: (run: RewindRun) => void;
 }
 
 export interface AgentRunOutcome {
@@ -315,6 +328,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     hooks: options.hooks ?? null,
     mcp: options.mcp ?? [],
     readOnly: options.readOnly === true,
+    ...(options.rewind === false ? { rewind: false } : {}),
     // 记忆工具与只读模式互斥：只读时连 `remember` 都不挂（列出来等于承诺能写）。
     memory: options.memory !== false && options.readOnly !== true,
     ask: options.ask ?? null,
@@ -526,6 +540,12 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     };
     // 折叠情况在运行收口时回报一次（只报事实：入口决定要不要打给用户）。
     options.onContext?.(historyPrep.stats);
+    /*
+     * 收尾时把回退日志落盘：这一轮改过的文件在这里定稿。写不进去就算了（`close()` 自己吞掉），
+     * 回退是加分项，不该让一次成功的运行因为存档失败而报错。
+     */
+    const rewindRun = await tooling.rewind.close();
+    if (rewindRun) options.onRewind?.(rewindRun);
     return { json, settled, capHit };
   })();
 

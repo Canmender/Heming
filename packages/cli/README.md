@@ -47,6 +47,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `heming sessions [--json] [--cwd <dir>]` | 列出本机的会话存档（id / 时间 / 条数 / 最后一句），不调模型。见下文「会话：接着上次聊」。 |
 | `heming memory [list | add <一句话> | forget <id 或序号>]` | 查看 / 添加 / 删除工作区记忆（`.heming/memory.json`），不调模型。见下文「工作区记忆」。 |
 | `heming commands [--json] [--cwd <dir>]` | 列出工作区里的自定义命令（`.heming/commands/*.md`），不调模型。见下文「工作区命令」。 |
+| `heming rewind [轮数] [--cwd <dir>]` | 看/退回前面几轮改过的文件。省略轮数 = 只列出来看。不调模型。见下文「回退」。 |
 | `heming --version` | 打印 `@heming/cli <版本>`。 |
 | `heming --help` | 用法与能力边界。 |
 
@@ -66,6 +67,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--no-compact` | 不折叠：整段历史原样发给模型（贵、也更容易撞长度上限，但细节一字不丢）。 |
 | `--no-memory` | 这次运行不读也不写工作区记忆（`.heming/memory.json`），也不给模型 `remember` 工具。 |
 | `--no-subagent` | 不给模型 `agent_task`：查证类任务只能主对话自己翻（省一次模型调用）。只读模式下这个工具照常可用。 |
+| `--no-rewind` | 不留回退记录（默认会在写文件之前抓一份原文，供 `heming rewind` 用）。见下文「回退」。 |
 | `--output-format <f>` | stdout 格式：`text`（默认）/ `json`（= `--json`，exec 专用）/ `stream-json`（一行一条事件，run 与 exec 都可用）。 |
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
 | `--base-url <url>` | OpenAI 兼容端点，默认 `https://api.openai.com/v1`。必须以 `http://` / `https://` 开头。 |
@@ -231,6 +233,44 @@ pnpm --silent cli exec --json --resume "$sid" "按刚才看到的，改一下构
 - 不做跨机器同步：存档是本机文件，换机器或清掉目录就没了。
 - `--continue` 只按工作目录匹配，不判断「是不是同一件事」；同一目录下两个不相干的会话会被当成一条线。
 - 中断（Ctrl+C）那一轮只留提问：下次接上时模型知道你问过什么，但不知道当时答到哪。
+## 回退：`heming rewind`
+
+`run` 每次运行改文件之前，会先把它**原来的内容**抓一份存起来（一次运行一份，最多留 20 轮）。
+改坏了不用去翻 git——直接退回来：
+
+```bash
+pnpm cli rewind                  # 看有哪些轮次可以退
+pnpm cli rewind 1                # 退回最近一轮改过的文件
+pnpm cli rewind 3                # 退回最近三轮（回到这三轮开始之前）
+pnpm cli rewind 2 --cwd D:/repo  # 指定工作区
+```
+
+每轮跑完如果留了记录，stderr 会打一行：
+
+```text
+[heming] 这次改了 1 个文件，回退记录 20261118111857-4198：heming rewind 1 可以退回去。
+```
+
+### 存哪儿、抓什么
+
+- 存 `.heming/rewind/<运行 id>.json`：跟着仓库走（能 review、能手删、换台机器还在），一次运行一个文件，`git diff` 只看这一轮。
+- 只抓三个写工具：`file_write` / `file_edit` / `file_patch`；抓的是**文本**。
+- 新建的文件记成 `before: null`，回退时把它删掉——「刚才还没有它」就该回到没有。
+- 同一个文件在一轮里被改多次，只留**最早**那份原文；退多轮时也是每个文件取窗口里最早的，所以退回去的是「这几轮开始之前」，而不是中间某一版。
+- 退完把这几轮的记录删掉：不能拿旧原文盖新状态。
+
+### 退不回去的，会明说
+
+- **`run_command` 改的东西**：命令走哪条路径、改了哪些文件都是事后才知道，没有原文可抓。回执固定带一句提醒，让你用 git 或自己的备份核对。
+- **MCP 工具、hooks 里的脚本**：同上，不在记录里。
+- **太大 / 二进制 / 读不出来**：单文件超过 20 万字符、含 NUL 字节、读失败 → 记 `skipped`，回退时点名跳过，绝不用半截内容盖回去。
+- 只整轮回退，不做逐文件挑选（`/rewind` 的桌面版可以按文件退，终端这版没有）。
+
+### 开关
+
+- `--no-rewind`：这一次运行干脆不留记录（不想让原文进工作区目录时用）。
+- 记录是**明文**：含密钥的文件请把 `.heming/rewind/` 加进 `.gitignore`。
+
 ## 工作区命令：`/名字` 与 `heming commands`
 
 工作区里放一个 `.heming/commands/名字.md`，文件名就是命令名（小写字母开头，可带数字与短横线），
