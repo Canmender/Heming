@@ -25,6 +25,12 @@ import { BackupPanel } from "./model/BackupPanel.js";
 import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { SubscriptionRow } from "./model/SubscriptionRow.js";
+import { AccountFilterRow } from "./model/AccountFilterRow.js";
+import {
+  accountFilterEmptyText,
+  filterAccounts,
+  type AccountFilter,
+} from "../lib/accountFilter.js";
 import { QUOTA_BADGE } from "./model/quotaBadge.js";
 import { DomesticCard } from "./model/DomesticCard.js";
 import { QuotaReminder } from "./model/QuotaReminder.js";
@@ -361,6 +367,17 @@ export function ModelPage() {
   const swapHints = useMemo(() => swapSuggestions(accounts), [accounts]);
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
+  /**
+   * 账号列表的筛选项（`all` = 不筛）。
+   *
+   * 账号一多，真正要看的往往是「哪个快用完了」「哪个要重新登录」；筛完再刷新或
+   * 切号时也留在这一档上，方便连续处理同一类账号。
+   */
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
+  const visibleAccounts = useMemo(
+    () => filterAccounts(accounts, accountFilter),
+    [accounts, accountFilter],
+  );
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
   const [agents, setAgents] = useState<LocalAgent[]>(() =>
     parseAgents(readCache("agents") || ""),
@@ -2218,8 +2235,9 @@ export function ModelPage() {
                   </ul>
                 )}
 
+                <AccountFilterRow rows={accounts} value={accountFilter} onChange={setAccountFilter} />
                 <ul className="mt-3 space-y-2" aria-label="订阅账号列表">
-                  {accounts.map((row, index) => (
+                  {visibleAccounts.map((row, index) => (
                     <SubscriptionRow
                       key={`${row.agent}-${row.user ?? ""}-${index}`}
                       row={row}
@@ -2256,6 +2274,20 @@ export function ModelPage() {
                           它的额度、重置时间与余额会显示在这里。
                         </>
                       )}
+                    </li>
+                  )}
+                  {accounts.length > 0 && visibleAccounts.length === 0 && (
+                    <li className="rounded-xl border border-dashed border-line px-3 py-2.5 ui-caption">
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0">{accountFilterEmptyText(accountFilter)}</span>
+                        <button
+                          type="button"
+                          className="ui-link shrink-0"
+                          onClick={() => setAccountFilter("all")}
+                        >
+                          看全部
+                        </button>
+                      </span>
                     </li>
                   )}
                 </ul>

@@ -859,6 +859,162 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已把 Claude 换到还有额度的那个账号/)).toBeInTheDocument();
   });
 
+  it("账号多了以后能只看快用完的那几个，看完再回到全部", async () => {
+    const rows = [
+      ...[1, 2, 3, 4].map((n) => ({
+        agent: "claude",
+        user: `ready${n}@example.com`,
+        alias: `宽裕的 ${n}`,
+        plan: "Max",
+        active: n === 1,
+        on: n === 1,
+        windows: [{ name: "5 hours", used: 30, remaining: 70, display: "30% used" }],
+        readAt: new Date().toISOString(),
+      })),
+      {
+        agent: "codex",
+        user: "tight@example.com",
+        alias: "快用完的",
+        plan: "Plus",
+        active: false,
+        on: false,
+        windows: [{ name: "week", used: 88, remaining: 12, display: "88% used" }],
+        readAt: new Date().toISOString(),
+      },
+      {
+        agent: "gemini",
+        user: "gone@example.com",
+        alias: "失效的",
+        active: true,
+        on: true,
+        lapsed: "登录过期了",
+        windows: [],
+        readAt: new Date().toISOString(),
+      },
+    ];
+    installBridge({}, { "accounts --json": { ok: true, stdout: JSON.stringify(rows), stderr: "" } });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    const bar = await screen.findByRole("group", { name: "按状态筛选账号" });
+    expect(within(bar).getByRole("button", { name: /^全部/ })).toHaveTextContent("6");
+    expect(within(bar).getByRole("button", { name: /^要重新登录/ })).toHaveTextContent("1");
+    expect(within(bar).getByRole("button", { name: /^快用完/ })).toHaveTextContent("1");
+    expect(within(bar).getByRole("button", { name: /^还有余量/ })).toHaveTextContent("4");
+
+    fireEvent.click(within(bar).getByRole("button", { name: /^快用完/ }));
+    const list = screen.getByLabelText("订阅账号列表");
+    expect(within(list).getByText("快用完的")).toBeInTheDocument();
+    expect(within(list).queryByText("失效的")).toBeNull();
+    expect(within(list).queryByText("宽裕的 1")).toBeNull();
+    expect(within(bar).getByRole("button", { name: /^快用完/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(within(bar).getByRole("button", { name: /^全部/ }));
+    expect(within(screen.getByLabelText("订阅账号列表")).getByText("失效的")).toBeInTheDocument();
+  });
+
+  it("账号不到六个时不摆筛选项：一眼看完的东西不用分类", async () => {
+    installBridge({}, {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            agent: "claude",
+            user: "a@example.com",
+            alias: "甲",
+            active: true,
+            on: true,
+            windows: [{ name: "5 hours", used: 10, remaining: 90, display: "10% used" }],
+            readAt: new Date().toISOString(),
+          },
+          {
+            agent: "claude",
+            user: "b@example.com",
+            alias: "乙",
+            active: false,
+            on: false,
+            windows: [{ name: "5 hours", used: 95, remaining: 5, display: "95% used" }],
+            readAt: new Date().toISOString(),
+          },
+        ]),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    const list = await screen.findByLabelText("订阅账号列表");
+    expect(within(list).getByText("甲")).toBeInTheDocument();
+    expect(within(list).getByText("乙")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "按状态筛选账号" })).toBeNull();
+  });
+
+  it("筛着筛着这一类没了，就说清楚并给一条「看全部」的路", async () => {
+    const tight = [
+      ...[1, 2].map((n) => ({
+        agent: "claude",
+        user: `ready${n}@example.com`,
+        alias: `宽裕的 ${n}`,
+        active: true,
+        on: n === 1,
+        windows: [{ name: "5 hours", used: 20, remaining: 80, display: "20% used" }],
+        readAt: new Date().toISOString(),
+      })),
+      ...[3, 4].map((n) => ({
+        agent: "codex",
+        user: `mid${n}@example.com`,
+        alias: `一般的 ${n}`,
+        active: false,
+        on: false,
+        windows: [{ name: "week", used: 60, remaining: 40, display: "60% used" }],
+        readAt: new Date().toISOString(),
+      })),
+      {
+        agent: "codex",
+        user: "tight@example.com",
+        alias: "快用完的",
+        active: false,
+        on: false,
+        windows: [{ name: "week", used: 88, remaining: 12, display: "88% used" }],
+        readAt: new Date().toISOString(),
+      },
+      {
+        agent: "qoder",
+        user: "q@example.com",
+        alias: "国内号",
+        active: true,
+        on: true,
+        windows: [{ name: "Month", used: 20, remaining: 80, display: "20% used" }],
+        readAt: new Date().toISOString(),
+      },
+    ];
+    // 同一份夹具对象：重读一次之后「快用完的」不再紧张，分类就空了。
+    const accountsReply = { ok: true, stdout: JSON.stringify(tight), stderr: "" };
+    installBridge({}, { "accounts --json": accountsReply });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    const bar = await screen.findByRole("group", { name: "按状态筛选账号" });
+    fireEvent.click(within(bar).getByRole("button", { name: /^快用完/ }));
+    expect(within(screen.getByLabelText("订阅账号列表")).getByText("快用完的")).toBeInTheDocument();
+
+    accountsReply.stdout = JSON.stringify(
+      tight.map((row) => ({
+        ...row,
+        windows: [{ name: "week", used: 20, remaining: 80, display: "20% used" }],
+      })),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /重读全部/ }));
+
+    expect(
+      await screen.findByText(/这个筛选下没有快用完的账号/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "看全部" }));
+    expect(within(screen.getByLabelText("订阅账号列表")).getByText("国内号")).toBeInTheDocument();
+  });
+
   it("余额提醒也走同一个设置：选一个数额就写 balanceAlert，并说清按各自币种算", async () => {
     const { calls } = installBridge({}, {
       "settings list --json": {
