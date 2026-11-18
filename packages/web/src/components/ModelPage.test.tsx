@@ -44,7 +44,19 @@ function installBridge(
     if (args[0] === "accounts") {
       return {
         ok: true,
-        stdout: JSON.stringify([{ agent: "claude", name: "工作号", allowance: "82% used" }]),
+        // 与内核 `accounts --json` 的真实字段一致：额度在 windows 里，没有 allowance
+        stdout: JSON.stringify([
+          {
+            agent: "claude",
+            user: "work@example.com",
+            alias: "工作号",
+            plan: "Max",
+            active: true,
+            on: true,
+            windows: [{ name: "5 hours", used: 82, remaining: 18, display: "82% used" }],
+            readAt: new Date().toISOString(),
+          },
+        ]),
         stderr: "",
       };
     }
@@ -304,11 +316,17 @@ describe("ModelPage · 添加来源", () => {
 });
 
 describe("ModelPage · 账号与更多", () => {
-  it("来源页同时展示已登录账号与额度", async () => {
+  it("来源页按内核字段展示账号：计划、状态与窗口额度", async () => {
     installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("工作号")).toBeInTheDocument();
+    // 计划徽标 + 状态徽标（active && on = 在用）
+    expect(screen.getByText("Max")).toBeInTheDocument();
+    expect(screen.getByText("在用")).toBeInTheDocument();
+    // 窗口名中文化，结论按剩余百分比；厂商原话留在右侧小字里
+    expect(screen.getByText("5 小时")).toBeInTheDocument();
+    expect(screen.getByText("剩 18%")).toBeInTheDocument();
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 

@@ -24,6 +24,7 @@ import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
 import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
+import { SubscriptionRow } from "./model/SubscriptionRow.js";
 import { useLlmStore } from "../store/llm.js";
 import { fetchGatewayImageModels } from "../lib/magpieClient.js";
 import { useUiStore } from "../store/ui.js";
@@ -58,6 +59,7 @@ import {
   visibleArgs,
   type AgentVisibility,
 } from "../lib/magpieVisible.js";
+import { agentName, latestReadAt } from "../lib/magpieQuota.js";
 import {
   parseCompact,
   parseContextCap,
@@ -217,6 +219,13 @@ export function ModelPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
+  const [accountBusy, setAccountBusy] = useState<string | null>(null);
+  /**
+   * 重置倒计时与「读数几分钟前」都要跟着时间走。集中一个时钟：
+   * 每分钟跳一次，没有账号就不开定时器（不白跑）。
+   */
+  const [now, setNow] = useState(() => Date.now());
   /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
   const [agents, setAgents] = useState<LocalAgent[]>([]);
   const [agentConfirm, setAgentConfirm] = useState<{ id: string; name: string; model: string } | null>(
@@ -224,13 +233,17 @@ export function ModelPage() {
   );
   /** 每行待应用的模型输入（按智能体展示名索引，不持久化）。 */
   /**
-   * 待确认的破坏性删除（审计 F4）：来源与搜索来源以前点一下就执行，而同一页的分组/密钥
+   * 待确认的动作（审计 F4）：来源与搜索来源以前点一下就执行，而同一页的分组/密钥
    * 删除却是两步确认——同一件不可恢复的事有两套语言。现在统一走 ConfirmDialog。
+   *
+   * 不只有删除：订阅账号的「切到这个」会改写别的工具的登录状态，同样先问一句，
+   * 但那不是破坏性操作，所以按钮用 `tone: "primary"` 而不是红的。
    */
-  const [confirmDelete, setConfirmDelete] = useState<{
+  const [confirmAction, setConfirmAction] = useState<{
     title: string;
     desc: string;
     confirmLabel: string;
+    tone?: "danger" | "primary";
     action: () => void;
   } | null>(null);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
@@ -510,6 +523,70 @@ export function ModelPage() {
         : result.error || "无法打开登录窗口",
       ok: result.ok,
     });
+    // 登录成功后账号列表会多一行（额度也要重读）：直接刷一次，不用用户再点。
+    if (result.ok) await loadAccounts();
+  };
+
+  /**
+   * 「刷新额度」：内核读用量有 1 分钟缓存，只调 `accounts --json` 可能还是刚才那份。
+   * 先让内核现在就问一次厂商（`quota refresh <provider>`），再重新读账号列表；
+   * 某个厂商问不到不影响别的厂商，结论写在来源区的提示条里。
+   */
+  const refreshAccountQuota = async () => {
+    if (!cli) return;
+    setAccountBusy("refresh");
+    try {
+      const agents = [...new Set(accounts.map((row) => row.agent))];
+      await Promise.all(agents.map((agent) => cli.cli(["quota", "refresh", agent])));
+      await loadAccounts();
+      setNow(Date.now());
+      setNotice("已重新读取订阅额度。");
+    } catch (err) {
+      setNotice(`刷新额度失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /** 失效的账号重新登录：与登录卡片同一条命令，只是从这一行发起。 */
+  const reloginAccount = (row: AccountRow) => {
+    void runTerminal(`登录 ${agentName(row.agent)}`, ["accounts", "add", row.agent]);
+  };
+
+  /**
+   * 切换智能体自己的登录账号（`accounts switch <agent> <email>`）。
+   *
+   * 这会改写那个工具自己的登录状态，所以走二次确认；确认文案里说明「不切也能用上」，
+   * 因为和鸣走网关时本来就按各账号剩余额度自动挑，别让人以为不切就白登录了。
+   */
+  const switchAccount = async (row: AccountRow) => {
+    if (!cli || !row.user) return;
+    setAccountBusy(`${row.agent}:${row.user}`);
+    try {
+      const result = await cli.cli(["accounts", "switch", row.agent, row.user]);
+      await loadAccounts();
+      setNow(Date.now());
+      setNotice(
+        result.ok
+          ? `已把 ${agentName(row.agent)} 切到 ${row.label}。`
+          : `切换失败：${(result.error || result.stderr || "").trim() || "内核没有说明原因"}`,
+      );
+    } catch (err) {
+      setNotice(`切换失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  const confirmSwitchAccount = (row: AccountRow) => {
+    if (!row.user) return;
+    setConfirmAction({
+      title: `把 ${agentName(row.agent)} 切到 ${row.label}？`,
+      desc: "切换会改写这个智能体自己的登录状态：之后它直接花这个账号的额度。只是换一个账号，随时可以再切回来。",
+      confirmLabel: "切换",
+      tone: "primary",
+      action: () => void switchAccount(row),
+    });
   };
 
   useEffect(() => {
@@ -539,6 +616,12 @@ export function ModelPage() {
     loadVisibility,
     loadGlobals,
   ]);
+
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [accounts.length]);
 
   /** 目录行：以网关给的模型为准，目录补全显示名/思考档/窗口/图片输入。 */
   const modelRows = useMemo(
@@ -1205,9 +1288,25 @@ export function ModelPage() {
             {cli && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <div className="ui-card p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="ui-section-title">订阅账号</h2>
-                  <span className="ui-caption">多个账号自动分担</span>
+                  <div className="flex items-center gap-2">
+                    <span className="ui-caption">
+                      {latestReadAt(accounts, now) ||
+                        (accounts.length > 1 ? "多个账号自动分担" : "每分钟自动重读")}
+                    </span>
+                    {accounts.length > 0 && (
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        leadingIcon={<RefreshIcon width={14} height={14} />}
+                        busy={accountBusy === "refresh"}
+                        onClick={() => void refreshAccountQuota()}
+                      >
+                        刷新额度
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {SUBSCRIPTIONS.map((item) => (
@@ -1232,19 +1331,22 @@ export function ModelPage() {
                     </button>
                   ))}
                 </div>
-                <ul className="mt-3 divide-y divide-line border-t border-line">
+                <ul className="mt-3 space-y-2" aria-label="订阅账号列表">
                   {accounts.map((row, index) => (
-                    <li key={`${row.agent}-${row.label}-${index}`} className="flex items-center gap-3 py-2">
-                      <Avatar name={row.agent} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ui-md font-semibold">{row.label}</span>
-                        <span className="block ui-caption">{row.agent}</span>
-                      </span>
-                      <span className="shrink-0 ui-caption">{row.allowance ?? "额度未知"}</span>
-                    </li>
+                    <SubscriptionRow
+                      key={`${row.agent}-${row.user ?? ""}-${index}`}
+                      row={row}
+                      now={now}
+                      busy={accountBusy === `${row.agent}:${row.user}`}
+                      onSwitch={confirmSwitchAccount}
+                      onRelogin={reloginAccount}
+                    />
                   ))}
                   {accounts.length === 0 && (
-                    <li className="py-2 ui-caption">还没有账号，点一个服务登录。</li>
+                    <li className="rounded-xl border border-dashed border-line px-3 py-2.5 ui-caption">
+                      还没有账号。上面这些软件里已经登录的订阅可以直接借给和鸣用：点一个登录，
+                      它的额度、重置时间与余额会显示在这里。
+                    </li>
                   )}
                 </ul>
               </div>
@@ -1396,7 +1498,7 @@ export function ModelPage() {
                           disabled={!cli}
                           icon={<TrashIcon width={16} height={16} />}
                           onClick={() =>
-                            setConfirmDelete({
+                            setConfirmAction({
                               title: "删除来源？",
                               desc: `来源「${row.id}」删除后不可恢复（地址、Key 与模型记录一并移除）。`,
                               confirmLabel: "删除",
@@ -1763,7 +1865,7 @@ export function ModelPage() {
                   size="sm" variant="danger"
                   disabled={!cli || !groupForm.target.trim()}
                   onClick={() =>
-                    setConfirmDelete({
+                    setConfirmAction({
                       title: "删除分组？",
                       desc: `分组「${groupForm.target.trim()}」删除后不可恢复。`,
                       confirmLabel: "删除",
@@ -1958,7 +2060,7 @@ export function ModelPage() {
                   disabled={!cli || !searchForm.target.trim()}
                   onClick={() => {
                     const target = searchForm.target.trim();
-                    setConfirmDelete({
+                    setConfirmAction({
                       title: "删除搜索来源？",
                       desc: `搜索来源「${target}」删除后不可恢复（地址与 Key 一并移除）。`,
                       confirmLabel: "删除",
@@ -2032,7 +2134,7 @@ export function ModelPage() {
                   size="sm" variant="danger"
                   disabled={!cli || !gatewayKeyForm.target.trim()}
                   onClick={() =>
-                    setConfirmDelete({
+                    setConfirmAction({
                       title: "删除密钥？",
                       desc: `密钥「${gatewayKeyForm.target.trim()}」删除后不可恢复。`,
                       confirmLabel: "删除",
@@ -2127,34 +2229,34 @@ export function ModelPage() {
         )}
       </div>
 
-      {confirmDelete && (
+      {confirmAction && (
         <ConfirmDialog
-          title={confirmDelete.title}
-          onCancel={() => setConfirmDelete(null)}
+          title={confirmAction.title}
+          onCancel={() => setConfirmAction(null)}
           footer={
             <>
               <Button
                 type="button"
                 size="md" variant="ghost" className="text-muted"
-                onClick={() => setConfirmDelete(null)}
+                onClick={() => setConfirmAction(null)}
               >
                 取消
               </Button>
               <Button
                 type="button"
-                size="md" variant="danger"
+                size="md" variant={confirmAction.tone === "primary" ? "primary" : "danger"}
                 onClick={() => {
-                  const pending = confirmDelete;
-                  setConfirmDelete(null);
+                  const pending = confirmAction;
+                  setConfirmAction(null);
                   pending.action();
                 }}
               >
-                {confirmDelete.confirmLabel}
+                {confirmAction.confirmLabel}
               </Button>
             </>
           }
         >
-          <p className="ui-body-sm text-muted">{confirmDelete.desc}</p>
+          <p className="ui-body-sm text-muted">{confirmAction.desc}</p>
         </ConfirmDialog>
       )}
 

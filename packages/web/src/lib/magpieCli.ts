@@ -6,6 +6,8 @@
  * 浏览器端没有这个桥 → 页面显示「仅桌面端可用」，但网关状态/模型目录仍可看。
  */
 
+import { emptyWindow, type QuotaWindow } from "./magpieQuota.js";
+
 export interface MagpieCliResult {
   ok: boolean;
   code?: number | null;
@@ -112,12 +114,89 @@ export function parseProviders(raw: string): ProviderRow[] {
   return rows;
 }
 
-/** 订阅账号：`magpie accounts --json` 是数组；字段随版本可能增加，这里只收敛通用字段。 */
+/**
+ * 订阅账号：`magpie accounts --json` 的一行。
+ *
+ * 字段与内核的 `accountRow`（internal/cli/accounts_cli.go）对齐。上一版只收敛了
+ * 一个 `allowance` 字符串——内核从来没有这个字段，于是真机上每个账号都显示
+ * 「额度未知」；真正的用量在 `windows` 里，一个账号有多个窗口（5 小时 / 每周…）。
+ */
 export interface AccountRow {
   agent: string;
+  /** 别名优先，其次邮箱/用户名——内核的 `accounts alias` 就是给这个用的。 */
   label: string;
-  allowance?: string;
+  user?: string;
+  /** 订阅档位（Pro / Max / Team…）。 */
+  plan?: string;
+  /** 席位（团队套餐里这一席的名字）。 */
+  seat?: string;
+  /** 这个智能体当前登录的账号（内核的 ●）。 */
+  active: boolean;
+  /** 正在用：`active`，或者额度用完时下一个接手。 */
+  on: boolean;
+  windows: QuotaWindow[];
+  /** 余额（按量付费/点数套餐，字符串因为带货币符号）。 */
+  balance?: string;
+  /** Codex 手里还能花几次 rate-limit reset。 */
+  resets?: { count: number; until?: string };
+  /** 登录失效，需要重新登录（内核的 lapsed）。 */
+  lapsed?: string;
+  /** 这一次没读到额度的原因。 */
+  error?: string;
+  /** 读数时间：读不到现行值时是上一次的读数（asOf）。 */
+  readAt?: string;
+  asOf?: string;
   raw: Record<string, unknown>;
+}
+
+/** 一个窗口：内核 `provider.QuotaSpan` 的子集，值缺失时给安全默认。 */
+function parseQuotaWindow(value: unknown): QuotaWindow | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  const text = (key: string): string =>
+    typeof item[key] === "string" ? (item[key] as string).trim() : "";
+  const number = (key: string): number | null =>
+    typeof item[key] === "number" && Number.isFinite(item[key]) ? (item[key] as number) : null;
+  const used = number("used");
+  const remaining = number("remaining");
+  const display = text("display");
+  const unlimited = item.unlimited === true;
+  // 内核偶尔只给一句厂商原话（`text` 窗口）；三个数一个都没有的窗口画不出条，
+  // 留着会让页面上多一行「剩 100%」的假读数，所以直接丢掉。
+  if (!unlimited && used === null && remaining === null && !display) return null;
+  const window = emptyWindow();
+  return {
+    ...window,
+    name: text("name"),
+    unlimited,
+    used: used ?? (remaining === null ? 0 : 100 - remaining),
+    remaining: remaining ?? (used === null ? 100 : 100 - used),
+    resetsAt: text("resetsAt") || null,
+    display,
+    text: item.text === true,
+    amount: number("amount"),
+    limit: number("limit"),
+    unit: text("unit"),
+    pool: text("pool"),
+    runsOutAt: text("runsOutAt") || null,
+    balance: number("balance"),
+  };
+}
+
+function parseQuotaWindows(value: unknown): QuotaWindow[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(parseQuotaWindow)
+    .filter((window): window is QuotaWindow => window !== null);
+}
+
+function parseResets(value: unknown): { count: number; until?: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
+  if (count <= 0) return undefined;
+  const until = typeof item.until === "string" ? item.until.trim() : "";
+  return until ? { count, until } : { count };
 }
 
 export function parseAccounts(stdout: string): AccountRow[] {
@@ -131,13 +210,29 @@ export function parseAccounts(stdout: string): AccountRow[] {
   return data
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
     .map((item) => {
-      const str = (key: string): string =>
-        typeof item[key] === "string" ? (item[key] as string) : "";
-      const agent = str("agent") || str("kind") || str("provider") || "账号";
-      const label =
-        str("name") || str("email") || str("label") || str("account") || str("id") || "(未命名)";
-      const allowance = str("allowance") || str("used") || str("quota") || str("reset");
-      return { agent, label, allowance: allowance || undefined, raw: item };
+      const text = (key: string): string =>
+        typeof item[key] === "string" ? (item[key] as string).trim() : "";
+      const time = (key: string): string | undefined => text(key) || undefined;
+      const agent = text("agent") || text("kind") || text("provider") || "账号";
+      // 内核只有 user；name/email 是早先的写法，留着兼容插件自己报的行。
+      const user = text("user") || text("email") || text("name") || undefined;
+      return {
+        agent,
+        label: text("alias") || user || "(未命名)",
+        user,
+        plan: text("plan") || undefined,
+        seat: text("seat") || undefined,
+        active: item.active === true,
+        on: item.on === true,
+        windows: parseQuotaWindows(item.windows),
+        balance: text("balance") || undefined,
+        resets: parseResets(item.resets),
+        lapsed: text("lapsed") || undefined,
+        error: text("error") || undefined,
+        readAt: time("readAt"),
+        asOf: time("asOf"),
+        raw: item,
+      };
     });
 }
 

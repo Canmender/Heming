@@ -61,16 +61,73 @@ describe("parseProviders", () => {
 });
 
 describe("parseAccounts", () => {
-  it("解析 accounts --json 数组，收敛 agent/名称/额度", () => {
+  it("解析 accounts --json 的真实字段：账号、计划、在用状态、窗口额度", () => {
     const rows = parseAccounts(
       JSON.stringify([
-        { agent: "claude", name: "工作号", allowance: "82% used" },
-        { agent: "codex", email: "me@example.com" },
+        {
+          agent: "claude",
+          user: "work@example.com",
+          alias: "工作号",
+          plan: "Max",
+          active: true,
+          on: true,
+          windows: [
+            {
+              name: "5 hours",
+              used: 82,
+              remaining: 18,
+              resetsAt: "2026-11-18T12:30:00Z",
+              display: "82% used",
+            },
+            { name: "week", unlimited: true },
+          ],
+          readAt: "2026-11-18T09:00:00Z",
+        },
+        { agent: "codex", user: "me@example.com", on: false, windows: [], error: "no token" },
       ]),
     );
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ agent: "claude", label: "工作号", allowance: "82% used" });
-    expect(rows[1]).toMatchObject({ agent: "codex", label: "me@example.com" });
+    // 别名优先于邮箱；plan/active/on 原样带出，页面据此画徽标与「在用」
+    expect(rows[0]).toMatchObject({
+      agent: "claude",
+      label: "工作号",
+      user: "work@example.com",
+      plan: "Max",
+      active: true,
+      on: true,
+    });
+    expect(rows[0]?.windows).toHaveLength(2);
+    expect(rows[0]?.windows[0]).toMatchObject({ name: "5 hours", used: 82, remaining: 18 });
+    expect(rows[0]?.windows[1]?.unlimited).toBe(true);
+    // 没有 active/on 的行不能被当成在用；读不到额度的原因要留着给页面显示
+    expect(rows[1]).toMatchObject({ agent: "codex", label: "me@example.com", active: false, on: false, error: "no token" });
+    expect(rows[1]?.windows).toEqual([]);
+  });
+
+  it("窗口只给了 remaining 时反推 used，缺字段给安全默认", () => {
+    const rows = parseAccounts(
+      JSON.stringify([{ agent: "codex", user: "a@b.c", windows: [{ name: "week", remaining: 40 }] }]),
+    );
+    expect(rows[0]?.windows[0]).toMatchObject({ used: 60, remaining: 40, unlimited: false, text: false });
+    expect(rows[0]?.resets).toBeUndefined();
+    expect(rows[0]?.balance).toBeUndefined();
+  });
+
+  it("三个数都没有、也没有厂商原话的窗口丢掉，只剩原话的窗口保留", () => {
+    const rows = parseAccounts(
+      JSON.stringify([
+        {
+          agent: "claude",
+          user: "a@b.c",
+          windows: [
+            { name: "5 hours" },
+            { name: "week", display: "上周已用完", text: true },
+            { name: "month", unlimited: true },
+          ],
+        },
+      ]),
+    );
+    expect(rows[0]?.windows.map((item) => item.name)).toEqual(["week", "month"]);
   });
 
   it("不是数组/坏 JSON → 空数组，不抛", () => {

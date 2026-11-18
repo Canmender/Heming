@@ -117,6 +117,11 @@
 
 ## 6. 验证
 
+- 订阅账号（来源 tab）的额度已经按内核 `accounts --json` 的真实契约渲染（d.279）：
+  `packages/web/src/lib/magpieQuota.ts` 负责窗口名中文化、剩余百分比、色调、重置倒计时、
+  读数时间与状态文案（全纯函数，`now` 由调用方传），`packages/web/src/components/model/SubscriptionRow.tsx`
+  负责那一行的版式；「刷新额度」走 `quota refresh <provider>`（`accounts refresh` 只续登录令牌，不重读额度），
+  「切到这个」走 `accounts switch <agent> <user>` 并带二次确认。
 - `pnpm --filter @heming/web test`（vitest）：`ModelPage.test.tsx`、`modelCatalog.test.ts`、
   `magpieVisible.test.ts`、`modelGlobals.test.ts`、`modelSettings.test.ts`、`modelSpec.test.ts`、
   `modelTier.test.ts`、`providerModels.test.ts`、`magpieClient.test.ts`、

@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.279.4.120.12",
+    "date": "2026-11-18",
+    "title": "订阅账号显示真实额度：窗口、重置时间、余额，还能一键刷新与切换",
+    "bullets": [
+      "`packages/web` 全量 `vitest run`：**425 个测试文件 / 6112 个用例全绿**；`tsc -p tsconfig.json --noEmit` 退出码 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过（model 页字号档 4、11px 正文 0、对比度不合格 0、横向溢出 0）。",
+      "新增 `packages/web/src/lib/magpieQuota.test.ts`（25 例）：窗口名翻译、百分比取整与夹取、按剩余定色调、时长分档、纳秒时间戳、重置倒计时、读数/上次读数、状态优先级、卡头「最近读数」。",
+      "`packages/web/src/lib/magpieCli.test.ts` 的 `parseAccounts` 改成真实字段夹具（`windows` / `plan` / `active` / `on` / `error`，含「只给 remaining 时反推 used」）；`ModelPage.test.tsx` 的来源页用例改为断言计划徽标、在用状态、窗口名与「剩 18%」。",
+      "本机 `magpie-core.exe accounts --json` 仍返回 `[]`（这台机器没有已登录的订阅账号），所以额度来自夹具：真实账号数据要到用户登录 Claude Code / Codex 等之后才会出现。",
+      "**按账号测模型**：`provider test` 没有 `--account`，见模型页对齐规格 §5。",
+      "**`accounts switch-only` 开关**：这条命令只有写、没有查询（裸执行报 usage 并 exit 1），页面摆不出当前状态，不做开关，避免显示一个可能与实际不符的按钮。",
+      "**额度用尽的自动切换策略**：内核自己按剩余额度挑账号，页面只显示「接手」状态，不提供手动排序。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「来源 → 订阅账号」原来每个账号后面只有一句「额度未知」。查下去不是内核没给数据，而是页面在等一个内核从来没有的字段（`allowance`）：真正的内容在 `accounts --json` 的 `windows` 里，一个账号挂着好几个窗口（Claude 的 5 小时 + 每周、Codex 的周额度…），还带计划档位、在用/接手状态、重置时间、余额与失效原因。这轮按内核的真实契约重画这一行，并补上「刷新额度」与「切到这个账号」两个本来就该有的动作。",
+      "做了什么",
+      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 每个账号显示计划档位、席位、读数时间 | 来源 tab → 订阅账号 | `accounts --json` 的 `plan` / `seat` / `readAt` / `asOf` || 状态徽标：在用 / 接手 / 已登录 / 备用 / 登录失效 / 读不到 | 同上，徽标悬停有原因 | `active` / `on` / `lapsed` / `error` || 每个额度窗口一条进度条：窗口名、剩多少、厂商原话、重置倒计时 | 同上 | `windows[]`（`name` / `used` / `remaining` / `resetsAt` / `display` / `unlimited`） || 余额、可手动重置次数 | 同上 | `balance` / `resets` || 刷新额度 | 卡片右上「刷新额度」 | `quota refresh <provider>`（`accounts refresh` 只续登录令牌，不重读额度） || 切到这个账号（二次确认） | 非当前账号那一行的「切到这个」 | `accounts switch <agent> <user>` || 登录失效时重新登录 | 失效那一行的「重新登录」 | `accounts add <agent>` |",
+      "读数时间与重置倒计时每分钟自己走一格（页面里一个时钟，没有账号就不开定时器），不需要用户反复点刷新。进度条按「还剩多少」上色：剩 10% 以下红、25% 以下黄，正常保持灰。整页文案保持「不摊内核英文」的既有口径：窗口名翻成「5 小时 / 每周 / 每月 / 点数」，厂商自己的写法（`82% used`、`In use`）留在右侧小字里不翻译。",
+      "怎么验证",
+      "留白（有依据，不是没做）"
+    ]
+  },
+  {
     "version": "d.278.4.120.12",
     "date": "2026-11-18",
     "title": "模型页对齐 magpie：目录、价格、可见范围、看图与画图都在同一页",
