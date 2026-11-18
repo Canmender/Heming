@@ -1,0 +1,436 @@
+/**
+ * 轮次检查点（d.290）：`/rewind N` 的底料。
+ *
+ * 为什么要有：`turnWrites`（d.176/d.185）只能撤回「刚刚这一轮」，而长任务真正的痛点是
+ * 「第三轮手滑改坏了，我想连那轮一起退回去」。codex / Claude Code 的 rewind 就是干这个的。
+ *
+ * 怎么做到的：桌面端的写盘备份是「每个路径一份、用一次就消费」（`file-fs.js` 的
+ * `undoWrite`），没法按时间点批量还原；所以这里换一条更笨但更可靠的路——
+ * **在写之前**用文件桥把目标文件的原内容读下来，按轮存进 localStorage。
+ * 回滚时把 `before` 原样写回去，原本不存在的文件则删掉。
+ *
+ * 已知边界（写进用户可见的文案，不藏）：
+ * - 只覆盖和鸣自己的写工具（`file_write` / `file_edit` / `file_patch`）；
+ *   `run_command` 之类绕过工具桥的改动抓不到。
+ * - 单个文件超过 200k 字符、或读出来是二进制 / GBK（写回会改编码）时不硬还原，记成 skipped。
+ * - **对话历史不回退**：这里只还原文件，消息照旧留在会话里（截断要服务端新接口，另做）。
+ * - localStorage 不可用或配额满时静默降级——宁可不记，也不能打断正在跑的一轮。
+ */
+
+import type { ToolBridge } from "../agentStream.js";
+import { getFileBridge } from "./bridge.js";
+import type { FileRoot } from "./paths.js";
+import { FILE_EDIT_TOOL, FILE_PATCH_TOOL, FILE_WRITE_TOOL, targetsOfCall } from "./ruleTargets.js";
+
+export const REWIND_CHECKPOINTS_KEY = "heming.rewindCheckpoints.v1";
+
+/** 每个会话最多保留多少轮检查点；再多就淘汰最老的。 */
+export const REWIND_MAX_TURNS = 20;
+
+/** 最多保留多少个会话的检查点。 */
+export const REWIND_MAX_SESSIONS = 20;
+
+/** 单个文件超过这个字符数就不存（存了也多半写不回去，还容易把配额撑爆）。 */
+export const REWIND_MAX_FILE_CHARS = 200_000;
+
+/** 单轮抓取的总字符预算：一轮改了几十个大文件时，超出部分不记。 */
+export const REWIND_MAX_TURN_CHARS = 1_000_000;
+
+/** 抓不到 / 不能安全还原的原因。 */
+export type RewindSkipReason = "too-large" | "binary" | "encoding" | "unreadable";
+
+/** 一轮里对某个文件抓到的「改之前」。 */
+export interface CheckpointFile {
+  /** 绝对路径（正斜杠，与 `ToolBridge.execute` 返回的 `writes` 一致）。 */
+  path: string;
+  /** 写之前的内容；`null` = 那一轮之前这个文件还不存在（回滚时删除它）。 */
+  before: string | null;
+  /** 有值 = 这份没抓到可还原的内容，回滚时跳过并如实汇报。 */
+  skipped?: RewindSkipReason;
+}
+
+/** 一轮的检查点。 */
+export interface TurnCheckpoint {
+  id: string;
+  /** 这一轮落盘的时间（ms）。 */
+  at: number;
+  /** 关联的助手消息 id（有就记，方便以后把「回退到哪条消息」接起来）。 */
+  messageId?: string;
+  files: CheckpointFile[];
+}
+
+/** 回滚计划：要写回去的内容、要删掉的文件、以及跳过的那些。 */
+export interface RewindPlan {
+  /** 这次回退多少轮。 */
+  turns: number;
+  restore: { path: string; content: string }[];
+  remove: string[];
+  skipped: { path: string; reason: RewindSkipReason }[];
+}
+
+type Store = Record<string, TurnCheckpoint[]>;
+
+const STORAGE_READ_ERRORS = new Set(["invalid-path", "outside-roots", "no-roots"]);
+
+let loaded = false;
+let store: Store = {};
+
+/** 每轮抓取的缓冲区（只在内存里，收口时一次性落库）。 */
+interface TurnBuffer {
+  at: number;
+  messageId?: string;
+  /** 按路径去重、保留最早那份 `before`（这一轮第一次动它之前的样子才是要回到的样子）。 */
+  files: Map<string, CheckpointFile>;
+  chars: number;
+}
+
+const buffers = new Map<string, TurnBuffer>();
+let sequence = 0;
+
+function isSkipReason(value: unknown): value is RewindSkipReason {
+  return value === "too-large" || value === "binary" || value === "encoding" || value === "unreadable";
+}
+
+function isCheckpointFile(value: unknown): value is CheckpointFile {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<CheckpointFile>;
+  if (typeof item.path !== "string" || item.path.length === 0) return false;
+  if (!(item.before === null || typeof item.before === "string")) return false;
+  return item.skipped === undefined || isSkipReason(item.skipped);
+}
+
+function isTurnCheckpoint(value: unknown): value is TurnCheckpoint {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<TurnCheckpoint>;
+  return (
+    typeof item.id === "string" &&
+    item.id.length > 0 &&
+    typeof item.at === "number" &&
+    Number.isFinite(item.at) &&
+    Array.isArray(item.files) &&
+    item.files.every(isCheckpointFile) &&
+    (item.messageId === undefined || typeof item.messageId === "string")
+  );
+}
+
+function readStorage(): Store {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(REWIND_CHECKPOINTS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Store = {};
+    for (const [conversationId, list] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!conversationId || !Array.isArray(list)) continue;
+      const checkpoints = list.filter(isTurnCheckpoint).map((item) => ({
+        id: item.id,
+        at: item.at,
+        files: item.files.map((file) =>
+          file.skipped ? { path: file.path, before: file.before, skipped: file.skipped } : { path: file.path, before: file.before },
+        ),
+        ...(item.messageId ? { messageId: item.messageId } : {}),
+      }));
+      if (checkpoints.length > 0) out[conversationId] = checkpoints;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeStorage(value: Store): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    if (Object.keys(value).length === 0) localStorage.removeItem(REWIND_CHECKPOINTS_KEY);
+    else localStorage.setItem(REWIND_CHECKPOINTS_KEY, JSON.stringify(value));
+  } catch {
+    // 配额满 / 隐私模式：内存里仍然对，只是重启后丢。绝不抛。
+  }
+}
+
+function ensureLoaded(): void {
+  if (loaded) return;
+  loaded = true;
+  store = readStorage();
+}
+
+function latestAt(list: readonly TurnCheckpoint[]): number {
+  let latest = 0;
+  for (const item of list) if (item.at > latest) latest = item.at;
+  return latest;
+}
+
+/** 按保留上限裁剪（会话数 + 每会话轮数）；会返回新对象，不改入参。 */
+function prune(value: Store, keepConversationId?: string): Store {
+  const sessions = Object.entries(value);
+  if (sessions.length > REWIND_MAX_SESSIONS) {
+    const sorted = [...sessions].sort((a, b) => latestAt(b[1]) - latestAt(a[1]));
+    const keep = new Set(sorted.slice(0, REWIND_MAX_SESSIONS).map(([id]) => id));
+    if (keepConversationId) keep.add(keepConversationId);
+    for (const [id] of sessions) if (!keep.has(id)) delete value[id];
+  }
+  for (const [id, list] of Object.entries(value)) {
+    if (list.length <= REWIND_MAX_TURNS) continue;
+    value[id] = [...list].sort((a, b) => a.at - b.at).slice(-REWIND_MAX_TURNS);
+  }
+  return value;
+}
+
+function sortNewestFirst(list: readonly TurnCheckpoint[]): TurnCheckpoint[] {
+  return [...list].sort((a, b) => b.at - a.at);
+}
+
+/** 某会话的检查点：最近的排最前。没有记录时返回空数组（引用稳定）。 */
+export function getTurnCheckpoints(conversationId: string): readonly TurnCheckpoint[] {
+  ensureLoaded();
+  if (!conversationId) return EMPTY;
+  return sortNewestFirst(store[conversationId] ?? []);
+}
+
+const EMPTY: readonly TurnCheckpoint[] = Object.freeze([]);
+
+/** 直接落一整轮检查点（抓取路径与测试都用它）。返回该会话现在的轮数。 */
+export function recordTurnCheckpoint(
+  conversationId: string,
+  checkpoint: Omit<TurnCheckpoint, "id"> & { id?: string },
+  now = Date.now(),
+): number {
+  ensureLoaded();
+  const files = checkpoint.files.filter(isCheckpointFile);
+  if (!conversationId || files.length === 0) return store[conversationId]?.length ?? 0;
+  const at = Number.isFinite(checkpoint.at) ? checkpoint.at : now;
+  const id = checkpoint.id && checkpoint.id.length > 0 ? checkpoint.id : `turn-${at}-${(sequence += 1)}`;
+  const entry: TurnCheckpoint = {
+    id,
+    at,
+    files: files.map((file) =>
+      file.skipped ? { path: file.path, before: file.before, skipped: file.skipped } : { path: file.path, before: file.before },
+    ),
+    ...(checkpoint.messageId ? { messageId: checkpoint.messageId } : {}),
+  };
+  const current = store[conversationId] ?? [];
+  // 同一轮重复落（收口可能被调两次）就替换，不叠加。
+  const next = [...current.filter((item) => item.id !== id), entry].sort((a, b) => a.at - b.at);
+  store = prune({ ...store, [conversationId]: next }, conversationId);
+  writeStorage(store);
+  return store[conversationId]?.length ?? 0;
+}
+
+/** 丢掉最近 `count` 轮（回滚成功后调用：退回去的轮次不该还能再退一次）。 */
+export function dropTurnCheckpoints(conversationId: string, count: number): number {
+  ensureLoaded();
+  if (!conversationId || !Number.isFinite(count) || count <= 0) return store[conversationId]?.length ?? 0;
+  const current = store[conversationId] ?? [];
+  if (current.length === 0) return 0;
+  const keep = sortNewestFirst(current).slice(Math.trunc(count));
+  const next = { ...store };
+  if (keep.length === 0) delete next[conversationId];
+  else next[conversationId] = [...keep].sort((a, b) => a.at - b.at);
+  store = next;
+  writeStorage(store);
+  return store[conversationId]?.length ?? 0;
+}
+
+/** 清掉某个会话的检查点（不影响文件本身）。 */
+export function clearTurnCheckpoints(conversationId: string): void {
+  ensureLoaded();
+  buffers.delete(conversationId);
+  if (!store[conversationId]) return;
+  const next = { ...store };
+  delete next[conversationId];
+  store = next;
+  writeStorage(store);
+}
+
+/** 清空全部（测试与「重置本地数据」用）。 */
+export function resetRewindCheckpoints(): void {
+  loaded = true;
+  store = {};
+  buffers.clear();
+  sequence = 0;
+  writeStorage(store);
+}
+
+/**
+ * 回滚计划：退回最近 `turns` 轮。
+ *
+ * 同一文件在窗口里被改过多次时，要回到**窗口最早那一轮动手之前**的样子——
+ * 所以从老到新扫、每路径只取第一次出现的那份（最新的那份是中间态，写回去会少退几轮）。
+ *
+ * 返回 null = 没有那么多轮可退（调用方按「没那么多」回话，不要静默当成成功）。
+ */
+export function planRewind(conversationId: string, turns: number): RewindPlan | null {
+  ensureLoaded();
+  if (!conversationId) return null;
+  const total = Math.trunc(turns);
+  if (!Number.isFinite(total) || total < 1) return null;
+  const newest = sortNewestFirst(store[conversationId] ?? []);
+  if (newest.length === 0 || total > newest.length) return null;
+  const window = newest.slice(0, total).sort((a, b) => a.at - b.at);
+  const seen = new Set<string>();
+  const plan: RewindPlan = { turns: total, restore: [], remove: [], skipped: [] };
+  for (const checkpoint of window) {
+    for (const file of checkpoint.files) {
+      if (seen.has(file.path)) continue;
+      seen.add(file.path);
+      if (file.skipped) plan.skipped.push({ path: file.path, reason: file.skipped });
+      else if (file.before === null) plan.remove.push(file.path);
+      else plan.restore.push({ path: file.path, content: file.before });
+    }
+  }
+  return plan;
+}
+
+function describeAgo(at: number, now: number): string {
+  const delta = Math.max(0, now - at);
+  if (delta < 60_000) return "刚刚";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} 分钟前`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} 小时前`;
+  return `${Math.floor(delta / 86_400_000)} 天前`;
+}
+
+function shortName(path: string): string {
+  const parts = path.split("/");
+  return parts[parts.length - 1] ?? path;
+}
+
+const EMPTY_HINT =
+  "还没有可回滚的检查点：先让它真的改过文件（`/rewind` 靠写盘前抓到的原内容还原，`run_command` 改的文件抓不到）。";
+
+/** `/rewind` 不带参数时的说明：最近几轮、各改了什么、怎么退。 */
+export function describeTurnCheckpoints(conversationId: string, now = Date.now()): string {
+  const list = getTurnCheckpoints(conversationId);
+  if (list.length === 0) return EMPTY_HINT;
+  const lines = list.map((checkpoint, index) => {
+    const names = checkpoint.files.slice(0, 3).map((file) => shortName(file.path));
+    const more = checkpoint.files.length > names.length ? ` 等 ${checkpoint.files.length} 个` : "";
+    const skipped = checkpoint.files.filter((file) => file.skipped).length;
+    const skippedText = skipped > 0 ? `，其中 ${skipped} 个抓不到原文（会跳过）` : "";
+    return `${index + 1}. ${describeAgo(checkpoint.at, now)} · ${checkpoint.files.length} 个文件（${names.join("、")}${more}）${skippedText}`;
+  });
+  return [
+    `可回滚的检查点（共 ${list.length} 轮）：`,
+    ...lines,
+    `发 \`/rewind 1\` 退回最近一轮、\`/rewind ${Math.min(2, list.length)}\` 退回 ${Math.min(2, list.length)} 轮（数字越大退得越多）。只还原文件，对话历史不会一起退。`,
+  ].join("\n");
+}
+
+/** 一个文件「写之前」的抓取结果：null = 这个目标不用记（目录、路径非法等）。 */
+export async function captureFileBefore(
+  bridge: { read(payload: { roots: FileRoot[]; path: string }): Promise<unknown> },
+  roots: FileRoot[],
+  absolute: string,
+): Promise<CheckpointFile | null> {
+  let response: unknown;
+  try {
+    response = await bridge.read({ roots, path: absolute });
+  } catch {
+    return { path: absolute, before: null, skipped: "unreadable" };
+  }
+  if (!response || typeof response !== "object") return { path: absolute, before: null, skipped: "unreadable" };
+  const result = response as { ok?: boolean; content?: unknown; encoding?: unknown; code?: unknown };
+  if (result.ok === true) {
+    if (typeof result.content !== "string") return { path: absolute, before: null, skipped: "unreadable" };
+    if (result.encoding === "gbk") return { path: absolute, before: null, skipped: "encoding" };
+    if (result.content.length > REWIND_MAX_FILE_CHARS) return { path: absolute, before: null, skipped: "too-large" };
+    return { path: absolute, before: result.content };
+  }
+  const code = typeof result.code === "string" ? result.code : "";
+  // 文件还不存在 = 这一轮是新建，回滚时删掉它就是「改之前的样子」。
+  if (code === "not-found") return { path: absolute, before: null };
+  if (code === "too-large") return { path: absolute, before: null, skipped: "too-large" };
+  if (code === "binary") return { path: absolute, before: null, skipped: "binary" };
+  // 路径本身不合法（越界、符号链接）：这次写也多半会被拒，不用记。
+  if (STORAGE_READ_ERRORS.has(code)) return null;
+  return { path: absolute, before: null, skipped: "unreadable" };
+}
+
+function openBuffer(conversationId: string, now: number): TurnBuffer {
+  const existing = buffers.get(conversationId);
+  if (existing) return existing;
+  const created: TurnBuffer = { at: now, files: new Map(), chars: 0 };
+  buffers.set(conversationId, created);
+  return created;
+}
+
+/** 这一轮已经开始抓取了（同一轮重复调用不重置，否则最早那份 before 会被覆盖）。 */
+export function beginRewindTurn(conversationId: string, now = Date.now(), messageId?: string): void {
+  if (!conversationId) return;
+  const buffer = openBuffer(conversationId, now);
+  if (messageId && !buffer.messageId) buffer.messageId = messageId;
+}
+
+/** 记一个文件（同路径只留最早那份；超预算直接丢，返回是否记下）。 */
+export function noteRewindFile(conversationId: string, file: CheckpointFile, now = Date.now()): boolean {
+  if (!conversationId || !file.path) return false;
+  const buffer = openBuffer(conversationId, now);
+  if (buffer.files.has(file.path)) return false;
+  const size = file.before?.length ?? 0;
+  if (buffer.chars + size > REWIND_MAX_TURN_CHARS) return false;
+  buffer.files.set(file.path, file);
+  buffer.chars += size;
+  return true;
+}
+
+/** 收口：把这一轮抓到的落成检查点并清空缓冲。没抓到东西就返回 null（不留空轮）。 */
+export function closeRewindTurn(conversationId: string, now = Date.now()): TurnCheckpoint | null {
+  const buffer = buffers.get(conversationId);
+  buffers.delete(conversationId);
+  if (!buffer || buffer.files.size === 0) return null;
+  const files = [...buffer.files.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const entry: TurnCheckpoint = {
+    id: `turn-${buffer.at}-${(sequence += 1)}`,
+    at: buffer.at,
+    files,
+    ...(buffer.messageId ? { messageId: buffer.messageId } : {}),
+  };
+  const count = recordTurnCheckpoint(conversationId, entry, now);
+  return count > 0 ? entry : null;
+}
+
+/**
+ * 给工具桥套一层「写之前先抓原文」。
+ *
+ * 包在**最里层**（capability registry 的桥外面、子代理/工作流/面板包装的内侧），
+ * 这样主模型、子代理、工作流的写盘都会经过它；只在真正执行前抓，闸门拒绝时不抓——
+ * 被拒的调用没改文件，记下来只会让用户以为退回去会变。
+ */
+export function withRewindCapture(
+  bridge: ToolBridge,
+  options: { conversationId: () => string; roots: () => FileRoot[]; now?: () => number },
+): ToolBridge {
+  const now = options.now ?? (() => Date.now());
+  const wrapped: ToolBridge = {
+    tools: bridge.tools,
+    execute: async (call, execOptions) => {
+      await captureForCall(call, options, now()).catch(() => undefined);
+      return bridge.execute(call, execOptions);
+    },
+  };
+  if (bridge.meta) wrapped.meta = bridge.meta;
+  return wrapped;
+}
+
+const CAPTURED_TOOLS: readonly string[] = [FILE_WRITE_TOOL, FILE_EDIT_TOOL, FILE_PATCH_TOOL];
+
+async function captureForCall(
+  call: { name: string; arguments: string },
+  options: { conversationId: () => string; roots: () => FileRoot[] },
+  now: number,
+): Promise<void> {
+  if (!CAPTURED_TOOLS.includes(call.name)) return;
+  const conversationId = options.conversationId();
+  if (!conversationId) return;
+  const fileBridge = getFileBridge();
+  if (!fileBridge?.read) return;
+  const roots = options.roots();
+  if (roots.length === 0) return;
+  const targets = targetsOfCall({ name: call.name, argsJson: call.arguments }, roots);
+  if (!targets) return;
+  for (let index = 0; index < targets.absolute.length; index += 1) {
+    if (targets.kinds?.[index] === "dir") continue;
+    const captured = await captureFileBefore(fileBridge, roots, targets.absolute[index]!);
+    if (captured) noteRewindFile(conversationId, captured, now);
+  }
+}

@@ -150,6 +150,14 @@ import {
   recordSessionChanges,
   subscribeSessionChanges,
 } from "../lib/fileEdit/sessionChanges.js";
+import {
+  beginRewindTurn,
+  closeRewindTurn,
+  describeTurnCheckpoints,
+  dropTurnCheckpoints,
+  planRewind,
+  withRewindCapture,
+} from "../lib/fileEdit/rewindCheckpoints.js";
 import { JobReadyBar } from "./JobReadyBar.js";
 import { ContextMeter } from "./ContextMeter.js";
 import { ResumeBar, type ResumeReason } from "./ResumeBar.js";
@@ -230,7 +238,7 @@ import { RoundLimitHint, type ContinueReason } from "./RoundLimitHint.js";
 import { PlanReadyBar } from "./PlanReadyBar.js";
 import { GoalBar } from "./GoalBar.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
-import { GOAL_COMMAND, HOOKS_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands, SLASH_COMMANDS } from "../lib/agentRuntime/slashCommands.js";
+import { GOAL_COMMAND, HOOKS_COMMAND, SUBAGENT_COMMAND, NOTIFY_COMMAND, PLAN_COMMAND, REWIND_COMMAND, STATUS_COMMAND, HELP_COMMAND, matchSlashCommands, SLASH_COMMANDS } from "../lib/agentRuntime/slashCommands.js";
 import { collectCustomCommands, commandsToSlash, expandCustomCommand, type CustomCommand } from "../lib/agentRuntime/customCommands.js";
 import { collectSubagentDefs, type SubagentDef } from "../lib/agentRuntime/subagentDefs.js";
 import { expandInitCommand } from "../lib/agentRuntime/initPrompt.js";
@@ -1720,12 +1728,20 @@ export function ChatPage({
       selfEdit: selfEditRef.current!,
       ...(workspace ? { workspace } : {}),
     });
+    // 轮次检查点（d.290）：在所有包装**之前**套一层——写盘前把目标文件的原内容读下来，
+    // 这样主模型、子代理、工作流的写都会经过它。包在最外层会漏掉子代理（它自己持有内层桥）。
+    const capturing = bridge
+      ? withRewindCapture(bridge, {
+          conversationId: () => convId,
+          roots: () => fileRootsFor(useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace ?? null),
+        })
+      : null;
     // 只读子代理（d.162）：在缓存桥外面包一层 `agent_task`。包在这里而不是做成
     // provider，是因为子代理要「用当前这个智能体绑定的模型」跑子会话，而模型绑定
     // 是按 agentId 查的——provider 拿不到 agentId 对应的路由，也不知道会话工作区。
     // 没有桥（这一轮零工具）时不包：凭空多一个能派子代理的工具会让模型以为有检索能力。
-    const withAgents = bridge
-      ? withSubagentTool(bridge, {
+    const withAgents = capturing
+      ? withSubagentTool(capturing, {
           agentId,
           conversationId: convId,
           // 进度推给界面（d.200）：谁在跑、第几轮、正在调哪个只读工具；跑在哪一步就报哪一步。
@@ -2742,6 +2758,9 @@ export function ChatPage({
         // 「计划就绪」同理——新一轮要么在计划里接着聊，要么已经动手了。
         setRoundLimitStreamId(null);
         setTurnWrites([]);
+        // d.290：新一轮开始记检查点缓冲——写工具执行前会把原内容抓进来，
+        // 收口时（closeRewindTurn）落成一轮 `/rewind` 能退回去的记录。
+        beginRewindTurn(convId, Date.now(), streamId);
         // 上一轮的对照窗口不该跨到新一轮（那时的文件状态已经不是现在这个）
         setChangeDiff(null);
         setSessionChangesOpen(false);
@@ -3218,6 +3237,9 @@ export function ChatPage({
         // 会话级台账（d.210）：撤回条会被下一轮覆盖，这里的记录留到会话结束，
         // 用户随时能回看「这个会话一共动过哪些文件、各改了几次」。
         if (result.writes && result.writes.length > 0) recordSessionChanges(convId, result.writes);
+        // 轮次检查点（d.290）：这一轮抓到的「改之前」落成一条，`/rewind N` 靠它还原。
+        // 放在会话台账之后、与 turnWrites 同源收口：两处看到的是同一份 result.writes。
+        closeRewindTurn(convId);
         // 回合收尾刷新上下文用量（d.187）：刚发出去的那一轮才是真实占用。
         refreshContextUsage();
         // 后台作业（d.182）：作业不会被 await，收口后由界面接着盯，跑完给一次「继续」。
@@ -4455,6 +4477,76 @@ export function ChatPage({
         notice: subagentWrite
           ? "子代理写盘：已授权（本次会话）。它只能用 file_write / file_edit，改动记进「本轮可撤回」；发 `/subagent write off` 收回。"
           : "子代理写盘：只读（默认）。需要它改文件时发 `/subagent write on`；它不会自己开这个开关。",
+      };
+    }
+    /**
+     * 轮次回滚（d.290）：`/rewind` 看检查点、`/rewind N` 把最近 N 轮改过的文件退回去。
+     *
+     * 全本地：不发模型、不动对话历史。为什么只还原文件：消息截断要服务端新接口
+     * （现在只有增和改，没有删），所以文案里每次都明说「对话历史未回退」，
+     * 不让用户以为聊天也退了。
+     */
+    if (text === REWIND_COMMAND || text.startsWith(`${REWIND_COMMAND} `)) {
+      const rest = text.slice(REWIND_COMMAND.length).trim();
+      if (!rest) return { ok: true, notice: describeTurnCheckpoints(convId) };
+      if (!/^\d+$/.test(rest) || Number(rest) < 1) {
+        return {
+          ok: true,
+          notice: "用法：`/rewind` 看有哪些检查点、`/rewind 1` 退回最近一轮（数字越大退得越多）。",
+        };
+      }
+      const turns = Number(rest);
+      const rewindPlan = planRewind(convId, turns);
+      if (!rewindPlan) {
+        return {
+          ok: true,
+          notice: `没有 ${turns} 轮可退（要么还没跑过改文件的轮次，要么已经退过了）。发 \`/rewind\` 看现在有哪些检查点。`,
+        };
+      }
+      const fileBridge = getFileBridge();
+      if (!fileBridge) {
+        return { ok: true, notice: "当前环境没有文件桥（浏览器里没有本地文件权限），回滚只能在桌面端用。" };
+      }
+      const workspace = useChatStore.getState().conversations.find((c) => c.id === convId)?.workspace;
+      const roots = fileRootsFor(workspace ?? null);
+      if (roots.length === 0) {
+        return { ok: true, notice: "这个会话还没有可写目录，没法还原文件。" };
+      }
+      const ops = [
+        ...rewindPlan.restore.map((item) => ({ kind: "write" as const, path: item.path, content: item.content })),
+        ...rewindPlan.remove.map((path) => ({ kind: "delete" as const, path })),
+      ];
+      const skippedNote =
+        rewindPlan.skipped.length > 0
+          ? `；${rewindPlan.skipped.length} 个抓不到原文没动（${rewindPlan.skipped
+              .slice(0, 3)
+              .map((item) => item.path.split("/").pop() ?? item.path)
+              .join("、")}）`
+          : "";
+      if (ops.length === 0) {
+        // 全是跳过的轮次也照样记账：否则用户会一直看到这几轮「可退」，退了又什么都没发生。
+        dropTurnCheckpoints(convId, rewindPlan.turns);
+        return {
+          ok: true,
+          notice: `退回了 ${rewindPlan.turns} 轮：这些改动都抓不到原文，没有文件被还原${skippedNote}。对话历史未回退。`,
+        };
+      }
+      const result = await fileBridge.write({ roots, ops });
+      if (!result.ok) {
+        return {
+          ok: true,
+          notice: `回滚没有完成：${result.error ?? "写盘失败"}（文件可能只还原了一部分，对话历史未回退）。`,
+        };
+      }
+      dropTurnCheckpoints(convId, rewindPlan.turns);
+      const restored = result.written ?? rewindPlan.restore.length;
+      const removed = result.deleted ?? rewindPlan.remove.length;
+      const parts: string[] = [];
+      if (restored > 0) parts.push(`还原 ${restored} 个文件`);
+      if (removed > 0) parts.push(`删掉 ${removed} 个当时还不存在的文件`);
+      return {
+        ok: true,
+        notice: `已退回 ${rewindPlan.turns} 轮：${parts.join("、") || "没有文件需要改"}${skippedNote}。对话历史未回退。`,
       };
     }
     /**

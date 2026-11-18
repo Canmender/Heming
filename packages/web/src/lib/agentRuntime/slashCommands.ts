@@ -29,6 +29,13 @@ export const SUBAGENT_COMMAND = "/subagent";
 /** 系统通知开关（d.208）：`/notify on|off`，不带参数就是看状态。 */
 export const NOTIFY_COMMAND = "/notify";
 /**
+ * 轮次回滚（d.290）：`/rewind` 看检查点、`/rewind N` 退回最近 N 轮改过的文件。
+ *
+ * 与 `/compact` 的区别：那个折的是上下文（消息还在，只是变短），这个真的把文件写回去。
+ * 只还原文件，对话历史不回退——截断要服务端新接口，见 `rewindCheckpoints.ts` 的模块注释。
+ */
+export const REWIND_COMMAND = "/rewind";
+/**
  * 工作区工具 hooks（PreToolUse）：`/hooks` 看状态与规则、`/hooks on|off` 启用/关闭。
  *
  * 默认关闭是安全边界：`.heming/hooks.json` 跟着仓库走，不能因为克隆了某个仓库
@@ -70,6 +77,11 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     command: STATUS_COMMAND,
     title: "看当前环境与预算",
     hint: "模型、工作区、可写目录、上下文用量、清单与作业状态，一次列清",
+  },
+  {
+    command: REWIND_COMMAND,
+    title: "把文件退回到几轮之前",
+    hint: "/rewind 看有哪些检查点；/rewind 1 退回最近一轮改过的文件（只还原文件，对话历史不动）",
   },
   {
     command: NOTIFY_COMMAND,

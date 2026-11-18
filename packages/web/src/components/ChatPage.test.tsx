@@ -51,6 +51,8 @@ import { resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
 import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
 import { getToolFailureStats, resetToolFailureStats } from "../lib/agentRuntime/toolFailureStats.js";
 import { resetPanelJobs, syncPanelJobs } from "../lib/shell/jobPanel.js";
+// d.290：`/rewind` 的检查点存储（用例直接种检查点，不靠真跑一轮写盘）
+import { recordTurnCheckpoint, resetRewindCheckpoints } from "../lib/fileEdit/rewindCheckpoints.js";
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
 // sealMessage 桩——cipher 内直接 JSON 明文（形状同真信封，断言可解），
@@ -6232,6 +6234,77 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
 
     delete (window as unknown as { __heming_files?: unknown }).__heming_files;
     localStorage.removeItem("heming.fileEdit.roots.v1");
+  }, 30_000);
+
+  /**
+   * d.290：`/rewind` 也是本地命令，且「没有检查点」时要说清怎么才会有。
+   *
+   * 这条线容易退化成静默失败：用户打 `/rewind` 却什么都没发生，会以为功能坏了。
+   */
+  it("I3-rewind `/rewind` 没有检查点时讲清怎么产生，不发模型（d.290）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    resetRewindCheckpoints();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/还没有可回滚的检查点/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(streamChat).not.toHaveBeenCalled();
+  }, 30_000);
+
+  /**
+   * d.290：`/rewind 1` 真把检查点里的原文写回去。
+   *
+   * 种一条检查点 → 发命令 → 断言写盘请求里有「原内容」且没有多余 op，
+   * 同时确认退回去的那轮记账被丢掉了（不然可以无限重退同一轮）。
+   */
+  it("I3-rewind `/rewind 1` 把文件写回原内容并丢掉那轮的记账（d.290）", async () => {
+    await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockClear();
+    resetRewindCheckpoints();
+    localStorage.setItem(
+      "heming.fileEdit.roots.v1",
+      JSON.stringify({ roots: [{ name: "评测区", path: "D:/评测区", mode: "write" }], outOfRoot: "ask" }),
+    );
+    recordTurnCheckpoint("c1", {
+      at: Date.now() - 60_000,
+      files: [{ path: "D:/评测区/a.ts", before: "旧内容" }],
+    });
+    const write = vi.fn(async (_payload: { ops: unknown[] }) => ({
+      ok: true as const,
+      results: [],
+      written: 1,
+      deleted: 0,
+    }));
+    (window as unknown as { __heming_files?: unknown }).__heming_files = {
+      read: async () => ({ ok: false as const, code: "not-found" as const, error: "没有这个文件" }),
+      write,
+      pickRoot: async () => null,
+    };
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/已退回 1 轮：还原 1 个文件/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(write).mock.calls[0]![0]).toMatchObject({
+      ops: [{ kind: "write", path: "D:/评测区/a.ts", content: "旧内容" }],
+    });
+    expect(streamChat).not.toHaveBeenCalled();
+
+    // 已退过：再发一次就「没有 1 轮可退」
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    });
+    expect(await screen.findByText(/没有 1 轮可退/, undefined, { timeout: 8000 })).toBeInTheDocument();
+
+    delete (window as unknown as { __heming_files?: unknown }).__heming_files;
+    localStorage.removeItem("heming.fileEdit.roots.v1");
+    resetRewindCheckpoints();
   }, 30_000);
 
   /**
