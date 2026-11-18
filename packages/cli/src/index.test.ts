@@ -179,4 +179,11 @@ describe.skipIf(tsx === null)("heming memory 子命令", () => {
     expect(result.stdout).toContain("heming memory");
     expect(result.stdout).toContain("--no-memory");
   }, 30_000);
+
+  it("--help 里能看见子代理与关掉它的开关（d.331）", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("agent_task");
+    expect(result.stdout).toContain("--no-subagent");
+  }, 30_000);
 });

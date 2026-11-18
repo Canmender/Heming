@@ -497,3 +497,30 @@ describe("parseArgs：工作区记忆（d.329）", () => {
     }
   });
 });
+describe("parseArgs：子代理（d.331）", () => {
+  it("默认开：不给 --no-subagent 就是开着", () => {
+    expect(expectRun(["run", "查一下"]).subagent).toBe(true);
+  });
+
+  it("--no-subagent 关掉", () => {
+    expect(expectRun(["run", "--no-subagent", "查一下"]).subagent).toBe(false);
+  });
+
+  it("--no-subagent 不接受取值", () => {
+    const parsed = parseArgs(["run", "--no-subagent=yes", "查一下"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--no-subagent 不接受取值");
+  });
+
+  it("sessions / memory / mcp serve 都不接它", () => {
+    for (const argv of [
+      ["sessions", "--no-subagent"],
+      ["memory", "--no-subagent"],
+      ["mcp", "serve", "--no-subagent"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("--no-subagent");
+    }
+  });
+});

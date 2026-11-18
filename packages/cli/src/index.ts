@@ -72,6 +72,7 @@ const USAGE = `用法：
   --context-budget <n> 续聊历史的 token 预算（默认 12000），超出就把早期对话折成摘要
   --no-compact         不折叠历史：整段发给模型（会更快烧钱，也更早撞上下文上限）
   --no-memory          不读写 .heming/memory.json（既不注入召回，也不提供 remember 工具）
+  --no-subagent        不给 agent_task：查证类任务只能自己翻，省一次模型调用
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -168,6 +169,12 @@ MCP 服务（给别的编辑器用）：
   heming memory add "以后都用中文回答"      手动加一条
   heming memory forget 2                  删掉序号 2（也认完整 id）
   --no-memory 关掉两头；记忆文件坏了不会让运行失败，只会说一句并且这次不写。
+
+  子代理（agent_task）：
+    模型可以派一个**只读**子代理去仓库里查证（它能 file_read / file_glob / file_grep /
+    file_image / tool_output_read，不能写、不能跑命令），只把结论交回来。查证类工作最吃上下文，
+    让它在外面翻完再回来，主对话就不必塞进几百行搜到的原文。
+    --no-subagent 关掉它；子代理的模型调用同样计入 exec --json 的 rounds 与用量。
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -538,6 +545,7 @@ async function main(argv: string[]): Promise<number> {
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(approver ? { ask: approver.ask } : {}),
     ...(memoryEnabled ? {} : { memory: false }),
+    ...(options.subagent ? {} : { subagent: false }),
     ...(recallSection ? { memorySection: recallSection } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     ...(options.contextBudget !== undefined ? { contextBudget: options.contextBudget } : {}),

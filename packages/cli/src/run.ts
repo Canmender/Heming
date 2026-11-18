@@ -161,6 +161,13 @@ export interface AgentRunOptions {
    */
   memorySection?: string;
   /**
+   * 子代理（`agent_task`，d.331）：缺省开启，`--no-subagent` 关掉。
+   *
+   * 关掉时工具清单里就没有它，模型会自己读文件查——慢一点，但省一次模型调用。
+   * MCP 模式永远没有它：那条路不调模型，没有「子代理」可言。
+   */
+  subagent?: boolean;
+  /**
    * 续聊历史的 token 预算（`--context-budget`）。缺省 12k，超出就把早期对话折成摘要。
    *
    * 只在 `history` 非空时有意义：单轮运行的历史是空的，折与不折都一样。
@@ -293,6 +300,14 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
   /** 本回合真正成功落盘的文件（只认 ok=true 的结果，被拒/失败的写不算）。 */
   const writes: string[] = [];
   const seenWrites = new Set<string>();
+/** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
+  let modelRounds = 0;
+  const chat: StreamChatFn = (profile, messages, opts) => {
+    modelRounds += 1;
+    const impl = options.streamChat ?? realStreamChat;
+    return impl(profile, messages, opts);
+  };
+
   const tooling = createCliTooling({
     cwd,
     allowDanger: options.allowDanger,
@@ -303,6 +318,8 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     // 记忆工具与只读模式互斥：只读时连 `remember` 都不挂（列出来等于承诺能写）。
     memory: options.memory !== false && options.readOnly !== true,
     ask: options.ask ?? null,
+    // 子代理用同一份 chat：modelRounds 因此把它的调用也算进去，成本不会凭空消失。
+    subagent: options.subagent === false ? null : { chat, profile: options.profile },
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;
@@ -336,15 +353,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     ...(options.compact === false ? { enabled: false } : {}),
     systemTokens: estimateTokens(systemPrompt),
   });
-  /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
-  let modelRounds = 0;
-  const chat: StreamChatFn = (profile, messages, opts) => {
-    modelRounds += 1;
-    const impl = options.streamChat ?? realStreamChat;
-    return impl(profile, messages, opts);
-  };
-
-  /** 进度行（stderr）：只报事实，不猜进度。 */
+    /** 进度行（stderr）：只报事实，不猜进度。 */
   const progress = (line: string) => options.onProgress?.(line);
 
   const toolCalls: ToolCallRecord[] = [];

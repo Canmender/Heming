@@ -618,3 +618,62 @@ describe("工作区记忆（--no-memory / remember，d.329）", () => {
     await expect(readFile(path.join(dir, ".heming", "memory.json"), "utf8")).rejects.toThrow();
   });
 });
+
+describe("子代理（d.331）", () => {
+  const namesOf = (tools: readonly unknown[]): string[] =>
+    tools
+      .map((tool) => {
+        const fn = (tool as { function?: { name?: unknown } }).function;
+        return typeof fn?.name === "string" ? fn.name : "";
+      })
+      .filter(Boolean);
+
+  it("默认开启：第一次请求的工具清单里有 agent_task", async () => {
+    const dir = await makeSandbox();
+    let offered: string[] = [];
+    const chat: StreamChatFn = async (_profile, _messages, opts) => {
+      offered = namesOf(opts.tools ?? []);
+      opts.onDelta("好");
+      return "好";
+    };
+
+    const outcome = await startAgentRun({
+      prompt: "查一下",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(offered).toContain("agent_task");
+  });
+
+  it("--no-subagent：清单里没有它，硬调只拿到「没有开子代理」", async () => {
+    const dir = await makeSandbox();
+    let offered: string[] = [];
+    const inner = createScriptedChat([
+      { tool_calls: [{ name: "agent_task", arguments: { task: "查限流" } }] },
+      { text: "结论：我自己查了" },
+    ]);
+    const chat: StreamChatFn = async (p, messages, opts) => {
+      if (offered.length === 0) offered = namesOf(opts.tools ?? []);
+      return inner(p, messages, opts);
+    };
+
+    const outcome = await startAgentRun({
+      prompt: "查一下",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      subagent: false,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(offered).not.toContain("agent_task");
+    const record = outcome.json.toolCalls.find((call) => call.name === "agent_task");
+    expect(record?.ok).toBe(false);
+    expect(record?.text).toContain("没有开子代理");
+  });
+});

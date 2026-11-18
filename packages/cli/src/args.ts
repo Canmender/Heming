@@ -79,6 +79,13 @@ export interface PromptOptions {
    * 也不挂 `remember` 工具（「这次别记也别用」要能一句话做到）。
    */
   memory: boolean;
+  /**
+   * 是否挂子代理（`agent_task`）。缺省开启；`--no-subagent` 关掉。
+   *
+   * 关掉之后模型只能自己一个文件一个文件地查——查证类任务会明显更费上下文，
+   * 但省一次模型调用。MCP 模式本来就没有它（那条路不调模型）。
+   */
+  subagent: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -156,6 +163,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let sessionDir: string | undefined;
   let mcp = false;
   let memory = true;
+let subagent = true;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -221,6 +229,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "ask": {
           if (inline !== undefined) return { ok: false, error: "--ask 不接受取值（直接写 --ask 即可）" };
           ask = true;
+          break;
+        }
+        case "no-subagent": {
+          if (inline !== undefined) return { ok: false, error: "--no-subagent 不接受取值（直接写 --no-subagent 即可）" };
+          subagent = false;
           break;
         }
         case "no-memory": {
@@ -347,6 +360,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (trustHooks) notForSessions.push("--trust-hooks");
   if (readOnly) notForSessions.push("--read-only");
   if (!memory) notForSessions.push("--no-memory");
+  if (!subagent) notForSessions.push("--no-subagent");
   if (ask) notForSessions.push("--ask");
     if (contextBudget !== undefined) notForSessions.push("--context-budget");
     if (!compact) notForSessions.push("--no-compact");
@@ -396,6 +410,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (contextBudget !== undefined) notForMemory.push("--context-budget");
     if (!compact) notForMemory.push("--no-compact");
     if (!memory) notForMemory.push("--no-memory");
+  if (!subagent) notForMemory.push("--no-subagent");
     if (notForMemory.length > 0) {
       return {
         ok: false,
@@ -443,6 +458,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (contextBudget !== undefined) notForMcp.push("--context-budget");
     if (!compact) notForMcp.push("--no-compact");
     if (!memory) notForMcp.push("--no-memory");
+  if (!subagent) notForMcp.push("--no-subagent");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -493,6 +509,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       trustHooks,
       compact,
       memory,
+      subagent,
       mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),

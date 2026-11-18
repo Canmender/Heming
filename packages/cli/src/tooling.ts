@@ -25,11 +25,21 @@ import type { ToolBridge } from "../../../packages/web/src/lib/agentStream.js";
 import { SHELL_TOOL } from "../../../packages/web/src/lib/shell/tool.js";
 import { createNodeFsBridge } from "../../../evals/runner/fsBridge.js";
 import { createEvalToolBridge } from "../../../evals/runner/tools.js";
+import type { LlmProfile } from "../../../packages/web/src/store/llm.js";
 import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approvals.js";
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
 import { REMEMBER_TOOL, addCliMemory, rememberResultText, rememberSpec } from "./memory.js";
+import {
+  SUBAGENT_READ_ONLY_TOOLS,
+  SUBAGENT_TOOL,
+  createSubagentRunner,
+  parseSubagentArgs,
+  subagentResultText,
+  subagentSpec,
+  type SubagentChatFn,
+} from "./subagent.js";
 
 /** 一次工具调用在闸门看来需要的最小形状（与编排层给的一致）。 */
 export interface GateCall {
@@ -394,6 +404,14 @@ export function createCliTooling(options: {
    * 后者会让它以为名字写错、反复重试。
    */
   memory?: boolean;
+  /**
+   * 子代理（d.331）：给 `chat` 与 `profile` 就挂 `agent_task`。
+   *
+   * 只传这两个而不传工具/执行器，是因为「它能用哪些工具」必须由**本函数**决定：
+   * 子代理拿到的桥是 baseBridge 过滤后的只读工具 + 同一套相对路径换算，
+   * 调方想放宽也放宽不了。`null` / 省略 = 没有这个工具。
+   */
+  subagent?: { chat: SubagentChatFn; profile: LlmProfile } | null;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -446,12 +464,37 @@ export function createCliTooling(options: {
     }
   }
 
+  /**
+   * 子代理：手里只拿**只读**工具，参数照主路径一样换算成工作区相对路径。
+   *
+   * 为什么在这里造而不是在 run.ts：工具清单与执行器都归本函数管，
+   * 让调用方自己拼一份「只读桥」迟早会漏（漏一次就是子代理能写文件）。
+   */
+  const readOnlyTools = baseBridge.tools.filter((tool) => {
+    const name = specNameOf(tool);
+    return name !== null && (SUBAGENT_READ_ONLY_TOOLS as readonly string[]).includes(name);
+  });
+  const runSubagent = options.subagent
+    ? createSubagentRunner({
+        chat: options.subagent.chat,
+        profile: options.subagent.profile,
+        tools: readOnlyTools,
+        execute: async (call) =>
+          baseBridge.execute({ ...call, arguments: relativizeToolArgs(call.arguments, cwd) }),
+      })
+    : null;
   const toolBridge: ToolBridge = {
     // 只读模式下连 `remember` 都不挂：列出来等于承诺能写（`run` 也做同样判断，这里是兜底）。
-    tools: [...baseBridge.tools, ...(options.memory && !options.readOnly ? [rememberSpec()] : []), ...mcpTools],
+    tools: [      ...baseBridge.tools,
+      ...(options.memory && !options.readOnly ? [rememberSpec()] : []),
+      // 子代理是只读的，所以只读模式下照样挂：它不会改任何东西，却最省上下文。
+      ...(runSubagent ? [subagentSpec()] : []),
+      ...mcpTools,
+    ],
     meta: (name) => {
       if (name === SHELL_TOOL) return { risk: "danger" as const, displayName: "在本机执行命令", core: true };
       if (name === REMEMBER_TOOL) return { risk: "write" as const, displayName: "记住这件事", core: true };
+      if (name === SUBAGENT_TOOL) return { risk: "read" as const, displayName: "派子代理", core: true };
       const mcpTarget = parseMcpToolName(name);
       if (mcpTarget) {
         return { risk: "danger" as const, displayName: `MCP · ${mcpTarget.server}/${mcpTarget.tool}`, core: true };
@@ -481,6 +524,22 @@ export function createCliTooling(options: {
         }
       }
 
+      /*
+       * 子代理：它只读，所以这里不碰审批、不碰写路径，只做参数解析与串行执行。
+       * 结果里必须写清「谁查的、几轮、几次工具调用」——主对话据此判断可信度。
+       */
+      if (call.name === SUBAGENT_TOOL) {
+        if (!runSubagent) {
+          return { text: "未执行：这次运行没有开子代理。自己用 file_read / file_grep 查。", ok: false };
+        }
+        const parsed = parseSubagentArgs(call.arguments);
+        if (!parsed.ok) return { text: parsed.error, ok: false };
+        const results: Awaited<ReturnType<typeof runSubagent>>[] = [];
+        for (const task of parsed.args.tasks) {
+          results.push(await runSubagent(task, parsed.args.maxRounds, execOpts?.signal));
+        }
+        return { text: subagentResultText(results, parsed.args.tasks), ok: true };
+      }
       /*
        * 记忆工具：只写 `.heming/memory.json`，不碰用户文件。
        *
@@ -599,6 +658,14 @@ export function createCliTooling(options: {
   return { roots, toolBridge, confirm };
 }
 
+/** 从 OpenAI 风格的工具声明里取名字；不是这个形状就返回 null（不猜）。 */
+function specNameOf(spec: unknown): string | null {
+  if (!spec || typeof spec !== "object") return null;
+  const fn = (spec as { function?: unknown }).function;
+  if (!fn || typeof fn !== "object") return null;
+  const name = (fn as { name?: unknown }).name;
+  return typeof name === "string" && name ? name : null;
+}
 /** 未挂命令桥时，模型硬调 `run_command` 拿到的拒绝文案（`run` 与 MCP 共用同一条口径）。 */
 export function shellDeniedText(): string {
   return [
