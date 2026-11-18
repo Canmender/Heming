@@ -95,6 +95,11 @@ export interface SubagentProgressEvent {
   tool?: string;
   /** `phase` 为 done/failed 时的简述（失败原因 / 轮次用量）。 */
   note?: string;
+  /**
+   * 团队任务里的角色名（d.347）：`agent_team` 的成员从工作区角色定义里来，
+   * 界面要显示「安全审查在跑」而不只是「第 2 个在跑」；普通派遣不带这个字段。
+   */
+  role?: string;
 }
 
 /** 子代理的人设：短、只讲边界，不讲业务。授权写盘时多两条写规矩（d.202）。 */
@@ -551,8 +556,12 @@ export async function runSubagentTask(
   maxRounds: number,
   deps: SubagentDeps,
   taskId: string,
+  limit = SUBAGENT_MAX_ROUNDS_LIMIT,
 ): Promise<SubagentResult> {
-  const rounds = Math.max(1, Math.min(maxRounds, SUBAGENT_MAX_ROUNDS_LIMIT));
+  // d.347：团队任务的长活比单次派遣需要更多轮，调用方可以抬高上限；
+  // 缺省仍是 6，既有调用方的行为不变。
+  const ceiling = Math.max(1, Math.min(limit, Number.MAX_SAFE_INTEGER));
+  const rounds = Math.max(1, Math.min(maxRounds, ceiling));
   return runOne(task, rounds, deps, taskId);
 }
 

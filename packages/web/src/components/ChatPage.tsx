@@ -186,12 +186,20 @@ import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
 import { decidePanelAutoOpen } from "../lib/agentRuntime/panelAuto.js";
 import { withPanelTool } from "../lib/agentRuntime/panelTool.js";
 import { withWorkflowTool } from "../lib/agentRuntime/workflow.js";
+import { withTeamTool } from "../lib/agentRuntime/team.js";
 import {
   applySubagentProgress,
   listSubagentRuns,
   resetSubagentRuns,
   subscribeSubagentRuns,
 } from "../lib/agentRuntime/subagentRuns.js";
+import {
+  applyTeamProgress,
+  beginTeamRun,
+  finishTeamRun,
+  resetTeamRuns,
+  teamRunMembersOf,
+} from "../lib/agentRuntime/teamRuns.js";
 import {
   clearTurnProgress,
   getTurnProgress,
@@ -1143,6 +1151,7 @@ export function ChatPage({
     // 插话队列按会话存（d.226），换会话时不必清：那个会话的队列只归它自己；
     // 这里只把「上一个会话的停止信号」放下，免得切回来时按钮还指着旧控制器。
     resetSubagentRuns();
+    resetTeamRuns();
     subagentStopsRef.current[convId] = null;
     // 子代理写盘授权按会话记：换会话要看那个会话自己的开关，不能顺延过来
     setSubagentWrite(isSubagentWriteEnabled(convId));
@@ -1868,14 +1877,46 @@ export function ChatPage({
           },
         })
       : null;
+    // 团队任务（d.347）：带角色、依赖与可写成员的长任务编排。放在工作流之外，
+    // 复用同一份进度表与停止信号——界面上「哪位成员在跑」和「第几步在跑」是同一种事实。
+    const withTeam = wrapped
+      ? withTeamTool(wrapped, {
+          agentId,
+          conversationId: convId,
+          onProgress: (event) => {
+            applySubagentProgress(event);
+            applyTeamProgress(event);
+          },
+          onStart: (plan) => {
+            beginTeamRun({
+              conversationId: convId,
+              goal: plan.goal,
+              members: teamRunMembersOf(plan, subagentDefsRef.current),
+            });
+          },
+          onFinish: (result) => {
+            finishTeamRun(result);
+          },
+          createSignal: () => {
+            const controller = new AbortController();
+            subagentStopsRef.current[convId] = controller;
+            return controller.signal;
+          },
+          ...(subagentWrite ? { writable: true } : {}),
+          agents: subagentDefsRef.current,
+          onWrite: (path: string) => {
+            setTurnWrites((current) => (current.includes(path) ? current : [...current, path]));
+          },
+        })
+      : null;
     // 计划模式（d.173）：只留只读工具，执行层再拦一次。
     // 这是**产品意图**不是安全边界——真正的写权限仍由可写根与 HITL 决定。
     // 以**存储**为准，不用渲染闭包里的 `planMode`：`executePlan` 在同一个 tick 里
     // 先写存储再发消息，state 还没落下去；读闭包会拿上一轮的 true，把这一轮的写工具又摘掉。
     // 面板工具（d.245）：模型觉得「该让用户看进度」时自己打开右侧栏（只读、免确认）。
     // 包在这里而不是做成 provider：面板是当前组件实例的状态，provider 拿不到组件。
-    const withPanel = wrapped
-      ? withPanelTool(wrapped, {
+    const withPanel = withTeam
+      ? withPanelTool(withTeam, {
           onOpen: (reason: string) => {
             setProgressOpen(true);
             setPanelAgentReason(reason === "" ? null : reason);

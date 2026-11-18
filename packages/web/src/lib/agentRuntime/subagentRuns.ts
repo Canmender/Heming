@@ -21,6 +21,8 @@ export interface SubagentRun {
   id: string;
   /** 这一条要查什么（原样来自模型给的任务描述）。 */
   task: string;
+  /** 团队任务里的角色名（d.347）；普通派遣为 null。 */
+  role: string | null;
   status: SubagentRunStatus;
   /** 已经走到第几轮（从 1 开始；0 表示刚派出）。 */
   round: number;
@@ -72,6 +74,7 @@ function patchRun(id: string, task: string, patch: Partial<SubagentRun>, now: nu
       {
         id,
         task,
+        role: null,
         status: "running",
         round: 0,
         tool: null,
@@ -99,7 +102,7 @@ export function applySubagentProgress(event: SubagentProgressEvent, now = Date.n
       patchRun(
         event.taskId,
         event.task,
-        { task: event.task, status: "running", round: 0, tool: null, note: null, startedAt: now, endedAt: null },
+        { task: event.task, role: event.role ?? null, status: "running", round: 0, tool: null, note: null, startedAt: now, endedAt: null },
         now,
       );
       return;

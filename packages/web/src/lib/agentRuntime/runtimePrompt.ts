@@ -17,8 +17,14 @@
 
 import { LONG_TASK_MAX_ROUNDS, LONG_TASK_MAX_SEGMENTS } from "./longTask.js";
 
-/** 工具清单最多逐条列出的数量：再多就折成「还有 N 个，可用 tool_search 检索」。 */
-export const MAX_LISTED_TOOLS = 12;
+/**
+ * 工具清单最多逐条列出的数量：再多就折成「还有 N 个，可用 tool_search 检索」。
+ *
+ * d.347 从 12 提到 14：编排类工具（`agent_task` / `agent_team`）与工作流是排在
+ * 目录末尾追加上来的，12 条时正好被折进「还有 N 个」里——模型看得见授权、看不见
+ * 名字，就不会派活。这条上限的作用是控体积，不是藏工具。
+ */
+export const MAX_LISTED_TOOLS = 14;
 
 /** 清单回灌上限（与 `lib/todo/store.ts` 的 `MAX_TODOS` 对齐；这里写死是为了不反向依赖）。 */
 export const MAX_TODOS_IN_PROMPT = 20;
@@ -507,6 +513,14 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
       "- 要翻很多文件、多轮检索才能得出结论时，用 `agent_task` 派一个只读子代理：它自己读、只把结论带回来，别把几十个文件的原文都拉进主对话。",
     );
   }
+  // 团队任务（d.347）：只在 `agent_team` 真的注入时才教。和 `agent_task` 的分界是
+  // 「一件事要不要拆成几种角色、要不要先后依赖」——不写清这个分界，模型会用单代理
+  // 硬扛长任务，或者反过来把三行的小活拆成一支队伍。
+  if (hasTeamTool(input.tools)) {
+    lines.push(
+      "- 复杂长任务值得拆角色、分先后时，用 `agent_team` 派一支小队：每位成员写清角色与任务，用 `needs` 声明依赖，能并行的会自己并行；成员结论按人返回，你再汇总。只有一件小事时用 `agent_task` 就够，别为三行改动组队。",
+    );
+  }
   // 撤销（d.170）：只在真的注入了 `file_undo` 时才写——承诺了却调不到比不承诺更糟。
   if (hasUndoTool(input.tools)) {
     lines.push(
@@ -565,6 +579,16 @@ function hasTodoTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
 function hasAgentTaskTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
   if (!tools) return false;
   return tools.some((tool) => tool.name === "agent_task");
+}
+
+/**
+ * 这一轮是否注入了团队派发工具（`agent_team`，d.347）。
+ *
+ * 与上面两个判断同一个理由：提示词不承诺没注入的工具，也不替用户组队。
+ */
+function hasTeamTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
+  if (!tools) return false;
+  return tools.some((tool) => tool.name === "agent_team");
 }
 
 /**

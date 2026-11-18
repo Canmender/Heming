@@ -9,6 +9,7 @@ function run(extra: Partial<SubagentRun> = {}): SubagentRun {
   return {
     id: "sub-1",
     task: "查 docs 里的安装说明",
+    role: null,
     status: "running",
     round: 0,
     tool: null,
@@ -66,6 +67,18 @@ describe("SubagentRuns（d.200）", () => {
     const item = screen.getByTitle(long);
     expect(item.textContent).toContain("…");
     expect(item.textContent?.length ?? 0).toBeLessThan(long.length);
+  });
+
+  it("团队任务显示成员角色，而不只是「第 2 个」（d.347）", () => {
+    render(
+      <SubagentRuns
+        runs={[run({ id: "team-1-sec", role: "安全审查", task: "按威胁模型逐条对" })]}
+        onStop={vi.fn()}
+      />,
+    );
+    const item = screen.getByTitle("按威胁模型逐条对");
+    expect(item.textContent).toContain("「安全审查」");
+    expect(item.textContent).toContain("按威胁模型逐条对");
   });
 
   it("授权写盘时标题如实写「可写」，不继续冒充只读（d.202）", () => {

@@ -151,6 +151,19 @@ describe("buildRuntimeSection", () => {
     expect(withTool).toContain("原文");
   });
 
+  it("注入了 agent_team 才提团队派发，并说清与 agent_task 的分界（d.347）", () => {
+    const team = [{ name: "agent_team", title: "派团队", risk: "read" as const }];
+    const without = buildRuntimeSection({ ...base, tools: [] });
+    expect(without).not.toContain("agent_team");
+
+    const withTeam = buildRuntimeSection({ ...base, tools: team });
+    expect(withTeam).toContain("agent_team");
+    // 分界必须写出来：否则模型要么用单代理硬扛长任务，要么把小事拆成一支队
+    expect(withTeam).toContain("派一支小队");
+    expect(withTeam).toContain("agent_task");
+    expect(withTeam).toContain("别为三行改动组队");
+  });
+
   it("注入了 run_command 才提命令，并且提前说清「要先请用户确认」（d.164）", () => {
     const shell = [{ name: "run_command", title: "运行命令", risk: "write" as const }];
     const without = buildRuntimeSection({ ...base, tools: [] });

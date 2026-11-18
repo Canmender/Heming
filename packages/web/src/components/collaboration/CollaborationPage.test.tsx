@@ -7,6 +7,7 @@ import { resolveBoundProfile, streamChatRouted } from "../../lib/llmRoute.js";
 import { getMagpieCliBridge } from "../../lib/magpieCli.js";
 import { COLLAB_HISTORY_KEY, saveLastRun } from "../../lib/collaboration/history.js";
 import type { CollaborationRun } from "../../lib/collaboration/types.js";
+import { beginTeamRun, clearTeamRuns, finishTeamRun } from "../../lib/agentRuntime/teamRuns.js";
 
 /**
  * 协作页：参与者默认值 / 本机智能体并入 / 模型映射缺失 / 配置与运行 / 历史恢复。
@@ -75,6 +76,7 @@ function addClaude() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  clearTeamRuns();
   vi.mocked(getMagpieCliBridge).mockReset();
   vi.mocked(resolveBoundProfile).mockReset();
   vi.mocked(streamChatRouted).mockReset();
@@ -289,6 +291,41 @@ describe("协作页 · 运行与历史", () => {
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(screen.getByText("还没有协作记录")).toBeInTheDocument();
     expect(window.localStorage.getItem(COLLAB_HISTORY_KEY)).toBeNull();
+  });
+
+  it("显示对话里最近一次团队任务：成员角色与真实状态（d.347）", async () => {
+    beginTeamRun({
+      conversationId: "c1",
+      goal: "把登录链路摸清并给出改造方案",
+      members: [
+        { id: "scan", role: "通用成员", task: "列出 auth 相关文件" },
+        { id: "review", role: "安全审查", task: "按威胁模型逐条对" },
+      ],
+      now: 1_000,
+    });
+    finishTeamRun(
+      {
+        ok: false,
+        members: [
+          { id: "scan", role: "通用成员", task: "列出 auth 相关文件", ok: true, rounds: 2, toolCalls: 3, text: "x" },
+          { id: "review", role: "安全审查", task: "按威胁模型逐条对", ok: false, rounds: 1, toolCalls: 0, text: "y" },
+        ],
+      },
+      2_500,
+    );
+    await renderReady();
+
+    const section = screen.getByRole("region", { name: "对话里的团队任务" });
+    expect(within(section).getByText("把登录链路摸清并给出改造方案")).toBeInTheDocument();
+    expect(within(section).getByText("安全审查")).toBeInTheDocument();
+    expect(within(section).getByText("已完成")).toBeInTheDocument();
+    expect(within(section).getByText("部分未完成")).toBeInTheDocument();
+  });
+
+  it("没有团队任务时如实说没有，不留一个空壳（d.347）", async () => {
+    await renderReady();
+    const section = screen.getByRole("region", { name: "对话里的团队任务" });
+    expect(within(section).getByText("还没有团队任务。")).toBeInTheDocument();
   });
 
   it("停止协作会中止请求并保留已产生的回合", async () => {

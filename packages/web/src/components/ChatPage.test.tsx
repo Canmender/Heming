@@ -1179,6 +1179,10 @@ describe("ChatPage", () => {
     // 提示词也要说明「翻很多文件时用它、别把原文拉进主对话」。
     expect(seen![0].content).toContain("agent_task");
     expect(seen![0].content).toContain("只读子代理");
+    // d.347 起挂上「派团队」：复杂长任务可以拆成有角色、有依赖的成员一起干，
+    // 它同样必须出现在这一轮真实可调的工具清单里。
+    expect(seen![0].content).toContain("agent_team");
+    expect(seen![0].content).toContain("派一支小队");
     expect(seen![1]).toEqual({ role: "user", content: "历史1" }); // 第 31 条以前的原话不再被丢
     expect(seen![35]).toEqual({ role: "user", content: "历史35" });
     expect(seen![36]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });

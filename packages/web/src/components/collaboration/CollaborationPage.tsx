@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
 import { PageShell } from "../layout/PageShell.js";
 import { Button } from "../ui/Button.js";
@@ -18,6 +18,8 @@ import type {
   CollaborationTurn,
 } from "../../lib/collaboration/types.js";
 import { CollabTurnCard } from "./CollabTurnCard.js";
+import { listTeamRuns, subscribeTeamRuns, type TeamRunMember } from "../../lib/agentRuntime/teamRuns.js";
+import { formatDuration } from "../progress/status.js";
 
 /**
  * 多智能体协作页（独立页面，d.146）。
@@ -109,6 +111,14 @@ function isAbort(error: unknown): boolean {
   );
 }
 
+/** 成员状态说人话：不编百分比，只说走到第几轮 / 已收口。 */
+function teamMemberStatusText(member: TeamRunMember): string {
+  if (member.status === "done") return "已完成";
+  if (member.status === "failed") return member.note ?? "未完成";
+  if (member.status === "running") return member.rounds > 0 ? `第 ${member.rounds} 轮` : "刚派出";
+  return "排队中";
+}
+
 export function CollaborationPage() {
   const profiles = useLlmStore((s) => s.profiles);
   const bindings = useLlmStore((s) => s.bindings);
@@ -118,6 +128,9 @@ export function CollaborationPage() {
   const [initialRun] = useState<CollaborationRun | null>(() => loadLastRun());
   const [run, setRun] = useState<CollaborationRun | null>(initialRun);
   const [restored, setRestored] = useState(initialRun !== null);
+  // 对话里的团队任务（d.347）：这里只读，不参与本页自己的协作运行。
+  const teamRuns = useSyncExternalStore(subscribeTeamRuns, listTeamRuns);
+  const latestTeam = teamRuns.length > 0 ? (teamRuns[teamRuns.length - 1] ?? null) : null;
   const [task, setTask] = useState(() => initialRun?.task ?? "");
   const [mode, setMode] = useState<CollaborationMode>(() => initialRun?.mode ?? "sequential");
   const [rounds, setRounds] = useState(() => initialRun?.rounds ?? 1);
@@ -496,6 +509,51 @@ export function CollaborationPage() {
             ))}
           </ul>
         ) : null}
+      </section>
+
+      <section aria-labelledby="collab-team-heading" className="ui-card p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="collab-team-heading" className="ui-section-title">
+            对话里的团队任务
+          </h2>
+          {latestTeam ? (
+            <span className="ui-chip">
+              {latestTeam.status === "running"
+                ? "运行中"
+                : latestTeam.status === "done"
+                  ? "已完成"
+                  : "部分未完成"}
+            </span>
+          ) : null}
+        </div>
+        <p className="ui-caption mt-1">
+          会话里让和小鸣组队干活时，它会按成员分工派子代理：这里显示最近一次的真实进度与结果。
+          想开始一次，去会话里说「分头查清楚再给我方案」这类话。
+        </p>
+        {latestTeam === null ? (
+          <p className="ui-caption mt-3">还没有团队任务。</p>
+        ) : (
+          <div className="mt-3 space-y-2" data-testid="team-run">
+            <p className="text-ui-sm text-body">{latestTeam.goal}</p>
+            <p className="ui-caption">
+              {latestTeam.members.length} 位成员 ·{" "}
+              {latestTeam.endedAt === null
+                ? "进行中"
+                : `用时 ${formatDuration(latestTeam.endedAt - latestTeam.startedAt)}`}
+            </p>
+            <ul className="space-y-1" aria-label="团队成员">
+              {latestTeam.members.map((member) => (
+                <li key={member.id} className="flex flex-wrap items-baseline gap-x-2 text-ui-sm">
+                  <span className="font-medium">{member.role}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted" title={member.task}>
+                    {member.task}
+                  </span>
+                  <span className="ui-micro">{teamMemberStatusText(member)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="collab-participants-heading" className="ui-card p-4">

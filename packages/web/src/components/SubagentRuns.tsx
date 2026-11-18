@@ -50,6 +50,7 @@ export function SubagentRuns({
       <ul className="min-w-0 flex-1 basis-64 space-y-0.5">
         {running.map((run) => (
           <li key={run.id} className="truncate text-muted" title={run.task}>
+            {run.role ? <span className="text-body">「{run.role}」</span> : null}
             {shortTask(run.task)} · {statusLine(run)}
           </li>
         ))}
