@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseArgs } from "./args.js";
 
 /** 窄化断言：解析成功且是运行命令。 */
@@ -332,6 +332,29 @@ describe("parseArgs：信任工作区钩子（d.312）", () => {
 
   it("sessions 不接 --trust-hooks", () => {
     const parsed = parseArgs(["sessions", "--trust-hooks"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
+  });
+});
+describe("parseArgs：只读模式（d.314）", () => {
+  it("默认不是只读：写工具照常可用", () => {
+    expect(expectRun(["run", "改一下"]).readOnly).toBe(false);
+    expect(expectMcp(["mcp", "serve"]).readOnly).toBe(false);
+  });
+
+  it("run 与 mcp serve 都认 --read-only", () => {
+    expect(expectRun(["run", "--read-only", "先看看"]).readOnly).toBe(true);
+    expect(expectMcp(["mcp", "serve", "--read-only"]).readOnly).toBe(true);
+  });
+
+  it("--read-only 不接受取值", () => {
+    const parsed = parseArgs(["run", "--read-only=1", "先看看"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("--read-only");
+  });
+
+  it("sessions 不接 --read-only（列存档不跑工具，谈不到只读）", () => {
+    const parsed = parseArgs(["sessions", "--read-only"]);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("sessions 不接");
   });

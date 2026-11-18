@@ -38,7 +38,7 @@
 ### 第三波（路线图，不在本轮承诺）
 
 
-- 命令白名单（`packages/cli/src/workspaceRules.ts`，d.307：`.heming/permissions.json` 的 deny/ask/allow 已接进 `run` 与 `mcp serve`；`ask` 在无人的 CLI 里落成拒绝）+ 网络域名策略 + OS 级沙箱（Windows Job Object / 受限令牌）——后两项仍未做；
+- 命令白名单（`packages/cli/src/workspaceRules.ts`，d.307：`.heming/permissions.json` 的 deny/ask/allow 已接进 `run` 与 `mcp serve`；`ask` 在无人的 CLI 里落成拒绝）+ 网络域名策略 + OS 级沙箱（Windows Job Object / 受限令牌）——网络域名策略与 OS 级沙箱仍未做；**只读模式已落地（d.315 `--read-only`：按工具自报 `risk` 裁剪能力、写/命令一律不执行，`mcp serve` 连工具清单都不列非只读项）**，但它只是能力裁剪，不等于沙箱；
 - 更新链 https + 安装包签名校验；
 - Web 端去桌面桥依赖（移动端前置）。
 
@@ -65,4 +65,5 @@
 | W4 扩展与回滚 | 已落地（自定义命令 d.240、子代理定义 d.287、`/rewind N` 的**文件回滚** d.291、**对话截断** d.293、删除跨窗口同步 d.298、断线重连对齐 d.300） | `packages/web/src/lib/agentRuntime/{customCommands,subagentDefs}.ts`、`subagent.ts` 的 `agent` 参数、`packages/web/src/lib/fileEdit/rewindCheckpoints.ts`、`packages/web/src/lib/api.ts` 的 `deleteMessages`、`packages/web/src/store/chat.ts` 的 `resyncMessages`（d.300）、`packages/server/src/{app,store,sqliteStore}.ts` 的 `DELETE /api/conversations/:id/messages/delete`、`ChatPage.test.tsx` I4i/I3z/I3-rewind |
 | W5 界面手感 | 已落地（Ctrl+F 唤起本会话搜索 d.236；工具参数内联 diff d.239 `argDiff.ts` 挂在工具气泡上；单条消息重答 d.295） | `packages/web/src/lib/agentRuntime/regenerate.ts`、`packages/web/src/lib/fileEdit/argDiff.ts`、`ChatPage.tsx` 消息行按钮 |
 | W6 MCP 双向 | 已落地：服务端 d.289（`heming mcp serve`：initialize/ping/tools/list/tools/call，与 `run` 共用 `src/tooling.ts` 的闸门）；客户端 d.309（`run --mcp` 读 `.heming/mcp.json`、`mcp__<服务>__<工具>`、工具按 danger 处理且要 `--allow-danger`、参数原样转发） | `packages/cli/src/{mcp,mcpServe,tooling,mcpClient}.ts` + 同名 `.test.ts` |
+| W8 CLI 只读模式 | 已落地（d.315 `run --read-only` / `mcp serve --read-only`：只有自报 `risk:"read"` 的工具放行，未声明风险按写处理；只读判定在权限规则之前；与 `--allow-danger` 同时给时只读赢；MCP `tools/list` 不列非只读工具） | `packages/cli/src/tooling.ts` 的 `createCliGate({readOnly})`、`mcp.ts` 的 `describeMcpTools` 过滤、`run.ts` 的只读提示词、`args.ts` 的 `--read-only` |
 | W7 CLI 项目约定 | 已落地（d.310 `run` 读工作区 `AGENTS.md` 一族并注入系统提示词，口径与桌面端 d.174 同源；`--cwd` 一层、最多 2 份、单份 4000 字 / 总量 6000 字、BOM/CRLF 归一、读不到不阻断） | `packages/cli/src/projectRules.ts` + `.test.ts`、`run.ts` 的 `projectRules` 选项、`index.ts` 的加载与摘要行 |

@@ -395,4 +395,65 @@ describe("与真实工具装配一起跑（d.288）", () => {
     }).map((tool) => tool.name);
     expect(dangerNames).toContain("run_command");
   });
+
+  it("只读模式：tools/list 只报只读工具，写工具连名字都不出现（d.314）", async () => {
+    const dir = await tmpDir();
+    const tooling = createCliTooling({ cwd: dir, allowDanger: true, conversationId: "mcp-ro", readOnly: true });
+    const ctx: McpContext = {
+      tools: tooling.toolBridge,
+      confirm: tooling.confirm,
+      version: "v",
+      cwd: dir.replace(/\\/g, "/"),
+      allowDanger: true,
+      readOnly: true,
+    };
+    const names = describeMcpTools(ctx).map((tool) => tool.name);
+    expect(names).toContain("file_read");
+    expect(names).toContain("file_grep");
+    expect(names).not.toContain("file_write");
+    expect(names).not.toContain("file_edit");
+    // 即使给了 --allow-danger 也不给：只读赢。
+    expect(names).not.toContain("run_command");
+  });
+
+  it("只读模式下即使客户端硬调写工具也拒，且磁盘不变（d.314）", async () => {
+    const dir = await tmpDir();
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "mcp-ro2", readOnly: true });
+    const ctx: McpContext = {
+      tools: tooling.toolBridge,
+      confirm: tooling.confirm,
+      version: "v",
+      cwd: dir.replace(/\\/g, "/"),
+      allowDanger: false,
+      readOnly: true,
+    };
+    const target = path.join(dir, "ro.txt").replace(/\\/g, "/");
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "file_write", arguments: { path: target, content: "不该落盘" } },
+      },
+      ctx,
+    );
+    // 只读模式下列表里本来就没有它：客户端硬调也只会得到「未知工具」，
+    // 不会走到执行那一步（这比「列出再拒」更干净——它连写能力都没被承诺过）。
+    const error = response as { error?: { code: number; message: string } };
+    expect(error.error?.code).toBe(MCP_ERROR.invalidParams);
+    expect(error.error?.message).toContain("未知工具：file_write");
+    await expect(readFile(target, "utf8")).rejects.toThrow();
+  });
+
+  it("只读模式的说明文字讲清「只暴露读取类工具」（d.314）", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      ctxOf(bridge, { readOnly: true }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应");
+    const result = response.result as { instructions: string };
+    expect(result.instructions).toContain("只读模式");
+    expect(result.instructions).toContain("只暴露读取类工具");
+  });
 });

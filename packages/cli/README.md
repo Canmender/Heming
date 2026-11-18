@@ -55,6 +55,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--cwd <dir>` | 工作目录，同时是唯一可写根（`{ path: <cwd>, mode: "write", name: "work" }`）。默认 `process.cwd()`。 |
 | `--max-rounds <n>` | 最多允许 `n` 个工具轮。第 `n+1` 轮如果模型还要调工具，CLI 会提前收口（第 `n+1` 轮直接作答仍然允许）。`n` 必须是正整数。 |
 | `--allow-danger` | 放行 `run_command` 等 danger 工具。不加时命令工具**不会出现在工具清单里**；模型硬调会得到「未执行」而不是真正执行。 |
+| `--read-only` | 只读模式：除自报 `risk:"read"` 的工具外一律不执行（写、删、打补丁、跑命令都拦住），与 `--allow-danger` 同时给时只读赢。详见下文「只读模式」。 |
 | `--trust-workspace` | 让工作区 `.heming/permissions.json` 里的 `allow` 规则生效（`deny` / `ask` 本来就算数）。详见下文「工作区权限规则」。 |
 | `--trust-hooks` | 允许执行工作区 `.heming/hooks.json` 里的本机检查（默认只读配置、不执行）。详见下文「工作区钩子」。 |
 | `--mcp` | 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把对方的工具接进这次运行。只有显式加这个开关才连；工具还要 `--allow-danger` 才真的调过去。详见下文「MCP 客户端」。 |
@@ -491,6 +492,35 @@ heming mcp serve --cwd D:/repo --trust-hooks
 
 钩子只覆盖 `PreToolUse` 这一类事件，且命令本身没有额外的白名单或沙箱——`--trust-hooks`
 等于「你让它跑什么它就跑什么」，只在该仓库值得信任时打开。
+## 只读模式：`--read-only`
+
+只想让和鸣「先看看、别动手」时用它。`run` 与 `mcp serve` 都认：
+
+```bash
+pnpm cli --read-only "这套代码哪里会出问题"
+heming mcp serve --cwd . --read-only      # 只把「读」的工具借给编辑器
+```
+
+判定口径：
+
+- 看工具自报的 `risk`：只有 `read` 放行（`file_read` / `file_glob` / `file_grep` / `file_image` /
+  `todo_write` / `tool_output_read`）。写、删、打补丁、跑命令一律拒。
+- **没声明风险的工具当写处理**（fail-closed）：新加工具不会因为忘记维护白名单而被悄悄放行。
+- 只读判定排在**工作区权限规则之前**：被拒的文案是「CLI 以只读模式运行（--read-only）：…」，
+  不会让模型误以为是仓库规则或参数问题，从而反复重试。
+- 与 `--allow-danger` 同时给时**只读赢**，启动时 stderr 明说一句：
+  `[heming] --read-only 优先：危险工具仍然不会执行（--allow-danger 这次被忽略）。`
+- 只读模式下 `createCliTooling` **根本不挂** `run_command`（闸门拦 + 桥不提供，两道都上）。
+- `run` 的系统提示词会追加一段「这次是只读模式」，并告诉模型「重试不会改变结果，要改动就写说明」——
+  否则它会把轮数烧在注定失败的写上。
+
+MCP 侧是另一种严格：`--read-only` 时 `tools/list` **不列**非只读工具。对端编辑器连名字都看不到，
+硬调回来是 `-32602 未知工具：file_write（本机只提供：…）`。理由是「列出来就等于承诺这个能写」，
+只读模式不该把写能力挂在别人机器上的菜单里。
+
+它**不是**沙箱：这是能力裁剪（不执行会改动的动作），不是进程隔离或系统调用过滤。
+模型仍然能通过只读工具读到工作区里的任何文件内容。
+
 ## 工具与审批口径
 
 默认提供真实的内置工具：
@@ -519,6 +549,8 @@ heming mcp serve --cwd D:/repo --trust-hooks
   `--allow-danger` 才真的调过去）。没有自动发现、没有常驻连接。
 - **不接联网搜索**：没有 web search 工具；需要联网请用 `--allow-danger` 跑命令（如 `curl`）。
 - **没有 HITL 人工确认**：无人值守时「问」一律按拒绝处理；危险能力必须由启动参数显式授权。
+- **只读模式是能力裁剪，不是沙箱**：`--read-only` 只保证「不改动、不跑命令」，不做进程隔离；
+  需要真正隔离请用容器/虚拟机。
 - **CLI 自己的会话存档，不碰桌面端历史**：默认单轮；`--continue` / `--resume` 只接 CLI 自己存在
   `~/.heming/cli-sessions/` 的文字问答，不读写桌面端的聊天历史/记忆/任务清单。
 - **不是 Electron**：系统提示词按「文件工具会真的改本机文件」描述运行环境；

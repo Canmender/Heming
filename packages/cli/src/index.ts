@@ -51,6 +51,7 @@ const USAGE = `用法：
   --cwd <dir>          工作目录（也是唯一可写根），默认当前目录
   --max-rounds <n>     最多允许 n 个工具轮；第 n+1 轮还要调工具就提前收口
   --allow-danger       允许 run_command 等危险工具（默认拒绝）
+  --read-only          只读模式：除读取类工具外一律不执行（写、删、命令都拦住）
   --trust-workspace    让 .heming/permissions.json 里的 allow 规则生效（deny / ask 总是生效）
   --trust-hooks        允许执行 .heming/hooks.json 里的本机检查（默认只读配置、不执行）
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
@@ -112,6 +113,7 @@ MCP 服务（给别的编辑器用）：
   pnpm cli --resume 20261118-144230-ab12 "继续"
   pnpm cli --trust-workspace "按仓库里的权限规则跑，别改 docs/"
   pnpm cli --trust-hooks "按仓库里的钩子检查跑，改完 generated 前会被拦住"
+  pnpm cli --read-only "先只看不改：这套代码哪里会出问题"
 
 工作区权限规则（.heming/permissions.json，与桌面端同一份）：
   {"deny":[{"tool":"run_command","command":"git push*"}]}   仓库里写了就一定生效
@@ -125,6 +127,12 @@ MCP 服务（给别的编辑器用）：
   退出码 0 放行、2 拒绝（取 stdout/stderr 第一行作原因）、其它一律拒绝；超时也算拒绝。
   默认**不执行**：配置跟着仓库走，克隆一个陌生仓库不该让它的脚本自动在你机器上跑，
   要真的生效必须显式加 --trust-hooks。
+
+只读模式（--read-only）：
+  除了读文件、搜代码、看目录，其它工具（写、删、打补丁、跑命令）一律不执行。
+  被拒的调用会回一句「CLI 以只读模式运行」，模型会转而把改动写成说明交回来。
+  它的作用范围比权限规则更靠前：即使仓库写了 allow、即使同时给了 --allow-danger，
+  也只读。适合「先让它看看、别动手」和 CI 里的预演。
 
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
@@ -207,6 +215,13 @@ async function main(argv: string[]): Promise<number> {
 
   const options = parsed.options;
   const streamMode = options.outputFormat === "stream-json";
+  /**
+   * 只读模式与 `--allow-danger` 同时给时只读赢，但要明说一句：
+   * 用户以为自己放行了命令，实际一条都没跑，静默忽略比报错更让人困惑。
+   */
+  if (options.readOnly && options.allowDanger) {
+    writeErr("[heming] --read-only 优先：危险工具仍然不会执行（--allow-danger 这次被忽略）。\n");
+  }
   const sink = streamMode ? createEventSink((chunk) => process.stdout.write(chunk)) : null;
   /**
    * `--mcp` 连上的子进程。
@@ -392,6 +407,7 @@ async function main(argv: string[]): Promise<number> {
     ...(workspaceRules ? { workspaceRules } : {}),
     ...(hookRunner ? { hooks: hookRunner } : {}),
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
+    ...(options.readOnly ? { readOnly: true } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     history: toHistory(prior),
     sessionId,

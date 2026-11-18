@@ -7,7 +7,7 @@
 
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { relativizeToolArgs } from "./tooling.js";
+import { createCliGate, relativizeToolArgs } from "./tooling.js";
 
 const CWD = path.resolve("D:/work/proj").replace(/\\/g, "/");
 
@@ -77,5 +77,62 @@ describe("relativizeToolArgs（d.288）", () => {
   it("没有发生改写时返回原字符串（避免无意义的重序列化）", () => {
     const original = '{"path":  "src/a.ts",   "content":"x"}';
     expect(relativizeToolArgs(original, CWD)).toBe(original);
+  });
+});
+/** 只读模式测试用的唯一可写根（与 CLI 装配时的形状一致）。 */
+const ROOTS = [{ path: CWD, mode: "write" as const, name: "work" }];
+
+/** 只读模式：闸门层面「除只读工具外一律拒」，不依赖 `--allow-danger`。 */
+function gateOf(options: { readOnly?: boolean; allowDanger?: boolean; risk?: "read" | "write" | "danger" }) {
+  return createCliGate({
+    roots: () => ROOTS,
+    allowDanger: options.allowDanger === true,
+    readOnly: options.readOnly === true,
+    metaOf: () => (options.risk ? { risk: options.risk } : undefined),
+  });
+}
+
+function denyReasonOf(outcome: Awaited<ReturnType<ReturnType<typeof gateOf>>>[number]): string {
+  if (outcome.kind !== "deny") throw new Error(`期望被拒绝，实际是 ${outcome.kind}`);
+  return outcome.reason ?? "";
+}
+
+describe("只读模式（d.314）", () => {
+  const call = (name: string, args: Record<string, unknown> = { path: "src/a.ts", content: "x" }) => ({
+    id: "c1",
+    function: { name, arguments: JSON.stringify(args) },
+  });
+
+  it("写工具一律被拒，理由说清是只读模式", async () => {
+    for (const name of ["file_write", "file_edit", "file_patch"]) {
+      const reason = denyReasonOf((await gateOf({ readOnly: true, risk: "write" })([call(name)]))[0]!);
+      expect(reason).toContain("只读模式");
+      expect(reason).toContain(name);
+    }
+  });
+
+  it("只读工具照常放行（只读不是「什么都不许看」）", async () => {
+    const outcome = (await gateOf({ readOnly: true, risk: "read" })([call("file_read", { path: "src/a.ts" })]))[0]!;
+    expect(outcome.kind).toBe("allow");
+  });
+
+  it("危险工具与没声明风险的工具同样被拒（宁缺勿滥）", async () => {
+    const danger = denyReasonOf((await gateOf({ readOnly: true, allowDanger: true, risk: "danger" })([call("run_command", { command: "git status" })]))[0]!);
+    expect(danger).toContain("只读模式");
+
+    const unknown = denyReasonOf((await gateOf({ readOnly: true })([call("some_new_tool")]))[0]!);
+    expect(unknown).toContain("只读模式");
+  });
+
+  it("命令工具即使在 --allow-danger 下也被拒：只读赢", async () => {
+    const outcomes = await gateOf({ readOnly: true, allowDanger: true })([
+      { id: "c1", function: { name: "run_command", arguments: JSON.stringify({ command: "npm test" }) } },
+    ]);
+    expect(denyReasonOf(outcomes[0]!)).toContain("只读模式");
+  });
+
+  it("不开只读时行为不变（写工具照常过闸门）", async () => {
+    const outcome = (await gateOf({ risk: "write" })([call("file_write")]))[0]!;
+    expect(outcome.kind).toBe("allow");
   });
 });

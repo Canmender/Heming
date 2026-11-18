@@ -61,12 +61,41 @@ export function createCliGate(input: {
   allowDanger: boolean;
   metaOf: (name: string) => { risk?: string } | undefined;
   rules?: CliWorkspaceRuleSet | null;
+  /**
+   * 只读模式（`--read-only`）：除「自报只读」的工具外一律拒绝。
+   *
+   * 这是 codex 的 `--sandbox read-only` 同一个位置的东西——「先看看它想干什么」，
+   * 而不是「跑起来再收拾」。它排在所有判定最前面：只读模式下没有例外，
+   * 连 `--allow-danger` 也不放开命令（两个开关同时给时只读赢，入口会提示）。
+   */
+  readOnly?: boolean;
 }): ToolConfirmFn {
   const rules = input.rules ?? null;
+  const readOnly = input.readOnly === true;
   return async (calls) =>
     calls.map((call) => {
       const hitlCall = toHitlCall(call);
       const name = call.function.name;
+
+      /*
+       * -1. 只读模式先判。
+       *     先于工作区规则：规则是「这个仓库额外限制什么」，只读是「这次运行整体
+       *     不许改动」，后者更宽、也更该被第一个说出来（模型收到的是模式原因，
+       *     不会误以为是仓库规则或参数问题）。
+       *     认「自报只读」而不是认工具名：桥自己声明 risk=read 的才算只读，
+       *     新增工具时不会因为忘了维护白名单而被静默放行。
+       */
+      if (readOnly) {
+        const meta = input.metaOf(name);
+        if (name === SHELL_TOOL || !meta || meta.risk !== "read") {
+          return {
+            kind: "deny" as const,
+            call: hitlCall,
+            reason: `CLI 以只读模式运行（--read-only）：${name} 会改动文件或执行命令，这次没有执行`,
+            cause: "gate" as const,
+          };
+        }
+      }
 
       /*
        * 0. 工作区规则先判。
@@ -250,6 +279,11 @@ export function createCliTooling(options: {
    * 发生在入口，与权限规则一样在启动时一次做完，避免每个工具调用都读盘。
    */
   hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
+  /**
+   * 只读模式：闸门拒掉一切可能改动的调用，桥也不挂命令工具（两道都上，
+   * 因为 `--allow-danger` 与 `--read-only` 同时出现时不能让任何一条路径漏过去）。
+   */
+  readOnly?: boolean;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -264,7 +298,7 @@ export function createCliTooling(options: {
     // 任务清单按本次运行独立：CLI 不在两次调用之间保存会话，清单串味只会误导模型。
     conversationId: options.conversationId,
     // 只有显式 --allow-danger 才挂命令工具（它同时意味着闸门放行 danger）。
-    ...(options.allowDanger ? { shell: true } : {}),
+    ...(options.allowDanger && !options.readOnly ? { shell: true } : {}),
   });
 
   const onWrite = options.onWrite;
@@ -368,6 +402,7 @@ export function createCliTooling(options: {
     allowDanger: options.allowDanger,
     metaOf: (name) => toolBridge.meta?.(name),
     rules: options.rules ?? null,
+    readOnly: options.readOnly === true,
   });
 
   /**

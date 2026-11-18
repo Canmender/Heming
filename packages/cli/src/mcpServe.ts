@@ -66,6 +66,7 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     conversationId,
     ...(workspaceRules ? { rules: workspaceRules } : {}),
     ...(hookRunner ? { hooks: hookRunner } : {}),
+    readOnly: options.readOnly === true,
   });
   const ctx: McpContext = {
     tools: tooling.toolBridge,
@@ -73,13 +74,16 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     version: io.version,
     cwd: cwd.replace(/\\/g, "/"),
     allowDanger: options.allowDanger,
+    readOnly: options.readOnly === true,
   };
 
   // 启动信息写 stderr：stdout 是协议通道，混一行裸文本就会让客户端解析失败并断连。
   const names = describeMcpTools(ctx).map((tool) => tool.name);
   io.stderr.write(
     `[heming] mcp serve 已就绪：工作区 ${ctx.cwd}，${names.length} 个工具（${names.join("、") || "无"}）；` +
-      `危险工具${options.allowDanger ? "已放行（--allow-danger）" : "未放行"}。\n`,
+      (options.readOnly
+        ? "只读模式（--read-only）：只暴露读取类工具。\n"
+        : `危险工具${options.allowDanger ? "已放行（--allow-danger）" : "未放行"}。\n`),
   );
   if (workspaceRules) {
     io.stderr.write(`[heming] ${describeCliWorkspaceRules(workspaceRules)}\n`);

@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -267,6 +267,8 @@ describe("startAgentRun", () => {
     expect(system).toContain("改完要跑 pnpm test。");
     // 约定段只算规矩，不该把「改一下这个函数」也算进去。
     expect(system).not.toContain("改一下这个函数");
+    // 只读模式没开时不该出现只读说明（否则模型会白白放弃写能力）。
+    expect(system).not.toContain("这次是只读模式");
   });
 
   it("不传项目约定时提示词里没有这一段（保持旧行为）", async () => {
@@ -286,5 +288,61 @@ describe("startAgentRun", () => {
     }).done;
     const system = (seen[0] ?? []).find((message) => message.role === "system")?.content ?? "";
     expect(system).not.toContain("## 项目约定（本工作区）");
+  });
+});
+describe("只读模式（--read-only，d.314）", () => {
+  it("提示词里说明只读并劝它把改动写成说明", async () => {
+    const dir = await makeSandbox();
+    const seen: { role: string; content: string }[][] = [];
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      seen.push(messages.map((message) => ({ role: message.role, content: message.content })));
+      opts.onFinish?.("stop");
+      return "好";
+    };
+    await startAgentRun({
+      prompt: "看看这里有什么问题",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      readOnly: true,
+    }).done;
+
+    const system = (seen[0] ?? []).find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain("这次是只读模式");
+    expect(system).toContain("--read-only");
+    // 关键一句：让它别把轮数烧在注定失败的写调用上。
+    expect(system).toContain("重试不会改变结果");
+  });
+
+  it("只读模式下写工具的调用被拒，磁盘不变", async () => {
+    const dir = await makeSandbox();
+    let round = 0;
+    const chat: StreamChatFn = async (_profile, messages, opts) => {
+      round += 1;
+      if (round === 1) {
+        const call = {
+          id: `call-${round}`,
+          type: "function" as const,
+          function: { name: "file_write", arguments: JSON.stringify({ path: "ro.txt", content: "不该落盘" }) },
+        };
+        messages.push({ role: "assistant", content: "", tool_calls: [call] } as never);
+        return "";
+      }
+      opts.onFinish?.("stop");
+      return "没写。";
+    };
+    const outcome = await startAgentRun({
+      prompt: "写一个文件",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      readOnly: true,
+    }).done;
+    expect(outcome.json.ok).toBe(true);
+    // 被拦下的写不算落盘。
+    expect(outcome.json.writes).toEqual([]);
+    await expect(readFile(path.join(dir, "ro.txt"), "utf8")).rejects.toThrow();
   });
 });

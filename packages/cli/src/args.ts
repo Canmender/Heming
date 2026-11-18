@@ -30,6 +30,11 @@ export interface PromptOptions {
   /** 放行 `run_command` 等 danger 工具。 */
   allowDanger: boolean;
   /**
+   * 只读模式：除自报只读的工具外一律不执行（写、删、改、跑命令都拦住）。
+   * 与 `--allow-danger` 同时给时只读赢——「先看看它想干什么」不该顺带动手。
+   */
+  readOnly: boolean;
+  /**
    * 信任工作区的 `.heming/permissions.json`：只有信任之后，里面的 **allow** 规则才生效。
    * deny / ask 不受这个开关影响——它们是收紧方向，仓库里写了一定照做。
    */
@@ -69,6 +74,8 @@ export interface McpOptions {
   cwd?: string;
   /** 放行 `run_command`（MCP 客户端能调用它真跑命令）。 */
   allowDanger: boolean;
+  /** 只读模式：只把只读工具暴露给客户端，写工具直接从 tools/list 里拿掉。 */
+  readOnly: boolean;
   /** 同 run：信任工作区权限规则里的 allow（deny / ask 总是生效），需要用 --trust-workspace 显式打开。 */
   trustWorkspace: boolean;
   /** 同 run：信任工作区的 `.heming/hooks.json` 并真的执行那些脚本（`--trust-hooks`）。 */
@@ -101,6 +108,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let allowDanger = false;
   let trustWorkspace = false;
   let trustHooks = false;
+  let readOnly = false;
   let cwd: string | undefined;
   let maxRounds: number | undefined;
   let model: string | undefined;
@@ -165,6 +173,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "allow-danger": {
           if (inline !== undefined) return { ok: false, error: "--allow-danger 不接受取值（直接写 --allow-danger 即可）" };
           allowDanger = true;
+          break;
+        }
+        case "read-only": {
+          if (inline !== undefined) return { ok: false, error: "--read-only 不接受取值（直接写 --read-only 即可）" };
+          readOnly = true;
           break;
         }
         case "mcp": {
@@ -273,6 +286,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (continueSession) notForSessions.push("--continue");
     if (trustWorkspace) notForSessions.push("--trust-workspace");
     if (trustHooks) notForSessions.push("--trust-hooks");
+  if (readOnly) notForSessions.push("--read-only");
     if (mcp) notForSessions.push("--mcp");
     if (resume !== undefined) notForSessions.push("--resume");
     if (notForSessions.length > 0) {
@@ -326,7 +340,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return {
       ok: true,
       action: "mcp",
-      options: { allowDanger, trustWorkspace, trustHooks, ...(cwd !== undefined ? { cwd } : {}) },
+      options: { allowDanger, readOnly, trustWorkspace, trustHooks, ...(cwd !== undefined ? { cwd } : {}) },
     };
   }
 
@@ -354,6 +368,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       json,
       fromStdin,
       allowDanger,
+      readOnly,
       trustWorkspace,
       trustHooks,
       mcp,

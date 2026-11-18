@@ -83,6 +83,14 @@ export interface McpContext {
   /** 工作区（也是唯一可写根），写进 instructions 与工具描述。 */
   cwd: string;
   allowDanger: boolean;
+  /**
+   * 只读模式：`tools/list` 只报自报只读的工具。
+   *
+   * 为什么不「照常列出、调用时再拒」：编辑器会把这些工具直接摆进它的工具面板，
+   * 列出来就等于承诺「这个能写」。只读模式是给「让我看看它想干什么」用的，
+   * 那就不该把写能力挂在别人机器上的菜单里。
+   */
+  readOnly?: boolean;
 }
 
 /** 从 OpenAI 风格的 tools 数组里取出 `{type:"function", function:{...}}` 的 name/描述/参数。 */
@@ -122,6 +130,8 @@ export function describeMcpTools(ctx: McpContext): McpToolDescriptor[] {
   for (const spec of ctx.tools.tools) {
     const name = (spec as { function?: { name?: unknown } })?.function?.name;
     const meta = typeof name === "string" ? ctx.tools.meta?.(name) : undefined;
+    // 只读模式：只报自报只读的工具。没声明风险的工具同样不报——宁缺勿滥。
+    if (ctx.readOnly === true && meta?.risk !== "read") continue;
     const descriptor = toDescriptor(spec, meta);
     if (descriptor) out.push(descriptor);
   }
@@ -134,9 +144,11 @@ function instructionsText(ctx: McpContext): string {
   return [
     `这是和鸣（heming）的本地工具服务：工具直接操作 ${ctx.cwd} 下的文件。`,
     `可写范围只有这个工作区（写根外一律拒绝），删除、改可执行文件这类高风险写也会被拒绝。`,
-    ctx.allowDanger
-      ? "已用 --allow-danger 启动：run_command 会真的在本机执行命令。"
-      : "没有 run_command：要跑命令必须由用户用 --allow-danger 重新启动，这不是重试能解决的问题。",
+    ctx.readOnly === true
+      ? "这次是只读模式（--read-only）：只暴露读取类工具，写与命令都没有开放，调用它们会失败且不会改动任何文件。"
+      : ctx.allowDanger
+        ? "已用 --allow-danger 启动：run_command 会真的在本机执行命令。"
+        : "没有 run_command：要跑命令必须由用户用 --allow-danger 重新启动，这不是重试能解决的问题。",
     `当前工具：${tools.join("、") || "（无）"}。`,
   ].join("\n");
 }

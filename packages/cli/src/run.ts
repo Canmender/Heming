@@ -132,6 +132,11 @@ export interface AgentRunOptions {
    * 工具调用才拿到「被拒绝」。`null` / 省略 = 这次运行不做钩子检查。
    */
   hooks?: ((call: { name: string; arguments: string }) => Promise<CliHookVerdict>) | null;
+  /**
+   * 只读模式（`--read-only`）：写与命令一律不执行，提示词里也要说清楚，
+   * 否则模型会一次次尝试、把轮数烧在注定失败的调用上。
+   */
+  readOnly?: boolean;
 }
 
 export interface AgentRunOutcome {
@@ -202,6 +207,7 @@ function buildCliSystemPrompt(input: {
   allowDanger: boolean;
   conversationId: string;
   rules?: string;
+  readOnly?: boolean;
 }): string {
   const runtime = buildRuntimeSection({
     desktop: true,
@@ -216,7 +222,7 @@ function buildCliSystemPrompt(input: {
     maxToolRounds: input.maxToolRounds,
     hasBackgroundJobs: input.allowDanger,
   });
-  return buildAgentContext({
+  const built = buildAgentContext({
     agentId: "cli",
     conversationId: input.conversationId,
     userText: input.prompt,
@@ -225,6 +231,24 @@ function buildCliSystemPrompt(input: {
     // 仓库自己的规矩排在人设之后、运行环境之前（与桌面端同一个位置）。
     ...(input.rules ? { rules: input.rules } : {}),
   }).systemPrompt;
+  if (!input.readOnly) return built;
+  /*
+   * 只读模式要写进提示词：否则模型会一次次尝试写文件、被拒、再换写法，
+   * 把轮数烧在注定失败的调用上，最后交出一个没结论的答案。
+   * 这里明确「要改动就写说明」，让它把精力放在读和给方案上。
+   */
+  return (
+    built +
+    [
+      "",
+      "## 这次是只读模式",
+      "",
+      "本次运行加了 --read-only：除了读取文件与搜索，其它工具调用都会被拒绝（写、删、打补丁、跑命令）。",
+      "- 需要改动时，把「改哪里、改成什么」写成可以直接执行的说明交回来，不要反复调用写工具。",
+      "- 被拒绝的调用不是参数错误，重试不会改变结果。",
+      "- 读文件、搜代码、看目录照常可用，结论照常给。",
+    ].join("\n")
+  );
 }
 
 /** 把「累计文本」切成增量：`onLocalDelta` 给的是全文累积，stdout 不该重复写旧内容。 */
@@ -253,6 +277,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     rules: options.workspaceRules ?? null,
     hooks: options.hooks ?? null,
     mcp: options.mcp ?? [],
+    readOnly: options.readOnly === true,
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;
@@ -274,6 +299,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     allowDanger: options.allowDanger,
     conversationId,
     ...(options.projectRules ? { rules: options.projectRules } : {}),
+    ...(options.readOnly ? { readOnly: true } : {}),
   });
   /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
   let modelRounds = 0;
