@@ -29,6 +29,7 @@ import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approvals.js";
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
+import { REMEMBER_TOOL, addCliMemory, rememberResultText, rememberSpec } from "./memory.js";
 
 /** 一次工具调用在闸门看来需要的最小形状（与编排层给的一致）。 */
 export interface GateCall {
@@ -234,6 +235,15 @@ export function createCliGate(input: {
         continue;
       }
 
+      /*
+       * 记忆工具：写的是我们自己管的 `.heming/memory.json`，不是用户的源码，
+       * 所以不走文件路径判定；但它仍然是「写」——只读模式在更早的分支就拒掉了。
+       */
+      if (name === REMEMBER_TOOL) {
+        outcomes.push({ kind: "allow", call: hitlCall });
+        continue;
+      }
+
       // 剩下的是写类：只有明确的文件写工具才走路径安全判定，其它写工具一律拒绝。
       if (!isFileWriteTool(name)) {
         outcomes.push({
@@ -377,6 +387,13 @@ export function createCliTooling(options: {
    * 但**执行**仍然逐次看批准状态：`allow-once` 只够这一次，`allow-session` 才长效。
    */
   ask?: CliApprover | null;
+  /**
+   * 工作区记忆（`.heming/memory.json`，d.329）：给 `true` 就挂 `remember` 工具。
+   *
+   * 不挂的时候模型硬调它会拿到「这次没开记忆」的明确回复，而不是「未知工具」——
+   * 后者会让它以为名字写错、反复重试。
+   */
+  memory?: boolean;
 }): CliTooling {
   const cwd = path.resolve(options.cwd).replace(/\\/g, "/");
   const roots: FileRoot[] = [{ path: cwd, mode: "write", name: "work" }];
@@ -430,9 +447,11 @@ export function createCliTooling(options: {
   }
 
   const toolBridge: ToolBridge = {
-    tools: [...baseBridge.tools, ...mcpTools],
+    // 只读模式下连 `remember` 都不挂：列出来等于承诺能写（`run` 也做同样判断，这里是兜底）。
+    tools: [...baseBridge.tools, ...(options.memory && !options.readOnly ? [rememberSpec()] : []), ...mcpTools],
     meta: (name) => {
       if (name === SHELL_TOOL) return { risk: "danger" as const, displayName: "在本机执行命令", core: true };
+      if (name === REMEMBER_TOOL) return { risk: "write" as const, displayName: "记住这件事", core: true };
       const mcpTarget = parseMcpToolName(name);
       if (mcpTarget) {
         return { risk: "danger" as const, displayName: `MCP · ${mcpTarget.server}/${mcpTarget.tool}`, core: true };
@@ -460,6 +479,33 @@ export function createCliTooling(options: {
         if (verdict.decision === "deny") {
           return { text: cliHookDeniedText(verdict, call.name), ok: false };
         }
+      }
+
+      /*
+       * 记忆工具：只写 `.heming/memory.json`，不碰用户文件。
+       *
+       * 放在这条位置（钩子之后、文件桥之前）是有意的——仓库的钩子可以拒绝「记这条」，
+       * 但它没有路径可判、也不需要根校验，套文件桥只会拿到「未知工具」。
+       */
+      if (call.name === REMEMBER_TOOL) {
+        if (!options.memory) {
+          return {
+            text: "未执行：这次运行没有开启记忆（--no-memory）。告诉用户这件事没记下来，不要重试。",
+            ok: false,
+          };
+        }
+        let text = "";
+        try {
+          const parsed = call.arguments.trim() ? (JSON.parse(call.arguments) as unknown) : {};
+          const value = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).text : undefined;
+          if (typeof value !== "string") {
+            return { text: 'remember 需要一个 text 字段（{"text":"要记下的那句话"}）。', ok: false };
+          }
+          text = value;
+        } catch {
+          return { text: "remember 的参数不是合法 JSON。", ok: false };
+        }
+        return rememberResultText(await addCliMemory(cwd, text));
       }
 
       // 命令工具放行一次就消费一次许可（`allow-session` 时不动计数）。

@@ -12,6 +12,20 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.329.4.120.12",
+    "date": "2026-11-18",
+    "title": "终端里的和鸣开始记事",
+    "bullets": [
+      "现在可以让它「记住这件事」：一句偏好、一条仓库约定、一个踩过的坑，写进工作区的 `.heming/memory.json`。",
+      "下次在同一个仓库里运行，它会按你这一轮问的东西，自动带上最多 5 条相关的记忆——不用每次重新交代。",
+      "记什么由它自己判断（只在你说「记住」或给出长期有效的规矩时才记），每件事单独一条，最多 200 条。",
+      "记错了能删：`heming memory` 列出全部（带序号），`heming memory forget 3` 删掉第 3 条，`heming memory add \"…\"` 自己加一条。",
+      "不想让它记：加 `--no-memory`，既不读也不写。",
+      "记忆文件跟着仓库走（能提交、能 review、能自己手改）；文件坏了它会说一声并跳过，不会静默把记忆清空。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.328.4.120.12",
     "date": "2026-11-18",
     "title": "进「来源」先看账号，要加账号再点开",

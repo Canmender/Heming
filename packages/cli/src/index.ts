@@ -19,6 +19,15 @@ import { describeCliWorkspaceRules, loadCliWorkspaceRules } from "./workspaceRul
 import { describeCliContext } from "./contextBudget.js";
 import { createCliHookRunner, describeCliHooks, loadCliHooks } from "./toolHooks.js";
 import { APPROVAL_ANSWER_HINTS, createTerminalApprover } from "./approvals.js";
+import {
+  addCliMemory,
+  describeCliMemory,
+  loadCliMemory,
+  memoryPath,
+  memorySection,
+  recallCliMemory,
+  removeCliMemory,
+} from "./memory.js";
 import { MCP_CLIENT_CONFIG_FILE, connectMcpServer, loadMcpServers, mcpToolName, type McpConnection } from "./mcpClient.js";
 import {
   appendTurn,
@@ -47,6 +56,8 @@ const USAGE = `用法：
                                              按 MCP（Model Context Protocol）把文件工具
                                              暴露给别的编辑器：协议消息走 stdin/stdout
   heming sessions [--json] [--cwd <dir>]     列出本机的会话存档（id / 时间 / 条数 / 最后一句）
+  heming memory [list | add <一句话> | forget <id 或序号>]
+                                             看 / 加 / 删这个工作区的长期记忆
   heming --version | --help
 
 常用选项：
@@ -60,6 +71,7 @@ const USAGE = `用法：
   --mcp                连上 .heming/mcp.json 里声明的 MCP 服务（工具还要 --allow-danger 才真能用）
   --context-budget <n> 续聊历史的 token 预算（默认 12000），超出就把早期对话折成摘要
   --no-compact         不折叠历史：整段发给模型（会更快烧钱，也更早撞上下文上限）
+  --no-memory          不读写 .heming/memory.json（既不注入召回，也不提供 remember 工具）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
@@ -149,6 +161,14 @@ MCP 服务（给别的编辑器用）：
   折了会打一行「上下文：折叠了 N 条早期对话」；--no-compact 则整段原样发送。
   真的撞上供应商的上下文上限时，会自动收紧一次预算重试（最多两级）。
 
+工作区记忆（.heming/memory.json）：
+  模型可以用 remember 工具把「以后都该记得的事」记下来（偏好、约定、踩过的坑），
+  下次运行会按你的提问自动挑几条相关的接在提示词里。
+  heming memory                          看记了些什么（带序号，能直接删）
+  heming memory add "以后都用中文回答"      手动加一条
+  heming memory forget 2                  删掉序号 2（也认完整 id）
+  --no-memory 关掉两头；记忆文件坏了不会让运行失败，只会说一句并且这次不写。
+
 说明：
   - run 的 stdout 只放模型最终回答；进度/工具轨迹在 stderr。
   - exec --json 的 JSON 契约与字段说明见 packages/cli/README.md。`;
@@ -169,6 +189,10 @@ function writeErr(text: string): void {
 }
 
 /** 比较两个工作目录是否同一个：统一正斜杠、去末尾斜杠，Windows 下忽略大小写。 */
+function memPathOf(cwd: string): string {
+  return memoryPath(cwd);
+}
+
 function normalizeCwd(value: string): string {
   const resolved = path.resolve(value.trim() || ".").replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
@@ -218,6 +242,59 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  /**
+   * `memory`：直接读写工作区的 `.heming/memory.json`，不调模型。
+   *
+   * 为什么给人一条命令：模型记错一条时用户得能一眼看见、能删。只把记忆交给模型
+   * 自己管，等于把「它记错了什么」也一起藏起来。
+   */
+  if (parsed.action === "memory") {
+    const memCwd = path.resolve(parsed.options.cwd ?? process.cwd());
+    if (parsed.options.add !== undefined) {
+      const added = await addCliMemory(memCwd, parsed.options.add);
+      if (!added.ok) {
+        writeErr(`heming: ${added.error}\n`);
+        return 1;
+      }
+      writeErr(
+        added.added
+          ? `[heming] 记下了（${memPathOf(memCwd)}，现在 ${added.total} 条）：${added.entry.text}\n`
+          : `[heming] 这句已经记过了，没有重复写（共 ${added.total} 条）：${added.entry.text}\n`,
+      );
+      return 0;
+    }
+    if (parsed.options.forget !== undefined) {
+      const removed = await removeCliMemory(memCwd, parsed.options.forget);
+      if (!removed.ok) {
+        writeErr(`heming: ${removed.error}\n`);
+        return 1;
+      }
+      writeErr(`[heming] 删掉了：${removed.entry.text}（还剩 ${removed.total} 条）\n`);
+      return 0;
+    }
+    const loaded = await loadCliMemory(memCwd);
+    if (!loaded) {
+      writeErr(
+        `[heming] 这个工作区还没有记过任何东西（${memPathOf(memCwd)} 还不存在）。` +
+          " 让它在跑的过程中调 remember，或直接 heming memory add \"…\"。\n",
+      );
+      return 0;
+    }
+    if (!loaded.ok) {
+      writeErr(`heming: 记忆读不出来：${loaded.error}（${loaded.source}）\n`);
+      return 1;
+    }
+    if (loaded.entries.length === 0) {
+      writeErr(`[heming] 记忆文件是空的（${loaded.source}）。\n`);
+      return 0;
+    }
+    process.stdout.write(`[heming] 工作区记忆（${loaded.source}，共 ${loaded.entries.length} 条，新的在最后）：\n`);
+    loaded.entries.forEach((entry, index) => {
+      process.stdout.write(`${String(index + 1).padStart(3)}  ${entry.at}  ${entry.id}\n     ${entry.text}\n`);
+    });
+    process.stdout.write("删除：heming memory forget <序号或 id>\n");
+    return 0;
+  }
   // `mcp serve` 不调模型：它只把文件工具按 MCP 协议暴露给别的编辑器，所以走单独的装配。
   if (parsed.action === "mcp") {
     return startMcpServe(parsed.options, {
@@ -429,6 +506,27 @@ async function main(argv: string[]): Promise<number> {
     // 约定文件读挂了不该让整次运行失败：说一句，继续跑。
     writeErr(`[heming] 项目约定没读成：${error instanceof Error ? error.message : String(error)}\n`);
   }
+  /*
+   * 工作区记忆（d.329）：按这一轮的提问捞几条相关的接进提示词。
+   *
+   * 记忆文件读坏了不该让运行失败——说一句，然后这次两头都不做：既不注入召回，
+   * 也不挂 `remember` 工具。否则模型会往一个坏文件里写，把还能救的数据覆盖掉。
+   */
+  let recallSection = "";
+  let memoryEnabled = options.memory;
+  if (memoryEnabled) {
+    const loadedMemory = await loadCliMemory(cwd);
+    if (loadedMemory && !loadedMemory.ok) {
+      memoryEnabled = false;
+      writeErr(`[heming] 记忆读不出来，这次不带上也不写入：${loadedMemory.error}（${loadedMemory.source}）\n`);
+    } else if (loadedMemory) {
+      const recalled = recallCliMemory(loadedMemory.entries, prompt);
+      recallSection = memorySection(recalled);
+      // 摘要句自带句号：拼「这次带上几条」之前先把它摘掉，免得出现「。；」。
+      const memoryLine = describeCliMemory(loadedMemory).replace(/。$/, "");
+      writeErr(`[heming] ${memoryLine}${recalled.length > 0 ? `；这次带上 ${recalled.length} 条相关的` : ""}。\n`);
+    }
+  }
   const handle = startAgentRun({
     prompt,
     cwd,
@@ -439,6 +537,8 @@ async function main(argv: string[]): Promise<number> {
     ...(mcpConnections.length > 0 ? { mcp: mcpConnections } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
     ...(approver ? { ask: approver.ask } : {}),
+    ...(memoryEnabled ? {} : { memory: false }),
+    ...(recallSection ? { memorySection: recallSection } : {}),
     ...(projectRulesSection ? { projectRules: projectRulesSection } : {}),
     ...(options.contextBudget !== undefined ? { contextBudget: options.contextBudget } : {}),
     ...(options.compact ? {} : { compact: false }),

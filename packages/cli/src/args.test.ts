@@ -435,3 +435,65 @@ describe("parseArgs：续聊的上下文预算（d.317）", () => {
     }
   });
 });
+describe("parseArgs：工作区记忆（d.329）", () => {
+  it("默认开启，--no-memory 关掉", () => {
+    expect(expectRun(["run", "看看代码"]).memory).toBe(true);
+    expect(expectRun(["run", "--no-memory", "看看代码"]).memory).toBe(false);
+  });
+
+  it("--no-memory 不接受取值；sessions / mcp serve / memory 自己都不接", () => {
+    const inline = parseArgs(["run", "--no-memory=1", "看看代码"]);
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error).toContain("--no-memory");
+
+    for (const argv of [["sessions", "--no-memory"], ["mcp", "serve", "--no-memory"], ["memory", "--no-memory"]]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("不接");
+    }
+  });
+
+  it("memory 子命令：默认列出、add 一句话、forget 一个键", () => {
+    const list = parseArgs(["memory"]);
+    expect(list.ok && list.action).toBe("memory");
+    if (list.ok && list.action === "memory") {
+      expect(list.options.add).toBeUndefined();
+      expect(list.options.forget).toBeUndefined();
+    }
+
+    const add = parseArgs(["memory", "add", "以后都用中文回答"]);
+    expect(add.ok && add.action).toBe("memory");
+    if (add.ok && add.action === "memory") expect(add.options.add).toBe("以后都用中文回答");
+
+    const forget = parseArgs(["memory", "forget", "2"]);
+    expect(forget.ok && forget.action).toBe("memory");
+    if (forget.ok && forget.action === "memory") expect(forget.options.forget).toBe("2");
+  });
+
+  it("memory 子命令的用法错误说清怎么改", () => {
+    const emptyAdd = parseArgs(["memory", "add"]);
+    expect(emptyAdd.ok).toBe(false);
+    if (!emptyAdd.ok) expect(emptyAdd.error).toContain("需要一句话");
+
+    const emptyForget = parseArgs(["memory", "forget"]);
+    expect(emptyForget.ok).toBe(false);
+    if (!emptyForget.ok) expect(emptyForget.error).toContain("id 或序号");
+
+    const unknown = parseArgs(["memory", "dump"]);
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.error).toContain("只支持 list");
+  });
+
+  it("模型相关选项对 memory 一律不接（它不调模型）", () => {
+    for (const argv of [
+      ["memory", "--allow-danger"],
+      ["memory", "--model", "gpt-4o"],
+      ["memory", "--max-rounds", "3"],
+      ["memory", "--continue"],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("不接");
+    }
+  });
+});

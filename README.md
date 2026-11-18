@@ -2,7 +2,7 @@
 
 原生电脑端智能体应用平台（云端团队名册）：一个内置智能体、会话式工作 + 独立协作页 + 真实团队动向。
 
-> **当前版本**：`d.328.4.120.12`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
+> **当前版本**：`d.330.4.120.12`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
 > **版本号规则**：5 段 `d.特性.破坏性.修订.构建`，**每次修改/修复都要 bump** —— 见 [docs/VERSION-MANAGEMENT.md](docs/VERSION-MANAGEMENT.md)
 > 改动记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -170,6 +170,7 @@
 
 - **退回去连对话一起退（d.293.4.120.12）**：`/rewind N` 还原文件之后，把这一轮之后的消息从会话里删掉，并把你当时的提问放回输入框——改一句就能重发，不用翻上去删记录、也不用回忆刚才说了什么。服务端新增按消息 id 删除的接口（只认本会话、重复请求幂等、全文索引在同一事务里摘掉）；边界按「这一轮之前的最后一条消息」记，`null` 表示那一轮之前会话是空的，老检查点没有边界信息时只退文件并如实说「对话没有退」，绝不把老记录当成空会话把整段对话删光。
 
+- **终端里的和鸣也开始记事（d.329.4.120.12）**：`heming run` / `--continue` 现在有长期记忆——模型可以把「以后都该记得的事」（偏好、仓库约定、踩过的坑）用 `remember` 工具记进工作区的 `.heming/memory.json`，下次运行时按你这一轮的提问挑最多 5 条自动带上；单条 400 字、最多 200 条，同一句不重复写，文件坏了拒绝覆盖。不用模型也能管：`heming memory` 列出、`heming memory add "…"`、`heming memory forget <序号或 id>`；`--no-memory` 两头都关。
 - **约定改了，编辑器那边不用重启（d.327.4.120.12）**：给 `heming mcp serve` 加上 MCP 的资源订阅——客户端 `resources/subscribe` 之后，`AGENTS.md`、`.heming/rules.md`、命令文件一改就推 `notifications/resources/updated`；命令文件增减还会推 `list_changed`，Cursor / Claude Code 那边直接刷新，不用断开重连。只监听工作区、`.heming`、`.heming/commands` 三个目录，不递归、按需建、退订即关。
 - **编辑器里也能用上仓库里的命令与约定（d.325.4.120.12）**：`heming mcp serve` 除了文件工具，还按 MCP 的 `prompts` / `resources` 把 `.heming/commands/*.md`（可直接选用的指令模板）、`AGENTS.md` 一族与 `.heming` 三份配置交给 Cursor / Claude Code；每次请求现读，改了文件下一轮就见效。
 - **危险命令可以先问一句（d.323.4.120.12）**：终端里的和鸣遇到 `run_command`、MCP 工具这类会真动手的调用，不再只有「一律拒绝」和「`--allow-danger` 一次全放」两条路——加 `--ask` 就执行前问一句：`[y]` 允许这一次、`[a]` 本次运行都允许、`[n]` 不要、`[q]` 停下（后面不再问）。一次性的许可会在执行时扣掉，答过一次不会悄悄变成长期放行；`allow-session` 之后闸门立刻知道，同一运行里不再打扰。拒绝按「用户拒绝」回灌给模型，`exec --json` 的 `denied` 也照实写。没有真终端（管道 / CI / 重定向）时 `--ask` 直接拒绝启动，绝不把 stdin 下一行当成「y」；`.heming/permissions.json` 里的 `ask` 规则也会真的问到人；`--read-only` 与它同时给时只读赢。

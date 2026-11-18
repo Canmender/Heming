@@ -12,6 +12,33 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.329.4.120.12",
+    "date": "2026-11-18",
+    "title": "终端里的和鸣也开始记事：记住的偏好下次自动带上",
+    "bullets": [
+      "`packages/cli/src/memory.test.ts`：24 例（坏 JSON 拒绝写入且原文件逐字未变、BOM、超长截断、去重、上限淘汰、id / 序号两种删法、召回同分新的优先、注入段字数上限、四态摘要、spec 形状）。",
+      "`packages/cli/src/tooling.test.ts` +5 例（工具清单里挂/不挂、meta 报写类、真落盘到`.heming/memory.json`、参数缺 `text` 与坏 JSON 的可改提示、只读模式不挂）。",
+      "`packages/cli/src/run.test.ts` +4 例（召回段进系统提示词、`remember` 落盘且不计入 `writes`、`--no-memory` 与 `--read-only` 下写不进去）。",
+      "`packages/cli/src/args.test.ts` +5 例（默认开、`--no-memory` 关、三种命令都不接它、memory子命令的三种用法与四种用法错误、模型相关选项一律不接）。",
+      "`packages/cli/src/index.test.ts` +4 例（进程级：`memory add → list → forget` 全流程、没有记忆时一句人话、坏文件 exit 1、`--help` 里能看见 `heming memory` 与 `--no-memory`）。",
+      "真机冒烟：假 OpenAI SSE 端点，第一次跑模型调 `remember` → 文件里出现那条；第二次换个能对上的提问 → stderr 打「这次带上 1 条相关的」且请求的 system 里确有那段；`--no-memory` 时两头都没有。",
+      "CLI 全量 `npx vitest run`：17 个文件 / 323 例全绿；`tsc --noEmit` 退出 0。",
+      "召回是**关键词重叠**，不是语义检索：换个说法（「用什么语言回答」vs「用中文」）可能捞不到。",
+      "没有分层：三条以内的「这次任务里的临时结论」也会被一起记下来，只能靠模型自己克制。",
+      "不做去重合并（除了逐字相同）：同一件事说两遍会留两条，只能人工 `forget`。",
+      "记忆不加密、不进 git ignore：写进仓库就跟着仓库走——敏感内容不该让它记。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "桌面端的记忆系统（工作记忆、情景记忆、语义记忆三层 + BM25）从 d.196 起就在用，而终端里的和鸣每次运行都是「第一次见面」：昨天说了「以后都用中文回答」「这个仓库别碰 generated 目录」，今天 `--continue` 接着聊它照样不知道。会话存档（d.303）只存问答原文，存不下「长期有效的偏好」——那类东西越长越占上下文，又不该每轮都重复。",
+      "做了什么",
+      "| 位置 | 说明 || --- | --- || `remember` 工具 | 模型可以把「以后都该记得的事」记下来；一次记一件事，单条 400 字，最多 200 条（超了丢最旧） || `.heming/memory.json` | 记忆跟着仓库走：能 git review、能手改、能删，与 `.heming/permissions.json`、`hooks.json`、`mcp.json` 同一口径 || 召回注入 | 每次运行按**这一轮的提问**挑最多 5 条（中文 bigram / ASCII 词重叠打分，同分新的优先），整段封顶 1200 字，接在项目约定之后 || `heming memory` | 不用模型也能管：`memory` 列出（带序号）、`memory add \"…\"`、`memory forget <序号或 id>` || `--no-memory` | 一头都不做：既不注入召回，也不挂 `remember` 工具 || 坏文件不覆盖 | 记忆文件 JSON 坏了：运行照常（说一句、这次不注入也不写入），`heming memory` 明确报错而不是当成空表 || 只读模式 | `--read-only` 下连 `remember` 都不挂——列出来等于承诺能写 |",
+      "写入用临时文件 + `rename`（半截文件比没记忆更糟）；同一句话不重复写（模型很容易在相邻两轮里说同一件事）；stderr 只说真发生了什么：「记忆：N 条；这次带上 K 条相关的」或「记忆读不出来，这次不带上也不写入」。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.328.4.120.12",
     "date": "2026-11-18",
     "title": "进「来源」先看账号：想再加一个，才展开登录",

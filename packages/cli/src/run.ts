@@ -147,6 +147,20 @@ export interface AgentRunOptions {
    */
   readOnly?: boolean;
   /**
+   * 是否读写工作区记忆（`.heming/memory.json`）：缺省开启。
+   *
+   * 关闭时两头都不做——不注入 `memorySection`、也不挂 `remember` 工具。入口在
+   * `--no-memory` 或记忆文件读坏时传 `false`（读坏了也不该让模型往一个坏文件里写）。
+   */
+  memory?: boolean;
+  /**
+   * 已召回的记忆段（由入口按本轮提问挑好）。
+   *
+   * 为什么在入口算：召回需要「这一轮的提问」，而提示词在 `startAgentRun` 里才组装；
+   * 入口拼好整段传进来，`run` 只负责把它接在人设与 runtime 之后，职责清楚。
+   */
+  memorySection?: string;
+  /**
    * 续聊历史的 token 预算（`--context-budget`）。缺省 12k，超出就把早期对话折成摘要。
    *
    * 只在 `history` 非空时有意义：单轮运行的历史是空的，折与不折都一样。
@@ -210,6 +224,7 @@ function buildCliSystemPrompt(input: {
   conversationId: string;
   rules?: string;
   readOnly?: boolean;
+  memory?: string;
 }): string {
   const runtime = buildRuntimeSection({
     desktop: true,
@@ -233,14 +248,19 @@ function buildCliSystemPrompt(input: {
     // 仓库自己的规矩排在人设之后、运行环境之前（与桌面端同一个位置）。
     ...(input.rules ? { rules: input.rules } : {}),
   }).systemPrompt;
-  if (!input.readOnly) return built;
+  /*
+   * 记忆段排在运行环境之后、只读说明之前：它是「这个工作区以前发生过的事」，
+   * 属于可选增强（与桌面端顺序一致）；只读说明是对本次运行的硬约束，必须最后说。
+   */
+  const withMemory = input.memory ? `${built}\n\n${input.memory}` : built;
+  if (!input.readOnly) return withMemory;
   /*
    * 只读模式要写进提示词：否则模型会一次次尝试写文件、被拒、再换写法，
    * 把轮数烧在注定失败的调用上，最后交出一个没结论的答案。
    * 这里明确「要改动就写说明」，让它把精力放在读和给方案上。
    */
   return (
-    built +
+    withMemory +
     [
       "",
       "## 这次是只读模式",
@@ -280,6 +300,8 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     hooks: options.hooks ?? null,
     mcp: options.mcp ?? [],
     readOnly: options.readOnly === true,
+    // 记忆工具与只读模式互斥：只读时连 `remember` 都不挂（列出来等于承诺能写）。
+    memory: options.memory !== false && options.readOnly !== true,
     ask: options.ask ?? null,
     conversationId,
     onWrite: (file) => {
@@ -303,6 +325,7 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     conversationId,
     ...(options.projectRules ? { rules: options.projectRules } : {}),
     ...(options.readOnly ? { readOnly: true } : {}),
+    ...(options.memorySection ? { memory: options.memorySection } : {}),
   });
   /**
    * 续聊历史的预算与折叠（d.317）：系统提示词在这里才算得出来，

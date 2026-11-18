@@ -129,3 +129,54 @@ describe.skipIf(tsx === null)("CLI 入口的进程级行为", () => {
     expect(result.stdout).toContain("需要真终端");
   }, 30_000);
 });
+
+/**
+ * `heming memory`（d.329）：给人一条不用模型也能管理记忆的路。
+ *
+ * 模型记错一条时，用户必须能看见、能删——这几条用例钉的就是「能看见」「能删干净」，
+ * 以及「不调模型也能跑」。
+ */
+describe.skipIf(tsx === null)("heming memory 子命令", () => {
+  it("add → list → forget 全流程，且不需要模型凭据", async () => {
+    const dir = tmpDir();
+
+    const added = await runCli(["memory", "add", "以后都用中文回答", "--cwd", dir]);
+    expect(added.code).toBe(0);
+    expect(added.stderr).toContain("记下了");
+
+    const listed = await runCli(["memory", "--cwd", dir]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("以后都用中文回答");
+
+    const forgotten = await runCli(["memory", "forget", "1", "--cwd", dir]);
+    expect(forgotten.code).toBe(0);
+    expect(forgotten.stderr).toContain("删掉了");
+
+    const after = await runCli(["memory", "--cwd", dir]);
+    expect(after.code).toBe(0);
+    expect(after.stderr).toContain("空的");
+  }, 60_000);
+
+  it("没有记忆时说一句人话，而不是报错", async () => {
+    const dir = tmpDir();
+    const listed = await runCli(["memory", "--cwd", dir]);
+    expect(listed.code).toBe(0);
+    expect(listed.stderr).toContain("还没有记过");
+  }, 30_000);
+
+  it("记忆文件坏了：明确报错（exit 1），不静默当成空表", async () => {
+    const dir = tmpDir();
+    mkdirSync(path.join(dir, ".heming"), { recursive: true });
+    writeFileSync(path.join(dir, ".heming", "memory.json"), "{ 这不是 JSON", "utf8");
+    const listed = await runCli(["memory", "--cwd", dir]);
+    expect(listed.code).toBe(1);
+    expect(listed.stderr).toContain("读不出来");
+  }, 30_000);
+
+  it("--help 里有 heming memory 与 --no-memory", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("heming memory");
+    expect(result.stdout).toContain("--no-memory");
+  }, 30_000);
+});

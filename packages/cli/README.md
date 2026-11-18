@@ -45,6 +45,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `heming exec -` | 非交互执行，指令从 stdin 读。 |
 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | 以 MCP 服务端身份在 stdio 上讲 JSON-RPC，把同一套文件工具交给别的编辑器/客户端（不调模型）。见下文「MCP 服务」。 |
 | `heming sessions [--json] [--cwd <dir>]` | 列出本机的会话存档（id / 时间 / 条数 / 最后一句），不调模型。见下文「会话：接着上次聊」。 |
+| `heming memory [list | add <一句话> | forget <id 或序号>]` | 查看 / 添加 / 删除工作区记忆（`.heming/memory.json`），不调模型。见下文「工作区记忆」。 |
 | `heming --version` | 打印 `@heming/cli <版本>`。 |
 | `heming --help` | 用法与能力边界。 |
 
@@ -62,6 +63,7 @@ pnpm --silent cli mcp serve --cwd D:/repo
 | `--mcp` | 连上工作区 `.heming/mcp.json` 里声明的 MCP 服务，把对方的工具接进这次运行。只有显式加这个开关才连；工具还要 `--allow-danger` 才真的调过去。详见下文「MCP 客户端」。 |
 | `--context-budget <n>` | 续聊时历史最多占 `n` 个 token（500–200000，默认 12000）。放不下就把早期对话折成摘要。详见下文「续聊的上下文预算」。 |
 | `--no-compact` | 不折叠：整段历史原样发给模型（贵、也更容易撞长度上限，但细节一字不丢）。 |
+| `--no-memory` | 这次运行不读也不写工作区记忆（`.heming/memory.json`），也不给模型 `remember` 工具。 |
 | `--output-format <f>` | stdout 格式：`text`（默认）/ `json`（= `--json`，exec 专用）/ `stream-json`（一行一条事件，run 与 exec 都可用）。 |
 | `--model <id>` | 模型 id，默认 `gpt-4o-mini`。 |
 | `--base-url <url>` | OpenAI 兼容端点，默认 `https://api.openai.com/v1`。必须以 `http://` / `https://` 开头。 |
@@ -227,6 +229,42 @@ pnpm --silent cli exec --json --resume "$sid" "按刚才看到的，改一下构
 - 不做跨机器同步：存档是本机文件，换机器或清掉目录就没了。
 - `--continue` 只按工作目录匹配，不判断「是不是同一件事」；同一目录下两个不相干的会话会被当成一条线。
 - 中断（Ctrl+C）那一轮只留提问：下次接上时模型知道你问过什么，但不知道当时答到哪。
+## 工作区记忆：`remember` 与 `heming memory`
+
+长跑的项目里总有些事「说过一次就该一直算数」：以后都用中文回答、别碰 `generated` 目录、这个仓库的
+测试要跑 `pnpm test`。会话存档只存问答原文，存不下这类东西；每轮重复一遍又白烧上下文。
+
+所以给终端加了一份**跟着仓库走**的记忆：`.heming/memory.json`（跟 `.heming/permissions.json`、
+`hooks.json`、`mcp.json` 同一个口径——能提交、能 review、能手改）。
+
+| 做什么 | 怎么用 |
+| --- | --- |
+| 让它记 | 直接说「记住：…」；模型通过 `remember` 工具写进去，一次一件事 |
+| 自动带上 | 每次运行按**你这一轮的提问**挑最多 5 条（中文 bigram / 英文词重叠打分，同分新的优先），整段封顶 1200 字 |
+| 看有哪些 | `heming memory`（带序号、时间、id） |
+| 自己加一条 | `heming memory add "以后都用中文回答"` |
+| 删一条 | `heming memory forget 3`（序号）或 `heming memory forget m-xxxxxxxx-xxxx`（id） |
+| 完全不用 | `--no-memory`：既不注入召回，也不挂 `remember` 工具 |
+
+```powershell
+pnpm cli memory add "这个仓库改完要跑 pnpm -w typecheck"
+pnpm cli --continue "接着上次那个 bug 看，按我说的规矩来"
+```
+
+跑起来会在 stderr 说一句实在话：
+
+```
+[heming] 记忆：2 条（来自 .heming/memory.json）；这次带上 1 条相关的。
+```
+
+规则与边界：
+
+- 单条 400 字（超了截断），最多 200 条（超了丢最旧的）；同一句话不重复写。
+- 写入是临时文件 + `rename`：半截文件比没记忆更糟。文件坏了就拒绝写入并说清楚，不会静默覆盖。
+- 召回是**关键词重叠**，不是语义检索：换个说法可能捞不到，需要的话自己 `memory add` 一条同义的说法。
+- 不分层、不做去重合并：模型记多了需要人工 `heming memory forget` 收一收。
+- 不加密、默认不进 `.gitignore`：写进仓库就跟着仓库走，敏感内容不该让它记。
+- `--read-only` 下连 `remember` 都不挂——列出来等于承诺能写。
 ## 续聊的上下文预算：`--context-budget` / `--no-compact`
 
 `--continue` / `--resume` 会把上次会话**整段文字问答**带进新请求，而会话存档允许 200 轮。

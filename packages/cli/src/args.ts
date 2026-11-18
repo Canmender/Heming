@@ -72,6 +72,13 @@ export interface PromptOptions {
   contextBudget?: number;
   /** `false` = `--no-compact`：历史原样发送，不做折叠。 */
   compact: boolean;
+  /**
+   * 是否读写工作区记忆（`.heming/memory.json`）。
+   *
+   * 缺省开启：记过的偏好下次运行自动带上。`--no-memory` 关掉两头——既不注入召回、
+   * 也不挂 `remember` 工具（「这次别记也别用」要能一句话做到）。
+   */
+  memory: boolean;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -81,6 +88,18 @@ export interface SessionsOptions {
   /** 只看这个目录下跑过的会话。 */
   cwd?: string;
   sessionDir?: string;
+}
+
+/** `heming memory` 的选项：直接读写 `.heming/memory.json`，不调模型。 */
+export interface MemoryOptions {
+  /** 工作目录（缺省由 index 用 `process.cwd()` 兜底）。 */
+  cwd?: string;
+  /** stdout 输出 JSON（给脚本用），否则是一张给人看的表。 */
+  json: boolean;
+  /** 记下这句话。 */
+  add?: string;
+  /** 删掉这条（完整 id 或列表里的序号）。 */
+  forget?: string;
 }
 
 export interface McpOptions {
@@ -102,6 +121,7 @@ export type ParsedArgs =
   | { ok: true; action: "run"; options: PromptOptions }
   | { ok: true; action: "mcp"; options: McpOptions }
   | { ok: true; action: "sessions"; options: SessionsOptions }
+  | { ok: true; action: "memory"; options: MemoryOptions }
   | { ok: false; error: string };
 
 /** 需要取值的选项：值不能是另一个选项（`--cwd --json` 是写错了，不该把 `--json` 当目录）。 */
@@ -116,7 +136,7 @@ function takeValue(argv: string[], index: number, inline: string | undefined): {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  let command: "run" | "exec" | "mcp" | "sessions" | null = null;
+  let command: "run" | "exec" | "mcp" | "sessions" | "memory" | null = null;
   let json = false;
   let outputFormat: "text" | "json" | "stream-json" = "text";
   let allowDanger = false;
@@ -135,6 +155,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let resume: string | undefined;
   let sessionDir: string | undefined;
   let mcp = false;
+  let memory = true;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -200,6 +221,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "ask": {
           if (inline !== undefined) return { ok: false, error: "--ask 不接受取值（直接写 --ask 即可）" };
           ask = true;
+          break;
+        }
+        case "no-memory": {
+          if (inline !== undefined) return { ok: false, error: "--no-memory 不接受取值（直接写 --no-memory 即可）" };
+          memory = false;
           break;
         }
         case "no-compact": {
@@ -286,11 +312,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
 
     if (command === null) {
-      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions") {
+      if (arg === "run" || arg === "exec" || arg === "mcp" || arg === "sessions" || arg === "memory") {
         command = arg;
         continue;
       }
-      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions，用 --help 查看用法）` };
+      return { ok: false, error: `未知命令「${arg}」（支持 run / exec / mcp / sessions / memory，用 --help 查看用法）` };
     }
     promptParts.push(arg);
   }
@@ -320,6 +346,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (trustWorkspace) notForSessions.push("--trust-workspace");
     if (trustHooks) notForSessions.push("--trust-hooks");
   if (readOnly) notForSessions.push("--read-only");
+  if (!memory) notForSessions.push("--no-memory");
   if (ask) notForSessions.push("--ask");
     if (contextBudget !== undefined) notForSessions.push("--context-budget");
     if (!compact) notForSessions.push("--no-compact");
@@ -342,6 +369,51 @@ export function parseArgs(argv: string[]): ParsedArgs {
     };
   }
 
+  /**
+   * `memory`：直接读写工作区记忆（`.heming/memory.json`），不调模型。
+   *
+   * 为什么给人一条命令：模型记错一条时，用户得能一眼看见、能删。只把记忆留给模型
+   * 自己管，等于把「它记错了什么」也藏起来了。
+   */
+  if (command === "memory") {
+    const sub = promptParts[0];
+    const rest = promptParts.slice(1).join(" ").trim();
+    const notForMemory: string[] = [];
+    if (outputFormat !== "text" && !json) notForMemory.push("--output-format");
+    if (allowDanger) notForMemory.push("--allow-danger");
+    if (readOnly) notForMemory.push("--read-only");
+    if (ask) notForMemory.push("--ask");
+    if (maxRounds !== undefined) notForMemory.push("--max-rounds");
+    if (model !== undefined) notForMemory.push("--model");
+    if (baseUrl !== undefined) notForMemory.push("--base-url");
+    if (apiKey !== undefined) notForMemory.push("--api-key");
+    if (continueSession) notForMemory.push("--continue");
+    if (resume !== undefined) notForMemory.push("--resume");
+    if (sessionDir !== undefined) notForMemory.push("--session-dir");
+    if (mcp) notForMemory.push("--mcp");
+    if (trustWorkspace) notForMemory.push("--trust-workspace");
+    if (trustHooks) notForMemory.push("--trust-hooks");
+    if (contextBudget !== undefined) notForMemory.push("--context-budget");
+    if (!compact) notForMemory.push("--no-compact");
+    if (!memory) notForMemory.push("--no-memory");
+    if (notForMemory.length > 0) {
+      return {
+        ok: false,
+        error: `memory 不接 ${notForMemory.join(" / ")}（它只读写 .heming/memory.json，不调模型）`,
+      };
+    }
+    const base = { json, ...(cwd !== undefined ? { cwd } : {}) };
+    if (sub === undefined) return { ok: true, action: "memory", options: base };
+    if (sub === "add") {
+      if (!rest) return { ok: false, error: "memory add 需要一句话（heming memory add \"以后都用中文回答\"）" };
+      return { ok: true, action: "memory", options: { ...base, add: rest } };
+    }
+    if (sub === "forget") {
+      if (!rest) return { ok: false, error: "memory forget 需要一条的 id 或序号（先跑 heming memory 看看）" };
+      return { ok: true, action: "memory", options: { ...base, forget: rest } };
+    }
+    return { ok: false, error: `memory 只支持 list（默认）/ add / forget，收到「${sub}」` };
+  }
   /**
    * `mcp serve`：把工具按 MCP 协议暴露给别的编辑器。
    *
@@ -370,6 +442,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (ask) notForMcp.push("--ask");
     if (contextBudget !== undefined) notForMcp.push("--context-budget");
     if (!compact) notForMcp.push("--no-compact");
+    if (!memory) notForMcp.push("--no-memory");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -419,6 +492,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       trustWorkspace,
       trustHooks,
       compact,
+      memory,
       mcp,
       continueSession,
       ...(cwd !== undefined ? { cwd } : {}),

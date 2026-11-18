@@ -5,7 +5,7 @@
  * 同时它**不放松安全边界**——工作区外的绝对路径只是被改写成 `../…`，仍然会被越界检查挡下。
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -371,5 +371,87 @@ describe("交互式审批的许可消费（d.322）", () => {
     const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "no-ask" });
     const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
     expect(names).not.toContain("run_command");
+  });
+});
+/**
+ * 工作区记忆（d.329）。
+ *
+ * 这里验的是「工具挂没挂」和「执行时写到了哪」——记忆文件必须落在工作区的
+ * `.heming/memory.json`，而不是别处的某个全局目录。
+ */
+describe("工作区记忆工具（d.329）", () => {
+  /** 闸门看到的形状（带 id 与 function 包装）。 */
+  const rememberGateCall = (text: string) => ({
+    id: "c-remember",
+    function: { name: "remember", arguments: JSON.stringify({ text }) },
+  });
+  /** 桥 execute 看到的形状（扁平 name/arguments）。 */
+  const rememberCall = (text: string) => ({ name: "remember", arguments: JSON.stringify({ text }) });
+
+  it("开启时 remember 出现在工具清单里，且自报为写类", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-mem-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "mem-on", memory: true });
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).toContain("remember");
+    expect(tooling.toolBridge.meta?.("remember")?.risk).toBe("write");
+  });
+
+  it("关闭时不挂；硬调它会说明「这次没开记忆」而不是「未知工具」", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-mem-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "mem-off" });
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).not.toContain("remember");
+
+    const result = await tooling.toolBridge.execute(rememberCall("以后都用中文回答"));
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("--no-memory");
+  });
+
+  it("放行后真的落到工作区的 .heming/memory.json，并能读回来", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-mem-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "mem-write", memory: true });
+
+    const gateOutcome = await tooling.confirm([rememberGateCall("以后都用中文回答")]);
+    expect(gateOutcome[0]?.kind).toBe("allow");
+
+    const result = await tooling.toolBridge.execute(rememberCall("以后都用中文回答"));
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("已记下");
+
+    const raw = JSON.parse(readFileSync(path.join(dir, ".heming", "memory.json"), "utf8")) as {
+      entries: { text: string }[];
+    };
+    expect(raw.entries.map((entry) => entry.text)).toEqual(["以后都用中文回答"]);
+  });
+
+  it("参数不对时给出可改的提示，而不是抛异常", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-mem-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({ cwd: dir, allowDanger: false, conversationId: "mem-bad", memory: true });
+
+    const missing = await tooling.toolBridge.execute({ name: "remember", arguments: "{}" });
+    expect(missing.ok).toBe(false);
+    expect(missing.text).toContain("text 字段");
+
+    const broken = await tooling.toolBridge.execute({ name: "remember", arguments: "{ 不是 JSON" });
+    expect(broken.ok).toBe(false);
+    expect(broken.text).toContain("不是合法 JSON");
+  });
+
+  it("只读模式下一个都不挂（列出来等于承诺能写）", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-mem-"));
+    tmpDirs.push(dir);
+    const tooling = createCliTooling({
+      cwd: dir,
+      allowDanger: false,
+      conversationId: "mem-ro",
+      readOnly: true,
+      memory: true,
+    });
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).not.toContain("remember");
   });
 });

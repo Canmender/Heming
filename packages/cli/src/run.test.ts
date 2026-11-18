@@ -511,3 +511,110 @@ describe("交互式审批（--ask，d.322）", () => {
     expect(approver.requests).toHaveLength(1);
   });
 });
+/**
+ * 工作区记忆（d.329）在运行这一层的两件事：
+ *
+ * 1) 入口挑好的召回段真的进了系统提示词（否则「记了但用不上」，等于没记）；
+ * 2) 模型调 `remember` 时，内容真的落到工作区的 `.heming/memory.json`。
+ */
+describe("工作区记忆（--no-memory / remember，d.329）", () => {
+  function capturingChat(turns: ScriptTurn[]): { chat: StreamChatFn; seen: { system: string; last: string }[] } {
+    const inner = createScriptedChat(turns);
+    const seen: { system: string; last: string }[] = [];
+    const chat: StreamChatFn = async (llmProfile, messages, opts) => {
+      const systemRow = messages.find((message) => message.role === "system");
+      seen.push({
+        system: typeof systemRow?.content === "string" ? systemRow.content : "",
+        last: messages[messages.length - 1]?.content ?? "",
+      });
+      return inner(llmProfile, messages, opts);
+    };
+    return { chat, seen };
+  }
+
+  it("召回段进系统提示词，位置在人设之后", async () => {
+    const dir = await makeSandbox();
+    const section = "## 长期记忆（这个工作区记下的）\n\n- 以后都用中文回答";
+    const { chat, seen } = capturingChat([{ text: "好的。" }]);
+
+    await startAgentRun({
+      prompt: "随便聊两句",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      memorySection: section,
+      streamChat: chat,
+    }).done;
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.system).toContain("长期记忆");
+    expect(seen[0]!.system).toContain("以后都用中文回答");
+  });
+
+  it("模型调 remember：内容落到 .heming/memory.json，第二轮能看到结果回灌", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "remember", arguments: { text: "以后都用中文回答" } }] },
+      { text: "记下了。" },
+    ]);
+
+    const outcome = await startAgentRun({
+      prompt: "以后都用中文回答，记住这一点",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.toolCalls).toHaveLength(1);
+    expect(outcome.json.toolCalls[0]).toMatchObject({ name: "remember", ok: true, denied: false });
+    // 写的是记忆文件，不该被算成「改了你的源码」。
+    expect(outcome.json.writes).toEqual([]);
+
+    const raw = JSON.parse(await readFile(path.join(dir, ".heming", "memory.json"), "utf8")) as {
+      entries: { text: string }[];
+    };
+    expect(raw.entries.map((entry) => entry.text)).toEqual(["以后都用中文回答"]);
+  });
+
+  it("--no-memory 时 remember 不挂：模型硬调只会拿到「这次没开记忆」", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "remember", arguments: { text: "以后都用中文回答" } }] },
+      { text: "没记下来。" },
+    ]);
+
+    const outcome = await startAgentRun({
+      prompt: "记住：以后都用中文回答",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      memory: false,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.toolCalls[0]?.ok).toBe(false);
+    expect(outcome.json.toolCalls[0]?.text ?? "").toContain("--no-memory");
+    await expect(readFile(path.join(dir, ".heming", "memory.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("只读模式下 remember 也不挂（只读就是只读）", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "remember", arguments: { text: "以后都用中文回答" } }] },
+      { text: "只读模式，没记。" },
+    ]);
+
+    const outcome = await startAgentRun({
+      prompt: "记住：以后都用中文回答",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      readOnly: true,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.toolCalls[0]?.ok).toBe(false);
+    await expect(readFile(path.join(dir, ".heming", "memory.json"), "utf8")).rejects.toThrow();
+  });
+});
