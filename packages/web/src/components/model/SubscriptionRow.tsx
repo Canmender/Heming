@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
 import { WindowBar } from "./WindowBar.js";
@@ -23,6 +24,10 @@ export interface SubscriptionRowProps {
   busy: boolean;
   onSwitch: (row: AccountRow) => void;
   onRelogin: (row: AccountRow) => void;
+  /** 改个名字（`accounts alias`）；传空串表示清掉名字，改回账号本身。 */
+  onRename: (row: AccountRow, name: string) => void;
+  /** 从列表里移除（`accounts forget`）——会二次确认，这里只负责发起。 */
+  onForget: (row: AccountRow) => void;
 }
 
 /** 状态徽标：和页面里其它徽标同一套语义色（信息=在用，红=读不到/失效）。 */
@@ -32,8 +37,45 @@ const STATE_BADGE: Record<ReturnType<typeof accountState>["tone"], string> = {
   danger: "bg-danger-soft text-danger",
 };
 
-export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: SubscriptionRowProps) {
+export function SubscriptionRow({
+  row,
+  now,
+  busy,
+  onSwitch,
+  onRelogin,
+  onRename,
+  onForget,
+}: SubscriptionRowProps) {
   const state = accountState(row);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const committedRef = useRef(false);
+
+  // 进入改名时把光标放在已有名字后面：多半是微调，不是从头输。
+  useEffect(() => {
+    if (!editing) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [editing]);
+
+  const beginRename = () => {
+    committedRef.current = false;
+    setDraft(row.alias ?? "");
+    setEditing(true);
+  };
+
+  // 回车与失焦都会走到这里：任一处先提交，另一处不再重复发命令。
+  const commitRename = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    setEditing(false);
+    const name = draft.trim();
+    if (name !== (row.alias ?? "")) onRename(row, name);
+  };
+
   const readLine = formatReadAt(row.readAt, row.asOf, now);
   const meta = [agentName(row.agent), row.seat ? `席位 ${row.seat}` : "", readLine]
     .filter(Boolean)
@@ -48,7 +90,29 @@ export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: Subscri
         <Avatar name={row.agent} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="min-w-0 truncate text-ui-md font-semibold">{row.label}</span>
+            {editing ? (
+              <input
+                ref={inputRef}
+                className="ui-input h-7 min-w-0 max-w-56 text-ui-sm"
+                value={draft}
+                placeholder="起个名字，比如「工作号」"
+                aria-label="账号名字"
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitRename();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setEditing(false);
+                  }
+                }}
+                onBlur={commitRename}
+              />
+            ) : (
+              <span className="min-w-0 truncate text-ui-md font-semibold">{row.label}</span>
+            )}
             {row.plan && <span className="ui-chip">{row.plan}</span>}
             <span
               className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-ui-xs ${STATE_BADGE[state.tone]}`}
@@ -57,7 +121,19 @@ export function SubscriptionRow({ row, now, busy, onSwitch, onRelogin }: Subscri
               {state.label}
             </span>
           </div>
-          {meta && <p className="mt-0.5 ui-caption">{meta}</p>}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            {meta && <p className="ui-caption">{meta}</p>}
+            {row.user && !editing && (
+              <span className="flex items-center gap-0.5">
+                <button type="button" className="ui-link" disabled={busy} onClick={beginRename}>
+                  改名
+                </button>
+                <button type="button" className="ui-link" disabled={busy} onClick={() => onForget(row)}>
+                  移除
+                </button>
+              </span>
+            )}
+          </div>
           {hasQuota(row.windows) ? (
             <ul className="mt-2 space-y-1.5">
               {row.windows.map((window, index) => (

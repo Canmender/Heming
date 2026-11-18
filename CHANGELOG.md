@@ -1,3 +1,88 @@
+## d.289.4.120.12（2026-11-18）— 和鸣的工具也能被 Cursor / Claude Code 直接调用了
+
+### 为什么做
+
+d.243 的无头 CLI 把智能体循环搬进了终端，但它始终是「我们主动去跑」的东西。真实工作里还有反方向：
+用户在 Cursor / Claude Code / Claude Desktop 里写代码，希望模型能读写**这台机器上的真实文件**，
+而不是只能用编辑器自带的沙箱工具。这些客户端统一认 MCP（Model Context Protocol），
+而和鸣此前一直是 MCP 的缺席者——`heming --help` 里那句「不接 MCP」既是事实，也是短板。
+
+这一轮补齐的是**服务端**这一半：`heming mcp serve` 在 stdio 上讲 JSON-RPC，把与桌面端同一套文件工具
+（`file_read` / `file_write` / `file_edit` / `file_patch` / `file_glob` / `file_grep` / `file_image` /
+`file_undo` / `todo_write` / `tool_output_read`）交给别的编辑器。它不调模型，所以不需要模型凭据——
+客户端负责思考，我们负责动手。
+
+### 做了什么
+
+| 能力 | 位置 | 说明 |
+| --- | --- | --- |
+| MCP 服务端 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | stdio JSON-RPC；支持 `initialize` / `ping` / `tools/list` / `tools/call`；协议版本协商（`2025-06-18` / `2025-03-26` / `2024-11-05`，客户端认识的照抄，否则回最新） |
+| 工具描述 | `tools/list` | 把 OpenAI 风格的 `parameters` 原样当 `inputSchema`；按工具自报的风险补 `annotations`（只读 → `readOnlyHint`，命令 → `destructiveHint` + `openWorldHint`）；**没有风险声明就不编造** annotations |
+| 调用 | `tools/call` | **先过闸门再执行**：拒绝时不碰磁盘，回「未执行：…／【该操作未执行，文件与系统状态未被修改】」并带 `isError` |
+| 安全口径 | `src/tooling.ts` | 把 `run` 里的闸门与桥整体抽出，run 与 MCP 共用同一份代码——不会出现「CLI 拒绝、MCP 放行」的缝 |
+| 路径换算 | `relativizeToolArgs` | 客户端发来的绝对路径换算成相对工作区（`D:/repo/src/a.ts` → `src/a.ts`）；工作区外的换算成 `../…` 后照样被越界检查拒绝。`run` 与 MCP 都吃这条改进 |
+| stdout 洁净 | `src/mcpServe.ts` | stdout 只放协议消息；就绪/错误/收工信息全部走 stderr；stdin 关闭即正常收工（退出码 0），Ctrl+C 先优雅关 stdin、再按一次 `130` |
+| 通知 | 协议层 | 没有 `id` 的消息**绝不回包**；坏 JSON 回 `-32700` 且不断连；未知方法回 `-32601` 并点名支持的方法 |
+| 参数校验 | `args.ts` | `mcp` 只认 `serve` 子命令；`--json` / `--output-format` / `--max-rounds` / `--model` / `--base-url` / `--api-key` 一律报「mcp serve 不接 …」，不静默忽略 |
+
+客户端配置（Claude Desktop 例子，已写进 `packages/cli/README.md`）：
+
+```json
+{ "mcpServers": { "heming": { "command": "node",
+  "args": ["D:/Heming/packages/cli/dist/index.js", "mcp", "serve", "--cwd", "D:/repo"] } } }
+```
+
+### 怎么验证
+
+- `packages/cli` 全量：**6 个测试文件 / 56 个用例全绿**（新增 `mcp.test.ts` 18 例、`tooling.test.ts` 6 例、
+  `args.test.ts` 追加 3 例；原有 `run.test.ts` 5 例仍绿，证明闸门搬家没有改动 run 的行为）。
+- `pnpm --filter @heming/cli exec tsc --noEmit` 退出 0。
+- 真机装配用例（不是 mock 桥）：在工作区里 `tools/call file_write` 写 `a.md`，文件真的落盘；
+  同一套装配下往工作区外写，被闸门拒绝且磁盘上没有文件；`--allow-danger` 前后对比工具清单里
+  `run_command` 的有无。
+- 协议用例：坏 JSON 一行不影响后面两行的响应（断言回包 `id` 序列为 `[1, null, 2]`）、
+  通知不回包、四个错误码各一条、`initialize` 的 `instructions` 在 `--allow-danger` 前后文案不同。
+
+### 留白
+
+- 只做 `tools` 能力：没有 `resources` / `prompts` / `sampling`。客户端要的是工具，不是我们的提示词。
+- 请求串行处理：stdio 上并行回包时序难调，单机文件工具也没有并发收益；真有慢工具再谈流水线。
+- `file_patch` 的多文件路径不做换算（补丁是文本，逐行改写会弄坏上下文），需要补丁时请写相对路径。
+- 没有鉴权：MCP 客户端与 CLI 是同一个用户、同一台机器，进程边界就是权限边界。
+- 反方向仍未做：和鸣自己**不接**别人的 MCP 服务（服务发现/调用），那是另一件事。
+## d.288.4.120.12（2026-11-18）— 账号能改名也能移除，模型页的首屏不再等额度
+
+### 为什么做
+
+模型页的「订阅账号」列表只读：同一个人的 Claude、Codex、WorkBuddy 各登录一次，行上全是邮箱，分不清哪个是工作号；登录错了、或者早就不用的账号，也没有地方去掉——只能去终端里敲命令。这两件事本该在页面上一次点完。
+
+另外首屏一直有个体感问题：模型列表并不依赖额度，但骨架要等九件事全部回来才撤，最慢的恰恰是额度读取（每条命令一个进程，`accounts --json` 冷启动四百多毫秒）。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 | 背后命令 |
+| --- | --- | --- | --- |
+| 订阅账号行 | 只有「切到这个」「重新登录」 | 多出「改名」「移除」两个文字按钮 | `accounts alias <agent> <email> <名字>`、`accounts forget <agent> <email>` |
+| 改名 | 无 | 行内出现输入框，回车保存、Esc 取消；清空 = 恢复显示账号本身 | `accounts alias … --clear` |
+| 移除 | 无 | 二次确认，文案直说「那个软件如果正登录在它上面会被退出登录」 | `accounts forget` |
+| 首屏 | 九件事全回来才撤骨架 | 模型、智能体、隐藏项、可见性先画完就撤；余额、设置、启动器后台补齐 | 同一批命令，分两波 |
+| 加载器 | 刷新与首屏可能各起一遍进程 | 同键去重：撞车时搭同一趟车 | — |
+
+顺手把窗口进度条抽成 `WindowBar`，订阅账号与「其余来源的额度」共用一套。
+
+### 怎么验证
+
+- `pnpm --filter @heming/web test`：433 个测试文件 / 6213 个用例全绿（新增 3 例：改名只发 `accounts alias` 且只发一次、Esc 一个命令都不发、移除必须过二次确认且文案说明会退出登录）。
+- 关键用例「首屏不等额度」：把 `accounts` 与 `quota` 的 promise 挂死，模型列表照样出现、骨架照样撤。
+- `pnpm --filter @heming/web typecheck`、`pnpm --filter @heming/web build`、`node scripts/design-audit.mjs` 全部通过。
+- 无头浏览器量 520/440/380 三种卡片宽度：订阅账号行横向溢出 0，「改名」「移除」两个按钮都在（24px 高、命中区补到 32px）。
+
+### 留白
+
+- 「移除」不会问「要不要顺手把那个软件的登录也退掉」——内核在有你别的账号时会先切过去，没有时会把它登出，这层结果只在提示条里说。
+- 改名没有长度提示，超长名字靠行内 truncate 收尾；内核没有长度上限，这里也没编一个。
+- 首屏仍是每件事一个进程；要更快得让内核常驻一个查询通道，那是另一件事。
+
 ## d.287.4.120.12（2026-11-18）— 子代理也能按你写在仓库里的那份要求干活
 
 ### 为什么做

@@ -729,6 +729,72 @@ export function ModelPage() {
   };
 
   /**
+   * 给账号起名字（`accounts alias <agent> <email> <name>`；空名字 = `--clear`）。
+   *
+   * 同一个人常在两三个软件里各登录一次，列表里全是邮箱时分不清「哪个是工作号」，
+   * 起个名字只改和鸣这边显示的那一行，不动任何登录状态。
+   */
+  const renameAccount = async (row: AccountRow, name: string) => {
+    if (!cli || !row.user) return;
+    setAccountBusy(`${row.agent}:${row.user}`);
+    try {
+      const args = name
+        ? ["accounts", "alias", row.agent, row.user, name]
+        : ["accounts", "alias", row.agent, row.user, "--clear"];
+      const result = await cli.cli(args);
+      await loadAccounts();
+      setNotice(
+        result.ok
+          ? name
+            ? `已把它叫作「${name}」。`
+            : "已清掉这个名字，改回显示账号本身。"
+          : `没能改名：${(result.error || result.stderr || "").trim() || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能改名：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 从列表里移除一个账号（`accounts forget <agent> <email>`）。
+   *
+   * 内核的行为要说清楚：它删掉的是「和鸣记住的这份登录」，如果那个软件此刻正登录在
+   * 这个账号上，它会被退出登录（内核会先把它切到别的账号）。所以走二次确认、文案直说。
+   */
+  const forgetAccount = async (row: AccountRow) => {
+    if (!cli || !row.user) return;
+    setAccountBusy(`${row.agent}:${row.user}`);
+    try {
+      const result = await cli.cli(["accounts", "forget", row.agent, row.user]);
+      await Promise.all([loadAccounts(), loadQuotas()]);
+      setNotice(
+        result.ok
+          ? `已移除 ${row.label}，它不再占额度。`
+          : `没能移除：${(result.error || result.stderr || "").trim() || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能移除：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  const confirmForgetAccount = (row: AccountRow) => {
+    if (!row.user) return;
+    setConfirmAction({
+      title: `移除 ${row.label}？`,
+      desc: `只会去掉和鸣记住的这份登录。${agentName(row.agent)} 如果此刻正登录在这个账号上，它会被退出登录（有别的账号时先切过去）。之后想用可以再登录一次。`,
+      confirmLabel: "移除",
+      tone: "danger",
+      action: () => void forgetAccount(row),
+    });
+  };
+
+  /**
    * 「今日签到」：WorkBuddy、Qoder、Trae CN、MiniMax Code 的每日免费额度要点一下才到账。
    * 内核按账号挨个点（`accounts checkin --json`），结果只有「领到 / 今天签过 /
    * 不能参加 / 要验证码」几种，翻成一句话写进提示条；签完顺手重读额度。
@@ -1687,6 +1753,8 @@ export function ModelPage() {
                       busy={accountBusy === `${row.agent}:${row.user}`}
                       onSwitch={confirmSwitchAccount}
                       onRelogin={reloginAccount}
+                      onRename={renameAccount}
+                      onForget={confirmForgetAccount}
                     />
                   ))}
                   {accounts.length === 0 && (

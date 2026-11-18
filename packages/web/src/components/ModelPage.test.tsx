@@ -331,6 +331,61 @@ describe("ModelPage · 账号与更多", () => {
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
+  it("账号可以就地改名：回车写 accounts alias，列表立刻换名字", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("工作号")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "改名" }));
+    const input = screen.getByLabelText("账号名字");
+    fireEvent.change(input, { target: { value: "小号" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(calls.some((args) => args.join(" ") === "accounts alias claude work@example.com 小号")).toBe(true),
+    );
+    // 回车与失焦都提交时也只发一次
+    expect(calls.filter((args) => args[1] === "alias")).toHaveLength(1);
+    // 只改名，不碰登录状态（`accounts --json` 是重读列表，不算）
+    expect(
+      calls.some((args) => args[0] === "accounts" && ["switch", "forget", "add", "checkin"].includes(args[1] ?? "")),
+    ).toBe(false);
+    expect(await screen.findByText(/已把它叫作「小号」/)).toBeInTheDocument();
+  });
+
+  it("改名时按 Esc 不改：一个命令都不发", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("工作号")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "改名" }));
+    const input = screen.getByLabelText("账号名字");
+    fireEvent.change(input, { target: { value: "不想保存" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByLabelText("账号名字")).toBeNull();
+    expect(calls.some((args) => args[1] === "alias")).toBe(false);
+  });
+
+  it("移除账号要二次确认，并说清那个软件可能被退出登录", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("工作号")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "移除" }));
+    const dialog = await screen.findByRole("dialog", { name: "移除 工作号？" });
+    expect(within(dialog).getByText(/会被退出登录/)).toBeInTheDocument();
+    expect(calls.some((args) => args[1] === "forget")).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "移除" }));
+    await waitFor(() =>
+      expect(calls.some((args) => args.join(" ") === "accounts forget claude work@example.com")).toBe(true),
+    );
+  });
+
   it("来源页列出国内智能体：点一下就接入并登录，两步合成一次点击", async () => {
     const { bridge, calls } = installBridge();
     render(<ModelPage />);

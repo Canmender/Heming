@@ -129,6 +129,8 @@ export interface AccountRow {
   agent: string;
   /** 别名优先，其次邮箱/用户名——内核的 `accounts alias` 就是给这个用的。 */
   label: string;
+  /** 用户自己起的名字（没有名字时为空，行上显示的是账号本身）。 */
+  alias?: string;
   user?: string;
   /** 订阅档位（Pro / Max / Team…）。 */
   plan?: string;
@@ -173,6 +175,7 @@ export function parseAccounts(stdout: string): AccountRow[] {
       return {
         agent,
         label: text("alias") || user || "(未命名)",
+        alias: text("alias") || undefined,
         user,
         plan: text("plan") || undefined,
         seat: text("seat") || undefined,
