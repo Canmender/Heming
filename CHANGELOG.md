@@ -1,3 +1,45 @@
+## d.278.4.120.12（2026-11-18）— 模型页对齐 magpie：目录、价格、可见范围、看图与画图都在同一页
+
+### 为什么做
+
+模型页原来只有一份「模型 ID 平铺列表 + 一个属性表单」：改显示名要手打模型 ID，看不到思考档和窗口，不知道一个模型多少钱，也没法只给某个智能体看一部分模型。原版 magpie 的模型管理是围绕「一张按来源分组的模型表」长的——显示名、思考档、窗口、图片输入、价格、逐模型测试、禁用启用都在模型本身那一行上。这轮把这块补齐，并保持一个原则：**界面上出现的每个操作，背后都是一条 magpie 已有的命令**，不做只能在本地生效的假开关。
+
+### 做了什么
+
+| 能力 | 位置 | 背后的命令 / 数据 |
+| --- | --- | --- |
+| 按来源分组的模型目录（显示名、思考档、窗口、最大输出、图片输入） | 模型 tab | 网关 `GET /v1/models` 的 `display_name` / `reasoning_levels` / `context_window` / `max_output_tokens` / `modalities` |
+| 行内编辑：显示名、思考档、窗口、最大输出、图片输入、请求协议、价格、速度档 | 模型行「编辑」 | `model name` / `model spec` / `model api` / `model price` / `model tier` |
+| 逐模型测试、按 Codex 测试、按 Claude Code 测试、测试全部 | 行内按钮 + 面板右上 | `provider test [--as codex\|claude-code] [model…]` |
+| 复制模型 ID | 行内按钮 | 剪贴板 |
+| 禁用 / 启用（规则可带 `*`） | 行内按钮 + 「已禁用的模型」折叠区 | `model disable` / `model enable` / `model disabled` |
+| 读取现在的设置（哪些字段是你自己设的） | 行内编辑器 | `model spec <p/m>` |
+| 智能体：按来源分组的模型下拉，只列这个智能体看得到的模型 | 智能体 tab | `visible` + `visible <agent> <family,…>` |
+| 智能体：可见来源收窄、只显示挑过的模型 | 智能体 tab 折叠区 | `visible <agent> …` / `visible <agent> --only-picked\|--show-new` |
+| 来源模型清单：逐个增删、全部 / 每个系列只要最新 / 暂时不下发、重新读取 | 来源 tab 高级 | `provider models <id> +id\|-id\|all\|best\|none` / `provider refresh` |
+| 全局：名字后缀、压缩窗口、窗口上限 | 模型 tab 底部 | `model suffix` / `model compact` / `model context-cap` |
+| 看图模型（含「关掉」与思考档）、画图模型 | 模型 tab 底部 | `settings get\|set\|reset vision\|visionEffort\|imageGen`，画图候选来自 `GET /v1/models?kind=image` |
+
+速度档按内核能力显示：启动时读一次裸 `magpie model` 的 usage，含 `magpie model tier` 才出现该下拉——随包的内核 `magpie 0.1.3246` 还没有这条命令，所以现在不显示，内核升级后自动出现，不会摆一个保存必报错的控件。
+
+### 怎么验证
+
+- `packages/web` 全量 `vitest run`：**424 个测试文件 / 6089 个用例全绿**；`tsc -p tsconfig.json --noEmit` 退出码 0；`vite build` 通过。
+- 组件级覆盖：`ModelPage.test.tsx` 36 例（含测试全部、读取现在的设置、看图与画图、可见范围收窄）、`ImageModelSettings.test.tsx` 5 例、`ModelCatalogPanel` / `modelCatalog` / `modelSpec` / `modelSettings` / `modelTier` / `magpieVisible` / `providerModels` 单测各自覆盖纯函数与命令拼装。
+- 安装包内嵌校验：`win-unpacked\resources\web\assets\ModelPage-*.js` 里能搜到「看图与画图模型」「看图模型的思考档」「测试全部模型」「已禁用的模型」。
+
+### 留白（有依据，不是没做）
+
+- 「Test on account」：`provider test` 没有 `--account` 参数，原版那项能力在当前 CLI 里没有入口。
+- 来源的模型排序 / 标签视图：`provider models` 只接受 `+id/-id/all/best/none`，没有排序或分组命令。
+- Web search 设置：原版 `index.html` 里 `#searchList` / `#searchMore` 容器还在，但 `app.js` 已无渲染代码（那段收回了工具层）。
+- 视频模型：`app.js` 的 prefs 快照里有 `videoGen`，但 `magpie settings list` 没有对应键。
+- `model alias`：那是「用量归到另一个 id」的计费口径，不是给模型起别名，不属于模型页该摆的东西；有需要可在「高级命令」里直接敲。
+
+### 参考
+
+`docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md`（逐项对照表、留白依据、验证清单）。
+
 ## d.277.4.120.12（2026-11-18）— 服务端测试门禁不再靠运气：逐文件进程 + 只对 worker 原生崩溃重试
 
 ### 为什么做
