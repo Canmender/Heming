@@ -1,3 +1,72 @@
+## d.339.4.126.12（2026-11-18）— 远端 MCP 服务不用再在本地起一个代理进程
+
+### 为什么做
+
+`heming run --mcp`（d.309）接进来的 MCP 服务只有一种：本地进程，`.heming/mcp.json` 里写 `command` / `args` / `env` / `cwd`。
+可 MCP 早就有了 HTTP 传输（POST 一条 JSON-RPC，回应可以是 JSON 也可以是 SSE）——远端服务只给一个地址，
+而 CLI 只能靠本地再写个转发脚本才连得上，等于把「别人的服务」变回「我的进程」。这是 `--mcp` 与 codex 之间最后一个明显的传输缺口。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| `.heming/mcp.json` 的声明 | 只有 `command`（本地进程） | 也可写 `url`（远端），附带可选的 `headers` |
+| `packages/cli/src/mcpClient.ts` | `McpServerConfig` 一种形状 | 拆成 `McpStdioConfig` / `McpHttpConfig` 联合 + `isHttpConfig` 收窄；`connectMcpServer` 按形状分派 |
+| 新 `connectHttpMcpServer` | 无 | 每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用同一条路 |
+| 回应解析 | 只会读 stdio 的逐行 JSON | `application/json` 直接解析；`text/event-stream` 走 `pickSseMessage`，**只取 `id` 对得上的那条**，通知丢弃 |
+| 会话与鉴权 | 无 | 服务端下发 `mcp-session-id` 后自动带上；`headers` 里的每条附加头都带上 |
+| 失败信息 | 「连不上」一句 | 区分：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…` |
+| 配置校验 | 只查 `command` / `args` / `env` / `cwd` | 额外查：`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 必须是字符串值、走 HTTP 时写 `args`/`env`/`cwd` 就拒 |
+
+### 怎么验证
+
+`mcpClientHttp.test.ts` 新增 7 例，起真 `node:http` 服务：JSON 回应走完四步且**只第一次不带 session、之后每次都带**、自定义 `authorization` 每条请求都在；
+SSE 回应里混一条通知只取 `id` 对上的；`isError` 透传；HTTP 503 报状态码与对方的话；`timeoutMs: 60` 说清「60ms 内没有回应 initialize」；`text/html` 正文报「看不懂」并带上开头；`close()` 之后不再发请求。
+`mcpClient.test.ts` 新增 1 例覆盖新校验（同写 command+url、`ftp://`、`headers` 是数组或非字符串、HTTP 里带 `args`/`cwd`）。
+真机冒烟：假模型 + 真 HTTP MCP 服务，`exec --json --mcp --allow-danger` → `exit 0`、`toolCalls` 里 `mcp__remote__upper` 成功、工具结果 `OK` 回到模型、服务端记录的方法顺序是 `initialize → notifications/initialized → tools/list → tools/call` 且后三条都带 session。
+CLI 全量 21 文件 / 441 例全绿；typecheck、web 全量、server 全量、`eval-agent`、`design-audit` 均通过。
+
+### 留白
+
+- HTTP 只做「发一条、等一条回应」：没有接服务端主动推消息（server-initiated）的那套，也没有断线重连。
+- 仍然只接 `tools` 一组方法（作为**客户端**）；`resources` / `prompts` 只有我们作为服务端时才提供。
+- 每次 `run` 现连现断，没有常驻连接池；远端服务的会话 id 只在一次运行内有效。
+- 风险等级仍不按服务细分：远端工具一律按 danger 处理，要 `--allow-danger` 才真的调过去。
+
+
+## d.338.4.126.12（2026-11-18）— 每个账号只把规则收起来，额度留在明面上
+
+### 为什么做
+
+一个账号上能改的东西越攒越多：改名、移除、重置谁花、用到多少换下一个、用掉一次重置。全都摊在额度条下面，一行就占掉半屏——
+可这些规则是「设一次就不动」的，天天要看的其实只有名字、状态、额度、余额。
+
+### 做了什么
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| `packages/web/src/components/model/SubscriptionRow.tsx` | 规则下拉直接摊在额度条下；改名/移除挤在账号名那行的尾上 | 收进一条 `这个账号的设置`（`.ui-disclosure`），默认收起 |
+| 摘要 | —— | 只写**偏离默认值**的项：`重置快过期就花`、`用到 70% 换下一个`；全是默认时就只写这一行的名字 |
+| 「用掉一次重置」 | 和「切到这个」一起竖排在右侧 | 跟着规则进设置区；右侧只留 `重新登录` / `切到这个` 这类当下要紧的动作 |
+| 没有可设的项时 | —— | 连这条摘要都不摆（没有登录名、没有可重置次数、也不是同门多账号） |
+| 失效与报错 | 排在规则下面 | 提到设置区之上，收起来也看得见 |
+
+实测行高（无头 Edge CDP，`.tmp/preview/row-measure.mjs`，520/440/380 三种卡片宽度）：
+窗口最多的那行从 212px 降到 180px（380 宽），横向溢出仍是 0，摘要文字不截断。
+
+### 怎么验证
+
+- 新建 `packages/web/src/components/model/SubscriptionRow.test.tsx` 6 例：设置区默认收起且明面上仍有名字/状态/额度；改过的两项写在摘要上；默认值不占摘要；没有可设项时连摘要都不摆；展开后四个动作与两个下拉都在设置区里；「切到这个」留在明面上、不在设置区里。
+- 全量 452 个测试文件 / 6484 个用例全绿；`typecheck`、`vite build`、`node scripts/design-audit.mjs`、`pnpm --filter @heming/desktop test` 均通过。
+- 明细见 `packages/web/src/components/model/SubscriptionRow.tsx` 里「这个账号的设置」那段注释。
+
+### 留白
+
+- 「切到这个」没有收起来：它是这一行唯一「马上要用」的动作，藏起来等于给操作加一步。
+- 摘要不写默认值（比如「重置自己不会花」），因为默认值不占地方才是这次的目的；想知道全貌就展开。
+- 展开状态不记忆：下次进页面仍从收起开始。
+- 主行没有做「整行折叠」——额度条本身就是这一行的内容，折了就没东西看了。
+
 ## d.338.4.125.12（2026-11-18）— 点数稀不代表没在掉：把读数的记法写在图上
 
 ### 为什么做
@@ -88,40 +157,6 @@
 - 展开状态不落盘：切走分区再回来是收起的（和账号那边的「再加一个账号」一致）。
 - 「API Key 服务商」那张现成服务商的卡没动——它是绝大多数人的入口，保留在上方。
 
-## d.338.4.122.12（2026-11-18）— 远端 MCP 服务不用再在本地起一个代理进程
-
-### 为什么做
-
-`heming run --mcp`（d.309）接进来的 MCP 服务只有一种：本地进程，`.heming/mcp.json` 里写 `command` / `args` / `env` / `cwd`。
-可 MCP 早就有了 HTTP 传输（POST 一条 JSON-RPC，回应可以是 JSON 也可以是 SSE）——远端服务只给一个地址，
-而 CLI 只能靠本地再写个转发脚本才连得上，等于把「别人的服务」变回「我的进程」。这是 `--mcp` 与 codex 之间最后一个明显的传输缺口。
-
-### 做了什么
-
-| 位置 | 之前 | 现在 |
-| --- | --- | --- |
-| `.heming/mcp.json` 的声明 | 只有 `command`（本地进程） | 也可写 `url`（远端），附带可选的 `headers` |
-| `packages/cli/src/mcpClient.ts` | `McpServerConfig` 一种形状 | 拆成 `McpStdioConfig` / `McpHttpConfig` 联合 + `isHttpConfig` 收窄；`connectMcpServer` 按形状分派 |
-| 新 `connectHttpMcpServer` | 无 | 每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用同一条路 |
-| 回应解析 | 只会读 stdio 的逐行 JSON | `application/json` 直接解析；`text/event-stream` 走 `pickSseMessage`，**只取 `id` 对得上的那条**，通知丢弃 |
-| 会话与鉴权 | 无 | 服务端下发 `mcp-session-id` 后自动带上；`headers` 里的每条附加头都带上 |
-| 失败信息 | 「连不上」一句 | 区分：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…` |
-| 配置校验 | 只查 `command` / `args` / `env` / `cwd` | 额外查：`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 必须是字符串值、走 HTTP 时写 `args`/`env`/`cwd` 就拒 |
-
-### 怎么验证
-
-`mcpClientHttp.test.ts` 新增 7 例，起真 `node:http` 服务：JSON 回应走完四步且**只第一次不带 session、之后每次都带**、自定义 `authorization` 每条请求都在；
-SSE 回应里混一条通知只取 `id` 对上的；`isError` 透传；HTTP 503 报状态码与对方的话；`timeoutMs: 60` 说清「60ms 内没有回应 initialize」；`text/html` 正文报「看不懂」并带上开头；`close()` 之后不再发请求。
-`mcpClient.test.ts` 新增 1 例覆盖新校验（同写 command+url、`ftp://`、`headers` 是数组或非字符串、HTTP 里带 `args`/`cwd`）。
-真机冒烟：假模型 + 真 HTTP MCP 服务，`exec --json --mcp --allow-danger` → `exit 0`、`toolCalls` 里 `mcp__remote__upper` 成功、工具结果 `OK` 回到模型、服务端记录的方法顺序是 `initialize → notifications/initialized → tools/list → tools/call` 且后三条都带 session。
-CLI 全量 21 文件 / 441 例全绿；typecheck、web 全量、server 全量、`eval-agent`、`design-audit` 均通过。
-
-### 留白
-
-- HTTP 只做「发一条、等一条回应」：没有接服务端主动推消息（server-initiated）的那套，也没有断线重连。
-- 仍然只接 `tools` 一组方法（作为**客户端**）；`resources` / `prompts` 只有我们作为服务端时才提供。
-- 每次 `run` 现连现断，没有常驻连接池；远端服务的会话 id 只在一次运行内有效。
-- 风险等级仍不按服务细分：远端工具一律按 danger 处理，要 `--allow-danger` 才真的调过去。
 
 ## d.337.4.122.12（2026-11-18）— 内核不认的那个开关，就别摆出来
 

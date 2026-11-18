@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.js";
+import { ChevronIcon } from "../icons.js";
 import { Avatar } from "./Avatar.js";
 import { WindowBar } from "./WindowBar.js";
 import { AUTO_RESET_LEVELS, autoResetLevelText, type AutoResetLevel } from "../../lib/autoReset.js";
@@ -101,6 +102,16 @@ export function SubscriptionRow({
     Boolean,
   );
   const canSwitch = !row.active && Boolean(row.user);
+  // 设置区里到底有没有东西：没有的话连那行「这个账号的设置」都不摆。
+  const hasResets = Boolean(row.resets && row.resets.count > 0);
+  const hasSettings = Boolean(
+    row.user || (hasResets && (onAutoReset || onSpendReset)) || onCapChange,
+  );
+  // 摘要只写「和默认不一样」的那几项：默认值不占地方，改过的一眼能看见。
+  const digest = [
+    hasResets && onAutoReset && autoReset !== "off" ? `重置${autoResetLevelText(autoReset)}` : "",
+    onCapChange && cap > 0 ? `用到 ${cap}% 换下一个` : "",
+  ].filter(Boolean);
   return (
     <li className="rounded-xl border border-line bg-subtle px-3 py-2.5">
       <div className="flex items-start gap-3">
@@ -138,18 +149,8 @@ export function SubscriptionRow({
               {state.label}
             </span>
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <div className="mt-0.5">
             {meta && <p className="ui-caption">{meta}</p>}
-            {row.user && !editing && (
-              <span className="flex items-center gap-0.5">
-                <button type="button" className="ui-link" disabled={busy} onClick={beginRename}>
-                  改名
-                </button>
-                <button type="button" className="ui-link" disabled={busy} onClick={() => onForget(row)}>
-                  移除
-                </button>
-              </span>
-            )}
           </div>
           {hasQuota(row.windows) ? (
             <ul className="mt-2 space-y-1.5">
@@ -161,53 +162,85 @@ export function SubscriptionRow({
             !row.error && <p className="mt-1.5 ui-caption">额度未知，这次没读到</p>
           )}
           {extras.length > 0 && <p className="mt-1.5 ui-caption">{extras.join(" · ")}</p>}
-          {(onAutoReset || onCapChange) && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              {row.resets && row.resets.count > 0 && onAutoReset && (
-                // 重置放着不用就到期作废：让它「该花的时候自己花」，是这批账号里最实在的一项。
-                <label className="flex items-center gap-2">
-                  <span className="ui-caption">重置谁花</span>
-                  <select
-                    className="ui-input w-auto"
-                    aria-label={`${row.label} 的重置怎么花`}
-                    title="周额度用完、又没有别的账号能接时自己花掉；快过期的也会提前花掉。一周最多一次。"
-                    value={autoReset}
-                    disabled={busy}
-                    onChange={(event) => onAutoReset(row, event.target.value as AutoResetLevel)}
-                  >
-                    {AUTO_RESET_LEVELS.map((level) => (
-                      <option key={level} value={level}>
-                        {autoResetLevelText(level)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {onCapChange && (
-                // 一家两份额度时才有意义：先把这份用到八成，剩下的留给下一个账号接，
-                // 别一头撞到底再换（换号时正在跑的请求会断）。
-                <label className="flex items-center gap-2">
-                  <span className="ui-caption">用到多少换下一个</span>
-                  <select
-                    className="ui-input w-auto"
-                    aria-label={`${row.label} 用到多少换下一个`}
-                    title="这份额度用到这个份额就换下一个账号；不设上限就一直用到用光。"
-                    value={cap && cap > 0 ? String(cap) : "0"}
-                    disabled={busy}
-                    onChange={(event) => onCapChange(row, Number(event.target.value))}
-                  >
-                    {capOptions(cap).map((choice) => (
-                      <option key={choice} value={String(choice)}>
-                        {capText(choice)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-          )}
           {row.lapsed && <p className="mt-1.5 text-ui-sm text-warn">登录已经过期：{engineText(row.lapsed)}</p>}
           {row.error && <p className="mt-1.5 text-ui-sm text-danger">{engineText(row.error)}</p>}
+          {hasSettings && (
+            // 这一行的常规内容（名字、状态、额度、余额）才是天天要看的；
+            // 「重置谁花」「用到多少换下一个」这类一次设好就不再动的规则收进来，
+            // 但偏离默认值的那几项仍写在摘要上——收起也看得见自己改过什么。
+            <details className="ui-disclosure mt-1.5">
+              <summary className="ui-caption">
+                <ChevronIcon width={12} height={12} className="ui-disclosure-chevron" />
+                这个账号的设置
+                {digest.length > 0 && ` · ${digest.join(" · ")}`}
+              </summary>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                {hasResets && onAutoReset && (
+                  // 重置放着不用就到期作废：让它「该花的时候自己花」，是这批账号里最实在的一项。
+                  <label className="flex items-center gap-2">
+                    <span className="ui-caption">重置谁花</span>
+                    <select
+                      className="ui-input w-auto"
+                      aria-label={`${row.label} 的重置怎么花`}
+                      title="周额度用完、又没有别的账号能接时自己花掉；快过期的也会提前花掉。一周最多一次。"
+                      value={autoReset}
+                      disabled={busy}
+                      onChange={(event) => onAutoReset(row, event.target.value as AutoResetLevel)}
+                    >
+                      {AUTO_RESET_LEVELS.map((level) => (
+                        <option key={level} value={level}>
+                          {autoResetLevelText(level)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {onCapChange && (
+                  // 一家两份额度时才有意义：先把这份用到八成，剩下的留给下一个账号接，
+                  // 别一头撞到底再换（换号时正在跑的请求会断）。
+                  <label className="flex items-center gap-2">
+                    <span className="ui-caption">用到多少换下一个</span>
+                    <select
+                      className="ui-input w-auto"
+                      aria-label={`${row.label} 用到多少换下一个`}
+                      title="这份额度用到这个份额就换下一个账号；不设上限就一直用到用光。"
+                      value={cap && cap > 0 ? String(cap) : "0"}
+                      disabled={busy}
+                      onChange={(event) => onCapChange(row, Number(event.target.value))}
+                    >
+                      {capOptions(cap).map((choice) => (
+                        <option key={choice} value={String(choice)}>
+                          {capText(choice)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                {row.user && (
+                  <>
+                    <button type="button" className="ui-link" disabled={busy} onClick={beginRename}>
+                      改名
+                    </button>
+                    <button type="button" className="ui-link" disabled={busy} onClick={() => onForget(row)}>
+                      移除
+                    </button>
+                  </>
+                )}
+                {hasResets && onSpendReset && (
+                  // 窗口用光了、手里又有可重置次数时，这一步比等下一次自然重置快得多。
+                  <Button
+                    size="sm" variant="ghost" busy={busy}
+                    title="把这个账号当前的额度窗口从头开始，用掉一次可重置次数"
+                    onClick={() => onSpendReset(row)}
+                  >
+                    用掉一次重置
+                  </Button>
+                )}
+              </div>
+            </details>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {row.lapsed && (
@@ -218,16 +251,6 @@ export function SubscriptionRow({
           {canSwitch && (
             <Button size="sm" variant="ghost" busy={busy} onClick={() => onSwitch(row)}>
               切到这个
-            </Button>
-          )}
-          {row.resets && row.resets.count > 0 && onSpendReset && (
-            // 窗口用光了、手里又有可重置次数时，这一步比等下一次自然重置快得多。
-            <Button
-              size="sm" variant="ghost" busy={busy}
-              title="把这个账号当前的额度窗口从头开始，用掉一次可重置次数"
-              onClick={() => onSpendReset(row)}
-            >
-              用掉一次重置
             </Button>
           )}
         </div>
