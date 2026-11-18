@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.330.4.120.12",
+    "date": "2026-11-18",
+    "title": "一份额度用到八成就换下一个账号，别一头撞到底",
+    "bullets": [
+      "新增 `packages/web/src/lib/accountCap.test.ts`：6 例（读散文 / 带 ANSI / 认不出来不猜 / 命令形状`off` 与百分比 / 档位说法 / 当前值不在候选里时补进去）。",
+      "`packages/web/src/components/ModelPage.test.tsx`：94 例（新增 2 例——两家 Claude 时下拉停在内核报的80%、改成 70% 真的发 `provider account-cap claude work@example.com 70` 并写提示；只有一家时",
+      "全量 `pnpm --filter @heming/web test`：450 个测试文件 / 6450 个用例全绿；`typecheck` 退出 0；`vite build` 通过；`node scripts/design-audit.mjs` 全部门槛通过。",
+      "只有五档（50/70/80/90 + 不设上限），没有自由输入框。",
+      "内核还能给**单个窗口**单独设份额（`--window <name>`），页面上不暴露：那是更细的调节，先只做账号级。",
+      "档位只在「同一家有两个账号」时可见，所以同一张卡里不会因为账号多少突然多出五个选项。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "同一家有两个账号时，内核本来就支持「这个账号的窗口用到百分之几就不再动它，让下一个接上」（`provider account-cap`，份额 1–99，`off` 是不设上限），但页面上没有出口：只能等一个账号用到100%、正在跑的请求被顶掉，用户才发现该换了。「充分利用免费额度」不只是「把额度读出来」，还包括**别把一份额度用成事故**。",
+      "做了什么",
+      "| 位置 | 落地的样子 || --- | --- || 订阅账号行 | 同一家有第二个账号时，多一行「用到多少换下一个」下拉：不设上限 / 50% / 70% / 80% / 90% || 读 | 按账号里的 agent 去重后各发一次 `provider account-cap <id>`，把内核的散文读成「账号 → 档位」 || 写 | `provider account-cap <id> <account> <percent|off>`，改完立刻重读，用内核的回答当准 || 守住的前提 | 一家只有一个账号时**不摆**这个下拉——一份额度设了上限会提前退出，没人接等于停用 || 别名 | 内核报的是账号本身的名字，用户改过别名时两处都认（先按账号名、再按别名） |",
+      "怎么验证整行没有这个下拉）。",
+      "留白"
+    ]
+  },
+  {
     "version": "d.329.4.120.12",
     "date": "2026-11-18",
     "title": "终端里的和鸣也开始记事：记住的偏好下次自动带上",

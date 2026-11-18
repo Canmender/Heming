@@ -46,6 +46,7 @@ import {
   spendsExpiringResets,
   type AutoResetLevel,
 } from "../lib/autoReset.js";
+import { capArgs, parseAccountCaps } from "../lib/accountCap.js";
 import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrendCard } from "./model/QuotaTrendCard.js";
@@ -347,6 +348,17 @@ export function ModelPage() {
    * 只能读 `quota auto-reset` 的散文输出：没读过就当作关闭，绝不替用户猜一个「开着」。
    */
   const [autoResetLevels, setAutoResetLevels] = useState<Map<string, AutoResetLevel>>(() => new Map());
+  /**
+   * 每个账号「用到百分之几就换下一个」（`provider account-cap`）：键是小写账号名。
+   * 内核按 provider 报一遍所有账号的档位，所以读的时候按 agent 去重、合并成一张表。
+   */
+  const [accountCaps, setAccountCaps] = useState<Map<string, number>>(() => new Map());
+  /** 同一家有几个人：只有这一家有第二份额度时，「用到多少换下一个」才有意义。 */
+  const agentAccountCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of accounts) counts.set(row.agent, (counts.get(row.agent) ?? 0) + 1);
+    return counts;
+  }, [accounts]);
   /** 「快过期时提前多久花」（分钟，`quota auto-reset lead`）；null = 这次没读到。 */
   const [resetLead, setResetLead] = useState<number | null>(null);
   /** 订阅账号上正在跑的动作（`agent:user`；刷新全量时是 `refresh`）：只忙那一处。 */
@@ -378,6 +390,15 @@ export function ModelPage() {
   const swapHints = useMemo(() => swapSuggestions(accounts), [accounts]);
   /** 哪个账号最宽裕、哪个最紧：账号多时不必自己一行行扫进度条。 */
   const accountRank = useMemo(() => rankText(accounts), [accounts]);
+  /**
+   * 一个账号的「用到多少换下一个」：内核报的是账号本身的名字，有些人给账号起了别名，
+   * 所以先按账号名找、再按别名找；两处都没有就是不设上限。
+   */
+  const capOf = (row: AccountRow): number => {
+    const direct = accountCaps.get((row.user ?? "").toLowerCase());
+    if (direct !== undefined) return direct;
+    return (row.alias ? accountCaps.get(row.alias.toLowerCase()) : undefined) ?? 0;
+  };
   /** 订阅以外（Key / 套餐 / 余额）的额度：订阅已经在「订阅账号」卡里按账号列过。 */
   const keyQuotas = useMemo(() => nonSubscriptionCards(quotaCards), [quotaCards]);
   /**
@@ -703,6 +724,33 @@ export function ModelPage() {
     [cli, once],
   );
 
+  /**
+   * 每个账号「用到百分之几就换下一个」：内核按 provider 报告（带账号名与档位），
+   * 所以按账号里的 agent 去重后各问一次，合并成一张表。
+   */
+  const loadCaps = useCallback(
+    () =>
+      once("caps", async () => {
+        if (!cli) return;
+        const agents = [...new Set(accounts.map((row) => row.agent))].filter(Boolean);
+        if (agents.length === 0) {
+          setAccountCaps(new Map());
+          return;
+        }
+        const results = await Promise.all(
+          agents.map((agent) => cli.cli(["provider", "account-cap", agent])),
+        );
+        const merged = new Map<string, number>();
+        for (const result of results) {
+          for (const [key, value] of parseAccountCaps(`${result.stdout || ""}${result.stderr || ""}`)) {
+            merged.set(key, value);
+          }
+        }
+        setAccountCaps(merged);
+      }),
+    [accounts, cli, once],
+  );
+
   const loadGlobals = useCallback(async () => {
     if (!cli) return;
     const [suffix, compact, cap, modelUsage] = await Promise.all([
@@ -757,6 +805,7 @@ export function ModelPage() {
       loadQuotas(),
       loadHistory(),
       loadAutoReset(),
+      loadCaps(),
       loadAgents(),
       loadPlugins(),
       loadSettings(),
@@ -779,6 +828,7 @@ export function ModelPage() {
     loadQuotas,
     loadHistory,
     loadAutoReset,
+    loadCaps,
     loadAgents,
     loadPlugins,
     loadSettings,
@@ -1072,6 +1122,31 @@ export function ModelPage() {
       );
     } catch (err) {
       setNotice(`没能改这个设置：${err instanceof Error ? err.message : String(err)}`, true);
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
+  /**
+   * 改「用到多少换下一个」（`provider account-cap`）：内核按账号存百分比，`off` 是不设上限。
+   * 只在同一家还别的账号时才有入口——一份额度设了上限会提前退出，没人接就等于是停用。
+   */
+  const changeCap = async (row: AccountRow, cap: number) => {
+    if (!cli || !row.user) return;
+    setAccountBusy(`${row.agent}:${row.user}`);
+    try {
+      const result = await cli.cli(capArgs(row.agent, row.user, cap));
+      await loadCaps();
+      setNotice(
+        result.ok
+          ? cap > 0
+            ? `已记下：${row.label} 用到 ${cap}% 就换下一个账号。`
+            : `已取消上限：${row.label} 会一直用到用光。`
+          : `没能改上限：${engineText(tailText(stripAnsi((result.stderr || result.stdout || "").trim()))) || "没有说明原因"}`,
+        !result.ok,
+      );
+    } catch (err) {
+      setNotice(`没能改上限：${err instanceof Error ? err.message : String(err)}`, true);
     } finally {
       setAccountBusy(null);
     }
@@ -1429,16 +1504,23 @@ export function ModelPage() {
       loadQuotas(),
       loadHistory(),
       loadAutoReset(),
+      loadCaps(),
       loadPlugins(),
       loadDiscovery(),
     ]);
-  }, [cli, tab, loadQuotas, loadHistory, loadAutoReset, loadPlugins, loadDiscovery]);
+  }, [cli, tab, loadQuotas, loadHistory, loadAutoReset, loadCaps, loadPlugins, loadDiscovery]);
 
   // 换了天数就重读：内核按天数现查，不重读等于选择器没生效。
   useEffect(() => {
     if (!cli || !sourcesWarm.current) return;
     void loadHistory(historyDays);
   }, [cli, historyDays, loadHistory]);
+
+  // 账号变了（登录完、自动收取到新账号）也要重读档位：它是按账号存的。
+  useEffect(() => {
+    if (!cli || !sourcesWarm.current) return;
+    void loadCaps();
+  }, [cli, loadCaps]);
 
   useEffect(() => {
     if (accounts.length === 0) return;
@@ -2227,6 +2309,10 @@ export function ModelPage() {
                       onSpendReset={confirmSpendReset}
                       autoReset={autoResetLevels.get((row.user ?? "").toLowerCase()) ?? "off"}
                       onAutoReset={changeAutoReset}
+                      cap={capOf(row)}
+                      onCapChange={
+                        (agentAccountCounts.get(row.agent) ?? 0) > 1 ? changeCap : undefined
+                      }
                     />
                   ))}
                   {accounts.length === 0 && (

@@ -872,6 +872,70 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已记下：额度窗口用到 80%/)).toBeInTheDocument();
   });
 
+  it("一家两份额度时，能说清这份用到几成就换下一个", async () => {
+    const { calls } = installBridge({}, {
+      "accounts --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            agent: "claude",
+            user: "work@example.com",
+            alias: "工作号",
+            plan: "Max",
+            active: true,
+            on: true,
+            windows: [{ name: "5 hours", used: 60, remaining: 40, display: "60% used" }],
+            readAt: new Date().toISOString(),
+          },
+          {
+            agent: "claude",
+            user: "backup@example.com",
+            alias: "备用号",
+            plan: "Pro",
+            active: false,
+            on: false,
+            windows: [{ name: "5 hours", used: 10, remaining: 90, display: "10% used" }],
+            readAt: new Date().toISOString(),
+          },
+        ]),
+        stderr: "",
+      },
+      "provider account-cap claude": {
+        ok: true,
+        stdout:
+          "work@example.com · capped at 80% of each usage window\nbackup@example.com · no cap: used to 100%",
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    // 内核说这个账号已经设到 80%：下拉就停在这一档，而不是装作没设过
+    const select = await screen.findByLabelText<HTMLSelectElement>("工作号 用到多少换下一个");
+    await waitFor(() => expect(select.value).toBe("80"));
+    expect(screen.getByLabelText<HTMLSelectElement>("备用号 用到多少换下一个").value).toBe("0");
+
+    fireEvent.change(select, { target: { value: "70" } });
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "provider",
+        "account-cap",
+        "claude",
+        "work@example.com",
+        "70",
+      ]),
+    );
+    expect(await screen.findByText(/已记下：工作号 用到 70% 就换下一个账号/)).toBeInTheDocument();
+  });
+
+  it("同一家只有一个账号时，不摆「用到多少换下一个」：设了上限没人接", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("工作号");
+    expect(screen.queryByLabelText("工作号 用到多少换下一个")).toBeNull();
+  });
+
   it("一家用完、同门还有余量时，卡片里问一句要不要换过去", async () => {
     const { calls } = installBridge({}, {
       "accounts --json": {
