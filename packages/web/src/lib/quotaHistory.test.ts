@@ -8,6 +8,8 @@ import {
   parseQuotaHistory,
   quotaPace,
   sparkPath,
+  trendHeadline,
+  type QuotaHistoryRow,
   type QuotaLine,
 } from "./quotaHistory.js";
 
@@ -221,5 +223,58 @@ describe("historySpan / 最后一次读数", () => {
     expect(lineLatestLeft(line)).toBe(65);
     expect(lineResetsAt(line)).toBe("2026-11-20T00:00:00Z");
     expect(lineLatestLeft({ name: "week", points: [] })).toBeNull();
+  });
+});
+
+describe("trendHeadline", () => {
+  it("只报最急的那一份，并说清还有几份也在往下掉", () => {
+    const rows: QuotaHistoryRow[] = [
+      // 8 小时掉 70%：从 30% 起还能撑 3 个多小时
+      { provider: "claude", user: "a@example.com", lines: [falling(30, 8)] },
+      // 6 小时掉 90%：从 10% 起不到一小时
+      { provider: "codex", lines: [falling(10, 6)] },
+    ];
+    const head = trendHeadline(rows, NOW);
+    expect(head.text).toContain("ChatGPT（5 小时）");
+    expect(head.text).toContain("后用完");
+    expect(head.text).toContain("另有 1 份也在往下掉");
+    expect(head.tone).toBe("danger");
+  });
+
+  it("两小时内用完算危险，一天内算偏紧，更久的不喊", () => {
+    expect(trendHeadline([{ provider: "codex", lines: [falling(10, 6)] }], NOW).tone).toBe(
+      "danger",
+    );
+    expect(trendHeadline([{ provider: "codex", lines: [falling(30, 8)] }], NOW).tone).toBe("warn");
+    expect(trendHeadline([{ provider: "codex", lines: [falling(95, 10)] }], NOW).tone).toBe(
+      "muted",
+    );
+  });
+
+  it("都撑得过这次重置时，报数而不是挨个说", () => {
+    const row: QuotaHistoryRow = {
+      provider: "claude",
+      lines: [
+        {
+          name: "5 hours",
+          points: falling(90, 4).points.map((point, index, all) =>
+            index === all.length - 1
+              ? { ...point, resetsAt: new Date(NOW + HOUR).toISOString() }
+              : point,
+          ),
+        },
+      ],
+    };
+    const head = trendHeadline([row], NOW);
+    expect(head.text).toBe("照这个速度，这 1 份额度都撑得过这次重置");
+    expect(head.tone).toBe("muted");
+  });
+
+  it("点太少、说不出所以然时给空串，让调用方自己兜一句", () => {
+    const rows: QuotaHistoryRow[] = [
+      { provider: "claude", lines: [{ name: "week", points: [{ at: iso(0), left: 40 }] }] },
+    ];
+    expect(trendHeadline(rows, NOW)).toEqual({ text: "", tone: "muted" });
+    expect(trendHeadline([], NOW)).toEqual({ text: "", tone: "muted" });
   });
 });

@@ -9,6 +9,8 @@
  * 把一周前的老读数混进当前这一轮，斜率会被历史平均抹平，等于没算。
  */
 
+import { agentName, windowName } from "./magpieQuota.js";
+
 export interface QuotaPoint {
   at: string;
   left: number;
@@ -223,4 +225,50 @@ export function lineResetsAt(line: QuotaLine): string | null {
     if (value) return value;
   }
   return null;
+}
+
+export interface TrendHeadline {
+  /** 一句话结论；空串表示「没有能下结论的东西」，调用方自己兜底。 */
+  text: string;
+  /** 最急那一份的紧迫程度：两小时内用完算危险，一天内算偏紧。 */
+  tone: "danger" | "warn" | "muted";
+}
+
+/**
+ * 收起「额度走向」时留在标题下的一句话。
+ *
+ * 这一块平时不需要看：曲线只有想知道「照这个速度会不会用完」时才值得展开。
+ * 所以收起时把**最急的那一份**写成一句话，其余的分量只报个数，不铺开。
+ */
+export function trendHeadline(rows: readonly QuotaHistoryRow[], now: number): TrendHeadline {
+  const running: { at: number; who: string; window: string }[] = [];
+  let lasts = 0;
+  for (const row of rows) {
+    const who = row.user ? `${agentName(row.provider)} ${row.user}` : agentName(row.provider);
+    for (const line of row.lines) {
+      if (line.points.length < 2) continue;
+      const pace = quotaPace(line, now, lineResetsAt(line));
+      if (!pace) continue;
+      if (pace.kind === "lasts") {
+        lasts += 1;
+        continue;
+      }
+      running.push({ at: pace.at, who, window: windowName(line.name) });
+    }
+  }
+  if (running.length === 0) {
+    return {
+      text: lasts > 0 ? `照这个速度，这 ${lasts} 份额度都撑得过这次重置` : "",
+      tone: "muted",
+    };
+  }
+  running.sort((a, b) => a.at - b.at);
+  const first = running[0] as { at: number; who: string; window: string };
+  const left = first.at - now;
+  const others = running.length - 1;
+  const sentence = paceText({ kind: "runs-out", at: first.at }, now);
+  return {
+    text: `${first.who}（${first.window}）${sentence}${others > 0 ? `；另有 ${others} 份也在往下掉` : ""}`,
+    tone: left <= 2 * 60 * 60 * 1000 ? "danger" : left <= 24 * 60 * 60 * 1000 ? "warn" : "muted",
+  };
 }

@@ -1233,7 +1233,7 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(within(list).getByText("DeepSeek")).toBeInTheDocument();
   });
 
-  it("来源页按历史读数画出额度走向，并说清照这个速度会不会用完", async () => {
+  it("来源页把额度走向收成一句话：最急的那份写在标题下，想看曲线再展开", async () => {
     const now = Date.now();
     const hour = 60 * 60 * 1000;
     const at = (hoursAgo: number): string => new Date(now - hoursAgo * hour).toISOString();
@@ -1263,11 +1263,25 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     });
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+
+    // 收起来时只留一句结论：曲线本身不在 DOM 里。
     expect(await screen.findByText("额度走向")).toBeInTheDocument();
-    const trend = screen.getByLabelText("额度走向");
-    expect(await within(trend).findByText("5 小时")).toBeInTheDocument();
+    expect(screen.getByText(/Claude work@example\.com（5 小时）照这个速度/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("额度走向")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "展开走向" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    const trend = await screen.findByLabelText("额度走向");
     expect(within(trend).getByText("剩 30%")).toBeInTheDocument();
     expect(within(trend).getByText(/^5 小时：照这个速度，/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起走向" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "收起走向" }));
+    expect(screen.queryByLabelText("额度走向")).toBeNull();
   });
 
   it("没有历史读数时整张「额度走向」卡都不出现", async () => {

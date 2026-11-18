@@ -47,7 +47,7 @@ import {
 } from "../lib/autoReset.js";
 import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
-import { QuotaTrend } from "./model/QuotaTrend.js";
+import { QuotaTrendCard } from "./model/QuotaTrendCard.js";
 import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
 import { nonSubscriptionCards, parseQuotaCards, type QuotaCard } from "../lib/magpieQuotaCards.js";
 import {
@@ -2340,15 +2340,7 @@ export function ModelPage() {
               )}
 
               {history.length > 0 && (
-                <div className="ui-card p-4">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 className="ui-section-title">额度走向</h2>
-                    <span className="ui-caption">
-                      最近 7 天的读数 · 照这个速度会不会用完
-                    </span>
-                  </div>
-                  <QuotaTrend rows={history} now={now} />
-                </div>
+                <QuotaTrendCard rows={history} now={now} />
               )}
 
               <WarmupCard
