@@ -2166,6 +2166,37 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(failed.className).toContain("text-danger");
   });
 
+  it("全部测一遍：一家一家真的测，最后报「几家通、几家连不上」", async () => {
+    const { calls } = installBridge(
+      {},
+      { "provider test mock": { ok: false, stdout: "", stderr: "401 Unauthorized" } },
+    );
+    render(<ModelPage />);
+    await screen.findByText("mock");
+
+    fireEvent.click(screen.getByRole("button", { name: "全部测一遍" }));
+    expect(
+      await screen.findByText("全部测过：0 家通，1 家连不上（原因在各自那行上）。"),
+    ).toBeInTheDocument();
+    expect(calls).toContainEqual(["provider", "test", "mock"]);
+    // 告警条自己也是 role=status，所以按文案找那一格，而不是假定只有一格。
+    expect(
+      (await screen.findAllByRole("status")).some((el) => el.textContent === "连不上"),
+    ).toBe(true);
+  });
+
+  it("全部测一遍：都通的时候就说都通，不说「0 家连不上」", async () => {
+    installBridge(
+      {},
+      { "provider test mock": { ok: true, stdout: "✓ mock · 1 model", stderr: "" } },
+    );
+    render(<ModelPage />);
+    await screen.findByText("mock");
+
+    fireEvent.click(screen.getByRole("button", { name: "全部测一遍" }));
+    expect(await screen.findByText("全部测过：1 家都通。")).toBeInTheDocument();
+  });
+
   it("来源模型清单：显示这个来源暴露的模型，增删与整套切换都走 provider models", async () => {
     const { calls } = installBridge(
       {},

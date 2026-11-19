@@ -554,6 +554,8 @@ export function ModelPage() {
   const [testState, setTestState] = useState<
     Record<string, { state: "running" | "ok" | "bad"; label: string; detail: string }>
   >({});
+  /** 正在一家一家测（「全部测一遍」按着的时候）：按钮要变成进行中，也不能重复点。 */
+  const [testingEvery, setTestingEvery] = useState(false);
   const [live, setLive] = useState("");
   const liveRef = useRef("");
   const [runId, setRunId] = useState<string | null>(null);
@@ -1875,6 +1877,33 @@ export function ModelPage() {
     return result;
   };
 
+  /**
+   * 全部测一遍：一家一家测，结论照旧写在各自的行上，最后报个数。
+   *
+   * 换机器、换网络之后，「到底哪几家还能用」是常问的；一家一家点要来回找按钮。
+   * 串行发——内核的 `provider test` 会真的发一个小请求，几路同时打出去既慢又容易
+   * 被对端限流，反而看不出真实结论。
+   */
+  const testEveryProvider = async () => {
+    if (!cli || testingEvery || providers.length === 0) return;
+    setTestingEvery(true);
+    let ok = 0;
+    try {
+      for (const row of providers) {
+        const result = await testProvider(row.id);
+        if (result.ok) ok += 1;
+      }
+    } finally {
+      setTestingEvery(false);
+    }
+    const failed = providers.length - ok;
+    setNotice(
+      failed === 0
+        ? `全部测过：${ok} 家都通。`
+        : `全部测过：${ok} 家通，${failed} 家连不上（原因在各自那行上）。`,
+    );
+  };
+
   const startTerminalRun = async () => {
     const args = termCommand.trim().split(/\s+/).filter(Boolean);
     if (!args.length || !cli) return;
@@ -2493,15 +2522,26 @@ export function ModelPage() {
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="ui-section-title">已添加的来源（{providers.length}）</h2>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  aria-expanded={custom.open}
-                  onClick={() => setCustom({ ...custom, open: !custom.open })}
-                >
-                  {custom.open ? "收起这一栏" : "加一个其他地址"}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli || testingEvery || providers.length === 0}
+                    title="一家一家真的发一个小请求；结论写在各自那行上，最后报个数。"
+                    onClick={() => void testEveryProvider()}
+                  >
+                    {testingEvery ? "正在一家家测…" : "全部测一遍"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    aria-expanded={custom.open}
+                    onClick={() => setCustom({ ...custom, open: !custom.open })}
+                  >
+                    {custom.open ? "收起这一栏" : "加一个其他地址"}
+                  </Button>
+                </div>
               </div>
               <p className="mt-1 ui-caption">
                 现成的服务商用上面「API Key 服务商」；中转、局域网或自建接口加在这里。

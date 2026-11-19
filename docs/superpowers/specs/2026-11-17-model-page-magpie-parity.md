@@ -272,6 +272,19 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 测试：`magpieCli.test.ts`（谁在用 / 没有就是空数组 / 箭头之后的备用链不算 / 停用那句不算）、
   `ModelPage.test.tsx`（行上看得见）。
 
+### 3.10 全部测一遍：换机器之后一家一家问「还通不通」
+
+「已添加的来源」的标题旁有一个「全部测一遍」：按 `providers` 的顺序一家一家跑
+`provider test <id>`，结论照旧写在各自那行（`通过 · 1.2 秒` / `连不上`，原因挂在悬停里），
+最后在告警条里报一句「几家通、几家连不上」。
+
+- 串行而不是并发：内核的 `provider test` 会真的发一个小请求，几路同时打出去既慢、又容易
+  被对端限流，看不出真实结论。
+- 复用行上的 `testProvider`（`packages/web/src/components/ModelPage.tsx`），单点「测试」与
+  「全部测一遍」共用一套判定与文案；进行中按钮变「正在一家家测…」并禁用。
+- 测试：`ModelPage.test.tsx`（失败时报「0 家通，1 家连不上」且行上是「连不上」；都通时只说
+  「都通」，不说「0 家连不上」）。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 
