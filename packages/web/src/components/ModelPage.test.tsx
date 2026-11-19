@@ -1671,6 +1671,47 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("调流：只发填过的项，一项一条命令，留空的不动", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("调流（可选）：并发、排队、休息"));
+
+    // 一项都没填时不给按：留空是「这次不改」，不是「改回默认」。
+    expect(screen.getByRole("button", { name: "保存调流" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("每分钟请求"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("同时用几个账号"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("排队"), { target: { value: "20:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存调流（3 项）" }));
+
+    await waitFor(() => expect(calls).toContainEqual(["provider", "at-once", "mock", "3"]));
+    expect(calls).toContainEqual(["provider", "rpm", "mock", "20"]);
+    expect(calls).toContainEqual(["provider", "queue", "mock", "20", "30"]);
+    // 没填的两项一条都不发。
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "quota-rest")).toBe(false);
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "rest-cap")).toBe(false);
+  });
+
+  it("调流：看不懂的那格点出来，能看懂的先发", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("调流（可选）：并发、排队、休息"));
+
+    fireEvent.change(screen.getByLabelText("每分钟请求"), { target: { value: "二十" } });
+    fireEvent.change(screen.getByLabelText("排队"), { target: { value: "5" } });
+    expect(screen.getByText(/这几格看不懂/)).toHaveTextContent("每分钟请求");
+
+    fireEvent.click(screen.getByRole("button", { name: "保存调流" }));
+    await waitFor(() => expect(calls).toContainEqual(["provider", "queue", "mock", "5"]));
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "rpm")).toBe(false);
+  });
+
   it("保存来源设置之后，余额卡与走向图也跟着重读（写命令会动到 Key 和限额）", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

@@ -93,6 +93,29 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - **做不到的**：参考实现有「组绑定点名账号」（`Group.Accounts`），但随桌面端发的这个内核
   `groups_cli.go` 里**没有 `accounts=` 这个键**（grep 零命中），所以本轮不做——等内核升上来再接。
 
+### 3.2 来源调流：并发、排队、休息
+
+参考实现的 Provider 编辑器里有一组「别把来源打爆」的开关。内核里它们不是 `provider set` 的键，
+而是各自一条子命令（`vendor/magpie-core/internal/cli/providers_cli.go` 的 `atOnceCmd` / `rpmCmd` /
+`queueCmd` / `quotaRestCmd` / `restCapCmd`），本轮接在来源「高级 → 调流（可选）」里：
+
+| 内核能力 | 和鸣模型页现在的行为 | 背后的命令 |
+| --- | --- | --- |
+| 一次只上几个账号，其余排队（Discord #405 那条：三个 ZCode 账号一起上被拒） | 「同时用几个账号」下拉：不限 / 2 / 3 / 5 | `provider at-once <id> <n\|off>` |
+| 每个账号每分钟最多几个请求（OpenRouter 免费模型常见 20） | 「每分钟请求」填数字 | `provider rpm <id> <n\|off>` |
+| 每个账号排队几个、最多等几秒 | 「排队」填 `20` 或 `20:30`（长度:秒） | `provider queue <id> <len> [sec]` |
+| 厂商说额度用完、又没说什么时候回来时歇多久 | 「额度用完后歇多久」下拉：15m / 30m / 6h / 1d / 回到默认 | `provider quota-rest <id> <dur\|default>` |
+| 连续失败或被限流时最多歇多久 | 「连续失败最多歇多久」下拉：1m / 30m / 2h / 1d / 不歇 / 回到默认 | `provider rest-cap <id> <dur\|off\|default>` |
+
+- 参数生成在 `packages/web/src/lib/magpieSourceTune.ts`（`SOURCE_TUNE_FIELDS` / `sourceTuneCommand` /
+  `sourceTuneCommands` / `sourceTuneRejected`），测试 `magpieSourceTune.test.ts` 8 例覆盖
+  「留空不发」「看不懂的点名」「一项一条命令」「没来源 ID 不发」。
+- **一次只发改过的项，一项一条命令**：内核每个键各自校验，前一条失败不该挡住后面几条；
+  留空是「这次不改」，和「改回默认」（下拉里的「回到默认/不改」之外的 `default` 项）不是一回事。
+- **收的边界**：`quota-rest` 的「到每天某个时刻」（`until 08:00`）和按账号/按 Key 的
+  `account-weight` / `account-concurrency` / `account-cap` 仍留命令行——它们要么要挑具体账号，
+  要么要写时刻，塞进一个不分账号的表单会误导。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。

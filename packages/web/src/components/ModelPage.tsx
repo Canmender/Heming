@@ -123,6 +123,12 @@ import {
   groupTemplateArgs,
 } from "../lib/magpieGroups.js";
 import {
+  SOURCE_TUNE_FIELDS,
+  sourceTuneCommands,
+  sourceTuneRejected,
+  type SourceTuneKey,
+} from "../lib/magpieSourceTune.js";
+import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   checkinFailed,
@@ -539,7 +545,20 @@ export function ModelPage() {
     headerValue: "",
     patience: "",
     errors: "",
+    atOnce: "",
+    rpm: "",
+    queue: "",
+    quotaRest: "",
+    restCap: "",
   });
+  /** 调流那几格各写各的：留空就是「这次不改」，不是「改回默认」。 */
+  const tuneSetters: Record<SourceTuneKey, (value: string) => void> = {
+    atOnce: (value) => setProviderForm({ ...providerForm, atOnce: value }),
+    rpm: (value) => setProviderForm({ ...providerForm, rpm: value }),
+    queue: (value) => setProviderForm({ ...providerForm, queue: value }),
+    quotaRest: (value) => setProviderForm({ ...providerForm, quotaRest: value }),
+    restCap: (value) => setProviderForm({ ...providerForm, restCap: value }),
+  };
   /** 每个来源「添加模型」输入框里的内容。 */
   const [modelAdd, setModelAdd] = useState<Record<string, string>>({});
   /** 路由分组规则（可选）：把某一类请求先交给组里指定模型。 */
@@ -2486,6 +2505,15 @@ export function ModelPage() {
                     showLoading === row.id
                       ? { label: "读取地址…", className: "bg-subtle-3 text-muted" }
                       : PLAN_BADGE[info?.plan ?? "normal"];
+                  const tuneValues = {
+                    atOnce: providerForm.atOnce,
+                    rpm: providerForm.rpm,
+                    queue: providerForm.queue,
+                    quotaRest: providerForm.quotaRest,
+                    restCap: providerForm.restCap,
+                  };
+                  const tuneCommands = sourceTuneCommands(row.id, tuneValues);
+                  const tuneRejected = sourceTuneRejected(tuneValues);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2832,6 +2860,68 @@ export function ModelPage() {
                                 </label>
                               </div>
                             </div>
+                          </details>
+
+                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                              调流（可选）：并发、排队、休息
+                            </summary>
+                            <p className="mt-1 ui-caption">
+                              一个来源被打爆之前先自己踩刹车：多账号轮着上、限制每分钟请求、排个队，
+                              额度用完和连续失败时歇一会儿。留空就是这次不改。
+                            </p>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              {SOURCE_TUNE_FIELDS.map((field) =>
+                                field.options ? (
+                                  <label key={field.key} className="grid gap-1">
+                                    <span className="ui-caption">{field.label}</span>
+                                    <select
+                                      className="ui-input"
+                                      aria-label={field.label}
+                                      value={providerForm[field.key]}
+                                      onChange={(event) => tuneSetters[field.key](event.target.value)}
+                                    >
+                                      <option value="">不改</option>
+                                      {field.options.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="ui-caption">{field.hint}</span>
+                                  </label>
+                                ) : (
+                                  <TextField
+                                    key={field.key}
+                                    label={field.label}
+                                    hint={field.hint}
+                                    placeholder={field.placeholder}
+                                    value={providerForm[field.key]}
+                                    onChange={(event) => tuneSetters[field.key](event.target.value)}
+                                  />
+                                ),
+                              )}
+                            </div>
+                            {tuneRejected.length > 0 && (
+                              <p className="mt-2 ui-caption text-danger">
+                                这几格看不懂，先不发：{tuneRejected.join("、")}
+                              </p>
+                            )}
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost" className="mt-2"
+                              disabled={!cli || tuneCommands.length === 0}
+                              onClick={() => {
+                                void (async () => {
+                                  for (const command of tuneCommands) {
+                                    // 一条一条发：内核每个键各自校验，前一条失败不该挡住后面几条。
+                                    await run(`调流 ${row.id}`, command, { refresh: true });
+                                  }
+                                })();
+                              }}
+                            >
+                              保存调流{tuneCommands.length > 1 ? `（${tuneCommands.length} 项）` : ""}
+                            </Button>
                           </details>
 
                           <div className="mt-3 flex flex-wrap gap-2">
