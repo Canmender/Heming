@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.408.4.141.14",
+    "date": "2026-11-19",
+    "title": "更新日志里的表格终于能摊开了",
+    "bullets": [
+      "「更新内容」页里带表格的版本说明，之前被压成一长行，现在能正常显示成表格。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.408.4.140.14",
     "date": "2026-11-19",
     "title": "网页搜索交给谁，页面上能选了",

@@ -12,6 +12,18 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.408.4.141.14",
+    "date": "2026-11-19",
+    "title": "更新日志里的表格终于能摊开了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 之前每一版说明里只要有表格，构建时会被当成「折行的续行」，所有行被压成一行（\\| 位置 | 变化 || --- | --- || …\\），在界面里读不出来是张表。",
+      "**做了什么。**",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\scripts/changelog-parser.mjs\\ | 以 \\|\\ 开头的行按行保留（同类连续行用单换行拼接），不再走续行合并 |\n| 影响 | \\changelog.ts\\ / \\\releaseNotes.ts\\ 里所有带表格的条目，渲染时能正常成为表格 |",
+      "**怎么验证。** \\ode scripts/build-changelog.mjs\\ 重新生成，抽查 d.408 与「额度走向」条目，表格行之间是 \\\\n\\ 而不是 \\||\\。"
+    ]
+  },
+  {
     "version": "d.408.4.140.14",
     "date": "2026-11-19",
     "title": "网页搜索交给谁，页面上能选了",
@@ -31,7 +43,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型想上网查点东西时，「让谁去查」「先问来源自己的搜索还是先问搜索 API」「查的时候想多深」是内核的三项设置（`searcher` / `searchFirst` / `searcherEffort`，`vendor/magpie-core/internal/settings/settings.go:519-541`）。这三项在 `settings list --json` 里一直读得到，页面上却没有任何入口：想让搜索走别家、或者干脆别让模型去搜（只走配好的搜索 API），只能开终端。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 三项只能命令行设 | 运行页「更多设置（可选）」里多一块「网页搜索用谁（可选）」 || 不知道现在谁在搜 | 下面一行「现在：用 X 搜网；先问搜索 API；搜索时按 high 档思考。」 || 挑模型要自己记 id | 下拉里直接列网关目录中的模型；现在设的那个若已不在目录里也保留一项 || 清空说不清 | 选回「和鸣自己挑 / 用它自己的默认 / 和鸣自己决定」就 `settings reset`，不发空串 |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 三项只能命令行设 | 运行页「更多设置（可选）」里多一块「网页搜索用谁（可选）」 |\n| 不知道现在谁在搜 | 下面一行「现在：用 X 搜网；先问搜索 API；搜索时按 high 档思考。」 |\n| 挑模型要自己记 id | 下拉里直接列网关目录中的模型；现在设的那个若已不在目录里也保留一项 |\n| 清空说不清 | 选回「和鸣自己挑 / 用它自己的默认 / 和鸣自己决定」就 `settings reset`，不发空串 |",
       "怎么验证",
       "留白"
     ]
@@ -42,10 +54,10 @@ export const CHANGELOG: ChangelogEntry[] = [
     "title": "导出的文件头上补「跑了多少」",
     "bullets": [],
     "paragraphs": [
-      "**为什么做。** 导出的 Markdown 头只有消息数。拿到文件的人（或评审的同事）想知道这段会话跑了多少轮、多少步、有没有失败的步骤，只能从头数。",
+      "**为什么做。** 导出的 Markdown 头只有消息数。拿到文件的人想知道这段会话跑了多少轮、多少步、有没有失败的步骤，只能从头数。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\lib/export/conversation.ts\\ | 头部新增「- 轮次：N（用户发了几条）」与「- 过程：M 步 · K 步没成」（\\K\\ 为 0 时不写后半句） || 统计口径 | 轮次 = \\kind === \"user\"\\ 的消息数；步数 = 每条消息 \\process\\ 的条目数；失败 = \\status\\ 为 \\error\\/\\denied\\ 的条目数 |",
-      "**怎么验证。** \\conversation.test.ts\\ 9 → 10 例（1 轮、2 步、1 步被拒 → 头里两行都在）；typecheck 通过。"
+      "| 位置 | 变化 |\n| --- | --- |\n| `lib/export/conversation.ts` | 头部新增「- 轮次：N（用户发了几条）」与「- 过程：M 步 · K 步没成」（K 为 0 时不写后半句） |\n| 统计口径 | 轮次 = `role === \"user\"` 的消息数；步数 = 每条消息 `process` 条目数；失败 = `status` 为 `error`/`denied` 的条目数 |",
+      "**怎么验证。** `conversation.test.ts` 9 → 10 例（1 轮、2 步、1 步被拒 → 头里两行都在）；typecheck 通过。"
     ]
   },
   {
@@ -56,7 +68,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 轨迹页每一行的「展开参数/结果」是绑在整行 \\\tr\\ 上的 \\onClick\\，键盘用户按不到，读屏也读不出「这行可以展开」。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 行内容列 | 可展开的行改成真正的 \\<button>\\（\\\u0007ria-expanded\\、\\data-testid=\"trajectory-row-toggle\"\\、焦点环），回车/空格即可展开；整行点击仍保留 || 不可展开的行 | 仍是纯文本，不会多出一个按了没反应的按钮 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\chat/TrajectoryView.tsx\\ 行内容列 | 可展开的行改成真正的 \\<button>\\（\\\u0007ria-expanded\\、\\data-testid=\"trajectory-row-toggle\"\\、焦点环），回车/空格即可展开；整行点击仍保留 |\n| 不可展开的行 | 仍是纯文本，不会多出一个按了没反应的按钮 |",
       "**怎么验证。** \\TrajectoryView.test.tsx\\ 13 → 14 例（\\\u0007ria-expanded\\ 由 false → true，展开后能看到结果正文）；typecheck 通过。"
     ]
   },
@@ -68,7 +80,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮加了「失败 N」筛选，但如果这段会话压根没有失败步骤，用户点开只会看到那句通用提示「没有匹配的步骤：换个关键词」，像是在怪他关键词写错了——其实他没输关键词。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 空态 | 分支：\\onlyFailed && !needle\\ → 「这段会话里没有被拒或报错的步骤：再点一次「失败」取消筛选。」；否则保持原句 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\chat/TrajectoryView.tsx\\ 空态 | 分支：\\onlyFailed && !needle\\ → 「这段会话里没有被拒或报错的步骤：再点一次「失败」取消筛选。」；否则保持原句 |",
       "配合已有的 \\disabled={failedSteps === 0}\\ 与 \\\title\\，0 条失败时根本点不下去，也不会出现空表格。",
       "**怎么验证。** \\TrajectoryView.test.tsx\\ 12 → 13 例（无失败时会话的 chip 禁用且 title 写明原因）；typecheck 通过。"
     ]
@@ -81,7 +93,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 一轮跑十几步，排查「为什么慢/为什么错」时要在一屏正常步骤里翻那一两行报错。搜索能找关键词，但你不知道关键词是什么。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 工具栏 | 新增「失败 N」chip（\\\u0007ria-pressed\\），\\N\\ 是 \\error\\/\\denied\\ 的步数；0 时禁用并写明「这段对话里没有被拒或报错的步骤」 || 过滤逻辑 | \\matched\\ 同时管关键词与失败筛选；\\\filtering\\ 计入该状态，命中时顶部显示「x / y 步」 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\chat/TrajectoryView.tsx\\ 工具栏 | 新增「失败 N」chip（\\\u0007ria-pressed\\），\\N\\ 是 \\error\\/\\denied\\ 的步数；0 时禁用并写明「这段对话里没有被拒或报错的步骤」 |\n| 过滤逻辑 | \\matched\\ 同时管关键词与失败筛选；\\\filtering\\ 计入该状态，命中时顶部显示「x / y 步」 |",
       "**怎么验证。** \\TrajectoryView.test.tsx\\ 11 → 12 例（两条工具、一条 error → 点「失败 1」后计数为「1 / 3 步」）；typecheck 通过。"
     ]
   },
@@ -104,7 +116,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "内核一直有 `settings` 的 `proxy` 键（`vendor/magpie-core/internal/settings/settings.go:110-119`），意思是「和鸣自己去问模型服务时走哪条线」：空着跟着系统环境变量、`direct` 直连、其余按地址走。但页面上没有任何地方能设它——网络需要代理才能出门的人，只能自己开终端敲 `magpie settings set proxy …`，而且很容易把「空值」误当成「不走代理」（这是两件事）。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 只能命令行设代理 | 运行页「更多设置（可选）」里第五块：三选一 + 地址框 || 不知道现在是什么状态 | 「现在：跟着系统的环境变量走 / 直连，不走代理 / 走 http://…」 || 地址写错了要发出去才被拒 | 空、带空格、形态不对的，按钮直接是死的，并在旁边点出原因 || 「清空」等于什么说不清 | 选「跟随系统」发的是 `settings reset proxy`，不是发一个空串 |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 只能命令行设代理 | 运行页「更多设置（可选）」里第五块：三选一 + 地址框 |\n| 不知道现在是什么状态 | 「现在：跟着系统的环境变量走 / 直连，不走代理 / 走 http://…」 |\n| 地址写错了要发出去才被拒 | 空、带空格、形态不对的，按钮直接是死的，并在旁边点出原因 |\n| 「清空」等于什么说不清 | 选「跟随系统」发的是 `settings reset proxy`，不是发一个空串 |",
       "怎么验证",
       "留白"
     ]
@@ -117,7 +129,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 输入框下方那行「3 轮 · 12 步 · 1.2K tokens」只是展示；想知道这些 token 花在哪、离压缩阈值还有多远，得自己切到「上下文」页签。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\ChatPage.tsx\\ 的 \\conversation-meter\\ | 「N tokens」从 \\span\\ 改成按钮：\\\u0007ria-label=\"查看上下文用量\"\\，点击 \\setView(\"context\")\\；悬停提示输入/输出拆分并写「点开看上下文」 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\ChatPage.tsx\\ 的 \\conversation-meter\\ | 「N tokens」从 \\span\\ 改成按钮：\\\u0007ria-label=\"查看上下文用量\"\\，点击 \\setView(\"context\")\\；悬停提示输入/输出拆分并写「点开看上下文」 |",
       "只在有真实用量（\\\total > 0\\）时出现，没报过 usage 的会话不会多一个死链接。",
       "**怎么验证。** \\ChatPage.test.tsx\\ 的「会话用量药丸」用例追加断言（点按钮 → \\[data-view-panel=\"context\"]\\ 出现），209 例全过；typecheck 通过。"
     ]
@@ -130,7 +142,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 轨迹页每轮分组头只写「第 3 轮 · 12 步」，看不出这一轮是 4 秒还是 4 分钟；底部虽有全场汇总，但定位不到慢的那一轮。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ | 新增 \\\turnDuration(turn)\\：只取同时有 \\startedAt\\/\\endedAt\\ 的行，算首末跨度；分组头追加 \\· 4.0s\\ |",
+      "| 位置 | 变化 |\n| --- | --- |\n| \\chat/TrajectoryView.tsx\\ | 新增 \\\turnDuration(turn)\\：只取同时有 \\startedAt\\/\\endedAt\\ 的行，算首末跨度；分组头追加 \\· 4.0s\\ |",
       "**关键约束**（d.382 踩过的）：用户消息的 \\createdAt\\ 是真实时间戳，**不能**当结束时间用——否则跨度会算出「1795046399 秒」。所以只统计同时有两端的行。",
       "**怎么验证。** \\TrajectoryView.test.tsx\\ 10 → 11 例（1 条用户消息 + 1 条带 5 秒工具的回复 → 标题含「4.0s」）；web 全量除并行会话的 \\ModelPage.test.tsx\\ 外全绿；typecheck 通过。"
     ]
@@ -153,7 +165,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "运行页上一轮有了锚点（d.398），来源页反而成了最脏的一页：找服务商、十二张预设卡、订阅账号、九张国产智能体卡、已添加的来源、可用模型、全局模型设置、看图与画图——从上到下七八块。想直接看「已添加的来源」，先得从一屏卡片里滚过去。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 从头滚到尾找人 | 顶上五个锚点：服务商 / 订阅 / 国产端 / 已添加 / 模型清单 || 两页各一套滚动逻辑 | 与运行页共用 `jumpTo(id)` || 「其余来源的额度」看起来像个入口 | 不给它锚点——那张卡只在真有孤儿额度时才渲染 |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 从头滚到尾找人 | 顶上五个锚点：服务商 / 订阅 / 国产端 / 已添加 / 模型清单 |\n| 两页各一套滚动逻辑 | 与运行页共用 `jumpTo(id)` |\n| 「其余来源的额度」看起来像个入口 | 不给它锚点——那张卡只在真有孤儿额度时才渲染 |",
       "怎么验证",
       "留白"
     ]
@@ -166,7 +178,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上下文页只说「占了多少窗口」，不回答「这段对话一共几轮、走了几步、几步没成」——想看这个得回聊天页数轮/步，失败步数更是只能一条条翻。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || chat/ContextView.tsx | 新增 sessionStats（用户消息数=轮、\transcriptOf().tools 计数=步、error/denied 单独数），在「本会话消耗」上方渲染一行 N 轮 · M 步 · K 步没成 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| chat/ContextView.tsx | 新增 sessionStats（用户消息数=轮、\transcriptOf().tools 计数=步、error/denied 单独数），在「本会话消耗」上方渲染一行 N 轮 · M 步 · K 步没成 |",
       "与聊天页输入框下方那行同口径（轮=用户发一条，步=一次工具操作）。",
       "**怎么验证。** ContextView.test.tsx 23 → 24 例（1 条用户消息 + 1 条带 2 个工具（1 个 error）的回复 → 「1 轮 · 2 步 · 1 步没成」）；web 全量 **6748 例全绿**；typecheck 通过。",
       "**留白。** 不含「用时」与「花了多少钱」——前者在轨迹页/上一轮小结，后者就在下面那节「本会话消耗」。"
@@ -189,7 +201,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "运行页最后原本并排放着四张卡：资源库与网页搜索、网关密钥、会话与启动器、高级命令。四个标题各占一行，谁都不常用，却一口气占掉一屏——上一轮刚给运行页加了锚点（d.398），锚点能带你过去，过去之后还是这一屏标题。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 四张卡各自一个标题、各带边框底纹 | 一个「更多设置（可选）」折叠，一行看完 || 想找「高级命令」得扫四行标题 | 展开父级再展开那一块，位置固定在第几行走不掉 || 锚点 `run-more` 落在第一张卡上 | 锚点落在父级上，跳过来就是这一行 |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 四张卡各自一个标题、各带边框底纹 | 一个「更多设置（可选）」折叠，一行看完 |\n| 想找「高级命令」得扫四行标题 | 展开父级再展开那一块，位置固定在第几行走不掉 |\n| 锚点 `run-more` 落在第一张卡上 | 锚点落在父级上，跳过来就是这一行 |",
       "怎么验证",
       "留白"
     ]
@@ -202,7 +214,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 历史里那行「处理过程 · 3 次工具调用」看着像三次都成功；实际可能夹着一次被拒或报错——收起来之后这些过程性信息就没了，用户只看到结论和一句「做完了」。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || AgentStreamBubble.tsx 的 MessageProcess | 统计 ToolTrace.status 为 error / denied 的步数，> 0 时摘要里追加「N 步没成」 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| AgentStreamBubble.tsx 的 MessageProcess | 统计 ToolTrace.status 为 error / denied 的步数，> 0 时摘要里追加「N 步没成」 |",
       "**怎么验证。** AgentStreamBubble.test.tsx 35 → 36 例（两次调用、一次失败 → 摘要含「1 步没成」）；web 全量 **6746 例全绿**；typecheck 通过。",
       "**留白。** 只说「几步没成」，不点名是哪个工具——展开即可看到；摘要行再长会挤掉「思考 N 字」。"
     ]
@@ -215,7 +227,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 版本号是并行会话在推进的，我上一轮就把标题写成 d.398、实际落在 d.397，直到生成器报「最新条目是 d.397」才发现。格式错了有 `findMalformedHeadings` 兜底，但**版本号对不对**没人管。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `scripts/build-changelog.mjs` | 解析完 CHANGELOG 后读 `packages/web/package.json` 的 `hemingVersion`，与最新条目版本比对，不一致就 `console.warn`（带两边版本号） |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `scripts/build-changelog.mjs` | 解析完 CHANGELOG 后读 `packages/web/package.json` 的 `hemingVersion`，与最新条目版本比对，不一致就 `console.warn`（带两边版本号） |",
       "只警告、不失败：并行会话可能先 bump、后写条目，那种情况本来就该让人看见，而不是卡住构建。",
       "**怎么验证。** `node scripts/build-changelog.mjs` 在版本一致时静默通过（535 / 423 条）；比对逻辑里两边的 `d.` 前缀都先剥掉（第一版漏剥，报出「d.d.398…」）。",
       "**留白。** 只比最新一条，不校验历史顺序；也只警告——真正要挡的「标题格式错」上一轮已经由 `findMalformedHeadings` 拦住。"
@@ -238,7 +250,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "从 d.359 起模型页只剩「来源 / 运行」两个页签，代价全压在运行页上：轨迹、本机智能体、路由分组、用量、备份与同步、再加四张「更多」卡（资源库与搜索、网关密钥、会话与启动器、高级命令）都在同一页。找一样东西得一路滚，滚过头还得往回找——合并页签是为了少点两下，不该换来「滚半天」。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 找「用量」靠滚 | 顶上六个锚点：轨迹 / 智能体 / 路由分组 / 用量 / 备份与同步 / 更多 || 点了会换页签、改筛选 | 只滚到那块，别的一概不动 || 各块没有稳定 id | `run-trace`、`run-agents`、`run-groups`、`run-usage`、`run-backup`、`run-more` |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 找「用量」靠滚 | 顶上六个锚点：轨迹 / 智能体 / 路由分组 / 用量 / 备份与同步 / 更多 |\n| 点了会换页签、改筛选 | 只滚到那块，别的一概不动 |\n| 各块没有稳定 id | `run-trace`、`run-agents`、`run-groups`、`run-usage`、`run-backup`、`run-more` |",
       "怎么验证",
       "留白"
     ]
@@ -251,7 +263,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮修好了「手动压缩不写记录」，但只覆盖了上下文页那个按钮——从输入框敲 `/compact` 走的是另一个入口，压完同样不改消息数，顶部那条折叠说明要等到下一条消息才出现。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` 的斜杠命令分发 | `/compact` 成功后 `setFoldTick(n + 1)` + `refreshContextUsage()`，与按钮那条路一致 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `ChatPage.tsx` 的斜杠命令分发 | `/compact` 成功后 `setFoldTick(n + 1)` + `refreshContextUsage()`，与按钮那条路一致 |",
       "**怎么验证。** `ChatPage.test.tsx` 209 例全过；web 全量 **6744 例全绿**。",
       "**留白。** typecheck 当前被并行会话的 `ModelPage.tsx`（`RUN_ANCHORS`/`jumpToRun` 未定义）挡住，与本轮无关；`ChatPage.tsx` 本身无类型错误。"
     ]
@@ -264,7 +276,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 手动 `/compact`（或点「现在压缩」）成功后，**没有写折叠记录**——只有自动压缩那条路径写。结果是：顶部那条「更早的 N 条消息折成了摘要」根本不会出现，用户下一次只看到「它忘了我刚说的」，明明自己刚才亲手压过。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `agentContext/contextFold.ts` | `ContextFold` 增加可选 `manual`；`recordContextFold(conversationId, foldedCount, now, manual = false)`；`getContextFold` 原样带出 || `ChatPage.tsx` 的 `runCompactCommand` | 压缩成功后补 `recordContextFold(convId, result.foldedCount, Date.now(), true)` || `ChatPage.tsx` 顶部说明 | 文案按来源区分：「你手动压缩过：更早的 N 条…」/「这轮发送时，更早的 N 条…」 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `agentContext/contextFold.ts` | `ContextFold` 增加可选 `manual`；`recordContextFold(conversationId, foldedCount, now, manual = false)`；`getContextFold` 原样带出 |\n| `ChatPage.tsx` 的 `runCompactCommand` | 压缩成功后补 `recordContextFold(convId, result.foldedCount, Date.now(), true)` |\n| `ChatPage.tsx` 顶部说明 | 文案按来源区分：「你手动压缩过：更早的 N 条…」/「这轮发送时，更早的 N 条…」 |",
       "**怎么验证。** `contextFold.test.ts` 11 → 12 例（手动标记写进去、老记录不会被误标）；`ChatPage.test.tsx` 209 例；web 全量 **6744 例全绿**；typecheck 通过。",
       "**留白。** `manual` 只用于文案，不影响压缩逻辑；老记录没有这个字段，按「自动」显示。"
     ]
@@ -288,7 +300,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "运行页的「最近请求」默认读最近 12 条。可用量摘要上明明写着「N 次失败」，点进列表翻半天常常一条都碰不上——12 条里本来就未必有问题的那几条。想排查「刚才那几次为什么没成」，得自己一条条看状态码、看「试了 2 次」的小字。筛选这件事，页面应该替人做。",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 12 条一视同仁地铺开 | 表头有「只看没成的」勾选框 || 「没成」得自己按状态码认 | 判定收在一处：状态 ≥ 400、重试过、一试失败交出去的那条 || 勾上也只是筛这 12 条 | 勾上时把上限从 12 提到 100 再取一次，并且写明「在最近读出的 N 条里」 || 筛空就一片空白 | 留一句「最近读出的这几条里没有没成的——时间放宽一点，或者换一个区间看看」 |",
+      "| 之前 | 现在 |\n| --- | --- |\n| 12 条一视同仁地铺开 | 表头有「只看没成的」勾选框 |\n| 「没成」得自己按状态码认 | 判定收在一处：状态 ≥ 400、重试过、一试失败交出去的那条 |\n| 勾上也只是筛这 12 条 | 勾上时把上限从 12 提到 100 再取一次，并且写明「在最近读出的 N 条里」 |\n| 筛空就一片空白 | 留一句「最近读出的这几条里没有没成的——时间放宽一点，或者换一个区间看看」 |",
       "怎么验证",
       "留白"
     ]
@@ -301,7 +313,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 「压缩中…」是这一条会话的动作；切到另一条会话时按钮会继续显示禁用态，看着像那边也在压。等原会话的压缩结束才复位，这中间新会话的按钮是死的。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` | 切会话的 effect 里除了清跳转高亮，一并 `setCompacting(false)` |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `ChatPage.tsx` | 切会话的 effect 里除了清跳转高亮，一并 `setCompacting(false)` |",
       "顺带做了一次全仓构建校验（本轮之前已积了 20 多个提交没打过包）：`pnpm -r build` 全 workspace 通过，web 产物正常生成。",
       "**怎么验证。** `pnpm -r build` 通过；`pnpm --filter @heming/web typecheck` 通过；`ChatPage.test.tsx` 209 例全过。",
       "**留白。** 只是复位 UI 状态；原会话那次压缩请求不会被取消（它已经在路上，取消反而更难说清结果）。"
@@ -327,7 +339,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "上一版把云同步做成了一张卡片（d.394），能看状态、能同步、能改间隔。但内核在 `magpie webdav` 的末尾还另有一段，专门说「这次同步换过谁的东西」——整套从服务器搬过来了、换了本机哪几份、换了服务器哪几份、被换掉的旧副本放在哪个目录、同步来的设置要用哪些本机还没登录的账号。这一整段之前被丢掉了，用户想知道「刚才那一下动了什么、能不能撤回」，还是得自己开命令行看，而且看完也不一定敢动手。",
       "做了什么",
-      "| 内核说的 | 页面现在 || --- | --- || `Restored from the server: …` | 一句「上次同步把服务器那份整个搬来了：…」＋「拿回原来的设置」按钮（`webdav undo`） || `Replaced here by newer ones from another computer: …` | 「上次同步换了本机的：…（另一台电脑比较新）」 || `Replaced on the server by this computer's newer ones: …` | 「上次同步换了服务器上的：…（这台电脑比较新）」 || `kept in <目录>` | 「被换掉的那几份留在 <目录>」 || `not signed in on this computer: …` | 「同步来的设置要用这些账号，本机还没登录：…」 || `dismiss` | 「知道了」，只是别再提；旧副本仍然留着 |",
+      "| 内核说的 | 页面现在 |\n| --- | --- |\n| `Restored from the server: …` | 一句「上次同步把服务器那份整个搬来了：…」＋「拿回原来的设置」按钮（`webdav undo`） |\n| `Replaced here by newer ones from another computer: …` | 「上次同步换了本机的：…（另一台电脑比较新）」 |\n| `Replaced on the server by this computer's newer ones: …` | 「上次同步换了服务器上的：…（这台电脑比较新）」 |\n| `kept in <目录>` | 「被换掉的那几份留在 <目录>」 |\n| `not signed in on this computer: …` | 「同步来的设置要用这些账号，本机还没登录：…」 |\n| `dismiss` | 「知道了」，只是别再提；旧副本仍然留着 |",
       "怎么验证",
       "留白"
     ]
@@ -340,7 +352,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 「现在压缩」如果要用模型生成摘要，就得先请求一次模型；这期间按钮还是可点的。连点两下会压两次，第二次是在刚压完的摘要上再压——纯属浪费一次调用，结果也更糊。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `chat/ContextView.tsx` | 新增可选 `compacting`：为真时按钮 `disabled`、`aria-busy`、文案「压缩中…」，`onClick` 置空 || `ChatPage.tsx` | 新增 `compacting` state；`onCompact` 里 `try/finally` 包住 `runCompactCommand`，跑完再刷新占用与折叠记录 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `chat/ContextView.tsx` | 新增可选 `compacting`：为真时按钮 `disabled`、`aria-busy`、文案「压缩中…」，`onClick` 置空 |\n| `ChatPage.tsx` | 新增 `compacting` state；`onCompact` 里 `try/finally` 包住 `runCompactCommand`，跑完再刷新占用与折叠记录 |",
       "**怎么验证。** `ContextView.test.tsx` 22 → 23 例（压缩中按钮禁用、点了不触发回调）；`ChatPage.test.tsx` 209 例；typecheck 通过。web 全量跑到 `magpieSync` 时失败——那是并行会话正在改的文件（`magpieSync.ts`、`CloudSyncCard.tsx` 同批），不是本轮引入。",
       "**留白。** 失败没有单独的错误态：`runCompactCommand` 自己会提示「没省下来」这类结果，这里只负责不让连点。"
     ]
@@ -368,7 +380,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "运行分区里的「多机同步」原来是一个表单：选通道、选动作（`now` / `on` / `off` / `set`）、填参数、点执行。等于把三条命令原样摊在页面上，两个后果：",
       "做了什么",
-      "| 之前 | 现在 || --- | --- || 进页面什么都不读 | 卡片一进就念一遍 `magpie webdav`，说成一句话：「WebDAV → 地址：同步 …；上次同步 …」 || 「立即同步一次」要选动作再点执行 | 一个「现在同步一次」按钮（同步中变「正在同步…」） || 自动同步只能手写 `auto 15` | 下拉：不改 / 只在我点的时候 / 3 / 15 / 30 / 60 分钟 || 开关要手写 `on <地址>` | 关只发 `off`（服务器上的文件留着）；开走终端，密码在终端里输，不经过页面 || 三种通道靠下拉猜 | 按内核抬头认（`WebDAV sync` / `S3 sync` / `GitHub sync`） |`syncOnArgs` / `syncOffArgs`（只拼内核对得上的形态，`auto` 只放 off/3/15/30/60）。",
+      "| 之前 | 现在 |\n| --- | --- |\n| 进页面什么都不读 | 卡片一进就念一遍 `magpie webdav`，说成一句话：「WebDAV → 地址：同步 …；上次同步 …」 |\n| 「立即同步一次」要选动作再点执行 | 一个「现在同步一次」按钮（同步中变「正在同步…」） |\n| 自动同步只能手写 `auto 15` | 下拉：不改 / 只在我点的时候 / 3 / 15 / 30 / 60 分钟 |\n| 开关要手写 `on <地址>` | 关只发 `off`（服务器上的文件留着）；开走终端，密码在终端里输，不经过页面 |\n| 三种通道靠下拉猜 | 按内核抬头认（`WebDAV sync` / `S3 sync` / `GitHub sync`） |`syncOnArgs` / `syncOffArgs`（只拼内核对得上的形态，`auto` 只放 off/3/15/30/60）。",
       "怎么验证",
       "留白"
     ]
@@ -381,7 +393,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 历史消息里的过程被收成一行「处理过程 · N 次工具调用 · 思考 M 字」，但**看不到花了多久**——同样的字数和调用次数，可能是 4 秒也可能是 4 分钟。轨迹页有每步耗时，收起状态却什么都没有。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `AgentStreamBubble.tsx` 的 `MessageProcess` | 按 `steps` 里的工具步去找对应的 `ToolTrace`，把 `endedAt - startedAt` 累加；≥1 秒时在摘要里追加「工具 X」，<1 秒不占位置 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `AgentStreamBubble.tsx` 的 `MessageProcess` | 按 `steps` 里的工具步去找对应的 `ToolTrace`，把 `endedAt - startedAt` 累加；≥1 秒时在摘要里追加「工具 X」，<1 秒不占位置 |",
       "口径与轨迹页、总结行一致：**各工具耗时之和**（并行工具会重复计入，不等于墙上时间）。",
       "**怎么验证。** `AgentStreamBubble.test.tsx` 33 → 35 例（4.0 秒写出、不到 1 秒不写）；web 全量 **6732 例全绿**；typecheck 通过。",
       "**留白。** 只写工具耗时，不写模型耗时与首字延迟——那两项属于「上一轮」小结，收起的消息里再塞会变长。"
@@ -395,7 +407,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** `docs/STREAMING.md` 是给后来人（和下一轮的我）看差距清单的；表里有几行其实早就做完了却还写着「没有」，照着它排期就会重复做一遍。这轮把 4 / 5 / 6 / 9 行的状态按实际改动标清。",
       "**做了什么。**",
-      "| 差距 | 现状 || --- | --- || 4 结束后的过程 | ✅ d.352 起收成「处理过程 · N 次工具调用」，点开才展开 || 5 生成中的用时 | ✅ d.361 起跑动时贴消息流末尾，收口才回输入框下方 || 6 首 token / 速度 | ✅ d.354 起写进「上一轮」小结（首字 / 字每秒 / 工具耗时） || 9 压缩提示 | ✅ d.376 消息列表顶部一条可展开的说明；输入区上方仍有一句短提示（两处并存，标为后续可合并） |",
+      "| 差距 | 现状 |\n| --- | --- |\n| 4 结束后的过程 | ✅ d.352 起收成「处理过程 · N 次工具调用」，点开才展开 |\n| 5 生成中的用时 | ✅ d.361 起跑动时贴消息流末尾，收口才回输入框下方 |\n| 6 首 token / 速度 | ✅ d.354 起写进「上一轮」小结（首字 / 字每秒 / 工具耗时） |\n| 9 压缩提示 | ✅ d.376 消息列表顶部一条可展开的说明；输入区上方仍有一句短提示（两处并存，标为后续可合并） |",
       "**怎么验证。** 只改文档，未改代码；不改测试。核对方式：逐条 grep 对应提交与组件里的 `data-testid`（`message-process`、`turn-progress` 的 `data-placement`、`describeTurnProgress` 的首字/字每秒、`context-fold-marker`）。",
       "**留白。** 第 9 条的「两处提示」没合并——输入区那句负责「刚折完」的即时反馈，顶部那条负责「回头查」；合并要等有更好的行内位置。"
     ]
@@ -408,7 +420,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 这个坑已经踩了三次（d.364、d.369、d.390）：`## d.x.y.z — 标题` 少了日期括号，解析器当普通段落跳过，条目静默消失，而 `build-changelog` 只打印「无变化」——计数还会被并行会话的条目带涨，看着像成功。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `scripts/changelog-parser.mjs` | 新增导出 `findMalformedHeadings(markdown)`：挑出 `## d.` 开头却不匹配 `## d.x.y.z（YYYY-MM-DD）— 标题` 的行，返回行号；`## 约定` 这类文件自身的二级标题不算 || `scripts/build-changelog.mjs` | CHANGELOG 与 RELEASE-NOTES 两处解析前先校验，命中就逐行报错并 `exit 1`，并提示正确格式 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `scripts/changelog-parser.mjs` | 新增导出 `findMalformedHeadings(markdown)`：挑出 `## d.` 开头却不匹配 `## d.x.y.z（YYYY-MM-DD）— 标题` 的行，返回行号；`## 约定` 这类文件自身的二级标题不算 |\n| `scripts/build-changelog.mjs` | CHANGELOG 与 RELEASE-NOTES 两处解析前先校验，命中就逐行报错并 `exit 1`，并提示正确格式 |",
       "**怎么验证。** `node -e` 直接调 `findMalformedHeadings(\"## d.1.2.3.4 — x\\n## d.1.2.3.4（2026-01-01）— ok\\n## 约定\")` → 只报第 1 行；`node scripts/build-changelog.mjs` 在现有文件上照常通过（524 / 412 条）。",
       "**留白。** 只校验「版本标题的形状」，不校验版本号是否递增、日期是否合理——那两个需要版本历史，不属于构建脚本的职责。"
     ]
@@ -421,7 +433,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 「API Key 服务商」十二张卡 +「国产智能体」九张卡已经不算是小数目：想找「通义千问」得一行行扫，想找「Trae CN」得先知道它在国内站那组。来源页是落地页，最常用的动作就是「找一家、加进来」。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 来源页顶上新增「找服务商」输入框；`matchesSourceFilter` 按 id / 名字 / 说明任一处包含匹配（不区分大小写，空词算全中） || 同上 | 「API Key 服务商」与「国产智能体」两排卡片按搜索词筛；**不筛**「已添加的来源」与「订阅账号」——那是每天要点的，藏起来会让人以为被删了 || 同上 | 筛空时各排自己说一句「…没有对得上「x」的；清掉搜索词就都回来」，不静默留白 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/components/ModelPage.tsx` | 来源页顶上新增「找服务商」输入框；`matchesSourceFilter` 按 id / 名字 / 说明任一处包含匹配（不区分大小写，空词算全中） |\n| 同上 | 「API Key 服务商」与「国产智能体」两排卡片按搜索词筛；**不筛**「已添加的来源」与「订阅账号」——那是每天要点的，藏起来会让人以为被删了 |\n| 同上 | 筛空时各排自己说一句「…没有对得上「x」的；清掉搜索词就都回来」，不静默留白 |",
       "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx src/components/model` **196 例全绿**（新增「找服务商：按名字把两排卡片筛掉，清掉搜索词就都回来」：搜 trae 只剩 Trae CN 并给出服务商那句提示，搜「通义」反过来，清空后两排都回来）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 只筛预设与国产端，不搜模型名——按模型找该去「可用模型」那份清单（它本来就按来源分组列着）。"
     ]
@@ -434,7 +446,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮加了「现在压缩」按钮，但点完百分比一格不动：占用是 `refreshContextUsage()` 算的，只在轮次边界刷新；折叠记录也只在 `messages.length` 变时重读，而压缩不改消息数。按钮看着像没生效。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` | `onCompact` 改成 async：`await runCompactCommand(...)` → `refreshContextUsage()` → `setFoldTick(n + 1)` || `ChatPage.tsx` | 新增 `foldTick` state，并进 `contextFold` 的 `useMemo` 依赖（压缩不改消息数，只能靠它触发重读） |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `ChatPage.tsx` | `onCompact` 改成 async：`await runCompactCommand(...)` → `refreshContextUsage()` → `setFoldTick(n + 1)` |\n| `ChatPage.tsx` | 新增 `foldTick` state，并进 `contextFold` 的 `useMemo` 依赖（压缩不改消息数，只能靠它触发重读） |",
       "**怎么验证。** `pnpm --filter @heming/web typecheck` 通过；`ChatPage.test.tsx` 209 例全过；web 全量 **6717 例全绿**。",
       "**留白。** 「现在压缩」是本地同步动作，没有「压缩中」的进度态；压缩失败（比如没绑模型）仍走 `/compact` 原有的提示文案，不额外造一套。"
     ]
@@ -447,7 +459,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 用量图原来有三个指标：每天的请求数、Token、首字。可「这个月到底花了多少、哪天花得多」只能看概览卡上那一个总数——看不到分布。内核按天的 `usage.Point`（内嵌 `Totals`）本来就带着 `cost` 与 `unpriced`，页面的 series 也早就解析了 `cost`，只是柱状图没用这一列。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieUsage.ts` | `ChartMetric` 加 `\"cost\"`；`chartBars` 按 `point.cost` 取值（未定价的那天照实给 0，不折算成钱） || `packages/web/src/components/ModelUsageView.tsx` | `CHART_METRICS` 加第四项「花费」，标题写「每天花费（按模型服务记账）」；柱子悬停与「单日最高」都走 `formatCost`，钱的写法与概览卡一致 || `packages/web/src/index.css` | 亮色与暗色各加 `--chart-4`（紫）：四个指标四种色相，互不混淆也不借告警红 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/lib/magpieUsage.ts` | `ChartMetric` 加 `\"cost\"`；`chartBars` 按 `point.cost` 取值（未定价的那天照实给 0，不折算成钱） |\n| `packages/web/src/components/ModelUsageView.tsx` | `CHART_METRICS` 加第四项「花费」，标题写「每天花费（按模型服务记账）」；柱子悬停与「单日最高」都走 `formatCost`，钱的写法与概览卡一致 |\n| `packages/web/src/index.css` | 亮色与暗色各加 `--chart-4`（紫）：四个指标四种色相，互不混淆也不借告警红 |",
       "**怎么验证。** `npx vitest run src/lib/magpieUsage.test.ts src/components/ModelUsageView.test.tsx` **18 例全绿**（新增数据层「按天的花费：柱高就是那天的钱，未定价的那天照实给 0」与视图「图表能切到花费：每天花了多少，钱按模型服务的记账方式写」）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 花费按内核的口径记在「能定价的调用」上；没有价格的模型只计入 `unpriced` 条数，不折算成钱——所以图上某天的柱高可能小于当天真实的用量感受，概览卡的「部分模型没有价格」那句就是提示这件事。"
     ]
@@ -460,7 +472,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上下文页会告诉你「距阈值还有 12.4K」，可你没有别的办法——只能等下一轮让系统自己压。`/compact` 这条命令早就在，但它藏在输入框里，用户得先知道它存在。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `chat/ContextView.tsx` | 新增可选 `onCompact`；给了就渲染「现在压缩」按钮，`title` 说明它和发 `/compact` 是同一件事 || `ChatPage.tsx` | 传 `onCompact={() => void runCompactCommand([{ agentId: conv.agent.id, name: nameOf(conv.agent.id) }])}`——复用现有 `runCompactCommand`，不另造一套压缩逻辑 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `chat/ContextView.tsx` | 新增可选 `onCompact`；给了就渲染「现在压缩」按钮，`title` 说明它和发 `/compact` 是同一件事 |\n| `ChatPage.tsx` | 传 `onCompact={() => void runCompactCommand([{ agentId: conv.agent.id, name: nameOf(conv.agent.id) }])}`——复用现有 `runCompactCommand`，不另造一套压缩逻辑 |",
       "**怎么验证。** `ContextView.test.tsx` 21 → 22 例（给了回调才出现按钮、点了调一次、不给就不渲染）；web 全量 6716 例（唯一失败是并行会话正在改的 `magpieUsage.test.ts`）；typecheck 通过。",
       "**留白。** 按钮不做「压缩中」禁用态——压缩本身是本地同步动作，跑完会走原有的提示；也不在压缩后自动刷新占用，仍按下一轮的 `refreshContextUsage` 更新。"
     ]
@@ -473,7 +485,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 换机器、换网络、或者隔了几周回来，最常问的一句是「这几个来源现在还有哪家能用」。页面原来只有行内的「测试」——五个来源就要点五次、来回找五次结论，还容易漏掉一家。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 「已添加的来源」标题旁加「全部测一遍」：按 `providers` 顺序一家一家跑 `provider test <id>`，结论照旧写在各自那行（`通过 · 1.2 秒` / `连不上`，原因挂悬停），最后在告警条里报「几家通、几家连不上」；进行中按钮变「正在一家家测…」并禁用 || 同上 | 复用行上的 `testProvider`：单点「测试」与「全部测一遍」共用一套判定与文案，不多一套 || `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` | 新增 §3.10 记下串行而非并发的理由 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/components/ModelPage.tsx` | 「已添加的来源」标题旁加「全部测一遍」：按 `providers` 顺序一家一家跑 `provider test <id>`，结论照旧写在各自那行（`通过 · 1.2 秒` / `连不上`，原因挂悬停），最后在告警条里报「几家通、几家连不上」；进行中按钮变「正在一家家测…」并禁用 |\n| 同上 | 复用行上的 `testProvider`：单点「测试」与「全部测一遍」共用一套判定与文案，不多一套 |\n| `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` | 新增 §3.10 记下串行而非并发的理由 |",
       "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx` **125 例全绿**（新增两例：失败时报「0 家通，1 家连不上」且行上是「连不上」；都通时只说「都通」，不说「0 家连不上」）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 没有并发：内核的 `provider test` 是真发一次小请求，几路同时打出去既慢又容易被对端限流，看不出真实结论；来源很多时这一串会比较久，但每条结论都是真的。"
     ]
@@ -486,7 +498,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 后台子代理的结论只往**当前**会话投递；你切去别的会话干活时，结论会排队等回来。可侧栏一声不响，用户根本不知道该回哪一条会话——「结论会自动送回来」就成了空话。原型里的原则是「只在有人要行动时说话」，而「有结论等你回来」正是要行动的事。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `subagentJobs.ts` | 新增 `undeliveredJobsOf(conversationId)`：只数、不取、不标记（`takeUndeliveredJobs` 会取走并标记已交付，那等于交付给模型了） || `PendingJobBadge.tsx`（新增） | 订阅作业表，有未交付结论时显示「结论」chip；tooltip 说明「点开会话就会送到」（若仍有作业在跑，额外注明） || `ConversationRail.tsx` | 行内挂在「正在跑」「未跑完」之后，三者互不替代 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `subagentJobs.ts` | 新增 `undeliveredJobsOf(conversationId)`：只数、不取、不标记（`takeUndeliveredJobs` 会取走并标记已交付，那等于交付给模型了） |\n| `PendingJobBadge.tsx`（新增） | 订阅作业表，有未交付结论时显示「结论」chip；tooltip 说明「点开会话就会送到」（若仍有作业在跑，额外注明） |\n| `ConversationRail.tsx` | 行内挂在「正在跑」「未跑完」之后，三者互不替代 |",
       "**怎么验证。** `PendingJobBadge.test.tsx` 2 例（有结论出现、取走后消失；别的会话的结论不算）；`subagentJobs.test.ts` 12 例（新增 1：只数不取、在跑的不算）；web 全量 **6712 例全绿**；typecheck 通过。",
       "**留白。** 徽标不区分「成功」与「失败」（都是等你看的结论）；也不显示条数——侧栏本来就窄，tooltip 里有。"
     ]
@@ -499,7 +511,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 内核 `magpie providers` 的说明列里本来就有一句 `← Claude Code, Codex`，写的是「这几个智能体现在拿它的模型」。页面此前把整列丢掉了，于是「这个来源还有人用吗」只能靠猜——删错一个正在用的来源，智能体那边下一个请求就报错。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieCli.ts` | `ProviderRow` 多 `usedBy: string[]`；新增 `usedByHint`：同一列还挤着停用那句（`magpie provider on <id>`）与备用链（`⤷ a → b`），所以只取 `←` 到 `⤷` 之间那段、按逗号拆，没写就是空数组 || `packages/web/src/components/ModelPage.tsx` | 行上在「备用 a → b」之后加一句「← Claude Code、Codex」，悬停写「这些智能体现在用它」 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/lib/magpieCli.ts` | `ProviderRow` 多 `usedBy: string[]`；新增 `usedByHint`：同一列还挤着停用那句（`magpie provider on <id>`）与备用链（`⤷ a → b`），所以只取 `←` 到 `⤷` 之间那段、按逗号拆，没写就是空数组 |\n| `packages/web/src/components/ModelPage.tsx` | 行上在「备用 a → b」之后加一句「← Claude Code、Codex」，悬停写「这些智能体现在用它」 |",
       "**怎么验证。** `npx vitest run src/lib/magpieCli.test.ts src/components/ModelPage.test.tsx` **141 例全绿**（新增 cli 两例：谁在用拆成数组、箭头之后的备用链不算；新增页面一例：行上看得见）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 「在用」是内核按智能体当前选的模型算出来的；智能体还没配模型时这一列是空的，页面也照实不写——不拿「可能用」凑一句。"
     ]
@@ -512,7 +524,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 一个会话里换过模型之后，「这一轮是谁在答」只写在输入框那个小徽标上；跑起来时眼睛在消息流末尾，谁也看不见。DSH 在运行状态行旁边就带着模型名。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `TurnProgressLine.tsx` | 新增可选 `model`，渲染成状态行右侧的小字（`data-testid=\"turn-progress-model\"`） || `ChatPage.tsx` | 消息流末尾那条运行行传 `resolveProfile(conv.agent.id)?.model`；没绑模型就不传，不占位 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `TurnProgressLine.tsx` | 新增可选 `model`，渲染成状态行右侧的小字（`data-testid=\"turn-progress-model\"`） |\n| `ChatPage.tsx` | 消息流末尾那条运行行传 `resolveProfile(conv.agent.id)?.model`；没绑模型就不传，不占位 |",
       "**怎么验证。** `TurnProgressLine.test.tsx` 7 → 8 例（给了模型名就显示、没给不渲染）；ChatPage 209 例；web 全量 6706 例全绿；typecheck 通过。",
       "**留白。** 只标「模型 id」，不标 provider、不标思考档位——那些在输入框徽标的 tooltip 里，运行行再塞会挤掉工具名。"
     ]
@@ -525,7 +537,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 运行页的「路由分组」能建组、能看某一组的详情、能删，却没有「现在都有哪些组」这一步——建了三个组之后想确认，只能靠记。另外 `packages/web/src/components/RouteGroupsCard.tsx` 从「本地模型路由页下线」那天起就没有任何页面渲染它了（只有它自己的测试在渲染），却和「路由分组」两套并存。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 「路由分组」里新增「看分组清单」按钮，跑 `magpie groups`——你自己建的组与 magpie 自己找到的组一起列出来；旁边一句说明写清「结果在页面底部」 || `packages/web/src/components/RouteGroupsCard.tsx`、`RouteGroupsCard.test.tsx` | 删除（候选链编辑器，已被 magpie 路由组取代，无页面引用） || `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` | §5 记下这两件事：为什么删、为什么分组清单不做成卡片 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/components/ModelPage.tsx` | 「路由分组」里新增「看分组清单」按钮，跑 `magpie groups`——你自己建的组与 magpie 自己找到的组一起列出来；旁边一句说明写清「结果在页面底部」 |\n| `packages/web/src/components/RouteGroupsCard.tsx`、`RouteGroupsCard.test.tsx` | 删除（候选链编辑器，已被 magpie 路由组取代，无页面引用） |\n| `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` | §5 记下这两件事：为什么删、为什么分组清单不做成卡片 |",
       "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx src/lib/magpieGroups.test.ts` **132 例全绿**（新增「看分组清单：一条命令把你自己建的组和 magpie 找到的组都列出来」）。`pnpm --filter @heming/web typecheck` 这一轮报的是并发会话正在写的 `ChatPage.tsx(6568,20): Cannot find name 'profile'`，与本轮改动无关。",
       "**留白。** 分组清单是内核给人看的表格（组名、ids、成员、谁在用），没有 JSON 输出，所以这一轮只给入口、不硬解析成卡片——解析错了比直接给人看原文更糟。"
     ]
@@ -538,7 +550,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 请求头、算免费、原文照发这些只写在 `provider show` 里，页面以前要点开「高级」才读。于是收起的行上永远看不出这家跟默认有什么不同——想知道只能一家一家展开、看一眼、再收起来。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 首屏 `providers` 一到位，就用 `flagsWarm`（`ref<Set<string>>`）逐家读一次 `provider show`，写进同一份 `showCache`：一家一次、串行，不跟首屏那几路抢 || `packages/web/src/components/ModelPage.tsx` | 行上多一个「改过」徽标，悬停是 `describeShowFlags` 的整句（「这家跟默认不一样：请求头 X-Trace；算免费；每 6h 刷清单」）；`describeShowFlags` 返回空串就不挂标 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/components/ModelPage.tsx` | 首屏 `providers` 一到位，就用 `flagsWarm`（`ref<Set<string>>`）逐家读一次 `provider show`，写进同一份 `showCache`：一家一次、串行，不跟首屏那几路抢 |\n| `packages/web/src/components/ModelPage.tsx` | 行上多一个「改过」徽标，悬停是 `describeShowFlags` 的整句（「这家跟默认不一样：请求头 X-Trace；算免费；每 6h 刷清单」）；`describeShowFlags` 返回空串就不挂标 |",
       "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx` **121 例全绿**（新增两例：「收起时也看得出这家改过：show 里有的才标，没设过的不标」——不点「高级」也读，断言徽标与悬停文案；「没设过的来源不挂『改过』」——空 show 一个字都不多说）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** show 里没有的东西标不出来：`context=` / `family=` / `at-once` / `rpm` / `queue` / `quota-rest` / `rest-cap` / `listed` 这些改了也读不回来，仍要靠展开时自己填的格子判断。代价是首屏多 N 次 `provider show`（N＝来源数，串行）。"
     ]
@@ -551,7 +563,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** d.380 把「工具 80 秒」放进了**上一轮**的小结，但那只是最近一轮；回头看一段长会话时，「这半小时到底花在哪」还是没答案。轨迹页本来记着每一步的起止时间，只是从来没把它汇总成一句话。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `TrajectoryView.tsx` | 小结条追加「工具 X」「全程 Y」：工具=各工具步耗时之和，全程=首个有起止的步骤到最后一个有起止的步骤 || 判据 | 工具 < 0.5 秒不写；全程 < 1 秒不写；**没有起止两端的行不参与**（用户消息、思考段、正在跑的那一步） |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `TrajectoryView.tsx` | 小结条追加「工具 X」「全程 Y」：工具=各工具步耗时之和，全程=首个有起止的步骤到最后一个有起止的步骤 |\n| 判据 | 工具 < 0.5 秒不写；全程 < 1 秒不写；**没有起止两端的行不参与**（用户消息、思考段、正在跑的那一步） |",
       "**怎么验证。** `TrajectoryView.test.tsx` 8 → 10 例（工具 4 秒 → 「工具 4.0 秒 · 全程 4.0 秒」；只有思考段的老消息不编「全程」「工具」）；web 全量 6713 例全绿；typecheck 通过。",
       "**留白。** 「全程」是首尾两个已结束步骤的跨度，中间用户离开、去开会的时间也会算进去——它不是「模型+工具的有效工作时间」。要精确得按轮求和，那更适合放进以后的会话统计页。"
     ]
@@ -564,7 +576,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 运行页的「最近请求是怎么走的」原来只说到最后落在哪个账号。可真正需要解释的是「为什么换了人」——额度用完？被限流？超时？内核的 `/v1/magpie/trace` 里，每一次尝试都带着结局（`tries[]` 的 `status` / `ms` / `ttft` / `fail` / `error`），页面此前只读了状态与耗时，把「为什么」丢掉了。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieTrace.ts` | `TraceTry` 补 `ttft` / `firstText` / `fail` / `error`；新增 `tryWho`（按候选顺序把尝试的 id 认回「哪个账号/Key」，认不到就用 id 本身）与 `describeTry`（一句话：成功 →「答上了（首字 320ms，共 1400ms）」，失败 →「没成 —— 额度用完（insufficient_quota）」，没结束 →「正在试」） || `packages/web/src/components/ModelTraceView.tsx` | 请求详情里加「试过谁、为什么没成」：按顺序列出每一试，失败行标红 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/lib/magpieTrace.ts` | `TraceTry` 补 `ttft` / `firstText` / `fail` / `error`；新增 `tryWho`（按候选顺序把尝试的 id 认回「哪个账号/Key」，认不到就用 id 本身）与 `describeTry`（一句话：成功 →「答上了（首字 320ms，共 1400ms）」，失败 →「没成 —— 额度用完（insufficient_quota）」，没结束 →「正在试」） |\n| `packages/web/src/components/ModelTraceView.tsx` | 请求详情里加「试过谁、为什么没成」：按顺序列出每一试，失败行标红 |",
       "**怎么验证。** `npx vitest run src/lib/magpieTrace.test.ts src/components/ModelTraceView.test.tsx` 15 例通过（新增「每一试说清落在了谁身上」「describeTry：成功带首字与耗时，失败带原因」「换过账号的请求：详情里说清『试过谁、为什么没成』」）。连带 `ModelPage.test.tsx` 一起跑 **134 例全绿**；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 网关侧 `Call.Fallback` 那句「哪些先失败了、为什么」没有单独接——每次尝试自己的 `fail` 已经更细，再引一份摘要反而两处会漂。`firstText` 读进来了但暂不展示（推理先出时它比首字早，等有真实样本再定怎么讲）。"
     ]
@@ -577,7 +589,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 「上一轮：8 步 · 用时 1 分 40 秒」只说总共多久。可这 1 分 40 秒里到底是模型在慢慢想，还是工具（跑测试、装依赖、搜大仓库）在慢慢跑？两种情况下用户该做的事完全不同：前者该换个更快的模型，后者只能等。DSH 的回合检查器里有时间拆分，我们的小结里没有任何线索。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `toolMs`；`settleTurnProgress(convId, now, chars, stopped, toolMs)` || 小结文案 | 工具累计 ≥ 0.5 秒时写「工具 80 秒」：`上一轮：8 步 · 用时 1 分 40 秒 · 工具 80 秒` || 落盘 | `summaryOf` / `readSummaries` / `hydrateTurnSummaries` 三处都带上，重开应用仍看得到 || `ChatPage` | 收口时把本轮流每条工具 `(endedAt ?? now) - startedAt` 求和传进去 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `toolMs`；`settleTurnProgress(convId, now, chars, stopped, toolMs)` |\n| 小结文案 | 工具累计 ≥ 0.5 秒时写「工具 80 秒」：`上一轮：8 步 · 用时 1 分 40 秒 · 工具 80 秒` |\n| 落盘 | `summaryOf` / `readSummaries` / `hydrateTurnSummaries` 三处都带上，重开应用仍看得到 |\n| `ChatPage` | 收口时把本轮流每条工具 `(endedAt ?? now) - startedAt` 求和传进去 |",
       "**怎么验证。** `turnProgress.test.ts` 31 例（新增 2：工具耗时写进小结、不到 1 秒不写；工具耗时活过 `reloadTurnSummaries()`）；`turnProgress` + `TurnProgressLine` 38 例、`ChatPage.test.tsx` 209 例全过；typecheck 通过。",
       "**留白。** 工具是并行跑的，这里求的是「各工具耗时的和」，不是墙上时间；一次调用里模型和工具可能重叠，所以「工具 80 秒」不等于「其中 80 秒在等工具」。真要精确得记每一步的起止并画甘特图——那是轨迹页的事（那边已有每步耗时）。"
     ]
@@ -590,7 +602,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮把每条请求的首字接进「最近请求」之后，很自然的下一个问题是「这一个月首字有没有变快、哪几天特别慢」。图上看不出来——柱状图只有两个指标：每天请求数、每天 Token。内核的按天数据（`usage.Point` 内嵌 `Totals`）本来就带着 `timed` 与 `ttft_ms`，页面没读这两列而已。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieUsage.ts` | `UsageSeriesPoint` 补 `timed` / `ttft_ms`；新增 `pointTTFT`（某天的平均首字，那天没有被计时的流式回复就返回 null）；`chartBars` 的指标类型收敛成导出的 `ChartMetric = \"calls\" \\| \"tokens\" \\| \"ttft\"` || `packages/web/src/components/ModelUsageView.tsx` | 指标切换由两个变三个（`CHART_METRICS` 表驱动：请求 / Token / 首字）；标题、颜色、悬停文案、刻度都跟着表走：首字的标题写「每天平均首字（只算流式回复）」，刻度写「单日最高 平均 900ms」，柱子的悬停是「11-07：平均 800ms」 || `packages/web/src/index.css` | 亮色与暗色各加一个 `--chart-3`（琥珀）：与蓝、蓝绿都不同色相；首字慢是体验问题，不用告警红 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/lib/magpieUsage.ts` | `UsageSeriesPoint` 补 `timed` / `ttft_ms`；新增 `pointTTFT`（某天的平均首字，那天没有被计时的流式回复就返回 null）；`chartBars` 的指标类型收敛成导出的 `ChartMetric = \"calls\" \\| \"tokens\" \\| \"ttft\"` |\n| `packages/web/src/components/ModelUsageView.tsx` | 指标切换由两个变三个（`CHART_METRICS` 表驱动：请求 / Token / 首字）；标题、颜色、悬停文案、刻度都跟着表走：首字的标题写「每天平均首字（只算流式回复）」，刻度写「单日最高 平均 900ms」，柱子的悬停是「11-07：平均 800ms」 |\n| `packages/web/src/index.css` | 亮色与暗色各加一个 `--chart-3`（琥珀）：与蓝、蓝绿都不同色相；首字慢是体验问题，不用告警红 |",
       "**怎么验证。** `npx vitest run src/lib/magpieUsage.test.ts src/components/ModelUsageView.test.tsx` 16 例通过（数据层 10 例，新增「按天的首字：有计时的天才给数，柱状图按这个指标取平均」；视图 6 例，新增「图表能切到首字：每天平均首字，只算有计时的那些天」）。连带 `ModelPage.test.tsx` 一起跑 **135 例全绿**。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 首字只统计流式回复（内核的 `timed` 就是这么记的），非流式的那部分在图里是空的；没被计时的日子在图上不画柱子，也不假装是 0ms。"
     ]
@@ -603,7 +615,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 用户按「停止」之后，输入框下方那行小结仍写「上一轮：3 步 · 用时 1 分 12 秒」，和正常说完的一轮长得一模一样。回头翻记录时看不出那次是被中断的——DSH 会在正文尾标一句「已停止」，我们连小结都没标。这个标记只在内存时也活不过重启，d.360 落盘时同样漏了它。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `stopped`；`settleTurnProgress(convId, now, chars, stopped)` 第四参标记 || 小结文案 | 停止的一轮写成「上一轮：已停止 · 3 步 · 用时 1 分 12 秒」；自然收口不变 || 落盘 | `summaryOf` 与 `readSummaries` 都带上 `stopped`，重开应用仍能看出那一轮是停的 || `ChatPage` | `onRunSettled` 把 `result.status === \"aborted\"` 传进去 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `stopped`；`settleTurnProgress(convId, now, chars, stopped)` 第四参标记 |\n| 小结文案 | 停止的一轮写成「上一轮：已停止 · 3 步 · 用时 1 分 12 秒」；自然收口不变 |\n| 落盘 | `summaryOf` 与 `readSummaries` 都带上 `stopped`，重开应用仍能看出那一轮是停的 |\n| `ChatPage` | `onRunSettled` 把 `result.status === \"aborted\"` 传进去 |",
       "**怎么验证。** `turnProgress.test.ts` 新增 2 例（停止收口带「已停止」、自然收口不带；「已停止」活过 `reloadTurnSummaries()`）；`turnProgress` + `TurnProgressLine` 36 例、`ChatPage.test.tsx` 209 例全过；typecheck 通过。",
       "**留白。** 只在「上一轮」小结里标；消息正文本身不加「（已停止）」——那是服务器上的内容，改它会让模型下一轮看到自己没写过的话。"
     ]
@@ -616,7 +628,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 运行页的「最近请求」原来只有耗时和状态码。用户问「为什么这条回复要等三秒」，页面答不了：慢在排队等名额、慢在和鸣自己翻译请求、慢在前面有几次试失败了在重试、还是慢在上游那家，内核每一笔都记着，页面一个都没显示。同理，一条请求试了几次、中途失败交给了谁、上游到底为什么拒的，也都藏在日志里。",
       "**做了什么。**",
-      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieUsage.ts` | `UsageRequestRow` 补 `ttft` / `firstText` / `sent` / `own` / `retried` / `queued` / `flow` / `tries` / `handedOn` / `err` / `errType` / `stop`；新增 `describeRequestWait`、`describeRequestTries`、`averageTTFT` || 最近请求表 | 新增「首字」一列：格子是首字毫秒；悬停给拆解「首字 720ms（和鸣自己 100ms、先失败的那几次 200ms、排队 50ms、上游 250ms）」；没流式的回复显示「—」并说明没有首字 || 最近请求表 | 状态格悬停是上游的失败原因；`tries > 1` 或这一试失败交了班的，后面跟一句小字「试了 3 次」「这一试失败，交给了下一条」 || 用在哪（拆分） | 每行在有计时时补一句「平均首字 xxx ms」，只算真被计时的流式回复 |",
+      "| 位置 | 变化 |\n| --- | --- |\n| `packages/web/src/lib/magpieUsage.ts` | `UsageRequestRow` 补 `ttft` / `firstText` / `sent` / `own` / `retried` / `queued` / `flow` / `tries` / `handedOn` / `err` / `errType` / `stop`；新增 `describeRequestWait`、`describeRequestTries`、`averageTTFT` |\n| 最近请求表 | 新增「首字」一列：格子是首字毫秒；悬停给拆解「首字 720ms（和鸣自己 100ms、先失败的那几次 200ms、排队 50ms、上游 250ms）」；没流式的回复显示「—」并说明没有首字 |\n| 最近请求表 | 状态格悬停是上游的失败原因；`tries > 1` 或这一试失败交了班的，后面跟一句小字「试了 3 次」「这一试失败，交给了下一条」 |\n| 用在哪（拆分） | 每行在有计时时补一句「平均首字 xxx ms」，只算真被计时的流式回复 |",
       "**怎么验证。** `npx vitest run src/lib/magpieUsage.test.ts src/components/ModelUsageView.test.tsx` 14 例通过（数据层 9 例，其中新增「首字、拆分与重试都读得出来」「老记录里没有首字就不编」「describeRequestWait 拆开说」「describeRequestTries 说几次」「averageTTFT 只算计时过的」；视图 5 例，新增「最近请求读得出首字：慢在哪儿、试了几次、失败原因」）。`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 「为什么没走那个账号」在网关的 `Call.Fallback` 里有，但用量账本（`usage.Record`）不落这个字段，要读就得另开一条轨迹接口；本轮只做账本里已有的。首字的柱状图（按天画首字趋势）还没做，现在的图表只有请求数与 token。"
     ]
@@ -629,7 +641,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上下文压缩（把早期消息折成摘要）发生时只在输入框上方弹一句提示，几秒后消失。用户过一会儿发现「它忘了我前面的规矩」，往上翻却什么都看不出来——提示条不会等人。DSH 的做法是在消息流里留一行压缩记录，位置就在被折叠的那段旁边。",
       "**做了什么。** 消息列表最上面常驻一个可展开的说明：",
-      "| 内容 | 说明 || --- | --- || 摘要行 | 「这轮发送时，更早的 N 条消息折成了摘要 · 12 分钟前」 || 展开后 | 解释折的是**发给模型的那份上下文**，界面里的消息仍在、往上翻能找到全文 |",
+      "| 内容 | 说明 |\n| --- | --- |\n| 摘要行 | 「这轮发送时，更早的 N 条消息折成了摘要 · 12 分钟前」 |\n| 展开后 | 解释折的是**发给模型的那份上下文**，界面里的消息仍在、往上翻能找到全文 |",
       "数据用已有的 `getContextFold(conversationId)`（`heming.contextFold.v1`，最近 20 个会话），没有新增存储；会话切换或消息数变化时重算。",
       "**怎么验证。** `ChatPage.test.tsx` 新增「压缩过历史后，列表最上面留一条可展开的说明（d.375）」——断言条数、「刚刚」、以及展开后的两句说明；ChatPage 209 例、web 全量通过；typecheck 通过。",
       "**留白。** 不知道折叠发生在消息流的哪一条旁边（压缩是本机算的、按条数折，没有锚点），所以只能放在列表最上面，并明确写「界面里这些消息仍在」，不假装那几条被删了。"
@@ -646,7 +658,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 备份与恢复面板此前只会发两条裸命令：`magpie backup <file>` 与 `magpie restore <file>`。可内核这两条命令的默认值**正反面不统一**——备份默认带 Key、带技能与 MCP 库、**不带**订阅与插件的登录（要带得显式 `--sign-ins`）；恢复则三样全恢复，少恢复哪样才加 `--no-agents` / `--no-library` / `--no-sign-ins`。记反一次，要么 Key 悄悄没进备份，要么把不该覆盖的登录覆盖掉了。",
       "**做了什么。**",
-      "| 以前 | 现在 || --- | --- || 只能发裸命令，flag 得自己记 | 新建备份前三个勾：带来源的 Key、带技能与 MCP 库、带订阅与插件的登录（默认与内核一致） || 恢复是「全盖」，没有选择 | 确认框里三个勾：本机工具的模型设置、技能与 MCP 库、订阅与插件的登录，取消哪块就加对应的 `--no-` || 勾了什么心里没底 | 面板里写一句人话：「现在：带Key、带技能库、不带登录。」；恢复前写「覆盖工具设置、覆盖技能库、覆盖登录；来源与账号总会恢复。」 || 「登录要不要带上」是个安全问题，容易被忽略 | 那一勾带着说明：带上就意味着拿到文件又知道口令的人能用这些账号 |",
+      "| 以前 | 现在 |\n| --- | --- |\n| 只能发裸命令，flag 得自己记 | 新建备份前三个勾：带来源的 Key、带技能与 MCP 库、带订阅与插件的登录（默认与内核一致） |\n| 恢复是「全盖」，没有选择 | 确认框里三个勾：本机工具的模型设置、技能与 MCP 库、订阅与插件的登录，取消哪块就加对应的 `--no-` |\n| 勾了什么心里没底 | 面板里写一句人话：「现在：带Key、带技能库、不带登录。」；恢复前写「覆盖工具设置、覆盖技能库、覆盖登录；来源与账号总会恢复。」 |\n| 「登录要不要带上」是个安全问题，容易被忽略 | 那一勾带着说明：带上就意味着拿到文件又知道口令的人能用这些账号 |",
       "**怎么验证。** `magpieBackupParts.test.ts` 9 例（默认值与内核一致、三种勾选组合、flag 顺序、恢复这头没有 keys / 备份这头没有 agents、两句人话）；`BackupPanel.test.tsx` 4 → 6 例（取消 Key 并勾上登录 → `[\"backup\",\"--no-keys\",\"--sign-ins\",<路径>]`；对话框取消登录 → `[\"restore\",\"--no-sign-ins\",<路径>]`）；`components/model + magpieBackupParts + magpieCli` 15 文件 210 例全绿。",
       "**留白。** 口令仍在内核的交互面板里输入，页面不接管；内核没有 `backup --dry-run`，所以做不了「先看会写什么再决定」；定时自动备份也还没有——内核侧没有对应命令，页面不自己造。`typecheck` 这次的红在另一个会话的 `src/components/chat/StreamTail.test.tsx`（`AgentStreamState` 少 `lastAt`），与本轮文件无关。"
     ]
@@ -659,7 +671,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** `ChatPage` 一直订阅整张 `streaming` 表。每个 delta 都会换一次对象引用，于是整页（七千行函数、几百个节点）每帧重渲染一次；真正在变的只有末尾那一两个气泡。`docs/STREAMING.md` 差距 #2 说的就是它，之前没做是因为自动贴底依赖「各流文本长度之和」这个 tick，而那个 tick 只能从父组件的渲染里算出来。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 父组件改订阅**签名**（`id:状态:智能体` 拼串）：只有「多一条 / 少一条 / 状态变了」才重渲 | `components/ChatPage.tsx` 的 `streamSignatureOf` || 气泡与跑动进度行搬进 `StreamTail`，它自己订阅整张表，正文逐帧只重渲这一块 | 同文件 `StreamTail` || 自动贴底不再靠父组件的 tick：气泡长高时 `StreamTail` 调一次 `onGrow`，直接改 `scrollTop` / 亮「新消息」，不 setState 文本 | 同文件 `onStreamGrow` || 草稿块让位判断改用「当前在跑的 streamId 集合」 | `streamingIds` |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 父组件改订阅**签名**（`id:状态:智能体` 拼串）：只有「多一条 / 少一条 / 状态变了」才重渲 | `components/ChatPage.tsx` 的 `streamSignatureOf` |\n| 气泡与跑动进度行搬进 `StreamTail`，它自己订阅整张表，正文逐帧只重渲这一块 | 同文件 `StreamTail` |\n| 自动贴底不再靠父组件的 tick：气泡长高时 `StreamTail` 调一次 `onGrow`，直接改 `scrollTop` / 亮「新消息」，不 setState 文本 | 同文件 `onStreamGrow` |\n| 草稿块让位判断改用「当前在跑的 streamId 集合」 | `streamingIds` |",
       "**怎么验证。** 新增 `components/chat/StreamTail.test.tsx` 2 例：只渲染本会话的气泡、正文增量直接上屏；长高时 `onGrow` 被调、正文不变时不重复调。`ChatPage.test.tsx` 208 例、web 全量通过；typecheck 通过。",
       "**踩坑。** 第一版用 `useShallow((s) => Object.entries(s.streaming).filter(...))` 选气泡条目——每次都是新数组、元素又是新元组，shallow 比不过，`useSyncExternalStore` 判定快照一直在变，直接「Maximum update depth exceeded」，68 个用例连带失败。改成在子组件里直接订阅 `s.streaming` 就干净了：重渲染范围仍然只有这一块。",
       "**留白。** 签名订阅意味着「同一个流里状态不变」的更新（例如 attempts 追加）不会重渲父组件——目前 `attempts` 只影响气泡，气泡自己有订阅，没受影响。消息列表的窗口化与历史行的 memo 未动。"
@@ -677,7 +689,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 有些来源在「请求发出前」还有三件事可以定：网页搜索由谁做（把客户端发来的搜索请求原样转给它，还是照客户端发的）、上下文压缩由谁做（Codex 这类自己会压，交给它就更省），以及请求该带谁的 User-Agent（智能体自己的，还是和鸣自己的——订阅账号按自己的客户端签，用错了对不上）。内核三个键都支持（`search=` / `compaction=` / `user-agent=`），而且 `provider show` 三个都读得回来，只差页面上的入口。",
       "**做了什么。**",
-      "| 以前 | 现在 || --- | --- || 这三项只有命令行 | 「更多设置」里第五块「端的小开关」：三个下拉，各带一句「什么时候才需要动它」 || 写了也不知道现在是什么 | 折叠里说一句「现在：和鸣自己的 UA · 搜索由来源做 · 压缩交给来源」，读的是同一个 show 缓存，不多发命令 || 三项要敲三条命令 | 三项合成一条 `provider set`，只发你改过的那几项 || 「保存设置」按钮孤零零落在折叠外面 | 搬进「请求」那一组里，改名「保存请求设置」——它保存的就是那几格 |",
+      "| 以前 | 现在 |\n| --- | --- |\n| 这三项只有命令行 | 「更多设置」里第五块「端的小开关」：三个下拉，各带一句「什么时候才需要动它」 |\n| 写了也不知道现在是什么 | 折叠里说一句「现在：和鸣自己的 UA · 搜索由来源做 · 压缩交给来源」，读的是同一个 show 缓存，不多发命令 |\n| 三项要敲三条命令 | 三项合成一条 `provider set`，只发你改过的那几项 |\n| 「保存设置」按钮孤零零落在折叠外面 | 搬进「请求」那一组里，改名「保存请求设置」——它保存的就是那几格 |",
       "**怎么验证。** `magpieSourceWire.test.ts` 5 例（键顺序、只发填过的、不认识的值不发、合成一条 / 没 id 为 null、现状一句）；`magpieSourceShow.test.ts` 6 → 7 例（三行新解析）；页面新增一例「没选就不发，选了就合成一条 `provider set`」；`ModelPage + components/model + components/ui + 来源四个 lib + CommandPalette` 29 文件 316 例全绿；`pnpm --filter @heming/web typecheck` 通过；`node scripts/check-source-encoding.mjs` OK。",
       "**留白。** `prompt=`（Antigravity 订阅原样发系统提示）与 `additional-tools=` 是端专属、show 又读不回来，仍留命令行；订阅账号带 `user-agent=agent` 内核会自己报错（它本来就用自己的客户端），页面不预判，让内核把话说清楚。"
     ]
@@ -694,7 +706,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 来源列表里一直只有「删除」这一个动作。可用户真正想要的往往是「先别用它」：Key 还想留着、额度下周可能回来、换一家对比两天。删掉是不可逆的，地址、Key、模型记录一起没了；不删又没法让它先别掺和路由。内核本来就有这个开关——`provider off <id>` 把整家关掉，Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它，`provider on <id>` 原样开回来。页面此前没接。",
       "**做了什么。**",
-      "| 以前 | 现在 || --- | --- || 只有「删除」，不可逆 | 行上多一个开关：「停用」/「启用」，可逆，不弹确认框 || 看不出哪家被停了 | 停用那行名字后多一个「已停用」徽标，悬停说清「Key 与记录都留着」 || 停着的时候两个动作都摆着 | 停着只剩「启用」，不会同时出现相反的两个按钮 || 状态得自己去命令行看 | 从 `magpie providers` 那行的说明里读（`magpie provider on <id>`），认 id 相同才算 |",
+      "| 以前 | 现在 |\n| --- | --- |\n| 只有「删除」，不可逆 | 行上多一个开关：「停用」/「启用」，可逆，不弹确认框 |\n| 看不出哪家被停了 | 停用那行名字后多一个「已停用」徽标，悬停说清「Key 与记录都留着」 |\n| 停着的时候两个动作都摆着 | 停着只剩「启用」，不会同时出现相反的两个按钮 |\n| 状态得自己去命令行看 | 从 `magpie providers` 那行的说明里读（`magpie provider on <id>`），认 id 相同才算 |",
       "**怎么验证。** `parseProviders` 新增一例（停用那行认成 off、别家提到不算）；页面新增两例（停用行显示徽标且按钮变成「启用」、点击发 `[\"provider\",\"on\",\"mock\"]`；正常行点「停用」发 `[\"provider\",\"off\",\"mock\"]` 且全程没有任何 `rm`）；`magpieCli + ModelPage + 来源解析 + components/model` 15 文件 204 例全绿；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** `listed no`（退出智能体清单、只经分组服务）是另一件事，仍在「模型清单」那组里，不并进这个开关；停用状态只能从那一行说明里认，等内核哪天给它单独一列再改成直读。"
     ]
@@ -707,7 +719,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** d.364 已经能把「生成到一半被中断」的草稿留住并显示出来，但它只停在那儿：用户只能看着那半截，或者按「丢弃这半截」从头再问一遍。原型里那条规矩是「答应的事不能悄悄消失」，落到这里就是——已经写出来的东西，应该能接着写完。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 草稿块里多一个「接着跑」按钮 | `components/ChatPage.tsx` || 点它就把这半截（最多取末尾 4000 字）连同「从断点接着写、不要重新开头、不要重复已写过的句子」一起发给同一个智能体 | 同上（复用 `startRun`，不另起发送路径） || 没有端到端封条时**不消耗草稿**：先给「无法安全回复」的提示，草稿留着 | 同上 || 发起成功后才清掉草稿条目，不会下次重开又冒出来一份 | 同上 |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 草稿块里多一个「接着跑」按钮 | `components/ChatPage.tsx` |\n| 点它就把这半截（最多取末尾 4000 字）连同「从断点接着写、不要重新开头、不要重复已写过的句子」一起发给同一个智能体 | 同上（复用 `startRun`，不另起发送路径） |\n| 没有端到端封条时**不消耗草稿**：先给「无法安全回复」的提示，草稿留着 | 同上 |\n| 发起成功后才清掉草稿条目，不会下次重开又冒出来一份 | 同上 |",
       "**怎么验证。** `ChatPage.test.tsx` 新增「中断的草稿可以「接着跑」：半截交给模型续写，草稿随即清掉（d.371）」——断言草稿被清空、界面上的草稿块消失、`streamChat` 收到的那一轮里含「从断点接着写」与那半截原文；ChatPage 208 例、web 全量通过；typecheck 通过。",
       "**留白。** 续写是**新的一轮**（用户会看到一个自己的气泡，内容就是那段续写指令），不是把服务端那条被中断的回答补完——后者要改归档语义，先不做。取的是末尾 4000 字，不是全文：草稿本来就只是节流留下的最近状态。"
     ]
@@ -720,7 +732,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 展开「高级」时本来就会读一次 `provider show <id>`（拿地址、普通/套餐、模型清单），但读回来的整段只用了三行：`unmasked`、`free`、`header`、`refresh`、`include` 全被扔掉。于是可选设置只能「填什么发什么」——改一个请求头要把整行重敲，也看不出这个来源算不算免费、有没有原文照发。上一版的留白写的就是这件。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 解析 `provider show` 里的 `header` / `free` / `unmasked` / `refresh` / `include` | `packages/web/src/lib/magpieSourceShow.ts` 的 `parseSourceShow` || 结果挂进已有的 show 缓存（`showCache[id].flags`），不多发一次命令 | `packages/web/src/components/ModelPage.tsx` || 「更多设置」下多说一句「现在设着：请求头 X-Trace；算免费；每 6h 刷清单」；什么都没设时整句不出现 | 同上（`describeShowFlags`） || 请求头那块多一个「拉下来改」：现有的头还原成一行一个填回多行框 | 同上（`headersToText`） || 边界：`context=` 与 `family=` 内核 show 不打印，这两项仍然只写不读 | parity spec §3 |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 解析 `provider show` 里的 `header` / `free` / `unmasked` / `refresh` / `include` | `packages/web/src/lib/magpieSourceShow.ts` 的 `parseSourceShow` |\n| 结果挂进已有的 show 缓存（`showCache[id].flags`），不多发一次命令 | `packages/web/src/components/ModelPage.tsx` |\n| 「更多设置」下多说一句「现在设着：请求头 X-Trace；算免费；每 6h 刷清单」；什么都没设时整句不出现 | 同上（`describeShowFlags`） |\n| 请求头那块多一个「拉下来改」：现有的头还原成一行一个填回多行框 | 同上（`headersToText`） |\n| 边界：`context=` 与 `family=` 内核 show 不打印，这两项仍然只写不读 | parity spec §3 |",
       "**怎么验证。** `npx vitest run src/lib/magpieSourceShow.test.ts` 6 例（含空值头、值里带冒号、现状一句话）；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/lib/magpieSourceShow.test.ts src/lib/magpieSourceHeaders.test.ts` 15 文件 / 193 例全绿（ModelPage 115 → 116 例，新增「现状显示 → 拉下来改 → 保存发原值」）；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 只有展开「高级」时才读得到——收起状态的行上仍然看不出「这个来源改过」。要给行上做标记，得在首屏并发读所有来源的 show（每个还带一次余额查询，最多 8 秒超时），代价不小；下一步先用缓存里已有的数据，别加首屏负担。"
     ]
@@ -733,7 +745,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 流式渲染为了少解析 markdown，d.353 起就把正文切成「冻结前缀 + 尾部两块」，但**切分本身**每帧都要从头扫一遍全文（`text.split(\"\\n\")` 再逐行判断围栏/列表/表格）。回复只有几百字时没感觉；几万字的长回答就是每帧 O(全文)，主线程一直在做同一件事。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 新增 `splitMarkdownBlocksFrom(text, previous)`：上一帧冻结的前缀这一帧一定还冻结，只切新增的那一段再拼回去 | `lib/markdown/blocks.ts` || 前缀对不上（改字、重试、切会话）就退回全量切分，不拼错 | 同上 || `MarkdownMessage` 用一个 ref 记住上一帧切到哪，流式时走增量、收口时清空 | `components/MarkdownMessage.tsx` |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 新增 `splitMarkdownBlocksFrom(text, previous)`：上一帧冻结的前缀这一帧一定还冻结，只切新增的那一段再拼回去 | `lib/markdown/blocks.ts` |\n| 前缀对不上（改字、重试、切会话）就退回全量切分，不拼错 | 同上 |\n| `MarkdownMessage` 用一个 ref 记住上一帧切到哪，流式时走增量、收口时清空 | `components/MarkdownMessage.tsx` |",
       "**怎么验证。** `blocks.test.ts` 13 例（新增 3 例：往后长时拼回全文一致且前缀单调变长、前缀变了退回全量、没有上一帧时与全量等价）；`MarkdownMessage.test.tsx` 16 例仍全过；web 全量通过、typecheck 通过。",
       "**留白。** 增量只对「后缀追加」有效；模型重写中间段落时会退回全量（正确但不再省）。这是切分层的优化，markdown 解析本身仍只重解析尾部两块。"
     ]
@@ -746,7 +758,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 来源的「请求（请求头 / 耐心 / 错误处理）」里原来只有一对「请求头名称 + 请求头值」两个单行框。想加第二个头要保存一次、再清空重填；想删掉某个头根本做不到。参考实现那边请求头是一张可增删的表，内核本身也支持一次给多对（`header.X-Foo=bar`，同名先删再写，**值为空就只删**）——页面没把这个能力放出来。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 「请求头名称 + 值」两个单行框换成一块多行文本框：一行一个，写成「名称: 值」 | `packages/web/src/components/ModelPage.tsx` 来源行的「请求」 || 值留空就是删掉这个头（跟内核 `header.X=` 的语义一致） | 同上 || 翻译抽成纯函数：认半角/全角冒号与等号，值里可以再有冒号，同名只留最后一个 | `packages/web/src/lib/magpieSourceHeaders.ts` 的 `parseHeaderLines` || 看不懂的行（缺分隔符、名字带空格）在原地列出来，其余照发 | 同上 + 页面里的红字提示 || 新 UI 基元 `TextAreaField`，与 `TextField` 共用 label / hint / error 语义 | `packages/web/src/components/ui/Field.tsx` || 测试：解析 7 例 + 页面 2 例（多行一起发 / 看不懂的列出来） | `magpieSourceHeaders.test.ts`、`ModelPage.test.tsx` |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 「请求头名称 + 值」两个单行框换成一块多行文本框：一行一个，写成「名称: 值」 | `packages/web/src/components/ModelPage.tsx` 来源行的「请求」 |\n| 值留空就是删掉这个头（跟内核 `header.X=` 的语义一致） | 同上 |\n| 翻译抽成纯函数：认半角/全角冒号与等号，值里可以再有冒号，同名只留最后一个 | `packages/web/src/lib/magpieSourceHeaders.ts` 的 `parseHeaderLines` |\n| 看不懂的行（缺分隔符、名字带空格）在原地列出来，其余照发 | 同上 + 页面里的红字提示 |\n| 新 UI 基元 `TextAreaField`，与 `TextField` 共用 label / hint / error 语义 | `packages/web/src/components/ui/Field.tsx` |\n| 测试：解析 7 例 + 页面 2 例（多行一起发 / 看不懂的列出来） | `magpieSourceHeaders.test.ts`、`ModelPage.test.tsx` |",
       "**怎么验证。** `npx vitest run src/lib/magpieSourceHeaders.test.ts` 7 例全绿；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/components/ui src/lib/magpieSourceHeaders.test.ts` 25 文件 / 246 例全绿（ModelPage 113 → 115 例）；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 还是「填什么发什么」：已经设过的头读不回来（`provider show` 的那些行还没接进来源行数据），所以改一个头要重填整行；也没做「这个头是不是某个厂商的专用头」的提示。删除同样要自己写一行「名称:」（留空值）。"
     ]
@@ -759,7 +771,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮把「导出这段对话」接回来时只给了 Markdown——给人读够了，但想自己拿去做统计、喂给别的工具、或者做一份可 diff 的存档，Markdown 就不合适了。导出模块里本来就有 `buildConversationJson`（d.25 起就在，只是从来没有入口），这轮把入口补齐。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 「更多操作」菜单多一项「导出这段对话（JSON）」 | `ChatPage.tsx` || 导出函数按格式分派：Markdown 走 `buildConversationMarkdown`，JSON 走 `buildConversationJson`，文件名后缀随格式 | `ChatPage.tsx` 的 `exportConversation(format)` || 成功提示带上格式（`…（JSON）。`），两种导出共用同一套「空会话不导」的判断 | 同上 |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 「更多操作」菜单多一项「导出这段对话（JSON）」 | `ChatPage.tsx` |\n| 导出函数按格式分派：Markdown 走 `buildConversationMarkdown`，JSON 走 `buildConversationJson`，文件名后缀随格式 | `ChatPage.tsx` 的 `exportConversation(format)` |\n| 成功提示带上格式（`…（JSON）。`），两种导出共用同一套「空会话不导」的判断 | 同上 |",
       "**怎么验证。** `ChatPage.test.tsx` 新增一例：点菜单项后拿到 1 个 Blob、文件名以 `.json` 结尾、内容 `JSON.parse` 后 `version === 1` 且两条正文按顺序、提示写「（JSON）」；菜单项清单断言同步补上这一项。web 全量通过、typecheck 通过。",
       "**留白。** JSON 与 Markdown 共用同一份消息投影（含过程摘要、不含附件字节）；导出仍是「本机能解开的明文」，E2E 解不开的整条跳过（与 Markdown 一致）；没有做「只导某一轮」。"
     ]
@@ -772,7 +784,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮把「它是什么」四项接上之后，来源行展开「高级」里并排躺着四个折叠区（请求 / 调流 / 清单 / 它是什么）。五个来源就是二十行标题，把真正要看的模型 chip、备用链挤到了下面——设置越全，越不好用。参考实现把这些放在一个编辑器里分块，本轮先解决「看得见」的问题。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 四块可选设置收进同一个「更多设置（可选）：请求、调流、清单、它是什么」 | `packages/web/src/components/ModelPage.tsx` 来源行的「高级」 || 默认仍然全收着：展开一次，再挑需要的那一块 | 同上（嵌套 `<details>`） || 每块自己的按钮、发的命令一个字都没动；这层不保存任何东西 | 同上 summary 里写明 |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 四块可选设置收进同一个「更多设置（可选）：请求、调流、清单、它是什么」 | `packages/web/src/components/ModelPage.tsx` 来源行的「高级」 |\n| 默认仍然全收着：展开一次，再挑需要的那一块 | 同上（嵌套 `<details>`） |\n| 每块自己的按钮、发的命令一个字都没动；这层不保存任何东西 | 同上 summary 里写明 |",
       "**怎么验证。** `ModelPage.test.tsx` 112 → 113 例（新增：四块都在「更多设置」这一个折叠区里、且默认收着）；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/lib/magpieSourceProfile.test.ts` 14 文件 / 184 例全绿；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** 现在只是收拢，没做「哪块改过」的提示——四个折叠标题上看不出这个来源有没有自定义头、有没有调流参数；要做得好得先把 `provider show` 里这些字段接进行数据。"
     ]
@@ -785,7 +797,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 前两轮把来源「怎么发请求」「清单怎么长」接上了，剩下四个描述来源自身的键一直只在命令行：这个来源的免费额度算不算免费（不然 Free first 与 Cheapest 永远排在它后面）、厂商没说或说小了的真实窗口有多大、给同一类来源打个共同标签好让规则按族挑、以及这一家要不要吃脱敏。它们都是 `provider set` 的键，一次就能合成一条命令，参考实现也把它们放在 Provider 编辑器里，本轮补齐。",
       "**做了什么。**",
-      "| 想定的事 | 页面在哪 | 背后是 || --- | --- | --- || 这个来源怎么算钱 | 来源「高级 → 它是什么（可选）」的「这个来源怎么算钱」 | `provider set <id> free=yes\\|no` || 它实际能给多大上下文 | 同一处的「上下文带宽」 | `provider set <id> context=<tokens>` || 给一组来源打个共同标签 | 同一处的「族标签」 | `provider set <id> family=<tag>` || 发过去的话要不要脱敏 | 同一处的「原文照发」 | `provider set <id> unmasked=yes\\|no` |",
+      "| 想定的事 | 页面在哪 | 背后是 |\n| --- | --- | --- |\n| 这个来源怎么算钱 | 来源「高级 → 它是什么（可选）」的「这个来源怎么算钱」 | `provider set <id> free=yes\\|no` |\n| 它实际能给多大上下文 | 同一处的「上下文带宽」 | `provider set <id> context=<tokens>` |\n| 给一组来源打个共同标签 | 同一处的「族标签」 | `provider set <id> family=<tag>` |\n| 发过去的话要不要脱敏 | 同一处的「原文照发」 | `provider set <id> unmasked=yes\\|no` |",
       "四项合成**一条** `provider set`，不像调流那样一项一条。窗口写法与内核 `provider.ParseTokens` 同口径：`200000`、`200k`、`1.5m` 都认，页面先判一遍——写错当场点出「这几格看不懂，先不发：上下文带宽」，整条都不发，不必等内核回 `tokens \"很多\" is not a length`。留空一律是「这次不改」，下拉首项也是「不改」，页面不读当前值，免得一保存就把人家原来的设置覆盖掉。",
       "**怎么验证。** `npx vitest run src/lib/magpieSourceProfile.test.ts` 7 例（键顺序、`200000`/`200k`/`1.5m`/`272K` 解析、空白与非法写法点名、四项合成一条、没 ID 不发）；`ModelPage.test.tsx` 新增 1 例（四项填好合成一条 `[\"provider\",\"set\",\"mock\",\"free=yes\",\"context=272k\",\"family=fast\",\"unmasked=yes\"]`；窗口改成「很多」后点出问题、按钮置灰、一条都不发），111 → 112 例；定向 17 文件 / 208 例全绿；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** `prompt=`（系统提示原样发）、`additional-tools=`、`user-agent=`、`search=`、`compaction=` 这几个更底层的键仍留命令行——它们多半是某个端专用的排查开关，摆到页面上会误导。另外「算免费」只是路由口径：Free first / Cheapest 会先挑它，价目与用量里的花费照旧按各家价格算，页面也没有替它改价目。"
@@ -799,7 +811,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 流式正文只活在本机内存（`store/chat.ts` 的 `streaming`）：回答写到一半刷新、关窗口、应用崩了，屏幕就干净得像什么都没发生过；服务端要等 `agent_finish` 才有正文，回头只能看到一条用户消息。DSH 靠服务端快照 + 游标把这段补回来，我们没有服务端流，但**本机已经有一个加密的明文缓存**（`msgCache`，E2E 的明文回放就是靠它）——草稿放进去，语义与别的明文一致，不新开存储、不让正文以明文落盘。",
       "**做了什么。**",
-      "| 做了什么 | 在哪 || --- | --- || 流式正文按流每 3 秒留一份草稿；同一条流覆盖写，不追加 | `lib/agentRuntime/liveDraft.ts` || 草稿低于 20 字不存：短回复重发更便宜，存了只会让「上次中断」误报 | 同上 `LIVE_DRAFT_MIN_CHARS` || 收口（成功/失败/用户停止）时删掉草稿 | `ChatPage.tsx` 的 `onRunSettled` || 打开会话时把「没走到收口」的草稿显示成一块虚线提示：谁说的、上次被中断、当时生成了什么 | `ChatPage.tsx` 的 `data-testid=\"live-draft-recovered\"` || 草稿可以一键丢弃（不留着占位置，也不假装它是会话记录的一部分） | 同上「丢弃这半截」 |",
+      "| 做了什么 | 在哪 |\n| --- | --- |\n| 流式正文按流每 3 秒留一份草稿；同一条流覆盖写，不追加 | `lib/agentRuntime/liveDraft.ts` |\n| 草稿低于 20 字不存：短回复重发更便宜，存了只会让「上次中断」误报 | 同上 `LIVE_DRAFT_MIN_CHARS` |\n| 收口（成功/失败/用户停止）时删掉草稿 | `ChatPage.tsx` 的 `onRunSettled` |\n| 打开会话时把「没走到收口」的草稿显示成一块虚线提示：谁说的、上次被中断、当时生成了什么 | `ChatPage.tsx` 的 `data-testid=\"live-draft-recovered\"` |\n| 草稿可以一键丢弃（不留着占位置，也不假装它是会话记录的一部分） | 同上「丢弃这半截」 |",
       "**怎么验证。** `liveDraft.test.ts` 7 例（阈值、覆盖、清除、上限 4 条、不误认普通消息、空会话）；`ChatPage.test.tsx` 新增 1 例（种一条草稿 → 渲染出提示 → 丢弃后消失且缓存清空）；web 全量通过（见下），typecheck 通过。",
       "**留白。** 草稿按流存最近一份，不做逐字回放；最多留 4 条，多开的并行流里更早的会被挤掉；跨设备没有意义（草稿只在本机加密缓存里，换机就是另一份缓存）。"
     ]
@@ -812,7 +824,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 上一轮让来源能自己踩刹车，这一轮解决清单的事：厂商后加的模型默认不会自己进来，于是一个来源加了两个月，新出的型号还是得手动加；反过来，有些来源（比如只拿来撑分组的备用号）根本不该出现在智能体的可选清单里，之前只能在命令行 `provider listed … no` 才做得到。参考实现把这三件事放在 Provider 编辑器的 listing 区，本轮补齐。",
       "**做了什么。**",
-      "| 想定的事 | 页面在哪 | 背后是 || --- | --- | --- || 它的模型要不要出现在智能体的可选清单里 | 来源「高级 → 模型清单（可选）」的「列给智能体」 | `provider listed <id> yes\\|no` || 清单多久自己去拉一次 | 同一处的「多久自己刷一次清单」 | `provider refresh-every <id> <30m\\|6h\\|1d\\|off>` || 新模型 id 命中什么规则就自动收 | 同一处的「新模型自动收」 | `provider auto-include <id> <rule…\\|none>` |",
+      "| 想定的事 | 页面在哪 | 背后是 |\n| --- | --- | --- |\n| 它的模型要不要出现在智能体的可选清单里 | 来源「高级 → 模型清单（可选）」的「列给智能体」 | `provider listed <id> yes\\|no` |\n| 清单多久自己去拉一次 | 同一处的「多久自己刷一次清单」 | `provider refresh-every <id> <30m\\|6h\\|1d\\|off>` |\n| 新模型 id 命中什么规则就自动收 | 同一处的「新模型自动收」 | `provider auto-include <id> <rule…\\|none>` |",
       "规则按空格、逗号、中文逗号拆开，`*` 当通配——写 `claude-* gpt-4o*` 就是「这两族新出的都收进来」，写 `none` 是清空。下拉首项是「不改」：页面不读当前值、也不猜默认值，免得一保存就把人家原来的设置覆盖掉。三项各发一条命令，前一条被内核拒了不会挡住后面。",
       "**怎么验证。** `npx vitest run src/lib/magpieSourceModels.test.ts` 7 例；`npx vitest run src/components/ModelPage.test.tsx` 109 → 111 例（新增两例：三项各发一条、填 none 只发清空那一条）；定向 15 文件 / 190 例全绿；`pnpm --filter @heming/web typecheck` 通过；packages/web 全量 461 文件 / 6642 例（唯一一条失败在 `src/lib/agentRuntime/liveDraft.test.ts`——那条属于同一工作树上另一条并行线当时正在写、还没入库的文件，与本轮无关）。",
       "**留白。** `refresh-every` 只在网关（`magpie serve` 或和鸣）跑着的时候才生效，页面不另起定时器——浏览器关了就不刷，这是内核的语义，不是页面的缺口。另外「模型清单长什么样」目前仍只显示已收进名单的那几个，没做「厂商有、你没收」的对照；要做得好得先把 `provider refresh` 的完整返回接进来。"
@@ -826,7 +838,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么做。** 之前的模型页能加来源、能看额度，但来源被打爆这件事只能干看着：三个 ZCode 账号一起上被厂商拒（上游 Discord #405 那条），OpenRouter 免费模型每分钟 20 次的软限，厂商说「额度用完」又没说什么时候回来。magpie 的 Provider 编辑器里有一组「别把它打爆」的开关，对标的这一轮把它们接上了。",
       "**做了什么。**",
-      "| 能力 | 页面在哪 | 背后是 || --- | --- | --- || 一次只上几个账号，其余排队 | 来源「高级 → 调流（可选）」的「同时用几个账号」 | `provider at-once <id> <n\\|off>` || 每个账号每分钟最多几个请求 | 同一处的「每分钟请求」 | `provider rpm <id> <n\\|off>` || 排队几个、最多等几秒 | 「排队」填 `20` 或 `20:30` | `provider queue <id> <len> [sec]` || 额度用完、又没说什么时候回来时歇多久 | 「额度用完后歇多久」 | `provider quota-rest <id> <dur\\|default>` || 连续失败或被限流时最多歇多久 | 「连续失败最多歇多久」 | `provider rest-cap <id> <dur\\|off\\|default>` |",
+      "| 能力 | 页面在哪 | 背后是 |\n| --- | --- | --- |\n| 一次只上几个账号，其余排队 | 来源「高级 → 调流（可选）」的「同时用几个账号」 | `provider at-once <id> <n\\|off>` |\n| 每个账号每分钟最多几个请求 | 同一处的「每分钟请求」 | `provider rpm <id> <n\\|off>` |\n| 排队几个、最多等几秒 | 「排队」填 `20` 或 `20:30` | `provider queue <id> <len> [sec]` |\n| 额度用完、又没说什么时候回来时歇多久 | 「额度用完后歇多久」 | `provider quota-rest <id> <dur\\|default>` |\n| 连续失败或被限流时最多歇多久 | 「连续失败最多歇多久」 | `provider rest-cap <id> <dur\\|off\\|default>` |",
       "一次只发改过的项，一项一条命令：内核每个键各自校验，前一条失败不该挡住后面几条。留空是「这次不改」，和下拉里的「回到默认」不是一回事。填了看不懂的值不静默吞掉——页面直接把那一格点出来，能看懂的先发出去。",
       "**怎么验证。** `npx vitest run src/lib/magpieSourceTune.test.ts` 8 例；`npx vitest run src/components/ModelPage.test.tsx` 109 例（其中两例专门盯「只发改过的项」和「看不懂的点名」）；定向 16 文件 / 229 例全绿；packages/web 全量 459 文件 / 6626 例全绿（182.83s）；`pnpm --filter @heming/web typecheck` 通过。",
       "**留白。** `quota-rest` 的「到每天某个时刻」（`until 08:00`）和按账号、按 Key 的 `account-weight` / `account-concurrency` / `account-cap` 没进页面——它们要挑具体账号，塞进一个不分账号的表单会误导，仍留命令行。参考实现的「组绑定点名账号」（`Group.Accounts`）也还做不了：随包的 magpie 内核里 `groups_cli.go` 没有 `accounts=` 这个键。"
@@ -849,7 +861,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "工具轮里模型说的话（「我先看一下 `core/app.ts`」这类过渡话术）原先只攒在本地缓冲里：一旦这一轮确实发起了工具调用，整段就被丢掉，一个字都不上行。于是从第一次检索到最后一段结论之间，屏幕上只有工具行在动，正文区一片空白——看的人分不清是在干活还是卡住了。这正是 `docs/STREAMING.md` 差距清单里的第 1 条，也是所有差距里最容易被误判成「死机」的一条。",
       "DSH 的语义是正文块与工具块**交错且都留在记录里**（`AssistantMarkdown` 按 block 渲染，text 块不会被后续的工具调用挤掉）。本轮照同样口径改。",
       "做了什么",
-      "| 变化 | 落地 || --- | --- || 过渡话术边到边显示 | `agentStream.ts` 的 `onDelta` 在工具轮也调 `emitDelta`：立刻上行 + 写进本轮累积，不再是「只攒不发」 || 轮末不再补发 | 删掉 `calls.length === 0` 分支里的 `for (const chunk of roundChunks) emitDelta(...)`，否则每片会出现两遍 || 留在最终回答里 | `acc` 里已含这些字，`agent_finish` 的全文与历史记录都带着它们——与 DSH 的 text 块一致 || 中断兜底简化 | `acc` 非空即可作为 partial，`buffered` 只在「上行前就抛错」的极端情况兜底；不再补「以上是中断前的过程说明」 || 测试口径 | 「中间话术不上行」改为「也上行并留在答案里」；溢出重试用例改为「首次那半句已上行、finish 仍是重试后的干净全文」；工具轮中断用例改为「partial 就是已上行的部分，不再追加过程说明」 |",
+      "| 变化 | 落地 |\n| --- | --- |\n| 过渡话术边到边显示 | `agentStream.ts` 的 `onDelta` 在工具轮也调 `emitDelta`：立刻上行 + 写进本轮累积，不再是「只攒不发」 |\n| 轮末不再补发 | 删掉 `calls.length === 0` 分支里的 `for (const chunk of roundChunks) emitDelta(...)`，否则每片会出现两遍 |\n| 留在最终回答里 | `acc` 里已含这些字，`agent_finish` 的全文与历史记录都带着它们——与 DSH 的 text 块一致 |\n| 中断兜底简化 | `acc` 非空即可作为 partial，`buffered` 只在「上行前就抛错」的极端情况兜底；不再补「以上是中断前的过程说明」 |\n| 测试口径 | 「中间话术不上行」改为「也上行并留在答案里」；溢出重试用例改为「首次那半句已上行、finish 仍是重试后的干净全文」；工具轮中断用例改为「partial 就是已上行的部分，不再追加过程说明」 |",
       "怎么验证",
       "留白"
     ]
@@ -872,7 +884,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.350 把「第 3 步 · 正在执行 file_read · 已跑 42 秒」放在输入框下方，和「N 轮 · M 步」同一区域。问题是**跑起来之后用户的眼睛在消息流末尾**——回答正在那里一个字一个字长出来，状态行却在屏幕另一头，看它还得把视线从正文挪开。DSH 把运行状态放在消息流末尾（`RunningStatus` 跟着`ChatFlow` 的 keyed 列表走），我们这个位置一直是个例外。",
       "同时保留 d.218 的小结语义：跑完之后那行「上一轮：5 步 · 用时 1 分 12 秒」属于**上一轮的账**，不属于正在读的正文，继续留在输入框下方。",
       "做了什么",
-      "| 变化 | 落地 || --- | --- || 进度行支持两种位置 | `TurnProgressLine` 新增 `placement?: \"composer\" | \"stream\"`，并写进 `data-placement`；`stream` 用 `mb-3`（贴消息列，不吃左右边距），`composer` 保持 `mx-4 mb-1` || 跑动中放到消息流末尾 | `ChatPage` 在流式气泡之后、贴底哨兵之前渲染 `<TurnProgressLine placement=\"stream\" />`（只在 `turnProgress && !done` 时） || 收口后回输入框下方 | 输入框下方只在 `turnProgress?.done` 时渲染（默认 `composer`）——同一时刻只有一条状态行，不会上下各说一遍 || 测试口径 | I3x 改成「跑动行在消息列内、`data-placement=\"stream\"`」「收口行在表单内、`data-placement=\"composer\"`、在输入框之后」；`TurnProgressLine` 补一例位置切换 |",
+      "| 变化 | 落地 |\n| --- | --- |\n| 进度行支持两种位置 | `TurnProgressLine` 新增 `placement?: \"composer\" | \"stream\"`，并写进 `data-placement`；`stream` 用 `mb-3`（贴消息列，不吃左右边距），`composer` 保持 `mx-4 mb-1` |\n| 跑动中放到消息流末尾 | `ChatPage` 在流式气泡之后、贴底哨兵之前渲染 `<TurnProgressLine placement=\"stream\" />`（只在 `turnProgress && !done` 时） |\n| 收口后回输入框下方 | 输入框下方只在 `turnProgress?.done` 时渲染（默认 `composer`）——同一时刻只有一条状态行，不会上下各说一遍 |\n| 测试口径 | I3x 改成「跑动行在消息列内、`data-placement=\"stream\"`」「收口行在表单内、`data-placement=\"composer\"`、在输入框之后」；`TurnProgressLine` 补一例位置切换 |",
       "怎么验证",
       "留白"
     ]
@@ -895,7 +907,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "内核其实早就把这件事做完了：`provider.Templates()` 给了三套（smart / thrifty / steady），每一套都是拿「用户自己已有的模型」现场拼出来的，不引入任何新来源。页面只是没接。",
       "`group set` 同理：内核认十余个键（会话亲和、是否列给智能体、推理档谁说了算、上下文、族标签、权重、快速档、分类模型…），页面只暴露了三个，其余只能敲命令行。本轮把「一句话能说清」的五个接出来。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 三套模板一键建组 | 「路由分组」里三个按钮：**难易分流 / 先用便宜的 / 不会卡住**，点一下发 `group template <kind> [name]` || 名字沿用、绝不覆盖 | 名字取「分组名称」那格；留空由内核起名——内核遇到重名会自己编号，**不会替换现有分组** || 说清楚建出来是什么 | 每个按钮下面一行小字写这套模板怎么选模型；并写明建出来的组 id 是 `smart-split` / `cheap-first` / `never-stuck` || 五个组设置 | 会话亲和（`stays`）、是否列给智能体（`listed`）、推理档谁说了算（`effort`）、上下文（`context`）、族标签（`family`） || 只发改过的项 | `groupSetArgs` 丢掉空值：留「不改」的键不会发给内核——空值等于把设置清回默认，那是另一件事 || 没目标就不给按 | 「应用设置」要「分组 ID」那格有值、且至少改了一项，否则不可点 || 清空选择 | 一个「清空选择」把表单恢复成「不改」，不动内核里的组 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 三套模板一键建组 | 「路由分组」里三个按钮：**难易分流 / 先用便宜的 / 不会卡住**，点一下发 `group template <kind> [name]` |\n| 名字沿用、绝不覆盖 | 名字取「分组名称」那格；留空由内核起名——内核遇到重名会自己编号，**不会替换现有分组** |\n| 说清楚建出来是什么 | 每个按钮下面一行小字写这套模板怎么选模型；并写明建出来的组 id 是 `smart-split` / `cheap-first` / `never-stuck` |\n| 五个组设置 | 会话亲和（`stays`）、是否列给智能体（`listed`）、推理档谁说了算（`effort`）、上下文（`context`）、族标签（`family`） |\n| 只发改过的项 | `groupSetArgs` 丢掉空值：留「不改」的键不会发给内核——空值等于把设置清回默认，那是另一件事 |\n| 没目标就不给按 | 「应用设置」要「分组 ID」那格有值、且至少改了一项，否则不可点 |\n| 清空选择 | 一个「清空选择」把表单恢复成「不改」，不动内核里的组 |",
       "参数生成集中在 `packages/web/src/lib/magpieGroups.ts`：`GROUP_TEMPLATES`（kind/id/说明）、`groupTemplateArgs()`、`GROUP_SETTING_FIELDS`（键/标签/说明/选项）、`groupSetArgs()`。没接的键（`weight`/`fast`/`pick`/`classifier`/`intent-sure`）在注释里写了原因：它们要么得跟模型清单一起才对得上，要么得先选一个分类模型，硬塞进同一张表只会变成「填了也不知道后果」。",
       "怎么验证`groupSetArgs` 只发填了的项、空值返回 `null`、没 ID 返回 `null`、未知键被忽略「组的设置」断言按钮初始不可点、填完 ID 与两项后发出 `[\"group\",\"set\",\"fleet\",\"stays=session\",\"context=272k\"]`（顺序固定、没填的不发）",
       "留白等内核升上来再接，本轮不猜参数名"
@@ -917,7 +929,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「上一轮：5 步 · 用时 1 分 12 秒 · 首字 1.3 秒 · 38 字/秒」这行小结是 d.218 / d.354 加的，但它只活在内存里：关掉窗口、刷新页面，这条就没了。长任务往往跑十几分钟，收口那一刻用户经常不在屏幕前——等他回来，界面上只剩一条「读完了」，没人告诉他刚才那十几分钟干了多少。「刚才那一轮到底跑了多久」是真实发生过的事，不该因为重开一次就消失。",
       "做了什么",
-      "| 变化 | 落地 || --- | --- || 收口小结落盘 | `packages/web/src/lib/agentRuntime/turnProgress.ts` 新增 `TURN_SUMMARY_KEY = \"heming.turnSummary.v1\"`：`settleTurnProgress` 时把轮次、步数、起止时刻、首字时刻、字符数写进 localStorage || 只存收口态 | 跑动中的进度**不落盘**——重开应用看到一条假的「正在执行 file_grep」比什么都没有更糟；只有 `done: true` 的那一条才写 || 加载即装回 | `hydrateTurnSummaries()` 在模块加载时执行；内存里已有更权威的状态（这一轮正在跑）时不覆盖 || 清除同步删档 | `clearTurnProgress(id)` 同时删掉该会话的小结；不带参数清全部时连存储键一起删；`resetTurnProgress()` 也清存储 || 坏档逐条丢弃 | 缺时间、结束早于开始、类型不对的记录单独跳过，不因为一条脏数据把整份档案清空 || 最多留 20 个会话 | 按收口时刻排序保留最近 20 条（`TURN_SUMMARY_SESSIONS`），与 msgCache 同一思路 |",
+      "| 变化 | 落地 |\n| --- | --- |\n| 收口小结落盘 | `packages/web/src/lib/agentRuntime/turnProgress.ts` 新增 `TURN_SUMMARY_KEY = \"heming.turnSummary.v1\"`：`settleTurnProgress` 时把轮次、步数、起止时刻、首字时刻、字符数写进 localStorage |\n| 只存收口态 | 跑动中的进度**不落盘**——重开应用看到一条假的「正在执行 file_grep」比什么都没有更糟；只有 `done: true` 的那一条才写 |\n| 加载即装回 | `hydrateTurnSummaries()` 在模块加载时执行；内存里已有更权威的状态（这一轮正在跑）时不覆盖 |\n| 清除同步删档 | `clearTurnProgress(id)` 同时删掉该会话的小结；不带参数清全部时连存储键一起删；`resetTurnProgress()` 也清存储 |\n| 坏档逐条丢弃 | 缺时间、结束早于开始、类型不对的记录单独跳过，不因为一条脏数据把整份档案清空 |\n| 最多留 20 个会话 | 按收口时刻排序保留最近 20 条（`TURN_SUMMARY_SESSIONS`），与 msgCache 同一思路 |",
       "怎么验证",
       "留白"
     ]
@@ -943,7 +955,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "模型页原本是四个页签：模型 / 智能体 / 来源 / 运行。对第一次打开的人来说，这四个名字先要猜一遍——「模型」和「来源」差在哪？「智能体」里的模型下拉跟「模型」里的清单是不是一回事？答案其实很简单：**模型从来源来，本机工具怎么用它属于运行**。既然只有两个问题，就不该让人先在四个标签之间试一遍才知道东西藏在哪。",
       "四条并成两条的能力一件没删：`ChatPage` 自己没有模型选择器，「可用模型」还得有个看得见的地方，所以它落在「来源」末尾（来源决定有哪些模型），「按个给本机工具设模型」落在「运行」里（那是它怎么跑）。",
       "做了什么",
-      "| 变化 | 落地 || --- | --- || 页签只剩两个 | `TabKey` 收到 `\"sources\" \\| \"run\"`；`TABS` 两项；默认页签 `\"sources\"`（来源是落地页，一进来就看得到「加来源」与现有来源） || 可用模型并进来源 | 原「模型」分区的 `<section aria-label=\"可用模型\">` 整块搬到「来源」末尾：模型清单 → 全局模型设置 → 看图与画图 || 本机智能体并进运行 | 原「智能体」分区整块搬到「运行」里、`<ModelTraceView />` 之后：先看它怎么跑，再改它用哪个模型 || 删掉首屏 0/0/0 统计条 | 并页后「订阅账号」这类名字和下面卡片标题重名（`findByText` 都撞成两个），三个 0 也没有信息量 || 空态不再让你跳走 | 「还没有可用的模型」的说明改成「在上面「API Key 服务商」「订阅账号」或「国产智能体」里加一个」，并去掉「添加来源」按钮——现在就在来源页里，点它是原地打转 || `ModelCatalogPanel` 少一个回调 | 删 `onAddSource` 与末尾「去来源添模型」按钮，同上 || 命令面板只留两个入口 | `PALETTE_VIEWS` 去掉「模型 › 模型」「模型 › 智能体」，留「模型 › 来源」「模型 › 运行」 || 副标题说清两个问题 | 「所有模型在一个地方：在「来源」里加，在「运行」里看它怎么跑。」 || 来源变落地页，那几路随之即读 | `sourcesWarm` 仍在，但默认就落在来源：进页面读一次额度 / 走向 / 自动重置 / 插件表 / 账号发现，重渲染与切页签都不再打第二遍（页头「重读全部」是显式入口） |",
+      "| 变化 | 落地 |\n| --- | --- |\n| 页签只剩两个 | `TabKey` 收到 `\"sources\" \\| \"run\"`；`TABS` 两项；默认页签 `\"sources\"`（来源是落地页，一进来就看得到「加来源」与现有来源） |\n| 可用模型并进来源 | 原「模型」分区的 `<section aria-label=\"可用模型\">` 整块搬到「来源」末尾：模型清单 → 全局模型设置 → 看图与画图 |\n| 本机智能体并进运行 | 原「智能体」分区整块搬到「运行」里、`<ModelTraceView />` 之后：先看它怎么跑，再改它用哪个模型 |\n| 删掉首屏 0/0/0 统计条 | 并页后「订阅账号」这类名字和下面卡片标题重名（`findByText` 都撞成两个），三个 0 也没有信息量 |\n| 空态不再让你跳走 | 「还没有可用的模型」的说明改成「在上面「API Key 服务商」「订阅账号」或「国产智能体」里加一个」，并去掉「添加来源」按钮——现在就在来源页里，点它是原地打转 |\n| `ModelCatalogPanel` 少一个回调 | 删 `onAddSource` 与末尾「去来源添模型」按钮，同上 |\n| 命令面板只留两个入口 | `PALETTE_VIEWS` 去掉「模型 › 模型」「模型 › 智能体」，留「模型 › 来源」「模型 › 运行」 |\n| 副标题说清两个问题 | 「所有模型在一个地方：在「来源」里加，在「运行」里看它怎么跑。」 |\n| 来源变落地页，那几路随之即读 | `sourcesWarm` 仍在，但默认就落在来源：进页面读一次额度 / 走向 / 自动重置 / 插件表 / 账号发现，重渲染与切页签都不再打第二遍（页头「重读全部」是显式入口） |",
       "代码上是一次**搬动**而不是重写：两个 `<section>` 原样平移进新位置，内部结构一行没动，diff 里能看出哪段是从哪儿挪过来的（相对缩进保持不变）。",
       "怎么验证",
       "留白"
@@ -965,7 +977,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "插话队列（d.199/d.225）在收口时会整体清空：用户插的话有正文落库，清掉还能从历史里捞回来，所以「这一轮停止后不再自动续跑」是对的。但队列里还有一种条目——**后台子代理交回的结论**（d.349）。它在本机**没有落库副本**：只有交付器把结论文本放进队列这一条路。点一下停止，这条结论就跟着队列一起消失，界面上只留一句「插话没发出去」，而真正没送到的结论一个字都没提。dsh-superagent 原型 `docs/000-philosophy` 把它写成一条硬规矩：**答应的事不能悄悄消失**——失败也要如实报告，不能让它看起来像已经做完了。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 条目记住来源 | `SteerItem` 新增 `source?: \"user\" \\| \"job\"`；`push` / `pending` / 新 API `takeItems()` 都保留它 || 交付时标明身份 | `deliverSubagentJob` 入队带 `source: \"job\"`，mentions 带上它自己的 agent（收口后 `shift()` 另起一轮时知道找谁） || 收口分开处理 | 非 ok 收口（停止/出错）：用户插话照旧清掉（正文已落库），job 条目原序放回队列 || 说清楚留着什么 | 提示会写明「还有 N 条后台子代理的结论没交给模型：它们没有存档，我留着，下一轮开始时会先看到」 || 不冒充已送达 | 用户插话的「点『接着做』或重新发送时模型会看到」不会再套到 job 结论上——那条结论不在历史里 || 队列条数照实 | 收口后「已排队 N 条插话」显示真实剩余条数，不是清空后的 0 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 条目记住来源 | `SteerItem` 新增 `source?: \"user\" \\| \"job\"`；`push` / `pending` / 新 API `takeItems()` 都保留它 |\n| 交付时标明身份 | `deliverSubagentJob` 入队带 `source: \"job\"`，mentions 带上它自己的 agent（收口后 `shift()` 另起一轮时知道找谁） |\n| 收口分开处理 | 非 ok 收口（停止/出错）：用户插话照旧清掉（正文已落库），job 条目原序放回队列 |\n| 说清楚留着什么 | 提示会写明「还有 N 条后台子代理的结论没交给模型：它们没有存档，我留着，下一轮开始时会先看到」 |\n| 不冒充已送达 | 用户插话的「点『接着做』或重新发送时模型会看到」不会再套到 job 结论上——那条结论不在历史里 |\n| 队列条数照实 | 收口后「已排队 N 条插话」显示真实剩余条数，不是清空后的 0 |",
       "怎么验证",
       "留白"
     ]
@@ -986,7 +998,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "导出这件事曾经有过，又在 d.147.4.89.11 连「选择消息」一起被移除了：`packages/web/src/lib/export/conversation.ts` 一直留着，`ChatPage` 却只从里面取 `formatBytes` 给附件标签用。结果是：想把一次排查过程贴进 issue、发给同事、或者存档，只能自己选中复制——**时间没了，工具调用全丢**，而「它当时到底读了哪些文件、为什么这么答」恰恰是复盘时最要紧的部分。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 入口回来 | 「更多操作」菜单末尾加「导出这段对话（Markdown）」，点一下直接下载 `.md` || 复用既有格式 | 走 d.25 那份 `buildConversationMarkdown`：标题、会话 ID、导出时间、消息数、附件元信息，格式不变 || 过程可选可见 | `ExportMessage` 新增 `process?: ExportStep[]`，思考段与每次工具调用收进 `<details><summary>过程（N 步）</summary>`；正文不被十几行日志打断 || 一步一行说清 | 工具行带状态记号（✓/✗/⊘/…）、耗时（120ms / 1.2s）、参数摘要与失败/被拒原因；缺字段就省略，不编 0 || 长过程有上限 | 最多列 `MAX_EXPORT_STEPS = 40` 步，其余写「…还有 N 步」——导出文件是给人读的，不是日志堆 || 不糊 HTML | `<details>` 里是 HTML，摘要先转义 `& < >`；否则一句 `<script>` 就能把结构顶坏 || 只导能解的明文 | E2E 消息走 `plainById` 的明文；解不开的不拿 base64 密文凑数——文件是给人读的 || 借用同一套命名 | 文件名沿用 `conversationFileName()`（`和鸣-<标题>-YYYYMMDD-HHMM.md`，非法字符已清） |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 入口回来 | 「更多操作」菜单末尾加「导出这段对话（Markdown）」，点一下直接下载 `.md` |\n| 复用既有格式 | 走 d.25 那份 `buildConversationMarkdown`：标题、会话 ID、导出时间、消息数、附件元信息，格式不变 |\n| 过程可选可见 | `ExportMessage` 新增 `process?: ExportStep[]`，思考段与每次工具调用收进 `<details><summary>过程（N 步）</summary>`；正文不被十几行日志打断 |\n| 一步一行说清 | 工具行带状态记号（✓/✗/⊘/…）、耗时（120ms / 1.2s）、参数摘要与失败/被拒原因；缺字段就省略，不编 0 |\n| 长过程有上限 | 最多列 `MAX_EXPORT_STEPS = 40` 步，其余写「…还有 N 步」——导出文件是给人读的，不是日志堆 |\n| 不糊 HTML | `<details>` 里是 HTML，摘要先转义 `& < >`；否则一句 `<script>` 就能把结构顶坏 |\n| 只导能解的明文 | E2E 消息走 `plainById` 的明文；解不开的不拿 base64 密文凑数——文件是给人读的 |\n| 借用同一套命名 | 文件名沿用 `conversationFileName()`（`和鸣-<标题>-YYYYMMDD-HHMM.md`，非法字符已清） |",
       "怎么验证",
       "留白"
     ]
@@ -1011,7 +1023,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "模型页「来源」里那组卡片的说明一直写着「自动签到覆盖 WorkBuddy、Qoder、Trae CN、MiniMax Code」，可卡片只有六张：WorkBuddy、WorkBuddy AI、Qoder、Qoder CN、MiMo Code、ZCode。**Trae CN 与 MiniMax Code 被点了名，却点不了「接入」**——用户看到的是承诺，伸手却是空的。",
       "原因不是内核不支持：`internal/provider/trae_checkin.go` 里写着 `TraeCNID = \"trae-cn\"`、包名 `@magpie-community/opencode-trae-auth`，`minimax_checkin.go` 里写着 `MiniMaxCodeID`、`MiniMaxCodeGlobalID` 与包名 `@magpie-community/opencode-minimax-auth`；`accounts_cli.go` 的 `pluginLogin` 分支也已放行「有插件就能登录」。缺的只是页面这张表没收录它们——于是这次照内核已确认的清单补齐，一个都不猜。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 三张新卡 | `magpieDomestic.ts` 的 `DOMESTIC_AGENTS` 6 → 9：新增 Trae CN（字节）、MiniMax Code（国内站）、MiniMax Code（国际） || 包名只抄内核 | 新卡的 `pkg` 取自内核签到实现里写明的插件包，不按名字猜 npm 上的同名包（猜错会把不相干的包装进来） || 站别分组 | `DomesticAgent` 新增必填 `site: \"cn\" \\| \"intl\"`，页面按 `DOMESTIC_GROUPS` 渲染成「国内站 6 张 / 国际站 3 张」两组小标题 || 标题说准 | 「国内智能体」→「国产智能体」：九张里三张是国际站，原来那个标题自己就不成立 || 走 Key 的另说 | `DOMESTIC_KEY_NOTE` 删掉 MiniMax Code（它现在是账号了），只留 Qwen Code、Kimi Code，并把「其他地址」改成按钮上的原话「加一个其他地址」 || 本机识别 | `magpieAgents.ts` 的 `NAME_TO_ID` 补 `MiniMax Code → minimax-code`（桌面端与 `mcode` 同一条），装了就能亮「本机已装」 || 风险提示不变 | 仍只有 WorkBuddy 两张卡带风险说明；新卡没有内核给出的封号先例，不硬编一句吓人的话 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 三张新卡 | `magpieDomestic.ts` 的 `DOMESTIC_AGENTS` 6 → 9：新增 Trae CN（字节）、MiniMax Code（国内站）、MiniMax Code（国际） |\n| 包名只抄内核 | 新卡的 `pkg` 取自内核签到实现里写明的插件包，不按名字猜 npm 上的同名包（猜错会把不相干的包装进来） |\n| 站别分组 | `DomesticAgent` 新增必填 `site: \"cn\" \\| \"intl\"`，页面按 `DOMESTIC_GROUPS` 渲染成「国内站 6 张 / 国际站 3 张」两组小标题 |\n| 标题说准 | 「国内智能体」→「国产智能体」：九张里三张是国际站，原来那个标题自己就不成立 |\n| 走 Key 的另说 | `DOMESTIC_KEY_NOTE` 删掉 MiniMax Code（它现在是账号了），只留 Qwen Code、Kimi Code，并把「其他地址」改成按钮上的原话「加一个其他地址」 |\n| 本机识别 | `magpieAgents.ts` 的 `NAME_TO_ID` 补 `MiniMax Code → minimax-code`（桌面端与 `mcode` 同一条），装了就能亮「本机已装」 |\n| 风险提示不变 | 仍只有 WorkBuddy 两张卡带风险说明；新卡没有内核给出的封号先例，不硬编一句吓人的话 |",
       "怎么验证",
       "留白"
     ]
@@ -1032,7 +1044,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "用量账本（d.230）一直在记：每轮收口时把 provider 报回来的 token 写进 `heming.tokenUsage.v1`，`/status` 也能查。但它只活在两个角落：一是 `/status`，要手打；二是设置里的用量面板，看的是全局与按模型的聚合。**具体到「我现在聊的这个会话」花了多少，聊天页上看不到**——而这恰恰是用户最常想知道的那个数（尤其换模型、开长任务之前）。DSH 在每个回合结束后有用量药丸（provider/model、input/output、缓存），和鸣这一轮先补上「本会话累计」，口径用账本里已有的真数。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 本会话用量 | `ChatPage` 订阅 token 账本，按会话聚合 `totalsOf(recordsForConversation(records, convId))` || 显示位置 | 输入框下方那行「N 轮 · M 步」后面补 ` · 12.4K tokens`，不新开面板、不加一行 || 只显示真数 | 账本里 `reportedTokens` 为 null 的记录不计入；一条都没报过就整段不显示，不写「0 tokens」 || 悬停拆分 | 药丸上给 `title`：`输入 9.8K · 输出 2.6K`（同一份 totals，不另算） || 自动刷新 | 订阅 `useTokenUsageStore` 的 `records`：每轮收口记账后这一行自己变，不需要切页刷新 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 本会话用量 | `ChatPage` 订阅 token 账本，按会话聚合 `totalsOf(recordsForConversation(records, convId))` |\n| 显示位置 | 输入框下方那行「N 轮 · M 步」后面补 ` · 12.4K tokens`，不新开面板、不加一行 |\n| 只显示真数 | 账本里 `reportedTokens` 为 null 的记录不计入；一条都没报过就整段不显示，不写「0 tokens」 |\n| 悬停拆分 | 药丸上给 `title`：`输入 9.8K · 输出 2.6K`（同一份 totals，不另算） |\n| 自动刷新 | 订阅 `useTokenUsageStore` 的 `records`：每轮收口记账后这一行自己变，不需要切页刷新 |",
       "怎么验证",
       "留白"
     ]
@@ -1053,7 +1065,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`docs/STREAMING.md` 的对账清单里有一条：DSH 的输入区有 `StatsPills`，结束之后能看到 TTFT（首字延迟）与出字速度；和鸣只有「上一轮：5 步 · 用时 1 分 12 秒」。「用时 1 分 12 秒」这个数字单独看没有判断力——同样是两分钟，十秒才开口和立刻开口的体感完全不同；写代码时如果出字速度掉到十几字每秒，多半是模型侧在排队，而不是活难。这两项都是**已经发生过的事实**，算出来不需要额外请求，也不该让用户去翻日志。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 首字时刻 | `TurnProgress` 新增 `firstTokenAt`；`ChatPage` 在第一个正文片段到达时调 `noteTurnFirstToken()`，只写一次 || 正文字数 | 收口时把这一轮真正产出的字符数交给 `settleTurnProgress(convId, now, chars)`，取最大值、非负取整 || 小结口径 | 收口行变成 `上一轮：5 步 · 用时 1 分 12 秒 · 首字 1.2 秒 · 38 字/秒`；没有正文的纯工具轮不补这两段 || 不编数字 | 正文段不足 0.5 秒时不报字/秒；没有首字时刻不报首字；中文按「字」算，不冒充 token || 兼容旧状态 | 两个字段都是可选的：不带它们的旧进度对象，输出仍是原来的「上一轮：N 步 · 用时 X」 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 首字时刻 | `TurnProgress` 新增 `firstTokenAt`；`ChatPage` 在第一个正文片段到达时调 `noteTurnFirstToken()`，只写一次 |\n| 正文字数 | 收口时把这一轮真正产出的字符数交给 `settleTurnProgress(convId, now, chars)`，取最大值、非负取整 |\n| 小结口径 | 收口行变成 `上一轮：5 步 · 用时 1 分 12 秒 · 首字 1.2 秒 · 38 字/秒`；没有正文的纯工具轮不补这两段 |\n| 不编数字 | 正文段不足 0.5 秒时不报字/秒；没有首字时刻不报首字；中文按「字」算，不冒充 token |\n| 兼容旧状态 | 两个字段都是可选的：不带它们的旧进度对象，输出仍是原来的「上一轮：N 步 · 用时 X」 |",
       "怎么验证",
       "留白"
     ]
@@ -1077,7 +1089,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**渲染**：上一轮把增量按绘制帧合并了，但每一帧仍然要把整段正文重新交给 `react-markdown` 解析——两千字的回答，每帧解析两千字，越到后面越慢。DSH 的流式渲染把已经写完的前缀「冻住」，每帧只重解析最后两块（`UNSTABLE_TAIL_BLOCKS = 2`）。和鸣此前没有这一层，所以长回答滚动时的卡顿主要来自这里。",
       "**诚实**：后台子代理（`background: true`）此前只活在内存里。应用被关掉或刷新时，那些正在跑、排队的任务一声不响地消失——模型以为「派出去了，等结论」，用户以为「在后台跑着」，实际上什么都没了。`dsh-superagent` 原型的做法正好相反：决策之后要做的事先落盘（stored work），重启时把没跑完的标成「被重启中断」并带上恢复说明，而不是假装做过。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || markdown 分块 | 新增 `packages/web/src/lib/markdown/blocks.ts`：只在空行处切，且不切开跨空行延续的列表、表格、缩进续行；围栏代码块未闭合时，从围栏那块起全部算尾部 || 冻结前缀 | `MarkdownMessage` 流式时把正文切为「冻结前缀 + 尾部」，前缀用 `memo` 的 `MarkdownChunk` 渲染——`text` 不变就不重新解析 || 尾部两块 | 与 DSH 同口径：最后两块永远不冻结（正在增长、可能被下一行改写）；收口后仍整段解析一次，只发生一次，不冒切分风险 || 重启不静默 | `subagentJobs.ts` 把 queued/running 的**元数据**落盘（`heming.subagentJobs.v1`），收口即从盘上消失 || 中断如实交回 | 启动时 `restoreInterruptedJobs()` 把上次没跑完的标成 `failed`、原因写「应用重启时中断…」，交给已有的交付路径送回会话；不占并发、不假装还在跑 || 坏档不猜 | 盘上的记录缺字段、不是 JSON、状态不认识，一律安静丢弃；同一批恢复只发生一次 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| markdown 分块 | 新增 `packages/web/src/lib/markdown/blocks.ts`：只在空行处切，且不切开跨空行延续的列表、表格、缩进续行；围栏代码块未闭合时，从围栏那块起全部算尾部 |\n| 冻结前缀 | `MarkdownMessage` 流式时把正文切为「冻结前缀 + 尾部」，前缀用 `memo` 的 `MarkdownChunk` 渲染——`text` 不变就不重新解析 |\n| 尾部两块 | 与 DSH 同口径：最后两块永远不冻结（正在增长、可能被下一行改写）；收口后仍整段解析一次，只发生一次，不冒切分风险 |\n| 重启不静默 | `subagentJobs.ts` 把 queued/running 的**元数据**落盘（`heming.subagentJobs.v1`），收口即从盘上消失 |\n| 中断如实交回 | 启动时 `restoreInterruptedJobs()` 把上次没跑完的标成 `failed`、原因写「应用重启时中断…」，交给已有的交付路径送回会话；不占并发、不假装还在跑 |\n| 坏档不猜 | 盘上的记录缺字段、不是 JSON、状态不认识，一律安静丢弃；同一批恢复只发生一次 |",
       "怎么验证",
       "留白"
     ]
@@ -1101,7 +1113,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "一是「每个 token 都写一次 store」。模型吐一个字就 `setState` 一次，等于每个字都提交一次 React 渲染——长回答滚起来发涩，输入框也跟着卡。DSH 的做法是「按绘制帧发布」：同一帧里攒下的增量只提交一次。",
       "二是「过程全摊开」。一轮长任务十几二十次工具调用，历史里每条消息都把思考与工具步骤铺满屏幕，翻回去找答案得先滚过一屏过程。DSH 在回合结束时会把它收成一行「已完成，用时 …」，想看再点开。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 对照文档 | 新增 `docs/STREAMING.md`：两仓链路图、DSH 屏幕上到底出现哪些行、渲染性能三招、和鸣现状与十条差距、分三步的优化清单、不建议照搬项、验收方式 || 绘制帧合并 | `onLocalDelta` 不再逐次写 store：同一 `requestAnimationFrame` 内的增量攒成一笔，帧尾统一 `upsertStream`；工具行、思考块、收口之前先 `flushLocalDeltas()`，保证「正文 → 工具 → 思考」顺序不颠倒 || 测试环境不吃合并 | jsdom 的 rAF 是定时器模拟的，合并会让断言依赖计时；检测到 jsdom 时退回逐次写入，测试跑得更快也更确定 || 历史过程收起 | 新增 `MessageProcess`：落定后的消息只留一行「处理过程 · N 次工具调用 · 思考 M 字」，点开才是分步的思考与工具；正文始终可见 || 流式气泡不变 | 正在跑的时候仍然显示完整分步过程（那是「现在在干什么」），只有落定后才收起 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 对照文档 | 新增 `docs/STREAMING.md`：两仓链路图、DSH 屏幕上到底出现哪些行、渲染性能三招、和鸣现状与十条差距、分三步的优化清单、不建议照搬项、验收方式 |\n| 绘制帧合并 | `onLocalDelta` 不再逐次写 store：同一 `requestAnimationFrame` 内的增量攒成一笔，帧尾统一 `upsertStream`；工具行、思考块、收口之前先 `flushLocalDeltas()`，保证「正文 → 工具 → 思考」顺序不颠倒 |\n| 测试环境不吃合并 | jsdom 的 rAF 是定时器模拟的，合并会让断言依赖计时；检测到 jsdom 时退回逐次写入，测试跑得更快也更确定 |\n| 历史过程收起 | 新增 `MessageProcess`：落定后的消息只留一行「处理过程 · N 次工具调用 · 思考 M 字」，点开才是分步的思考与工具；正文始终可见 |\n| 流式气泡不变 | 正在跑的时候仍然显示完整分步过程（那是「现在在干什么」），只有落定后才收起 |",
       "怎么验证",
       "留白"
     ]
@@ -1127,7 +1139,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "轨迹页只画「这一轮」，翻回上一轮就是空的——用户看的是一个会话，不是一次请求；DSH 的轨迹页是整段会话的账本，按轮分组、每轮里能看见用户说了什么、模型想了什么、调了什么工具、得了什么结果。上下文页则一直用「用户手填的预算」当分母，70% 还是 80% 全凭猜；DSH 的规则很清楚：窗口的 80% 才该压缩，且要给输出与摘要留余量，压缩时保留最近 16% 原文。设置里那两个「预算 / 保留轮数」下拉，看起来像调优，实际只有两个结果：调低 = 更早失忆，调高 = 越过窗口换一次 400。",
       "这一轮按 DSH 重做轨迹页与会话账本，上下文页改成窗口占用口径，设置里删掉自定义预算，改由规则算出、只读展示。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 轨迹页 = 整段会话 | TrajectoryView 按用户消息分轮：用户 / 思考 / 工具 / 确认 / 回答逐行列出，当前轮接在末尾并标「进行中」；旧消息没有分步记录就退化成「一段思考 + 工具」，不假装有顺序 || 工具栏 | 搜索（步骤 / 工具 / 参数 / 结果）、折叠全部轮次、时长 / 等宽切换、选中轮次后「看全部轮次」；筛选时给「命中 / 总数」 || 时间线 | 每轮一根段带，按每步真实耗时着色；没有时间戳时按等宽，不编时间 || 行内详情 | 点一行展开参数与结果全文（工具）或整段思考（思考），不再挤在标题里 || 上下文页按窗口 | 大号百分比（分母是窗口）+ 圆环 +「窗口 / 已用 / 压缩阈值」三个绝对值；进度条改名「上下文窗口占用」，超过阈值转警告色并提示下一轮先压缩 || 分段占比 | 消息 / 工具结果 / 预留三段堆叠条 + 图例 + 剩余额度与百分比 || 预算按 DSH 算 | compactSpec：阈值 = min(窗口 × 80%, 窗口 − 输出预留 − 摘要余量)；保留 = 消息预算 × 16%；头寸默认 65536；窗口未知才回 6000 / 8 轮 || 设置删掉自定义 | 预算与保留轮数两个下拉、以及「按窗口自动分配」开关全部删除；改为只读面板展示 窗口 / 压缩阈值 / 保留原文 / 最近轮数 / 摘要余量，并写清公式；只留「启用上下文预算」「用模型生成早期摘要」两个真偏好 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 轨迹页 = 整段会话 | TrajectoryView 按用户消息分轮：用户 / 思考 / 工具 / 确认 / 回答逐行列出，当前轮接在末尾并标「进行中」；旧消息没有分步记录就退化成「一段思考 + 工具」，不假装有顺序 |\n| 工具栏 | 搜索（步骤 / 工具 / 参数 / 结果）、折叠全部轮次、时长 / 等宽切换、选中轮次后「看全部轮次」；筛选时给「命中 / 总数」 |\n| 时间线 | 每轮一根段带，按每步真实耗时着色；没有时间戳时按等宽，不编时间 |\n| 行内详情 | 点一行展开参数与结果全文（工具）或整段思考（思考），不再挤在标题里 |\n| 上下文页按窗口 | 大号百分比（分母是窗口）+ 圆环 +「窗口 / 已用 / 压缩阈值」三个绝对值；进度条改名「上下文窗口占用」，超过阈值转警告色并提示下一轮先压缩 |\n| 分段占比 | 消息 / 工具结果 / 预留三段堆叠条 + 图例 + 剩余额度与百分比 |\n| 预算按 DSH 算 | compactSpec：阈值 = min(窗口 × 80%, 窗口 − 输出预留 − 摘要余量)；保留 = 消息预算 × 16%；头寸默认 65536；窗口未知才回 6000 / 8 轮 |\n| 设置删掉自定义 | 预算与保留轮数两个下拉、以及「按窗口自动分配」开关全部删除；改为只读面板展示 窗口 / 压缩阈值 / 保留原文 / 最近轮数 / 摘要余量，并写清公式；只留「启用上下文预算」「用模型生成早期摘要」两个真偏好 |",
       "怎么验证",
       "留白"
     ]
@@ -1155,7 +1167,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一轮把「派活」和「后台」补齐了，但实测里更刺眼的是另一组问题：模型被两道内部闸门卡住（工具结果累计到 token 预算就收口、最多 12 轮工具就停），停下来时还要自己解释「任务清单还有未完成项，正在自动接着做」「回复『继续』可以接着做」；回答末尾还会追加一段「来源（来自本机知识库）：…」。用户要的是：不要上限、不要自动续跑、不要来源脚注，思考要一步一停地摊开，轮和步要分开算，输入框要有层次。",
       "这一轮把这些内部兜底全部拆掉，并重做了输入区与两个页签。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 不再有次数上限 | `agentStream` 删掉「工具结果累计 token 到顶就收口」与「12 轮工具就停」两道闸：跑到模型自己给出答案为止 || 不再截断工具结果 | `truncateToolResult` 默认原样返回，只有调用方显式给上限才截；`spill-<n>` handle 机制保留 || 不再自动续跑 | 去掉「任务清单还有未完成项，正在自动接着做…」与「回复『继续』可以接着做」：一轮何时结束由模型与用户决定 || 不再拼来源脚注 | 回答末尾不再追加「来源（来自本机知识库）：…」；找到什么由模型写进正文（对齐 DSH 的回复形态） || 思考分步 | 新增 `TranscriptStep`（think / tool 交错）：每段思考自成一块、紧跟它触发的调用；流式与回看都按「想 → 做 → 再想」铺开，旧消息回落旧版式 || 轮 / 步分开 | 轮 = 用户发一条 + AI 答完 + 停止；步 = AI 每次工具操作。进度行改「第 3 步 · 正在执行 file_grep」「上一轮：5 步 · 用时 1 分 12 秒」，输入框下方居中显示「N 轮 · M 步」 || 发送键就是停止键 | 生成中同一个圆形按钮变成「停止生成」，不再另挂文字「停止」；运行中插话用 Enter 提交 || 左侧转圈 | 会话列表「正在跑」文字换成转圈图标（`aria-label=\"正在跑\"`，减少动效偏好下不转） || 输入框重做 | 单框三层：容器投影 + 底栏浅底 + 聚焦描边加深；textarea 内边距与行高放大，动作行独立成条 || 上方不再摆改动 | 会话台账移到右侧「会话进度」栏，本轮改动收进输入框内部第一行；输入框上方只留任务清单 || 底下不再常驻快捷键 | 删掉「Enter 发送 · Shift+Enter 换行 · Esc 停止生成」那一行 || 轨迹页对齐 DSH | 工具栏：搜索步骤/工具/参数、全部/思考/工具/确认/回答 五档过滤、命中计数；筛选时收起工具表，无命中给可操作说明 || 上下文页对齐 billion-context | 预算分段条（消息 / 工具结果 / 预留）+ 图例 + 剩余额度与百分比 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 不再有次数上限 | `agentStream` 删掉「工具结果累计 token 到顶就收口」与「12 轮工具就停」两道闸：跑到模型自己给出答案为止 |\n| 不再截断工具结果 | `truncateToolResult` 默认原样返回，只有调用方显式给上限才截；`spill-<n>` handle 机制保留 |\n| 不再自动续跑 | 去掉「任务清单还有未完成项，正在自动接着做…」与「回复『继续』可以接着做」：一轮何时结束由模型与用户决定 |\n| 不再拼来源脚注 | 回答末尾不再追加「来源（来自本机知识库）：…」；找到什么由模型写进正文（对齐 DSH 的回复形态） |\n| 思考分步 | 新增 `TranscriptStep`（think / tool 交错）：每段思考自成一块、紧跟它触发的调用；流式与回看都按「想 → 做 → 再想」铺开，旧消息回落旧版式 |\n| 轮 / 步分开 | 轮 = 用户发一条 + AI 答完 + 停止；步 = AI 每次工具操作。进度行改「第 3 步 · 正在执行 file_grep」「上一轮：5 步 · 用时 1 分 12 秒」，输入框下方居中显示「N 轮 · M 步」 |\n| 发送键就是停止键 | 生成中同一个圆形按钮变成「停止生成」，不再另挂文字「停止」；运行中插话用 Enter 提交 |\n| 左侧转圈 | 会话列表「正在跑」文字换成转圈图标（`aria-label=\"正在跑\"`，减少动效偏好下不转） |\n| 输入框重做 | 单框三层：容器投影 + 底栏浅底 + 聚焦描边加深；textarea 内边距与行高放大，动作行独立成条 |\n| 上方不再摆改动 | 会话台账移到右侧「会话进度」栏，本轮改动收进输入框内部第一行；输入框上方只留任务清单 |\n| 底下不再常驻快捷键 | 删掉「Enter 发送 · Shift+Enter 换行 · Esc 停止生成」那一行 |\n| 轨迹页对齐 DSH | 工具栏：搜索步骤/工具/参数、全部/思考/工具/确认/回答 五档过滤、命中计数；筛选时收起工具表，无命中给可操作说明 |\n| 上下文页对齐 billion-context | 预算分段条（消息 / 工具结果 / 预留）+ 图例 + 剩余额度与百分比 |",
       "怎么验证",
       "留白"
     ]
@@ -1180,7 +1192,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.348 教会了模型「什么时候该派活、任务怎么写」，但派出去之后它只能停在原地等：`agent_task` 是一个同步工具，子代理跑几轮，主对话就空转几轮。真正费时的检索（翻二十份文件、跑一遍全仓搜索、核对几处实现）正好是用户最不想干等的场景；DSH 那边的做法是「派出即返回，结果跑完再当一条消息送回来」，主对话可以继续干别的。",
       "这一轮把派发拆成两条路：**同步**（必须等结论才能往下走）和**后台**（结论回来再接着处理），后台同时最多跑 5 个。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 后台派发 | `agent_task` 新增 `background: true`：工具立刻返回一句话（派了几个、几个在排队），任务进后台队列；同步调用保持原行为，不改既有用法 || 同时最多 5 个 | 全局并发上限 5（`SUBAGENT_MAX_ACTIVE`），不分会话计数；多的自动排队，一个收口就补位；队列只在内存，关窗即散 || 结论自动回来 | 跑完按会话投递，分三种情况：主对话还在跑 → 进插话队列，下一次工具轮模型就能看到；已收口 → 直接另起一轮接着处理（`startRun`，不伪造用户消息）；已经切走 → 先攒着，切回那个会话再补送，绝不会把 A 会话的结论送进 B || 失败也说话 | 失败与取消同样投递，带原因和「不要把它没做完的事当成已完成」；交付被拒（页面不在/正忙）保持未交付，不吞任务 || 看得见 | 子代理进度条报「N 个在跑 · M 个排队」（派了 8 个时不会只显示 5 个）；主「停止」的提示写明后台不受影响，进度条上的「停止」会把后台任务一起停掉 || 提示词教用法 | 注入 `agent_task` 时补一句：有别的活能干就加 `background: true`，派完继续做手头的事、别反复问「好了没有」，必须等结论时别用后台；工具描述同步写清上限与停止方式 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 后台派发 | `agent_task` 新增 `background: true`：工具立刻返回一句话（派了几个、几个在排队），任务进后台队列；同步调用保持原行为，不改既有用法 |\n| 同时最多 5 个 | 全局并发上限 5（`SUBAGENT_MAX_ACTIVE`），不分会话计数；多的自动排队，一个收口就补位；队列只在内存，关窗即散 |\n| 结论自动回来 | 跑完按会话投递，分三种情况：主对话还在跑 → 进插话队列，下一次工具轮模型就能看到；已收口 → 直接另起一轮接着处理（`startRun`，不伪造用户消息）；已经切走 → 先攒着，切回那个会话再补送，绝不会把 A 会话的结论送进 B |\n| 失败也说话 | 失败与取消同样投递，带原因和「不要把它没做完的事当成已完成」；交付被拒（页面不在/正忙）保持未交付，不吞任务 |\n| 看得见 | 子代理进度条报「N 个在跑 · M 个排队」（派了 8 个时不会只显示 5 个）；主「停止」的提示写明后台不受影响，进度条上的「停止」会把后台任务一起停掉 |\n| 提示词教用法 | 注入 `agent_task` 时补一句：有别的活能干就加 `background: true`，派完继续做手头的事、别反复问「好了没有」，必须等结论时别用后台；工具描述同步写清上限与停止方式 |",
       "怎么验证",
       "留白"
     ]
@@ -1201,7 +1213,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.347 把 `agent_task` 和 `agent_team` 交到了模型手里，但实测它还是更愿意自己 `file_read` 十来份文件再回答：提示词只说了「可以派」，没说「什么时候值得派、任务该怎么写、你现在已经花了多少上下文」。子代理又没有主对话历史——任务写成「看一下那个文件」，它只能空跑一轮；而主对话里留下的每段原文，之后每一轮都要重付一次，压缩时还会先丢。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 让模型看见成本 | 运行时提示词写入本会话上下文用量（约 X / Y tokens、百分比），与界面 ContextMeter 用同一份估算；只在真的注入 `agent_task` 时出现，没注入就不凭空报数字 || 到 70% 就催 | 用量 ≥ 70% 追加一句「接下来的检索先派子代理、只要结论；凑够能交付的先收口」，提醒放在还来得及的位置，而不是等到快溢出 || 描述教「怎么派」 | `agent_task` 描述与 `task` / `tasks.items` 参数说明重写：子代理看不到这段对话、任务要自包含（路径/关键词、要回答什么、结论格式）、它只回结论不回过程、一次 `tasks` 并行派、一次 `file_read` 能答的别派 || 别重复读 | 提示词明说「子代理已经读过的文件别再自己读一遍核对」——这条是省上下文最容易漏掉的一半 || 派不下就合并 | 要查的事超过 3 件时，提示词要求先合并成 3 件、先派最费上下文的那几件，而不是硬塞 || 整合者收尾 | 团队里成员改过的文件，提示词要求主模型自己复核 diff、跑相关测试再宣布完成（对齐 DSH 的「谁整合谁负责」） || 拒绝即说明 | 子代理系统提示要求：工具被拒或超出权限时不要换参数反复试，把受限点写进结论交给主对话 || 交付边界 | 子代理系统提示补一句「主对话只会收到你的最终答复，看不到你的工具输出与中间推理」，别在结论里写「见上面」「如前所述」 || 对齐 DSH | 描述口径参考 DSH 的 `subagent`（`providerWording` / `withResultDeliveryGuidance`）；与它的差异（异步派发、`structured_output`、`maxDepth`）连同「为什么暂不做」写进 HANDOFF d.348 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 让模型看见成本 | 运行时提示词写入本会话上下文用量（约 X / Y tokens、百分比），与界面 ContextMeter 用同一份估算；只在真的注入 `agent_task` 时出现，没注入就不凭空报数字 |\n| 到 70% 就催 | 用量 ≥ 70% 追加一句「接下来的检索先派子代理、只要结论；凑够能交付的先收口」，提醒放在还来得及的位置，而不是等到快溢出 |\n| 描述教「怎么派」 | `agent_task` 描述与 `task` / `tasks.items` 参数说明重写：子代理看不到这段对话、任务要自包含（路径/关键词、要回答什么、结论格式）、它只回结论不回过程、一次 `tasks` 并行派、一次 `file_read` 能答的别派 |\n| 别重复读 | 提示词明说「子代理已经读过的文件别再自己读一遍核对」——这条是省上下文最容易漏掉的一半 |\n| 派不下就合并 | 要查的事超过 3 件时，提示词要求先合并成 3 件、先派最费上下文的那几件，而不是硬塞 |\n| 整合者收尾 | 团队里成员改过的文件，提示词要求主模型自己复核 diff、跑相关测试再宣布完成（对齐 DSH 的「谁整合谁负责」） |\n| 拒绝即说明 | 子代理系统提示要求：工具被拒或超出权限时不要换参数反复试，把受限点写进结论交给主对话 |\n| 交付边界 | 子代理系统提示补一句「主对话只会收到你的最终答复，看不到你的工具输出与中间推理」，别在结论里写「见上面」「如前所述」 |\n| 对齐 DSH | 描述口径参考 DSH 的 `subagent`（`providerWording` / `withResultDeliveryGuidance`）；与它的差异（异步派发、`structured_output`、`maxDepth`）连同「为什么暂不做」写进 HANDOFF d.348 |",
       "怎么验证",
       "留白"
     ]
@@ -1225,7 +1237,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "之前的派活只有两档：`agent_task` 一次派 1–3 个只读子代理，每人 4 轮，谁也不等谁；`workflow_run` 有先后依赖，但每一步都是同一模板的只读步骤。真正复杂的长任务不是这种形状：它常常要几种不同的角色（先摸清现状、再按威胁模型审、最后写方案），角色之间还有先后，跑完要让用户看得见谁做了什么、停在哪。",
       "协作页以前只能由人在页面上发起一场辩论，和会话里正在干的活不连通——用户在聊天里说「分头查清楚」，和鸣只能自己硬扛。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 派团队 | 新增 `agent_team` 工具（`packages/web/src/lib/agentRuntime/team.ts`）：2–6 位成员，每位写清 `id` / 角色 `agent` / 任务 `task` / 依赖 `needs` / 是否可写 `write` || 有依赖地跑 | 成员按 `needs` 用 Kahn 分层，同批最多 3 个并发；成环时报出「哪些成员在互相等待」，不静默乱序 || 长任务 | 每人默认 4 轮、上限 8 轮（在 `agent_task` 的 6 轮硬顶之上单独放宽）；上游成员结论截断到 1200 字注入下游 || 可写可选 | 写盘要同时满足「用户在安全范围里授权」和「成员 `write: true`」；缺一条就只读，并在工具说明里如实说不出现 `write` || 失败隔离 | 某个成员抛错只把该成员记为未完成，其余成员继续；最终按成员分段回给主模型，附汇总要求 || 按人看进度 | `SubagentRuns` 面板按成员显示角色与状态（第 N 轮 / 已完成 / 未完成）；进度事件带 `memberId` 与 `role` || 留档回看 | 新增 `teamRuns.ts`：运行中在内存，收口写 `heming.teamRuns.v1`（上限 20 条），切会话清掉在跑的；协作页新增只读区块「对话里的团队任务」，显示目标、成员角色、任务与真实状态 || 提示词说清分界 | 注入 `agent_team` 时才写「复杂长任务值得拆角色、分先后时用它；只有一件小事时用 `agent_task` 就够，别为三行改动组队」；同时把「本轮可用工具」上限 12 → 14，否则追加在目录末尾的编排工具会被折进「还有 N 个」，模型看得见授权、看不见名字 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 派团队 | 新增 `agent_team` 工具（`packages/web/src/lib/agentRuntime/team.ts`）：2–6 位成员，每位写清 `id` / 角色 `agent` / 任务 `task` / 依赖 `needs` / 是否可写 `write` |\n| 有依赖地跑 | 成员按 `needs` 用 Kahn 分层，同批最多 3 个并发；成环时报出「哪些成员在互相等待」，不静默乱序 |\n| 长任务 | 每人默认 4 轮、上限 8 轮（在 `agent_task` 的 6 轮硬顶之上单独放宽）；上游成员结论截断到 1200 字注入下游 |\n| 可写可选 | 写盘要同时满足「用户在安全范围里授权」和「成员 `write: true`」；缺一条就只读，并在工具说明里如实说不出现 `write` |\n| 失败隔离 | 某个成员抛错只把该成员记为未完成，其余成员继续；最终按成员分段回给主模型，附汇总要求 |\n| 按人看进度 | `SubagentRuns` 面板按成员显示角色与状态（第 N 轮 / 已完成 / 未完成）；进度事件带 `memberId` 与 `role` |\n| 留档回看 | 新增 `teamRuns.ts`：运行中在内存，收口写 `heming.teamRuns.v1`（上限 20 条），切会话清掉在跑的；协作页新增只读区块「对话里的团队任务」，显示目标、成员角色、任务与真实状态 |\n| 提示词说清分界 | 注入 `agent_team` 时才写「复杂长任务值得拆角色、分先后时用它；只有一件小事时用 `agent_task` 就够，别为三行改动组队」；同时把「本轮可用工具」上限 12 → 14，否则追加在目录末尾的编排工具会被折进「还有 N 个」，模型看得见授权、看不见名字 |",
       "怎么验证",
       "留白"
     ]
@@ -1248,7 +1260,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "测试时反复遇到「本机解不开这条消息（可能来自其他设备、本机缓存被清理，或消息在生成时被中断）」，对话结果凭空消失。查下来不是渲染坏了：自制消息的明文以前只放在内存出站箱里，一旦在回声落盘前刷新 / 断线 / 崩溃，服务端只剩密文，而发送链只有本机持有——这条消息就永远解不开了。",
       "聊天页本身也堆了几处将就：左上角挂着一个并不存在的「标准模式」，选「完全权限」后常驻一条黄条反复提醒，任务清单与本轮改动被塞在输入框里面，而「上一轮：N 轮 · M 次工具」这种事后统计反而贴在输入框上方，正文列 960 太窄、输入框 96 太矮。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 密文回放 | `sealAndSend` / `sealFinish` / `sealError` 封条后，除内存出站箱外，再以 `chain:<chainKid>:<n>` 为键把明文写进 `msgCache`（持久化）；`makeOpenHandler` 真实消息 id 未命中时按链键回退取明文，命中即用真实 id 再入缓存并删掉副条目 || 缓存淘汰也能解 | 发送链保留起始键：新链带 `seed`/`seedN`，轮换下来的旧链进 `retiredSend`（最多 20 条），老链首次启动用「当前链键 + 当前 n」补检查点；明文缓存被每会话 500 条上限挤掉后，`openOwnMessage` 按 `n` 重新派生 `msgKey`，把服务端密文再解一遍 || 换设备仍在 | 本机没有发送链、也没有明文的历史消息依旧显示占位——这是 E2E 的边界，不改 || 编排条 | 去掉「标准模式」chip（和鸣没有模式区分）；「智能体团队」改名「多智能体协作」，点击进协作页，title 写明「人类的团队在左侧「团队」页」 || 团队与协作 | 团队页副标题写明「这里是人类队伍」；协作页副标题写明「这里不是人类团队」 || 输入区重排 | 任务清单、本轮改动撤回、会话改动条移到输入框**上方**；「上一轮：…」移到输入框**下方** || 完全权限 | 不再挂常驻黄条，说明只在安全范围菜单里 || 不再说「正在回答」 | 去掉「生成中…」视觉条与「生成中：X」通知条，只留读屏播报；运行中在动作行给一个「停止」按钮 || 更大 | 输入框默认 144（72–480 可拖），聊天列 960 → 1080 || 轨迹页 | 参考 DSH：步骤带序号、类别（思考 / 工具 / 确认 / 回答）、状态词、耗时、参数预览，底部一张工具表 || 上下文页 | 参考 billion-context：预算与用量改由聊天页实时传入（与输入框上方同源），分别显示消息与工具结果各占多少 token，并展示最近一次折叠，没有折叠就不显示 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 密文回放 | `sealAndSend` / `sealFinish` / `sealError` 封条后，除内存出站箱外，再以 `chain:<chainKid>:<n>` 为键把明文写进 `msgCache`（持久化）；`makeOpenHandler` 真实消息 id 未命中时按链键回退取明文，命中即用真实 id 再入缓存并删掉副条目 |\n| 缓存淘汰也能解 | 发送链保留起始键：新链带 `seed`/`seedN`，轮换下来的旧链进 `retiredSend`（最多 20 条），老链首次启动用「当前链键 + 当前 n」补检查点；明文缓存被每会话 500 条上限挤掉后，`openOwnMessage` 按 `n` 重新派生 `msgKey`，把服务端密文再解一遍 |\n| 换设备仍在 | 本机没有发送链、也没有明文的历史消息依旧显示占位——这是 E2E 的边界，不改 |\n| 编排条 | 去掉「标准模式」chip（和鸣没有模式区分）；「智能体团队」改名「多智能体协作」，点击进协作页，title 写明「人类的团队在左侧「团队」页」 |\n| 团队与协作 | 团队页副标题写明「这里是人类队伍」；协作页副标题写明「这里不是人类团队」 |\n| 输入区重排 | 任务清单、本轮改动撤回、会话改动条移到输入框**上方**；「上一轮：…」移到输入框**下方** |\n| 完全权限 | 不再挂常驻黄条，说明只在安全范围菜单里 |\n| 不再说「正在回答」 | 去掉「生成中…」视觉条与「生成中：X」通知条，只留读屏播报；运行中在动作行给一个「停止」按钮 |\n| 更大 | 输入框默认 144（72–480 可拖），聊天列 960 → 1080 |\n| 轨迹页 | 参考 DSH：步骤带序号、类别（思考 / 工具 / 确认 / 回答）、状态词、耗时、参数预览，底部一张工具表 |\n| 上下文页 | 参考 billion-context：预算与用量改由聊天页实时传入（与输入框上方同源），分别显示消息与工具结果各占多少 token，并展示最近一次折叠，没有折叠就不显示 |",
       "怎么验证",
       "留白"
     ]
@@ -1269,7 +1281,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`.heming/hooks.json` 以前只有「动手之前」这一档：仓库能拦住「别改 generated」，却没法在改完之后说一句「现在格式不对 / 测试挂了」。写完自动格式化、跑一遍相关测试、生成物存在性检查这类事，只能靠提示词祈祷模型自觉。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 执行后规则 | 规则多一个 `on` 字段：`\"pre\"`（缺省，执行前拦截）、`\"post\"`（执行后检查） || 不改变结果 | 执行后规则**拦不住**已经发生的调用，结论只作为说明附在工具结果后面 || 看得到结果 | 执行后 payload 的 `event` 是 `PostToolUse`，多一个 `result: {ok, text}`（结果超过 4000 字截断） || 什么会变成说明 | 超时 / 退出码 2 / 其它非零退出码 / stdout 的 `{\"note\":\"…\"}`；退出码 0 且静默则不打扰模型 || 两档互不串 | `matchHooks` 按 `phase` 过滤：执行前规则不会在 `runPost` 里重跑，反之亦然 || 桌面端与 CLI 同口径 | `packages/web/src/lib/hitl/hooks.ts` 的 `interpretPostHookResult` / `postHookNoteText`、`hookRunner.ts` 的 `runPost`、`packages/cli/src/toolHooks.ts` 的 `createCliPostHookRunner` || 上限 | 一次调用最多附 5 条说明、每条 400 字；检查自己坏掉只丢说明，不影响调用结果 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 执行后规则 | 规则多一个 `on` 字段：`\"pre\"`（缺省，执行前拦截）、`\"post\"`（执行后检查） |\n| 不改变结果 | 执行后规则**拦不住**已经发生的调用，结论只作为说明附在工具结果后面 |\n| 看得到结果 | 执行后 payload 的 `event` 是 `PostToolUse`，多一个 `result: {ok, text}`（结果超过 4000 字截断） |\n| 什么会变成说明 | 超时 / 退出码 2 / 其它非零退出码 / stdout 的 `{\"note\":\"…\"}`；退出码 0 且静默则不打扰模型 |\n| 两档互不串 | `matchHooks` 按 `phase` 过滤：执行前规则不会在 `runPost` 里重跑，反之亦然 |\n| 桌面端与 CLI 同口径 | `packages/web/src/lib/hitl/hooks.ts` 的 `interpretPostHookResult` / `postHookNoteText`、`hookRunner.ts` 的 `runPost`、`packages/cli/src/toolHooks.ts` 的 `createCliPostHookRunner` |\n| 上限 | 一次调用最多附 5 条说明、每条 400 字；检查自己坏掉只丢说明，不影响调用结果 |",
       "怎么验证",
       "留白"
     ]
@@ -1289,7 +1301,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「智能体」分区每行都有「恢复默认」。它做的是**撤掉模型服务写进那个工具配置里的模型**。可有些工具本来就没被写过（`magpie ls` 那栏报的就是 `—`），按下去是一次空操作：还会弹一次二次确认，等于让人认真确认一件不会发生的事。一行里最显眼的两个按钮，其中一个常年无效，读起来就像页面坏了。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/ModelPage.tsx` 新增 `agentIsDefault(agent)` | 没有判断 | `magpie ls` 报的当前模型是空或 `—` 时算「没被写过」 || 同一文件的「恢复默认」按钮 | 只要命令行可用就能点 | 没被写过的工具上灰着，悬停说明「它现在没有用模型服务写入的模型，不用恢复」；真正被写过的工具照旧可点、照旧二次确认 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/components/ModelPage.tsx` 新增 `agentIsDefault(agent)` | 没有判断 | `magpie ls` 报的当前模型是空或 `—` 时算「没被写过」 |\n| 同一文件的「恢复默认」按钮 | 只要命令行可用就能点 | 没被写过的工具上灰着，悬停说明「它现在没有用模型服务写入的模型，不用恢复」；真正被写过的工具照旧可点、照旧二次确认 |",
       "怎么验证",
       "留白"
     ]
@@ -1310,7 +1322,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「智能体」分区里每行都能改模型，但改完要按「应用」才写进那个工具自己的配置。工具一多，常见的情况是：改了两个、忘了按应用，或者某个工具其实还空着没配模型，却要一行一行往下翻才看得出来。这些都不是设置项，而是**待办**，应该一眼看到。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 新 `packages/web/src/lib/agentSummary.ts` | 没有汇总 | `agentSummary({ total, dirty, unset })` → `2 个工具改了还没写进去；3 个还没配模型。`；两类都是 0 时返回空串 || `packages/web/src/components/ModelPage.tsx` 「本机智能体」卡头 | 只有标题与「重新检测」 | 标题下多一行 `role=\"status\"` 的汇总；有没落盘的改动时用告警色；没有待办就不显示 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 新 `packages/web/src/lib/agentSummary.ts` | 没有汇总 | `agentSummary({ total, dirty, unset })` → `2 个工具改了还没写进去；3 个还没配模型。`；两类都是 0 时返回空串 |\n| `packages/web/src/components/ModelPage.tsx` 「本机智能体」卡头 | 只有标题与「重新检测」 | 标题下多一行 `role=\"status\"` 的汇总；有没落盘的改动时用告警色；没有待办就不显示 |",
       "判据：`dirty` = 选了但和 `magpie ls` 报的当前模型不同的工具数；`unset` = 既没选、`magpie ls` 也没报出可用模型（`—`）的工具数；只数能改写的（有 id 的）。",
       "怎么验证",
       "留白"
@@ -1334,7 +1346,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.325 起 `heming mcp serve` 会把「这个仓库的规矩」按 MCP 的 `resources` 交出去：命令文件、`AGENTS.md` 一族、三份 `.heming` 配置。但那份名单是**写死的**。编辑器真正想读的常常是普通源码（「把这个文件全文读进来当上下文」），它只能退回去调 `file_read` 工具——那要多跑一轮模型调用，还得让模型把路径拼对。MCP 本身给了这类需求一个标准答案：**资源模板**。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/cli/src/mcpCatalog.ts` | 只有固定名单 | 新增 `MCP_RESOURCE_TEMPLATE_URI = \"heming://workspace/{path}\"`、`McpResourceTemplate`、`describeResourceTemplates()`、`readWorkspaceResource({ cwd, uri, bridge? })` || `packages/cli/src/mcp.ts` | 没有 `resources/templates/list`；`resources/read` 只查固定名单 | `McpContext` 新增 `readResource?`；新增 `resources/templates/list`；`resources/read` 先查名单、再走模板读盘；`initialize` 在只有模板时也声明 `resources` 能力；`instructions` 写明模板用法；未知方法清单补上新方法 || `packages/cli/src/mcpServe.ts` | 只注入 `catalog` | 注入 `readResource: (uri) => readWorkspaceResource({ cwd, uri })` |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/cli/src/mcpCatalog.ts` | 只有固定名单 | 新增 `MCP_RESOURCE_TEMPLATE_URI = \"heming://workspace/{path}\"`、`McpResourceTemplate`、`describeResourceTemplates()`、`readWorkspaceResource({ cwd, uri, bridge? })` |\n| `packages/cli/src/mcp.ts` | 没有 `resources/templates/list`；`resources/read` 只查固定名单 | `McpContext` 新增 `readResource?`；新增 `resources/templates/list`；`resources/read` 先查名单、再走模板读盘；`initialize` 在只有模板时也声明 `resources` 能力；`instructions` 写明模板用法；未知方法清单补上新方法 |\n| `packages/cli/src/mcpServe.ts` | 只注入 `catalog` | 注入 `readResource: (uri) => readWorkspaceResource({ cwd, uri })` |",
       "模板读盘的几条边界都在 `readWorkspaceResource` 一个函数里：URI 必须是 `heming://workspace/<相对路径>`（`..`、开头 `/`、别的命名空间一律拒）、算一次相对路径确认没跑出工作区、只给文本（不存在/目录/二进制/超大/符号链接各自一句人话）、单份超 `MCP_CATALOG_MAX_FILE_CHARS` 截断并指回 `file_read`。模板**只读、不参与订阅推送**：`resources/subscribe` 仍只认固定名单里的 URI。",
       "怎么验证",
       "留白"
@@ -1357,7 +1369,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「额度走向」展开后只有一条曲线和右端一段虚线。虚线代表「离重置还有一段」，可那段空白到底是一小时还是一天，图上没有任何刻度——同一张图，5 小时的窗口和每周的窗口看起来一模一样。结论行虽然写了「2 小时后重置」，但要拿它去换算曲线左端是什么时候，只能自己心算。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/quotaHistory.ts` | 有 `lineLastAt` / `lineResetsAt`，没有「第一份读数是什么时候」 | 新增 `lineFirstAt(line): number \\| null`（读不出或时间戳坏了返回 null） || `packages/web/src/components/model/QuotaTrend.tsx` | 曲线下方没有刻度 | 知道重置时刻时，曲线下方补一行两端文字：左端 `2 小时前`（第一份读数）、右端 `4 小时后重置`；不知道重置时刻就不硬写端点 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/lib/quotaHistory.ts` | 有 `lineLastAt` / `lineResetsAt`，没有「第一份读数是什么时候」 | 新增 `lineFirstAt(line): number \\| null`（读不出或时间戳坏了返回 null） |\n| `packages/web/src/components/model/QuotaTrend.tsx` | 曲线下方没有刻度 | 知道重置时刻时，曲线下方补一行两端文字：左端 `2 小时前`（第一份读数）、右端 `4 小时后重置`；不知道重置时刻就不硬写端点 |",
       "怎么验证",
       "留白"
     ]
@@ -1378,7 +1390,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「来源」页把同一个 provider 说了两遍：一遍是「其余来源的额度」卡（只有额度、没有按钮），一遍是「已添加的来源」列表（有测试、换 Key、高级、删除，却没有额度）。想知道「这个 Key 还剩多少、要不要续」，得上下对着看；想动手又得回到另一张卡。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/magpieQuotaCards.ts` | 只有 `cardSummary` 一句结论 | 新增 `cardTone(card)`：颜色跟着最紧的那份窗口走（见底红、偏紧黄、其余中性；读不到按红；钱包余额与厂商原话没有份额可比，走中性） || `packages/web/src/components/ModelPage.tsx` 来源行 | 名称后只有计划徽标 | 同一个 provider 有额度时，紧跟一枚额度徽标（`剩 30%`），悬停写「种类 · 套餐」，读不到写原因 || 同上「其余来源的额度」卡 | 列所有 Key / 套餐 / 余额 | 只列**没有对应来源行**的（钱包余额、没有 Key 的套餐）；卡头副标题改成「没有对应来源行的 Key、套餐与钱包余额」 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/lib/magpieQuotaCards.ts` | 只有 `cardSummary` 一句结论 | 新增 `cardTone(card)`：颜色跟着最紧的那份窗口走（见底红、偏紧黄、其余中性；读不到按红；钱包余额与厂商原话没有份额可比，走中性） |\n| `packages/web/src/components/ModelPage.tsx` 来源行 | 名称后只有计划徽标 | 同一个 provider 有额度时，紧跟一枚额度徽标（`剩 30%`），悬停写「种类 · 套餐」，读不到写原因 |\n| 同上「其余来源的额度」卡 | 列所有 Key / 套餐 / 余额 | 只列**没有对应来源行**的（钱包余额、没有 Key 的套餐）；卡头副标题改成「没有对应来源行的 Key、套餐与钱包余额」 |",
       "怎么验证",
       "留白"
     ]
@@ -1403,7 +1415,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`--ask`（d.323）只把**命令**交给了人，写文件这条路仍然是「根内合法就自动写」。可真正把仓库改坏的多半是写：模型一次任务连着改十几个文件，中间某一笔改错了，人是在跑完之后翻diff 才发现的——那时它已经落盘，只能用 `heming rewind` 或 git 往回退。",
       "终端里缺的是「动手之前看一眼这一笔改了什么」。桌面端早就有这个位（工具卡片展开就是增删对照），CLI 一直没有。",
       "做了什么",
-      "| 位置 | 做了什么 || --- | --- || `packages/cli/src/args.ts` | 新增 `--ask-writes`（不接受取值）。必须与 `--ask` 同时给——没有 `--ask` 就没人回答，直接报错而不是悄悄退化成自动放行。`sessions` / `memory` / `rewind` / `commands` / `mcp serve` 都拒收它 || `packages/cli/src/tooling.ts` | 闸门的写入分支在**路径安全通过之后**增加一道询问：`--ask-writes` 打开时，根内合法写入也停下来问。越界写仍在前一步直接拒绝，人的点头不能把根外写变成合法 || `packages/cli/src/tooling.ts` | 复用桌面端的参数对照 `argDiff`（`file_write` 整段新增、`file_edit` 行级 diff、`file_patch` 按补丁文法），生成 `detail`（「新增 2 行 / 删除 1 行」）与 `preview`（`+ / - / 空格` 前缀的逐行对照，最多 20 行，超出明说截断） || `packages/cli/src/approvals.ts` | `ApprovalRequest` 新增 `preview` 与 `kind`（`danger` / `write`）。审批框按行画预览，排在「为什么问你」之前 || `packages/cli/src/tooling.ts` | **许可范围分开记**：写文件答「本次运行都允许」只放行写入，不放行命令；命令那边的一次性许可也照旧要消费。`deny-all` 仍然两边都停 || `packages/cli/src/index.ts` / `run.ts` | 接线、USAGE/HELP 文案、「审批已开启」那行在开了写入审批时补一句「（写文件也会问，并画出增删对照）」 |",
+      "| 位置 | 做了什么 |\n| --- | --- |\n| `packages/cli/src/args.ts` | 新增 `--ask-writes`（不接受取值）。必须与 `--ask` 同时给——没有 `--ask` 就没人回答，直接报错而不是悄悄退化成自动放行。`sessions` / `memory` / `rewind` / `commands` / `mcp serve` 都拒收它 |\n| `packages/cli/src/tooling.ts` | 闸门的写入分支在**路径安全通过之后**增加一道询问：`--ask-writes` 打开时，根内合法写入也停下来问。越界写仍在前一步直接拒绝，人的点头不能把根外写变成合法 |\n| `packages/cli/src/tooling.ts` | 复用桌面端的参数对照 `argDiff`（`file_write` 整段新增、`file_edit` 行级 diff、`file_patch` 按补丁文法），生成 `detail`（「新增 2 行 / 删除 1 行」）与 `preview`（`+ / - / 空格` 前缀的逐行对照，最多 20 行，超出明说截断） |\n| `packages/cli/src/approvals.ts` | `ApprovalRequest` 新增 `preview` 与 `kind`（`danger` / `write`）。审批框按行画预览，排在「为什么问你」之前 |\n| `packages/cli/src/tooling.ts` | **许可范围分开记**：写文件答「本次运行都允许」只放行写入，不放行命令；命令那边的一次性许可也照旧要消费。`deny-all` 仍然两边都停 |\n| `packages/cli/src/index.ts` / `run.ts` | 接线、USAGE/HELP 文案、「审批已开启」那行在开了写入审批时补一句「（写文件也会问，并画出增删对照）」 |",
       "怎么验证",
       "留白"
     ]
@@ -1424,7 +1436,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "「智能体」分区每一行原来有两处说同一件事，而其中一处还是假的：",
       "1. 下拉框在没挑过时显示 `选择模型…`，看上去像**这个工具还没配模型**；它此刻真正用的模型其实写在下面那行小字里——同一个事实分两处看，第一处还是空的。2. 「应用」按钮一直亮着：挑的是它现在就用的那个模型也亮，点下去还照样弹二次确认，确认完写进配置的内容和原来一模一样。用户只能靠记性判断「我到底改了没有」。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/ModelPage.tsx` 智能体下拉 | `value={agentModelOf(agent)}`，没挑过就是空 → 显示「选择模型…」 | 新增 `agentSelectValue(agent)`：没挑过就显示 `magpie ls` 报的当前模型；只有当前模型确实在可选项里才回填（被「可见模型」挡住的仍留空，不给出一个它选不了的选项） || 同一行的「应用」 | `disabled={!cli \\|\\| !isModelId(...)}`，永远亮 | 新增 `agentDirtyOf(agent)`：选的和它现在用的不一样才可点；一样时灰掉，`title` 写「和它现在用的模型一样，不用再写一次」 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/components/ModelPage.tsx` 智能体下拉 | `value={agentModelOf(agent)}`，没挑过就是空 → 显示「选择模型…」 | 新增 `agentSelectValue(agent)`：没挑过就显示 `magpie ls` 报的当前模型；只有当前模型确实在可选项里才回填（被「可见模型」挡住的仍留空，不给出一个它选不了的选项） |\n| 同一行的「应用」 | `disabled={!cli \\|\\| !isModelId(...)}`，永远亮 | 新增 `agentDirtyOf(agent)`：选的和它现在用的不一样才可点；一样时灰掉，`title` 写「和它现在用的模型一样，不用再写一次」 |",
       "怎么验证",
       "留白"
     ]
@@ -1443,7 +1455,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`heming run --mcp`（d.309）接进来的 MCP 服务只有一种：本地进程，`.heming/mcp.json` 里写 `command` / `args` / `env` / `cwd`。可 MCP 早就有了 HTTP 传输（POST 一条 JSON-RPC，回应可以是 JSON 也可以是 SSE）——远端服务只给一个地址，而 CLI 只能靠本地再写个转发脚本才连得上，等于把「别人的服务」变回「我的进程」。这是 `--mcp` 与 codex 之间最后一个明显的传输缺口。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `.heming/mcp.json` 的声明 | 只有 `command`（本地进程） | 也可写 `url`（远端），附带可选的 `headers` || `packages/cli/src/mcpClient.ts` | `McpServerConfig` 一种形状 | 拆成 `McpStdioConfig` / `McpHttpConfig` 联合 + `isHttpConfig` 收窄；`connectMcpServer` 按形状分派 || 新 `connectHttpMcpServer` | 无 | 每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用同一条路 || 回应解析 | 只会读 stdio 的逐行 JSON | `application/json` 直接解析；`text/event-stream` 走 `pickSseMessage`，**只取 `id` 对得上的那条**，通知丢弃 || 会话与鉴权 | 无 | 服务端下发 `mcp-session-id` 后自动带上；`headers` 里的每条附加头都带上 || 失败信息 | 「连不上」一句 | 区分：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…` || 配置校验 | 只查 `command` / `args` / `env` / `cwd` | 额外查：`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 必须是字符串值、走 HTTP 时写 `args`/`env`/`cwd` 就拒 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `.heming/mcp.json` 的声明 | 只有 `command`（本地进程） | 也可写 `url`（远端），附带可选的 `headers` |\n| `packages/cli/src/mcpClient.ts` | `McpServerConfig` 一种形状 | 拆成 `McpStdioConfig` / `McpHttpConfig` 联合 + `isHttpConfig` 收窄；`connectMcpServer` 按形状分派 |\n| 新 `connectHttpMcpServer` | 无 | 每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用同一条路 |\n| 回应解析 | 只会读 stdio 的逐行 JSON | `application/json` 直接解析；`text/event-stream` 走 `pickSseMessage`，**只取 `id` 对得上的那条**，通知丢弃 |\n| 会话与鉴权 | 无 | 服务端下发 `mcp-session-id` 后自动带上；`headers` 里的每条附加头都带上 |\n| 失败信息 | 「连不上」一句 | 区分：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…` |\n| 配置校验 | 只查 `command` / `args` / `env` / `cwd` | 额外查：`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 必须是字符串值、走 HTTP 时写 `args`/`env`/`cwd` 就拒 |",
       "怎么验证",
       "`mcpClientHttp.test.ts` 新增 7 例，起真 `node:http` 服务：JSON 回应走完四步且**只第一次不带 session、之后每次都带**、自定义 `authorization` 每条请求都在；SSE 回应里混一条通知只取 `id` 对上的；`isError` 透传；HTTP 503 报状态码与对方的话；`timeoutMs: 60` 说清「60ms 内没有回应 initialize」；`text/html` 正文报「看不懂」并带上开头；`close()` 之后不再发请求。`mcpClient.test.ts` 新增 1 例覆盖新校验（同写 command+url、`ftp://`、`headers` 是数组或非字符串、HTTP 里带 `args`/`cwd`）。真机冒烟：假模型 + 真 HTTP MCP 服务，`exec --json --mcp --allow-danger` → `exit 0`、`toolCalls` 里 `mcp__remote__upper` 成功、工具结果 `OK` 回到模型、服务端记录的方法顺序是 `initialize → notifications/initialized → tools/list → tools/call` 且后三条都带 session。CLI 全量 21 文件 / 441 例全绿；typecheck、web 全量、server 全量、`eval-agent`、`design-audit` 均通过。",
       "留白"
@@ -1466,7 +1478,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "一个账号上能改的东西越攒越多：改名、移除、重置谁花、用到多少换下一个、用掉一次重置。全都摊在额度条下面，一行就占掉半屏——可这些规则是「设一次就不动」的，天天要看的其实只有名字、状态、额度、余额。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/model/SubscriptionRow.tsx` | 规则下拉直接摊在额度条下；改名/移除挤在账号名那行的尾上 | 收进一条 `这个账号的设置`（`.ui-disclosure`），默认收起 || 摘要 | —— | 只写**偏离默认值**的项：`重置快过期就花`、`用到 70% 换下一个`；全是默认时就只写这一行的名字 || 「用掉一次重置」 | 和「切到这个」一起竖排在右侧 | 跟着规则进设置区；右侧只留 `重新登录` / `切到这个` 这类当下要紧的动作 || 没有可设的项时 | —— | 连这条摘要都不摆（没有登录名、没有可重置次数、也不是同门多账号） || 失效与报错 | 排在规则下面 | 提到设置区之上，收起来也看得见 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/components/model/SubscriptionRow.tsx` | 规则下拉直接摊在额度条下；改名/移除挤在账号名那行的尾上 | 收进一条 `这个账号的设置`（`.ui-disclosure`），默认收起 |\n| 摘要 | —— | 只写**偏离默认值**的项：`重置快过期就花`、`用到 70% 换下一个`；全是默认时就只写这一行的名字 |\n| 「用掉一次重置」 | 和「切到这个」一起竖排在右侧 | 跟着规则进设置区；右侧只留 `重新登录` / `切到这个` 这类当下要紧的动作 |\n| 没有可设的项时 | —— | 连这条摘要都不摆（没有登录名、没有可重置次数、也不是同门多账号） |\n| 失效与报错 | 排在规则下面 | 提到设置区之上，收起来也看得见 |",
       "实测行高（无头 Edge CDP，`.tmp/preview/row-measure.mjs`，520/440/380 三种卡片宽度）：窗口最多的那行从 212px 降到 180px（380 宽），横向溢出仍是 0，摘要文字不截断。",
       "怎么验证",
       "留白"
@@ -1489,7 +1501,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "额度走向这块有两个容易看错的地方，都是「不写出来就会被误读」：",
       "1. **点稀 ≠ 没在掉。** 内核只在数字变了的时候记一笔（`quota history` 的 help 原话：a reading only when it changed），一段平的曲线可能只是三次读数都一样，却像「半天没人管」。2. **Claude 的读数要它自己说。** 它的额度只有 Claude Code 应答或跑一次用量查询时才更新，不会因为有人打开和匀的模型页就变——所以「今天没涨」不是坏了。3. 顺带：刚开始用的账号只有一份读数，展开后原先是一块**空白**，看不出是没数据还是加载失败。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/components/model/QuotaTrendCard.tsx` | 展开后直接是曲线 | 曲线前一行小字：读数只在数字变了时记一笔、点稀不代表没在掉、最多留 45 天、Claude 要它自己应答才更新 || `packages/web/src/components/model/QuotaTrend.tsx` | 一条线都画不出时，列表里什么都不显示 | 改成一句说明「每份额度至少要两份读数才画得出线，现在还没攒够」 || 收起态 | 一句结论 | 不变：这条说明只在展开后出现，收起时仍是一屏内的高度 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/components/model/QuotaTrendCard.tsx` | 展开后直接是曲线 | 曲线前一行小字：读数只在数字变了时记一笔、点稀不代表没在掉、最多留 45 天、Claude 要它自己应答才更新 |\n| `packages/web/src/components/model/QuotaTrend.tsx` | 一条线都画不出时，列表里什么都不显示 | 改成一句说明「每份额度至少要两份读数才画得出线，现在还没攒够」 |\n| 收起态 | 一句结论 | 不变：这条说明只在展开后出现，收起时仍是一屏内的高度 |",
       "怎么验证",
       "留白"
     ]
@@ -1510,7 +1522,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「额度走向」的曲线只画到最后一个读数为止，x 轴也止于那里。于是它答不了自己最该答的那个问题：**这条线到底是在这次重置之前撞到底，还是能撑过去？**——因为重置那一刻根本不在图上，用户得自己把「照这个速度 6 小时用完」和标题里那句「5 小时后重置」在脑子里对一遍。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/quotaHistory.ts` 的 `sparkPath` | x 轴范围 = 第一个点到最后一个点 | 多一个可选 `until`：给了且晚于最后一个点，x 轴延到那一刻，线就停在左边 || 同文件 | 无 | 新增 `resetAt(line)` / `lineLastAt(line)`：这条线记的重置时刻、最后一个读数时刻（毫秒，读不出是 null） || `packages/web/src/components/model/QuotaTrend.tsx` | 图里只有一条折线 | 重置还在将来时，右端补一条竖直虚线（`stroke-dasharray`、`vector-effect: non-scaling-stroke`）；图的朗读文案与 `<title>` 都带上「N 小时后重置」 || 同文件 | 结论行「5 小时：照这个速度…」 | 末尾补「· N 小时后重置」（重置已经过去/没记录时不补，不编） |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/lib/quotaHistory.ts` 的 `sparkPath` | x 轴范围 = 第一个点到最后一个点 | 多一个可选 `until`：给了且晚于最后一个点，x 轴延到那一刻，线就停在左边 |\n| 同文件 | 无 | 新增 `resetAt(line)` / `lineLastAt(line)`：这条线记的重置时刻、最后一个读数时刻（毫秒，读不出是 null） |\n| `packages/web/src/components/model/QuotaTrend.tsx` | 图里只有一条折线 | 重置还在将来时，右端补一条竖直虚线（`stroke-dasharray`、`vector-effect: non-scaling-stroke`）；图的朗读文案与 `<title>` 都带上「N 小时后重置」 |\n| 同文件 | 结论行「5 小时：照这个速度…」 | 末尾补「· N 小时后重置」（重置已经过去/没记录时不补，不编） |",
       "怎么验证",
       "留白"
     ]
@@ -1528,7 +1540,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「来源」页原先有两张卡说同一件事：「其他地址」（添加中转/自建接口的表单）和「已添加的来源」（已有来源的列表），中间还隔着预热卡。想加一个新的中转，得先滚到页面靠下找到那张表单；加完之后，新来源又出现在**另一张**卡里。同一个概念分两处，人得先猜「我该在哪一张卡里动手」。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 「已添加的来源」卡头 | 只有标题 | 右侧一个「加一个其他地址」按钮，开合状态用 `aria-expanded` 表达 || 添加表单 | 单独的「其他地址」卡，位置在列表上方 | 就在列表卡里、按钮下方展开（`rta-enter`、虚线框内），填完「保存」或「取消」 || 「其他地址」整张卡 | 占一张卡、一个标题、一句说明 | 删除；说明合并成一行「现成的服务商用上面『API Key 服务商』；中转、局域网或自建接口加在这里。」 || 空态文案（一个来源都没有时） | 「…或展开「其他地址」填服务地址和 Key」 | 「…或点「加一个其他地址」填服务地址和 Key」——指的就是卡头那个按钮 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 「已添加的来源」卡头 | 只有标题 | 右侧一个「加一个其他地址」按钮，开合状态用 `aria-expanded` 表达 |\n| 添加表单 | 单独的「其他地址」卡，位置在列表上方 | 就在列表卡里、按钮下方展开（`rta-enter`、虚线框内），填完「保存」或「取消」 |\n| 「其他地址」整张卡 | 占一张卡、一个标题、一句说明 | 删除；说明合并成一行「现成的服务商用上面『API Key 服务商』；中转、局域网或自建接口加在这里。」 |\n| 空态文案（一个来源都没有时） | 「…或展开「其他地址」填服务地址和 Key」 | 「…或点「加一个其他地址」填服务地址和 Key」——指的就是卡头那个按钮 |",
       "怎么验证",
       "`ModelPage.test.tsx` 新增一例：进「来源」→ 卡头有「加一个其他地址」且 `aria-expanded=\"false\"`、表单没铺开（`接口地址` 不存在）→ 点开后按钮变「收起这一栏」、填 `relay` 与 `relay.example.com/v1` 保存 → 发出`provider add relay url=https://relay.example.com/v1`（地址补 scheme 的既有规则没变）→ 整页再没有「其他地址」这块标题。全量 451 个测试文件 / 6476 个用例全绿；typecheck、`vite build`、`design-audit.mjs` 均通过。",
       "留白"
@@ -1546,7 +1558,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型页底部「全局模型设置」里一直有一块「窗口上限」（`model context-cap`），可随桌面端发布的内核（magpie 0.1.3246-heming.d.107）根本不认识这条命令：`magpie model context-cap` 回`unknown command \"context-cap\"`，裸 `magpie model` 的 usage 里也没有这一行。后果有两条：每次打开模型页都白发一条注定失败的命令（本机 246ms）；这一块的「保存上限 / 关掉上限」按下去只会得到一条错误提示——摆一个保存必报错的控件，比少一个功能更糟。单元测试一直没发现，是因为夹具把这条命令的成功回复也一起编了出来。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || `packages/web/src/lib/modelGlobals.ts` | 无 | 新增 `supportsContextCap(usage)`：看裸 `magpie model` 的 usage 里有没有 `model context-cap` 这一行 || `packages/web/src/components/ModelPage.tsx` | 四条命令并行问，其中一条必失败 | 先问三条，再用同一次 `model` 的 usage 判断：认得才去读上限，不认得就跳过（少一次进程） || `packages/web/src/components/model/GlobalModelSettings.tsx` | 永远渲染「窗口上限」 | 只在 `capSupported` 时渲染；后缀与压缩照旧 || 说明文档 | 把这块当成「已对齐」 | 注明按内核 usage 决定摆不摆，与「速度档」的 `supportsModelTier` 同一套做法 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| `packages/web/src/lib/modelGlobals.ts` | 无 | 新增 `supportsContextCap(usage)`：看裸 `magpie model` 的 usage 里有没有 `model context-cap` 这一行 |\n| `packages/web/src/components/ModelPage.tsx` | 四条命令并行问，其中一条必失败 | 先问三条，再用同一次 `model` 的 usage 判断：认得才去读上限，不认得就跳过（少一次进程） |\n| `packages/web/src/components/model/GlobalModelSettings.tsx` | 永远渲染「窗口上限」 | 只在 `capSupported` 时渲染；后缀与压缩照旧 |\n| 说明文档 | 把这块当成「已对齐」 | 注明按内核 usage 决定摆不摆，与「速度档」的 `supportsModelTier` 同一套做法 |",
       "怎么验证",
       "`modelGlobals.test.ts` 新增一例：真机内核的 usage（只有 `model name/efforts/context`）判 `false`，`unknown command` 与空串判 `false`，含 `magpie model context-cap <size>` 的 usage 判 `true`。`ModelPage.test.tsx`：原「后缀、压缩窗口、窗口上限各走一条命令」补上裸 `model` 的 usage 夹具（认得 → 控件在、命令发得出去）；新增一例「内核不认识时这块不摆、也不发那条命令」，同时断言「后缀 / 压缩窗口」仍在，不因为一块不认得就整块收起。全量 451 个测试文件 / 6475 个用例全绿；typecheck、`vite build`、`design-audit.mjs`、desktop 测试均通过。",
       "留白"
@@ -1571,7 +1583,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.336 让终端也能 `heming rewind` 了，但只覆盖三个写工具：`run_command` 改的东西一直是黑箱——它新建了哪些文件、覆盖了哪些文件，事后没有任何记录，`heming rewind` 只能说一句「退不回去」。而这恰恰是最常出事的地方：`npm run build`、代码生成器、`sed -i`、一脚本重排文件。",
       "命令的内容没有原文可抓（要抓就得给整个工作区做快照，那是另一套东西），但**改动范围**是能看出来的：跑之前扫一遍工作区（相对路径 → 大小 + 改动时间），跑完再扫一遍，两个清单的差就是它动了什么。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 命令前后 | 不记录 | 各扫一次工作区（跳过 `.git`／`node_modules`／`dist` 等产物目录；超过 4000 个文件就放弃记录，扫不完的清单比没有更骗人） || 差异 | — | 分出新建／改过／删掉三类，每个清单都有上限，一轮最多 100 条 || 回退时 | 命令碰过的文件一律「退不回去」 | 命令**新建**的文件真的删掉（跑之前不存在，删掉就回到了当时）；改过与删掉的点名说清、没有原文 || 写入工具也碰过的文件 | — | 以写工具那份原文为准，不重复处理（原文永远比「范围」更可信） || 列表与回执 | 只有文件数 | 列表多一段「命令新建 1 / 改过 2 / 删掉 0」；回执分开写「删掉 1 个当时还不存在的文件」与「命令改过内容或删掉的 2 个文件没有原文，退不回去：…」 || 运行收尾那行 | 「这次改了 N 个文件」 | 「这次改了 N 个文件，命令动了 M 个文件（只有范围、没有原文）」 || `--no-rewind` | 不抓写工具原文 | 也不扫盘（连范围都不记） |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 命令前后 | 不记录 | 各扫一次工作区（跳过 `.git`／`node_modules`／`dist` 等产物目录；超过 4000 个文件就放弃记录，扫不完的清单比没有更骗人） |\n| 差异 | — | 分出新建／改过／删掉三类，每个清单都有上限，一轮最多 100 条 |\n| 回退时 | 命令碰过的文件一律「退不回去」 | 命令**新建**的文件真的删掉（跑之前不存在，删掉就回到了当时）；改过与删掉的点名说清、没有原文 |\n| 写入工具也碰过的文件 | — | 以写工具那份原文为准，不重复处理（原文永远比「范围」更可信） |\n| 列表与回执 | 只有文件数 | 列表多一段「命令新建 1 / 改过 2 / 删掉 0」；回执分开写「删掉 1 个当时还不存在的文件」与「命令改过内容或删掉的 2 个文件没有原文，退不回去：…」 |\n| 运行收尾那行 | 「这次改了 N 个文件」 | 「这次改了 N 个文件，命令动了 M 个文件（只有范围、没有原文）」 |\n| `--no-rewind` | 不抓写工具原文 | 也不扫盘（连范围都不记） |",
       "怎么验证",
       "留白"
     ]
@@ -1588,7 +1600,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「用到多少换下一个」这个档位是按来源（provider）存的，可是页面把它挂在「账号变了」这件事上：只要账号名单刷新（签到、切号、改名、移除、重读全部都会刷新），就再把每一家的档位问一遍。本机实测一条 `provider account-cap <来源>` 要 0.5–1 秒（首次冷启动 0.96 秒），三家就是两三秒的无用功，而这些命令和「重读全部」那十几路挤在一起跑，正好落在用户等着看结果的那几秒里。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 问档位的条件 | 账号名单一变就问 | 记住上次问过的**来源集合**，同一批来源直接跳过 || 「重读全部」 | 与上面共用同一条件 | 显式 `force`：它是用户点的一次完整重读，该问就问 || 改完档位之后 | 依赖上面那条路回读 | 也是 `force`：刚写过就得读回来，否则下拉停在旧值 || 新增一家来源的账号（如签到后多出 Codex） | 会重问 | 会补问那一家——来源集合变了，档位可能不一样 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 问档位的条件 | 账号名单一变就问 | 记住上次问过的**来源集合**，同一批来源直接跳过 |\n| 「重读全部」 | 与上面共用同一条件 | 显式 `force`：它是用户点的一次完整重读，该问就问 |\n| 改完档位之后 | 依赖上面那条路回读 | 也是 `force`：刚写过就得读回来，否则下拉停在旧值 |\n| 新增一家来源的账号（如签到后多出 Codex） | 会重问 | 会补问那一家——来源集合变了，档位可能不一样 |",
       "怎么验证",
       "`ModelPage.test.tsx` 新增两例（99 例全绿）：一例让账号从一开始的 1 个变成 2 个（同一家），断言档位只问过 1 次、新账号照常出现在列表里；一例让名单里多出一家 Codex，断言补问的`provider account-cap codex` 确实发出。全量 451 个测试文件 / 6473 个用例全绿；typecheck、`vite build`、`design-audit.mjs` 均通过。",
       "留白"
@@ -1614,7 +1626,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "桌面端从 d.291 起有 `/rewind`，改坏了能退回去；终端一侧此前什么都没有——`heming run --allow-danger \"重构一半\"` 之后想收手，只能指望 git 恰好是干净的。而 `--allow-danger` 正是最容易写坏东西的那条路（它连命令都能跑）。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 抓取 | 每次运行里，`file_write` / `file_edit` / `file_patch` **动手之前**先读一份原文，按运行存进 `.heming/rewind/<运行 id>.json` || 存哪儿 | 跟着仓库走（与 `.heming/memory.json` 同一口径：能 review、能手删、换台机器还在）；一次运行一个文件，`git diff` 只看这一轮 || 新建的文件 | 记成 `before: null`，回退时把它删掉（「刚才还没有这个文件」就该回到没有） || 列表 | `heming rewind` 列出最多 20 轮，每轮点名改过哪几个文件、多久以前 || 回退 | `heming rewind 1` / `heming rewind 3`：每个文件只取窗口里**最早**那份原文，退到这几轮开始之前，而不是中间某一版 || 退过即消 | 退完把这几轮的记录删掉，不能拿旧原文盖新状态 || 抓不到的不硬盖 | 单文件超过 20 万字符、二进制、读失败 → 记 `skipped`，回退时点名跳过 || 边界明说 | 回执固定带一句：`run_command` 改的东西没有原文，退不回去——那种情况用 git 或自己的备份 || 收尾提示 | 运行结束留了记录就打一行「这次改了 N 个文件，回退记录 <id>：`heming rewind 1` 可以退回去」 || 开关 | `--no-rewind` 关掉抓取；`heming rewind` 只读写盘，不调模型 |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 抓取 | 每次运行里，`file_write` / `file_edit` / `file_patch` **动手之前**先读一份原文，按运行存进 `.heming/rewind/<运行 id>.json` |\n| 存哪儿 | 跟着仓库走（与 `.heming/memory.json` 同一口径：能 review、能手删、换台机器还在）；一次运行一个文件，`git diff` 只看这一轮 |\n| 新建的文件 | 记成 `before: null`，回退时把它删掉（「刚才还没有这个文件」就该回到没有） |\n| 列表 | `heming rewind` 列出最多 20 轮，每轮点名改过哪几个文件、多久以前 |\n| 回退 | `heming rewind 1` / `heming rewind 3`：每个文件只取窗口里**最早**那份原文，退到这几轮开始之前，而不是中间某一版 |\n| 退过即消 | 退完把这几轮的记录删掉，不能拿旧原文盖新状态 |\n| 抓不到的不硬盖 | 单文件超过 20 万字符、二进制、读失败 → 记 `skipped`，回退时点名跳过 |\n| 边界明说 | 回执固定带一句：`run_command` 改的东西没有原文，退不回去——那种情况用 git 或自己的备份 |\n| 收尾提示 | 运行结束留了记录就打一行「这次改了 N 个文件，回退记录 <id>：`heming rewind 1` 可以退回去」 |\n| 开关 | `--no-rewind` 关掉抓取；`heming rewind` 只读写盘，不调模型 |",
       "怎么验证跨轮取最早原文、路径跑出工作区不碰盘、文案三态）。",
       "留白"
     ]
@@ -1635,7 +1647,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「可见模型」是按工具各管一份的：想把本机四五个工具都收窄到同一组来源，得在每一行重复勾一遍（勾、保存、再下一行）。真正想表达的意思往往只有一句——「这些工具都只该看到我挑的这几家」——但界面逼着人把同一句话抄 N 遍，抄漏一个就会有个工具还在用别的来源。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 按钮 | 某一行勾选改过（草稿与已保存的不一样）时，多一个「同样写给其它 N 个」 || 确认 | 先点名会覆盖谁（`覆盖 Codex、Gemini CLI…`），并说明想撤回就在各自那行点「恢复全部」 || 写 | 逐个发 `visible <agent> <names…|all>`（内核一次只改一个工具自己的配置），一个失败不打断后面的 || 结果 | `已把这份可见范围写给 N 个工具。`；失败时 `1 个设好了，1 个没成（Codex）：<内核原话>` || 不越权 | 没有改动时不出现这个出口——没有一份值得抄的勾选，就不该有机会去改别人的配置 || 抄不等于存 | 抄给别的工具**不会**顺手保存来源那一行：它自己仍是「改过没保存」，要不要存由人决定 |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 按钮 | 某一行勾选改过（草稿与已保存的不一样）时，多一个「同样写给其它 N 个」 |\n| 确认 | 先点名会覆盖谁（`覆盖 Codex、Gemini CLI…`），并说明想撤回就在各自那行点「恢复全部」 |\n| 写 | 逐个发 `visible <agent> <names…|all>`（内核一次只改一个工具自己的配置），一个失败不打断后面的 |\n| 结果 | `已把这份可见范围写给 N 个工具。`；失败时 `1 个设好了，1 个没成（Codex）：<内核原话>` |\n| 不越权 | 没有改动时不出现这个出口——没有一份值得抄的勾选，就不该有机会去改别人的配置 |\n| 抄不等于存 | 抄给别的工具**不会**顺手保存来源那一行：它自己仍是「改过没保存」，要不要存由人决定 |",
       "怎么验证提示条说写给 1 个工具，且来源那一行仍然是「改过没保存」）。",
       "留白"
     ]
@@ -1657,7 +1669,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.291 / d.293 的回退靠「写之前抓原文」，只覆盖和鸣自己的三个写工具。`run_command` 绕过工具桥，它生成、删除、覆盖的文件一份原文都没抓到——更糟的是：**只跑命令的轮次以前连检查点都不留**，于是 `/rewind` 要么说「没有可回滚的检查点」，要么只报那几份文件，让人以为脚本干的事也退回去了。",
       "诚实比覆盖率重要：退不回去的部分，至少要点名。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 记命令 | 每一轮跑过的 `run_command` 记进检查点（最多 10 条；压成一行、每条最多 200 字） || 只跑命令的轮次 | 也留检查点（以前直接丢）——它恰恰是最容易让人误判「都退干净了」的那种 || `/rewind` 列表 | 每行后面点名「跑过 N 条命令（改的东西退不回去）」 || `/rewind N` 回执 | 末尾补一句，列出前 3 条命令（多的写「等 N 条」），说明这些改动没有原文，需要 git 或自己的备份核对 || 取哪句 | 从参数里的 `command` / `cmd` / `script` 取；参数不是 JSON 就照原样记一句 || 不干扰 | 记命令失败、超上限都不影响工具本身执行（与抓原文一样静默降级） |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 记命令 | 每一轮跑过的 `run_command` 记进检查点（最多 10 条；压成一行、每条最多 200 字） |\n| 只跑命令的轮次 | 也留检查点（以前直接丢）——它恰恰是最容易让人误判「都退干净了」的那种 |\n| `/rewind` 列表 | 每行后面点名「跑过 N 条命令（改的东西退不回去）」 |\n| `/rewind N` 回执 | 末尾补一句，列出前 3 条命令（多的写「等 N 条」），说明这些改动没有原文，需要 git 或自己的备份核对 |\n| 取哪句 | 从参数里的 `command` / `cmd` / `script` 取；参数不是 JSON 就照原样记一句 |\n| 不干扰 | 记命令失败、超上限都不影响工具本身执行（与抓原文一样静默降级） |",
       "怎么验证超长截断；`planRewind` 跨轮汇总去重保序；列表文案；`describeShellCommandsNote` 空/单条/多条；`withRewindCapture` 把 `run_command` 记进这一轮且不读文件、不影响执行结果。",
       "留白（写清楚，不藏）"
     ]
@@ -1681,7 +1693,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "桌面端从 d.240 起就认 `.heming/commands/*.md`：文件名就是命令名，输入 `/review` 就把那份提示词发出去。CLI 一直没有这条路——更别扭的是，d.325 起 `heming mcp serve` 反而把同一批命令当成 MCP 的 `prompts` 交给了 Cursor / Claude Code：**别的编辑器能调 `/review`，我们自己的终端不能**。同一套仓库规矩，只有一条执行入口不认它。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 调用 | `heming run /review` 把这一行换成 `.heming/commands/review.md` 的正文再发 || 带上补充 | `heming run /review src/login.ts` 会把 `src/login.ts` 空一行接在正文之后 || 认什么 | 形如 `/<小写字母开头、字母数字短横线>`；`/usr/bin/foo`、`/1abc` 不像命令名，照旧当普通提问 || 没定义 | 形状像命令但工作区里没有 → **当场报错并列出可用的**，不把 `/reviwe` 原样发给模型 || 列表 | `heming commands`（`--json` 给脚本用）：名字、标题、说明、来源文件 || 解析规则 | 直接复用桌面端的 `parseCustomCommands`（`# 标题` / `> 说明` 的约定、名字校验、4000 字上限、同名取先），两边同一份 || 读不到 | 没有命令目录、单份文件坏了 → 当作「这个工作区没有它」，不阻断运行；命令目录本身读不出来才报错 || 召回 | 记忆召回仍按你**敲的那一行**（`/review src/login.ts`）去捞，不按展开后四千字的正文打分 || 明确说 | stderr 打一行「用的是工作区命令 /review（安全审查，来自 …）」，接没接补充说明都写清 |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 调用 | `heming run /review` 把这一行换成 `.heming/commands/review.md` 的正文再发 |\n| 带上补充 | `heming run /review src/login.ts` 会把 `src/login.ts` 空一行接在正文之后 |\n| 认什么 | 形如 `/<小写字母开头、字母数字短横线>`；`/usr/bin/foo`、`/1abc` 不像命令名，照旧当普通提问 |\n| 没定义 | 形状像命令但工作区里没有 → **当场报错并列出可用的**，不把 `/reviwe` 原样发给模型 |\n| 列表 | `heming commands`（`--json` 给脚本用）：名字、标题、说明、来源文件 |\n| 解析规则 | 直接复用桌面端的 `parseCustomCommands`（`# 标题` / `> 说明` 的约定、名字校验、4000 字上限、同名取先），两边同一份 |\n| 读不到 | 没有命令目录、单份文件坏了 → 当作「这个工作区没有它」，不阻断运行；命令目录本身读不出来才报错 |\n| 召回 | 记忆召回仍按你**敲的那一行**（`/review src/login.ts`）去捞，不按展开后四千字的正文打分 |\n| 明确说 | stderr 打一行「用的是工作区命令 /review（安全审查，来自 …）」，接没接补充说明都写清 |",
       "怎么验证不炸；调用解析（补充说明、大小写、路径与数字开头不算命令、名字合规但未定义仍算一次调用、补充说明长度上限）；展开与解析（正文、空行接尾巴、未定义时列出可用、工作区无命令时的提示）；列表与运行提示文案；`--json` 摘要不含正文。未知命令提示里带上 `commands`。并列出 `/review`——**没有凭据也不会先卡在模型上**，说明它在解析这一步就停了。发给模型、stderr 有「用的是工作区命令 /review」。",
       "留白"
     ]
@@ -1702,7 +1714,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「智能体」分区原来只能一行一行改：每个工具选模型、点「应用」、确认一次。本机装着四五种工具时，想把它们统一到同一个模型要点十几下，而且中途很容易漏掉一个——漏掉的那个还按旧模型跑，事后很难发现。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 卡片头 | 有两个以上能改写的工具时，多一行「一次给这 N 个工具设同一个模型」：一个模型下拉 + 「统一应用」 || 确认 | 写之前一次性点名会写到哪些工具（`Claude Code、Codex…`），以及「想撤回就逐个点恢复默认」 || 写 | 逐个发 `<agent> <model>`（内核没有通配符，一次只动一个工具自己的配置文件）；一个失败不打断后面的 || 结果 | 一句话说清：`已把 N 个工具都设成 X，下次启动它们时生效。` 失败时 `1 个设好了，1 个没成（Codex）：<内核原话>` || 只读的不算 | `id` 为空的工具（没有对应模型命令）不进名单——否则「统一应用」会把它们算进「没成」，看着像坏了 |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 卡片头 | 有两个以上能改写的工具时，多一行「一次给这 N 个工具设同一个模型」：一个模型下拉 + 「统一应用」 |\n| 确认 | 写之前一次性点名会写到哪些工具（`Claude Code、Codex…`），以及「想撤回就逐个点恢复默认」 |\n| 写 | 逐个发 `<agent> <model>`（内核没有通配符，一次只动一个工具自己的配置文件）；一个失败不打断后面的 |\n| 结果 | 一句话说清：`已把 N 个工具都设成 X，下次启动它们时生效。` 失败时 `1 个设好了，1 个没成（Codex）：<内核原话>` |\n| 只读的不算 | `id` 为空的工具（没有对应模型命令）不进名单——否则「统一应用」会把它们算进「没成」，看着像坏了 |",
       "怎么验证",
       "留白"
     ]
@@ -1726,7 +1738,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "桌面端从 d.176 起就有 `agent_task`：主对话派一个只读子代理去翻代码，它翻完只交回结论，几百行原文不进主线。CLI 一直没有这件事——同一个查证任务，在窗口里是「你去查，我继续想」，在终端里只能主对话自己一条条 `file_grep` / `file_read`，读到的每一段都留在上下文里。查证类工作恰恰最吃上下文：读得越多，后面越容易糊。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 工具 | `agent_task`，参数 `task` 或 `tasks`（一次最多 3 件，串行执行）、`max_rounds`（1–6，默认 4） || 能力边界 | 子代理只能用 `file_read` / `file_glob` / `file_grep` / `file_image` / `tool_output_read`；名单按**常量清单**硬编码，不跟着 `meta.risk` 漂 || 越界 | 名单外的调用直接回「子代理只能调用只读工具（…），X 没有执行」，**桥根本不会被调** || 交回什么 | 只交结论：`子代理（只读，N 轮 / M 次工具调用）结论：…`，空白结论写「（它没有给出结论。）」 || 装不下时 | 单次工具结果与最终结论都截到 4000 字，末尾写「…（后面还有 N 字，没有全部带回来）」 || 到轮次上限 | 明确说「到了 N 轮上限还没有收口，上面是它最后的说法」，不假装它想清楚了 || 失败 | 工具执行抛错变成一条可读的 `role: \"tool\"` 消息，子代理不会因此整段崩掉 || 账目 | 子代理的模型调用与工具调用都计入本次 `exec --json` 的 `rounds` / `usage` / `toolCalls` || 开关 | `--no-subagent` 不挂这个工具；`--read-only` 照挂（它本来就是只读的）；`mcp serve` 不挂 |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 工具 | `agent_task`，参数 `task` 或 `tasks`（一次最多 3 件，串行执行）、`max_rounds`（1–6，默认 4） |\n| 能力边界 | 子代理只能用 `file_read` / `file_glob` / `file_grep` / `file_image` / `tool_output_read`；名单按**常量清单**硬编码，不跟着 `meta.risk` 漂 |\n| 越界 | 名单外的调用直接回「子代理只能调用只读工具（…），X 没有执行」，**桥根本不会被调** |\n| 交回什么 | 只交结论：`子代理（只读，N 轮 / M 次工具调用）结论：…`，空白结论写「（它没有给出结论。）」 |\n| 装不下时 | 单次工具结果与最终结论都截到 4000 字，末尾写「…（后面还有 N 字，没有全部带回来）」 |\n| 到轮次上限 | 明确说「到了 N 轮上限还没有收口，上面是它最后的说法」，不假装它想清楚了 |\n| 失败 | 工具执行抛错变成一条可读的 `role: \"tool\"` 消息，子代理不会因此整段崩掉 |\n| 账目 | 子代理的模型调用与工具调用都计入本次 `exec --json` 的 `rounds` / `usage` / `toolCalls` |\n| 开关 | `--no-subagent` 不挂这个工具；`--read-only` 照挂（它本来就是只读的）；`mcp serve` 不挂 |",
       "怎么验证`file_write` / `run_command` 被拒且**桥未被调用**、到上限收口、执行抛错、9000 字结果截断、结论超长截断、abort 透传）、结果文案三例、工具桥集成四例（挂上且 `risk=read`、关掉后硬调回「没有开子代理」、子代理要写时磁盘上**没有**那个文件、子代理真读到工作区内容）。`--no-subagent`）。确实读到了 `rate.ts:42`、最终文本为「查到了：限流在 rate.ts:42」。",
       "留白"
     ]
@@ -1747,7 +1759,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "同一家有两个账号时，内核本来就支持「这个账号的窗口用到百分之几就不再动它，让下一个接上」（`provider account-cap`，份额 1–99，`off` 是不设上限），但页面上没有出口：只能等一个账号用到100%、正在跑的请求被顶掉，用户才发现该换了。「充分利用免费额度」不只是「把额度读出来」，还包括**别把一份额度用成事故**。",
       "做了什么",
-      "| 位置 | 落地的样子 || --- | --- || 订阅账号行 | 同一家有第二个账号时，多一行「用到多少换下一个」下拉：不设上限 / 50% / 70% / 80% / 90% || 读 | 按账号里的 agent 去重后各发一次 `provider account-cap <id>`，把内核的散文读成「账号 → 档位」 || 写 | `provider account-cap <id> <account> <percent|off>`，改完立刻重读，用内核的回答当准 || 守住的前提 | 一家只有一个账号时**不摆**这个下拉——一份额度设了上限会提前退出，没人接等于停用 || 别名 | 内核报的是账号本身的名字，用户改过别名时两处都认（先按账号名、再按别名） |",
+      "| 位置 | 落地的样子 |\n| --- | --- |\n| 订阅账号行 | 同一家有第二个账号时，多一行「用到多少换下一个」下拉：不设上限 / 50% / 70% / 80% / 90% |\n| 读 | 按账号里的 agent 去重后各发一次 `provider account-cap <id>`，把内核的散文读成「账号 → 档位」 |\n| 写 | `provider account-cap <id> <account> <percent|off>`，改完立刻重读，用内核的回答当准 |\n| 守住的前提 | 一家只有一个账号时**不摆**这个下拉——一份额度设了上限会提前退出，没人接等于停用 |\n| 别名 | 内核报的是账号本身的名字，用户改过别名时两处都认（先按账号名、再按别名） |",
       "怎么验证整行没有这个下拉）。",
       "留白"
     ]
@@ -1773,7 +1785,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "桌面端的记忆系统（工作记忆、情景记忆、语义记忆三层 + BM25）从 d.196 起就在用，而终端里的和鸣每次运行都是「第一次见面」：昨天说了「以后都用中文回答」「这个仓库别碰 generated 目录」，今天 `--continue` 接着聊它照样不知道。会话存档（d.303）只存问答原文，存不下「长期有效的偏好」——那类东西越长越占上下文，又不该每轮都重复。",
       "做了什么",
-      "| 位置 | 说明 || --- | --- || `remember` 工具 | 模型可以把「以后都该记得的事」记下来；一次记一件事，单条 400 字，最多 200 条（超了丢最旧） || `.heming/memory.json` | 记忆跟着仓库走：能 git review、能手改、能删，与 `.heming/permissions.json`、`hooks.json`、`mcp.json` 同一口径 || 召回注入 | 每次运行按**这一轮的提问**挑最多 5 条（中文 bigram / ASCII 词重叠打分，同分新的优先），整段封顶 1200 字，接在项目约定之后 || `heming memory` | 不用模型也能管：`memory` 列出（带序号）、`memory add \"…\"`、`memory forget <序号或 id>` || `--no-memory` | 一头都不做：既不注入召回，也不挂 `remember` 工具 || 坏文件不覆盖 | 记忆文件 JSON 坏了：运行照常（说一句、这次不注入也不写入），`heming memory` 明确报错而不是当成空表 || 只读模式 | `--read-only` 下连 `remember` 都不挂——列出来等于承诺能写 |",
+      "| 位置 | 说明 |\n| --- | --- |\n| `remember` 工具 | 模型可以把「以后都该记得的事」记下来；一次记一件事，单条 400 字，最多 200 条（超了丢最旧） |\n| `.heming/memory.json` | 记忆跟着仓库走：能 git review、能手改、能删，与 `.heming/permissions.json`、`hooks.json`、`mcp.json` 同一口径 |\n| 召回注入 | 每次运行按**这一轮的提问**挑最多 5 条（中文 bigram / ASCII 词重叠打分，同分新的优先），整段封顶 1200 字，接在项目约定之后 |\n| `heming memory` | 不用模型也能管：`memory` 列出（带序号）、`memory add \"…\"`、`memory forget <序号或 id>` |\n| `--no-memory` | 一头都不做：既不注入召回，也不挂 `remember` 工具 |\n| 坏文件不覆盖 | 记忆文件 JSON 坏了：运行照常（说一句、这次不注入也不写入），`heming memory` 明确报错而不是当成空表 |\n| 只读模式 | `--read-only` 下连 `remember` 都不挂——列出来等于承诺能写 |",
       "写入用临时文件 + `rename`（半截文件比没记忆更糟）；同一句话不重复写（模型很容易在相邻两轮里说同一件事）；stderr 只说真发生了什么：「记忆：N 条；这次带上 K 条相关的」或「记忆读不出来，这次不带上也不写入」。",
       "怎么验证",
       "留白"
@@ -1795,7 +1807,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「订阅账号」这张卡里，登录网格（5 家）与国内智能体（6 张卡片 + 自动签到开关 + 风险说明）一直摆在账号列表**上面**。已有两三个账号的人，每次进「来源」都要先滚过 11 张卡片、约 680px，才看到自己真正想看的额度；没有账号的人看到的则是一屏「可以登录的东西」，也没有一句话说「这就是你现在该做的那一步」。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 卡片顺序 | 登录网格、国内智能体 → 账号列表 | 账号列表 → 折叠区「再加一个账号」 || 默认状态 | 全部摊开 | 有账号时收起，只占一行；一个账号都没有时自动摊开，标题写「登录一个账号」 || 空态那句话 | 「上面这些软件…」 | 「下面这些软件里已经登录的订阅可以直接借给和鸣用」——指向折叠区 || 折叠区 | — | `ui-disclosure` + 统一 Chevron，点标题展开，里面的登录卡片与国内智能体一字未改 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 卡片顺序 | 登录网格、国内智能体 → 账号列表 | 账号列表 → 折叠区「再加一个账号」 |\n| 默认状态 | 全部摊开 | 有账号时收起，只占一行；一个账号都没有时自动摊开，标题写「登录一个账号」 |\n| 空态那句话 | 「上面这些软件…」 | 「下面这些软件里已经登录的订阅可以直接借给和鸣用」——指向折叠区 |\n| 折叠区 | — | `ui-disclosure` + 统一 Chevron，点标题展开，里面的登录卡片与国内智能体一字未改 |",
       "展开状态跟着账号数走：从「一个都没有」变成「有了」时（登录成功、自动收取到账号）自动收起，反过来自动摊开；中间几秒不会把用户手点的展开状态抢回去。",
       "怎么验证文案指向「下面」）。对比度不合格 0、命中区 <32 为 0、横向溢出 0）。",
       "留白"
@@ -1817,7 +1829,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.325 把 `.heming/commands/*.md` 和 `AGENTS.md` 一族交给了 MCP 客户端，但只交了一次：客户端读到的是「连接那一刻的样子」。用户在编辑器里改了约定、加了一条命令，得断开重连才生效——而这恰恰是`resources/subscribe` 存在的理由。之前我们在 `initialize` 里把 `subscribe` 与 `listChanged` 都写成`false`，等于明确告诉客户端「别指望我推送」。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 订阅 | `resources/subscribe` / `resources/unsubscribe`；只接受 `resources/list` 里真有的 URI，名单外回 `-32602` 并列出可订的 || 变更推送 | 订阅过的文件一改，推 `notifications/resources/updated {uri}`（防抖 150ms，编辑器保存一次常触发多条事件） || 清单变化 | 命令文件新增/删除时推 `notifications/resources/list_changed` 与 `notifications/prompts/list_changed`——只在清单真的变了才推（比对前后签名） || 能力声明 | `initialize` 里 `resources: {listChanged: true, subscribe: true}`；没有 watcher 时仍然声明 `false`，不做空头承诺 || 监听范围 | 只有工作区、`.heming`、`.heming/commands` 三个目录，**不递归**（工作区里常有 `node_modules`，递归监听既慢又容易打回文件句柄上限） || 资源占用 | 按需建 watcher：一个订阅都没有时不占系统资源；退订到零就全部关掉，`close()` 一并清 timer || 文档 | `instructions` 里加一句「资源可以订阅」，客户端不必猜 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 订阅 | `resources/subscribe` / `resources/unsubscribe`；只接受 `resources/list` 里真有的 URI，名单外回 `-32602` 并列出可订的 |\n| 变更推送 | 订阅过的文件一改，推 `notifications/resources/updated {uri}`（防抖 150ms，编辑器保存一次常触发多条事件） |\n| 清单变化 | 命令文件新增/删除时推 `notifications/resources/list_changed` 与 `notifications/prompts/list_changed`——只在清单真的变了才推（比对前后签名） |\n| 能力声明 | `initialize` 里 `resources: {listChanged: true, subscribe: true}`；没有 watcher 时仍然声明 `false`，不做空头承诺 |\n| 监听范围 | 只有工作区、`.heming`、`.heming/commands` 三个目录，**不递归**（工作区里常有 `node_modules`，递归监听既慢又容易打回文件句柄上限） |\n| 资源占用 | 按需建 watcher：一个订阅都没有时不占系统资源；退订到零就全部关掉，`close()` 一并清 timer |\n| 文档 | `instructions` 里加一句「资源可以订阅」，客户端不必猜 |",
       "实现落在新文件 `packages/cli/src/mcpWatch.ts`（`createMcpCatalogWatcher` / `relOfResourceUri` /`watchTargetsOf`），协议层 `packages/cli/src/mcp.ts` 只多两个方法分支与两个上下文字段（`subscriptions` / `notify`），装配在 `packages/cli/src/mcpServe.ts`。",
       "怎么验证新增命令文件 → `resources/list_changed` + `prompts/list_changed`；退订后再改 → 一条都没有；订阅 `heming://workspace/../x.md` → `-32602 未知资源`",
       "留白"
@@ -1839,7 +1851,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「订阅账号」卡里每个账号都画了进度条，一个账号一眼能看出快用完，三四个账号就得自己从上扫到下，比一遍才知道该把活往哪家放。额度走向那句结论只讲「照这个速度会怎样」，不讲「现在谁最宽裕」。",
       "做了什么",
-      "| 位置 | 内容 || --- | --- || 「订阅账号」卡、同门合计条下面 | 一句话：`最宽裕的是 Claude 工作号（剩 82%）；最紧的是 ChatGPT 个人（剩 6%）` || 中间那几个 | 三个账号以上时只报个数：`；还有 2 个在中间` || 都差不多时 | 不硬分高低：`2 个账号都差不多，最宽的 Claude a 也只剩 40%` || 颜色 | 最紧的 ≤10% 红、≤25% 黄，其余不额外强调 |",
+      "| 位置 | 内容 |\n| --- | --- |\n| 「订阅账号」卡、同门合计条下面 | 一句话：`最宽裕的是 Claude 工作号（剩 82%）；最紧的是 ChatGPT 个人（剩 6%）` |\n| 中间那几个 | 三个账号以上时只报个数：`；还有 2 个在中间` |\n| 都差不多时 | 不硬分高低：`2 个账号都差不多，最宽的 Claude a 也只剩 40%` |\n| 颜色 | 最紧的 ≤10% 红、≤25% 黄，其余不额外强调 |",
       "比的是每个账号**最紧的那一份**（5 小时窗口剩 20% 就按 20% 算，不看它每周还有 90%）。不算进来的三种：不限量的窗口（说不清比例）、只有厂商原话的积分/签到行（没有数）、登录失效或这次没读到的账号——免得把「不知道」算成「最紧」。只有一个可比账号时不说话。",
       "怎么验证",
       "留白"
@@ -1863,7 +1875,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`heming mcp serve`（d.289）之前只把**工具**交出去：读文件、写文件、跑命令。但一个工作区里真正决定「和鸣会怎么干活」的其实是另外几份文本——`.heming/commands/*.md` 里写好的固定指令（桌面端 `/名字` 用的就是它们）、`AGENTS.md` 一族里的仓库约定、`.heming` 下的权限 / 钩子 / 外部服务配置。这些对 Cursor、Claude Code 这类 MCP 客户端此前完全不可见：没人能在那儿选用你的 `/review`，也看不到「这个仓库改完要跑 pnpm test」。工具通了、规矩不通，等于只接了半条胳膊。",
       "这一轮按 MCP 的两类只读能力把它们补上：`prompts`（可被用户直接选用的指令模板）与 `resources`（可被引用/读入上下文的文档）。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || `prompts/list` | 列出 `.heming/commands/*.md`，名字就是命令名，标题与说明来自文件头的 `# 标题` / `> 说明`（与桌面端同一份解析） || `prompts/get` | 按名字回一条 `role: \"user\"` 的消息，正文是命令展开后真正发给模型的那段话 || `resources/list` | 命令文件 + `AGENTS.md` / `HEMING.md` / `.heming/AGENTS.md` / `.heming/rules.md` + `.heming/{permissions,hooks,mcp}.json`，URI 形如 `heming://workspace/AGENTS.md` || `resources/read` | 按 URI 返正文与 MIME（`.md` → `text/markdown`，`.json` → `application/json`） || 能力声明 | 只有工作区真有内容时才在 `initialize` 里声明 `prompts` / `resources`，客户端就不会白问 || 现读不缓存 | 每次 `prompts/list` / `resources/list` 重新读盘——中途改了命令文件，下一轮就见效 || 归一 | 去掉开头 BOM、CRLF 折成 LF（记事本 / PowerShell 5 默认就写 BOM，否则 `# 标题` 这种首行约定认不出来），其余一律照原样 || 安全边界 | `resources/read` 只在 `resources/list` 报过的名单里查：URI 从不拿去拼路径，`../` 之类根本没有机会变成越界读盘 || 上限 | 单份文件 60k 字截断并在末尾写明「要看全的请用 `file_read` 读哪一份」；资源总数 40 份 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| `prompts/list` | 列出 `.heming/commands/*.md`，名字就是命令名，标题与说明来自文件头的 `# 标题` / `> 说明`（与桌面端同一份解析） |\n| `prompts/get` | 按名字回一条 `role: \"user\"` 的消息，正文是命令展开后真正发给模型的那段话 |\n| `resources/list` | 命令文件 + `AGENTS.md` / `HEMING.md` / `.heming/AGENTS.md` / `.heming/rules.md` + `.heming/{permissions,hooks,mcp}.json`，URI 形如 `heming://workspace/AGENTS.md` |\n| `resources/read` | 按 URI 返正文与 MIME（`.md` → `text/markdown`，`.json` → `application/json`） |\n| 能力声明 | 只有工作区真有内容时才在 `initialize` 里声明 `prompts` / `resources`，客户端就不会白问 |\n| 现读不缓存 | 每次 `prompts/list` / `resources/list` 重新读盘——中途改了命令文件，下一轮就见效 |\n| 归一 | 去掉开头 BOM、CRLF 折成 LF（记事本 / PowerShell 5 默认就写 BOM，否则 `# 标题` 这种首行约定认不出来），其余一律照原样 |\n| 安全边界 | `resources/read` 只在 `resources/list` 报过的名单里查：URI 从不拿去拼路径，`../` 之类根本没有机会变成越界读盘 |\n| 上限 | 单份文件 60k 字截断并在末尾写明「要看全的请用 `file_read` 读哪一份」；资源总数 40 份 |",
       "采集逻辑在新增的 `packages/cli/src/mcpCatalog.ts`（`collectCliMcpCatalog` / `resourceUriOf` / `relOfResourceUri` / `normalizeCatalogText` / `describeCliMcpCatalog`），协议翻译在 `packages/cli/src/mcp.ts`（四个新方法与能力声明），装配在 `packages/cli/src/mcpServe.ts`（启动时往 stderr 打一行「工作区内容：1 条提示词（review）、2 份资源」）。",
       "怎么验证",
       "留白"
@@ -1885,7 +1897,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「智能体」分区里的「可见模型」是一排勾选框：勾一下只是改了手上的草稿，必须再点一次「保存可见范围」才会写进这个工具自己的配置。以前这个按钮一直亮着——没改动也亮，按下去就白发一条命令，顺手把人家已经收窄好的配置按原样重写一遍。更糟的是草稿和已保存的状态在界面上长得一样：勾完以为生效了，切到别处再回来，发现白勾了。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 折叠标题 | `可见模型 · 收窄到 deepseek、relay · 12 个可见` | 草稿有改动时补 ` · 改过没保存`（黄字） || 「保存可见范围」 | 一直可点，没改动也发一条 `visible <agent> <names>` | 没有改动就灰着，悬停说「还没有改动」 || 按钮旁 | 没有提示 | 有改动时补一行「改过了，点「保存可见范围」才生效」 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 折叠标题 | `可见模型 · 收窄到 deepseek、relay · 12 个可见` | 草稿有改动时补 ` · 改过没保存`（黄字） |\n| 「保存可见范围」 | 一直可点，没改动也发一条 `visible <agent> <names>` | 没有改动就灰着，悬停说「还没有改动」 |\n| 按钮旁 | 没有提示 | 有改动时补一行「改过了，点「保存可见范围」才生效」 |",
       "判断「有没有改动」比字符串比较麻烦一点：内核里「全部」写作空名单，界面上一律画成全勾，所以「全勾」「一个都没勾」「从没动过」是同一件事；勾选的顺序也不该算改动。这几条归一化写在 `lib/magpieVisible.ts` 的 `sameVisibleRange(saved, picked, allIds)` 里，界面上只问一句`visibleDirtyOf(agent)`。",
       "顺带修掉一个说法：把两个勾都取消之后再点保存，其实什么也没变（空名单就是「全部」），现在按钮直接是灰的，不再假装发一条 `visible … all`。",
       "怎么验证保存之后这句话消失」。",
@@ -1911,7 +1923,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "CLI 的危险工具此前是个开关：不加 `--allow-danger` 连 `git status` 都跑不了，加了就把`rm -rf` 一起放行。真实用法常在中间——这次跑测试可以，那条删除命令不行。codex 的approval policy 就在这个位置：**执行前问一句，而不是一刀切**。",
       "三条底线写死在实现里：只有危险类调用会问（写文件仍按路径安全判定，根外一律拒绝，不因为有人点头就放松）；`--ask` 必须真有人在终端前面（非 TTY 直接拒绝启动，绝不把 stdin 下一行当「y」）；默认拒绝（EOF、连续答错 3 次都按「不要」，且后面的同类调用不再追问）。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 开关 | `--ask`：危险调用（`run_command`、MCP 工具、自报 danger 的工具）执行前问一句 || 四种回答 | `[y]` 允许这一次 / `[a]` 本次运行都允许 / `[n]` 不要 / `[q]` 停下（后面不再问） || 一次性的许可要消费 | 答「允许这一次」只够一次；下一次仍会问（`permits` 计数在执行时扣减） || 长效放行 | 答「本次运行都允许」之后闸门立刻知道，同一运行里的后续危险调用不再打扰 || 拒绝要说清是人拒的 | 回灌文案与 `exec --json` 的 `denied` 都按 `cause: \"user\"` 走，模型不会去「劝程序」 || 命令工具可见 | 开了 `--ask` 就把 `run_command` 挂进工具清单，否则模型看不见、人也无从放行 || 工作区规则也能问 | `.heming/permissions.json` 里的 `ask` 规则在 `--ask` 下真的问人（没有 `--ask` 仍落成拒绝） || 只读优先 | `--read-only` 与 `--ask` 同时给时，只读赢——不问、也不执行 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 开关 | `--ask`：危险调用（`run_command`、MCP 工具、自报 danger 的工具）执行前问一句 |\n| 四种回答 | `[y]` 允许这一次 / `[a]` 本次运行都允许 / `[n]` 不要 / `[q]` 停下（后面不再问） |\n| 一次性的许可要消费 | 答「允许这一次」只够一次；下一次仍会问（`permits` 计数在执行时扣减） |\n| 长效放行 | 答「本次运行都允许」之后闸门立刻知道，同一运行里的后续危险调用不再打扰 |\n| 拒绝要说清是人拒的 | 回灌文案与 `exec --json` 的 `denied` 都按 `cause: \"user\"` 走，模型不会去「劝程序」 |\n| 命令工具可见 | 开了 `--ask` 就把 `run_command` 挂进工具清单，否则模型看不见、人也无从放行 |\n| 工作区规则也能问 | `.heming/permissions.json` 里的 `ask` 规则在 `--ask` 下真的问人（没有 `--ask` 仍落成拒绝） |\n| 只读优先 | `--read-only` 与 `--ask` 同时给时，只读赢——不问、也不执行 |",
       "怎么验证",
       "留白"
     ]
@@ -1932,7 +1944,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「额度走向」这张卡原来写死最近 7 天（`quota history --days 7 --json`）。可一周只够看清「跑得快不快」，看不出「这个月是不是一直这么费」；而内核本来就收任意天数，页面上却没有地方改——用户只能去「运行 → 高级命令」里手敲。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 卡头 | 多一个「看几天」下拉：7 / 14 / 30 天（`TREND_DAY_CHOICES`），只在调用方给了 `days` 时才出现 || 读取 | `loadHistory(days)` 收天数，去重键改成 `history:<天数>`：同一档并发只发一条，换档照常重读 || 换档 | 换天数就立刻按新天数重读（`sourcesWarm` 已读过才自动重读，没进过「来源」不提前跑） || 兜底文案 | 结论说不出来那句从写死的「最近 7 天的读数」改成跟着当前档位走 || 其它入口 | 页头「重读全部」仍用当前选中的天数，不会把用户的选择打回 7 天 |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 卡头 | 多一个「看几天」下拉：7 / 14 / 30 天（`TREND_DAY_CHOICES`），只在调用方给了 `days` 时才出现 |\n| 读取 | `loadHistory(days)` 收天数，去重键改成 `history:<天数>`：同一档并发只发一条，换档照常重读 |\n| 换档 | 换天数就立刻按新天数重读（`sourcesWarm` 已读过才自动重读，没进过「来源」不提前跑） |\n| 兜底文案 | 结论说不出来那句从写死的「最近 7 天的读数」改成跟着当前档位走 |\n| 其它入口 | 页头「重读全部」仍用当前选中的天数，不会把用户的选择打回 7 天 |",
       "怎么验证不给 `days` 就一个控件都不多。「5 小时」变成「每周」）。",
       "留白"
     ]
@@ -1952,10 +1964,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "打开模型页时，页面会先把十个命令一起发出去：模型目录、智能体、账号、其余额度、额度走向、重置开关、接入组件表、自动收取、设置、看图/画图模型。其中**五条只有「来源」分区用得上**——多数人打开这一页是来看模型和智能体的，替另一页等后端没有任何理由。",
       "本机实测（`magpie-core.exe`，同机冷跑）：",
-      "| 命令 | 耗时 || --- | --- || `quota --json` | 852 ms || `quota history --days 7 --json` | 380 ms || `quota auto-reset` | 235 ms || `quota auto-reset lead` | 240 ms || `plugin list --json` | 246 ms || `accounts discovery` | 64 ms |",
+      "| 命令 | 耗时 |\n| --- | --- |\n| `quota --json` | 852 ms |\n| `quota history --days 7 --json` | 380 ms |\n| `quota auto-reset` | 235 ms |\n| `quota auto-reset lead` | 240 ms |\n| `plugin list --json` | 246 ms |\n| `accounts discovery` | 64 ms |",
       "它们并行发，但页面上「还有东西在跑」的尾巴由最慢那条决定：**852 ms**。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 首屏第二波 | 只留账号、全局设置、看图/画图设置、会话与启动器四路 || 进「来源」时 | 一次性补读额度、走向、重置开关、接入组件表、自动收取（`sourcesWarm` 只放一次） || 补读之前 | 用上次缓存先把已知的画出来（d.302/d.304 那套），不闪空 || 页头「重读全部」 | 照旧读全部，并顺手把 `sourcesWarm` 置真，进「来源」时不再重复补一遍 || 「来源」内的动作 | 签到、切换、改名、移除、重置、国内端接入都不受影响（它们本来就走自己的命令） |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 首屏第二波 | 只留账号、全局设置、看图/画图设置、会话与启动器四路 |\n| 进「来源」时 | 一次性补读额度、走向、重置开关、接入组件表、自动收取（`sourcesWarm` 只放一次） |\n| 补读之前 | 用上次缓存先把已知的画出来（d.302/d.304 那套），不闪空 |\n| 页头「重读全部」 | 照旧读全部，并顺手把 `sourcesWarm` 置真，进「来源」时不再重复补一遍 |\n| 「来源」内的动作 | 签到、切换、改名、移除、重置、国内端接入都不受影响（它们本来就走自己的命令） |",
       "怎么验证点「来源」之后五条都发。②在「模型」分区点过「重读全部」之后再进「来源」，那几条**不会再发一遍**（用 `calls.length = 0` 清空后断言不含）。",
       "留白"
     ]
@@ -1976,7 +1988,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「来源」页里原来有两个刷新按钮：页头的「重读全部」，和「订阅账号」卡头里的「刷新额度」。它们其实是同一件事的两半——前者重读整页但这吃内核那一分钟缓存，后者绕开缓存向厂商重问但只更新账号、额度和走向。用户在同一个屏幕上看到两个「刷新」，只能猜哪个才管用。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 页头「重读全部」 | 先按订阅账号与 Key 的 provider 逐个发 `quota refresh <vendor>`，再走原来那 13 路重读 || 顺序 | 先问厂商、后读数据：不然读回来的还是缓存里那份，按钮就成了安慰剂 || 厂商问不到 | 单条 `.catch()`，不连累其它厂商与其它读取；失败原因照旧由各分区的读取结果写进提示条 || 「订阅账号」卡头 | 去掉「刷新额度」按钮，只留「今日签到」——签到是另一件事，不是刷新 || 文案 | 「刷新额度」相关的失败/兜底注释改成「重读全部」 |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 页头「重读全部」 | 先按订阅账号与 Key 的 provider 逐个发 `quota refresh <vendor>`，再走原来那 13 路重读 |\n| 顺序 | 先问厂商、后读数据：不然读回来的还是缓存里那份，按钮就成了安慰剂 |\n| 厂商问不到 | 单条 `.catch()`，不连累其它厂商与其它读取；失败原因照旧由各分区的读取结果写进提示条 |\n| 「订阅账号」卡头 | 去掉「刷新额度」按钮，只留「今日签到」——签到是另一件事，不是刷新 |\n| 文案 | 「刷新额度」相关的失败/兜底注释改成「重读全部」 |",
       "怎么验证`quota --json` 之前」；②「来源」页确认 `刷新额度` 按钮不存在、`今日签到` 仍在。",
       "留白"
     ]
@@ -1998,7 +2010,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「额度走向」这张卡在「来源」页最下面摊着一整块曲线。它只在一种情况下有用：想知道「照这个速度会不会在重置前用完」。平时它占掉一屏高度，而用户扫一眼想要的其实只是**那一句话**——哪一份最急、还有多久用完。曲线本身是「展开看细节」时才需要的东西。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 默认收起 | 卡里只留标题、一句结论和「展开走向」按钮；曲线不在 DOM 里（不是藏起来） || 结论怎么挑 | 在所有能算出速度的份额里挑**最早用完**的那一份，写成「Claude work@example.com（5 小时）照这个速度，3 小时 25 分后用完」 || 其余的分量 | 只报个数：「另有 2 份也在往下掉」，不逐个铺开 || 一句顶一句 | 都撑得过这次重置时写「照这个速度，这 N 份额度都撑得过这次重置」；算不出来时兜一句「最近 7 天的读数 · 展开看每一份的曲线」 || 急不急看颜色 | 两小时内用完标红、一天内标黄、更久不着色（与窗口条同一套语义） || 展开 | 「展开走向 / 收起走向」按钮，带 `aria-expanded` 与 `aria-controls`；展开后仍是原来那张曲线列表 |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 默认收起 | 卡里只留标题、一句结论和「展开走向」按钮；曲线不在 DOM 里（不是藏起来） |\n| 结论怎么挑 | 在所有能算出速度的份额里挑**最早用完**的那一份，写成「Claude work@example.com（5 小时）照这个速度，3 小时 25 分后用完」 |\n| 其余的分量 | 只报个数：「另有 2 份也在往下掉」，不逐个铺开 |\n| 一句顶一句 | 都撑得过这次重置时写「照这个速度，这 N 份额度都撑得过这次重置」；算不出来时兜一句「最近 7 天的读数 · 展开看每一份的曲线」 |\n| 急不急看颜色 | 两小时内用完标红、一天内标黄、更久不着色（与窗口条同一套语义） |\n| 展开 | 「展开走向 / 收起走向」按钮，带 `aria-expanded` 与 `aria-controls`；展开后仍是原来那张曲线列表 |",
       "怎么验证都撑得过时只报数、点太少时给空串（不硬下结论）。",
       "留白"
     ]
@@ -2019,7 +2031,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "订阅账号攒到六七个以后，「来源」页那一列变成半屏：想找「哪个快用完了」得一行行扫额度条，想找「哪个要重新登录」得看每一行右上角的小字。同一类账号往往要连着处理（换号、重新登录、改名字），处理完刷新一次又得从头找。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 筛选项 | 「订阅账号」列表上方一排按钮：全部 / 要重新登录 / 快用完 / 还有余量，每个带条数；选中的那个是实心按钮并带 `aria-pressed` || 只在需要时出现 | 账号少于 6 个不渲染这一排——三个账号一眼看完，多一排按钮只是多一次点击 || 空档不出现 | 条数为 0 的那一档不出现（「全部」除外）：点进去必然空空如也的按钮不算功能 || 怎么分档 | 登录失效或读不到额度的先归「要重新登录」（额度数字本来就不可信）；有一个窗口剩余 ≤ 25% 归「快用完」（与进度条同一套色调）；其余都算「还有余量」 || 判不了的不硬判 | 不限量窗口、只有厂商原话（没有百分比）的窗口不参与「快用完」的判断 || 筛空了 | 刷新后这一档正好空了，列表里说一句这个筛选下没有这类账号，并给「看全部」一键回到全貌 || 刷新与切号之后 | 筛选停在原来那一档：连着一类账号处理时不用每次重新点 |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 筛选项 | 「订阅账号」列表上方一排按钮：全部 / 要重新登录 / 快用完 / 还有余量，每个带条数；选中的那个是实心按钮并带 `aria-pressed` |\n| 只在需要时出现 | 账号少于 6 个不渲染这一排——三个账号一眼看完，多一排按钮只是多一次点击 |\n| 空档不出现 | 条数为 0 的那一档不出现（「全部」除外）：点进去必然空空如也的按钮不算功能 |\n| 怎么分档 | 登录失效或读不到额度的先归「要重新登录」（额度数字本来就不可信）；有一个窗口剩余 ≤ 25% 归「快用完」（与进度条同一套色调）；其余都算「还有余量」 |\n| 判不了的不硬判 | 不限量窗口、只有厂商原话（没有百分比）的窗口不参与「快用完」的判断 |\n| 筛空了 | 刷新后这一档正好空了，列表里说一句这个筛选下没有这类账号，并给「看全部」一键回到全貌 |\n| 刷新与切号之后 | 筛选停在原来那一档：连着一类账号处理时不用每次重新点 |",
       "怎么验证三档计数之和等于全部、筛出来的数组是新的、每档都有各自的空态说明。根本没有这一排；筛着筛着这一档空了会出现说明与「看全部」。",
       "留白"
     ]
@@ -2045,7 +2057,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "1. 请求越来越贵——每一轮都把几十轮旧对话重发一遍，token 花在重复内容上；2. 最后直接撞供应商的上下文上限（400），一次也跑不了，只能开新会话从头讲。",
       "桌面端从 d.183 起就有「预算 + 折叠早期对话」，CLI 一点没用：`run.ts` 的`fetchHistory` 把存档原样交给编排层。同一个会话在窗口里能接着聊，在终端里多聊几轮就废了。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 开关 | `--context-budget <n>`（正整数，500–200000）与 `--no-compact`（不接受取值）；`sessions` 与 `mcp serve` 都拒收 || 默认 | 12000 tokens：CLI 的系统提示词比桌面端短得多，12k 够长又不至于烧钱 || 折什么 | 只折**早期**对话，最近的原文照旧保留；历史本身放得下就一条不折 || 摘要怎么来 | 复用桌面端的 `prepareHistory`：意图 / 结论 / 待办三段式，**零成本确定性生成，不额外调模型**——终端不该在「让它干活」时偷偷多花一次调用，而且那次调用用户看不见 || 一本账 | 系统提示词的 token 估算也扣进同一个预算（`planTurnBudget`），避免「系统 + 历史各算各的」双花 || 溢出重试 | 真撞上上下文超限时，编排层会带 `aggressive` 再调一次，CLI 照转：1 级半预算、2 级四分之一预算，最多两级 || 说话 | 折了才打一行：`[heming] 上下文：折叠了 18 条早期对话（预算 3000 tokens）`；`--no-compact` 打「不折叠，历史原样发送」；没折且没关不掉时**不打** || 失败回落 | 预算/摘要任何一步抛错都退回「原样发送」——贵一点可以，跑不起来不行 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 开关 | `--context-budget <n>`（正整数，500–200000）与 `--no-compact`（不接受取值）；`sessions` 与 `mcp serve` 都拒收 |\n| 默认 | 12000 tokens：CLI 的系统提示词比桌面端短得多，12k 够长又不至于烧钱 |\n| 折什么 | 只折**早期**对话，最近的原文照旧保留；历史本身放得下就一条不折 |\n| 摘要怎么来 | 复用桌面端的 `prepareHistory`：意图 / 结论 / 待办三段式，**零成本确定性生成，不额外调模型**——终端不该在「让它干活」时偷偷多花一次调用，而且那次调用用户看不见 |\n| 一本账 | 系统提示词的 token 估算也扣进同一个预算（`planTurnBudget`），避免「系统 + 历史各算各的」双花 |\n| 溢出重试 | 真撞上上下文超限时，编排层会带 `aggressive` 再调一次，CLI 照转：1 级半预算、2 级四分之一预算，最多两级 |\n| 说话 | 折了才打一行：`[heming] 上下文：折叠了 18 条早期对话（预算 3000 tokens）`；`--no-compact` 打「不折叠，历史原样发送」；没折且没关不掉时**不打** |\n| 失败回落 | 预算/摘要任何一步抛错都退回「原样发送」——贵一点可以，跑不起来不行 |",
       "怎么验证`aggressive` 折算与统计、非数组输入不抛错。`--no-compact` 时请求里没有摘要且第一轮原文仍在。",
       "留白"
     ]
@@ -2067,7 +2079,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "ChatGPT 账号里那几次「手动重置」是有期限的：放着不用，到期就作废。内核其实早就会替你花（`quota auto-reset`）：周额度用光、又没有别的账号能接时花一次，或者在一份重置快过期时提前花一次，一周最多一次。但它只有命令行，而且**状态不在任何 JSON 里**——`settings list --json` 不报这个键，`accounts --json` 也不报，页面因此完全没有入口，用户只能看着次数过期。",
       "做了什么",
-      "| 位置 | 落地 || --- | --- || 触发条件 | 只在有可重置次数的账号行上出现（没次数就没有可花的） || 四档 | 不自己花 / 周额度用完就花 / 快过期就花 / 两种时候都花 || 读状态 | `quota auto-reset` 的散文输出（`● 账号  一句话`），解析在 `lib/autoReset.ts`；认不出的措辞一律当「不自己花」，不替用户猜 || 写状态 | `quota auto-reset <账号> on|off`，单开一档时**把另一档显式关掉**——内核的 `week`/`expiring` 只管一档、另一档保持原样，只发一条会变成两档都开 || 失败 | 内核原话进提示条，并重读一次把下拉拉回真实状态（避免界面显示一个没生效的选择） || 顺带 | 「重读全部」也重读这张表 || 提前多久 | 有人选了「快过期就花」时，额度提醒卡里会多一枚「重置提前」：默认 30 分钟，可选 3 分钟到 24 小时（`quota auto-reset lead`）；没人会快过期时花，这一项就不出现 |",
+      "| 位置 | 落地 |\n| --- | --- |\n| 触发条件 | 只在有可重置次数的账号行上出现（没次数就没有可花的） |\n| 四档 | 不自己花 / 周额度用完就花 / 快过期就花 / 两种时候都花 |\n| 读状态 | `quota auto-reset` 的散文输出（`● 账号  一句话`），解析在 `lib/autoReset.ts`；认不出的措辞一律当「不自己花」，不替用户猜 |\n| 写状态 | `quota auto-reset <账号> on|off`，单开一档时**把另一档显式关掉**——内核的 `week`/`expiring` 只管一档、另一档保持原样，只发一条会变成两档都开 |\n| 失败 | 内核原话进提示条，并重读一次把下拉拉回真实状态（避免界面显示一个没生效的选择） |\n| 顺带 | 「重读全部」也重读这张表 |\n| 提前多久 | 有人选了「快过期就花」时，额度提醒卡里会多一枚「重置提前」：默认 30 分钟，可选 3 分钟到 24 小时（`quota auto-reset lead`）；没人会快过期时花，这一项就不出现 |",
       "怎么验证`quota auto-reset lead 2h`），没人这么选时不摆这一项",
       "留白"
     ]
@@ -2091,7 +2103,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "1. **先预演再动手。**「让它先看看这套代码哪里有问题」和「让它改」在这之前是同一个命令，只能事后从改动里看出它想干什么。2. **CI 里只读。** 想在流水线上跑一遍「它能不能看懂这个仓库」，不希望任何文件被写、任何命令被跑，只能靠容器兜底，CLI 自己不给能力。3. **把工具借给编辑器却不让它写。** `heming mcp serve` 一开，对端拿到的是`file_read` 也有 `file_write`——同意的范围只能是全部。",
       "对标 codex 的 `--sandbox read-only`，这一轮补的就是这个模式开关。真正的 OS 级沙箱（进程隔离、系统调用过滤）仍然是另一件事，这里只做**能力裁剪**：不启动任何可能改动的动作。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 开关 | `heming run --read-only`、`heming mcp serve --read-only`；不接受取值 || 判定依据 | 看工具自报的 `risk`：只有 `read` 放行（读、搜、看图、todo、工具输出），写/删/打补丁/跑命令一律拒 || 未知工具 | 没声明风险的一律当写处理（fail-closed）——新增工具不会因为忘记维护白名单被静默放行 || 优先级 | 只读判定排在**工作区权限规则之前**：被拒时说的是「CLI 以只读模式运行」，不会让模型误以为是仓库规则或参数问题 || 与 `--allow-danger` | 同时给时只读赢，启动时 stderr 明说一句（否则用户以为自己放行了命令） || MCP 侧 | `tools/list` 直接不列非只读工具：连名字都没出现在对端菜单里，硬调回来是「未知工具」；`instructions` 也照实说明 || 提示词 | `run` 的系统提示词追加一段「这次是只读模式」，并明确「重试不会改变结果，要改动就写说明」——否则模型会把轮数烧在注定失败的写上 || 命令工具 | 只读模式下桥里根本不挂 `run_command`（闸门拦 + 桥不提供，两道都上） |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 开关 | `heming run --read-only`、`heming mcp serve --read-only`；不接受取值 |\n| 判定依据 | 看工具自报的 `risk`：只有 `read` 放行（读、搜、看图、todo、工具输出），写/删/打补丁/跑命令一律拒 |\n| 未知工具 | 没声明风险的一律当写处理（fail-closed）——新增工具不会因为忘记维护白名单被静默放行 |\n| 优先级 | 只读判定排在**工作区权限规则之前**：被拒时说的是「CLI 以只读模式运行」，不会让模型误以为是仓库规则或参数问题 |\n| 与 `--allow-danger` | 同时给时只读赢，启动时 stderr 明说一句（否则用户以为自己放行了命令） |\n| MCP 侧 | `tools/list` 直接不列非只读工具：连名字都没出现在对端菜单里，硬调回来是「未知工具」；`instructions` 也照实说明 |\n| 提示词 | `run` 的系统提示词追加一段「这次是只读模式」，并明确「重试不会改变结果，要改动就写说明」——否则模型会把轮数烧在注定失败的写上 |\n| 命令工具 | 只读模式下桥里根本不挂 `run_command`（闸门拦 + 桥不提供，两道都上） |",
       "怎么验证`file_write`、`run_command` 都不在；硬调 `file_write` 回 `-32602 未知工具`，磁盘上没有那个文件；去掉 `--read-only` 后同一调用正常落盘",
       "留白"
     ]
@@ -2118,7 +2130,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "同一个问题还有第二个入口：任何一条写命令（改 Key、保存来源设置、换备用链）跑完之后只重读来源和账号，余额卡与走向图留在旧值上。",
       "一个页面上有两个「刷新」，一个刷半页、一个刷另外半页，用户不可能记住哪个刷哪半。",
       "做了什么",
-      "| 位置 | 之前 | 现在 ||---|---|---|| 页头按钮 | 「刷新模型」：目录 + 来源 + 账号 + 禁用 + 可见 + 全局 | 「重读全部」：再加**其余额度、额度走向、本机智能体、插件清单、设置表、自动收取开关**，共 12 路；按钮转圈到全部读完 || 重读结果 | 无反馈（只能自己看数字变没变） | 提示条说结果：`已重读全部：来源、账号、额度、走向与设置都按现在的样子更新了。`；有几段没读到就改说 `已重读，但其余额度这次没读到。` || 写命令之后的刷新（`runDetailed` 的 `refresh: true`） | 只重读来源 + 账号 | 一并重读**其余额度 + 额度走向**（改 Key、换备用链都会动到余额） || 提示条位置 | 只渲染在「来源」分区里 | 提到分区之外（页签下方），在「模型 / 智能体 / 运行」分区操作也能看到结果 || 「没读到哪几段」 | — | `readErrorsRef` 记一份同步镜像：一批读完后立刻总结，不等 state 重新渲染 |",
+      "| 位置 | 之前 | 现在 |\n|---|---|---|\n| 页头按钮 | 「刷新模型」：目录 + 来源 + 账号 + 禁用 + 可见 + 全局 | 「重读全部」：再加**其余额度、额度走向、本机智能体、插件清单、设置表、自动收取开关**，共 12 路；按钮转圈到全部读完 |\n| 重读结果 | 无反馈（只能自己看数字变没变） | 提示条说结果：`已重读全部：来源、账号、额度、走向与设置都按现在的样子更新了。`；有几段没读到就改说 `已重读，但其余额度这次没读到。` |\n| 写命令之后的刷新（`runDetailed` 的 `refresh: true`） | 只重读来源 + 账号 | 一并重读**其余额度 + 额度走向**（改 Key、换备用链都会动到余额） |\n| 提示条位置 | 只渲染在「来源」分区里 | 提到分区之外（页签下方），在「模型 / 智能体 / 运行」分区操作也能看到结果 |\n| 「没读到哪几段」 | — | `readErrorsRef` 记一份同步镜像：一批读完后立刻总结，不等 state 重新渲染 |",
       "怎么验证",
       "1. `pnpm --filter @heming/web test` — 445 个测试文件 / 6380 个用例全绿。2. `ModelPage.test.tsx` 新增 3 例：并写出「已重读全部」；4. `node scripts/design-audit.mjs` — 模型页字号档 / 11px 正文 / 对比度 / 命中区 / 横向溢出全部通过。",
       "留白"
@@ -2140,7 +2152,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "可 `heming run` 之前**完全不看这份文件**：同一份 hooks.json，窗口里的和鸣先跑检查再动手，终端里的和鸣直接动。团队把规矩写进仓库，结果只有一半入口遵守，这比没有规矩更糟——因为大家会以为规矩已经生效了。",
       "这一轮把 CLI 也接上它，口径与桌面端逐字对齐（解析、匹配、payload、判定全部复用同一份纯逻辑，不另立一套）。",
       "做了什么",
-      "| 位置 | 之前 | 现在 ||---|---|---|| 新 `packages/cli/src/toolHooks.ts` | — | `loadCliHooks`（只认 `.heming/hooks.json`、剥 BOM、256KB 上限、坏 JSON 显式报错）、`describeCliHooks`、`runHookProcess`（自管超时并标 `timedOut`、输出各截 8000 字）、`createCliHookRunner`（按配置顺序跑、任一拒绝即停、payload 写到 `.heming/hooks/.tmp/<runId>.json`、跑完 `finally` 删掉）、`cliHookDeniedText` || `packages/cli/src/tooling.ts` | 闸门之后直接执行 | 闸门放行后再跑钩子：命中且拒绝 → 回「未执行」并把原因写回给模型，磁盘不动；参数用**模型原文**（不相对化，脚本才敢逐字核对） || `packages/cli/src/index.ts` | 无 | 启动时读配置并打一行（几条规则、启用与否、来自哪份文件）；配置坏了且加了 `--trust-hooks` 就**不启动** || `packages/cli/src/mcpServe.ts` | 无 | 同上；`mcp serve` 暴露出去的 `file_write` 一样受这套检查约束 || `packages/cli/src/args.ts` | 无 | 新增 `--trust-hooks`（不接受取值；`sessions` 不接） |",
+      "| 位置 | 之前 | 现在 |\n|---|---|---|\n| 新 `packages/cli/src/toolHooks.ts` | — | `loadCliHooks`（只认 `.heming/hooks.json`、剥 BOM、256KB 上限、坏 JSON 显式报错）、`describeCliHooks`、`runHookProcess`（自管超时并标 `timedOut`、输出各截 8000 字）、`createCliHookRunner`（按配置顺序跑、任一拒绝即停、payload 写到 `.heming/hooks/.tmp/<runId>.json`、跑完 `finally` 删掉）、`cliHookDeniedText` |\n| `packages/cli/src/tooling.ts` | 闸门之后直接执行 | 闸门放行后再跑钩子：命中且拒绝 → 回「未执行」并把原因写回给模型，磁盘不动；参数用**模型原文**（不相对化，脚本才敢逐字核对） |\n| `packages/cli/src/index.ts` | 无 | 启动时读配置并打一行（几条规则、启用与否、来自哪份文件）；配置坏了且加了 `--trust-hooks` 就**不启动** |\n| `packages/cli/src/mcpServe.ts` | 无 | 同上；`mcp serve` 暴露出去的 `file_write` 一样受这套检查约束 |\n| `packages/cli/src/args.ts` | 无 | 新增 `--trust-hooks`（不接受取值；`sessions` 不接） |",
       "`--trust-hooks` 是这一轮唯一「与桌面端不同」的地方，而且是有意的：桌面端是用户自己打开的窗口、自己攒的仓库；`.heming/hooks.json` 却跟着仓库走，克隆一个陌生仓库不能让它在你敲下 `heming run` 时自动在你机器上执行命令。所以默认只读配置、不执行，要真生效必须显式加这一项——和 `.heming/permissions.json` 的 `allow` 规则需要`--trust-workspace` 是同一个道理。",
       "判定优先级沿用桌面端：**超时 > stdout 里的 JSON > 退出码**（0 放行、2 拒绝并取首行作为原因、其它一律拒绝）。拒绝文案里明写「【该操作未执行，文件与系统状态未被修改】」和「这不是用户的选择，而是 .heming/hooks.json 里声明的本机检查拒绝了它」——否则模型会当成偶发失败反复重试。",
       "怎么验证",
@@ -2164,7 +2176,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这句话把一个**服务问题**说成了**用户没登录**。用户照着它去点登录，只会再失败一次，而且失败原因（真正的那个）一个字都没露出来。读失败和「真的没有」必须分开说：前者要报原因并给一个重试入口，后者才该引导用户去登录。",
       "顺带修掉同一根源上的第二个问题：一次偶发超时会把**已经读到的列表抹成空**——缓存里明明有上次的读数，页面却在那一刻清空成「还没有」。",
       "做了什么",
-      "| 位置 | 之前 | 现在 ||---|---|---|| 新 `lib/readErrors.ts` | — | `readFailureDetail`（取 stderr 最后一行、剥 ANSI、过 `engineText`、压成一行 120 字内）、`setReadError`（成功即抹掉）、`readFailureText`、`failedSections`、`readFailuresText` || 四个加载器（来源 / 订阅账号 / 其余额度 / 本机智能体） | 只解析 stdout | 先 `reportRead` 记下结果；**失败时 `return`，保住上一次的读数**，不拿空表覆盖 || 「订阅账号」卡的空态 | 一律「还没有账号」 | 读失败时改说「这次没读到订阅账号：<原因>」并给「重新读一次」 || 「来源」列表的空态 | 一律「还没有来源」 | 读失败时改说「这次没读到来源：<原因>」+「重新读一次」 || 「智能体」列表的空态 | 一律「没有检测到本机智能体」 | 读失败时改说「这次没读到本机的智能体：<原因>」+「重新检测」 || 「其余来源的额度」卡 | 读不到时整卡消失（看起来像没有 Key） | 读失败时卡片保留，写「这次没读到其余额度：<原因>」+「重新读一次」 || 「订阅账号」卡头右侧 | 只写最近读数时间 | 读失败且有旧读数时先说「这次没读到，下面是上次的读数」（红字） |",
+      "| 位置 | 之前 | 现在 |\n|---|---|---|\n| 新 `lib/readErrors.ts` | — | `readFailureDetail`（取 stderr 最后一行、剥 ANSI、过 `engineText`、压成一行 120 字内）、`setReadError`（成功即抹掉）、`readFailureText`、`failedSections`、`readFailuresText` |\n| 四个加载器（来源 / 订阅账号 / 其余额度 / 本机智能体） | 只解析 stdout | 先 `reportRead` 记下结果；**失败时 `return`，保住上一次的读数**，不拿空表覆盖 |\n| 「订阅账号」卡的空态 | 一律「还没有账号」 | 读失败时改说「这次没读到订阅账号：<原因>」并给「重新读一次」 |\n| 「来源」列表的空态 | 一律「还没有来源」 | 读失败时改说「这次没读到来源：<原因>」+「重新读一次」 |\n| 「智能体」列表的空态 | 一律「没有检测到本机智能体」 | 读失败时改说「这次没读到本机的智能体：<原因>」+「重新检测」 |\n| 「其余来源的额度」卡 | 读不到时整卡消失（看起来像没有 Key） | 读失败时卡片保留，写「这次没读到其余额度：<原因>」+「重新读一次」 |\n| 「订阅账号」卡头右侧 | 只写最近读数时间 | 读失败且有旧读数时先说「这次没读到，下面是上次的读数」（红字） |",
       "怎么验证",
       "1. `pnpm --filter @heming/web test` — 445 个测试文件 / 6377 个用例全绿。新增 `lib/readErrors.test.ts` 11 例（最后一行取值、`error` 兜底、都空时说「没有说明原因」、截断到 120 字、外部引擎名不外泄、记录/抹掉/不重复渲染、空原因写成人话、失败段顺序）。2. `ModelPage.test.tsx` 新增 4 例：来源读失败时说「这次没读到来源：模型服务没有启动」且**不出现**「还没有来源」，改好点「重新读一次」当场画出真来源并抹掉错误；账号读失败时说原因而不是让人去登录；**读失败但有旧读数和缓存时，卡片顶先说「这次没读到，下面是上次的读数」，旧的行照常画着**（这条也守住了「失败不覆盖」）；其余额度读失败时卡片还在并说明原因。3. `pnpm --filter @heming/web exec tsc -p tsconfig.json --noEmit` — 0 错。4. `node scripts/design-audit.mjs` — 模型页字号档、11px 正文、对比度、命中区、横向溢出全部通过。",
       "留白"
@@ -2185,7 +2197,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "同一个人常在两三个账号上各有一份额度（工作号、小号、家里号）。一个用完时，页面把「已用完」写在那一行，但没有任何动作——用户只能自己去别处找「还剩多少的那个」，或者干等它自己重置。内核本来就替 Claude / Codex 存着登录态，能一句话换过去（`accounts switch <claude|codex> next`），页面一直没有出口。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 新 `packages/web/src/lib/swapAccount.ts` | `accountUsedUp(row)`（窗口全见底，不限量与只有原话的不算）、`swapSuggestions(rows, readyAbove = 25)`（只在 Claude / Codex 上、有人用完且有人余量 >25% 时给一条）、`swapText`、`swapArgs` || `packages/web/src/components/ModelPage.tsx` | 「订阅账号」卡里、账号合计下面多一行提示：「Claude 有 1 个账号用完了，另有 1 个还有余量」+「换过去」按钮；点击走既有二次确认（说明会改写该工具自己的登录），确认后执行 `accounts switch <agent> next` 并重读账号、额度与走向 || 同一文件 | 换号成功后提示「已把 Claude 换到还有额度的那个账号。」；失败把内核原话放提示条（红色） |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 新 `packages/web/src/lib/swapAccount.ts` | `accountUsedUp(row)`（窗口全见底，不限量与只有原话的不算）、`swapSuggestions(rows, readyAbove = 25)`（只在 Claude / Codex 上、有人用完且有人余量 >25% 时给一条）、`swapText`、`swapArgs` |\n| `packages/web/src/components/ModelPage.tsx` | 「订阅账号」卡里、账号合计下面多一行提示：「Claude 有 1 个账号用完了，另有 1 个还有余量」+「换过去」按钮；点击走既有二次确认（说明会改写该工具自己的登录），确认后执行 `accounts switch <agent> next` 并重读账号、额度与走向 |\n| 同一文件 | 换号成功后提示「已把 Claude 换到还有额度的那个账号。」；失败把内核原话放提示条（红色） |",
       "怎么验证失效与读不到错误的账号不参与、不限量算有余量、命令与文案形状。`[\"accounts\",\"switch\",\"claude\",\"next\"]` 并出现成功提示。",
       "留白"
     ]
@@ -2204,7 +2216,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "桌面端从 d.174 起，每一轮都会读工作区里的 `AGENTS.md` 一族文件并塞进系统提示词：「改完要跑哪套测试、注释里能不能写为什么、生成文件不许手改」这类规矩，窗口里的和鸣知道。终端里的 `heming run` 一直不知道——同一个仓库、同一份规矩，两条路行为不一样。`codex` 与 `Claude Code` 都默认读这份文件，这是我们和它们最容易被察觉的一处差异。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 读哪些文件 | 与桌面端同一份口径：`AGENTS.md`、`HEMING.md`、`.heming/AGENTS.md`、`.heming/rules.md`，最多读 2 份 || 从哪读 | 只读 `--cwd`（CLI 的唯一根）及其 `.heming/`，不往上层目录找——上层是别人的项目 || 封顶 | 单文件 4000 字、总量 6000 字；截断处明写「需要后面的内容用 `file_read` 读」 || 放进哪 | 系统提示词的「项目约定」段，位置与人设之后、运行环境之前（与桌面端一致） || 看得见 | stderr 一行：`[heming] 项目约定：AGENTS.md（1234 字）`；截断/未展开会写出来 || 读不到时 | 没这份文件、没权限、不是文本、桥抛错，都只是「这一轮没有约定」，不阻断运行 || 编码 | BOM 与 CRLF 归一（Windows 上最常见的写法） |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 读哪些文件 | 与桌面端同一份口径：`AGENTS.md`、`HEMING.md`、`.heming/AGENTS.md`、`.heming/rules.md`，最多读 2 份 |\n| 从哪读 | 只读 `--cwd`（CLI 的唯一根）及其 `.heming/`，不往上层目录找——上层是别人的项目 |\n| 封顶 | 单文件 4000 字、总量 6000 字；截断处明写「需要后面的内容用 `file_read` 读」 |\n| 放进哪 | 系统提示词的「项目约定」段，位置与人设之后、运行环境之前（与桌面端一致） |\n| 看得见 | stderr 一行：`[heming] 项目约定：AGENTS.md（1234 字）`；截断/未展开会写出来 |\n| 读不到时 | 没这份文件、没权限、不是文本、桥抛错，都只是「这一轮没有约定」，不阻断运行 |\n| 编码 | BOM 与 CRLF 归一（Windows 上最常见的写法） |",
       "怎么验证",
       "```bash",
       "cd packages/cli",
@@ -2229,7 +2241,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.289 让和鸣**被**别的编辑器调用（`heming mcp serve`：Cursor / Claude Code 调我们的文件工具）。但反方向一直空着：终端里跑 `heming run` 时，`--help` 写着「不接 MCP」，能用的只有内置那几个文件工具。团队已经把数据库查询、内部 API 包成了 MCP 服务，桌面端连得上，终端里却用不了——同一个仓库，两条路能力不一样。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 声明位置 | `.heming/mcp.json` 的 `mcpServers`，与桌面端那份配置同一个习惯写法（`command` / `args` / `env` / `cwd`） || 什么时候连 | 只有显式 `--mcp` 才连。连上等于执行仓库里写的命令，克隆来的陌生仓库不该自动拿到这个权力 || 工具长什么样 | `mcp__<服务>__<工具>`，描述里写清来源；对方给的 `inputSchema` 原样当参数表 || 授权 | MCP 工具一律按 danger 处理：没有 `--allow-danger` 时调用得到「未执行」，并把原因写回给模型 || 参数 | **原样转发**，不做 CLI 内部那套绝对路径改相对路径（那是我们自己的文件工具约定，不能替别人的服务改写） || 失败 | 单个服务连不上只警告、继续跑；配置坏了（JSON 坏 / 缺 `command` / 超过 8 个服务）直接不启动，说清是哪个文件 || 收尾 | 退出前关掉所有 MCP 子进程——它们挂在 stdio 上，留着会让终端一直不返回（这一条有进程级回归测试钉着） |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 声明位置 | `.heming/mcp.json` 的 `mcpServers`，与桌面端那份配置同一个习惯写法（`command` / `args` / `env` / `cwd`） |\n| 什么时候连 | 只有显式 `--mcp` 才连。连上等于执行仓库里写的命令，克隆来的陌生仓库不该自动拿到这个权力 |\n| 工具长什么样 | `mcp__<服务>__<工具>`，描述里写清来源；对方给的 `inputSchema` 原样当参数表 |\n| 授权 | MCP 工具一律按 danger 处理：没有 `--allow-danger` 时调用得到「未执行」，并把原因写回给模型 |\n| 参数 | **原样转发**，不做 CLI 内部那套绝对路径改相对路径（那是我们自己的文件工具约定，不能替别人的服务改写） |\n| 失败 | 单个服务连不上只警告、继续跑；配置坏了（JSON 坏 / 缺 `command` / 超过 8 个服务）直接不启动，说清是哪个文件 |\n| 收尾 | 退出前关掉所有 MCP 子进程——它们挂在 stdio 上，留着会让终端一直不返回（这一条有进程级回归测试钉着） |",
       "怎么验证",
       "```bash",
       "cd packages/cli",
@@ -2256,7 +2268,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "额度提醒原来只管两件事：窗口用到多少百分比、窗口到期前几小时。但「按量付费的 Key」没有窗口，它只有一个余额——¥2.60 这种数字，用到见底时没有任何人说话。内核本来就有这个设置（`balanceAlert`，`quota alert --balance 5`），页面一直没有出口。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/magpieReminder.ts` | 新增 `BALANCE_ALERT_CHOICES`（关/1/5/10/20）、`balanceAlertText`；`reminderArgs` 允许 `balanceAlert`；`reminderSummary` 多一段 || `packages/web/src/components/model/QuotaReminder.tsx` | 第三枚下拉「余额少」，与「快用完」「快到期」并排，窄屏自动换行 || 同一组件底部小字 | 开了余额提醒时补一句「余额按各自的币种或点数算」——内核是按每张余额卡自己的单位比的 || `packages/web/src/components/ModelPage.tsx` | `setReminder` 接受 `balanceAlert`，提示条说「已记下：余额低到 5 或更少时提醒一次，直到充值回来。」 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/lib/magpieReminder.ts` | 新增 `BALANCE_ALERT_CHOICES`（关/1/5/10/20）、`balanceAlertText`；`reminderArgs` 允许 `balanceAlert`；`reminderSummary` 多一段 |\n| `packages/web/src/components/model/QuotaReminder.tsx` | 第三枚下拉「余额少」，与「快用完」「快到期」并排，窄屏自动换行 |\n| 同一组件底部小字 | 开了余额提醒时补一句「余额按各自的币种或点数算」——内核是按每张余额卡自己的单位比的 |\n| `packages/web/src/components/ModelPage.tsx` | `setReminder` 接受 `balanceAlert`，提示条说「已记下：余额低到 5 或更少时提醒一次，直到充值回来。」 |",
       "怎么验证",
       "留白"
     ]
@@ -2277,7 +2289,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`.heming/permissions.json` 一直是桌面端的规则：`deny` 一定生效、`ask` 问你、`allow` 要你信任过工作区。可 `heming run` 和 `heming mcp serve` 从来不读它——同一份`{\"deny\":[{\"tool\":\"run_command\",\"command\":\"git push*\"}]}`，在窗口里被拦住，在终端里照跑；把服务挂给别的编辑器时更是完全不受约束。团队把规范写进仓库，结果只有一半入口遵守，这比没有规范更糟。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/cli/src/workspaceRules.ts` | 读 `.heming/permissions.json`：不存在当「没有规则」，存在但太大/不是文件/解析失败一律 fail-closed；顺手剥掉 UTF-8 BOM（记事本与 PowerShell 5 的默认写法） || `packages/cli/src/tooling.ts` | 闸门里加「工作区规则先判」一层，排在命令工具之前：`deny` 直接拒（带命中的规则），`ask` 在 CLI 里落成拒绝并说清「没有人可以确认」 || 同上 | `allow` 只在 `--trust-workspace` 后生效，且**只放宽 danger 工具的风险判定**，不绕过写路径的越界/删除检查——路径安全是文件桥的最后一闸，不该被仓库里的 JSON 顶掉 || `packages/cli/src/{run,mcpServe}.ts` | `run` 与 `mcp serve` 共用同一份规则；启动时把「deny N / ask N / allow N，allow 是否生效」打到 stderr || `packages/cli/src/args.ts` | 新增 `--trust-workspace`（不接受取值）；`sessions` 与 `mcp serve` 各自拒绝不相关的选项 || `packages/cli/src/index.ts` | `--help` 增加「工作区权限规则」一节：三行示例 + 「文件坏了就不启动」 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/cli/src/workspaceRules.ts` | 读 `.heming/permissions.json`：不存在当「没有规则」，存在但太大/不是文件/解析失败一律 fail-closed；顺手剥掉 UTF-8 BOM（记事本与 PowerShell 5 的默认写法） |\n| `packages/cli/src/tooling.ts` | 闸门里加「工作区规则先判」一层，排在命令工具之前：`deny` 直接拒（带命中的规则），`ask` 在 CLI 里落成拒绝并说清「没有人可以确认」 |\n| 同上 | `allow` 只在 `--trust-workspace` 后生效，且**只放宽 danger 工具的风险判定**，不绕过写路径的越界/删除检查——路径安全是文件桥的最后一闸，不该被仓库里的 JSON 顶掉 |\n| `packages/cli/src/{run,mcpServe}.ts` | `run` 与 `mcp serve` 共用同一份规则；启动时把「deny N / ask N / allow N，allow 是否生效」打到 stderr |\n| `packages/cli/src/args.ts` | 新增 `--trust-workspace`（不接受取值）；`sessions` 与 `mcp serve` 各自拒绝不相关的选项 |\n| `packages/cli/src/index.ts` | `--help` 增加「工作区权限规则」一节：三行示例 + 「文件坏了就不启动」 |",
       "怎么验证allow 需信任且规则要写 `allowDanger`、allow 不绕过越界写、没有规则时行为不变）。",
       "留白"
     ]
@@ -2298,7 +2310,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "打开模型页，第二波请求里有七个进程，其中三个只做一件事：问「看图模型」「思考档」「画图模型」当前是什么。可这三项的值本来就在同一波的 `settings list --json` 里——那是整张设置表，一次就全给了。等于同样的答案问了四遍。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/modelSettings.ts` | 新增 `textSetting(values, key)`：从设置表里取字符串值，布尔/数组/缺失都当没设置 || `packages/web/src/components/ModelPage.tsx` `loadSettings` | 读完设置表顺手写这三项，不再单独发 `settings get` || 同一文件 `loadGlobals` | 只剩 `model suffix` / `model compact` / `model context-cap` / `model` 四条 || 保存看图、画图设置之后 | 同时重读设置表与这四条，改完的值当场生效（原来只重读四条） |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/lib/modelSettings.ts` | 新增 `textSetting(values, key)`：从设置表里取字符串值，布尔/数组/缺失都当没设置 |\n| `packages/web/src/components/ModelPage.tsx` `loadSettings` | 读完设置表顺手写这三项，不再单独发 `settings get` |\n| 同一文件 `loadGlobals` | 只剩 `model suffix` / `model compact` / `model context-cap` / `model` 四条 |\n| 保存看图、画图设置之后 | 同时重读设置表与这四条，改完的值当场生效（原来只重读四条） |",
       "怎么验证",
       "留白"
     ]
@@ -2318,7 +2330,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型清单来自本地 store，来源那几条内核命令还没回来时它其实已经能画了。但页面把整块「可用模型」都挡在一个 `loading` 后面，于是每次打开都先看半秒骨架，等的是与模型列表无关的 `providers` / `ls` / `model disabled` / `visible`。骨架的价值是「什么都不知道时先占位」，不是「知道也先藏着」。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/components/ModelPage.tsx` 模型分区 | 骨架只在 `loading && modelRows.length === 0` 时出现：已经有模型就直接画 || 同一文件 `refreshAccountQuota` | 「刷新额度」顺手把额度走向（`quota history`）也读一遍，图上不必等下一分钟的定时器 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/components/ModelPage.tsx` 模型分区 | 骨架只在 `loading && modelRows.length === 0` 时出现：已经有模型就直接画 |\n| 同一文件 `refreshAccountQuota` | 「刷新额度」顺手把额度走向（`quota history`）也读一遍，图上不必等下一分钟的定时器 |",
       "怎么验证",
       "留白"
     ]
@@ -2338,7 +2350,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "上一版把「上一次读到的内容」留在本机，打开模型页先用它画一版。省时间是真的，代价也跟着来：昨天改过的 Key、昨天还登录着、今天已经失效的账号，会先在画面上闪一下再被改掉。本地页面可以先给你一个旧画面，但不该把隔天的状态当成今天的。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/pageCache.ts` | 每条缓存带上时间戳（`{ at, text }`），超过 `CACHE_MAX_AGE_MS = 24 小时` 就当没有 || 版本前缀 | `v1` → `v2`：旧版没时间戳的那几份直接读不到，不会混用 || 时间戳坏掉 / 形状不对 | 一律当没有（旧格式、`at: null`、写坏的 JSON 都试过了） || 空内容 | 不写（写了也读不出来，白占配额） || 智能体列表 | `ls` 的原话也进缓存：打开时先画出上次认到的本机智能体，再被真正的读取替换 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/lib/pageCache.ts` | 每条缓存带上时间戳（`{ at, text }`），超过 `CACHE_MAX_AGE_MS = 24 小时` 就当没有 |\n| 版本前缀 | `v1` → `v2`：旧版没时间戳的那几份直接读不到，不会混用 |\n| 时间戳坏掉 / 形状不对 | 一律当没有（旧格式、`at: null`、写坏的 JSON 都试过了） |\n| 空内容 | 不写（写了也读不出来，白占配额） |\n| 智能体列表 | `ls` 的原话也进缓存：打开时先画出上次认到的本机智能体，再被真正的读取替换 |",
       "怎么验证",
       "留白"
     ]
@@ -2360,7 +2372,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`heming run` 之前是**单轮**的：`fetchHistory` 固定返回空数组，跑完一次就忘掉上一次说过什么。长任务里这很致命——第一步「读一遍仓库结构」，第二步要「按刚才看到的改」，用户只能把结论复制回 prompt 里。桌面端本来就有会话，终端里没有，就成了「同一件事在终端里做不到」。codex 的 `resume` / `--continue` 解决的正是这件事。",
       "做了什么",
-      "| 能力 | 落地 || --- | --- || 接着上次聊 | `heming run --continue \"继续\"`：接这个工作目录下最近一次会话；没有同目录的就接全局最近一次 || 接指定会话 | `heming run --resume <id> \"继续\"`：支持唯一前缀（`--resume 20261118-14`），匹配到多份时列出来让你挑，而不是猜一个 || 看有哪些会话 | `heming sessions [--json] [--cwd <dir>]`：id / 时间 / 条数 / 最后一句；`--json` 给脚本用 || 存档内容 | 只存文字问答（提问 + 最终回答），不存工具调用与中间话术：旧工具结果里的文件可能已经不在，重放反而误导 || 存档位置 | 默认 `~/.heming/cli-sessions/`，可用 `--session-dir` 或 `HEMING_CLI_SESSION_DIR` 换；一个会话一个文件，临时文件 + rename 原子写 || 脚本可用 | `exec --json` 多一个 `sessionId` 字段，CI 里可以直接 `--resume` 接着跑 || 容量 | 最多 50 个会话（按更新时间淘汰）、单会话 200 条、单条 20000 字（超了截断并注明） || 容错 | 坏存档跳过、目录不存在当空；存档写失败只警告一句，不影响本次结果与退出码 |",
+      "| 能力 | 落地 |\n| --- | --- |\n| 接着上次聊 | `heming run --continue \"继续\"`：接这个工作目录下最近一次会话；没有同目录的就接全局最近一次 |\n| 接指定会话 | `heming run --resume <id> \"继续\"`：支持唯一前缀（`--resume 20261118-14`），匹配到多份时列出来让你挑，而不是猜一个 |\n| 看有哪些会话 | `heming sessions [--json] [--cwd <dir>]`：id / 时间 / 条数 / 最后一句；`--json` 给脚本用 |\n| 存档内容 | 只存文字问答（提问 + 最终回答），不存工具调用与中间话术：旧工具结果里的文件可能已经不在，重放反而误导 |\n| 存档位置 | 默认 `~/.heming/cli-sessions/`，可用 `--session-dir` 或 `HEMING_CLI_SESSION_DIR` 换；一个会话一个文件，临时文件 + rename 原子写 |\n| 脚本可用 | `exec --json` 多一个 `sessionId` 字段，CI 里可以直接 `--resume` 接着跑 |\n| 容量 | 最多 50 个会话（按更新时间淘汰）、单会话 200 条、单条 20000 字（超了截断并注明） |\n| 容错 | 坏存档跳过、目录不存在当空；存档写失败只警告一句，不影响本次结果与退出码 |",
       "怎么验证",
       "留白"
     ]
@@ -2379,7 +2391,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型页每一块内容都得单独起一个内核进程去问：`providers` 实测 629ms、`accounts` 425ms，其余 280–430ms。打开页面时哪怕已经做了「首屏两波」，第一波也要等这几百毫秒才画得出自己的来源与模型；而这段时间里，用户其实**上一次打开时就已经看过这些内容**。半秒钟的空等纯粹是重复劳动。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 新 `packages/web/src/lib/pageCache.ts` | `readCache(key)` / `writeCache(key, text)` / `clearCache()`，键带版本前缀 `heming.modelpage.v1.` || 存什么 | 存**内核原话**，不存解析后的对象：解析规则一变，缓存自然失效，不会出现「旧形状 + 新逻辑」 || 什么时候写 | 每次 `providers` / `accounts --json` / `quota --json` 读成功之后 || 什么时候读 | 组件的 `useState` 初始化里，先用它画一版；真正的读取一回来就替换 || 测试环境 | `import.meta.env.MODE === \"test\"` 时完全不读写——否则同一文件里的用例会互相串数据 || 存不下时 | 隐私模式 / 配额满都直接放弃，绝不影响页面 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 新 `packages/web/src/lib/pageCache.ts` | `readCache(key)` / `writeCache(key, text)` / `clearCache()`，键带版本前缀 `heming.modelpage.v1.` |\n| 存什么 | 存**内核原话**，不存解析后的对象：解析规则一变，缓存自然失效，不会出现「旧形状 + 新逻辑」 |\n| 什么时候写 | 每次 `providers` / `accounts --json` / `quota --json` 读成功之后 |\n| 什么时候读 | 组件的 `useState` 初始化里，先用它画一版；真正的读取一回来就替换 |\n| 测试环境 | `import.meta.env.MODE === \"test\"` 时完全不读写——否则同一文件里的用例会互相串数据 |\n| 存不下时 | 隐私模式 / 配额满都直接放弃，绝不影响页面 |",
       "怎么验证`ModelPage.test.tsx` 新增 1 例：先把一份 `providers` 原话塞进 localStorage，再让这一次的 `providers`**永远不返回**，页面仍然画出了缓存里的那一行来源。",
       "留白"
     ]
@@ -2398,7 +2410,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型页的订阅账号有两个来源：在这里自己登录，或者由内核读本机那些智能体已经登录好的账号（「自动收取」）。第二条是整个「借额度」故事的底座，但它是个开关——关掉之后订阅账号一个都不会出现，而页面上没有任何地方显示这件事。用户看到空列表只会以为账号丢了、额度没了，实际上只是被关掉了。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 订阅账号卡底部 | 一行小字说清当前状态：开着→「本机那些软件里已经登录的账号会自动收进来」；关着→「已关掉自动收取：订阅账号不会自己出现，只能在这里手动登录」 || 同一行的链接 | 「关掉自动收取」/「打开自动收取」，走 `accounts discovery off|on` || 切换之后 | 重读账号与额度（关掉之后列表会真的空掉，得让画面跟上），提示条说清刚才发生了什么 || 读不到时 | 写「自动收取的状态这次没读到」，不冒充开着 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 订阅账号卡底部 | 一行小字说清当前状态：开着→「本机那些软件里已经登录的账号会自动收进来」；关着→「已关掉自动收取：订阅账号不会自己出现，只能在这里手动登录」 |\n| 同一行的链接 | 「关掉自动收取」/「打开自动收取」，走 `accounts discovery off|on` |\n| 切换之后 | 重读账号与额度（关掉之后列表会真的空掉，得让画面跟上），提示条说清刚才发生了什么 |\n| 读不到时 | 写「自动收取的状态这次没读到」，不冒充开着 |",
       "怎么验证底部写「已关掉自动收取…」→ 点「打开自动收取」→ 断言发出 `accounts discovery on` → 文案换成「本机那些软件…」，按钮变「关掉自动收取」。",
       "留白"
     ]
@@ -2420,7 +2432,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.298 让删除同步到别的窗口，但那是**广播**：不在线就收不到。断线期间别处 `/rewind` 或重答删掉的几条，重连之后还留在列表里；更糟的是旧的重连逻辑是「合并」语义——服务端已经没有的条目会被当成「本地独有」保留下来，于是只有手动刷新才对齐。断线重连本该是一次收敛，不是一次追加。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 拉历史（`packages/web/src/store/chat.ts`） | `loadMessages` 与新的 `resyncMessages` 共用 `resolveHistory`：解密/chaindist/转录贴回只有一份实现，免得「刷新」和「对齐」两套规则慢慢走偏 || 对齐（`resyncMessages`） | 断线前就在本地、服务端却没有的 → 视为已删、摘掉；拉取期间刚到的不在快照里 → 留下（否则等于吞掉刚收到的回复）；返回 `{ ok, removed, kept }` || 重连（`packages/web/src/components/ChatPage.tsx` 的 `onOpen`） | 首次连上仍走 `loadMessages`（合并语义）；断线重连走 `resyncMessages`，并把会话列表补拉一次（未读数、别处新建的会话） || 提示 | 真的摘掉了才提示「断线期间别处删掉了 N 条消息，已经对齐」；本来就一致时安静 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 拉历史（`packages/web/src/store/chat.ts`） | `loadMessages` 与新的 `resyncMessages` 共用 `resolveHistory`：解密/chaindist/转录贴回只有一份实现，免得「刷新」和「对齐」两套规则慢慢走偏 |\n| 对齐（`resyncMessages`） | 断线前就在本地、服务端却没有的 → 视为已删、摘掉；拉取期间刚到的不在快照里 → 留下（否则等于吞掉刚收到的回复）；返回 `{ ok, removed, kept }` |\n| 重连（`packages/web/src/components/ChatPage.tsx` 的 `onOpen`） | 首次连上仍走 `loadMessages`（合并语义）；断线重连走 `resyncMessages`，并把会话列表补拉一次（未读数、别处新建的会话） |\n| 提示 | 真的摘掉了才提示「断线期间别处删掉了 N 条消息，已经对齐」；本来就一致时安静 |",
       "怎么验证",
       "留白"
     ]
@@ -2439,7 +2451,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "Codex 偶尔给账号几次「手动重置」：某个窗口用光了，不必等它自然重置，花一次就能让当前窗口从头开始（重置次数到期作废，所以闲置一次就是白白扔掉）。内核 `quota reset` 一直支持这件事，页面上却只写了「可手动重置 N 次」，没有任何入口——用户得记住这件事、去终端敲命令。额度刚好用完的时候，恰恰是最想点一下的时候。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 订阅账号行 | 账号持有可重置次数时，右侧多出「用掉一次重置」；没有次数的账号不出现这个按钮 || 确认框 | 先问一句「用掉 <名字> 的一次重置？」，写清还剩几次、什么时候到期，并说明撤不回来 || 执行 | `quota reset <account> --yes`，成功后重读账号与额度，行上的窗口与次数当场变 || 提示条 | 成功说「窗口已经重新开始，可以接着用了」；失败写内核原话（经 `engineText` 换成中文说法） |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 订阅账号行 | 账号持有可重置次数时，右侧多出「用掉一次重置」；没有次数的账号不出现这个按钮 |\n| 确认框 | 先问一句「用掉 <名字> 的一次重置？」，写清还剩几次、什么时候到期，并说明撤不回来 |\n| 执行 | `quota reset <account> --yes`，成功后重读账号与额度，行上的窗口与次数当场变 |\n| 提示条 | 成功说「窗口已经重新开始，可以接着用了」；失败写内核原话（经 `engineText` 换成中文说法） |",
       "怎么验证`用掉 码号 的一次重置？` 且文案含「还剩 2 次」、此时**还没有**发出 `quota reset`；点确认后才发出`quota reset gpt@example.com --yes`，并出现「码号 的窗口已经重新开始」。",
       "留白"
     ]
@@ -2464,7 +2476,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "`/rewind` 从 d.293 起会连对话一起退，但那只落在发起操作的窗口里：服务端把消息删了、回执给发起方，别的窗口（同一会话开在两个窗口、或桌面端与网页端各开一个）仍然留着那段已经不存在的消息，直到手动刷新。一边说退掉了，另一边还在，看起来像退了个寂寞。删除本来就会改变所有人的视野，得让在场的人都知道。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || WS 事件（`packages/shared/src/schemas.ts`） | 新增 `messages_deleted`：`{ conversationId, ids }`，一批 1–500 条，与 `message_new` 同级 || 事件总线（`packages/server/src/events.ts`，新文件） | 进程内会话事件总线：HTTP 路由发布、WS 层订阅；监听器抛错只吞掉那一个，不影响发起请求（删除已经落库） || 删除路由（`packages/server/src/app.ts`） | 删完库后广播一条；`removed === 0` 不广播——没有变化就不打扰 || WS 分发（`packages/server/src/ws.ts`） | 订阅总线后按会话成员分发，非成员收不到；`wss` 关闭时退订，避免热重启留下旧监听器 || 客户端（`packages/web/src/store/chat.ts`） | 收到 `messages_deleted` 就按 id 摘本地镜像：只动这一个会话、不回打服务端，再收一次也是同一个结果 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| WS 事件（`packages/shared/src/schemas.ts`） | 新增 `messages_deleted`：`{ conversationId, ids }`，一批 1–500 条，与 `message_new` 同级 |\n| 事件总线（`packages/server/src/events.ts`，新文件） | 进程内会话事件总线：HTTP 路由发布、WS 层订阅；监听器抛错只吞掉那一个，不影响发起请求（删除已经落库） |\n| 删除路由（`packages/server/src/app.ts`） | 删完库后广播一条；`removed === 0` 不广播——没有变化就不打扰 |\n| WS 分发（`packages/server/src/ws.ts`） | 订阅总线后按会话成员分发，非成员收不到；`wss` 关闭时退订，避免热重启留下旧监听器 |\n| 客户端（`packages/web/src/store/chat.ts`） | 收到 `messages_deleted` 就按 id 摘本地镜像：只动这一个会话、不回打服务端，再收一次也是同一个结果 |",
       "怎么验证",
       "留白"
     ]
@@ -2483,7 +2495,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「已添加的来源」每行都有个「测试」按钮，点完的结果只落在页面底部的终端面板里：想知道通不通，得把视线从行上挪走、在下滑的输出里找那句话。手上几个来源要对比时更别扭——测一次、看一次面板、再滚回来。而真正的问题往往只有一句「401」或「连不上」，塞在一整屏输出里反而看不清。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 来源行 | 点「测试」之后就在行上多一行小字：`通过 · 1.2 秒`（绿）或 `连不上`（红），测试中显示 `正在测…` || 悬停 | 挂 `providerTestVerdict` 的原话：「连通正常：…」或「连不上：401 Unauthorized」，不用再去面板里找 || 按钮 | 测试期间按钮进忙碌态（`busy`），不会连点出两次请求 || 底部面板 | 输出照旧写进去——需要完整回显的人不受影响 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 来源行 | 点「测试」之后就在行上多一行小字：`通过 · 1.2 秒`（绿）或 `连不上`（红），测试中显示 `正在测…` |\n| 悬停 | 挂 `providerTestVerdict` 的原话：「连通正常：…」或「连不上：401 Unauthorized」，不用再去面板里找 |\n| 按钮 | 测试期间按钮进忙碌态（`busy`），不会连点出两次请求 |\n| 底部面板 | 输出照旧写进去——需要完整回显的人不受影响 |",
       "耗时是这次点击本身花的（从发出到拿回结果），不是内核报的某个数字，所以它同时包含进程启动时间，能直接感受快慢。",
       "怎么验证`provider test mock` 回 `401 Unauthorized`，断言行上是「连不上」、`title` 带 401、颜色 `text-danger`。",
       "留白"
@@ -2503,7 +2515,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「额度用完 / 被限流 / 连不上之后走谁」这个设置早就有了，藏在「高级」里，而且只有进去才知道现在设的是什么。更糟的是从来没设过的人看不出这个功能存在；而设过的人，行上写的还是「6 个模型」，看不出这一家背后还挂着一串别人。内核在 `providers` 里其实一直把这条链画出来（`⤷ openrouter/deepseek-v3 → moonshot/kimi-k2`），我们不但没显示，解析时还会把它当成一家 id 叫「⤷」的来源——列表里凭空多一行。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/magpieCli.ts` | `ProviderRow` 增 `fallback: string[]`；`⤷` 那行不再造新来源，按 `→` 拆开挂到**上一行**；没有链时是空数组（页面直接读 `.length`，不写 `?.` 兜底） || 来源行 | 有链时多一行小字 `备用 openrouter/deepseek-v3 → moonshot/kimi-k2`，悬停写清「没额度、被限流或连不上时，请求依次改用 …」 || 高级面板 | 展开时把**现有的链**填进「备用模型」输入框（改一处，不用重打一串） || 保存备用 | 走 `provider fallback <id> <a> <b> …`，改成 `{ refresh: true }` 后重读来源：存完行上那行小字当场变 || 清掉备用 | 有链时多一个按钮，走 `provider fallback <id> none`（内核的清除写法，不是空串——空串会被当成一个模型名） |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/lib/magpieCli.ts` | `ProviderRow` 增 `fallback: string[]`；`⤷` 那行不再造新来源，按 `→` 拆开挂到**上一行**；没有链时是空数组（页面直接读 `.length`，不写 `?.` 兜底） |\n| 来源行 | 有链时多一行小字 `备用 openrouter/deepseek-v3 → moonshot/kimi-k2`，悬停写清「没额度、被限流或连不上时，请求依次改用 …」 |\n| 高级面板 | 展开时把**现有的链**填进「备用模型」输入框（改一处，不用重打一串） |\n| 保存备用 | 走 `provider fallback <id> <a> <b> …`，改成 `{ refresh: true }` 后重读来源：存完行上那行小字当场变 |\n| 清掉备用 | 有链时多一个按钮，走 `provider fallback <id> none`（内核的清除写法，不是空串——空串会被当成一个模型名） |",
       "怎么验证高级里能改也能清掉」：断言行上出现 `备用 openrouter/deepseek-v3 → moonshot/kimi-k2`、展开后输入框里是`openrouter/deepseek-v3, moonshot/kimi-k2`、点「清掉备用」发出 `provider fallback mock none`。",
       "留白"
     ]
@@ -2526,7 +2538,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型偶尔答偏：前提理解错了、答到一半被停、或者结论看着像样其实是错的。以前的出路只有两条——自己往上翻着删掉那几轮，或者开一个新会话把上下文重讲一遍。ChatGPT / Codex 这类工具的答案是第三条：**就在原地重答**。这一轮把它补上，删除动作复用 d.293 已经做好的「按消息 id 删」（`POST /api/conversations/:id/messages/delete`）。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 入口 | 每条回答右侧 hover 出「重答」（与「复制」竖排在同一列）；生成中禁用，点了会说明「等这一轮结束」 || 删的范围 | **成对删**：那条提问 + 它之后的全部消息。只删回答会留下一句没人答的提问，再把同一句发一遍就变成问了两遍 || 按 id 不按序号 | 客户端可能只加载了最近一段，序号会删错别人；id 是它真正看见的那几条 || 二次确认 | 只有最后一轮直接执行；中间那条会先问「后面还有 N 条消息，会一起删掉」，因为删除不可撤销 || 重发 | 同一句提问（trim 后）走正常发送路径：会落库、会调工具、会走写盘确认，与手打一次没有区别 || 顺序 | **先删再发**。反过来的话 `fetchHistory` 读到的还是旧对话，模型会看见同一句提问问了两遍 || 失败 | 删除失败就整件不做（宁可没重答，也不留「删了一半」的会话）；重答发不出去时把那句提问放回输入框 || 明确拒绝 | 带附件的提问不给重答：重发只有文字会把文件丢掉，用户会以为文件还在 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 入口 | 每条回答右侧 hover 出「重答」（与「复制」竖排在同一列）；生成中禁用，点了会说明「等这一轮结束」 |\n| 删的范围 | **成对删**：那条提问 + 它之后的全部消息。只删回答会留下一句没人答的提问，再把同一句发一遍就变成问了两遍 |\n| 按 id 不按序号 | 客户端可能只加载了最近一段，序号会删错别人；id 是它真正看见的那几条 |\n| 二次确认 | 只有最后一轮直接执行；中间那条会先问「后面还有 N 条消息，会一起删掉」，因为删除不可撤销 |\n| 重发 | 同一句提问（trim 后）走正常发送路径：会落库、会调工具、会走写盘确认，与手打一次没有区别 |\n| 顺序 | **先删再发**。反过来的话 `fetchHistory` 读到的还是旧对话，模型会看见同一句提问问了两遍 |\n| 失败 | 删除失败就整件不做（宁可没重答，也不留「删了一半」的会话）；重答发不出去时把那句提问放回输入框 |\n| 明确拒绝 | 带附件的提问不给重答：重发只有文字会把文件丢掉，用户会以为文件还在 |",
       "怎么验证",
       "留白"
     ]
@@ -2546,7 +2558,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "订阅账号是一行一个。同一家开了两三个号，最常问的那句「我现在还剩多少」得自己在几行之间心算：一个剩 80%、一个剩 20%，合起来到底算不算紧？点数窗口更没法心算——得先知道每个号各有多少上限。内核的图形界面早就把这件事做了（`quotaall.js` 的「All N accounts」一条），我们这边一直是分开列。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || `packages/web/src/lib/mergedQuota.ts` | 新增 `mergeAccounts(rows, now)`：同一个智能体、**读法相同**的窗口才合并 || 份额（只有百分比） | 只在**同一个计划**的账号之间求平均——同计划的窗口一样大，平均才是「他们一起的份额」；不同计划各算各的，各自只有一份就不合并 || 点数（有 limit） | 用量与上限分别相加，剩下的按合计算，写成「剩 12,000 点」 || 钱包（只有 balance） | 余额相加，写成「余额 20」 || 读不到 | `error` 的账号不进合并；`asOf` 说明是重置之前的旧读数，也算读不到，并在悬停里写明「N 份读不到，没有算进来」 || 不限量 | 只有**每个**读到的账号都说不限量才写「不限量」，否则这一份不出现 || 厂商原话 | 只有文字、没有份额的窗口不参与（无从相加） || 两个以下 | 只有一份的窗口不合并——那一行自己就在下面 || `packages/web/src/components/model/MergedQuotaStrip.tsx` | 新增一行「账号合计」：`Claude 3 个账号` + 每个窗口一枚徽标（`5 小时 平均剩 62%`），悬停写口径与「最早 2 小时后重置」；余量见底一样变黄变红 || `ModelPage.tsx` | `mergedAccounts = useMemo(() => mergeAccounts(accounts, now), [accounts, now])`，放在订阅账号列表上方；下面各账号的明细照旧 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| `packages/web/src/lib/mergedQuota.ts` | 新增 `mergeAccounts(rows, now)`：同一个智能体、**读法相同**的窗口才合并 |\n| 份额（只有百分比） | 只在**同一个计划**的账号之间求平均——同计划的窗口一样大，平均才是「他们一起的份额」；不同计划各算各的，各自只有一份就不合并 |\n| 点数（有 limit） | 用量与上限分别相加，剩下的按合计算，写成「剩 12,000 点」 |\n| 钱包（只有 balance） | 余额相加，写成「余额 20」 |\n| 读不到 | `error` 的账号不进合并；`asOf` 说明是重置之前的旧读数，也算读不到，并在悬停里写明「N 份读不到，没有算进来」 |\n| 不限量 | 只有**每个**读到的账号都说不限量才写「不限量」，否则这一份不出现 |\n| 厂商原话 | 只有文字、没有份额的窗口不参与（无从相加） |\n| 两个以下 | 只有一份的窗口不合并——那一行自己就在下面 |\n| `packages/web/src/components/model/MergedQuotaStrip.tsx` | 新增一行「账号合计」：`Claude 3 个账号` + 每个窗口一枚徽标（`5 小时 平均剩 62%`），悬停写口径与「最早 2 小时后重置」；余量见底一样变黄变红 |\n| `ModelPage.tsx` | `mergedAccounts = useMemo(() => mergeAccounts(accounts, now), [accounts, now])`，放在订阅账号列表上方；下面各账号的明细照旧 |",
       "怎么验证一个账号不合并）+ `MergedQuotaStrip.test.tsx` 4 例（空不渲染、名字与账号数、悬停口径、危险色）+`ModelPage.test.tsx` 一例「同一家两个账号时，先把两份读成一行」：断言「账号合计」里有 `2 个账号` 与`5 小时 平均剩 50%`，明细行的「家里号」仍在。",
       "留白"
     ]
@@ -2567,7 +2579,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.291 的 `/rewind` 只还原文件，回执每次都写「对话历史未回退」。可真退回去时，用户面对的是：文件是旧的了，屏幕上还挂着那几轮「我让你改成 X」「它说改好了」的记录——得自己翻上去删掉，再把说过的话重新打一遍。半个回滚比不回滚更别扭：它把状态弄成两半，却把收尾的活留给用户。",
       "做了什么",
-      "| 位置 | 做的事 || --- | --- || 服务端 | 新增 `POST /api/conversations/:id/messages/delete`（body `{ ids: string[] }`，1–500 条）；按**消息 id** 删，不按「第几条」——客户端可能只加载了最近一段，序号会删错 || 两套存储 | `Store.deleteMessages` 内存实现按数组过滤；SQLite 按 400 条一批 `DELETE`，同一事务里 `unindexMessage` 把全文索引一起摘掉 || 幂等 | 只认本会话的 id：别的会话的 id、已经删过的 id 一律静默忽略；重复请求第二次回 `removed: 0`；会话不存在才报 `conversation not found` || 检查点 | 每轮多记两样：`afterMessageId`（这一轮之前的最后一条消息；`null` = 当时会话为空，得与「不知道」的 `undefined` 分开）与 `prompt`（这一轮的提问，截到 2000 字） || 回退 | `/rewind N` 先还原文件，再按窗口里**最早**那条边界删掉之后的消息，最后 `dropTurnCheckpoints` 记账；老检查点没有边界信息时如实说「对话没有退」，绝不当成空会话全删 || 放回提问 | 退完把当时的提问填回输入框并落草稿：改一句就能重发 || 回执 | 「已退回 N 轮：还原 X 个文件；对话退了 M 条，你那句提问已放回输入框。」服务端失败时说明「文件已退回、对话没有退」 |",
+      "| 位置 | 做的事 |\n| --- | --- |\n| 服务端 | 新增 `POST /api/conversations/:id/messages/delete`（body `{ ids: string[] }`，1–500 条）；按**消息 id** 删，不按「第几条」——客户端可能只加载了最近一段，序号会删错 |\n| 两套存储 | `Store.deleteMessages` 内存实现按数组过滤；SQLite 按 400 条一批 `DELETE`，同一事务里 `unindexMessage` 把全文索引一起摘掉 |\n| 幂等 | 只认本会话的 id：别的会话的 id、已经删过的 id 一律静默忽略；重复请求第二次回 `removed: 0`；会话不存在才报 `conversation not found` |\n| 检查点 | 每轮多记两样：`afterMessageId`（这一轮之前的最后一条消息；`null` = 当时会话为空，得与「不知道」的 `undefined` 分开）与 `prompt`（这一轮的提问，截到 2000 字） |\n| 回退 | `/rewind N` 先还原文件，再按窗口里**最早**那条边界删掉之后的消息，最后 `dropTurnCheckpoints` 记账；老检查点没有边界信息时如实说「对话没有退」，绝不当成空会话全删 |\n| 放回提问 | 退完把当时的提问填回输入框并落草稿：改一句就能重发 |\n| 回执 | 「已退回 N 轮：还原 X 个文件；对话退了 M 条，你那句提问已放回输入框。」服务端失败时说明「文件已退回、对话没有退」 |",
       "实现上一条容易踩的坑：提问不能在命令处理里直接 `setDraft` —— `send()` 拿到结果后会调 `resetComposer()`清输入区，命令里设的值当场被抹掉。改成让结果带一个 `restoreDraft`，在清空之后落位。",
       "怎么验证非成员 403 且一条没删、body 非法 400 不动数据）。并把提问放回输入框」：断言真的打了 `/messages/delete`（body 是边界之后那几条 id）、本地镜像同步摘掉、输入框里正是那句提问、全程没有调模型。",
       "留白"
@@ -2590,7 +2602,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Codex 与 Claude 的额度窗口都从**第一次使用**那一刻起算，不是从重置那一刻。一周结束时如果隔了三天才用，下一周就从三天后才开始算——同样的订阅，白丢三天。5 小时窗口同理：一天只在 9 点用一次，就只跑得动两轮；6 点先开一轮，一天能塞下三轮。",
       "内核早就会这件事（`provider/codex_warmup.go`、`claude_warmup.go`、`warmup_daily.go`）：窗口一重置就替账号发一个极小的请求，让下一轮从那一刻开始。但模型页从来没有把这两个开关露出来，用户只能自己去改设置文件。",
       "做了什么",
-      "| 位置 | 做的事 | 背后命令 || --- | --- | --- || 「来源」分区新卡「额度窗口预热」 | ChatGPT / Claude 各一行，三档：不预热 / 只预热每周 / 每周与 5 小时 | `settings set codexWarmup week\\|all`（关掉用 `settings reset`，空串内核不收） || 每行的时间框 | 每天固定几个时间点各开一次 5 小时窗口，`06:00 15:05` 这样写；回车或离焦才提交 | `settings set codexAts 06:00,15:05`，清空则 `settings reset codexAts` || 时间写法 | `9:05` / `09:05` / `0905` 都收，逗号顿号空格都能分开，去重后按时间排 | 纯函数 `packages/web/src/lib/warmup.ts` || 卡片底部一句 | 现在替谁开着、开到哪一档、每天几点开；两家都关就说「窗口从你第一次用它时才开始算」 | `warmupSummary` |",
+      "| 位置 | 做的事 | 背后命令 |\n| --- | --- | --- |\n| 「来源」分区新卡「额度窗口预热」 | ChatGPT / Claude 各一行，三档：不预热 / 只预热每周 / 每周与 5 小时 | `settings set codexWarmup week\\|all`（关掉用 `settings reset`，空串内核不收） |\n| 每行的时间框 | 每天固定几个时间点各开一次 5 小时窗口，`06:00 15:05` 这样写；回车或离焦才提交 | `settings set codexAts 06:00,15:05`，清空则 `settings reset codexAts` |\n| 时间写法 | `9:05` / `09:05` / `0905` 都收，逗号顿号空格都能分开，去重后按时间排 | 纯函数 `packages/web/src/lib/warmup.ts` |\n| 卡片底部一句 | 现在替谁开着、开到哪一档、每天几点开；两家都关就说「窗口从你第一次用它时才开始算」 | `warmupSummary` |",
       "写作上的两个约束照内核的真话办：空值是「重置回默认」，不能发 `settings set <key> \"\"`（内核会当成没给值而拒绝）；一档的说明挂在选择框的 `title` 上，不占版面。",
       "怎么验证`model/WarmupCard.test.tsx` 7 例、`ModelPage.test.tsx` 2 例：切档写对键、关掉走 `reset`、时间整理成 `09:00,15:05`、没改动不白发命令、看不懂的时间只提示不提交）。",
       "留白"
@@ -2613,7 +2625,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.176 起有「这一轮改了哪些文件、逐个撤回」，d.185 又补了逐文件撤回，但它们都只能撤回**刚跑完的那一轮**。用户真正想要的是 Codex / Claude Code 那种「退回三轮之前」的一步到位操作：改坏了不用一个个点，也不用去翻版本库。",
       "桌面端备份做不到这件事，原因在于它的语义：`packages/desktop/file-fs.js` 的 `undoWrite` 是「每个路径留一份、用一次就消费」。同一轮里 A 被写两次，备份只剩最近一次的原内容；跨轮的 B 更是在同一时间线上被覆盖。要按时间点还原，必须在**写之前**留下原内容，所以这一轮换了抓取点：写工具执行前用文件桥把目标文件的当前内容读下来，按轮存进本机。",
       "做了什么",
-      "| 能力 | 位置 | 说明 || --- | --- | --- || 检查点存储 | `packages/web/src/lib/fileEdit/rewindCheckpoints.ts` | 本机 `localStorage`（键 `heming.rewindCheckpoints.v1`）；每会话最近 20 轮、最多 20 个会话、单文件 200k 字符、单轮 1M 字符；读失败一律静默降级，不影响聊天 || 抓取时机 | `withRewindCapture(bridge, …)` | 包在工具桥**最内层**（子代理的写也要算进来）：`file_write` / `file_edit` / `file_patch` 执行前用 `targetsOfCall` 解析目标、`bridge.read` 读原文；`file_patch` 的每个 op 分别解析，目录跳过 || 新建与删除 | `before: null` | 写之前文件不存在（`code === \"not-found\"`）记为「当时还没有」，回退时把它**删掉**，而不是留个空文件 || 同路径去重 | 每轮 `Map` | 同一轮里同一路径只留**最早**那份原内容——回退要回到这轮动手之前，不是回到中间态 || 列检查点 | `/rewind` | 「可回滚的检查点（共 N 轮）」，每条给时间、文件数与前两个文件名；一条都没有时说清「改过文件的轮次才会有检查点」 || 退回去 | `/rewind N` | 按 `bridge.write({ ops })` 还原：有原文的写回、当时不存在的删除；跳过项单独计数并在回执里点名 || 回执 | 会话内提示 | 「已退回 N 轮：还原 X 个文件、删掉 Y 个当时还不存在的文件……」+ **「对话历史未回退」**——这句必须说，不然用户会以为聊天记录也一起退了 || 记账 | `dropTurnCheckpoints` | 退过的轮次从记账里丢掉，不能无限重退同一轮；失败时**不丢**，允许重试 |",
+      "| 能力 | 位置 | 说明 |\n| --- | --- | --- |\n| 检查点存储 | `packages/web/src/lib/fileEdit/rewindCheckpoints.ts` | 本机 `localStorage`（键 `heming.rewindCheckpoints.v1`）；每会话最近 20 轮、最多 20 个会话、单文件 200k 字符、单轮 1M 字符；读失败一律静默降级，不影响聊天 |\n| 抓取时机 | `withRewindCapture(bridge, …)` | 包在工具桥**最内层**（子代理的写也要算进来）：`file_write` / `file_edit` / `file_patch` 执行前用 `targetsOfCall` 解析目标、`bridge.read` 读原文；`file_patch` 的每个 op 分别解析，目录跳过 |\n| 新建与删除 | `before: null` | 写之前文件不存在（`code === \"not-found\"`）记为「当时还没有」，回退时把它**删掉**，而不是留个空文件 |\n| 同路径去重 | 每轮 `Map` | 同一轮里同一路径只留**最早**那份原内容——回退要回到这轮动手之前，不是回到中间态 |\n| 列检查点 | `/rewind` | 「可回滚的检查点（共 N 轮）」，每条给时间、文件数与前两个文件名；一条都没有时说清「改过文件的轮次才会有检查点」 |\n| 退回去 | `/rewind N` | 按 `bridge.write({ ops })` 还原：有原文的写回、当时不存在的删除；跳过项单独计数并在回执里点名 |\n| 回执 | 会话内提示 | 「已退回 N 轮：还原 X 个文件、删掉 Y 个当时还不存在的文件……」+ **「对话历史未回退」**——这句必须说，不然用户会以为聊天记录也一起退了 |\n| 记账 | `dropTurnCheckpoints` | 退过的轮次从记账里丢掉，不能无限重退同一轮；失败时**不丢**，允许重试 |",
       "怎么验证`ChatPage.test.tsx` 2 例：空检查点的提示、`/rewind 1` 真把原文写回去且丢掉那轮记账）。",
       "留白"
     ]
@@ -2635,7 +2647,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "到 d.286 为止，模型页能回答「现在还剩多少」，但回答不了下一个问题：**照这个速度，会不会在重置前用完**。周份额掉到 60% 时，可能是六天匀速、也可能是一天里被一次长任务吃掉——只看一个数字分不清这两种情况，而它们该做的事完全不同（前者可以继续，后者要现在换号或加 Key）。",
       "内核其实一直在记这件事：每次读到额度都会留一条「时间 → 剩余」的读数，`quota history` 就是这些点。上游 GUI 用了一条最小二乘拟合来回答同一个问题（`quotaEta` / `quotaEtaText`），我们此前一点都没用上。这一轮把这条线接到页面上：**来源 → 额度走向**。",
       "做了什么",
-      "| 能力 | 位置 | 说明 || --- | --- | --- || 历史读数 | `magpie quota history --days 7 --json` | 只取最近 7 天；与 `quota --json` 分开取，慢也不挡首屏 || 解析 | `packages/web/src/lib/quotaHistory.ts` | `parseQuotaHistory` / `drawableRows` / `historySpan`；坏 JSON、缺 provider、缺点位的行直接丢掉，单点行留着但不画 || 折线 | `sparkPath(points, width, height)` | 剩余百分比夹到 0–100，y 轴翻转；<2 点或坏时间返回空串（画不成就不画） || 用完预估 | `quotaPace(line, now, resetsAt?)` | 只看最近一次回升之后的读数；≥3 点、跨度 ≥1 小时才拟合；斜率不为负就不预测；有重置且算出来晚于重置，就说「撑得过这次重置」；**没有重置信息且要一个月以上才用完时不说话**（那种斜率等于没在掉，写出来只会误导） || 文案 | `paceText(pace, now)` | 「照这个速度，3 小时 57 分后用完」/「撑得过这次重置」 || 组件 | `packages/web/src/components/model/QuotaTrend.tsx` | 每行一个账号、每个窗口一条线 + 「剩 N%」+ 一句结论；结论前带窗口名，多窗口各说各的；余量 ≤25% 转黄、≤10% 转红 || 位置 | 来源 → 「额度走向」卡 | 排在「其余来源的额度」之后；**没有历史读数时整张卡不渲染**，不占位置 || 无障碍 | `<svg role=\"img\" aria-label=\"5 小时 的额度走向：从 96% 到 30%\">` | 线本身读得出来；读屏用户不必看图 |",
+      "| 能力 | 位置 | 说明 |\n| --- | --- | --- |\n| 历史读数 | `magpie quota history --days 7 --json` | 只取最近 7 天；与 `quota --json` 分开取，慢也不挡首屏 |\n| 解析 | `packages/web/src/lib/quotaHistory.ts` | `parseQuotaHistory` / `drawableRows` / `historySpan`；坏 JSON、缺 provider、缺点位的行直接丢掉，单点行留着但不画 |\n| 折线 | `sparkPath(points, width, height)` | 剩余百分比夹到 0–100，y 轴翻转；<2 点或坏时间返回空串（画不成就不画） |\n| 用完预估 | `quotaPace(line, now, resetsAt?)` | 只看最近一次回升之后的读数；≥3 点、跨度 ≥1 小时才拟合；斜率不为负就不预测；有重置且算出来晚于重置，就说「撑得过这次重置」；**没有重置信息且要一个月以上才用完时不说话**（那种斜率等于没在掉，写出来只会误导） |\n| 文案 | `paceText(pace, now)` | 「照这个速度，3 小时 57 分后用完」/「撑得过这次重置」 |\n| 组件 | `packages/web/src/components/model/QuotaTrend.tsx` | 每行一个账号、每个窗口一条线 + 「剩 N%」+ 一句结论；结论前带窗口名，多窗口各说各的；余量 ≤25% 转黄、≤10% 转红 |\n| 位置 | 来源 → 「额度走向」卡 | 排在「其余来源的额度」之后；**没有历史读数时整张卡不渲染**，不占位置 |\n| 无障碍 | `<svg role=\"img\" aria-label=\"5 小时 的额度走向：从 96% 到 30%\">` | 线本身读得出来；读屏用户不必看图 |",
       "怎么验证",
       "留白"
     ]
@@ -2660,7 +2672,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.243 的无头 CLI 把智能体循环搬进了终端，但它始终是「我们主动去跑」的东西。真实工作里还有反方向：用户在 Cursor / Claude Code / Claude Desktop 里写代码，希望模型能读写**这台机器上的真实文件**，而不是只能用编辑器自带的沙箱工具。这些客户端统一认 MCP（Model Context Protocol），而和鸣此前一直是 MCP 的缺席者——`heming --help` 里那句「不接 MCP」既是事实，也是短板。",
       "这一轮补齐的是**服务端**这一半：`heming mcp serve` 在 stdio 上讲 JSON-RPC，把与桌面端同一套文件工具（`file_read` / `file_write` / `file_edit` / `file_patch` / `file_glob` / `file_grep` / `file_image` /`file_undo` / `todo_write` / `tool_output_read`）交给别的编辑器。它不调模型，所以不需要模型凭据——客户端负责思考，我们负责动手。",
       "做了什么",
-      "| 能力 | 位置 | 说明 || --- | --- | --- || MCP 服务端 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | stdio JSON-RPC；支持 `initialize` / `ping` / `tools/list` / `tools/call`；协议版本协商（`2025-06-18` / `2025-03-26` / `2024-11-05`，客户端认识的照抄，否则回最新） || 工具描述 | `tools/list` | 把 OpenAI 风格的 `parameters` 原样当 `inputSchema`；按工具自报的风险补 `annotations`（只读 → `readOnlyHint`，命令 → `destructiveHint` + `openWorldHint`）；**没有风险声明就不编造** annotations || 调用 | `tools/call` | **先过闸门再执行**：拒绝时不碰磁盘，回「未执行：…／【该操作未执行，文件与系统状态未被修改】」并带 `isError` || 安全口径 | `src/tooling.ts` | 把 `run` 里的闸门与桥整体抽出，run 与 MCP 共用同一份代码——不会出现「CLI 拒绝、MCP 放行」的缝 || 路径换算 | `relativizeToolArgs` | 客户端发来的绝对路径换算成相对工作区（`D:/repo/src/a.ts` → `src/a.ts`）；工作区外的换算成 `../…` 后照样被越界检查拒绝。`run` 与 MCP 都吃这条改进 || stdout 洁净 | `src/mcpServe.ts` | stdout 只放协议消息；就绪/错误/收工信息全部走 stderr；stdin 关闭即正常收工（退出码 0），Ctrl+C 先优雅关 stdin、再按一次 `130` || 通知 | 协议层 | 没有 `id` 的消息**绝不回包**；坏 JSON 回 `-32700` 且不断连；未知方法回 `-32601` 并点名支持的方法 || 稳定入口 | `packages/cli/bin/heming.mjs` | 给客户端一个不需要 `pnpm`、也不依赖 `dist` 的命令（本包 `build` 只做类型检查）：用仓库里装好的 `tsx` 转译 `src/index.ts`，参数透传、信号透传、退出码如实返回 || 参数校验 | `args.ts` | `mcp` 只认 `serve` 子命令；`--json` / `--output-format` / `--max-rounds` / `--model` / `--base-url` / `--api-key` 一律报「mcp serve 不接 …」，不静默忽略 |",
+      "| 能力 | 位置 | 说明 |\n| --- | --- | --- |\n| MCP 服务端 | `heming mcp serve [--cwd <dir>] [--allow-danger]` | stdio JSON-RPC；支持 `initialize` / `ping` / `tools/list` / `tools/call`；协议版本协商（`2025-06-18` / `2025-03-26` / `2024-11-05`，客户端认识的照抄，否则回最新） |\n| 工具描述 | `tools/list` | 把 OpenAI 风格的 `parameters` 原样当 `inputSchema`；按工具自报的风险补 `annotations`（只读 → `readOnlyHint`，命令 → `destructiveHint` + `openWorldHint`）；**没有风险声明就不编造** annotations |\n| 调用 | `tools/call` | **先过闸门再执行**：拒绝时不碰磁盘，回「未执行：…／【该操作未执行，文件与系统状态未被修改】」并带 `isError` |\n| 安全口径 | `src/tooling.ts` | 把 `run` 里的闸门与桥整体抽出，run 与 MCP 共用同一份代码——不会出现「CLI 拒绝、MCP 放行」的缝 |\n| 路径换算 | `relativizeToolArgs` | 客户端发来的绝对路径换算成相对工作区（`D:/repo/src/a.ts` → `src/a.ts`）；工作区外的换算成 `../…` 后照样被越界检查拒绝。`run` 与 MCP 都吃这条改进 |\n| stdout 洁净 | `src/mcpServe.ts` | stdout 只放协议消息；就绪/错误/收工信息全部走 stderr；stdin 关闭即正常收工（退出码 0），Ctrl+C 先优雅关 stdin、再按一次 `130` |\n| 通知 | 协议层 | 没有 `id` 的消息**绝不回包**；坏 JSON 回 `-32700` 且不断连；未知方法回 `-32601` 并点名支持的方法 |\n| 稳定入口 | `packages/cli/bin/heming.mjs` | 给客户端一个不需要 `pnpm`、也不依赖 `dist` 的命令（本包 `build` 只做类型检查）：用仓库里装好的 `tsx` 转译 `src/index.ts`，参数透传、信号透传、退出码如实返回 |\n| 参数校验 | `args.ts` | `mcp` 只认 `serve` 子命令；`--json` / `--output-format` / `--max-rounds` / `--model` / `--base-url` / `--api-key` 一律报「mcp serve 不接 …」，不静默忽略 |",
       "客户端配置（Claude Desktop 例子，已写进 `packages/cli/README.md`）：",
       "```json",
       "{ \"mcpServers\": { \"heming\": { \"command\": \"node\",",
@@ -2688,7 +2700,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "模型页的「订阅账号」列表只读：同一个人的 Claude、Codex、WorkBuddy 各登录一次，行上全是邮箱，分不清哪个是工作号；登录错了、或者早就不用的账号，也没有地方去掉——只能去终端里敲命令。这两件事本该在页面上一次点完。",
       "另外首屏一直有个体感问题：模型列表并不依赖额度，但骨架要等九件事全部回来才撤，最慢的恰恰是额度读取（每条命令一个进程，`accounts --json` 冷启动四百多毫秒）。",
       "做了什么",
-      "| 位置 | 之前 | 现在 | 背后命令 || --- | --- | --- | --- || 订阅账号行 | 只有「切到这个」「重新登录」 | 多出「改名」「移除」两个文字按钮 | `accounts alias <agent> <email> <名字>`、`accounts forget <agent> <email>` || 改名 | 无 | 行内出现输入框，回车保存、Esc 取消；清空 = 恢复显示账号本身 | `accounts alias … --clear` || 移除 | 无 | 二次确认，文案直说「那个软件如果正登录在它上面会被退出登录」 | `accounts forget` || 首屏 | 九件事全回来才撤骨架 | 模型、智能体、隐藏项、可见性先画完就撤；余额、设置、启动器后台补齐 | 同一批命令，分两波 || 加载器 | 刷新与首屏可能各起一遍进程 | 同键去重：撞车时搭同一趟车 | — |",
+      "| 位置 | 之前 | 现在 | 背后命令 |\n| --- | --- | --- | --- |\n| 订阅账号行 | 只有「切到这个」「重新登录」 | 多出「改名」「移除」两个文字按钮 | `accounts alias <agent> <email> <名字>`、`accounts forget <agent> <email>` |\n| 改名 | 无 | 行内出现输入框，回车保存、Esc 取消；清空 = 恢复显示账号本身 | `accounts alias … --clear` |\n| 移除 | 无 | 二次确认，文案直说「那个软件如果正登录在它上面会被退出登录」 | `accounts forget` |\n| 首屏 | 九件事全回来才撤骨架 | 模型、智能体、隐藏项、可见性先画完就撤；余额、设置、启动器后台补齐 | 同一批命令，分两波 |\n| 加载器 | 刷新与首屏可能各起一遍进程 | 同键去重：撞车时搭同一趟车 | — |",
       "顺手把窗口进度条抽成 `WindowBar`，订阅账号与「其余来源的额度」共用一套。",
       "怎么验证",
       "留白"
@@ -2714,7 +2726,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`agent_task` 从 d.185 起就有：主智能体可以派一个只读（或经 `/subagent write on` 授权的可写）子代理去查东西、改文件。但它只有一副面孔——系统提示是代码里写死的五行「你是一个子代理……」。真实团队里「做安全审查」「查性能」「按测试规范补用例」要的东西完全不同：安全审查要它先摆威胁模型、逐条对入口与权限；性能要它先量基线再动手。用户没有任何地方能把这类要求交给子代理——在主对话里叮嘱也没用，子代理根本看不到主对话，它只收到一条 `task` 文本。",
       "对标物都给了出口：Codex 有自定义子代理定义，Claude Code 有 `.claude/agents/*.md`（frontmatter 写名字和描述）。和鸣在 d.240 已经立起「仓库里的 Markdown 就是配置」这条约定（`.heming/commands/*.md`），子代理定义理应长在同一棵树上：`.heming/agents/名字.md`。",
       "做了什么",
-      "| 能力 | 位置 | 说明 || --- | --- | --- || 定义文件 | `.heming/agents/<名字>.md` | 文件名即名字，规则与自定义命令一致（小写字母开头，字母/数字/短横线，最长 30）；可选首行 `# 标题`、次行 `> 说明`（同一套文件头解析），其余正文就是「额外要求」 || 点名 | `agent_task` 新增 `agent` 参数 | 工作区里有定义时，这个参数才出现在工具函数里，`enum` 逐个列出可用名字，描述里点名「名字（标题）」与来源；**没有定义时参数根本不出现**，不给模型一个填了必错的坑 || 落到哪 | 子代理的系统提示 | 在基础人设后面追加一段「这次你扮演工作区里定义的子代理「x」，额外要求如下……」；没有点名时与旧行为逐字一致 || 只加严 | 白名单 / 轮次 / 写授权 | 定义里的文字**只能在前面的规则之内加严**：可用工具仍是只读三件（或经用户授权的两件写工具）、轮次上限仍是 1–6、能不能写盘仍由 `/subagent write` 决定。定义里写「你可以执行 run_command、轮次上限 999」也调不动 || 看得见 | 结果标题与 `/status` | 结果写成「子代理「review」（只读，2 轮 / 3 次工具调用）结论：」，并行时标题同样带名字；`/status` 在「子代理」那行后补「另有 N 个自定义子代理（来自 `.heming/agents/*.md`，派活时在 agent_task 里写它的名字）」 || 边界 | 解析与上限 | 单个定义 3000 字（超出截断，并告诉模型去 `file_read` 读全文）；最多 20 个；同名取先读到的；坏文件与非 `.md` 跳过；无根 / 无文件桥 / glob 抛错都静默不启用 |",
+      "| 能力 | 位置 | 说明 |\n| --- | --- | --- |\n| 定义文件 | `.heming/agents/<名字>.md` | 文件名即名字，规则与自定义命令一致（小写字母开头，字母/数字/短横线，最长 30）；可选首行 `# 标题`、次行 `> 说明`（同一套文件头解析），其余正文就是「额外要求」 |\n| 点名 | `agent_task` 新增 `agent` 参数 | 工作区里有定义时，这个参数才出现在工具函数里，`enum` 逐个列出可用名字，描述里点名「名字（标题）」与来源；**没有定义时参数根本不出现**，不给模型一个填了必错的坑 |\n| 落到哪 | 子代理的系统提示 | 在基础人设后面追加一段「这次你扮演工作区里定义的子代理「x」，额外要求如下……」；没有点名时与旧行为逐字一致 |\n| 只加严 | 白名单 / 轮次 / 写授权 | 定义里的文字**只能在前面的规则之内加严**：可用工具仍是只读三件（或经用户授权的两件写工具）、轮次上限仍是 1–6、能不能写盘仍由 `/subagent write` 决定。定义里写「你可以执行 run_command、轮次上限 999」也调不动 |\n| 看得见 | 结果标题与 `/status` | 结果写成「子代理「review」（只读，2 轮 / 3 次工具调用）结论：」，并行时标题同样带名字；`/status` 在「子代理」那行后补「另有 N 个自定义子代理（来自 `.heming/agents/*.md`，派活时在 agent_task 里写它的名字）」 |\n| 边界 | 解析与上限 | 单个定义 3000 字（超出截断，并告诉模型去 `file_read` 读全文）；最多 20 个；同名取先读到的；坏文件与非 `.md` 跳过；无根 / 无文件桥 / glob 抛错都静默不启用 |",
       "调用链：`ChatPage` 读到定义后存进 `subagentDefsRef` 并清掉 `toolBridgeRef` 缓存（否则 `agent_task` 的函数描述还停在旧清单上）→ `withSubagentTool` 把清单交给 `subagentSpec` 生成枚举 → 点名时 `findSubagentDef` 取正文塞进 `SubagentDeps.instructions` → `runOne` 用 `subagentSystemPromptFor` 拼出系统提示。",
       "怎么验证",
       "留白"
@@ -2740,7 +2752,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "慢在首屏：打开模型页时，前端一次 `Promise.all` 发了九次加载，其中「全局设置」那一路自己又并发七条命令——九加七，十四条，每条都要单独起一个内核进程（实测 `providers` 629ms、`accounts` 425ms、其余 280–430ms）。骨架屏要等这十四条全部回来才撤，用户先看到的是一片灰。",
       "缺在额度：`accounts --json` 只讲订阅账号，用户按量付费买的 Key、套餐还剩多少钱，页面上一个字都没有——只能用终端敲 `quota` 才看得到。同一个「额度」的概念，一半在页面上，一半在命令行里。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 首屏（`ModelPage.tsx` 启动 effect） | 九路 `Promise.all` 全回来才撤骨架 | 两波：第一波只等模型页真正要用的四样（`providers` / `ls` / `model disabled` / `visible`），齐了立刻撤骨架；额度、全局设置、画图模型、接入组件表、settings 在后台继续补，不挡首屏 || 加载器（`ModelPage.tsx` 的 `once()`） | 重复触发就重复起进程，旧读数还可能盖掉新读数 | 同键并发请求复用同一份（`useRef<Map<string, Promise<void>>>`），「刷新额度」与首屏撞在一起时只发一次 || 其余来源的额度（新 `lib/magpieQuotaCards.ts` + `model/QuotaCards.tsx`） | 没有 | 「来源」分区新增卡：按 `quota --json` 列出每个 Key / 套餐 / 钱包的余额、窗口与到期时间；订阅不在这里重复（订阅账号卡已经按账号列过） || 额度窗口条（新 `model/WindowBar.tsx`） | 只长在订阅账号行里 | 抽成独立组件，订阅账号行与额度卡共用同一套：窗口名、进度条、剩多少、重置倒计时 || 「刷新额度」按钮 | 只刷新订阅账号的用量 | 订阅账号与 Key 一起让内核去问厂商（合并去重后逐个 `quota refresh <provider>`），再一起重读 || 窗口解析（`lib/magpieQuota.ts`） | `parseQuotaWindow` / `parseQuotaWindows` / `parseResets` 藏在 `magpieCli.ts` 里 | 挪进 `magpieQuota.ts` 并导出，`accounts` 与 `quota` 两处共用一套解析：同一个数字不会有两种读法 |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 首屏（`ModelPage.tsx` 启动 effect） | 九路 `Promise.all` 全回来才撤骨架 | 两波：第一波只等模型页真正要用的四样（`providers` / `ls` / `model disabled` / `visible`），齐了立刻撤骨架；额度、全局设置、画图模型、接入组件表、settings 在后台继续补，不挡首屏 |\n| 加载器（`ModelPage.tsx` 的 `once()`） | 重复触发就重复起进程，旧读数还可能盖掉新读数 | 同键并发请求复用同一份（`useRef<Map<string, Promise<void>>>`），「刷新额度」与首屏撞在一起时只发一次 |\n| 其余来源的额度（新 `lib/magpieQuotaCards.ts` + `model/QuotaCards.tsx`） | 没有 | 「来源」分区新增卡：按 `quota --json` 列出每个 Key / 套餐 / 钱包的余额、窗口与到期时间；订阅不在这里重复（订阅账号卡已经按账号列过） |\n| 额度窗口条（新 `model/WindowBar.tsx`） | 只长在订阅账号行里 | 抽成独立组件，订阅账号行与额度卡共用同一套：窗口名、进度条、剩多少、重置倒计时 |\n| 「刷新额度」按钮 | 只刷新订阅账号的用量 | 订阅账号与 Key 一起让内核去问厂商（合并去重后逐个 `quota refresh <provider>`），再一起重读 |\n| 窗口解析（`lib/magpieQuota.ts`） | `parseQuotaWindow` / `parseQuotaWindows` / `parseResets` 藏在 `magpieCli.ts` 里 | 挪进 `magpieQuota.ts` 并导出，`accounts` 与 `quota` 两处共用一套解析：同一个数字不会有两种读法 |",
       "两处顺手的取舍：额度卡的表头不再重复「余额」这个种类词（徽标已经说了），余额卡也不再把同一句结论写两遍（有钱数就够了，有窗口时结论由窗口条说）。",
       "怎么验证",
       "留白"
@@ -2764,7 +2776,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "需求原话：「不要携带什么 magpie 和 magpie 的插件等字样，要把他完美集成为和鸣内核的一部分。」",
       "上一轮虽然把额度、签到、切换都做进了模型页，但页面仍在几处漏出外部引擎的名字：提示条里原样打印的英文拒绝（`magpie can't sign in to workbuddy accounts`、`npm couldn't install @magpie-community/…`）、桌面端启动失败的「magpie 退出」、国内端卡片上「先装插件 → 登录」这两步、悬停提示里的 `magpie ls`。用户看到这些会得出一个错误结论：还得自己去装别人的东西。事实上这些能力随安装包一起到，属于和鸣自己的一部分。",
       "做了什么",
-      "| 位置 | 之前 | 现在 || --- | --- | --- || 提示条、控制台、会话输出（`ModelPage.tsx`、`ConsolePanel.tsx`、`SubscriptionRow.tsx`） | 内核英文原话，带 `magpie` | 统一过 `packages/web/src/lib/engineText.ts`：包名 → 「接入组件「xxx」」；`magpie can't sign in to X accounts` → 「模型服务不能直接登录 X 的账号：先装上它的接入组件」；`no … account is signed in` → 「还没有登录任何 … 账号」；`magpie-core` / `magpie` → 「模型服务」 || 国内端卡片（`model/DomesticCard.tsx`） | 「先装插件」→「登录」两步 | 一步「接入」：接入组件在背后装好，用户只看见「接入」与「已登录 N 个」 || 桌面端启动失败（`packages/desktop/magpie-host.js`） | `magpie 退出（code=…）`、`magpie 网关没有在规定时间内就绪` | 「模型服务意外退出」「模型服务没有在规定时间内就绪」；缺运行文件时直接说「安装包不完整」并给出重装建议 || 反代拒绝（`packages/desktop/magpie-proxy.js`） | `只接受和鸣本机页面访问 magpie 反代` | `只接受和鸣本机页面访问模型服务` || 连不上 / Key 被拒（`lib/magpieClient.ts`） | `连不上 magpie 网关`、`核对 magpie 网关 Key` | `连不上和鸣的模型服务`、`在「模型 → 来源」里核对这个 Key` || 智能体页说明（`model/GlobalModelSettings.tsx`） | `和原版 magpie 的 Settings › Models 一样` | `这三项是全局的，会影响所有智能体看到的模型。` || 协作页（`collaboration/CollaborationPage.tsx`） | `由 magpie 检测` | `由和鸣在本机检测` || 卡片悬停（`model/DomesticCard.tsx`） | `magpie ls 在本机找到了它` | `本机扫描时找到了它` || 订阅账号行（`model/SubscriptionRow.tsx`） | `额度未知，内核这次没读到`、`内核没有说明原因` | `额度未知，这次没读到`、`没有说明原因` || 签到厂商兜底（`lib/magpieDomestic.ts`） | `插件` | `接入组件` |",
+      "| 位置 | 之前 | 现在 |\n| --- | --- | --- |\n| 提示条、控制台、会话输出（`ModelPage.tsx`、`ConsolePanel.tsx`、`SubscriptionRow.tsx`） | 内核英文原话，带 `magpie` | 统一过 `packages/web/src/lib/engineText.ts`：包名 → 「接入组件「xxx」」；`magpie can't sign in to X accounts` → 「模型服务不能直接登录 X 的账号：先装上它的接入组件」；`no … account is signed in` → 「还没有登录任何 … 账号」；`magpie-core` / `magpie` → 「模型服务」 |\n| 国内端卡片（`model/DomesticCard.tsx`） | 「先装插件」→「登录」两步 | 一步「接入」：接入组件在背后装好，用户只看见「接入」与「已登录 N 个」 |\n| 桌面端启动失败（`packages/desktop/magpie-host.js`） | `magpie 退出（code=…）`、`magpie 网关没有在规定时间内就绪` | 「模型服务意外退出」「模型服务没有在规定时间内就绪」；缺运行文件时直接说「安装包不完整」并给出重装建议 |\n| 反代拒绝（`packages/desktop/magpie-proxy.js`） | `只接受和鸣本机页面访问 magpie 反代` | `只接受和鸣本机页面访问模型服务` |\n| 连不上 / Key 被拒（`lib/magpieClient.ts`） | `连不上 magpie 网关`、`核对 magpie 网关 Key` | `连不上和鸣的模型服务`、`在「模型 → 来源」里核对这个 Key` |\n| 智能体页说明（`model/GlobalModelSettings.tsx`） | `和原版 magpie 的 Settings › Models 一样` | `这三项是全局的，会影响所有智能体看到的模型。` |\n| 协作页（`collaboration/CollaborationPage.tsx`） | `由 magpie 检测` | `由和鸣在本机检测` |\n| 卡片悬停（`model/DomesticCard.tsx`） | `magpie ls 在本机找到了它` | `本机扫描时找到了它` |\n| 订阅账号行（`model/SubscriptionRow.tsx`） | `额度未知，内核这次没读到`、`内核没有说明原因` | `额度未知，这次没读到`、`没有说明原因` |\n| 签到厂商兜底（`lib/magpieDomestic.ts`） | `插件` | `接入组件` |",
       "顺带收掉的东西：`DomesticCard` 的 `pluginReady` prop 与 `ModelPage` 的 `pluginsChecked` 状态只为「先装插件」那一态存在，现在整条删掉；`engineText` 只在展示层换词，命令、参数、包名一个字节不改，页面上照抄出去仍然有效。",
       "怎么验证",
       "留白"
@@ -2786,7 +2798,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "上一轮把每日免费额度搬进了「国内智能体」这一组卡片，但登录之后还有一段路要走：额度数字在上面的「订阅账号」列表里，卡片上只写「已登录 1 个」。用户看到的是「WorkBuddy 登录了」，却不知道「它还够跑几次」——免费额度本来就是这一组卡片的事，数字和入口分成两处，等于每次都要在页面上跑一趟。",
       "做了什么",
-      "| 能力 | 位置 | 数据来源 || --- | --- | --- || 卡片右侧直接报这个端最紧的那份额度：`剩 18%` / `剩 7,000 点` / `额度用完` / `不限量` / `额度未知` | 国内智能体卡片 | `accounts --json` 的 `windows`，与「智能体」分区共用 `lib/agentQuota.ts` 与 `model/quotaBadge.ts` || 悬停里说全：哪个账号、每扇窗口剩多少、什么时候重置，再带上「本机装过它」和这家的风险提示 | 同上 | 同上 + `magpie ls` + `DOMESTIC_AGENTS` 的风险文案 || 登录全都失效时，右侧改成「重新登录」并贴「登录已失效」，不再假装还有额度 | 同上 | `lapsed` || 只有一部分账号失效时仍说「已登录 2 个」，由上面那行账号自己说清哪条要重登 | 同上 | `active` / `lapsed` |",
+      "| 能力 | 位置 | 数据来源 |\n| --- | --- | --- |\n| 卡片右侧直接报这个端最紧的那份额度：`剩 18%` / `剩 7,000 点` / `额度用完` / `不限量` / `额度未知` | 国内智能体卡片 | `accounts --json` 的 `windows`，与「智能体」分区共用 `lib/agentQuota.ts` 与 `model/quotaBadge.ts` |\n| 悬停里说全：哪个账号、每扇窗口剩多少、什么时候重置，再带上「本机装过它」和这家的风险提示 | 同上 | 同上 + `magpie ls` + `DOMESTIC_AGENTS` 的风险文案 |\n| 登录全都失效时，右侧改成「重新登录」并贴「登录已失效」，不再假装还有额度 | 同上 | `lapsed` |\n| 只有一部分账号失效时仍说「已登录 2 个」，由上面那行账号自己说清哪条要重登 | 同上 | `active` / `lapsed` |",
       "顺手做的一体化：额度徽标的配色从 `ModelPage.tsx` 里的一份就地常量抽成 `components/model/quotaBadge.ts`，「智能体」分区和国内端卡片从此是同一套颜色——同一件事不会在两个分区说成两种话。有额度时卡片不再重复写「已登录 N 个」（徽标已经说明有账号），「本机已装」也让位给徽标、退进悬停提示，窄到 346px 也不会把名字截成「WorkB…」。",
       "怎么验证",
       "留白"
@@ -2810,7 +2822,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "1. **到期清零**：周额度、月额度、每日点数到点就作废，剩一半没用完也一样。内核早就有这件事的提醒（`resetReminder`：到期前 N 小时说「还有多少没花完」），但页面没有出口，等于只有命令行用户享受得到。2. **用到见底**：长任务跑到一半撞上额度上限，比提前十分钟知道要糟得多。内核的 `usageAlert`（窗口用到 X% 时说一次）同样没有出口。",
       "这两个键都是内核 `settings` 的真键，取值是数字（`usageAlert` 是百分比、`resetReminder` 是小时，0 都是关）。真机验证过写入与回读：`settings set usageAlert 80` → `settings get usageAlert` 回 `80`，写完还原成 `0`。",
       "做了什么",
-      "| 位置 | 变化 | 背后 || --- | --- | --- || 订阅账号卡底部（有账号时才出现） | 「额度提醒」一行，两枚下拉：`快用完`（不提醒 / 一半 / 70% / 80% / 90%）与 `快到期`（不提醒 / 前 3 / 6 / 12 / 24 小时） | `settings list --json` 读，`settings set usageAlert\\|resetReminder <数字>` 写 || 行内小字 | 一眼说清现在提醒什么：「用到 80% 提醒；到期前 6 小时提醒还剩多少」，都关着时写「两个提醒都关着」 | `reminderSummary()` || 改完的反馈 | 提示条说明「已记下：额度窗口用到 80% 时提醒一次」「已关掉这条提醒」；失败写内核原话 | 与刷新/签到同一条提示条 |",
+      "| 位置 | 变化 | 背后 |\n| --- | --- | --- |\n| 订阅账号卡底部（有账号时才出现） | 「额度提醒」一行，两枚下拉：`快用完`（不提醒 / 一半 / 70% / 80% / 90%）与 `快到期`（不提醒 / 前 3 / 6 / 12 / 24 小时） | `settings list --json` 读，`settings set usageAlert\\|resetReminder <数字>` 写 |\n| 行内小字 | 一眼说清现在提醒什么：「用到 80% 提醒；到期前 6 小时提醒还剩多少」，都关着时写「两个提醒都关着」 | `reminderSummary()` |\n| 改完的反馈 | 提示条说明「已记下：额度窗口用到 80% 时提醒一次」「已关掉这条提醒」；失败写内核原话 | 与刷新/签到同一条提示条 |",
       "下拉里的档位是现成的，但值本身是任意数字——页面只提供这几档，是因为「77% 时提醒」这种事没人需要。选择即保存，没有「确定」按钮：这两个设置各自只是内核里的一个数字，多一个提交动作只会让人以为没生效。",
       "怎么验证",
       "留白"
@@ -2832,7 +2844,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一轮把国内端接进了「来源」，但「智能体」分区还是只管写配置：在那排「Claude Code / Codex / WorkBuddy…」里挑模型时，看不出这个智能体背后是哪份额度、还剩多少。用户要切到另一个端之前，得先回「来源」翻账号，再回来选模型——两个分区明明读的是同一份 `accounts --json`。",
       "「充分利用免费额度」的前提是**知道还剩多少**：额度快见底时选它，等于让一次长任务中途掉到别的账号上；额度还满时却绕开它，又浪费了免费的那份额度。",
       "做了什么",
-      "| 位置 | 变化 | 数据 || --- | --- | --- || 智能体分区 · 每个智能体名字旁 | 一枚额度徽标：`剩 18%`、`剩 7,000 点`、`额度用完`、`不限量` | `accounts --json` 的 `windows`，与「来源」同一份 || 徽标颜色 | 还有余量=灰、剩余 ≤25%=黄、≤10% 或已用完=红；`额度未知`=灰 | `windowLeftPercent` / `windowTone` || 徽标悬停 | 逐账号、逐窗口写出还剩多少、什么时候重置（最多列 3 个账号，多了写「等 N 个账号」） | `windowName` / `windowLeftText` / `formatResetIn` || 取哪个窗口说话 | 同一智能体多个账号、多个窗口时，取**最紧**的那个——先看见会见底的那份 | 新增 `lib/agentQuota.ts` |",
+      "| 位置 | 变化 | 数据 |\n| --- | --- | --- |\n| 智能体分区 · 每个智能体名字旁 | 一枚额度徽标：`剩 18%`、`剩 7,000 点`、`额度用完`、`不限量` | `accounts --json` 的 `windows`，与「来源」同一份 |\n| 徽标颜色 | 还有余量=灰、剩余 ≤25%=黄、≤10% 或已用完=红；`额度未知`=灰 | `windowLeftPercent` / `windowTone` |\n| 徽标悬停 | 逐账号、逐窗口写出还剩多少、什么时候重置（最多列 3 个账号，多了写「等 N 个账号」） | `windowName` / `windowLeftText` / `formatResetIn` |\n| 取哪个窗口说话 | 同一智能体多个账号、多个窗口时，取**最紧**的那个——先看见会见底的那份 | 新增 `lib/agentQuota.ts` |",
       "读不到额度的账号不进徽标（它在「来源」那一行已经说清了原因），所以没有订阅账号的智能体行和以前一样干净，不会每行挂一个问号。点数窗口（WorkBuddy 这类）按点数说「剩 7,000 点」，不再是百分比。",
       "怎么验证",
       "留白"
@@ -2856,7 +2868,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "1. **每日额度要每天领一次，人总会忘。** 内核其实早就有这件事的常开状态——`settings` 里的 `workbuddyCheckin` / `qoderCheckin` / `traeCheckin` / `minimaxCheckin` 四个开关，打开后内核按北京时间每天自己点一遍签到（`accounts checkin` 覆盖的就是这四家）。页面原来只有一个「今日签到」按钮，等于把「记住每天点」交给用户。2. **卡片看不出「这台机器本来就有这个账号」。** 本机 `magpie ls` 明明认出了 WorkBuddy、Qoder，卡片却和别的端一样只写「先装插件」，用户得自己回想「我是不是登录过 Qoder」。",
       "顺手修了一处会改错文件的地方：`magpie ls` 里的「Qoder CN」原来映射成 `qoder`，在「智能体」分区给它改模型会写到 Qoder 国际站的配置里去。",
       "做了什么",
-      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 「每天自动签到」开关：一次打开四家，关掉就都关 | 来源 → 订阅账号 → 国内智能体 卡片组上方 | `settings list --json` 读，`settings set workbuddyCheckin\\|qoderCheckin\\|traeCheckin\\|minimaxCheckin on\\|off` 写 || 开关打开的说明会点明覆盖哪几家（WorkBuddy、Qoder、Trae CN、MiniMax Code） | 同上 | 同上 || 「本机已装」徽标：本机检测到这个端的客户端就标出来 | 国内智能体卡片标题行 | `magpie ls` 的展示名 → agent id || 登录完成后立刻读一次该端额度，不用等一分钟缓存 | 国内端登录之后 | `quota refresh <agent>` → `accounts --json` || Qoder CN 的 agent id 修正为 `qoder-cn` | 「智能体」分区的模型写入 | `magpie ls` 名称映射表 |",
+      "| 能力 | 位置 | 背后的命令 / 数据 |\n| --- | --- | --- |\n| 「每天自动签到」开关：一次打开四家，关掉就都关 | 来源 → 订阅账号 → 国内智能体 卡片组上方 | `settings list --json` 读，`settings set workbuddyCheckin\\|qoderCheckin\\|traeCheckin\\|minimaxCheckin on\\|off` 写 |\n| 开关打开的说明会点明覆盖哪几家（WorkBuddy、Qoder、Trae CN、MiniMax Code） | 同上 | 同上 |\n| 「本机已装」徽标：本机检测到这个端的客户端就标出来 | 国内智能体卡片标题行 | `magpie ls` 的展示名 → agent id |\n| 登录完成后立刻读一次该端额度，不用等一分钟缓存 | 国内端登录之后 | `quota refresh <agent>` → `accounts --json` |\n| Qoder CN 的 agent id 修正为 `qoder-cn` | 「智能体」分区的模型写入 | `magpie ls` 名称映射表 |",
       "自动签到逐个写、谁失败就停下来说清楚，不谎报「全部打开」；状态是「有一部分开着」时按钮写「补齐自动签到」。四个开关的键名与取值都是真机验证过的：`magpie-core.exe settings set workbuddyCheckin on` → `settings get` 回 `on`，写完再还原成 `off`。",
       "怎么验证",
       "留白（有依据，不是没做）"
@@ -2881,7 +2893,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一轮把「订阅账号」接到了内核的真实契约上，能显示额度了；但那一组卡片只有 Claude、ChatGPT、Copilot、Gemini、Antigravity 五家，用户点名的 WorkBuddy、Qoder 这些国内端不在里面。查内核源码发现两件事：这些端它都认识（`workbuddy`、`workbuddy-ai`、`qoder`、`qoder-cn`、`mimo`、`zcode` 都在 agent 表里，额度窗口也会读），但它们的账号由社区插件供给——内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity（`internal/provider/logins.go` 的 `loginAgents` 只有 claude 与 codex，`signin.go` 的 switch 只有五家），国内端在 `migrate.go` 的 `retiredBuiltins` 里，`loginsNow()` 对它们走 `pluginOfAgent`。**直接摆一个「登录」按钮只会让用户撞见「magpie can't sign in to workbuddy accounts」**，所以这一组要按「先装插件、再登录」两步走，并且插件包名取内核 movers 表里写死的那几个（`@magpie-community/opencode-workbuddy-auth` 等），不拿端名去猜 npm 包——猜错的名字会被当成同名包装进来。",
       "另外两件顺手补齐的事：WorkBuddy、Qoder 的免费额度是**点数**（`tencent_usage.go` 给的 `QuotaWindow{Amount, Limit, Unit: \"credits\"}`），原来按百分比显示会说「剩 70%」而不说「剩 7,000 点」；而每日免费额度要**点一下签到**才到账（内核 `accounts checkin` 覆盖 WorkBuddy、Qoder、Trae CN、MiniMax Code 与插件自己的签到）。",
       "做了什么",
-      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 国内智能体一组卡片：WorkBuddy、WorkBuddy AI、Qoder、Qoder CN、MiMo Code、ZCode | 来源 tab → 订阅账号 → 国内智能体 | 内核 agent id（`workbuddy` / `workbuddy-ai` / `qoder` / `qoder-cn` / `mimo` / `zcode`） || 卡片右侧如实说下一步：先装插件 / 登录 / 已登录 N 个 | 同上一行 | `plugin list --json` 的 `providers[].id`；`accounts --json` 的 `agent` || 点一下装插件再登录 | 同上 | `plugin add <包名>` → `accounts add <agent>` || 今日签到（每日免费额度到账） | 订阅账号卡头「今日签到」 | `accounts checkin --json` || 点数窗口按点数说：剩 7,000 点 / 已用 3,000 点 共 10,000 点 | 每个账号的窗口行 | `windows[].amount` / `limit` / `unit`（`credits` → 点） || 只有厂商原话、没有份额的窗口不再画一条假的 0% 进度条 | 同上 | `windows[].text` || 提示条分成功/失败两种颜色 | 来源区顶部 | 「刷新额度」「切换」「签到」「装插件」的失败都走告警色 |",
+      "| 能力 | 位置 | 背后的命令 / 数据 |\n| --- | --- | --- |\n| 国内智能体一组卡片：WorkBuddy、WorkBuddy AI、Qoder、Qoder CN、MiMo Code、ZCode | 来源 tab → 订阅账号 → 国内智能体 | 内核 agent id（`workbuddy` / `workbuddy-ai` / `qoder` / `qoder-cn` / `mimo` / `zcode`） |\n| 卡片右侧如实说下一步：先装插件 / 登录 / 已登录 N 个 | 同上一行 | `plugin list --json` 的 `providers[].id`；`accounts --json` 的 `agent` |\n| 点一下装插件再登录 | 同上 | `plugin add <包名>` → `accounts add <agent>` |\n| 今日签到（每日免费额度到账） | 订阅账号卡头「今日签到」 | `accounts checkin --json` |\n| 点数窗口按点数说：剩 7,000 点 / 已用 3,000 点 共 10,000 点 | 每个账号的窗口行 | `windows[].amount` / `limit` / `unit`（`credits` → 点） |\n| 只有厂商原话、没有份额的窗口不再画一条假的 0% 进度条 | 同上 | `windows[].text` |\n| 提示条分成功/失败两种颜色 | 来源区顶部 | 「刷新额度」「切换」「签到」「装插件」的失败都走告警色 |",
       "插件包名全部来自 `vendor/magpie-core/internal/provider/migrate_*.go` 的 `pkg` 字段（`workbuddy` 与 `workbuddy-ai` 共用一个包，`qoder` 与 `qoder-cn` 共用一个包）。风险端按内核自己的说法写：WorkBuddy 与国际版 WorkBuddy AI 卡片下面直接写「腾讯可能封禁在 WorkBuddy 之外使用的账号」，登录前就能看到，不用等点了才知道。走 Key 的国内端（Qwen Code、Kimi Code、MiniMax Code）不混进这一组，卡片下面一句话说明它们要在「其他地址」加 Key。",
       "怎么验证",
       "留白（有依据，不是没做）"
@@ -2904,7 +2916,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「来源 → 订阅账号」原来每个账号后面只有一句「额度未知」。查下去不是内核没给数据，而是页面在等一个内核从来没有的字段（`allowance`）：真正的内容在 `accounts --json` 的 `windows` 里，一个账号挂着好几个窗口（Claude 的 5 小时 + 每周、Codex 的周额度…），还带计划档位、在用/接手状态、重置时间、余额与失效原因。这轮按内核的真实契约重画这一行，并补上「刷新额度」与「切到这个账号」两个本来就该有的动作。",
       "做了什么",
-      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 每个账号显示计划档位、席位、读数时间 | 来源 tab → 订阅账号 | `accounts --json` 的 `plan` / `seat` / `readAt` / `asOf` || 状态徽标：在用 / 接手 / 已登录 / 备用 / 登录失效 / 读不到 | 同上，徽标悬停有原因 | `active` / `on` / `lapsed` / `error` || 每个额度窗口一条进度条：窗口名、剩多少、厂商原话、重置倒计时 | 同上 | `windows[]`（`name` / `used` / `remaining` / `resetsAt` / `display` / `unlimited`） || 余额、可手动重置次数 | 同上 | `balance` / `resets` || 刷新额度 | 卡片右上「刷新额度」 | `quota refresh <provider>`（`accounts refresh` 只续登录令牌，不重读额度） || 切到这个账号（二次确认） | 非当前账号那一行的「切到这个」 | `accounts switch <agent> <user>` || 登录失效时重新登录 | 失效那一行的「重新登录」 | `accounts add <agent>` |",
+      "| 能力 | 位置 | 背后的命令 / 数据 |\n| --- | --- | --- |\n| 每个账号显示计划档位、席位、读数时间 | 来源 tab → 订阅账号 | `accounts --json` 的 `plan` / `seat` / `readAt` / `asOf` |\n| 状态徽标：在用 / 接手 / 已登录 / 备用 / 登录失效 / 读不到 | 同上，徽标悬停有原因 | `active` / `on` / `lapsed` / `error` |\n| 每个额度窗口一条进度条：窗口名、剩多少、厂商原话、重置倒计时 | 同上 | `windows[]`（`name` / `used` / `remaining` / `resetsAt` / `display` / `unlimited`） |\n| 余额、可手动重置次数 | 同上 | `balance` / `resets` |\n| 刷新额度 | 卡片右上「刷新额度」 | `quota refresh <provider>`（`accounts refresh` 只续登录令牌，不重读额度） |\n| 切到这个账号（二次确认） | 非当前账号那一行的「切到这个」 | `accounts switch <agent> <user>` |\n| 登录失效时重新登录 | 失效那一行的「重新登录」 | `accounts add <agent>` |",
       "读数时间与重置倒计时每分钟自己走一格（页面里一个时钟，没有账号就不开定时器），不需要用户反复点刷新。进度条按「还剩多少」上色：剩 10% 以下红、25% 以下黄，正常保持灰。整页文案保持「不摊内核英文」的既有口径：窗口名翻成「5 小时 / 每周 / 每月 / 点数」，厂商自己的写法（`82% used`、`In use`）留在右侧小字里不翻译。",
       "怎么验证",
       "留白（有依据，不是没做）"
@@ -2928,7 +2940,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "模型页原来只有一份「模型 ID 平铺列表 + 一个属性表单」：改显示名要手打模型 ID，看不到思考档和窗口，不知道一个模型多少钱，也没法只给某个智能体看一部分模型。原版 magpie 的模型管理是围绕「一张按来源分组的模型表」长的——显示名、思考档、窗口、图片输入、价格、逐模型测试、禁用启用都在模型本身那一行上。这轮把这块补齐，并保持一个原则：**界面上出现的每个操作，背后都是一条 magpie 已有的命令**，不做只能在本地生效的假开关。",
       "做了什么",
-      "| 能力 | 位置 | 背后的命令 / 数据 || --- | --- | --- || 按来源分组的模型目录（显示名、思考档、窗口、最大输出、图片输入） | 模型 tab | 网关 `GET /v1/models` 的 `display_name` / `reasoning_levels` / `context_window` / `max_output_tokens` / `modalities` || 行内编辑：显示名、思考档、窗口、最大输出、图片输入、请求协议、价格、速度档 | 模型行「编辑」 | `model name` / `model spec` / `model api` / `model price` / `model tier` || 逐模型测试、按 Codex 测试、按 Claude Code 测试、测试全部 | 行内按钮 + 面板右上 | `provider test [--as codex\\|claude-code] [model…]` || 复制模型 ID | 行内按钮 | 剪贴板 || 禁用 / 启用（规则可带 `*`） | 行内按钮 + 「已禁用的模型」折叠区 | `model disable` / `model enable` / `model disabled` || 读取现在的设置（哪些字段是你自己设的） | 行内编辑器 | `model spec <p/m>` || 智能体：按来源分组的模型下拉，只列这个智能体看得到的模型 | 智能体 tab | `visible` + `visible <agent> <family,…>` || 智能体：可见来源收窄、只显示挑过的模型 | 智能体 tab 折叠区 | `visible <agent> …` / `visible <agent> --only-picked\\|--show-new` || 来源模型清单：逐个增删、全部 / 每个系列只要最新 / 暂时不下发、重新读取 | 来源 tab 高级 | `provider models <id> +id\\|-id\\|all\\|best\\|none` / `provider refresh` || 全局：名字后缀、压缩窗口、窗口上限 | 模型 tab 底部 | `model suffix` / `model compact` / `model context-cap` || 看图模型（含「关掉」与思考档）、画图模型 | 模型 tab 底部 | `settings get\\|set\\|reset vision\\|visionEffort\\|imageGen`，画图候选来自 `GET /v1/models?kind=image` |",
+      "| 能力 | 位置 | 背后的命令 / 数据 |\n| --- | --- | --- |\n| 按来源分组的模型目录（显示名、思考档、窗口、最大输出、图片输入） | 模型 tab | 网关 `GET /v1/models` 的 `display_name` / `reasoning_levels` / `context_window` / `max_output_tokens` / `modalities` |\n| 行内编辑：显示名、思考档、窗口、最大输出、图片输入、请求协议、价格、速度档 | 模型行「编辑」 | `model name` / `model spec` / `model api` / `model price` / `model tier` |\n| 逐模型测试、按 Codex 测试、按 Claude Code 测试、测试全部 | 行内按钮 + 面板右上 | `provider test [--as codex\\|claude-code] [model…]` |\n| 复制模型 ID | 行内按钮 | 剪贴板 |\n| 禁用 / 启用（规则可带 `*`） | 行内按钮 + 「已禁用的模型」折叠区 | `model disable` / `model enable` / `model disabled` |\n| 读取现在的设置（哪些字段是你自己设的） | 行内编辑器 | `model spec <p/m>` |\n| 智能体：按来源分组的模型下拉，只列这个智能体看得到的模型 | 智能体 tab | `visible` + `visible <agent> <family,…>` |\n| 智能体：可见来源收窄、只显示挑过的模型 | 智能体 tab 折叠区 | `visible <agent> …` / `visible <agent> --only-picked\\|--show-new` |\n| 来源模型清单：逐个增删、全部 / 每个系列只要最新 / 暂时不下发、重新读取 | 来源 tab 高级 | `provider models <id> +id\\|-id\\|all\\|best\\|none` / `provider refresh` |\n| 全局：名字后缀、压缩窗口、窗口上限 | 模型 tab 底部 | `model suffix` / `model compact` / `model context-cap` |\n| 看图模型（含「关掉」与思考档）、画图模型 | 模型 tab 底部 | `settings get\\|set\\|reset vision\\|visionEffort\\|imageGen`，画图候选来自 `GET /v1/models?kind=image` |",
       "速度档按内核能力显示：启动时读一次裸 `magpie model` 的 usage，含 `magpie model tier` 才出现该下拉——随包的内核 `magpie 0.1.3246` 还没有这条命令，所以现在不显示，内核升级后自动出现，不会摆一个保存必报错的控件。",
       "怎么验证",
       "留白（有依据，不是没做）",
@@ -2954,7 +2966,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这一轮专门把这件事查清楚了一半、并且把另一半做了工程处理。",
       "查到了什么",
       "复现过的组合（都偶发、都能崩，不是某个断言的锅）：",
-      "| 尝试 | 结果 || --- | --- || 默认 fork 池 | 偶发崩溃，崩点随机文件 || `--maxWorkers=1 --no-file-parallelism` | 仍偶发（前几轮就是靠这个兜） || threads 池 + `singleThread` | 仍偶发 || fork + `singleFork` + `isolate:false` | 仍偶发（换到 `skillHub.test.ts`） || 单 fork + `isolate:true` | 仍偶发（`app.test.ts` 约 1/5～1/10） || `--stack-size=4096` | **反而更糟**（5/5 崩：worker 线程栈给不到那么大） |",
+      "| 尝试 | 结果 |\n| --- | --- |\n| 默认 fork 池 | 偶发崩溃，崩点随机文件 |\n| `--maxWorkers=1 --no-file-parallelism` | 仍偶发（前几轮就是靠这个兜） |\n| threads 池 + `singleThread` | 仍偶发 |\n| fork + `singleFork` + `isolate:false` | 仍偶发（换到 `skillHub.test.ts`） |\n| 单 fork + `isolate:true` | 仍偶发（`app.test.ts` 约 1/5～1/10） |\n| `--stack-size=4096` | **反而更糟**（5/5 崩：worker 线程栈给不到那么大） |",
       "单文件跑大多数时候是绿的（`fts.test.ts` 连跑 10 次全绿），但**同一个文件偶尔也会崩**——说明它不是「文件太多」，也不是测试内容，而是 worker 进程在这台机器（Node 24.15 + vitest 5.0.5 + vite 8 + `node:sqlite`/FTS5 + 大量 supertest http server）上的原生稳定性问题。开了 `--report-on-fatalerror` 也没有产出诊断报告（原生 fast-fail 直接终结进程，Node 拿不到）。",
       "改了什么",
       "1. **`packages/server/scripts/test-each.mjs`（新）**：逐文件起独立 vitest 进程（18 个文件，共约 40s），每个文件跑完立刻回收进程——把不稳定窗口缩到最小。2. **只对「原生崩溃」做有界重试**：判定条件是进程退出码属于 Windows 原生异常码，或输出里出现 `Worker exited unexpectedly` / `Worker forks emitted error`。断言失败**一次就算失败**，不重试——真实的 red 会稳定复现，重试骗不了人。3. **重试要打出来**：每次重跑都打印「被 worker 原生崩溃打断，重跑第 N 次」，最后的总结也说「其中 N 个文件重跑后通过」。如果这个数字变大，说明环境在变坏，应该去看，而不是默默通过。4. `packages/server/package.json` 的 `test` 改为 `node scripts/test-each.mjs`；根工作区 `pnpm -r test` 与 CI 的 `pnpm --filter @heming/server test` 自动走新脚本，调用方式不变。",
@@ -2981,7 +2993,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "把成员移出团队、或者成员自己退出时，`store` 本来就会把他名下的任务解绑成「待认领」——这条不变量是对的（否则团队里会留下「指给非成员」的非法引用）。问题是**这件事没有留痕**：",
       "结果就是组长第二天看任务板：「这几件怎么没人了？」——只能靠记忆或问人。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/server/src/app.ts` | 新增 `pushUnassignedTaskEvents`：成员离开（被移出 / 自己退出）后，把他名下**没做完**的活逐件写一条 `task_updated` 动态——「因为 X 离开团队，这件活回到「待认领」」，最多逐件记 10 条，其余汇总一条 || `packages/server/src/team.test.ts` | 新增 `describe(\"人走了，活要归位（d.278）\")` 2 例：移出成员后任务 `assigneeId` 变 `null`、单件历史里能查到「回到「待认领」」且带人名；自己退出同样，团队动态里能查到「退出了团队」 || `packages/server/src/storeContract.test.ts` | 新增内存/SQLite 各 2 例，把「移除成员 / 自己退出 → 名下任务解绑」这条契约显式测住（此前只靠实现，没有回归网） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/server/src/app.ts` | 新增 `pushUnassignedTaskEvents`：成员离开（被移出 / 自己退出）后，把他名下**没做完**的活逐件写一条 `task_updated` 动态——「因为 X 离开团队，这件活回到「待认领」」，最多逐件记 10 条，其余汇总一条 |\n| `packages/server/src/team.test.ts` | 新增 `describe(\"人走了，活要归位（d.278）\")` 2 例：移出成员后任务 `assigneeId` 变 `null`、单件历史里能查到「回到「待认领」」且带人名；自己退出同样，团队动态里能查到「退出了团队」 |\n| `packages/server/src/storeContract.test.ts` | 新增内存/SQLite 各 2 例，把「移除成员 / 自己退出 → 名下任务解绑」这条契约显式测住（此前只靠实现，没有回归网） |",
       "口径三条：",
       "1. **只记「没做完」的活**：已完成的活不写事件——它没有可执行的动作，写进去只会让动态变成噪音（谁完成过仍留在 `completedBy` / 结果里）。2. **逐件记，但有上限**：一个人名下有十几件活时，逐件记满 10 条后汇总成一条，避免一次操作刷屏 300 条上限。3. **事件指向具体任务**：写的是 `task_updated` 且带 `taskId`，所以在单件历史（d.276）里也查得到——这才是排查「活为什么没人了」的入口。",
       "验证",
@@ -3004,7 +3016,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "任务板是按**状态**和**负责人**分的（未完成 / 待验收 / 按人看），回答的是「谁在做什么」。但组长每天真正要问的是另一件事：「**今天谁该交什么、哪件已经拖了**」。这两条不是一回事——未完成的清单里既有今天到期的，也有下周以后的；只按状态看，催办只能靠印象。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/schedule.ts`（新） | `bucketOf` / `scheduleBuckets` / `describeSchedule` / `dueText`：按**日历日**分六档（已逾期 / 今天到期 / 明天到期 / 本周内到期 / 下周以后 / 没定截止），已完成的不进来 || `packages/web/src/components/team/TeamSchedulePanel.tsx`（新） | 团队页新增「近期要交的活」：一行摘要（「2 件已逾期 · 3 件今天到期」）+ 按档列标题、负责人、状态、逾期天数；**默认收起**，展开才渲染 || `packages/web/src/components/team/TeamWorkspace.tsx` | 在任务板之前挂上这块面板 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/schedule.ts`（新） | `bucketOf` / `scheduleBuckets` / `describeSchedule` / `dueText`：按**日历日**分六档（已逾期 / 今天到期 / 明天到期 / 本周内到期 / 下周以后 / 没定截止），已完成的不进来 |\n| `packages/web/src/components/team/TeamSchedulePanel.tsx`（新） | 团队页新增「近期要交的活」：一行摘要（「2 件已逾期 · 3 件今天到期」）+ 按档列标题、负责人、状态、逾期天数；**默认收起**，展开才渲染 |\n| `packages/web/src/components/team/TeamWorkspace.tsx` | 在任务板之前挂上这块面板 |",
       "三条口径：",
       "1. **按日历日算，不按小时**：今天 23:00 到期的，今天上午看仍是「今天到期」，不是「还剩 14 小时」。2. **已完成的不占位置**：已交的活属于任务板「待验收」那一档（带结论摘要更方便看），不挤占「今天要交」。3. **默认收起、纯只读**：不展开就不渲染标题（也不和任务板抢版面），不改任何任务。",
       "验证",
@@ -3031,7 +3043,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "但真正排查时问的是**单件活**：「这条为什么又变回进行中」「上次是谁打回的」「是谁把它从我名下拿走的」。当时只有两条路：",
       "数据其实早就有了：每条事件都带 `taskId`，只是没有按任务查的入口。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/server/src/store.ts`、`sqliteStore.ts` | `listTeamEvents(teamId, limit, taskId?)`：可按任务过滤（内存与 SQLite 同口径） || `packages/server/src/app.ts` | `GET /api/teams/:id/events?taskId=` 支持按任务取流水 || `packages/web/src/lib/api.ts` | `fetchTeamEvents(teamId, request, limit, taskId?)` || `packages/web/src/lib/capability/teamTools.ts` | 新增只读工具 `team_task_history`（工具数 18→19，读 7 个） || `packages/web/src/components/team/TeamTaskPanel.tsx` | 每条任务加「历史」按钮：展开才拉、只拉这一条，再点收起 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/server/src/store.ts`、`sqliteStore.ts` | `listTeamEvents(teamId, limit, taskId?)`：可按任务过滤（内存与 SQLite 同口径） |\n| `packages/server/src/app.ts` | `GET /api/teams/:id/events?taskId=` 支持按任务取流水 |\n| `packages/web/src/lib/api.ts` | `fetchTeamEvents(teamId, request, limit, taskId?)` |\n| `packages/web/src/lib/capability/teamTools.ts` | 新增只读工具 `team_task_history`（工具数 18→19，读 7 个） |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 每条任务加「历史」按钮：展开才拉、只拉这一条，再点收起 |",
       "口径三条：",
       "1. **按任务过滤在服务端做**：不是拉全队再筛——团队动态有 300 条上限，筛掉的可能是这条活更早的记录。2. **展开才拉**：任务卡片上写着十几条历史，但九十时间并不需要看；不展开就不发请求。3. **只读不猜**：工具与界面只回库里已有的事实；「为什么」要人读理由（改动摘要里写了改了什么）。",
       "验证",
@@ -3058,7 +3070,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "于是最容易发生的事就是：三件活交上来了、没人看，组长以为团队空了。",
       "这一轮把「待验收」当成一种**独立的状态**，让四个地方都数得出来。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/teamSummary.ts` | `TeamSummary` 加 `pendingReview`；`describeTeamSummary` 追加 ` · 待验收 N`（团队页顶部那行） || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务筛选加「待验收」一档：只看 `status === \"done\" && reviewState === \"pending\"` || `packages/web/src/lib/team/digest.ts` | 「需要关注」最前面加待验收清单（带已交的结论摘要），排在「高优先级」之前——它卡着交付 || `packages/web/src/lib/team/weeklyReport.ts` | 周报「需要关注」第一段改成**待验收**，没交东西时明确写「没有交上来待看的任务」 || `packages/server/src/store.ts`、`sqliteStore.ts` | 打回后重新标完成 → `reviewState` 回到 `pending`（否则组长永远看不到第二版） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/teamSummary.ts` | `TeamSummary` 加 `pendingReview`；`describeTeamSummary` 追加 ` · 待验收 N`（团队页顶部那行） |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务筛选加「待验收」一档：只看 `status === \"done\" && reviewState === \"pending\"` |\n| `packages/web/src/lib/team/digest.ts` | 「需要关注」最前面加待验收清单（带已交的结论摘要），排在「高优先级」之前——它卡着交付 |\n| `packages/web/src/lib/team/weeklyReport.ts` | 周报「需要关注」第一段改成**待验收**，没交东西时明确写「没有交上来待看的任务」 |\n| `packages/server/src/store.ts`、`sqliteStore.ts` | 打回后重新标完成 → `reviewState` 回到 `pending`（否则组长永远看不到第二版） |",
       "口径三条：",
       "验证",
       "没做"
@@ -3080,7 +3092,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "d.273 给团队加了事件时间线，但只落了任务线：派活、改动、留言、删任务。类型里给方案与成员预留了位置，实现却没接上——于是用户问「这周有人动过方案吗」「谁把小赵加进来的」「队长什么时候换的」，时间线还是答不了，只能回快照里猜。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || 服务端成员路由 | 加成员、移除成员、自己退出、转让队长各写一条动态；移除/退出/转让前先取快照拿名字（事后就拿不到了） || 服务端方案路由 | 新建、修改、删除方案各写一条；修改只写「改了哪几个字段」（标题 / 说明 / 状态 / 排序），不把整段说明倒进时间线 || 服务端方案创建 | 顺手补上漏接的 `not_found`：以前团队不存在时会 201 回一个字符串 `\"not_found\"` || 团队动态面板 | 加「全部 / 任务 / 方案 / 成员」四个筛选；空态与工具文案补上方案与成员 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| 服务端成员路由 | 加成员、移除成员、自己退出、转让队长各写一条动态；移除/退出/转让前先取快照拿名字（事后就拿不到了） |\n| 服务端方案路由 | 新建、修改、删除方案各写一条；修改只写「改了哪几个字段」（标题 / 说明 / 状态 / 排序），不把整段说明倒进时间线 |\n| 服务端方案创建 | 顺手补上漏接的 `not_found`：以前团队不存在时会 201 回一个字符串 `\"not_found\"` |\n| 团队动态面板 | 加「全部 / 任务 / 方案 / 成员」四个筛选；空态与工具文案补上方案与成员 |",
       "口径三条：只记一句人话（不存字段快照）；移除类事件在删除前取名字（不留「某人被移出」）；筛选只在界面做分类，不改变拉取与权限。",
       "验证",
       "没做"
@@ -3131,7 +3143,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "到 d.271 为止，团队里的活能派、能认领、能退回、能催、能讨论、能找、能复盘——但「交上来的东西行不行」没有地方说。",
       "成员把任务标成「已完成」，管理侧就只剩两种做法：口头说一句「这版不行」（说完就散在聊天里，任务板上看不出「交上来的还没人看」），或者干脆不管（过两天自己忘了这版有没有被看过）。真出问题时没人说得清：这一版是谁认定可以交的、当时提了什么要求。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `TeamTask`（共享 schema + 内存实现 + SQLite） | 任务多了一个验收状态：`pending`（待验收，默认）/ `approved`（已验收）/ `changes`（打回重做），以及打回意见 `reviewNote`、验收时间 `reviewedAt`、验收人 `reviewedBy` || 服务端 | 新增验收动作：只有组长能验收，只能验收「已完成」的任务；打回必须带一句原因，打回后任务回到「进行中」，**上一版的交付结论保留**（让做的人知道改的是哪一版） || 智能体工具 | 组长侧的智能体多了 `team_task_review`：可以说「这一版验收通过」，也可以说「打回，原因是……」，回执里带上任务状态变化 || 任务板 | 「已完成」的任务上显示验收状态；组长能看到「验收通过 / 要求修改」，要求修改要填一句原因 || 交给成员的那份任务说明 | 如果任务被打回，说明里会写「组长打回了这一版：……（按这个改；改完再标完成，会重新进入待验收）」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `TeamTask`（共享 schema + 内存实现 + SQLite） | 任务多了一个验收状态：`pending`（待验收，默认）/ `approved`（已验收）/ `changes`（打回重做），以及打回意见 `reviewNote`、验收时间 `reviewedAt`、验收人 `reviewedBy` |\n| 服务端 | 新增验收动作：只有组长能验收，只能验收「已完成」的任务；打回必须带一句原因，打回后任务回到「进行中」，**上一版的交付结论保留**（让做的人知道改的是哪一版） |\n| 智能体工具 | 组长侧的智能体多了 `team_task_review`：可以说「这一版验收通过」，也可以说「打回，原因是……」，回执里带上任务状态变化 |\n| 任务板 | 「已完成」的任务上显示验收状态；组长能看到「验收通过 / 要求修改」，要求修改要填一句原因 |\n| 交给成员的那份任务说明 | 如果任务被打回，说明里会写「组长打回了这一版：……（按这个改；改完再标完成，会重新进入待验收）」 |",
       "口径三条：**验收只管「算不算交付」**，不改变谁做、不改变截止时间；**打回必须写原因**，写不出原因说明还没想清楚要不要打回；**重新标完成就重新进待验收**，不会一次通过就再也不看。",
       "验证",
       "没做"
@@ -3154,7 +3166,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "一条任务上的信息原本只有两处：**最新进展**（被覆盖的一条状态）与**交付结论**（做完时写一句）。于是组员想问「这里按 v1 还是 v2 口径」，只能覆盖进展、或者干脆另起一段对话——组长看不到、对方的智能体也看不到，最后靠人传话。",
       "真正缺的是一条**追加的时间线**：谁在什么时候问了什么、谁怎么回的。它必须和组织里的分工一起存在任务上，而不是散在群聊里。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | `TeamTaskCommentSchema`（id / teamId / taskId / authorId / text 1–2000 字 / createdAt）+ `CreateTeamTaskCommentBodySchema`（空白拒收、超长拒收） || `packages/server`（store / sqlite / db / app） | `team_task_comments` 表 + 按任务建索引；内存与 SQLite 两套实现同一契约；`GET/POST /api/teams/:id/tasks/:taskId/comments`——**只有团队成员能读能写**，非成员 403，任务或团队不存在 404 || `packages/web`（api / 工具 / 界面） | `fetchTeamTaskComments` / `createTeamTaskComment` 两个 API；智能体新增两只工具：`team_task_comments`（读）与 `team_task_comment`（写，走确认）；任务卡片加「讨论」按钮，展开后是留言列表 + 输入框（Enter 或「发送」，最多 2000 字） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | `TeamTaskCommentSchema`（id / teamId / taskId / authorId / text 1–2000 字 / createdAt）+ `CreateTeamTaskCommentBodySchema`（空白拒收、超长拒收） |\n| `packages/server`（store / sqlite / db / app） | `team_task_comments` 表 + 按任务建索引；内存与 SQLite 两套实现同一契约；`GET/POST /api/teams/:id/tasks/:taskId/comments`——**只有团队成员能读能写**，非成员 403，任务或团队不存在 404 |\n| `packages/web`（api / 工具 / 界面） | `fetchTeamTaskComments` / `createTeamTaskComment` 两个 API；智能体新增两只工具：`team_task_comments`（读）与 `team_task_comment`（写，走确认）；任务卡片加「讨论」按钮，展开后是留言列表 + 输入框（Enter 或「发送」，最多 2000 字） |",
       "三条口径：**只追加**（没有编辑、没有删除，谁也不能改别人写过的话）／**讨论不是进展**（进展仍是被覆盖的一条状态，两者不混）／**双方智能体都看得见**（派活提示词与团队简报里各加了一条：开工前先看讨论、有疑问写在讨论里）。",
       "验证",
       "没做"
@@ -3177,7 +3189,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.264 起派活能带负载，d.268 起能标轻重缓急，但**一次只能建一件**。",
       "组长（和它的智能体）最常见的动作恰恰是「把这条方案拆成四五件活」：拆的时候要一次调四五次 `team_task_add`，每次都要重新确认团队、重新读一遍成员、重新听一遍「这个人在忙」的回执；中途一次失败，前面建到哪一件还得自己数。次数一多，模型还容易前后不一致——第一件标了 high、第三件忘了写、第四件派给了同一个人。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` 新增 `tasks` 参数（最多 8 条）：每件 `title` 必填，可选 `detail` / `assigneeId` / `dueAt` / `priority`；`plan_id` 与 `attachment_file_id` 对整个批次共享 || 同一位置 | `title` 与 `tasks` 二选一（同时给直接说清，不发请求）；超过 8 条直接拒并说明「拆成两次」；`required` 从 `[\"team_id\",\"title\"]` 改为 `[\"team_id\"]`，运行时校验两者必居其一 || 同一位置 | 逐件建、一次回执：全部成功写「已派 N 件任务」并逐条列 id；有失败写「派了 X 件，另有 Y 件没成」并点名第几件、为什么——**不因为中间一件失败就把前面建好的藏起来** || 同一位置 | 批次里指派了人的，回执末尾仍附「这个人手上还有多少活」（沿用 d.264），一次派完也看得见谁被压满 || `packages/web/src/lib/team/teamBrief.ts` | 提示词加一条：一个方案要拆成几步时，用一次 `tasks` 派 2–8 件，别一件一件分开调；超过 8 件分两次 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` 新增 `tasks` 参数（最多 8 条）：每件 `title` 必填，可选 `detail` / `assigneeId` / `dueAt` / `priority`；`plan_id` 与 `attachment_file_id` 对整个批次共享 |\n| 同一位置 | `title` 与 `tasks` 二选一（同时给直接说清，不发请求）；超过 8 条直接拒并说明「拆成两次」；`required` 从 `[\"team_id\",\"title\"]` 改为 `[\"team_id\"]`，运行时校验两者必居其一 |\n| 同一位置 | 逐件建、一次回执：全部成功写「已派 N 件任务」并逐条列 id；有失败写「派了 X 件，另有 Y 件没成」并点名第几件、为什么——**不因为中间一件失败就把前面建好的藏起来** |\n| 同一位置 | 批次里指派了人的，回执末尾仍附「这个人手上还有多少活」（沿用 d.264），一次派完也看得见谁被压满 |\n| `packages/web/src/lib/team/teamBrief.ts` | 提示词加一条：一个方案要拆成几步时，用一次 `tasks` 派 2–8 件，别一件一件分开调；超过 8 件分两次 |",
       "口径三条：**一次调用、一份回执**（不假装原子，也不隐瞒部分成功）／**上限 8 件**（再多参数会变长，模型容易漏字段，宁可拆两次）／**共享字段只写一次**（`plan_id`、`attachment_file_id` 对整个批次生效，不用每件重复）。",
       "验证",
       "没做"
@@ -3206,7 +3218,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "团队功能到 d.268 已经能派活、认领、退回、催办、找活、复盘，但「把这一周汇报上去」这一步仍然要人自己拼：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/weeklyReport.ts`（新） | `weeklyReportMarkdown()` 把一份团队快照写成可直接复制的 Markdown：标题与时间窗 → 概况（总数/未完成/已完成/这 N 天新建与完成/需要盯的项）→ 这 N 天完成（带结论、负责人、日期）→ 进行中（按优先级、带截止与逾期天数）→ 需要关注（逾期 / 待认领 / 被前置挡住 / 催过还没动，各段都有空态文案）→ 成员负荷表 → 下周建议（按事实给 1–4 条）；`weeklyReportFileName()` 生成 `团队周报-团队名-日期.md` || `packages/web/src/components/team/TeamWorkspace.tsx` | 页头加「生成周报」按钮：打开弹窗展示成稿，可「复制」、可「导出 .md」；导出走既有导出桥（桌面端落到 `~/Heming/exports` 并回报真实路径，浏览器端退回下载） || `packages/desktop/export-fs.js` | 导出桥后缀白名单从 `.json` 扩到 `.json` / `.md`（白名单而不是放开后缀：这个桥只服务记忆导出与周报两种产物）；长名字截断、Windows 保留名、路径穿越校验全部沿用 || `packages/web/src/lib/export/file.ts` | 浏览器降级路径按后缀给 MIME（`.md` 用 `text/markdown`），别把 Markdown 标成 JSON |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/weeklyReport.ts`（新） | `weeklyReportMarkdown()` 把一份团队快照写成可直接复制的 Markdown：标题与时间窗 → 概况（总数/未完成/已完成/这 N 天新建与完成/需要盯的项）→ 这 N 天完成（带结论、负责人、日期）→ 进行中（按优先级、带截止与逾期天数）→ 需要关注（逾期 / 待认领 / 被前置挡住 / 催过还没动，各段都有空态文案）→ 成员负荷表 → 下周建议（按事实给 1–4 条）；`weeklyReportFileName()` 生成 `团队周报-团队名-日期.md` |\n| `packages/web/src/components/team/TeamWorkspace.tsx` | 页头加「生成周报」按钮：打开弹窗展示成稿，可「复制」、可「导出 .md」；导出走既有导出桥（桌面端落到 `~/Heming/exports` 并回报真实路径，浏览器端退回下载） |\n| `packages/desktop/export-fs.js` | 导出桥后缀白名单从 `.json` 扩到 `.json` / `.md`（白名单而不是放开后缀：这个桥只服务记忆导出与周报两种产物）；长名字截断、Windows 保留名、路径穿越校验全部沿用 |\n| `packages/web/src/lib/export/file.ts` | 浏览器降级路径按后缀给 MIME（`.md` 用 `text/markdown`），别把 Markdown 标成 JSON |",
       "口径三条：",
       "验证",
       "没做"
@@ -3233,7 +3245,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "优先级做成 `low / normal / high` 三档，不填即 `normal`：",
       "真正要抢时间的活才标 `high`——各级描述里都写了这句，避免所有人都把活标成急。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | 新增 `TeamTaskPrioritySchema`（`low/normal/high`）；任务读写体加可选 `priority`，`TeamTaskUpdateBody` 的校验条件同步放宽 || `packages/server/src/store.ts`、`sqliteStore.ts`、`db.ts` | 创建默认 `normal`、更新可改；SQLite 加 `priority TEXT NOT NULL DEFAULT 'normal'` 列与幂等迁移（旧库自动补列） || `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 支持 `priority`（非法值当场拒绝，不发请求）；回执写明「优先级：高/普通/低」 || `packages/web/src/lib/team/findTasks.ts` | 找活排序改为「高优先级 → 逾期 → 截止 → 更新时间」；结果行给 `【高】/【低】` 标记 || `packages/web/src/lib/team/digest.ts` | 复盘「需要关注」里先点名高优先级未完成的任务（谁在做） || `packages/web/src/components/team/TeamTaskPanel.tsx` | 新建任务可选优先级；卡片上直接改；`high` 显示红色「高」徽标 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | 新增 `TeamTaskPrioritySchema`（`low/normal/high`）；任务读写体加可选 `priority`，`TeamTaskUpdateBody` 的校验条件同步放宽 |\n| `packages/server/src/store.ts`、`sqliteStore.ts`、`db.ts` | 创建默认 `normal`、更新可改；SQLite 加 `priority TEXT NOT NULL DEFAULT 'normal'` 列与幂等迁移（旧库自动补列） |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 支持 `priority`（非法值当场拒绝，不发请求）；回执写明「优先级：高/普通/低」 |\n| `packages/web/src/lib/team/findTasks.ts` | 找活排序改为「高优先级 → 逾期 → 截止 → 更新时间」；结果行给 `【高】/【低】` 标记 |\n| `packages/web/src/lib/team/digest.ts` | 复盘「需要关注」里先点名高优先级未完成的任务（谁在做） |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 新建任务可选优先级；卡片上直接改；`high` 显示红色「高」徽标 |",
       "验证",
       "没做"
     ]
@@ -3262,7 +3274,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "团队功能到 d.266 已经能派、能认领、能退、能催、能找，但「**这周团队到底怎么样**」仍然没有答案：",
       "这是团队协作的第三个必需能力：**看得见（快照）→ 找得回（检索）→ 说得清（复盘）**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/digest.ts`（新） | 纯函数统计：`completedInWindow`（窗口内完成、按完成时间新→旧）、`createdInWindow`、`blockingTask`（被哪条未完成的前置挡着）、`buildTeamDigest`（概况 / 目标 / 这 N 天完成（带结论）/ 按人看（完成、未完成、逾期、在做、未开始）/ 需要关注（逾期、被退回、等前置、催过没动、待认领）/ 下一步） || `packages/web/src/lib/capability/teamTools.ts` | 新只读工具 `team_digest`：`team_id` + `days`（1–30，默认 7）；数字全由纯函数算，模型只负责组织成话 || `packages/web/src/lib/team/teamBrief.ts` | 加规矩：用户问「这周团队怎么样」「周报/复盘」时先调 `team_digest`，不要对着快照手工统计（会截断） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/digest.ts`（新） | 纯函数统计：`completedInWindow`（窗口内完成、按完成时间新→旧）、`createdInWindow`、`blockingTask`（被哪条未完成的前置挡着）、`buildTeamDigest`（概况 / 目标 / 这 N 天完成（带结论）/ 按人看（完成、未完成、逾期、在做、未开始）/ 需要关注（逾期、被退回、等前置、催过没动、待认领）/ 下一步） |\n| `packages/web/src/lib/capability/teamTools.ts` | 新只读工具 `team_digest`：`team_id` + `days`（1–30，默认 7）；数字全由纯函数算，模型只负责组织成话 |\n| `packages/web/src/lib/team/teamBrief.ts` | 加规矩：用户问「这周团队怎么样」「周报/复盘」时先调 `team_digest`，不要对着快照手工统计（会截断） |",
       "口径四条：",
       "验证",
       "没做"
@@ -3289,7 +3301,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "任务板到第 20 轮时会长出相当多的条目，而和鸣只给了三样筛选：状态（未完成/全部/已完成）、按人看、逾期列表。想知道「上周说的接口那个 bug 是哪条」「谁手上有卡住的活」，只能一条条翻；智能体那边更差——`team_get` 快照只列**前 20 条**任务，第 21 条之后的活它压根看不见，也就没法基于「全部任务」判断该派谁、该催谁。",
       "这是团队功能里「看得见」之后的第二个必需能力：**找得回**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/findTasks.ts`（新） | 纯函数：`matchesTaskQuery`（空格分词 AND，范围含标题/需求/结论/进展/退回原因/任务 id）、`isOverdue`（未完成 + 有截止 + 已过点）、`sortTaskHits`（逾期优先→截止早→没有截止的按更新时间新）、`findTeamTasks`（status/assignee/overdue/limit，`total` 与 `scanned` 分开给）、`describeFindResult`（命中数、条数截断、行内负责人/截止/逾期/taskId，没结果时给下一步） || `packages/web/src/lib/capability/teamTools.ts` | 新只读工具 `team_task_find`：`team_id` + `query`/`assignee`/`status`/`overdue`/`limit`；`assignee` 支持用户名或显示名，找不到时直接说「团队里没有叫「X」的成员」并列出当前成员 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务板加关键词搜索框（`data-testid=\"task-search\"`），与状态筛选、按人筛选可叠加；非空时给「命中 N 条（当前筛选下共 M 条）」；空态分三档（真的没任务 / 关键词没命中 / 筛选下没有） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/findTasks.ts`（新） | 纯函数：`matchesTaskQuery`（空格分词 AND，范围含标题/需求/结论/进展/退回原因/任务 id）、`isOverdue`（未完成 + 有截止 + 已过点）、`sortTaskHits`（逾期优先→截止早→没有截止的按更新时间新）、`findTeamTasks`（status/assignee/overdue/limit，`total` 与 `scanned` 分开给）、`describeFindResult`（命中数、条数截断、行内负责人/截止/逾期/taskId，没结果时给下一步） |\n| `packages/web/src/lib/capability/teamTools.ts` | 新只读工具 `team_task_find`：`team_id` + `query`/`assignee`/`status`/`overdue`/`limit`；`assignee` 支持用户名或显示名，找不到时直接说「团队里没有叫「X」的成员」并列出当前成员 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务板加关键词搜索框（`data-testid=\"task-search\"`），与状态筛选、按人筛选可叠加；非空时给「命中 N 条（当前筛选下共 M 条）」；空态分三档（真的没任务 / 关键词没命中 / 筛选下没有） |",
       "口径三条：",
       "验证",
       "没做"
@@ -3316,7 +3328,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "团队派活这条链已经能「派 / 认领 / 退回 / 留进展 / 看对方忙不忙」，缺的是最常用的那一下：**组长口头催一句**。之前催了没有任何痕迹——被催的人（和它的智能体）不知道「已经被催过、催过几次」，组长自己也看不出来「催了还不做」。",
       "为什么做",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | `TeamTaskSchema` 加 `nudgedAt` / `nudgedBy` / `nudgeCount`（只记提醒，不改状态、不改负责人；次数累加不清零）；`UpdateTeamTaskBodySchema` 加 `nudge` 开关 || `packages/server/src/{store,sqliteStore,db}.ts` | 内存与 sqlite 两条存储路径都落这三列；建表加 `nudged_at / nudged_by / nudge_count`，并给旧库补幂等 `ALTER TABLE` 迁移（**独立判断，不埋在别的列分支里**） || `packages/server/src/app.ts` | 新错误码 `not_nudgeable` → 400「只能催办派给别人、还没完成的任务：自己的活不用催，没人认领的先派人，已完成的不用催」 || `packages/web/src/lib/capability/teamTools.ts` | 新工具 `team_task_nudge`（写操作、走确认）：只组长能催，只留提醒，不改状态、不改负责人 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务板上显示「催过 N 次（最近一次：谁，时间）」 || `packages/web/src/lib/team/myTaskPrompt.ts` | 被催过的任务进提示词时写明「组长催过 N 次…先说明现在进展、什么时候能交；做不动就退回」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | `TeamTaskSchema` 加 `nudgedAt` / `nudgedBy` / `nudgeCount`（只记提醒，不改状态、不改负责人；次数累加不清零）；`UpdateTeamTaskBodySchema` 加 `nudge` 开关 |\n| `packages/server/src/{store,sqliteStore,db}.ts` | 内存与 sqlite 两条存储路径都落这三列；建表加 `nudged_at / nudged_by / nudge_count`，并给旧库补幂等 `ALTER TABLE` 迁移（**独立判断，不埋在别的列分支里**） |\n| `packages/server/src/app.ts` | 新错误码 `not_nudgeable` → 400「只能催办派给别人、还没完成的任务：自己的活不用催，没人认领的先派人，已完成的不用催」 |\n| `packages/web/src/lib/capability/teamTools.ts` | 新工具 `team_task_nudge`（写操作、走确认）：只组长能催，只留提醒，不改状态、不改负责人 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务板上显示「催过 N 次（最近一次：谁，时间）」 |\n| `packages/web/src/lib/team/myTaskPrompt.ts` | 被催过的任务进提示词时写明「组长催过 N 次…先说明现在进展、什么时候能交；做不动就退回」 |",
       "三条口径：**只有组长能催**（成员之间不互相催，避免变成内部施压）／**只催别人名下、还没完成的任务**（自己的不用催、没人认领的先派人、已完成的不再打扰）／**只留痕不改状态**（催办不等于改派，也不等于标记在做）。",
       "验证",
       "没做"
@@ -3342,7 +3354,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "到 d.263 为止，派活这条线已经能「派、认领、做、退、留结论、留进展」。但组长（和他的智能体）派活时**看不到对方手上有多少活**：同一个能干的人被反复点名，别的成员闲着手；被派的人也不好拒绝，只能默默排队。界面上的「按人看」要人自己去数，智能体侧更糟——它连「这个人已经压着 5 件」都不知道，照样派。",
       "这一版把「负载」这层信息接给智能体，并在它派完活之后把结果说清楚。只做一件事：让「派给谁」这个决定有事实依据。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/load.ts`（新） | `memberLoads()` 按人统计未完成数与逾期数（未认领的不算到任何人头上）；`describeLoad()` 三档文案；`describeAssigneeLoad(name, load)` 在人已经很满（> 5 项未完成）时补一句「考虑换一个人」 || `packages/web/src/lib/capability/teamTools.ts` | `team_get` 的成员行带上「手上 N 项未完成（其中 M 项已逾期）」；`team_task_add` / `team_task_update`（改派）成功后追加一行「林晓（@linxiao）手上 3 项未完成（1 项已逾期）」 || `packages/web/src/lib/team/teamBrief.ts` | 每轮的团队简报多一条规矩：派之前先看成员后面的未完成数，已经压着好几件的别再派，能分散就分散 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/load.ts`（新） | `memberLoads()` 按人统计未完成数与逾期数（未认领的不算到任何人头上）；`describeLoad()` 三档文案；`describeAssigneeLoad(name, load)` 在人已经很满（> 5 项未完成）时补一句「考虑换一个人」 |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_get` 的成员行带上「手上 N 项未完成（其中 M 项已逾期）」；`team_task_add` / `team_task_update`（改派）成功后追加一行「林晓（@linxiao）手上 3 项未完成（1 项已逾期）」 |\n| `packages/web/src/lib/team/teamBrief.ts` | 每轮的团队简报多一条规矩：派之前先看成员后面的未完成数，已经压着好几件的别再派，能分散就分散 |",
       "口径",
       "验证",
       "没做"
@@ -3375,7 +3387,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "但**对人这边来说，入口全靠记忆**：不点开面板就不知道有活。于是常见的情况是——",
       "提示词里一直有这份信息（模型看得见），界面上却没有（人看不见）。这一轮把这个不对称补上：「我的任务」按钮上直接显示有几件活。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/myTaskBadge.ts`（新） | `summarizeMyTasks()` 把两份列表折成 `{ assigned, claimable, total }`；`myTaskBadgeText()` 出角标文字（`3 项待办` / `2 项可接` / 两者都有时用 `·` 连接）；`myTaskButtonLabel()` 把数量写进按钮的无障碍名字；超过 99 显示 `99+` || `packages/web/src/components/ChatPage.tsx` | 顶栏「我的任务」按钮外包一层定位容器，有活时右上角出现角标；挂载时与窗口重新获得焦点时各刷新一次；每轮对话开始复用 my-tasks 那份结果刷新（**不额外请求**） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/myTaskBadge.ts`（新） | `summarizeMyTasks()` 把两份列表折成 `{ assigned, claimable, total }`；`myTaskBadgeText()` 出角标文字（`3 项待办` / `2 项可接` / 两者都有时用 `·` 连接）；`myTaskButtonLabel()` 把数量写进按钮的无障碍名字；超过 99 显示 `99+` |\n| `packages/web/src/components/ChatPage.tsx` | 顶栏「我的任务」按钮外包一层定位容器，有活时右上角出现角标；挂载时与窗口重新获得焦点时各刷新一次；每轮对话开始复用 my-tasks 那份结果刷新（**不额外请求**） |",
       "口径",
       "验证",
       "没做"
@@ -3403,7 +3415,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "团队任务到 d.261 已经能派、能退、能留结论，但**「做到一半」这个状态是空白的**：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | 任务新增 `progress`（≤500 字）、`progressAt`、`progressBy`；更新请求体接受 `progress`（纳入「至少改一个字段」判据） || `packages/server/src/store.ts` / `sqliteStore.ts` | 写进展时记下内容、时间、作者；传空串＝清空（旧进展不能一直挂着） || `packages/server/src/db.ts` | `team_tasks` 加三列 + 幂等迁移（与 d.252/d.255/d.261 同一块，老库自动补） || `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 支持 `progress`；描述里讲清「进展是给下一轮的你和组长看的，别拿它当结论」 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行显示「进展（谁，时间）：内容」（与结论、退回痕迹分开显示） || 提示词（`runtimePrompt` / `myTaskPrompt`） | 团队任务段补「做到一半就留一句进展」；「我的任务」/「认领并接着做」会把上次进展写进提示词，并说明「接着它往下做，不要从头重来」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | 任务新增 `progress`（≤500 字）、`progressAt`、`progressBy`；更新请求体接受 `progress`（纳入「至少改一个字段」判据） |\n| `packages/server/src/store.ts` / `sqliteStore.ts` | 写进展时记下内容、时间、作者；传空串＝清空（旧进展不能一直挂着） |\n| `packages/server/src/db.ts` | `team_tasks` 加三列 + 幂等迁移（与 d.252/d.255/d.261 同一块，老库自动补） |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 支持 `progress`；描述里讲清「进展是给下一轮的你和组长看的，别拿它当结论」 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行显示「进展（谁，时间）：内容」（与结论、退回痕迹分开显示） |\n| 提示词（`runtimePrompt` / `myTaskPrompt`） | 团队任务段补「做到一半就留一句进展」；「我的任务」/「认领并接着做」会把上次进展写进提示词，并说明「接着它往下做，不要从头重来」 |",
       "口径",
       "验证",
       "没做"
@@ -3429,7 +3441,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "派活这件事到 d.260 为止一直是「单向」的：组长把任务派出去，能改派、能催、能看进度，但**执行的人没法说「这条我做不了」**——只能干拖着，或者在对话里口头解释一句（组长翻不到），或者干脆标成 done 交个空结论（这比拖着更糟：组长以为做完了）。",
       "任务板本来有一个隐式的「退回」动作（把负责人清空回待认领），但接口语义从来没被这样解释过，也没有留下「谁退的、为什么退」——于是同一件事会被反复派给同一个人、或者被当成没人动过。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | 任务新增 `returnNote`（≤500 字）、`returnedAt`、`returnedBy`；更新请求体接受 `returnNote`（纳入「至少改一个字段」判据） || `packages/server/src/store.ts` / `sqliteStore.ts` | 把负责人清空（`assigneeId: null`）视为**退回**：记下退回人与时间、存下原因；重新认领时清空这三项（旧原因不能一直挂在任务上，否则下一个人以为在说自己） || `packages/server/src/db.ts` | `team_tasks` 加三列 + 幂等迁移（与 d.252/d.255 同一块，老库自动补） || `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 讲清这条路：`assignee_id` 传空串 + `return_note` 写原因；返回文案改成「已把「X」退回待认领…组长会看到」；没写原因时提醒下次说明 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行加「退回」按钮（只有本人/组长、且未完成时可点）→ 内联填原因 → 确认；被退回的任务显示「X 退回过：原因（时间）」徽标 || 提示词（`runtimePrompt` / `myTaskPrompt`） | 团队任务段补「做不了就退回，不要让它挂着不动」；认领待认领的活时，把上一个负责人退回时的原因写在最前面 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | 任务新增 `returnNote`（≤500 字）、`returnedAt`、`returnedBy`；更新请求体接受 `returnNote`（纳入「至少改一个字段」判据） |\n| `packages/server/src/store.ts` / `sqliteStore.ts` | 把负责人清空（`assigneeId: null`）视为**退回**：记下退回人与时间、存下原因；重新认领时清空这三项（旧原因不能一直挂在任务上，否则下一个人以为在说自己） |\n| `packages/server/src/db.ts` | `team_tasks` 加三列 + 幂等迁移（与 d.252/d.255 同一块，老库自动补） |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 讲清这条路：`assignee_id` 传空串 + `return_note` 写原因；返回文案改成「已把「X」退回待认领…组长会看到」；没写原因时提醒下次说明 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行加「退回」按钮（只有本人/组长、且未完成时可点）→ 内联填原因 → 确认；被退回的任务显示「X 退回过：原因（时间）」徽标 |\n| 提示词（`runtimePrompt` / `myTaskPrompt`） | 团队任务段补「做不了就退回，不要让它挂着不动」；认领待认领的活时，把上一个负责人退回时的原因写在最前面 |",
       "口径",
       "验证",
       "没做"
@@ -3454,7 +3466,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "派活时把负责人留空，本意是「谁有空谁接」。但从 d.248 起，`GET /api/team/my-tasks` 只返回**派到我名下**的任务——队员的智能体根本不知道队里还有活等着人接；这类活只能靠人自己去团队页翻，于是经常一直挂着：组长以为有人会接，队员以为没派给自己。",
       "这一版把「待认领」单独补上：**看得见**（面板 + 每轮提示词），并且**先认领再动手**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/server/src/store.ts` / `sqliteStore.ts` | 新增 `listClaimableTeamTasks(userId)`：只返回**我所在团队**里 `assigneeId` 为空、且未完成的任务，带 `openBlockers` 并按「前置没完成的往后排」排序 || `packages/server/src/app.ts` | `GET /api/team/my-tasks` 改为返回两段：`{ tasks, claimable }` || `packages/web/src/lib/team/assignedTasks.ts` | `formatClaimableTask()` / `describeClaimableTasks()`：一项一行、最多 4 行 || `packages/web/src/lib/team/myTaskPrompt.ts` | `buildClaimTaskPrompt()`：第一步先认领（把 `assignee_id` 设成自己），再动手、做完写 `result` || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 团队里待认领的活」一段（与「派到我名下的」分开） || `packages/web/src/components/MyTasksDialog.tsx` | 面板下半部分「队里待认领（N）」，点一行 = 认领并接着做 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/server/src/store.ts` / `sqliteStore.ts` | 新增 `listClaimableTeamTasks(userId)`：只返回**我所在团队**里 `assigneeId` 为空、且未完成的任务，带 `openBlockers` 并按「前置没完成的往后排」排序 |\n| `packages/server/src/app.ts` | `GET /api/team/my-tasks` 改为返回两段：`{ tasks, claimable }` |\n| `packages/web/src/lib/team/assignedTasks.ts` | `formatClaimableTask()` / `describeClaimableTasks()`：一项一行、最多 4 行 |\n| `packages/web/src/lib/team/myTaskPrompt.ts` | `buildClaimTaskPrompt()`：第一步先认领（把 `assignee_id` 设成自己），再动手、做完写 `result` |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 团队里待认领的活」一段（与「派到我名下的」分开） |\n| `packages/web/src/components/MyTasksDialog.tsx` | 面板下半部分「队里待认领（N）」，点一行 = 认领并接着做 |",
       "口径",
       "验证",
       "没做"
@@ -3482,7 +3494,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "团队派活这条路已经通了（d.248 起每轮提示词里就列着「派到我名下的任务」），但**界面上没有入口**：被派的人要先打开团队页、翻到任务、把标题和需求说明读一遍，再回到对话框把它复述出来让智能体去做。少做一步就少一次「没让它写结论」，多一步就多一次「我是不是漏说了什么」。",
       "这一版把最后这段补上：把「派到我名下、还没做完」的活列出来，点一下就把这条活变成一条正常的用户消息。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/myTaskPrompt.ts`（新） | `buildMyTaskPrompt()` 把一条指派任务拼成可直接发送的请求：团队 / 任务 id / 标题 / 需求说明，再按需带上截止时间与「前置还没完成」的提醒，末尾三条做法（先用 `team_get` 看完整信息、做完用 `team_task_update` 标 done 并写 `result`、不该自己做要说清并建议改派） || `packages/web/src/components/MyTasksDialog.tsx`（新） | 「我的任务」面板：打开时拉一次 `GET /api/team/my-tasks`（不轮询）；**三态分开**——加载中、读不到（可能是网络或服务端）、真的没有；每行一条，点即发出 || `packages/web/src/components/ChatPage.tsx` | 顶栏加「我的任务」入口；选中后关面板并发出这条消息（与手打完全相同的一条路径） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/myTaskPrompt.ts`（新） | `buildMyTaskPrompt()` 把一条指派任务拼成可直接发送的请求：团队 / 任务 id / 标题 / 需求说明，再按需带上截止时间与「前置还没完成」的提醒，末尾三条做法（先用 `team_get` 看完整信息、做完用 `team_task_update` 标 done 并写 `result`、不该自己做要说清并建议改派） |\n| `packages/web/src/components/MyTasksDialog.tsx`（新） | 「我的任务」面板：打开时拉一次 `GET /api/team/my-tasks`（不轮询）；**三态分开**——加载中、读不到（可能是网络或服务端）、真的没有；每行一条，点即发出 |\n| `packages/web/src/components/ChatPage.tsx` | 顶栏加「我的任务」入口；选中后关面板并发出这条消息（与手打完全相同的一条路径） |",
       "口径",
       "验证",
       "没做"
@@ -3507,7 +3519,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.248 起组长的智能体能建团队、拉人、写方案、派活，但**只能加不能减、只能接不能交**：要把一个已离职或调岗的人移出团队，或者在离开前把队长交给别人，只能由用户自己去团队页点按钮。可「帮我把 @linxiao 移出产品组」「走之前把队长交给阿鸣」恰恰是很自然的一句话。",
       "服务端这两条接口早就存在（`DELETE /api/teams/:id/members/:userId`、`POST /api/teams/:id/owner`，都带 owner 校验），缺的只是把它们接给智能体，并让风险分级反映真实后果。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/capability/teamTools.ts` | 新增 `team_member_remove`、`team_owner_transfer`：都接受 `team_id` + `username`，先在团队快照里把用户名解析成 `userId`（忽略大小写、允许带 `@`），解析不到就把现有成员名单回给模型，不盲发请求 || 风险分级 | 两条都定为 `danger`（此前团队工具最高是 `write`）：它们影响的是**别人的访问权限**和团队控制权，收不回来，所以每次都要人看一眼，不能被「记住允许」放行 || 前置校验 | 不能把队长移出（提示先转让或解散）；转让给已经是队长的人直接说明、不发请求 || 结果文案 | 移出后回显剩余成员；转让后明确写「你现在是普通成员：还能看团队、认领任务，但不能再加人、派活或删除」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/capability/teamTools.ts` | 新增 `team_member_remove`、`team_owner_transfer`：都接受 `team_id` + `username`，先在团队快照里把用户名解析成 `userId`（忽略大小写、允许带 `@`），解析不到就把现有成员名单回给模型，不盲发请求 |\n| 风险分级 | 两条都定为 `danger`（此前团队工具最高是 `write`）：它们影响的是**别人的访问权限**和团队控制权，收不回来，所以每次都要人看一眼，不能被「记住允许」放行 |\n| 前置校验 | 不能把队长移出（提示先转让或解散）；转让给已经是队长的人直接说明、不发请求 |\n| 结果文案 | 移出后回显剩余成员；转让后明确写「你现在是普通成员：还能看团队、认领任务，但不能再加人、派活或删除」 |",
       "口径",
       "验证",
       "没做"
@@ -3534,7 +3546,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一版（d.256）已经把这组数字写进了智能体的团队简报，但**界面这边没有**：组长进团队页看到的是「2 名成员 · 1 条方案 · 3 个任务」，至于「几件逾期、几件还没人认领、几件卡在前置上」，得逐条读任务行自己在脑子里数。",
       "同一套口径服务器已经会算（`TeamBrief.counts`），界面这侧完全可以在本地按同一规则再算一次——不用多发一个请求，也不会出现「提示词和界面对不上」。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/teamSummary.ts`（新） | `summarizeTeamTasks(tasks, now)` 一次遍历数出 `open / done / overdue / unassigned / blocked`；`describeTeamSummary()` 拼成一行字（全清时也要说出来） || `packages/web/src/components/team/TeamWorkspace.tsx` | 团队页头部在「N 名成员 · M 条方案 · K 个任务」下面加一行「进度：…」（`data-testid=\"team-summary\"`）；有逾期时整行用警示色并带 `data-overdue` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/teamSummary.ts`（新） | `summarizeTeamTasks(tasks, now)` 一次遍历数出 `open / done / overdue / unassigned / blocked`；`describeTeamSummary()` 拼成一行字（全清时也要说出来） |\n| `packages/web/src/components/team/TeamWorkspace.tsx` | 团队页头部在「N 名成员 · M 条方案 · K 个任务」下面加一行「进度：…」（`data-testid=\"team-summary\"`）；有逾期时整行用警示色并带 `data-overdue` |",
       "口径（与 d.256 服务端逐条一致）",
       "验证",
       "没做"
@@ -3560,7 +3572,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.253 给组长的智能体补了「队里有谁、各自 id」，但**没有一件任务的全貌**：被问「进度怎么样」时，它只能把每个团队逐个 `team_get` 拉一遍快照再自己数，慢且容易数错；界面上组长也要点进每个团队才能看出「谁手上压着活、几件逾期、有没有该派没派出去的」。",
       "这一版把**任务概览**放进团队简报：每轮提示词里就有「几项未完成（逾期 X、待认领 Y、被前置卡住 Z）」，每个成员名后面写「几项未完成」。组长（和队员）的智能体答进度题时，答案本来就在手里。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | `TeamBriefMemberSchema` 增 `open`（名下未完成数）；新增 `TeamBriefCountsSchema { open, done, overdue, unassigned, blocked }`；`TeamBriefSchema` 增 `counts` || `packages/server/src/teamCounts.ts`（新） | `summarizeTeamTasks(tasks, now)` 一次遍历数出五项，并给出 `perMember` 计数（被前置卡住 = 有未完成的前置任务） || `packages/server/src/store.ts` / `sqliteStore.ts` | `listTeamBriefs` 随简报返回 `counts` 与成员 `open`（两套实现口径一致） || `packages/web/src/lib/team/teamBrief.ts` | 简报行改成「团队名（身份）：任务：N 项未完成（逾期…）；成员：阿鸣（u-1，组长，2 项未完成）」；全清时明说「没有未完成（已完成 N 项）」；新增一条规矩：被问进度按这行回答，别逐个 `team_get` 去数 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | `TeamBriefMemberSchema` 增 `open`（名下未完成数）；新增 `TeamBriefCountsSchema { open, done, overdue, unassigned, blocked }`；`TeamBriefSchema` 增 `counts` |\n| `packages/server/src/teamCounts.ts`（新） | `summarizeTeamTasks(tasks, now)` 一次遍历数出五项，并给出 `perMember` 计数（被前置卡住 = 有未完成的前置任务） |\n| `packages/server/src/store.ts` / `sqliteStore.ts` | `listTeamBriefs` 随简报返回 `counts` 与成员 `open`（两套实现口径一致） |\n| `packages/web/src/lib/team/teamBrief.ts` | 简报行改成「团队名（身份）：任务：N 项未完成（逾期…）；成员：阿鸣（u-1，组长，2 项未完成）」；全清时明说「没有未完成（已完成 N 项）」；新增一条规矩：被问进度按这行回答，别逐个 `team_get` 去数 |",
       "口径",
       "验证",
       "没做"
@@ -3587,7 +3599,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "后果在长任务里很具体：三件事一起开工，最后互相等；或者后置任务先做出来，前置一改又得返工。更麻烦的是智能体看不到这层关系——d.248 之后被派活的一方能在提示词里看到任务，但「这条要等那条」它并不知道。",
       "这一版把依赖变成任务本身的一个字段，让界面、智能体、服务端都看同一份事实。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | `TeamTask.blockedBy`（前置任务 id 数组，最多 5 个）；创建/更新的 body 都能带它 || 服务端两套存储（内存 + sqlite）+ `db.ts` | 建表加 `blocked_by` 列与幂等迁移；建/改任务时校验前置存在、同团队、不成环（自依赖与 A→B→A 都拒） || `listAssignedTeamTasks` / `GET /api/team/my-tasks` | 每项多带 `openBlockers`（还没做完的前置），并把「还轮不到」的排在后面 || 删除任务 | 自动把悬空的前置 id 从其它任务里剔除（不碰 `updatedAt`，免得把「多久没动」重置成今天） || `packages/web/src/components/team/TeamTaskPanel.tsx` | 派活表单多一个「前置」下拉；任务行显示「等「X」做完」/「前置「X」已完成」，前置没完成时标黄，状态按钮的说明也会点出前置 || `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 支持 `blockedBy`（数组或逗号分隔串），走既有的参数归一与显式拒绝未知键 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 团队段落补两条规则：摘要写着「前置还没完成」就先别开始；有顺序就用 `blockedBy` 写清，不要只在标题里说「等 X 做完」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | `TeamTask.blockedBy`（前置任务 id 数组，最多 5 个）；创建/更新的 body 都能带它 |\n| 服务端两套存储（内存 + sqlite）+ `db.ts` | 建表加 `blocked_by` 列与幂等迁移；建/改任务时校验前置存在、同团队、不成环（自依赖与 A→B→A 都拒） |\n| `listAssignedTeamTasks` / `GET /api/team/my-tasks` | 每项多带 `openBlockers`（还没做完的前置），并把「还轮不到」的排在后面 |\n| 删除任务 | 自动把悬空的前置 id 从其它任务里剔除（不碰 `updatedAt`，免得把「多久没动」重置成今天） |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 派活表单多一个「前置」下拉；任务行显示「等「X」做完」/「前置「X」已完成」，前置没完成时标黄，状态按钮的说明也会点出前置 |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 支持 `blockedBy`（数组或逗号分隔串），走既有的参数归一与显式拒绝未知键 |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 团队段落补两条规则：摘要写着「前置还没完成」就先别开始；有顺序就用 `blockedBy` 写清，不要只在标题里说「等 X 做完」 |",
       "口径",
       "验证",
       "没做"
@@ -3617,7 +3629,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "结果是这样几件事都能发生，而且都不报错：",
       "派活的人看不到这些改动是谁做的；被改的人也没有任何提示。团队协作里「谁的活谁做主」这件事，在数据层其实是没有的——注释里本来就写着「方案/任务：团队成员都能读写（forbidden 留给后续按项授权用）」，这一版把这个口子收上。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/server/src/store.ts`（内存） | `updateTeamTask`：非组长、任务已有负责人、且负责人不是我 → `forbidden`；`deleteTeamTask`：非组长只能删「自己名下」或「自己创建且还没人认领」的任务 || `packages/server/src/sqliteStore.ts` | 同一口径（用 `row.assignee_id` / `created_by` 判定，逻辑与内存实现一致） || `packages/server/src/app.ts` | 两种情况分别给 403 文案：「只能改自己名下的任务（还没人认领的可以先认领）；别人的任务请让组长改派或调整」「只能删自己名下的任务（或自己创建、还没人认领的）；别人的任务请让组长处理」 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 新增 `canTouch(task)`：状态切换按钮、负责人下拉、删除、交付物上传都在不能动时禁用，并用 `title` 说明「这是别人名下的任务：只有本人或组长能改」 || `packages/web/src/lib/capability/teamTools.ts` + `runtimePrompt.ts` | 把这条规矩写进工具描述与提示词——模型在别人的任务上被拒后不该反复重试 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/server/src/store.ts`（内存） | `updateTeamTask`：非组长、任务已有负责人、且负责人不是我 → `forbidden`；`deleteTeamTask`：非组长只能删「自己名下」或「自己创建且还没人认领」的任务 |\n| `packages/server/src/sqliteStore.ts` | 同一口径（用 `row.assignee_id` / `created_by` 判定，逻辑与内存实现一致） |\n| `packages/server/src/app.ts` | 两种情况分别给 403 文案：「只能改自己名下的任务（还没人认领的可以先认领）；别人的任务请让组长改派或调整」「只能删自己名下的任务（或自己创建、还没人认领的）；别人的任务请让组长处理」 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 新增 `canTouch(task)`：状态切换按钮、负责人下拉、删除、交付物上传都在不能动时禁用，并用 `title` 说明「这是别人名下的任务：只有本人或组长能改」 |\n| `packages/web/src/lib/capability/teamTools.ts` + `runtimePrompt.ts` | 把这条规矩写进工具描述与提示词——模型在别人的任务上被拒后不该反复重试 |",
       "三条口径：",
       "验证",
       "没做"
@@ -3641,7 +3653,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "1. 让用户在对话框里报一串 uuid（没人愿意）；2. 先调 `team_list`、再调 `team_get` 翻快照，多花两轮工具调用才拿到「队里都有谁」；3. 最坏的情况：凭印象编一个 id，服务端 400，用户只看到「派活失败」。",
       "「组长的智能体也能把任务派到其他队员的智能体」是这一轮目标里的半句话，而派活的第一道坎就是**认人**。这一版把「我在哪些团队、我在里面是什么身份、队里都有谁（名字 + id）」每轮写进提示词。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | 新增 `TeamBrief` / `TeamBriefMember` / `TeamBriefList`（团队名、目标、我的角色、成员 id + 名字 + 是否组长） || `packages/server/src/store.ts` + `sqliteStore.ts` | 新增 `listTeamBriefs(userId)`：内存遍历成员表；sqlite 一条 join 查询（成员 + 用户 + 我的角色），按最近有动静排序 || `packages/server/src/app.ts` | 新增 `GET /api/team/my-teams`——一次请求拿全，避免逐团队拉快照的 N+1 || `packages/web/src/lib/api.ts` | `fetchMyTeamBriefs()` || `packages/web/src/lib/team/teamBrief.ts`（新） | 拼「## 团队（你在的）」段落：团队名（你是组长/你是成员）、可选目标、成员「名字（id，组长）」；超 4 个团队 / 10 名成员时如实说「还有 N 个没列出来，用 team_list 看全部」；两条硬规矩写在段末 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增 `teamBrief` 字段，段落插在「团队任务（派到我名下的）」**之前**（先认人、再说要干什么） || `packages/web/src/components/ChatPage.tsx` | 每轮与「派到我名下的任务」**并行**拉取（各自失败互不影响），非空才注入 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | 新增 `TeamBrief` / `TeamBriefMember` / `TeamBriefList`（团队名、目标、我的角色、成员 id + 名字 + 是否组长） |\n| `packages/server/src/store.ts` + `sqliteStore.ts` | 新增 `listTeamBriefs(userId)`：内存遍历成员表；sqlite 一条 join 查询（成员 + 用户 + 我的角色），按最近有动静排序 |\n| `packages/server/src/app.ts` | 新增 `GET /api/team/my-teams`——一次请求拿全，避免逐团队拉快照的 N+1 |\n| `packages/web/src/lib/api.ts` | `fetchMyTeamBriefs()` |\n| `packages/web/src/lib/team/teamBrief.ts`（新） | 拼「## 团队（你在的）」段落：团队名（你是组长/你是成员）、可选目标、成员「名字（id，组长）」；超 4 个团队 / 10 名成员时如实说「还有 N 个没列出来，用 team_list 看全部」；两条硬规矩写在段末 |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增 `teamBrief` 字段，段落插在「团队任务（派到我名下的）」**之前**（先认人、再说要干什么） |\n| `packages/web/src/components/ChatPage.tsx` | 每轮与「派到我名下的任务」**并行**拉取（各自失败互不影响），非空才注入 |",
       "口径",
       "1. **只给事实，不替它挑人**：谁最闲、该派给谁，是用户和模型的判断；这里不预判，也不排「推荐名单」。2. **先认人再讲活**：段落顺序先「你在哪些团队、队友是谁」，再「派到你名下的任务」——反过来它看到任务时还不知道能派给谁。3. **失败不谎报**：请求失败就整段不写（不会告诉模型「你没有团队」），也不阻断这一轮。",
       "验证",
@@ -3665,7 +3677,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "派活这条链路的最后一段一直是空的：任务状态变成 done，但组长看到的只是一个勾——**谁做的、什么时候交的、做成什么样、怎么验证的，全都没有**。前面几轮把「能派出去」「队员的智能体接得住」补上了，交回来的那一半却是断的。",
       "更糟的是之前的提示词让智能体把结论写进 `detail`：那是需求说明字段，一覆盖，需求就没了。于是常见结果是「原始要求被结论顶掉，结论还不一定被看见」。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/shared/src/schemas.ts` | `TeamTask` 增 `result`（结论，≤2000 字）/`completedAt`/`completedBy`；`PATCH /api/teams/:id/tasks/:taskId` 接受 `result` || `packages/server/src/store.ts` + `sqliteStore.ts` | 标 done 时记下完成时刻与操作者；退回未完成时清掉这两项（结论留库作历史）。内存与 sqlite 同口径 || `packages/server/src/db.ts` | 新库建表直接带三列；旧库用 `PRAGMA table_info` 幂等 `ALTER TABLE` 补齐（读侧另有 `??` 兜底） || `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 增 `result` 参数；**标 done 必须给 result**，否则回「标完成前请用 result 写一句结论（做成什么样、怎么验证的）；团队里的其他人只看到状态，看不到你的过程」 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 团队任务段改为「done 时用 result 写结论，别拿它覆盖 detail」 || `packages/web/src/lib/team/taskResult.ts`（新）+ `TeamTaskPanel.tsx` | 已完成任务多一行「结论：…（阿鸣 交的，11-17 17:30）」，完整结论在悬浮标题里；退回未完成就不显示 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/shared/src/schemas.ts` | `TeamTask` 增 `result`（结论，≤2000 字）/`completedAt`/`completedBy`；`PATCH /api/teams/:id/tasks/:taskId` 接受 `result` |\n| `packages/server/src/store.ts` + `sqliteStore.ts` | 标 done 时记下完成时刻与操作者；退回未完成时清掉这两项（结论留库作历史）。内存与 sqlite 同口径 |\n| `packages/server/src/db.ts` | 新库建表直接带三列；旧库用 `PRAGMA table_info` 幂等 `ALTER TABLE` 补齐（读侧另有 `??` 兜底） |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_update` 增 `result` 参数；**标 done 必须给 result**，否则回「标完成前请用 result 写一句结论（做成什么样、怎么验证的）；团队里的其他人只看到状态，看不到你的过程」 |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 团队任务段改为「done 时用 result 写结论，别拿它覆盖 detail」 |\n| `packages/web/src/lib/team/taskResult.ts`（新）+ `TeamTaskPanel.tsx` | 已完成任务多一行「结论：…（阿鸣 交的，11-17 17:30）」，完整结论在悬浮标题里；退回未完成就不显示 |",
       "口径",
       "1. **判据是完成时刻，不是「有没有结论」**：任务退回未完成时结论还在库里（留作历史），但界面上不再显示「已提交」——那种状态最容易被读成「这活儿做完了」。2. **需求与交付分开**：`detail` 是需求，`result` 是交付。不许拿结论覆盖需求。3. **不静默截断**：结论超过 2000 字直接 400 拒绝，而不是悄悄砍掉半句。",
       "验证",
@@ -3689,7 +3701,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "任务板上最容易漏掉的不是「逾期的任务」——逾期的至少要有个截止时间才标得出来。真正会被忘记的是**没有截止时间、也没人碰过**的任务：它不红、不响，就一直挂在那里，直到某天有人想起来。",
       "派活之后最需要盯的恰恰是这一类：组长以为「派出去了就有人做」，队员以为「没说急就不用现在做」，中间那件事谁也不提。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/taskAge.ts`（新） | `daysSince(iso, now)` 按自然日算差（今天＝0、认不出时间＝null）；`taskAge(task, now)` 给出 `{ days, stale }`；`describeTaskAge` 分三档文案「今天更新 / N 天前更新 / N 天没动了」；阈值 `STALE_TASK_DAYS = 3` || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行的时间信息里多一句「N 天没动了」（超过 3 天且未完成时用警示色），今天动过的显示「今天更新」；一次算好放进 `Map`，渲染时只查表，不在每行里重复算 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/taskAge.ts`（新） | `daysSince(iso, now)` 按自然日算差（今天＝0、认不出时间＝null）；`taskAge(task, now)` 给出 `{ days, stale }`；`describeTaskAge` 分三档文案「今天更新 / N 天前更新 / N 天没动了」；阈值 `STALE_TASK_DAYS = 3` |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务行的时间信息里多一句「N 天没动了」（超过 3 天且未完成时用警示色），今天动过的显示「今天更新」；一次算好放进 `Map`，渲染时只查表，不在每行里重复算 |",
       "口径：1. **只看未完成的任务**——做完的不用再催，催只会让人忽略提醒；2. **用 `updatedAt`，不另存「最后动作」**——服务端在状态、负责人、内容变更时都会刷新它，这是一份现成的信号；3. **按自然日算、向下取整**——「昨天下午改的」不该显示成「1 天没动」这种含糊数字，但也不能精确到小时给人压力。",
       "验证",
       "没做"
@@ -3712,7 +3724,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一版把「只有组长能派活」做清楚了，但**派完之后看不过来**：任务板只有「未完成 / 全部 / 已完成」三档，组长想知道「谁手上压了几件、谁的已经逾期」只能一条条往下读负责人。任务一多，这件事就从「看一眼」变成「翻一屏」。",
       "派活的价值不只是发出去，还包括随时看得见**它到了谁手上、有没有落地**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/assigneeGroups.ts`（新） | `groupTasksByAssignee(tasks, members, ownerId, now)`：按负责人分组，算好每组「未完成 / 逾期」条数；排序为**组长最前 → 成员按名字 → 待认领最后**，组内按截止时间由近到远；`isTaskOverdue` 只管「未完成且时间已过」；`describeAssigneeLoad` / `assigneeFilterLabel` 给出组头与筛选项文案 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务面板新增「按人看」一行 chip：每个负责人一个按钮，写着「韩梅梅 · 2 项未完成 · 1 项逾期」；点一下只显示这个人的任务，再点一次恢复；逾期组 chip 用危险色。分组统计**始终按全量任务算**，所以切到「已完成」时也看得出谁手上还有活 || 同上 | 新增 `assigneeFilter` 状态参与 `shown` 过滤（与既有的「未完成/全部/已完成」叠加，不清空对方的选择） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/assigneeGroups.ts`（新） | `groupTasksByAssignee(tasks, members, ownerId, now)`：按负责人分组，算好每组「未完成 / 逾期」条数；排序为**组长最前 → 成员按名字 → 待认领最后**，组内按截止时间由近到远；`isTaskOverdue` 只管「未完成且时间已过」；`describeAssigneeLoad` / `assigneeFilterLabel` 给出组头与筛选项文案 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 任务面板新增「按人看」一行 chip：每个负责人一个按钮，写着「韩梅梅 · 2 项未完成 · 1 项逾期」；点一下只显示这个人的任务，再点一次恢复；逾期组 chip 用危险色。分组统计**始终按全量任务算**，所以切到「已完成」时也看得出谁手上还有活 |\n| 同上 | 新增 `assigneeFilter` 状态参与 `shown` 过滤（与既有的「未完成/全部/已完成」叠加，不清空对方的选择） |",
       "口径",
       "1. **只列有任务的组**：空组是噪音；「谁手上没活」由「看不到他」这件事本身表达。2. **逾期只算未完成**：已完成的任务不该继续标红——否则红点会变成噪声，用户很快就不再看了。3. **已退出成员的遗留任务不能消失**：名字显示「已退出的成员」，任务照常列出来——派活容易、收尾难，把它们藏起来最省事也最危险。",
       "验证",
@@ -3739,7 +3751,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一版（d.248）把「只有组长能把任务派给别人」做成了服务端规则，但界面一个字没说：",
       "规则在服务端、说明在界面，缺了后一半，用户就会把「我选不了别人」读成 bug。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/team/roles.ts`（新） | 把「创建者即组长」的判定收在一处（`isTeamLeader` / `teamRoleText` / `memberLabel`），并给出两句口径文案（`LEADER_ASSIGN_HINT`、`assigneeAgentHint`）——界面与文案共用同一判断，避免两处漂移 || `packages/web/src/components/team/TeamTaskPanel.tsx` | 派活表单与任务行的「负责」下拉都按组长身份渲染：非组长时别人的选项 `disabled`、组长名字带「（组长）」后缀、表单里多一行说明「只有组长能把任务派给别人：你可以给自己派活，或者留空等认领」 || 同上（任务行） | 已有负责人的任务多一句「X 的智能体会在下一轮对话里看到这条任务」——派活不是改一行数据，这句话让「派出去」变成可预期的行为 || `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 的工具描述补上组长口径与「接手的队友智能体下一轮会看到」；`assigneeId` 参数说明补「派给别人需要你是组长」 || `packages/web/src/components/team/TeamWorkspace.tsx` | 把当前用户与团队创建者传给任务面板（`viewerId` / `ownerId`）；成员芯片加 `team-member-leader` / `team-member-member` 标记，便于测试与后续样式区分 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/team/roles.ts`（新） | 把「创建者即组长」的判定收在一处（`isTeamLeader` / `teamRoleText` / `memberLabel`），并给出两句口径文案（`LEADER_ASSIGN_HINT`、`assigneeAgentHint`）——界面与文案共用同一判断，避免两处漂移 |\n| `packages/web/src/components/team/TeamTaskPanel.tsx` | 派活表单与任务行的「负责」下拉都按组长身份渲染：非组长时别人的选项 `disabled`、组长名字带「（组长）」后缀、表单里多一行说明「只有组长能把任务派给别人：你可以给自己派活，或者留空等认领」 |\n| 同上（任务行） | 已有负责人的任务多一句「X 的智能体会在下一轮对话里看到这条任务」——派活不是改一行数据，这句话让「派出去」变成可预期的行为 |\n| `packages/web/src/lib/capability/teamTools.ts` | `team_task_add` / `team_task_update` 的工具描述补上组长口径与「接手的队友智能体下一轮会看到」；`assigneeId` 参数说明补「派给别人需要你是组长」 |\n| `packages/web/src/components/team/TeamWorkspace.tsx` | 把当前用户与团队创建者传给任务面板（`viewerId` / `ownerId`）；成员芯片加 `team-member-leader` / `team-member-member` 标记，便于测试与后续样式区分 |",
       "口径",
       "1. **创建者即组长**：没有第二套角色体系，也没有「副组长」；转让队长就是改 owner（服务端 d.92 已有）。2. **界面少放选项，服务端仍是唯一裁决**：`roles.ts` 只决定「显不显示、能不能点」，越权请求照样由服务端 `not_leader` 拒绝——两者是同一件事的两层，不是两套规则。3. **派活要说清后果**：谁被指到、对方的智能体什么时候会看到，界面上直接写出来，不靠用户猜。",
       "验证",
@@ -3770,7 +3782,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "团队里「把任务派给某人」以前只是写了一行 `assigneeId`：",
       "这一版把这两头补上：创建者即组长，**只有组长能把任务派给别人**；而被派的人，**他的智能体一开口就知道自己名下有什么活儿**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/server/src/store.ts` / `sqliteStore.ts` | 新增组长判定 `isTeamOwner`；`createTeamTask` / `updateTeamTask` 在「派给别人」时校验组长，不满足返回 `not_leader`。成员仍可自派、可留空等认领；组长改回原负责人或改回未认领不受限 || `packages/server/src/app.ts` | `not_leader` → 403「只有组长可以把任务派给别人（成员只能认领或做自己的）」；新增 `GET /api/team/my-tasks`：一次返回「派到我名下、还没完成」的任务（跨团队，按截止时间近的在前） || `packages/web/src/lib/api.ts` | `fetchMyTeamTasks()` || `packages/web/src/lib/team/assignedTasks.ts`（新） | 纯函数：`describeDue`（今天/明天/N 天后/已过期 N 天）、`formatAssignedTask`（`团队 · 标题（在做，明天截止）`，标题按码点截断 48）、`describeAssignedTasks`（最多 6 行 + 「还有 N 项」） || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 团队任务（派到我名下的）」段：列出任务 + 要求先 `team_get` 看详情、做完 `team_task_update` 改 done 并写结论、不该自己做就说明并建议改派 || `packages/web/src/components/ChatPage.tsx` | 每轮开场拉一次 `/api/team/my-tasks` 并注入提示词；读失败就当没有（这一段干脆不写，不谎报「没有任务」） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/server/src/store.ts` / `sqliteStore.ts` | 新增组长判定 `isTeamOwner`；`createTeamTask` / `updateTeamTask` 在「派给别人」时校验组长，不满足返回 `not_leader`。成员仍可自派、可留空等认领；组长改回原负责人或改回未认领不受限 |\n| `packages/server/src/app.ts` | `not_leader` → 403「只有组长可以把任务派给别人（成员只能认领或做自己的）」；新增 `GET /api/team/my-tasks`：一次返回「派到我名下、还没完成」的任务（跨团队，按截止时间近的在前） |\n| `packages/web/src/lib/api.ts` | `fetchMyTeamTasks()` |\n| `packages/web/src/lib/team/assignedTasks.ts`（新） | 纯函数：`describeDue`（今天/明天/N 天后/已过期 N 天）、`formatAssignedTask`（`团队 · 标题（在做，明天截止）`，标题按码点截断 48）、`describeAssignedTasks`（最多 6 行 + 「还有 N 项」） |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 团队任务（派到我名下的）」段：列出任务 + 要求先 `team_get` 看详情、做完 `team_task_update` 改 done 并写结论、不该自己做就说明并建议改派 |\n| `packages/web/src/components/ChatPage.tsx` | 每轮开场拉一次 `/api/team/my-tasks` 并注入提示词；读失败就当没有（这一段干脆不写，不谎报「没有任务」） |",
       "口径",
       "验证",
       "没做"
@@ -3797,7 +3809,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "两个都是「看界面就知道不对」的问题，用户报的原话是：「聊天页气泡不要显示\"我\"\"和鸣\"的名字。新对话会出现旧对话的记录。」（`setMessages` 会把「本地独有条目」插回列表）。只要有一次写错桶（切会话的竞态、晚到的事件），用户看到的就是「新会话里出现旧记录」，而这类症状会直接让人怀疑整件事（串会话）不可信。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx` | 用户气泡不再渲染「我」，助手气泡不再渲染智能体名；meta 行只留时间（仍靠右对齐区分左右）。删除已无用的 `senderName` 计算 || `packages/web/src/components/ChatPage.tsx` | `visibleMessages` 增加一道**会话归属闸**：渲染前按 `conversationId` 过滤，桶里混进别的会话的记录时不显示（无脏数据时不建新数组，引用保持稳定，不影响窗口化/滚动的 memo 依赖） || `packages/web/src/components/AgentStreamBubble.tsx` | 流式气泡头部不再显示名字，只保留「生成中…」状态；读屏文案仍带名字（`sr-only`，不占视觉空间） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/components/ChatPage.tsx` | 用户气泡不再渲染「我」，助手气泡不再渲染智能体名；meta 行只留时间（仍靠右对齐区分左右）。删除已无用的 `senderName` 计算 |\n| `packages/web/src/components/ChatPage.tsx` | `visibleMessages` 增加一道**会话归属闸**：渲染前按 `conversationId` 过滤，桶里混进别的会话的记录时不显示（无脏数据时不建新数组，引用保持稳定，不影响窗口化/滚动的 memo 依赖） |\n| `packages/web/src/components/AgentStreamBubble.tsx` | 流式气泡头部不再显示名字，只保留「生成中…」状态；读屏文案仍带名字（`sr-only`，不占视觉空间） |",
       "口径",
       "验证",
       "没做"
@@ -3826,7 +3838,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "思考过程是模型的自言自语，长度**不受控**——实测一次能写几千到几万字，而它渲染在正文**上方**。不设上限时有两个后果：",
       "上一版没加内层 `max-height` 是有原因的（B 轨 E5 的既有决定）：轨迹区域只保留**一层滚动**，嵌套滚动条在触控板上会「卡在里层」，用户滚不到消息列表。所以这一次**不加第二个滚动容器**，改成按内容截断。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/reasoningPreview.ts`（新） | `previewReasoning(text, { mode, lines, chars })`：最多 12 行且不超过 800 字，两种截法取更短的那个；`mode: \"tail\"` 从末尾取（流式中看「它现在想到哪」）、`\"head\"` 从开头取（回看想从头读）；从末尾截时不劈开代理对（emoji）；`describeReasoningClip()` 给出「前面/后面还有 N 字没显示」 || `packages/web/src/components/AgentStreamBubble.tsx` 的 `ReasoningBlock` | 正文只渲染截断后那一段（尾巴前加省略号、开头后加省略号）；被截断时下方给「展开全部（还有 N 字）」/「只看开头一段」；流式结束自动收起时把「看全文」一并复位，避免下次展开直接铺开几万字；标题行的「思考过程 / N 字 / 进行中」加 `shrink-0`，长文本不再把它挤走 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/reasoningPreview.ts`（新） | `previewReasoning(text, { mode, lines, chars })`：最多 12 行且不超过 800 字，两种截法取更短的那个；`mode: \"tail\"` 从末尾取（流式中看「它现在想到哪」）、`\"head\"` 从开头取（回看想从头读）；从末尾截时不劈开代理对（emoji）；`describeReasoningClip()` 给出「前面/后面还有 N 字没显示」 |\n| `packages/web/src/components/AgentStreamBubble.tsx` 的 `ReasoningBlock` | 正文只渲染截断后那一段（尾巴前加省略号、开头后加省略号）；被截断时下方给「展开全部（还有 N 字）」/「只看开头一段」；流式结束自动收起时把「看全文」一并复位，避免下次展开直接铺开几万字；标题行的「思考过程 / N 字 / 进行中」加 `shrink-0`，长文本不再把它挤走 |",
       "口径",
       "验证",
       "没做"
@@ -3851,7 +3863,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "「聊天界面会有重叠」不是一句笼统的抱怨，拆开看是四类各自成立的布局错位，共同点是：**都只在窗口变窄、内容变长、或输入区堆了东西时才出现**，宽屏 + 短内容下完全看不出来，所以一直没被修。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx`（消息区） | 消息区外面包一层 `relative flex min-h-0 flex-1 flex-col`，「↓ 新消息」浮标从相对**整个会话面板**改为相对**消息区**（`absolute bottom-4 right-4 z-10`）。以前输入区一长（附件 / 排队插话 / 提示条 / 安全范围黄条），浮标就会被压到输入框上 || `ChatPage.tsx`（署名行） | 助手署名加 `min-w-0 truncate`：名字很长时省略，右端时间（`ml-auto shrink-0`）不再被挤出这一行 || `packages/web/src/components/AgentStreamBubble.tsx`（流式气泡） | 同上：名字 `min-w-0 truncate`、「生成中…」`shrink-0`——窄侧栏下名字再长也不会把状态挤没 || `ChatPage.tsx`（输入区动作行） | 动作行加 `flex-wrap`，模型徽标宽度从 `max-w-[160px]` 改成 `max-w-[min(160px,38vw)]`：安全范围 / 计划 / 模型三项总宽超过一行时换行，发送按钮不会被挤出可视区 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/components/ChatPage.tsx`（消息区） | 消息区外面包一层 `relative flex min-h-0 flex-1 flex-col`，「↓ 新消息」浮标从相对**整个会话面板**改为相对**消息区**（`absolute bottom-4 right-4 z-10`）。以前输入区一长（附件 / 排队插话 / 提示条 / 安全范围黄条），浮标就会被压到输入框上 |\n| `ChatPage.tsx`（署名行） | 助手署名加 `min-w-0 truncate`：名字很长时省略，右端时间（`ml-auto shrink-0`）不再被挤出这一行 |\n| `packages/web/src/components/AgentStreamBubble.tsx`（流式气泡） | 同上：名字 `min-w-0 truncate`、「生成中…」`shrink-0`——窄侧栏下名字再长也不会把状态挤没 |\n| `ChatPage.tsx`（输入区动作行） | 动作行加 `flex-wrap`，模型徽标宽度从 `max-w-[160px]` 改成 `max-w-[min(160px,38vw)]`：安全范围 / 计划 / 模型三项总宽超过一行时换行，发送按钮不会被挤出可视区 |",
       "口径",
       "验证",
       "没做"
@@ -3880,7 +3892,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "右侧「会话进度」栏一直是**等用户想起来**才用得上的东西：要自己注意到右上角那个按钮，点开，才知道它跑到第几步、哪一步在调什么工具。可这个栏最有用的时候恰恰相反——一轮已经跑了十几分钟，正文里只有不断滚动的工具行，用户只能靠猜「它到底卡了没有」；或者事后往回翻，才发现中间某一步其实退回来改过两次。",
       "所以这一版给它两个入口：**模型自己需要展示时打开**（列了多步计划、连续做了几步），以及**跑得够久时自动摊开一次**。两个入口都只在聊天页内、都能被用户随手关掉。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/panelTool.ts`（新） | `panel_show` 工具：只读、可带一句 `reason`，模型需要用户看进度时自己打开右侧栏；`withPanelTool()` 把这条工具并进主工具桥（包在 workflow 之外、计划模式之内） || `packages/web/src/lib/agentRuntime/panelAuto.ts`（新） | 自动打开的**唯一**判据：跑满 45 秒 **且** 已调 6 次工具才开；一轮最多自动开一次；用户手动关掉后 60 秒内不再自动开。纯函数，每条约束单独可测 || `packages/web/src/components/ChatPage.tsx` | 自动开栏 effect（每秒心跳里判一次）、工具桥接上 `panel_show`、顶栏按钮与栏内关闭都记「手动关闭时间」、打开时在对话里提示一句 || `packages/web/src/components/ProgressPanel.tsx` | 栏头新增一行「智能体打开了这一栏：<理由>」，让人知道这一栏不是自己弹出来捣乱的 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/panelTool.ts`（新） | `panel_show` 工具：只读、可带一句 `reason`，模型需要用户看进度时自己打开右侧栏；`withPanelTool()` 把这条工具并进主工具桥（包在 workflow 之外、计划模式之内） |\n| `packages/web/src/lib/agentRuntime/panelAuto.ts`（新） | 自动打开的**唯一**判据：跑满 45 秒 **且** 已调 6 次工具才开；一轮最多自动开一次；用户手动关掉后 60 秒内不再自动开。纯函数，每条约束单独可测 |\n| `packages/web/src/components/ChatPage.tsx` | 自动开栏 effect（每秒心跳里判一次）、工具桥接上 `panel_show`、顶栏按钮与栏内关闭都记「手动关闭时间」、打开时在对话里提示一句 |\n| `packages/web/src/components/ProgressPanel.tsx` | 栏头新增一行「智能体打开了这一栏：<理由>」，让人知道这一栏不是自己弹出来捣乱的 |",
       "口径",
       "验证",
       "没做"
@@ -3905,7 +3917,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "根因不是渲染，是**主动掐断**：ChatPage 卸载时（正是「切到设置/知识库/团队页」这件事）会 `abortAll()` 把这一轮所有在飞的流中止掉，理由是「不再空烧供应商 token」，并顺手`cancelAll(\"页面离开\")` 把待确认的工具调用记成拒绝。于是切页 = 这一轮被杀，回来只剩一条被截断的半截回答——用户读成「流式输出坏了」。",
       "同时还有两处在配合这个中止：WS 清理会在有在飞流时延迟关连接（为的是让中止后的`finish(partial)` 能发出去），而挂载时又会把本会话残留的 streaming 项一律清掉（怕留孤儿）。三件事合起来，就是「离开即中断、回来即空白」。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx` · 卸载 effect | **不再** `abortAll()`、**不再** `cancelAll(\"页面离开\")`；只留语音识别/录音的本机清理。显式中止只剩「停止」按钮与真正关窗 || 同上 · WS 清理 | 用新的 `unmountingRef`（由 `useLayoutEffect` 的 cleanup 先置真）区分「离开页面」与「切会话」：离开时**保留连接**（否则 `agent_finish`/`agent_error` 发不出去，答案不落库）；切会话仍走原来的延迟关闭（F1 次序不变） || 同上 · `startRun` 收口 | 流全部跑完时，若组件已卸载且有保留的连接，延后一个宏任务关掉它——不空占连接，也不丢收尾帧 || 同上 · 挂载清扫 | 不再清本会话的 streaming 项；只在**存在超过 60s 没刷新**的项时才 `sweepStaleStreams`（真孤儿判死，正在跑的留给用户看） || 同上 · 回来提示 | 挂载时若本会话已有在飞的流，提示一次「这一轮在你离开页面时还在跑，这里接的是实时输出。」 || `packages/web/src/store/chat.ts` | 导出 `STREAM_STALE_MS`（页面挂载清扫与 watchdog 共用同一个 60s 口径，不各写一份） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/components/ChatPage.tsx` · 卸载 effect | **不再** `abortAll()`、**不再** `cancelAll(\"页面离开\")`；只留语音识别/录音的本机清理。显式中止只剩「停止」按钮与真正关窗 |\n| 同上 · WS 清理 | 用新的 `unmountingRef`（由 `useLayoutEffect` 的 cleanup 先置真）区分「离开页面」与「切会话」：离开时**保留连接**（否则 `agent_finish`/`agent_error` 发不出去，答案不落库）；切会话仍走原来的延迟关闭（F1 次序不变） |\n| 同上 · `startRun` 收口 | 流全部跑完时，若组件已卸载且有保留的连接，延后一个宏任务关掉它——不空占连接，也不丢收尾帧 |\n| 同上 · 挂载清扫 | 不再清本会话的 streaming 项；只在**存在超过 60s 没刷新**的项时才 `sweepStaleStreams`（真孤儿判死，正在跑的留给用户看） |\n| 同上 · 回来提示 | 挂载时若本会话已有在飞的流，提示一次「这一轮在你离开页面时还在跑，这里接的是实时输出。」 |\n| `packages/web/src/store/chat.ts` | 导出 `STREAM_STALE_MS`（页面挂载清扫与 watchdog 共用同一个 60s 口径，不各写一份） |",
       "口径三条：**用户没点停止就不算停止**（离开页面不是用户意图）／**收尾必须发得出去**（连接留到流收口，否则「跑完了但答案没了」比中断更糟）／**真孤儿仍然判死**（60s 没刷新照旧标错，不假装还活着）。",
       "验证",
       "没做"
@@ -3928,7 +3940,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "一次长任务经常连跑十几条命令。每条工具调用在对话里占一行，行本身是折叠的（点开才看参数与结果），但「十几行工具轨迹」叠起来仍会把正文挤到屏幕外——用户的原话是「大量命令行间输出占用屏幕位置」。",
       "之前处理过的是另一种情况：**单条结果太长**（d.234 只给开头 + 结尾，展开才看全部）。这一版处理的是**行数太多**：流式气泡里只保留最近几次调用，早先的成功调用收成一行可展开的按钮。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/toolTraceFold.ts`（新） | `foldToolTraces()`：超过 6 次才折、保留最近 3 次、**失败/被拒的调用一律不折**；折掉的次数（含其中几次出错）返回给界面显示 || `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 新增 `fold` 开关（只有流式气泡传）：折叠时给一行「还有 N 次工具调用已收起 · 展开」，展开后可再「收起早先的调用」；历史回看块与进度面板不折（前者外层已整体折叠，后者是用户主动打开的详情） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolTraceFold.ts`（新） | `foldToolTraces()`：超过 6 次才折、保留最近 3 次、**失败/被拒的调用一律不折**；折掉的次数（含其中几次出错）返回给界面显示 |\n| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 新增 `fold` 开关（只有流式气泡传）：折叠时给一行「还有 N 次工具调用已收起 · 展开」，展开后可再「收起早先的调用」；历史回看块与进度面板不折（前者外层已整体折叠，后者是用户主动打开的详情） |",
       "三条口径：**保留最近的**（长任务里最想知道「现在在干什么」）／**失败永远可见**（折掉就等于把「为什么卡住」藏起来）／**折了多少写在按钮上**（不是静默省略）。",
       "验证",
       "没做"
@@ -3960,7 +3972,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "HITL（工具执行前确认）一直有三档，但它们只活在「设置 → 安全」里，名字是**严格 / 受控 / 信任**：",
       "这一版把这三档搬到用户真正做决定的地方——**输入框左下角**，并且用「连危险操作也不再问」来表达「完全」，但把它做成**一次显式、可随时撤销、重启即失效**的开关，而不是第四个持久档位。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/hitl/safetyScope.ts`（新） | 用户语言三档 ↔ 内部档位的映射（手动=`strict`、自动=`guarded`、完全=`trusted`+全放行）；「完全」的全放行标志**只存内存**（不写 localStorage，重启回自动）；三档的标签与说明文案（界面与 `/status` 共用，避免两处漂移） || `packages/web/src/lib/hitl/policy.ts` | `allowed()` 增加可选 `{ dangerAuto }`：为真时连 `danger` 也免问；**工作区 `permissions.json` 的 deny 仍先判定**，仓库级禁令不被这一档越过 || `packages/web/src/lib/hitl/gate.ts` | 闸门依赖新增 `dangerAuto?: () => boolean`（缺省＝关闭，安全默认；做成依赖便于单测注入，闸门保持纯逻辑） || `packages/web/src/components/ChatPage.tsx` | 输入区左下角新增「安全范围」按钮 + 菜单（三档带勾选与一句说明）；选「完全」**要点两次**（第一次只说代价）；打开后输入区常驻黄条「危险操作也会直接执行」+ 一键「改回自动」 || `packages/web/src/lib/agentRuntime/statusReport.ts` + ChatPage | `/status` 新增「安全范围：手动 / 自动 / 完全」一行，读存储与开关本身而不是渲染状态（设置页改过也能如实反映） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/hitl/safetyScope.ts`（新） | 用户语言三档 ↔ 内部档位的映射（手动=`strict`、自动=`guarded`、完全=`trusted`+全放行）；「完全」的全放行标志**只存内存**（不写 localStorage，重启回自动）；三档的标签与说明文案（界面与 `/status` 共用，避免两处漂移） |\n| `packages/web/src/lib/hitl/policy.ts` | `allowed()` 增加可选 `{ dangerAuto }`：为真时连 `danger` 也免问；**工作区 `permissions.json` 的 deny 仍先判定**，仓库级禁令不被这一档越过 |\n| `packages/web/src/lib/hitl/gate.ts` | 闸门依赖新增 `dangerAuto?: () => boolean`（缺省＝关闭，安全默认；做成依赖便于单测注入，闸门保持纯逻辑） |\n| `packages/web/src/components/ChatPage.tsx` | 输入区左下角新增「安全范围」按钮 + 菜单（三档带勾选与一句说明）；选「完全」**要点两次**（第一次只说代价）；打开后输入区常驻黄条「危险操作也会直接执行」+ 一键「改回自动」 |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` + ChatPage | `/status` 新增「安全范围：手动 / 自动 / 完全」一行，读存储与开关本身而不是渲染状态（设置页改过也能如实反映） |",
       "口径",
       "验证",
       "没做"
@@ -3990,7 +4002,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "知识库、团队工作台、插件市场、插件带的 MCP 服务——这些能力的工具**早就注册进了工具清单**，但对话里模型仍然会绕开它们：问「我上次记的会议纪要」它去翻文件夹、让它派活它自己写备忘录、刚装完一个插件它下一次还是只用老几件。这不是能力缺失，是**交接缺失**：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/plugins/installedNotice.ts`（新） | 「刚装/刚升级」的告知队列：安装成功后记一条（含贡献的服务与技能），下一轮提示词用一次就清；按插件 id 去重（同插件连升两次只说最新一次）、最多挂 10 条、坏数据静默丢弃 || `packages/web/src/lib/plugins/store.ts` | `applyPlan` 落盘成功后记一条告知（失败/回滚路径不记）；首装与升级用 `mode` 区分，避免把首装说成「升级」 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 能力与配合」段：知识库（先检索再回答、给出来源、没有就说没有、可写时提一句写入会确认）、刚装插件（逐条点名版本/贡献/「找不到工具名就先 `tool_search` 搜插件名」）、团队（`team_*`，不知道 id 先 `team_list`）、插件市场（先搜再预览，不许把预览说成装好）；带 900 字预算，超了按行截断并说明 || `packages/web/src/components/ChatPage.tsx` | 按本轮**真实注入**的工具名算出「有知识库 / 有团队 / 有市场」并把刚装插件带进提示词；正常收口后清空告知（被停止或报错则留到下一轮再说） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/plugins/installedNotice.ts`（新） | 「刚装/刚升级」的告知队列：安装成功后记一条（含贡献的服务与技能），下一轮提示词用一次就清；按插件 id 去重（同插件连升两次只说最新一次）、最多挂 10 条、坏数据静默丢弃 |\n| `packages/web/src/lib/plugins/store.ts` | `applyPlan` 落盘成功后记一条告知（失败/回滚路径不记）；首装与升级用 `mode` 区分，避免把首装说成「升级」 |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 新增「## 能力与配合」段：知识库（先检索再回答、给出来源、没有就说没有、可写时提一句写入会确认）、刚装插件（逐条点名版本/贡献/「找不到工具名就先 `tool_search` 搜插件名」）、团队（`team_*`，不知道 id 先 `team_list`）、插件市场（先搜再预览，不许把预览说成装好）；带 900 字预算，超了按行截断并说明 |\n| `packages/web/src/components/ChatPage.tsx` | 按本轮**真实注入**的工具名算出「有知识库 / 有团队 / 有市场」并把刚装插件带进提示词；正常收口后清空告知（被停止或报错则留到下一轮再说） |",
       "口径",
       "验证",
       "没做"
@@ -4017,7 +4029,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "内置命令（`/plan` `/status` `/goal` `/hooks`…）解决的是「和鸣自己会做的事」，但每个仓库都有反复叮嘱的同一段话：",
       "现在只能每次手打，或者塞进 `AGENTS.md`——可它是**每轮都会发**的项目约定，为此吃满上下文不划算。codex / Claude Code 都有「把常用提示词存成命令」的能力，这是五轮里「扩展」方向的最后一块。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/customCommands.ts`（新） | 读 `.heming/commands/*.md`：文件名即命令名（`review.md` → `/review`，只认 `[a-z0-9-]`）；可选首行 `# 标题`、紧随的 `> 说明`，其余全文即提示词；单条封顶 4000 字（截断处写明「需要完整内容用 `file_read`」）、最多 20 条、同名取先读到的、坏文件跳过 || `packages/web/src/components/ChatPage.tsx` | 切会话/换工作区/改可写根时读一次，合进 `/` 面板（标题 + 说明 + 来源路径）；输入 `/名字` 回车 → 换成那段提示词走**正常发送路径**（会落库、会调工具）；内置命令优先（仓库里的 `plan.md` 不会顶掉 `/plan`） || `packages/web/src/lib/agentRuntime/statusReport.ts` + ChatPage | `/status` 新增「自定义命令：N 条」；没读过时说「尚未统计」，读到 0 条时告诉用户放个文件就能加 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/customCommands.ts`（新） | 读 `.heming/commands/*.md`：文件名即命令名（`review.md` → `/review`，只认 `[a-z0-9-]`）；可选首行 `# 标题`、紧随的 `> 说明`，其余全文即提示词；单条封顶 4000 字（截断处写明「需要完整内容用 `file_read`」）、最多 20 条、同名取先读到的、坏文件跳过 |\n| `packages/web/src/components/ChatPage.tsx` | 切会话/换工作区/改可写根时读一次，合进 `/` 面板（标题 + 说明 + 来源路径）；输入 `/名字` 回车 → 换成那段提示词走**正常发送路径**（会落库、会调工具）；内置命令优先（仓库里的 `plan.md` 不会顶掉 `/plan`） |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` + ChatPage | `/status` 新增「自定义命令：N 条」；没读过时说「尚未统计」，读到 0 条时告诉用户放个文件就能加 |",
       "口径：**文件即提示词**（不写 JSON、不配参数，和 `AGENTS.md` 同一套「仓库里的静态配置」心智）／**展开后就是普通消息**（不是本地动作，模型看得到、也会花这一轮上下文）／**读不到什么都不发生**（没有桥、没有根、老桌面端没有 `glob`：一律空列表，绝不让它影响正常对话）。",
       "验证",
       "没做"
@@ -4041,7 +4053,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "审阅这一侧还有两个「明明东西都在手里，却要绕一圈」的地方：",
       "1. **工具行的展开区只有参数 JSON**。`file_write` 的「参数」是把整篇正文当字符串读（几千字挤成一坨），`file_edit` 要自己在 `old_string` / `new_string` 里找差别——想知道这步改了什么，得再去点「本轮改动 → 查看改动」，而那边读的是磁盘，未必等于这一步做的事。2. **改动对照里上下文占绝大多数**。改一个长文件的一两行，弹窗先给你十几行没改的内容，真正的 `+`/`−` 要自己滚着找。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/argDiff.ts`（新） | 从**工具参数**算出这次调用的增删对照：`file_write` 整份写入算新增；`file_edit` 的 `old_string → new_string` 走与弹窗同一套 LCS；`file_patch` 按补丁文法（`+`/`-`/上下文，文件头与 `@@` 画成上下文）直接画，不读盘 || `packages/web/src/components/AgentStreamBubble.tsx` | 成功的写/改调用，展开区最上面先给「这次改动：新增 N 行 / 删除 M 行」与逐行增删（`+` 绿 / `−` 红），超过 40 行如实说「只画了前 40 行，完整对照在『查看改动』里」 || `packages/web/src/components/ChangeDiffDialog.tsx` | 有上下文行时给「只看改动 / 显示上下文」切换，右侧标明「共 N 行（含上下文）」或「已隐藏未改动的行」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/fileEdit/argDiff.ts`（新） | 从**工具参数**算出这次调用的增删对照：`file_write` 整份写入算新增；`file_edit` 的 `old_string → new_string` 走与弹窗同一套 LCS；`file_patch` 按补丁文法（`+`/`-`/上下文，文件头与 `@@` 画成上下文）直接画，不读盘 |\n| `packages/web/src/components/AgentStreamBubble.tsx` | 成功的写/改调用，展开区最上面先给「这次改动：新增 N 行 / 删除 M 行」与逐行增删（`+` 绿 / `−` 红），超过 40 行如实说「只画了前 40 行，完整对照在『查看改动』里」 |\n| `packages/web/src/components/ChangeDiffDialog.tsx` | 有上下文行时给「只看改动 / 显示上下文」切换，右侧标明「共 N 行（含上下文）」或「已隐藏未改动的行」 |",
       "口径三条：**只从参数推**（不读盘，画的是这一步确实要做的事，不会因为文件后来被改而错位）／**失败的调用不画**（没写成功却说「改了什么」会骗人）／**统计按全文、显示按上限**（长文件不把 DOM 撑爆，但行数不虚报）。",
       "验证",
       "没做"
@@ -4072,7 +4084,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`web_read` 一直只挡「本机 / 内网 / 保留段」（`net-guard.ts`），**任何公网地址都能读**。这意味着用户对「它能上网」没有边界可设：想做到「只许读公司文档站和我信任的那几个站」是做不到的；而反过来的风险是真实的——模型可能顺着搜索结果读到不该读的内部镜像、付费墙转储、别人的仓库，用户事后才发现，且没有任何地方能回看「它到底被允许读哪些站」。",
       "《对标 Codex / Claude Code》的「2.4 沙箱与权限」一节里，网络边界那一行写的正是「无（渲染层可经主进程桥发任意 http/https）| 默认禁网，按需开 | 可配域名白名单」，最小补法第 1 条就是「网络请求加域名白名单」。这一版把这条补上，但**默认不收紧**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/webtools/netPolicy.ts`（新） | 策略存储（模式 + 域名列表，`heming.netPolicy.v1`，坏数据静默降级为「开放」）；规则归一（去协议/账号/路径/端口/尾点、小写、支持 `*.` 子域通配、拒绝 IP/单段名/超长/含空格）；`domainAllowed()` 匹配；`describeNetPolicy()` 一句话文案 || `packages/web/src/lib/webtools/net-guard.ts` | `checkPublicHttpUrl(raw, { policy })`：内网检查**之后**再做域名判定，拒绝文案写明「不在允许列表 + 去设置里改」；顺序有意为之——内网是绝对边界，不能说成「加进列表就行」 || `packages/web/src/lib/webtools/tools.ts` | `web_read` 在**一次读取开始时**取一份策略快照，多跳重定向用同一份（中途改设置不影响正在进行的读取） || `packages/web/src/components/NetworkPolicyCard.tsx`（新）+ 设置区「写操作边界」 | 开放 / 仅允许列表两种模式；域名增删；空列表时明说「现在什么都读不了」；粘贴多行用 `textarea`（单行 input 会把两行粘成一个非法串）；加错的写法当场说明并保留输入 || `packages/web/src/lib/agentRuntime/statusReport.ts` + `ChatPage` | `/status` 新增「网络访问：开放 / 仅允许 N 个域名」一行 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/webtools/netPolicy.ts`（新） | 策略存储（模式 + 域名列表，`heming.netPolicy.v1`，坏数据静默降级为「开放」）；规则归一（去协议/账号/路径/端口/尾点、小写、支持 `*.` 子域通配、拒绝 IP/单段名/超长/含空格）；`domainAllowed()` 匹配；`describeNetPolicy()` 一句话文案 |\n| `packages/web/src/lib/webtools/net-guard.ts` | `checkPublicHttpUrl(raw, { policy })`：内网检查**之后**再做域名判定，拒绝文案写明「不在允许列表 + 去设置里改」；顺序有意为之——内网是绝对边界，不能说成「加进列表就行」 |\n| `packages/web/src/lib/webtools/tools.ts` | `web_read` 在**一次读取开始时**取一份策略快照，多跳重定向用同一份（中途改设置不影响正在进行的读取） |\n| `packages/web/src/components/NetworkPolicyCard.tsx`（新）+ 设置区「写操作边界」 | 开放 / 仅允许列表两种模式；域名增删；空列表时明说「现在什么都读不了」；粘贴多行用 `textarea`（单行 input 会把两行粘成一个非法串）；加错的写法当场说明并保留输入 |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` + `ChatPage` | `/status` 新增「网络访问：开放 / 仅允许 N 个域名」一行 |",
       "口径",
       "验证",
       "没做"
@@ -4100,7 +4112,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`packages/cli` 早就能跑无头任务（`heming run` 流式给人看、`heming exec --json` 跑完给一个对象），但把它接进 CI 或另一个程序时有三处硬伤，根子都是「只能一问一答」：",
       "这一轮把这三处补齐，目标很克制：**让另一个程序能用它**，而不是造第二套运行时。循环、工具、审批口径仍然复用桌面端同一份 `runAgentMentions`。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/cli/src/events.ts`（新） | 定义事件契约：`start` / `round` / `delta` / `tool_start` / `tool_end` / `retry` / `final` / `error`；`jsonLine()` 保证一条事件一行；`createEventSink()` 只负责写出 || `packages/cli/src/args.ts` | 新增 `--output-format text\\|json\\|stream-json`（`--json` 保留为 `json` 的别名）；`prompt` 写 `-` 表示从 stdin 读（`fromStdin`）；`--json` 与 `stream-json` 同时给当场报错，不让一种静默盖掉另一种 || `packages/cli/src/stdin.ts`（新） | `readPromptFromStdin()`：读满即返、剥 BOM、**1 MB 上限**（prompt 是指令不是整份大文件）、读失败给可读原因 || `packages/cli/src/run.ts` | `AgentRunOptions.onEvent`，在 round / tool start / tool end / retry 各处发出结构化事件；`ExecJson` 新增 `stopReason: \"ok\" \\| \"max-rounds\" \\| \"aborted\" \\| \"error\"`（撞上限仍是成功，但原因写清楚） || `packages/cli/src/index.ts` | stdout 格式分发：`text` 原样流式、`json` 收尾一个对象、`stream-json` 一行一条事件（`final` 一定发，失败/中断也发）；配置错误在 `start` 之前发 `error` 事件并以退出码 2 结束 || `packages/cli/README.md` | 事件契约表、`stopReason` 字段、stdin 用法与上限、CI 里边跑边解析的示例 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/cli/src/events.ts`（新） | 定义事件契约：`start` / `round` / `delta` / `tool_start` / `tool_end` / `retry` / `final` / `error`；`jsonLine()` 保证一条事件一行；`createEventSink()` 只负责写出 |\n| `packages/cli/src/args.ts` | 新增 `--output-format text\\|json\\|stream-json`（`--json` 保留为 `json` 的别名）；`prompt` 写 `-` 表示从 stdin 读（`fromStdin`）；`--json` 与 `stream-json` 同时给当场报错，不让一种静默盖掉另一种 |\n| `packages/cli/src/stdin.ts`（新） | `readPromptFromStdin()`：读满即返、剥 BOM、**1 MB 上限**（prompt 是指令不是整份大文件）、读失败给可读原因 |\n| `packages/cli/src/run.ts` | `AgentRunOptions.onEvent`，在 round / tool start / tool end / retry 各处发出结构化事件；`ExecJson` 新增 `stopReason: \"ok\" \\| \"max-rounds\" \\| \"aborted\" \\| \"error\"`（撞上限仍是成功，但原因写清楚） |\n| `packages/cli/src/index.ts` | stdout 格式分发：`text` 原样流式、`json` 收尾一个对象、`stream-json` 一行一条事件（`final` 一定发，失败/中断也发）；配置错误在 `start` 之前发 `error` 事件并以退出码 2 结束 |\n| `packages/cli/README.md` | 事件契约表、`stopReason` 字段、stdin 用法与上限、CI 里边跑边解析的示例 |",
       "口径三条：**stdout 只放契约内容**（进度仍走 stderr，事件流里不混裸文本）／**事件里的工具参数是摘要**（`path=`、`command=`，写文件时完整参数是整份正文，不该进日志）／**退出码不因「撞上限」变成失败**（`ok` 仍为真，`stopReason` 说原因）。",
       "验证",
       "没做"
@@ -4125,7 +4137,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "会话内搜索只有两种打开方式：把鼠标移上去点顶部那个放大镜，或者先注意到它存在。长任务里想回头找「刚才那句结论」「那次 grep 到底搜到了什么」，手要离开键盘、眼睛要找图标。",
       "更实际的问题在**搜什么**：以前只搜消息正文。可长任务里真正承载信息的是工具轨迹——读了哪个文件、命令输出里的报错、grep 命中了哪几行，这些全在工具参数与结果里，搜索一律搜不到，只能一格一格展开工具行去翻。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx` | 文档级快捷键：`Ctrl+F` / `Cmd+F` 打开会话内搜索并聚焦输入框（面板是条件渲染，聚焦放到下一帧）；`Esc` 关闭搜索并清空关键词——以前搜索开着按 `Esc` 什么都不做，看起来像坏的 || 同上 | 搜索范围扩到工具轨迹：每条消息附带最近 8 次工具调用的「名称 + 参数 + 结果」，每次截断 4000 字。同步搜索不能无限吃字符：长任务里一条命令输出可以到几十万字，不截断会把输入卡住 || 同上 | 放大镜按钮的 `title` 写明「搜索会话（Ctrl+F）」，让快捷键能被发现 || `packages/web/src/lib/agentRuntime/slashCommands.ts`、`ChatPage.tsx`、`lib/chat/exportMarkdown.ts` | **撤掉 `/export`**：上一轮 WIP 合入 main 的导出链与本产品既有决定冲突——`ChatPage.test.tsx` 里有一条不变量用例写明「导出/下载链已删除，会话语义只保留会话内搜索」。按既有决定删除代码、面板条目与 `exportMarkdown.ts` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/components/ChatPage.tsx` | 文档级快捷键：`Ctrl+F` / `Cmd+F` 打开会话内搜索并聚焦输入框（面板是条件渲染，聚焦放到下一帧）；`Esc` 关闭搜索并清空关键词——以前搜索开着按 `Esc` 什么都不做，看起来像坏的 |\n| 同上 | 搜索范围扩到工具轨迹：每条消息附带最近 8 次工具调用的「名称 + 参数 + 结果」，每次截断 4000 字。同步搜索不能无限吃字符：长任务里一条命令输出可以到几十万字，不截断会把输入卡住 |\n| 同上 | 放大镜按钮的 `title` 写明「搜索会话（Ctrl+F）」，让快捷键能被发现 |\n| `packages/web/src/lib/agentRuntime/slashCommands.ts`、`ChatPage.tsx`、`lib/chat/exportMarkdown.ts` | **撤掉 `/export`**：上一轮 WIP 合入 main 的导出链与本产品既有决定冲突——`ChatPage.test.tsx` 里有一条不变量用例写明「导出/下载链已删除，会话语义只保留会话内搜索」。按既有决定删除代码、面板条目与 `exportMarkdown.ts` |",
       "顺带修好一条**既有用例里不成立的假设**：`I3u`（点「改动」看 diff）的假桥 `read` 对任何路径都返回正文，`hooksRunner` 读 `.heming/hooks.json` 时拿到一段非法 JSON → 按 fail-closed 拒绝所有工具 → 写盘根本没发生，用例超时。改成「只认目标文件，其余按真实桌面端回 not-found」（hooks 配置不存在＝不启用）。",
       "验证",
       "没做"
@@ -4149,7 +4161,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "真机冒烟是唯一能覆盖「渲染层 `invoke` → 主进程 handler → 平台能力」整条链的地方，所以这两条通道必须进去走一遍：成功的路径可以不弹资源管理器，但**拒绝路径必须真的走主进程**。",
       "顺带修掉一个顺序问题：`revealFile` 原来先查「这个环境能不能打开文件管理器」，再 `stat`。于是没有 `shell` 注入的环境里，一个**根本不存在**的文件会被报成「当前环境不能打开系统文件管理器」——把「文件没了」说成「环境不行」，正是这一系列改动一直在治的病。现在先 `stat`：不存在就报不存在，存在才轮到能力判断。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/smoke/main.js` | 新增探针：写 `notes/b.md` 两版 → `backupPreview`（断言 `ok`、`encoding === \"utf-8\"`、能看到第一版）→ 再 `undo`（证明预览**不消费**备份）；`reveal` 判通道存在、根外路径回 `outside-roots`、不存在的文件回 `not-found`。新增 5 条断言，冒烟从 51 项变 56 项 || `packages/desktop/file-fs.js` | `revealFile` 把「`shell` 能力判断」移到 `stat` 之后：先回答「文件在不在」，再回答「这个环境能不能打开」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/smoke/main.js` | 新增探针：写 `notes/b.md` 两版 → `backupPreview`（断言 `ok`、`encoding === \"utf-8\"`、能看到第一版）→ 再 `undo`（证明预览**不消费**备份）；`reveal` 判通道存在、根外路径回 `outside-roots`、不存在的文件回 `not-found`。新增 5 条断言，冒烟从 51 项变 56 项 |\n| `packages/desktop/file-fs.js` | `revealFile` 把「`shell` 能力判断」移到 `stat` 之后：先回答「文件在不在」，再回答「这个环境能不能打开」 |",
       "验证",
       "没做"
     ]
@@ -4172,7 +4184,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.234 只把「定位」挂在了「本轮改动」那条最近的位置。可历史回看时，用户真正想核对的是**它当时读的是哪个文件、写的是哪个文件**——那信息就在工具轨迹里，但轨迹只显示参数摘要（`D:/工作区/src/a.ts · +3 行`），路径是死文本，要落到资源管理器里对一遍，只能自己抄出来。",
       "而且同一条消息里往往同时出现「本轮改动」和「工具调用」两处同名的 `a.ts`：两处按钮要是叫同一个名字，测试与用户都会分不清点的是哪一个。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/toolArgsSummary.ts` | 新增 `toolArgPath(name, argsJson)`：只认真正有单一目标文件的工具（`file_read` / `file_write` / `file_edit` / `file_undo` / `file_image`），取参数里的 `path`；纯函数、不抛，非法 JSON / 空路径 / 非字符串一律 `null`（不猜） || `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 增可选 `onRevealPath`：折叠行在状态标签前多一个「定位」按钮（`aria-label=\"在文件夹里定位 <文件名>\"`）；不传就不渲染（老安装包没有 `file:reveal` 通道）。点击时 `preventDefault`，不让 `<summary>` 顺手折叠 || `packages/web/src/components/AgentStreamBubble.tsx` | 流式气泡把 `onRevealPath` 透传给 `ToolTraceList`；历史分组里的那份仍不传（那一处是回看用的，按钮挂在实时面板与本轮改动上就够） || `packages/web/src/components/ProgressPanel.tsx` | 右侧「会话进度」栏同样透传，工具行也能定位 || `packages/web/src/components/ChatPage.tsx` | 两处渲染都按 `hasRevealBridge(getFileBridge())` 决定传不传 `onRevealPath`，复用 d.234 的 `revealTurnChange`（同一套「只认已授权根」的闸） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolArgsSummary.ts` | 新增 `toolArgPath(name, argsJson)`：只认真正有单一目标文件的工具（`file_read` / `file_write` / `file_edit` / `file_undo` / `file_image`），取参数里的 `path`；纯函数、不抛，非法 JSON / 空路径 / 非字符串一律 `null`（不猜） |\n| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 增可选 `onRevealPath`：折叠行在状态标签前多一个「定位」按钮（`aria-label=\"在文件夹里定位 <文件名>\"`）；不传就不渲染（老安装包没有 `file:reveal` 通道）。点击时 `preventDefault`，不让 `<summary>` 顺手折叠 |\n| `packages/web/src/components/AgentStreamBubble.tsx` | 流式气泡把 `onRevealPath` 透传给 `ToolTraceList`；历史分组里的那份仍不传（那一处是回看用的，按钮挂在实时面板与本轮改动上就够） |\n| `packages/web/src/components/ProgressPanel.tsx` | 右侧「会话进度」栏同样透传，工具行也能定位 |\n| `packages/web/src/components/ChatPage.tsx` | 两处渲染都按 `hasRevealBridge(getFileBridge())` 决定传不传 `onRevealPath`，复用 d.234 的 `revealTurnChange`（同一套「只认已授权根」的闸） |",
       "口径三条：**只认有单一目标的工具**（`file_glob` 是模式、`file_patch` 可能改多个文件，挑一个定位等于替用户猜）／**文案必须能区分**（工具行叫「在文件夹里定位」，本轮改动叫「在文件夹里显示」）／**没通道就不出现**（不留死按钮）。",
       "验证",
       "没做"
@@ -4198,7 +4210,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "智能体刚写完的文件，第一个真问题不是「写得对不对」，而是「这东西在哪儿」。",
       "在这个版本之前，用户只能拿到结果里的一条路径（`D:/工作区/src/a.ts`），然后自己打开资源管理器、一层层点进去；改了三五个文件就要点三五遍。知识库那侧早就有「在文件管理器中显示」（`vault:reveal`），聊天这侧一直没有对应通道——同一台机器上，一边能点、一边不能点，纯属漏了。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/file-fs.js` | 新增 `revealFile(roots, absPath, shell)`：路径必须绝对、不含 NUL，且**落在已授权的根里**（与读写同一套 `findRoot`，越界直接 `outside-roots`）；文件走 `shell.showItemInFolder`（在父目录里选中它）、目录走 `shell.openPath`（直接打开）；文件不在了回 `not-found` 而不是弹一个空文件夹；没有 `shell` 时结构化失败 `unsupported` || `packages/desktop/file-fs.js` | 新 IPC `file:reveal`（同样过 `isTrustedSender`，未授权来源一律 `untrusted-sender`）；`registerFileIpc` 接收注入的 `shell` || `packages/desktop/main.js` | 把 `shell` 传给文件桥（与 `dialog`、`backupDir` 同路） || `packages/desktop/preload.js` | `__heming_files.reveal(payload)` → `file:reveal` || `packages/web/src/lib/fileEdit/bridge.ts` | `FileFsBridge.reveal?`、`FileRevealResponse`（带 `kind: \"file\" | \"directory\"`）、`FileRevealFailureCode`、`hasRevealBridge()` || `packages/web/src/components/TurnUndoBar.tsx` | 清单每行新增「定位」按钮（`aria-label=\"在文件夹里显示 <文件名>\"`）；没接回调就不渲染（老安装包不留死按钮） || `packages/web/src/components/ChatPage.tsx` | `revealTurnChange(path)`：取工作区根 → `bridge.reveal` → 成功说「已在资源管理器里定位这个文件」/「打开那个目录」，失败把桌面端给的原因原样说出来；只有 `hasRevealBridge` 为真才传 `onReveal` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/file-fs.js` | 新增 `revealFile(roots, absPath, shell)`：路径必须绝对、不含 NUL，且**落在已授权的根里**（与读写同一套 `findRoot`，越界直接 `outside-roots`）；文件走 `shell.showItemInFolder`（在父目录里选中它）、目录走 `shell.openPath`（直接打开）；文件不在了回 `not-found` 而不是弹一个空文件夹；没有 `shell` 时结构化失败 `unsupported` |\n| `packages/desktop/file-fs.js` | 新 IPC `file:reveal`（同样过 `isTrustedSender`，未授权来源一律 `untrusted-sender`）；`registerFileIpc` 接收注入的 `shell` |\n| `packages/desktop/main.js` | 把 `shell` 传给文件桥（与 `dialog`、`backupDir` 同路） |\n| `packages/desktop/preload.js` | `__heming_files.reveal(payload)` → `file:reveal` |\n| `packages/web/src/lib/fileEdit/bridge.ts` | `FileFsBridge.reveal?`、`FileRevealResponse`（带 `kind: \"file\" | \"directory\"`）、`FileRevealFailureCode`、`hasRevealBridge()` |\n| `packages/web/src/components/TurnUndoBar.tsx` | 清单每行新增「定位」按钮（`aria-label=\"在文件夹里显示 <文件名>\"`）；没接回调就不渲染（老安装包不留死按钮） |\n| `packages/web/src/components/ChatPage.tsx` | `revealTurnChange(path)`：取工作区根 → `bridge.reveal` → 成功说「已在资源管理器里定位这个文件」/「打开那个目录」，失败把桌面端给的原因原样说出来；只有 `hasRevealBridge` 为真才传 `onReveal` |",
       "三条口径：**只认已授权的根**（这不是「任意路径都能弹资源管理器」的口子）／**文件与目录分开处理**（用户要的是「我改的那个文件」被选中，不是打开它的父目录）／**不做了就如实说**（文件已被删 → `not-found`，不假装打开成功）。",
       "验证",
       "没做"
@@ -4223,7 +4235,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "模型输出的文本几乎总是 `\\n`，而 Windows 上的源码与文档大多是 `\\r\\n`。以前这两个工具都不看原文件：",
       "两者都不报错、退出码 0、「已写入」——典型的静默破坏，跟 d.228（GBK 编码）、d.231（终端痕迹）同族。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/eol.ts`（新） | `detectNewlineStyle(text)`：纯 LF / 纯 CRLF 才给答案，混合行尾、无换行、空串都返回 `null`；`adaptNewlines(text, style)`：把待插入文本收敛到目标风格，并如实回报 `converted` || `packages/web/src/lib/fileEdit/toolOps.ts` 的 `file_write` | 覆盖已有文件时用原文件风格对齐整份内容（新建文件没有可跟随的事实，保持原文）；结果里说明「原文件用的是 CRLF，已按它写入」 || `packages/web/src/lib/fileEdit/toolOps.ts` 的 `file_edit` | 插入的多行文本按原文件风格对齐；结果里说明对齐过，避免出现混合行尾 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/fileEdit/eol.ts`（新） | `detectNewlineStyle(text)`：纯 LF / 纯 CRLF 才给答案，混合行尾、无换行、空串都返回 `null`；`adaptNewlines(text, style)`：把待插入文本收敛到目标风格，并如实回报 `converted` |\n| `packages/web/src/lib/fileEdit/toolOps.ts` 的 `file_write` | 覆盖已有文件时用原文件风格对齐整份内容（新建文件没有可跟随的事实，保持原文）；结果里说明「原文件用的是 CRLF，已按它写入」 |\n| `packages/web/src/lib/fileEdit/toolOps.ts` 的 `file_edit` | 插入的多行文本按原文件风格对齐；结果里说明对齐过，避免出现混合行尾 |",
       "三条口径：**只跟随、不发明**（没有可跟随的风格就保持原样，不擅自格式化）／**改了就说明**（不静默动格式，用户能一眼看出这不是他改的）／**混合行尾不猜**（猜错比不动更糟）。",
       "验证",
       "没做"
@@ -4251,7 +4263,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "但 `packages/desktop/file-fs.js` 里真正发生的是一次次**静默跳过**：`readTextQuiet()` 对四类文件一律返回 `null` ——",
       "于是「没找到」和「没去找」在结果里长得一模一样。这跟 d.231 修好的另一个问题同族：那一次是默认跳过构建产物目录、却不说；这一次是**跳过了文件、也不说**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/file-fs.js` | `readTextQuiet()` 换成 `readTextForSearch()`，返回 `{ok:true,text}` 或 `{ok:false,reason}`（`too-large` / `binary` / `undecodable` / `io`）；`grepFiles()` 按原因计数，并收集前 5 个文件名做样本；成功响应新增 `skippedFiles: { total, tooLarge, binary, undecodable, other, sample } \\| null`（全都能搜时为 `null`） || `packages/web/src/lib/fileEdit/bridge.ts` | 结果类型加 `skippedFiles?: {…} \\| null`，注释写明「null/省略 = 全都搜过了；老桌面端不返回时按不知道处理，不编 0」 || `packages/web/src/lib/fileEdit/toolOps.ts` | `file_grep` 的抬头追加一行：`（另有 N 个文件没能搜：1 个超过 2MB、1 个像二进制、1 个编码认不出——例如 巨大.log、图片.png、坏编码.bin；要搜它们就把 path/include 缩到那个目录，或直接 file_read）` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/file-fs.js` | `readTextQuiet()` 换成 `readTextForSearch()`，返回 `{ok:true,text}` 或 `{ok:false,reason}`（`too-large` / `binary` / `undecodable` / `io`）；`grepFiles()` 按原因计数，并收集前 5 个文件名做样本；成功响应新增 `skippedFiles: { total, tooLarge, binary, undecodable, other, sample } \\| null`（全都能搜时为 `null`） |\n| `packages/web/src/lib/fileEdit/bridge.ts` | 结果类型加 `skippedFiles?: {…} \\| null`，注释写明「null/省略 = 全都搜过了；老桌面端不返回时按不知道处理，不编 0」 |\n| `packages/web/src/lib/fileEdit/toolOps.ts` | `file_grep` 的抬头追加一行：`（另有 N 个文件没能搜：1 个超过 2MB、1 个像二进制、1 个编码认不出——例如 巨大.log、图片.png、坏编码.bin；要搜它们就把 path/include 缩到那个目录，或直接 file_read）` |",
       "三条口径：**报数也报原因**（「3 个没搜」不如「1 个太大、1 个是二进制、1 个编码认不出」可操作）／**只说事实**（老桌面端不返回就不写，不编一个「另有 0 个」）／**给下一步**（缩范围、或直接读文件）。",
       "验证",
       "没做"
@@ -4279,7 +4291,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "命令的输出本来是打给**终端**看的，而我们把它原样塞进了工具结果：",
       "这类问题不报错、不崩、退出码照常为 0，和 d.165 那批静默 bug 同族：**输出看起来「有内容」，但它不是终端上真正看到的那段。**",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/shell-run.js` | 新增 `shapeTerminalText()`：去掉 ANSI 转义（颜色 / 光标 / 擦除 / OSC 窗口标题 / 退格），含 `\\r` 的行只保留最后一段；在 `decodeCommandOutput()` 的三条返回路径上统一套用，前台命令、后台作业、作业预览一次改完 || 同上 | `module.exports` 导出 `shapeTerminalText`，方便单测直接钉住行为 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/shell-run.js` | 新增 `shapeTerminalText()`：去掉 ANSI 转义（颜色 / 光标 / 擦除 / OSC 窗口标题 / 退格），含 `\\r` 的行只保留最后一段；在 `decodeCommandOutput()` 的三条返回路径上统一套用，前台命令、后台作业、作业预览一次改完 |\n| 同上 | `module.exports` 导出 `shapeTerminalText`，方便单测直接钉住行为 |",
       "明确不做的：不合并重复行、不丢空行、不按宽度折行——那些会改动输出内容本身（模型的判断依据）。",
       "验证",
       "没做"
@@ -4306,7 +4318,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这不是虚荣指标，是长任务里最实在的一笔账：",
       "数据本来就记着（`packages/web/src/store/tokenUsage.ts` 每轮一条，带 `conversationId` / `streamId`），只是没人把它按会话汇总出来给用户看。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `UsageSnapshot`、`formatTokens()`（`812` / `34.2K` / `1.20M`，这一行不求精确到个位）、`describeUsageLine()`；`/status` 在「上次压缩」之后输出「本会话用量：N 轮 · 输入 X / 输出 Y tokens（合计 Z）」 || `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `usage: totalsOf(recordsForConversation(records, convId))` —— 只读用量账本，不写一行 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `UsageSnapshot`、`formatTokens()`（`812` / `34.2K` / `1.20M`，这一行不求精确到个位）、`describeUsageLine()`；`/status` 在「上次压缩」之后输出「本会话用量：N 轮 · 输入 X / 输出 Y tokens（合计 Z）」 |\n| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `usage: totalsOf(recordsForConversation(records, convId))` —— 只读用量账本，不写一行 |",
       "三种情况必须分开说：**没跑过**（不写这一行，省掉空话）／**跑过但一次都没上报**（明写「无法统计」，绝不显示成 0）／**有数字**（轮数 + 输入/输出 + 合计，未上报的轮数如实附在后面）。",
       "验证",
       "没做"
@@ -4333,7 +4345,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "会话内搜索（`Ctrl/⌘+F` 那个输入框）一直只给一个计数：`1/5`、`2/5`…… 要找到「是不是这一条」，只能一路按回车看上下文。会话长到几十上百轮时，这个流程和翻箱倒柜没区别：",
       "这不是能力缺失，而是**结果没有呈现出来**——搜索明明已经算出了命中的消息，界面却只用了它的数量。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/chat/search.ts` | 新增 `SearchHitRow`、`excerptAround()`、`buildSearchRows()`：把命中消息压成一行摘要（换行压成空格、在压平后的文本里**重新定位关键词**再取前后各 26 字，两端越界补「…」），并保留该消息里的出现次数 || `packages/web/src/components/ChatPage.tsx` | 搜索栏下面新增命中列表 `data-testid=\"search-hit-list\"`：每行「#序号 / 谁说的 / 命中附近一句 / 出现 N 处」，点哪条跳哪条，当前那条 `aria-current=\"true\"` 高亮；搜不到时不渲染空面板，回车前后跳转的行为完全不变 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/chat/search.ts` | 新增 `SearchHitRow`、`excerptAround()`、`buildSearchRows()`：把命中消息压成一行摘要（换行压成空格、在压平后的文本里**重新定位关键词**再取前后各 26 字，两端越界补「…」），并保留该消息里的出现次数 |\n| `packages/web/src/components/ChatPage.tsx` | 搜索栏下面新增命中列表 `data-testid=\"search-hit-list\"`：每行「#序号 / 谁说的 / 命中附近一句 / 出现 N 处」，点哪条跳哪条，当前那条 `aria-current=\"true\"` 高亮；搜不到时不渲染空面板，回车前后跳转的行为完全不变 |",
       "三条口径：**不搬正文**（只给命中附近一句，长消息不会把面板撑爆）；**不按原始下标切**（原文里的换行在摘要里被压平了，直接用旧下标会偏，必须重新定位）；**点了就跳**（复用原有「扩窗 + 高亮」，与按回车走同一条路）。",
       "验证",
       "没做"
@@ -4358,7 +4370,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "工具结果的展开区一直是「把全文塞进一个 `<pre>`」：",
       "这不是「显示得不好看」，而是「结论看不见」——d.220 好不容易把失败原因抬到折叠行，展开后又被淹没。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/toolResultPreview.ts`（新） | `previewToolResult()`：超过 2000 字才折叠；行多时保留**开头 40 行 + 结尾 12 行**，中间写成「…（中间还有 N 行 / M 字未显示）…」；行少但单行极长（压成一行的 JSON、无换行日志）自动退化成按字符截 || `packages/web/src/components/AgentStreamBubble.tsx` | 结果区换成 `ToolResultText`：默认给预览 + 「展开全部（还有 N 字未显示）」按钮；点开是全量原文（一字不少），并给「收起（只看开头和结尾）」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolResultPreview.ts`（新） | `previewToolResult()`：超过 2000 字才折叠；行多时保留**开头 40 行 + 结尾 12 行**，中间写成「…（中间还有 N 行 / M 字未显示）…」；行少但单行极长（压成一行的 JSON、无换行日志）自动退化成按字符截 |\n| `packages/web/src/components/AgentStreamBubble.tsx` | 结果区换成 `ToolResultText`：默认给预览 + 「展开全部（还有 N 字未显示）」按钮；点开是全量原文（一字不少），并给「收起（只看开头和结尾）」 |",
       "口径三条：**先头后尾**（契约行与结论都在两端）；**不假装完整**（藏了多少字明写出来）；**只影响显示**（模型侧看到的内容仍走原有截断与 spill 逻辑，一个字都没动）。",
       "验证",
       "没做"
@@ -4384,7 +4396,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "输入框对长度没有任何上限。把一份 300 KB 的日志、一整份接口文档、或者几千行代码粘进去，点发送就能直接发出去——然后会发生三件都不报错的事：",
       "也没有任何提示告诉他「其实可以存成文件让我按需读」——而这正是长任务里更省上下文、也更可靠的做法。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/messageBudget.ts`（新） | `inspectOutgoingText()` 用**与上下文预算同一套 token 估算**（中文一字一 token、ASCII 约四字符一 token）算出 `chars` / `tokens` / `tooLarge`；阈值 `MESSAGE_WARN_TOKENS = 12_000`；`largeMessageNotice()` 把代价与更好的做法一起说清 || `packages/web/src/components/ChatPage.tsx` | `send()` 在真正发送前体检：超阈值且**这次还没确认过**时只提醒、不发；用户再点一次发送才照发（原文一个字不改、不静默截断）；草稿一改，「已确认」立即作废；发送成功后复位 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/messageBudget.ts`（新） | `inspectOutgoingText()` 用**与上下文预算同一套 token 估算**（中文一字一 token、ASCII 约四字符一 token）算出 `chars` / `tokens` / `tooLarge`；阈值 `MESSAGE_WARN_TOKENS = 12_000`；`largeMessageNotice()` 把代价与更好的做法一起说清 |\n| `packages/web/src/components/ChatPage.tsx` | `send()` 在真正发送前体检：超阈值且**这次还没确认过**时只提醒、不发；用户再点一次发送才照发（原文一个字不改、不静默截断）；草稿一改，「已确认」立即作废；发送成功后复位 |",
       "三条口径：**不截断**（模型看到半份日志却不知道缺了后半段，比不发更糟）；**不替用户决定**（第一次拦、第二次放，拦一道但不拦死）；**用 token 而不是字符数判**（同样 2 万字符，中文约 2 万 tokens、英文代码只有约 5 千，风险差三倍）。",
       "验证",
       "没做"
@@ -4412,7 +4424,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这类收尾有很坏的性质：",
       "之前 d.157 管的是「轮次用完了但活没干完」；这一轮补的是另一半：**轮次没到顶，它自己提前收工**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/finishGate.ts`（新） | `unfinishedTodos()` 只读本会话任务清单里没打勾的项；`finishGateVerdict()` 决定该不该催（四个「不催」的理由各自成词）；`finishGatePrompt()` 把未完成项逐条摆出来并要求它用 `todo_write` 与事实对齐 || `packages/web/src/components/ChatPage.tsx` | 收口（`onRunSettled`）时若「正常做完 + 清单还有未完成 + 这次输入还没催过 + 没有排队插话」，就提示一句「清单里还有 N 项没打勾（哪几项）」并自动再开一轮核对；用户自己发的消息会把「催过几次」清零 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/finishGate.ts`（新） | `unfinishedTodos()` 只读本会话任务清单里没打勾的项；`finishGateVerdict()` 决定该不该催（四个「不催」的理由各自成词）；`finishGatePrompt()` 把未完成项逐条摆出来并要求它用 `todo_write` 与事实对齐 |\n| `packages/web/src/components/ChatPage.tsx` | 收口（`onRunSettled`）时若「正常做完 + 清单还有未完成 + 这次输入还没催过 + 没有排队插话」，就提示一句「清单里还有 N 项没打勾（哪几项）」并自动再开一轮核对；用户自己发的消息会把「催过几次」清零 |",
       "口径四条，全部写在代码注释里：",
       "1. **只看正常收口**：用户点停止、或这一轮出错都不催——那是另一种情境，而且通常用户已经介入了。2. **只看清单**：清单是模型自己写的，「它自己承认没干完」才算数；没有清单就不替它脑补完成度。自检是锦上添花，判据不明时必须选择不催。3. **一次用户输入只催一次**（`FINISH_GATE_MAX_NUDGES = 1`）：催完仍不动手就如实停，把判断权交回用户。无限催会变成用户按不了停止的自动循环。4. **插话优先**：有排队的插话时先让插话——用户的即时意图优先于系统自检。",
       "验证",
@@ -4439,7 +4451,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "后果是两层：",
       "更根本的问题是**沉默**：即使跳过了，工具结果的抬头也只写「命中 0 个文件」——模型无法区分「真的没有」和「我没去那儿找」。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/file-fs.js` | 新增 `BUILD_DIR_NAMES`（dist / build / out / coverage / target / release / .next / .nuxt / .output / .turbo / .cache / venv / .venv）；`walkFiles` 收集真跳过过的目录名并随结果返回；glob / grep 的成功响应多一个 `skipped: string[]`（去重、排序、最多点名 12 个；老调用方忽略该字段不受影响） || `packages/desktop/file-fs.js` | 注释写明「不是禁地」：把 `dir`（web 侧的 `path` 参数）直接指到那个目录，照样搜得到——跳过只发生在**向下遍历**时 || `packages/web/src/lib/fileEdit/bridge.ts` | `FileGlobResponse` / `FileGrepResponse` 的成功分支加可选 `skipped?: string[]`（老桌面端不返回 = `undefined`，界面不编） || `packages/web/src/lib/fileEdit/toolOps.ts` | `runGlob` / `runGrep` 的抬头多一行：「（已跳过这些目录：build、dist——依赖、版本库与构建产物通常不是答案；要搜里面就把 path 指到那个目录）」；`skipped` 为空（老版本或确实没跳过）时不写这一行 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/file-fs.js` | 新增 `BUILD_DIR_NAMES`（dist / build / out / coverage / target / release / .next / .nuxt / .output / .turbo / .cache / venv / .venv）；`walkFiles` 收集真跳过过的目录名并随结果返回；glob / grep 的成功响应多一个 `skipped: string[]`（去重、排序、最多点名 12 个；老调用方忽略该字段不受影响） |\n| `packages/desktop/file-fs.js` | 注释写明「不是禁地」：把 `dir`（web 侧的 `path` 参数）直接指到那个目录，照样搜得到——跳过只发生在**向下遍历**时 |\n| `packages/web/src/lib/fileEdit/bridge.ts` | `FileGlobResponse` / `FileGrepResponse` 的成功分支加可选 `skipped?: string[]`（老桌面端不返回 = `undefined`，界面不编） |\n| `packages/web/src/lib/fileEdit/toolOps.ts` | `runGlob` / `runGrep` 的抬头多一行：「（已跳过这些目录：build、dist——依赖、版本库与构建产物通常不是答案；要搜里面就把 path 指到那个目录）」；`skipped` 为空（老版本或确实没跳过）时不写这一行 |",
       "口径三条：**跳过要报**（「没搜到」必须能和「没去找」区分开）；**不是禁地**（`path` 指进去仍可搜，不新增开关、不加 schema 预算）；**不编不知道的事**（老桌面端不给 `skipped`，界面就不写）。",
       "验证",
       "没做"
@@ -4465,7 +4477,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**其二：取消的文案分不清「用户点的」和「渲染层断了」。** 桌面端 `runCommand` 的 `onAbort` 同时服务两种来源：用户点停止、渲染层断开（窗口关闭/崩溃）。以前两种情况都回「渲染层已断开，命令被中止」——用户自己点停止、却被告诉「渲染层断开」，属于甩锅式文案，排查时会把人带偏。",
       "**其三：`shell-run` 的取消用例会随机红。** 用例在 `runCommand` 之后只 `await` 了一次 `setImmediate` 就取消，机器一忙就可能还停在校验目录阶段——那时走的是「执行前取消」分支，子进程压根没 spawn，于是「取消必须真的杀掉子进程」这条断言随机失败。前两轮整包测试都被它红过一次（单跑必绿、整体偶红），这会毁掉每次验收的可信度。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/shell-run.js` | 新增 `userCancelled` 集合：`cancelRun` 命中在跑的命令时先记名，`onAbort` 据此分流文案——用户取消 → 「命令已被取消：已请求终止整个进程树（含它启动的子进程）」；渲染层断开 → 保留原文案；收口时清理，不泄漏 || `packages/desktop/shell-run.test.js` | 取消用例改成**确定性等待 spawn**（spawnImpl 里 resolve 一个 promise，await 到它再取消），不再依赖 `setImmediate` 的时序；顺带断言文案含「命令已被取消」 || `packages/desktop/shell-run.test.js` | 「渲染层中止」用例加反向断言：文案必须含「渲染层已断开」且**不含**「已被取消」（两条路径不许混用措辞） || `packages/web/src/components/ChatPage.tsx` | `abortRuns` 在中断后检查面板是否有在跑的后台作业：有就提示「已停止这一轮。后台还有作业在跑（点停止不会停它们）：在「后台作业」面板里可以逐条停，或者让它跑完。」 || `packages/web/src/components/ChatPage.test.tsx` | 新增 I4c：面板里预置一条在跑的作业 → 发起一轮 → 点「停止生成」→ 断言出现「后台还有作业在跑」「点停止不会停它们」；主 describe 的 `beforeEach` 补 `resetPanelJobs()` 防串扰 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/shell-run.js` | 新增 `userCancelled` 集合：`cancelRun` 命中在跑的命令时先记名，`onAbort` 据此分流文案——用户取消 → 「命令已被取消：已请求终止整个进程树（含它启动的子进程）」；渲染层断开 → 保留原文案；收口时清理，不泄漏 |\n| `packages/desktop/shell-run.test.js` | 取消用例改成**确定性等待 spawn**（spawnImpl 里 resolve 一个 promise，await 到它再取消），不再依赖 `setImmediate` 的时序；顺带断言文案含「命令已被取消」 |\n| `packages/desktop/shell-run.test.js` | 「渲染层中止」用例加反向断言：文案必须含「渲染层已断开」且**不含**「已被取消」（两条路径不许混用措辞） |\n| `packages/web/src/components/ChatPage.tsx` | `abortRuns` 在中断后检查面板是否有在跑的后台作业：有就提示「已停止这一轮。后台还有作业在跑（点停止不会停它们）：在「后台作业」面板里可以逐条停，或者让它跑完。」 |\n| `packages/web/src/components/ChatPage.test.tsx` | 新增 I4c：面板里预置一条在跑的作业 → 发起一轮 → 点「停止生成」→ 断言出现「后台还有作业在跑」「点停止不会停它们」；主 describe 的 `beforeEach` 补 `resetPanelJobs()` 防串扰 |",
       "三条口径：**只报事实**（取消只说「已请求终止进程树」，不夸成「已确认全部杀干净」）；**不混用措辞**（用户取消 vs 断连各说各的，测试双向钉住）；**测试要确定性**（等真实状态，不等「大概已经好了」）。",
       "验证",
       "没做"
@@ -4494,7 +4506,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "中文 Windows 上随手存下的 `.txt` / `.bat` / `.ini` / `.csv`，大多是 GBK（ANSI）编码。而文件工具一直只按 UTF-8 严解：",
       "还有一个更危险、但**不报错**的问题：落盘一律写 UTF-8。如果模型去改一个 GBK 的 `.bat`，写完之后文件编码就被悄悄换成 UTF-8 —— 按 ANSI 读它的老程序从此乱码，用户根本不知道是这一步改坏的。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/desktop/file-fs.js` | 新增 `decodeTextBytes()`：先按 UTF-8 严解，失败再按 GBK 严解（GBK 解码器惰性创建，运行时缺完整 ICU 就永久降级，不抛）；两种都不成才算「非文本」 || `packages/desktop/file-fs.js` | `file_read` 走它，并在结果里带上 `encoding: \"utf-8\" \\| \"gbk\"` || `packages/desktop/file-fs.js` | `file_grep` 的静默读走它 —— GBK 文件现在也能被搜到 || `packages/desktop/file-fs.js` | 改动预览也走它，并在响应里带 `encoding`；预览 GBK 备份不再是一片乱码 || `packages/desktop/file-fs.js` | 落盘前新增 `nonUtf8TextTarget()` 检查：目标是二进制/超 2MB/不是文本，不拦；是 GBK 文本则**拒绝覆盖**，返回可照做的说明（「请先确认要改编码，或把结果写到新文件」） || `packages/web/src/lib/fileEdit/tools.ts` | `file_read` 的头部多一句：这个文件是 GBK 编码、已按 GBK 解码显示、写入会被拒绝、要改就另存为新文件 || `packages/web/src/lib/fileEdit/toolOps.ts` | 写入被编码闸拦下时给结构化契约 `encoding-mismatch`：说清原因、给「写到新文件 / 先转成 UTF-8」的重试建议，而不是笼统的「写入失败」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/desktop/file-fs.js` | 新增 `decodeTextBytes()`：先按 UTF-8 严解，失败再按 GBK 严解（GBK 解码器惰性创建，运行时缺完整 ICU 就永久降级，不抛）；两种都不成才算「非文本」 |\n| `packages/desktop/file-fs.js` | `file_read` 走它，并在结果里带上 `encoding: \"utf-8\" \\| \"gbk\"` |\n| `packages/desktop/file-fs.js` | `file_grep` 的静默读走它 —— GBK 文件现在也能被搜到 |\n| `packages/desktop/file-fs.js` | 改动预览也走它，并在响应里带 `encoding`；预览 GBK 备份不再是一片乱码 |\n| `packages/desktop/file-fs.js` | 落盘前新增 `nonUtf8TextTarget()` 检查：目标是二进制/超 2MB/不是文本，不拦；是 GBK 文本则**拒绝覆盖**，返回可照做的说明（「请先确认要改编码，或把结果写到新文件」） |\n| `packages/web/src/lib/fileEdit/tools.ts` | `file_read` 的头部多一句：这个文件是 GBK 编码、已按 GBK 解码显示、写入会被拒绝、要改就另存为新文件 |\n| `packages/web/src/lib/fileEdit/toolOps.ts` | 写入被编码闸拦下时给结构化契约 `encoding-mismatch`：说清原因、给「写到新文件 / 先转成 UTF-8」的重试建议，而不是笼统的「写入失败」 |",
       "三条口径：**读宽写严**（读尽力解、写不替用户改编码）；**不猜**（两种严格解码都不成就是非文本，不按启发式硬转）；**拒绝要说人话**（拦下时必须告诉模型下一步怎么做，否则它只会重试同一个动作）。",
       "验证",
       "没做"
@@ -4569,7 +4581,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么做",
       "长任务很少只跑一条会话：一边让 A 会话慢慢改代码，一边在 B 会话里查资料，是这台机器上最正常的用法。而这条路径上有三样东西是**全局共享**的：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/steerQueues.ts`（新） | 按会话分的插话队列注册表：`of(conversationId)` 同一 id 永远拿到同一个实例，`clear(id?)` 可按会话或全清 || `packages/web/src/lib/agentRuntime/steerQueues.test.ts`（新） | 4 例：两个会话各排各的、谁也取不走对方的话；同一会话取回同一实例；按会话清；全清 || `packages/web/src/components/ChatPage.tsx` | 插话队列换成注册表（`steerQueueOf(convId)`）；子代理停止控制器按会话存（`subagentStopsRef[convId]`），界面「停止」只停眼前这个会话；本轮工具计数改成 `startRun` 作用域里的局部变量（一次调用一份，收口读自己那份） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/steerQueues.ts`（新） | 按会话分的插话队列注册表：`of(conversationId)` 同一 id 永远拿到同一个实例，`clear(id?)` 可按会话或全清 |\n| `packages/web/src/lib/agentRuntime/steerQueues.test.ts`（新） | 4 例：两个会话各排各的、谁也取不走对方的话；同一会话取回同一实例；按会话清；全清 |\n| `packages/web/src/components/ChatPage.tsx` | 插话队列换成注册表（`steerQueueOf(convId)`）；子代理停止控制器按会话存（`subagentStopsRef[convId]`），界面「停止」只停眼前这个会话；本轮工具计数改成 `startRun` 作用域里的局部变量（一次调用一份，收口读自己那份） |",
       "验证",
       "没做"
     ]
@@ -4593,7 +4605,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "于是用户点「停止」时：这一轮以 `aborted` 收口 → 界面自己又开了一轮 → **「停止」按了没停住**。如果这一轮是报错收口，则是在一个已经失败的请求上再叠一次大概率同样失败的请求。用户看到的现场是「我明明点了停止，它还在跑」，比原本的「直接拒绝发送」更让人不信任。",
       "码这一轮改的是收口口径：只有正常做完才自动接着处理；停/错时说清「那条没发出去」，别自作主张。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/components/ChatPage.tsx` | `onRunSettled` 里的插话处理改为按 `result.status` 分流：`ok` → 原样 `shift()` + `startRun`（行为不变）；`aborted` / `error` → **不再自动开轮**，改为 `steerQueueRef.current.clear()` 并提示「你点了停止：排队里的 N 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）」/「这一轮出错了：…（内容留在会话里，重试时会一起看到）」 || `packages/web/src/components/ChatPage.test.tsx` | 新增 **I4a**：真流式挂起 → 发送 → 运行中插一句（断言正文照常上行、提示「已插话」）→ 点「停止生成」→ 断言 **`streamChat` 只被调用 1 次**（没有自动开第二轮）、提示含「没有发出去」与去向 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/components/ChatPage.tsx` | `onRunSettled` 里的插话处理改为按 `result.status` 分流：`ok` → 原样 `shift()` + `startRun`（行为不变）；`aborted` / `error` → **不再自动开轮**，改为 `steerQueueRef.current.clear()` 并提示「你点了停止：排队里的 N 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）」/「这一轮出错了：…（内容留在会话里，重试时会一起看到）」 |\n| `packages/web/src/components/ChatPage.test.tsx` | 新增 **I4a**：真流式挂起 → 发送 → 运行中插一句（断言正文照常上行、提示「已插话」）→ 点「停止生成」→ 断言 **`streamChat` 只被调用 1 次**（没有自动开第二轮）、提示含「没有发出去」与去向 |",
       "为什么清队列而不是留着：插话正文在发送时已经上行落库，续跑/重试时模型从会话历史里就会看到它；留在内存队列反而危险——几轮之后某个工具轮会突然把很久以前的一句话塞进上下文，像是模型「想起来一句过时指令」。",
       "验证",
       "没做"
@@ -4617,7 +4629,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "问题是界面上一个字都没说。用户装了第三个 MCP 服务之后发现「它怎么不用我那个工具了」，第一反应是能力坏了或者模型不行，实际是工具被挡在检索后面。`/status` 的本轮工具行只写着「共 N 个（其中核心 C 个常驻）」，从这行读不出这一层。",
       "这轮把遮住的那层摊开：阈值多少、每轮先给几个、剩下怎么才用得上、想恢复全量可见该做什么。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/statusReport.ts` | `tools` 快照扩为 `{ count; core; discovery?; visible?; threshold? }`；新增 `describeToolsLine()`：没超阈值时输出与以前完全一样，超阈值时补上「超过 20 个，已改按需发现——每轮先给约 20 个 + tool_search，其余要先检索」以及「想让它直接可用：停用不用的服务」；阈值/可见数缺失时按 20 兜底，不写出 `0` 或 `undefined` || `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `discovery: names.length > TOOL_SEARCH_THRESHOLD`、`visible: MAX_VISIBLE_TOOLS`、`threshold: TOOL_SEARCH_THRESHOLD`——与 `agentStream` 的钉选同一口径，界面不自己猜阈值 || `packages/web/src/lib/agentRuntime/statusReport.test.ts` | 新增 `describe(\"工具目录与按需发现（d.224）\")` 3 例：未超阈值不提按需发现；超阈值时阈值/可见数/`tool_search`/「停用不用的服务」都在；缺阈值与可见数时按 20 兜底且没有 `undefined` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | `tools` 快照扩为 `{ count; core; discovery?; visible?; threshold? }`；新增 `describeToolsLine()`：没超阈值时输出与以前完全一样，超阈值时补上「超过 20 个，已改按需发现——每轮先给约 20 个 + tool_search，其余要先检索」以及「想让它直接可用：停用不用的服务」；阈值/可见数缺失时按 20 兜底，不写出 `0` 或 `undefined` |\n| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 传 `discovery: names.length > TOOL_SEARCH_THRESHOLD`、`visible: MAX_VISIBLE_TOOLS`、`threshold: TOOL_SEARCH_THRESHOLD`——与 `agentStream` 的钉选同一口径，界面不自己猜阈值 |\n| `packages/web/src/lib/agentRuntime/statusReport.test.ts` | 新增 `describe(\"工具目录与按需发现（d.224）\")` 3 例：未超阈值不提按需发现；超阈值时阈值/可见数/`tool_search`/「停用不用的服务」都在；缺阈值与可见数时按 20 兜底且没有 `undefined` |",
       "验证",
       "没做"
     ]
@@ -4639,7 +4651,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "MCP 工具出现在工具清单里，不等于那台服务此刻连得上。服务进程第二天没起来、配置写错、或者启动时连过一次之后掉线（`state: \"stale\"`），模型照样在清单里看见这些工具，然后一次次调用失败。",
       "`packages/web/src/lib/mcp/store.ts` 的 `McpServerStatus` 注释其实早就把这件事讲透了——「快照会落盘，服务第二天起不来时清单还在，界面就显示已连接，模型则拿到一份指向死进程的工具目录」——状态必须反映**最近一次连接尝试的结果**。但这份状态只出现在「能力 → MCP」页里：用户在看 `/status` 时看不到它；而 d.221 的工具失败统计只会说「这个会话失败了 N 次，卡在 transport ×3」，说不出「因为爬虫那台没连上」。于是用户去改模型、改提示词，改不到点上。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/mcp/summary.ts`（新） | `summarizeMcpStatus(servers, statusOf, enabledTools)` 纯函数，把注册表事实压成一个快照 `{ total; enabled; connected; failed[{name,state,error}]; pending; tools }`；只统计**已启用**的服务（用户主动关掉的不参与「没连上」告警），没有连接记录的单独算 `pending`（刚配置完还没连，与连失败是两件事），失败原因原样带出、不改写 || `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeMcpLine(mcp)` 与 `StatusInput.mcp`；行插在「本轮工具」之后。四种情况分开说：没有配置服务 / 服务都停用了 / 全部连上（给工具数）/ 有问题的点名 + 带原因 + 指路「能力 → MCP」 || `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 里读 `mcpRegistry.servers()`、`status(id)`、`enabledTools().length` 组成快照——只读，不发请求、不触发重连 || `packages/web/src/lib/mcp/summary.test.ts`（新） | 6 例：零服务、停用服务不计失败、stale/error 都算没连上且原因原样、无记录算 pending、名称为空退回 id、工具数非法归零 || `packages/web/src/lib/agentRuntime/statusReport.test.ts` | +6 例（共 27）：没有服务、全部连上、点名带原因 + 指路、pending 不说成失败、服务全停用、不给快照不出这一行 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/mcp/summary.ts`（新） | `summarizeMcpStatus(servers, statusOf, enabledTools)` 纯函数，把注册表事实压成一个快照 `{ total; enabled; connected; failed[{name,state,error}]; pending; tools }`；只统计**已启用**的服务（用户主动关掉的不参与「没连上」告警），没有连接记录的单独算 `pending`（刚配置完还没连，与连失败是两件事），失败原因原样带出、不改写 |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeMcpLine(mcp)` 与 `StatusInput.mcp`；行插在「本轮工具」之后。四种情况分开说：没有配置服务 / 服务都停用了 / 全部连上（给工具数）/ 有问题的点名 + 带原因 + 指路「能力 → MCP」 |\n| `packages/web/src/components/ChatPage.tsx` | `buildSelfStatus()` 里读 `mcpRegistry.servers()`、`status(id)`、`enabledTools().length` 组成快照——只读，不发请求、不触发重连 |\n| `packages/web/src/lib/mcp/summary.test.ts`（新） | 6 例：零服务、停用服务不计失败、stale/error 都算没连上且原因原样、无记录算 pending、名称为空退回 id、工具数非法归零 |\n| `packages/web/src/lib/agentRuntime/statusReport.test.ts` | +6 例（共 27）：没有服务、全部连上、点名带原因 + 指路、pending 不说成失败、服务全停用、不给快照不出这一行 |",
       "验证",
       "没做"
     ]
@@ -4691,7 +4703,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.220 让每一次工具失败都说得清「为什么」，但「为什么」是一次性的。真正难处理的是**反复卡在同一件事上**：",
       "三种情况的修法完全不同，而界面上只有零散的单次红字，得靠人记忆去数。`/status` 是「我自己也不知道它为什么不干活」时最该看的那一屏，偏偏没有这一项。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/toolFailure.ts` | 新增 `failureCode(result)`：从失败文本里取契约中的稳定错误码（`标题（path-escape）：…` 里中文括号那段英文 kebab-case）；取不到返回 null，**绝不按中文猜**——猜错会把两种不同的失败并成一类 || `packages/web/src/lib/agentRuntime/toolFailureStats.ts`（新） | 按会话累计失败次数与错误码：`recordToolFailure(convId, { tool, result?, denied?, errorCode? })`、`getToolFailureStats(convId)`（返回 `{ total, codes(次数降序), tools(最多 5 个), dropped }`）、`clearToolFailureStats`、`resetToolFailureStats`。**被拒单独记 `denied`**，不和「工具失败」混一起；错误码最多记 20 种，长尾如实记进 `dropped`；只存内存（重启重新数）、按会话隔离（不同工作区的失败原因不可比） || `packages/web/src/lib/agentStream.ts` | `onToolTrace` 的 end 事件增加 `errorCode?: string`，直接取工具返回的结构化 `result.error.error_code`。**不从文本正则抠**：一部分工具（`file_read` 的 io / not-found 分支）走 `appendFailure`，文本里根本没有 `（code）` 那段，只有结构化字段有——第一版按文本解析，实测全被记成 `unknown` || `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeToolFailureLine(stats)`：`工具失败：本会话 3 次（path-escape ×2、match-failed ×1）；出错最多的是 file_write（2 次）`；错误码只列前 3 个，被截断的种类说清「还有 N 种没列」；**没有失败时整行不出现**（不写「0 次」占位）。`StatusInput` 增加 `toolFailures` || `packages/web/src/components/ChatPage.tsx` | `onToolTrace` 的 end 分支里，`error` / `denied` 各记一次账；归到**这条流所属的会话**（用 `useChatStore.getState().streaming[streamId]?.conversationId` 兜底），切会话后迟到的 end 事件不会记到当前会话头上；`/status` 传 `toolFailures: getToolFailureStats(convId)` |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolFailure.ts` | 新增 `failureCode(result)`：从失败文本里取契约中的稳定错误码（`标题（path-escape）：…` 里中文括号那段英文 kebab-case）；取不到返回 null，**绝不按中文猜**——猜错会把两种不同的失败并成一类 |\n| `packages/web/src/lib/agentRuntime/toolFailureStats.ts`（新） | 按会话累计失败次数与错误码：`recordToolFailure(convId, { tool, result?, denied?, errorCode? })`、`getToolFailureStats(convId)`（返回 `{ total, codes(次数降序), tools(最多 5 个), dropped }`）、`clearToolFailureStats`、`resetToolFailureStats`。**被拒单独记 `denied`**，不和「工具失败」混一起；错误码最多记 20 种，长尾如实记进 `dropped`；只存内存（重启重新数）、按会话隔离（不同工作区的失败原因不可比） |\n| `packages/web/src/lib/agentStream.ts` | `onToolTrace` 的 end 事件增加 `errorCode?: string`，直接取工具返回的结构化 `result.error.error_code`。**不从文本正则抠**：一部分工具（`file_read` 的 io / not-found 分支）走 `appendFailure`，文本里根本没有 `（code）` 那段，只有结构化字段有——第一版按文本解析，实测全被记成 `unknown` |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeToolFailureLine(stats)`：`工具失败：本会话 3 次（path-escape ×2、match-failed ×1）；出错最多的是 file_write（2 次）`；错误码只列前 3 个，被截断的种类说清「还有 N 种没列」；**没有失败时整行不出现**（不写「0 次」占位）。`StatusInput` 增加 `toolFailures` |\n| `packages/web/src/components/ChatPage.tsx` | `onToolTrace` 的 end 分支里，`error` / `denied` 各记一次账；归到**这条流所属的会话**（用 `useChatStore.getState().streaming[streamId]?.conversationId` 兜底），切会话后迟到的 end 事件不会记到当前会话头上；`/status` 传 `toolFailures: getToolFailureStats(convId)` |",
       "验证",
       "没做",
       "现场备注"
@@ -4720,7 +4732,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "但这套契约一直只给模型看。界面上：",
       "结果是长任务里七次调用红两次时，用户只知道「它又失败了」，不知道**为什么**、更不知道**下一步该改什么**——于是把配置问题（没有可写根、路径在根外）读成模型能力问题。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/toolFailure.ts`（新） | `parseToolFailure(result)`：从工具结果文本里解析出 `headline`（第一行，压到 72 字、按码点截断不劈代理对）、`hint`（`提示：…`）、`retry`（`可重试：…`）；`failureNextStep(note)`：优先「提示」，其次「可重试」，都没有返回 null。**只搬运 `toolError.ts` 已有的契约，不另立一套建议表** || `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 每行先算一次失败摘要：`status` 为 `error` / `denied` 时，**折叠行改为显示错误首行**（红色、`title` 保留完整原文），成功行仍显示 d.216 的参数摘要；展开区在结果下面多一行 `下一步：…`（只有真解析出提示才出现） || 全文 | 原始 `result` 一个字不删：展开区仍是完整原文，用户想核对细节不会被摘要替换掉 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolFailure.ts`（新） | `parseToolFailure(result)`：从工具结果文本里解析出 `headline`（第一行，压到 72 字、按码点截断不劈代理对）、`hint`（`提示：…`）、`retry`（`可重试：…`）；`failureNextStep(note)`：优先「提示」，其次「可重试」，都没有返回 null。**只搬运 `toolError.ts` 已有的契约，不另立一套建议表** |\n| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 每行先算一次失败摘要：`status` 为 `error` / `denied` 时，**折叠行改为显示错误首行**（红色、`title` 保留完整原文），成功行仍显示 d.216 的参数摘要；展开区在结果下面多一行 `下一步：…`（只有真解析出提示才出现） |\n| 全文 | 原始 `result` 一个字不删：展开区仍是完整原文，用户想核对细节不会被摘要替换掉 |",
       "验证",
       "没做",
       "现场备注"
@@ -4742,7 +4754,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.174 起，每一轮都会在工作区里找 `AGENTS.md` 一族（`AGENTS.md`、`HEMING.md`、`.heming/AGENTS.md`、`.heming/rules.md`），读到就塞进系统提示词——这是「像团队里的人」与「像通用聊天机器人」的分界线之一。",
       "但这条链路此前**两头都是哑的**：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `INIT_COMMAND = \"/init\"` 与面板条目（面板第 8 条），说明里点明「写进 AGENTS.md，已存在就合并、不覆盖你手写的」 || `packages/web/src/lib/agentRuntime/initPrompt.ts`（新） | `INIT_PROMPT`：先 `file_glob` 看结构、`file_read` 读 README / package.json / 2–3 个代表源文件，再写工作区根的 `AGENTS.md`；已存在先读再合并；不超过 200 行；只写这一个文件；`expandInitCommand(text)` 做「命令 → 任务描述」的纯函数换算 || `packages/web/src/components/ChatPage.tsx` | `submitMessage` 入口处 `expandInitCommand`：命中就把命令**换成任务描述继续走正常发送路径**（会落库、会调工具、会走写盘确认）——与 `/status`、`/goal` 这类真正本地的命令分界；项目约定收集处留一份 `summarizeProjectRules` 摘要到 ref，`buildSelfStatus` 传给 `/status` || `packages/web/src/lib/agentRuntime/projectRules.ts` | 新增 `ProjectRulesSummary` 与 `summarizeProjectRules`：只给事实（文件名、字数、是否截断、省略几份），**正文不进摘要** || `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeProjectRulesLine`：`项目约定：AGENTS.md（812 字）、.heming/rules.md（2.4K 字，已截断）；还有 1 份没展开`；没读到说「无（工作区里没有 AGENTS.md；发 /init 可以让它摸清仓库后写一份）」；还没跑过一轮说「尚未统计」——不把「不知道」说成「没有」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `INIT_COMMAND = \"/init\"` 与面板条目（面板第 8 条），说明里点明「写进 AGENTS.md，已存在就合并、不覆盖你手写的」 |\n| `packages/web/src/lib/agentRuntime/initPrompt.ts`（新） | `INIT_PROMPT`：先 `file_glob` 看结构、`file_read` 读 README / package.json / 2–3 个代表源文件，再写工作区根的 `AGENTS.md`；已存在先读再合并；不超过 200 行；只写这一个文件；`expandInitCommand(text)` 做「命令 → 任务描述」的纯函数换算 |\n| `packages/web/src/components/ChatPage.tsx` | `submitMessage` 入口处 `expandInitCommand`：命中就把命令**换成任务描述继续走正常发送路径**（会落库、会调工具、会走写盘确认）——与 `/status`、`/goal` 这类真正本地的命令分界；项目约定收集处留一份 `summarizeProjectRules` 摘要到 ref，`buildSelfStatus` 传给 `/status` |\n| `packages/web/src/lib/agentRuntime/projectRules.ts` | 新增 `ProjectRulesSummary` 与 `summarizeProjectRules`：只给事实（文件名、字数、是否截断、省略几份），**正文不进摘要** |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | 新增 `describeProjectRulesLine`：`项目约定：AGENTS.md（812 字）、.heming/rules.md（2.4K 字，已截断）；还有 1 份没展开`；没读到说「无（工作区里没有 AGENTS.md；发 /init 可以让它摸清仓库后写一份）」；还没跑过一轮说「尚未统计」——不把「不知道」说成「没有」 |",
       "顺带修掉 `StatusInput` 里 `contextFold` 与 `tasks` 两条注释挤在同一行的排版问题。",
       "验证",
       "没做",
@@ -4766,7 +4778,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "长任务一次跑十几分钟，收口那一刻用户常常不在屏幕前：回来只看到最后一句话，想知道「刚才那一下到底干了多少」只能往上翻消息数工具调用——还数不准（同一次工具调用在流式气泡里可能分成多段）。这些数字本来就是模型真实做过的事，白扔了可惜。",
       "而进度行如果留着不动，又会被当成「还在跑」，用户会一直等一个不存在的下一轮。所以做法是：**收口时把它换成一行小结**。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/turnProgress.ts` | `TurnProgress` 增 `startedAt`（第一次上报的时刻）、`tools`（真实工具调用次数）、`done`、`endedAt`；新增 `settleTurnProgress(conversationId, now)`：把跑动态换成收口态并保留数字，重复调用不重复通知；`recordTurnProgress` 在「收口后又来进度」时重置计时与次数（新一轮不能累加上一轮）；`describeTurnProgress` 收口态输出「上一轮：N 轮 · M 次工具 · 用时 X」 || `packages/web/src/components/TurnProgressLine.tsx` | 收口后：呼吸点停止、不再显示「已跑」，改为居中一行小结；`data-done` 标明状态（测试与样式都可依赖） || `packages/web/src/components/ChatPage.tsx` | 收口时 `clearTurnProgress` → `settleTurnProgress`；秒表只在真的在跑时开；切会话时保留已收口的小结（切回来还能看到「上一次干了多少」），未收口的照旧清掉 || `packages/web/src/components/ChatPage.test.tsx` | 主 describe 的 `beforeEach` 里 `resetTurnProgress()`：这张表是模块级内存，不清会把上一条用例的数字带进来（实测有 9 条用例被串红） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/turnProgress.ts` | `TurnProgress` 增 `startedAt`（第一次上报的时刻）、`tools`（真实工具调用次数）、`done`、`endedAt`；新增 `settleTurnProgress(conversationId, now)`：把跑动态换成收口态并保留数字，重复调用不重复通知；`recordTurnProgress` 在「收口后又来进度」时重置计时与次数（新一轮不能累加上一轮）；`describeTurnProgress` 收口态输出「上一轮：N 轮 · M 次工具 · 用时 X」 |\n| `packages/web/src/components/TurnProgressLine.tsx` | 收口后：呼吸点停止、不再显示「已跑」，改为居中一行小结；`data-done` 标明状态（测试与样式都可依赖） |\n| `packages/web/src/components/ChatPage.tsx` | 收口时 `clearTurnProgress` → `settleTurnProgress`；秒表只在真的在跑时开；切会话时保留已收口的小结（切回来还能看到「上一次干了多少」），未收口的照旧清掉 |\n| `packages/web/src/components/ChatPage.test.tsx` | 主 describe 的 `beforeEach` 里 `resetTurnProgress()`：这张表是模块级内存，不清会把上一条用例的数字带进来（实测有 9 条用例被串红） |",
       "口径三条：只报模型真做过的事（轮次 / 工具次数 / 用时，都是从事件里数出来的）；一个工具都没用时就不写「0 次工具」；切会话保留小结但绝不保留「正在执行」。",
       "验证",
       "没做",
@@ -4794,7 +4806,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "于是用户看到的现象是「它怎么突然忘了我刚说的规矩」「我让它别动那个文件，它又动了」，很容易归因成「这模型不行」「这软件不可靠」，而不是「那一轮之前的历史已经变成摘要了」。会话里的原文一条都没删——被折的只是**发给模型的请求**——这一点用户也无从得知。",
       "codex 在压缩上下文时会明确告诉用户；这条我们对齐它。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentContext/history.ts` | 新增纯函数 `countFoldedMessages(rows, prepared)`：判据与 `compactNow` 完全一致（头是 system 且以摘要骨架开头才算折了，否则回 0，不编数字） || `packages/web/src/lib/agentContext/contextFold.ts`（新） | 按会话记「最近一次折了几条、什么时候」：`recordContextFold` / `getContextFold` / `clearContextFold` / `resetContextFolds`，只留最近 20 个会话、坏数据丢弃、`localStorage` 抛异常静默降级；`foldNoticeText`（说清「原文没删」与「忘了就再说一遍」）、`foldAgeMinutes` / `formatFoldAgeMinutes` || `packages/web/src/components/ChatPage.tsx` | `prepareHistory` 包装里算出折叠条数：真折了就记一条 + 在提示位说一次（`foldNoticeText`）；`/status` 快照带 `contextFold`（条数与距今分钟数） || `packages/web/src/lib/agentRuntime/statusReport.ts` | `StatusInput.contextFold?`；上下文那行之后输出 `上次压缩：折叠 18 条（3 分钟前）——会话原文一条没删，模型看到的是摘要；要是它忘了要求，把关键约束再说一遍。` || `packages/web/src/lib/agentContext/index.ts` | 导出 `contextFold` 模块 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentContext/history.ts` | 新增纯函数 `countFoldedMessages(rows, prepared)`：判据与 `compactNow` 完全一致（头是 system 且以摘要骨架开头才算折了，否则回 0，不编数字） |\n| `packages/web/src/lib/agentContext/contextFold.ts`（新） | 按会话记「最近一次折了几条、什么时候」：`recordContextFold` / `getContextFold` / `clearContextFold` / `resetContextFolds`，只留最近 20 个会话、坏数据丢弃、`localStorage` 抛异常静默降级；`foldNoticeText`（说清「原文没删」与「忘了就再说一遍」）、`foldAgeMinutes` / `formatFoldAgeMinutes` |\n| `packages/web/src/components/ChatPage.tsx` | `prepareHistory` 包装里算出折叠条数：真折了就记一条 + 在提示位说一次（`foldNoticeText`）；`/status` 快照带 `contextFold`（条数与距今分钟数） |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | `StatusInput.contextFold?`；上下文那行之后输出 `上次压缩：折叠 18 条（3 分钟前）——会话原文一条没删，模型看到的是摘要；要是它忘了要求，把关键约束再说一遍。` |\n| `packages/web/src/lib/agentContext/index.ts` | 导出 `contextFold` 模块 |",
       "口径：",
       "验证",
       "没做",
@@ -4824,7 +4836,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "工具轨迹里每次调用展开后，`参数` 直接渲染模型给的原始 JSON。写文件时那是一整篇正文、跑命令时那是一整条命令，用户看到的是一屏转义字符（`{\"path\":\"notes/新.md\",\"content\":\"# 标题\\n\\n正文…\"}`），而不是「它改了哪个文件、改了多少行、跑了什么命令」。历史回看时更难受：一个 `<details>` 里铺开的是参数原文，折叠状态那一行却只有工具名。",
       "写文件的调用尤其值得说清楚——这是用户最关心的一类动作（「它到底改了我哪个文件」），却恰恰是参数最长、最不像话的一类。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/toolArgsSummary.ts`（新） | 纯函数 `summarizeToolArgs(name, argsJson)`：按工具名取「用户关心的字段」拼一行摘要，解析失败一律返回空串（宁可只显示工具名，也不瞎猜） || `packages/web/src/lib/toolArgsSummary.test.ts`（新） | 13 例：写/改/补丁/读/图/撤销/glob/grep/跑命令/后台作业/子代理/工作流/清单/长输出/未知工具/非法 JSON/代理对截断 || `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 的折叠行在工具名之后渲染摘要（`data-testid=\"tool-arg-summary\"`，`title` 保留原始 JSON）；展开区的「参数」仍是原文，一个字段都没少 || `packages/web/src/components/AgentStreamBubble.test.tsx` | +1 例：写文件显示 `notes/新.md · +2 行`、跑命令显示 `pnpm -w typecheck · D:/Heming`，并断言原始 JSON 仍在 `title` 里 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/toolArgsSummary.ts`（新） | 纯函数 `summarizeToolArgs(name, argsJson)`：按工具名取「用户关心的字段」拼一行摘要，解析失败一律返回空串（宁可只显示工具名，也不瞎猜） |\n| `packages/web/src/lib/toolArgsSummary.test.ts`（新） | 13 例：写/改/补丁/读/图/撤销/glob/grep/跑命令/后台作业/子代理/工作流/清单/长输出/未知工具/非法 JSON/代理对截断 |\n| `packages/web/src/components/AgentStreamBubble.tsx` | `ToolTraceList` 的折叠行在工具名之后渲染摘要（`data-testid=\"tool-arg-summary\"`，`title` 保留原始 JSON）；展开区的「参数」仍是原文，一个字段都没少 |\n| `packages/web/src/components/AgentStreamBubble.test.tsx` | +1 例：写文件显示 `notes/新.md · +2 行`、跑命令显示 `pnpm -w typecheck · D:/Heming`，并断言原始 JSON 仍在 `title` 里 |",
       "摘要口径（每类都只取能回答「干了什么」的字段）：",
       "验证",
       "没做",
@@ -4855,7 +4867,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "偏差平时只是数字难看，危险的是它让「快到上限了」出现得太晚：真到超限时上游只会回 400，压缩链再紧急收紧也救不回已经发出的这一轮。反过来，估算偏高会让用户白白 `/compact`，把还能用的上下文压掉。",
       "供应商其实告诉了我们真值：每个响应里的 `usage.input_tokens` 就是这次请求实际用了多少提示 token。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || 新建 `packages/web/src/lib/agentContext/calibration.ts` | 按模型记一个「实际 / 估算」的平滑倍率：单条样本直接成为倍率，之后每来一条只占一半权重；倍率夹在 0.8–1.8；估算低于 2000 token 不采样（短对话的偏差主要是工具 schema 这类固定开销，摊成比例会虚高）；模型名大小写与首尾空白归一；最多记 12 个模型、按最近使用淘汰 || `packages/web/src/lib/agentStream.ts` | 新增 `TriggerDeps.onContextSample`：供应商报了 `inputTokens` 时，把「模型 / 同一批消息的估算值 / 实际提示 token」交给调用方。只走回调不写存储（本模块保持纯逻辑可测），缺省不采样 || `packages/web/src/components/ChatPage.tsx` | 采样回调 → 记一条样本 → 立刻按新倍率刷新用量那行；`refreshContextUsage()` 显示校准后的数字，并记住「有没有校准过」 || `packages/web/src/components/ContextMeter.tsx` | 校准过就在 `title` 里说明「已用供应商上报的真实提示 token 校准」——被修正过的数字必须说清楚，不然用户会把它当朴素估算而不信 || `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 的上下文那一行加上「（已按实测校准）」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| 新建 `packages/web/src/lib/agentContext/calibration.ts` | 按模型记一个「实际 / 估算」的平滑倍率：单条样本直接成为倍率，之后每来一条只占一半权重；倍率夹在 0.8–1.8；估算低于 2000 token 不采样（短对话的偏差主要是工具 schema 这类固定开销，摊成比例会虚高）；模型名大小写与首尾空白归一；最多记 12 个模型、按最近使用淘汰 |\n| `packages/web/src/lib/agentStream.ts` | 新增 `TriggerDeps.onContextSample`：供应商报了 `inputTokens` 时，把「模型 / 同一批消息的估算值 / 实际提示 token」交给调用方。只走回调不写存储（本模块保持纯逻辑可测），缺省不采样 |\n| `packages/web/src/components/ChatPage.tsx` | 采样回调 → 记一条样本 → 立刻按新倍率刷新用量那行；`refreshContextUsage()` 显示校准后的数字，并记住「有没有校准过」 |\n| `packages/web/src/components/ContextMeter.tsx` | 校准过就在 `title` 里说明「已用供应商上报的真实提示 token 校准」——被修正过的数字必须说清楚，不然用户会把它当朴素估算而不信 |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 的上下文那一行加上「（已按实测校准）」 |",
       "一条刻意的边界：**校准只影响显示与提醒，不改变压缩决策**。压缩是否需要发生仍由 `prepareHistory` 用未校准的估算自己算——一次异常样本顶多让那行数字偏一点，绝不能让它决定「把整段历史压掉」（压缩是不可逆的）。",
       "验证",
       "没做"
@@ -4881,7 +4893,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "长任务一跑就是十几二十轮，而界面上关于「它在干什么」的信息只有一句静态的「生成中：和小鸣」。用户判断不了「还在干活」还是「已经卡死」，只有两个选择：干等，或者点停止——后者会把跑了十分钟的活掐掉。",
       "更别扭的是：**旁支都有进度，主对话偏偏没有**。子代理有 `SubagentRuns`（d.200：第几轮 / 正在调哪个只读工具），后台作业有 `JobPanel`（d.203：哪条在跑、跑了多久），唯独最需要的那条主链路什么都不说。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | 新增 `TurnProgressEvent { round; phase: \"round\" \\| \"tool\"; tool? }` 与 `TriggerDeps.onProgress`；工具轮循环开头报一次 `round`（第 N 轮，从 1 起），每次工具调用前补一条 `tool`（带工具名）。缺省不报，行为与之前逐字一致 || 新建 `packages/web/src/lib/agentRuntime/turnProgress.ts` | 按会话存当前进度（内存 + 快照缓存，`useSyncExternalStore` 拿到稳定引用）；脏轮次（0 / 超过 99 / NaN）与空会话 id 一律不入账；`tool` 阶段没给工具名就退回「在思考」；`describeTurnProgress()` 与 `formatElapsed()` 让界面与其它位置共用同一口径 || 新建 `packages/web/src/components/TurnProgressLine.tsx` | 一行状态条：`第 3 轮 · 正在执行 file_grep · 已跑 42 秒`；没进度就整个不渲染（不留空白条）；带 `role=\"status\"` || `packages/web/src/components/ChatPage.tsx` | 接 `onProgress` → 写进度表；有进度时开 1 秒秒表推进「已跑 X 秒」；收口（`onRunSettled` 第一行）与切会话都清掉——留着等于告诉用户「还在跑」，它会一直等一个不存在的下一轮 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentStream.ts` | 新增 `TurnProgressEvent { round; phase: \"round\" \\| \"tool\"; tool? }` 与 `TriggerDeps.onProgress`；工具轮循环开头报一次 `round`（第 N 轮，从 1 起），每次工具调用前补一条 `tool`（带工具名）。缺省不报，行为与之前逐字一致 |\n| 新建 `packages/web/src/lib/agentRuntime/turnProgress.ts` | 按会话存当前进度（内存 + 快照缓存，`useSyncExternalStore` 拿到稳定引用）；脏轮次（0 / 超过 99 / NaN）与空会话 id 一律不入账；`tool` 阶段没给工具名就退回「在思考」；`describeTurnProgress()` 与 `formatElapsed()` 让界面与其它位置共用同一口径 |\n| 新建 `packages/web/src/components/TurnProgressLine.tsx` | 一行状态条：`第 3 轮 · 正在执行 file_grep · 已跑 42 秒`；没进度就整个不渲染（不留空白条）；带 `role=\"status\"` |\n| `packages/web/src/components/ChatPage.tsx` | 接 `onProgress` → 写进度表；有进度时开 1 秒秒表推进「已跑 X 秒」；收口（`onRunSettled` 第一行）与切会话都清掉——留着等于告诉用户「还在跑」，它会一直等一个不存在的下一轮 |",
       "口径三条：**只报事实**（轮次、工具名都是模型真的做过的事）、**不编百分比**（没人知道还差几轮）、**收口即消失**（进度不是历史，是现在）。",
       "验证",
       "没做"
@@ -4907,7 +4919,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.211 给流式响应加了「空闲超时」，但那只覆盖**流建立之后**。实际卡死还有两段更早/更隐蔽的空白：",
       "代码里这两处都没有任何计时器，`connectTimeoutMs` / 空闲超时都只作用于流已建立之后。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/llmClient.ts` | 新增 `CONNECT_TIMEOUT_MS = 120_000`：给「发出请求 → 拿到响应头」这段单独计时，超时 `abort` 连接并抛 `UpstreamTimeoutError`（`status 408`、`phase: \"connect\"`），复用已有的可重试分类 || 同上 | `doFetch` 改成「fetch 与计时器竞速」——不能给 `fetch` 加整体超时（那会把正常的长响应体一起掐掉）；拿到响应头即 `clearTimeout` || 同上 | 抽出 `readChunkWithIdle(reader)`：一次读一个 chunk，`idleMs` 内没读到就 `abort` + 抛 `StreamIdleTimeoutError`（`phase: \"stream\"`）；流式与非流式**共用同一份实现** || 同上 | 非流式分支的 `res.json()` 换成「先带空闲超时读完整个 body，再 `JSON.parse`」；`StreamIdleTimeoutError` / `UpstreamTimeoutError` 原样抛出，`AbortError` 仍转成用户停止，非法 JSON 给 `LlmHttpError(0, \"响应不是合法 JSON：…\")` || `packages/web/src/lib/agentRuntime/upstreamRetry.ts` | 408 的文案按 `phase` 分三档：`connect` →「上游一直没有开始响应（可能卡住了）」、`stream` →「流式响应卡住了（长时间没有新数据）」、无 phase →「上游响应超时（可能卡住了）」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/llmClient.ts` | 新增 `CONNECT_TIMEOUT_MS = 120_000`：给「发出请求 → 拿到响应头」这段单独计时，超时 `abort` 连接并抛 `UpstreamTimeoutError`（`status 408`、`phase: \"connect\"`），复用已有的可重试分类 |\n| 同上 | `doFetch` 改成「fetch 与计时器竞速」——不能给 `fetch` 加整体超时（那会把正常的长响应体一起掐掉）；拿到响应头即 `clearTimeout` |\n| 同上 | 抽出 `readChunkWithIdle(reader)`：一次读一个 chunk，`idleMs` 内没读到就 `abort` + 抛 `StreamIdleTimeoutError`（`phase: \"stream\"`）；流式与非流式**共用同一份实现** |\n| 同上 | 非流式分支的 `res.json()` 换成「先带空闲超时读完整个 body，再 `JSON.parse`」；`StreamIdleTimeoutError` / `UpstreamTimeoutError` 原样抛出，`AbortError` 仍转成用户停止，非法 JSON 给 `LlmHttpError(0, \"响应不是合法 JSON：…\")` |\n| `packages/web/src/lib/agentRuntime/upstreamRetry.ts` | 408 的文案按 `phase` 分三档：`connect` →「上游一直没有开始响应（可能卡住了）」、`stream` →「流式响应卡住了（长时间没有新数据）」、无 phase →「上游响应超时（可能卡住了）」 |",
       "验证",
       "没做"
     ]
@@ -4925,7 +4937,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**为什么做**",
       "长任务最常见的错觉是「屏幕没动 = 它没在干活」。在会话 A 里派一轮要跑几分钟的活，切到会话 B 看别的东西，左栏里 A 和别的会话长得一模一样——于是回去重发一遍，或者干脆把整个应用关掉。`/status` 只在打开那个会话时说话，「未跑完」徽标（d.196）说的是**过去**没跑完，都回答不了「此刻哪几个在跑」。",
       "**改了什么**",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/runningStreams.ts`（新） | 纯函数 `runningConversationIds(streaming, streamOwner)` / `isConversationRunning(...)`：只认本机起的流（`streamOwner[id] === true`）、只认 `status === \"streaming\"`、按会话去重、丢掉没有会话 id 的条目；不读时间不读存储，口径可以单测 || `packages/web/src/lib/agentRuntime/useRunningConversations.ts`（新） | `useMemo` 把两个 store 切片算成 `Set<string>`：左栏每行问一次「这条在不在里面」是 O(1)，且只在切片真的换引用时重算 || `packages/web/src/components/RunningTurnBadge.tsx`（新） | 会话行上的「正在跑」徽标（`ui-chip`、`aria-label=\"正在跑\"`、title 说明「模型或工具正在工作」）；不在跑就不渲染 || `packages/web/src/components/assistant/ConversationRail.tsx` | 在「未跑完」徽标之前渲染它——两者互不替代：一个说此刻，一个说过去 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/runningStreams.ts`（新） | 纯函数 `runningConversationIds(streaming, streamOwner)` / `isConversationRunning(...)`：只认本机起的流（`streamOwner[id] === true`）、只认 `status === \"streaming\"`、按会话去重、丢掉没有会话 id 的条目；不读时间不读存储，口径可以单测 |\n| `packages/web/src/lib/agentRuntime/useRunningConversations.ts`（新） | `useMemo` 把两个 store 切片算成 `Set<string>`：左栏每行问一次「这条在不在里面」是 O(1)，且只在切片真的换引用时重算 |\n| `packages/web/src/components/RunningTurnBadge.tsx`（新） | 会话行上的「正在跑」徽标（`ui-chip`、`aria-label=\"正在跑\"`、title 说明「模型或工具正在工作」）；不在跑就不渲染 |\n| `packages/web/src/components/assistant/ConversationRail.tsx` | 在「未跑完」徽标之前渲染它——两者互不替代：一个说此刻，一个说过去 |",
       "**验证**",
       "**没做**",
       "1. 不显示进度百分比：真实进度只有子代理/后台作业知道，左栏编一个数字比不显示更坏。2. 不在工作区分组头上汇总（「这个工作区有 2 个在跑」）——先把单会话口径钉住。3. 不做托盘/任务栏角标：与「不打包」的验证口径无关，留给需要时再加。"
@@ -4949,7 +4961,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "真实场景里这样卡住很常见：供应商在「思考」时长时间不发字节、中间网关被限流后既不回数据也不断开、半死的长连接留在那里。此时 `reader.read()` 会一直挂着——界面上是一个永远转圈的「生成中」，用户没有任何错误可看，只能手动点停止；而点停止之后这一轮就白跑了。",
       "`fetch` 本身没有空闲超时，所以这一层必须自己兜。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/llmClient.ts` | 新增 `STREAM_IDLE_TIMEOUT_MS = 120_000`：流式读循环改成「带空闲超时的读」，超过 120 秒没有新字节就中止这条连接并抛 `StreamIdleTimeoutError`（`status = 408`，直接落进已有的上游重试分类，不用特判）；空闲超时会真的 abort 底层 `fetch`，不把坏连接留着让重试撞上去 || 同上 | `StreamChatOpts.idleTimeoutMs?` 只给测试用（产品里不传，走 120 秒默认）；`combineSignals` 把「用户停止」与「空闲超时」两个信号合成一个总闸 || `packages/web/src/lib/agentRuntime/upstreamRetry.ts` | `describeUpstreamError` 给 408 单独一句「流式响应卡住了（长时间没有新数据）」——说成 `HTTP 408` 等于没说 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/llmClient.ts` | 新增 `STREAM_IDLE_TIMEOUT_MS = 120_000`：流式读循环改成「带空闲超时的读」，超过 120 秒没有新字节就中止这条连接并抛 `StreamIdleTimeoutError`（`status = 408`，直接落进已有的上游重试分类，不用特判）；空闲超时会真的 abort 底层 `fetch`，不把坏连接留着让重试撞上去 |\n| 同上 | `StreamChatOpts.idleTimeoutMs?` 只给测试用（产品里不传，走 120 秒默认）；`combineSignals` 把「用户停止」与「空闲超时」两个信号合成一个总闸 |\n| `packages/web/src/lib/agentRuntime/upstreamRetry.ts` | `describeUpstreamError` 给 408 单独一句「流式响应卡住了（长时间没有新数据）」——说成 `HTTP 408` 等于没说 |",
       "验证",
       "没做"
     ]
@@ -4970,7 +4982,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一版（d.207）能逐行看「本轮改成了什么」，但那份对照挂在**当前一轮**上：下一轮跑起来就被覆盖，点一下「保留」也立刻消失。长任务改到第十几轮之后，用户想问的其实是另一个问题——**这个会话一共动过哪些文件？** 之前只能靠翻聊天记录回忆，而记录会被压缩、会被折叠。",
       "长任务里最贵的失误不是改错一行，是「改乱了却不知道乱在哪、也没法回头」。所以这一轮补的是会话级的改动台账：改过哪些文件、每个文件改过几次，点进去仍能逐行对照。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/sessionChanges.ts`（新） | 会话级台账：每个会话记 `{ path, at, writes }`，内存 + localStorage 双写（`heming.sessionChanges.v1`），每会话最多 100 个文件、最多 30 个会话，坏数据静默丢弃；`getSessionChanges` 的快照引用稳定（`useSyncExternalStore` 必须），最近改的排前面 || `packages/web/src/components/SessionChangesBar.tsx`（新） | 输入框上方一条「本会话改过 a.ts、b.ts、c.ts 等 N 个」+「查看改动」；没有记录时整条不渲染 || `packages/web/src/components/ChangeDiffDialog.tsx` | 加可选的文件列表（左侧栏，每个文件标「改过 N 次」、当前文件高亮）；点另一个文件就换成它的对照；不传列表时仍是原来的单文件弹窗，老入口行为不变 || `packages/web/src/components/ChatPage.tsx` | 每轮收口把 `result.writes` 记进台账（同一文件重复改只累加次数、不堆重复条目）；「查看改动」直接打开台账第一条的对照；切会话/开始新一轮/撤回后都关掉弹窗，不留上一轮的残影 || `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 多一行「本会话改动：N 个文件」，没有改动时不占行 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/fileEdit/sessionChanges.ts`（新） | 会话级台账：每个会话记 `{ path, at, writes }`，内存 + localStorage 双写（`heming.sessionChanges.v1`），每会话最多 100 个文件、最多 30 个会话，坏数据静默丢弃；`getSessionChanges` 的快照引用稳定（`useSyncExternalStore` 必须），最近改的排前面 |\n| `packages/web/src/components/SessionChangesBar.tsx`（新） | 输入框上方一条「本会话改过 a.ts、b.ts、c.ts 等 N 个」+「查看改动」；没有记录时整条不渲染 |\n| `packages/web/src/components/ChangeDiffDialog.tsx` | 加可选的文件列表（左侧栏，每个文件标「改过 N 次」、当前文件高亮）；点另一个文件就换成它的对照；不传列表时仍是原来的单文件弹窗，老入口行为不变 |\n| `packages/web/src/components/ChatPage.tsx` | 每轮收口把 `result.writes` 记进台账（同一文件重复改只累加次数、不堆重复条目）；「查看改动」直接打开台账第一条的对照；切会话/开始新一轮/撤回后都关掉弹窗，不留上一轮的残影 |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 多一行「本会话改动：N 个文件」，没有改动时不占行 |",
       "验证",
       "没做"
     ]
@@ -5019,7 +5031,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "长任务最典型的使用方式是「让它跑，我去干别的」。可这条链路一直断着：桌面端的通知桥（`notify-bridge.js`）从 d.39 起就齐全——限长、按码点截断、窗口在前台就不打扰、点击回传会话 id，连压力测试都有；渲染层也有 `notifyDesktop()`。但**生产代码里没有任何一处调用它**，`notify:open` 也从来没有被订阅。",
       "结果是：切走的用户永远不知道自己那一轮已经跑完，或者正停在「等你确认」上——回来时看到的是「已超时按拒绝处理」。通知功能在代码里存在了几个月，在用户那里等于不存在。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/desktopNotify.ts` | 加开关（`heming.desktopNotify.v1`，默认开、只认显式 `0` 为关）；`notifyDesktop` 先看开关；新增 `onDesktopNotifyOpen()` 订阅点击回传（包装 `__heming_notify.onOpen`，异常不外溢、返回退订） || `packages/web/src/lib/agentRuntime/turnNotify.ts`（新） | 纯函数把收口状态翻成人话：做完了 / 出错了 / 撞轮次上限 / 上下文满了；用户自己点停的**不提醒**；工具确认等待单独一条；按「同会话同标题 4 秒」「同 requestId 一小时」去重 || `packages/web/src/components/ChatPage.tsx` | 收口时 `notifyTurnEnd()`；确认请求出现时 `notifyApprovalWait()`；订阅 `onDesktopNotifyOpen` 做点击回跳；切会话重置去重表；`/notify on|off` 本地命令 || `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `/notify`（面板第 7 条命令，能被发现） || `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 多一行「系统通知：开/关」 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/desktopNotify.ts` | 加开关（`heming.desktopNotify.v1`，默认开、只认显式 `0` 为关）；`notifyDesktop` 先看开关；新增 `onDesktopNotifyOpen()` 订阅点击回传（包装 `__heming_notify.onOpen`，异常不外溢、返回退订） |\n| `packages/web/src/lib/agentRuntime/turnNotify.ts`（新） | 纯函数把收口状态翻成人话：做完了 / 出错了 / 撞轮次上限 / 上下文满了；用户自己点停的**不提醒**；工具确认等待单独一条；按「同会话同标题 4 秒」「同 requestId 一小时」去重 |\n| `packages/web/src/components/ChatPage.tsx` | 收口时 `notifyTurnEnd()`；确认请求出现时 `notifyApprovalWait()`；订阅 `onDesktopNotifyOpen` 做点击回跳；切会话重置去重表；`/notify on|off` 本地命令 |\n| `packages/web/src/lib/agentRuntime/slashCommands.ts` | 新增 `/notify`（面板第 7 条命令，能被发现） |\n| `packages/web/src/lib/agentRuntime/statusReport.ts` | `/status` 多一行「系统通知：开/关」 |",
       "两条口径：**只报状态，不猜结果**（正文取模型最后输出那一行，没有就写「打开会话看结果」）；**窗口在前台就不弹**（沿用桌面端既有判断，不在这里另造一套）。",
       "验证",
       "没做"
@@ -5042,7 +5054,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.176 / d.185 已经能让用户「撤回本轮改动」了，但**撤之前看不到改了什么**。模型改文件的动作往往发生在你没打开的那些文件里：界面上只写着「本轮改了 a.ts、b.ts」，至于里面那几行变成什么样，得自己开编辑器对着看（还得先猜到是哪一行）。",
       "现实后果是「撤回」这个功能几乎不敢用——万一撤掉的是自己要的改动呢？于是宁可留着错的，也不点。这轮把「看清楚」补上：每个文件一行「改动」按钮，点开是改动前/改动后的逐行对照。",
       "改了什么",
-      "| 层 | 文件 | 改动 || --- | --- | --- || 桌面 | `packages/desktop/file-fs.js` | 新增 `previewBackup()`：**只读**读回某个路径最近一份改动前备份（走与 `undoWrite` 同一套闸：可写根、只读根、根内、软链祖先、保留名），不消费备份、不动目标文件；256KB 上限、二进制嗅探、`cut` 标记 || 桌面 | `packages/desktop/file-fs.js` / `preload.js` | 新 IPC `file:backup-preview` → `__heming_files.backupPreview`（只暴露给主预加载，组件/桌宠不暴露） || 桌面 | 三处测试 | 通道白名单（`main.test.js` / `secure-origins.test.js`）、`preload.test.js` 转发断言、`file-fs.test.js` 4 例（不消费备份、no-backup、二进制、截断、IPC 闸门） || 渲染 | `packages/web/src/lib/fileEdit/turnDiff.ts` | 新行级对照：先剥公共前后缀、中间用 LCS，长段未改动折叠成「…（省略 N 行未改动）」；完全一致时**不产出任何行**并明说「内容没有变化」；最多 600 行、上下文 3 行 || 渲染 | `packages/web/src/components/ChangeDiffDialog.tsx` | 新弹窗：等宽列表 + 两列行号 + `+`/`-` 前缀；加载、错误、二进制、截断各自如实说；底部只有一个「知道了」 || 渲染 | `packages/web/src/components/TurnUndoBar.tsx` | 每个文件多一个「改动」按钮（没收到 `onPreview` 就不渲染，老安装包行为不变） || 渲染 | `packages/web/src/components/ChatPage.tsx` | `previewTurnChange()`：先预览备份、再读当前文件，两边都拿到才画对照；读不到备份（新建文件 / 已撤销用过）就直说原因；切会话、开新一轮、撤回之后都关掉对照 |",
+      "| 层 | 文件 | 改动 |\n| --- | --- | --- |\n| 桌面 | `packages/desktop/file-fs.js` | 新增 `previewBackup()`：**只读**读回某个路径最近一份改动前备份（走与 `undoWrite` 同一套闸：可写根、只读根、根内、软链祖先、保留名），不消费备份、不动目标文件；256KB 上限、二进制嗅探、`cut` 标记 |\n| 桌面 | `packages/desktop/file-fs.js` / `preload.js` | 新 IPC `file:backup-preview` → `__heming_files.backupPreview`（只暴露给主预加载，组件/桌宠不暴露） |\n| 桌面 | 三处测试 | 通道白名单（`main.test.js` / `secure-origins.test.js`）、`preload.test.js` 转发断言、`file-fs.test.js` 4 例（不消费备份、no-backup、二进制、截断、IPC 闸门） |\n| 渲染 | `packages/web/src/lib/fileEdit/turnDiff.ts` | 新行级对照：先剥公共前后缀、中间用 LCS，长段未改动折叠成「…（省略 N 行未改动）」；完全一致时**不产出任何行**并明说「内容没有变化」；最多 600 行、上下文 3 行 |\n| 渲染 | `packages/web/src/components/ChangeDiffDialog.tsx` | 新弹窗：等宽列表 + 两列行号 + `+`/`-` 前缀；加载、错误、二进制、截断各自如实说；底部只有一个「知道了」 |\n| 渲染 | `packages/web/src/components/TurnUndoBar.tsx` | 每个文件多一个「改动」按钮（没收到 `onPreview` 就不渲染，老安装包行为不变） |\n| 渲染 | `packages/web/src/components/ChatPage.tsx` | `previewTurnChange()`：先预览备份、再读当前文件，两边都拿到才画对照；读不到备份（新建文件 / 已撤销用过）就直说原因；切会话、开新一轮、撤回之后都关掉对照 |",
       "对照的两边都是**真实文件内容**，不是从工具参数里拼出来的：`file_edit` 只带改动片段，用它拼对照会把文件其余部分漏掉。",
       "验证",
       "没做"
@@ -5068,7 +5080,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.191 的解法是在 `agentRuntime/coreTools.ts` 里列一份**常驻名单**。这个解法本身没错，但它有一个隐蔽的失效方式：**会过期，而且不报错**。",
       "d.204 加了 `workflow_run`，没人想起来往名单里补。后果：装了 MCP 的机器上，模型自己做的工作流工具可能被挤到看不见的地方——它刚学会怎么编排，转头就摸不到那个工具了。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `lib/agentStream.ts` | `ToolBridge.meta` 的返回类型加 `core?: boolean`：**由注册工具的地方声明**「这是长任务全程要用的本地核心工具」 || `lib/fileEdit/tools.ts`、`lib/shell/tool.ts`、`lib/todo/tool.ts`、`lib/spill/tool.ts`、`lib/agentRuntime/subagent.ts`、`lib/agentRuntime/workflow.ts` | 六个内置桥在自己的 `meta()` 里声明 `core: true`（文件读写出 8 个、命令与作业 4 个、清单、长输出、子代理、工作流） || `lib/agentRuntime/coreTools.ts` | `isCoreTool(name, metaOf?)` / `coreToolNames(names, metaOf?)`：**声明优先，旧名单兜底，两者取并集**；旧名单补上漏掉的 `workflow_run` || `lib/agentStream.ts`（钉选处）、`components/ChatPage.tsx`（`/status` 计） | 都改成把桥的 `meta` 传进去，两条路径同一口径 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `lib/agentStream.ts` | `ToolBridge.meta` 的返回类型加 `core?: boolean`：**由注册工具的地方声明**「这是长任务全程要用的本地核心工具」 |\n| `lib/fileEdit/tools.ts`、`lib/shell/tool.ts`、`lib/todo/tool.ts`、`lib/spill/tool.ts`、`lib/agentRuntime/subagent.ts`、`lib/agentRuntime/workflow.ts` | 六个内置桥在自己的 `meta()` 里声明 `core: true`（文件读写出 8 个、命令与作业 4 个、清单、长输出、子代理、工作流） |\n| `lib/agentRuntime/coreTools.ts` | `isCoreTool(name, metaOf?)` / `coreToolNames(names, metaOf?)`：**声明优先，旧名单兜底，两者取并集**；旧名单补上漏掉的 `workflow_run` |\n| `lib/agentStream.ts`（钉选处）、`components/ChatPage.tsx`（`/status` 计） | 都改成把桥的 `meta` 传进去，两条路径同一口径 |",
       "为什么用「并集」而不是直接删掉清单：清单兜住的是**没补声明的桥**（第三方、老安装包、单测假桥）。声明漏了最坏退回以前的行为，不会更差；声明补上了就立刻生效。",
       "验证",
       "没做"
@@ -5100,7 +5112,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.186 给工具调用加了 180 秒兜底超时，但当时只做到「**不再等**」：`Promise.race` 一到点就回一条失败文案，底层那次调用还照跑——本机命令的子进程、MCP 的 HTTP 请求都留在后面继续跑。",
       "后果是安静的，也更危险：",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | `withToolTimeout` 改成收 `run(signal)`：给**每一次**工具调用建自己的 `AbortController`，与本轮停止信号合成；超时那一刻 `abort()` 这次调用。文案分两条：真发了取消 → 「已经请求取消这次调用：能停的（本机命令、MCP 调用）会真的停下，其余只是不再等它」；本轮同时被停止 → 「已经中止这次等待（本轮同时被停止）」 || 同上 | `TriggerDeps` 新增 `toolTimeoutMs?`：**只给测试用**（把 180 秒压到 1 秒才能验「超时真的 abort」），注释写明产品里不要传——超时值不该由调用点各说各话 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentStream.ts` | `withToolTimeout` 改成收 `run(signal)`：给**每一次**工具调用建自己的 `AbortController`，与本轮停止信号合成；超时那一刻 `abort()` 这次调用。文案分两条：真发了取消 → 「已经请求取消这次调用：能停的（本机命令、MCP 调用）会真的停下，其余只是不再等它」；本轮同时被停止 → 「已经中止这次等待（本轮同时被停止）」 |\n| 同上 | `TriggerDeps` 新增 `toolTimeoutMs?`：**只给测试用**（把 180 秒压到 1 秒才能验「超时真的 abort」），注释写明产品里不要传——超时值不该由调用点各说各话 |",
       "为什么这就够：真正「停掉」的能力早就有了，只是没接上——",
       "所以这次没有新增「杀进程」逻辑，只把**超时**接到了那条已有的取消链上。",
       "验证",
@@ -5127,7 +5139,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.204 的工作流编排只被单元测试盯着：`workflow.test.ts` 证明「依赖排序、上游结论注入、失败隔离」这些逻辑对，但它证明不了**模型真的会调到这件工具**——`workflow_run` 在评测里此前根本不存在，`evals/runner/tools.ts` 只组文件工具、`todo_write`、`tool_output_read` 和按用例挂的 `run_command`。",
       "这是这个仓库反复踩过的坑：d.159 的 `evals/runner` 只认两个文件工具，d.153 新加的四个工具一度完全度量不到。新能力不上评测，就等于「自己说它能用」。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `evals/runner/types.ts` | `EvalCase` 加 `workflow?: boolean`（注释写明：与 `agent_task` 共用 `subagent_script`，各自一份队列；缺省不注入，免得既有用例的工具清单被多一件工具带偏） || `evals/runner/loader.ts` | 解析 `workflow` 开关 || `evals/runner/run.ts` | 在子代理包装之外再包一层 `withWorkflowTool`；**单独建一份** `createScriptedSubagentChat(testCase.subagent_script)` 给工作流用——和 `agent_task` 共用一份队列的话，两边会互相抢回合 || `evals/cases/wf-001.yaml` | 新用例：两步有依赖（`scan` → `read`），`needs` 故意写成前向引用；断言工具被调 1 次、工具结果里有批次头 `工作流（2 步`、`2 批`、两个步骤分段与两步结论 || `evals/fixtures/wf-001/` | 极简夹具（`README.md` + `src/main.ts`）：用例只验证批次与结论回灌，不依赖真实文件内容 || `evals/README.md` | 用例数 49 → 50（可回放 39 → 40）；覆盖段落补 `wf-001`；「工具开关」小节加「工作流编排（d.205）」一条，说明为什么「上游结论注入」由单元测试盯而不是评测盯 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `evals/runner/types.ts` | `EvalCase` 加 `workflow?: boolean`（注释写明：与 `agent_task` 共用 `subagent_script`，各自一份队列；缺省不注入，免得既有用例的工具清单被多一件工具带偏） |\n| `evals/runner/loader.ts` | 解析 `workflow` 开关 |\n| `evals/runner/run.ts` | 在子代理包装之外再包一层 `withWorkflowTool`；**单独建一份** `createScriptedSubagentChat(testCase.subagent_script)` 给工作流用——和 `agent_task` 共用一份队列的话，两边会互相抢回合 |\n| `evals/cases/wf-001.yaml` | 新用例：两步有依赖（`scan` → `read`），`needs` 故意写成前向引用；断言工具被调 1 次、工具结果里有批次头 `工作流（2 步`、`2 批`、两个步骤分段与两步结论 |\n| `evals/fixtures/wf-001/` | 极简夹具（`README.md` + `src/main.ts`）：用例只验证批次与结论回灌，不依赖真实文件内容 |\n| `evals/README.md` | 用例数 49 → 50（可回放 39 → 40）；覆盖段落补 `wf-001`；「工具开关」小节加「工作流编排（d.205）」一条，说明为什么「上游结论注入」由单元测试盯而不是评测盯 |",
       "验证",
       "没做"
     ]
@@ -5707,7 +5719,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么",
       "工具是外部世界（MCP 服务、浏览器桥、命令、网络），**没有哪一处保证一定返回**。一个不返回的调用会让整轮对话一直挂着：界面一直显示「正在调用 X」，用户只能手点停止，而模型此时什么信息都没拿到，也不知道该换路。d.180 加了后台作业以后，长任务更多地依赖外部服务，这个洞只会更容易被踩到。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | 新增 `TOOL_CALL_TIMEOUT_MS = 180_000` 与 `withToolTimeout()`：每次 `bridge.execute` 都套一层兜底超时 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentStream.ts` | 新增 `TOOL_CALL_TIMEOUT_MS = 180_000` 与 `withToolTimeout()`：每次 `bridge.execute` 都套一层兜底超时 |",
       "超时后回给模型的是一条**能照做的失败文案**，而不是空结果：",
       "> 工具 X 超过 180 秒没有返回，已经中止这次等待。这不算任务失败：可以换一种做法> （例如换成后台作业、缩小范围、或先确认外部服务的状态）再继续。",
       "三条口径",
@@ -5730,7 +5742,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么",
       "d.176 的「本轮改动可撤回」只有**全部撤回**这一个动作。真实场景是：一轮改了五个文件、只有两个不对——全部撤回等于把对的也扔了，用户只能再让模型写一遍（还可能写出不一样的东西）。codex 的审阅体验是按文件看、按文件改；和鸣至少要做到按文件撤。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/components/TurnUndoBar.tsx` | 新增「看清单/收起清单」：每行一个文件（文件名 + 所在目录 + 各自的「撤回」）；新增 `busyPath` 让正在撤的那一行单独显示「撤回中…」 || `packages/web/src/components/ChatPage.tsx` | 新增 `undoingPath` state 与 `undoTurnFile(path)`：走同一个 `file:undo` 通道，成功后把该路径从清单里移除，其余保留 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/components/TurnUndoBar.tsx` | 新增「看清单/收起清单」：每行一个文件（文件名 + 所在目录 + 各自的「撤回」）；新增 `busyPath` 让正在撤的那一行单独显示「撤回中…」 |\n| `packages/web/src/components/ChatPage.tsx` | 新增 `undoingPath` state 与 `undoTurnFile(path)`：走同一个 `file:undo` 通道，成功后把该路径从清单里移除，其余保留 |",
       "口径（与「全部撤回」一致，没有另开路径）",
       "1. 仍然逐个文件走 `file_undo`，**一份备份只能用一次**——所以同一个文件连点两次，第二次会明确说「没有可用的旧版本」，而不是假装成功。2. 失败不改清单：撤失败的文件仍留在列表里，用户能重试或手工处理。3. 不传 `onUndoOne` 时行为与 d.176 完全一致（老调用方不受影响）。",
       "验证",
@@ -5752,7 +5764,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "为什么",
       "d.183 加了 `/compact`，但用户得先知道有这串字符——输入框里没有任何「发现」它的入口。codex / Claude Code 都是打 `/` 就列出可用命令；和鸣此前是「文档里写了，界面上没有」。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/slashCommands.ts`（新） | 命令注册表 `SLASH_COMMANDS`（`/compact`、`/plan`）、`PLAN_COMMAND`、`slashQuery()`、`matchSlashCommands()` || `packages/web/src/components/SlashCommandMenu.tsx`（新） | `role=\"listbox\"` 面板：命令名 + 标题 + 说明，`aria-selected` 跟随高亮；只负责显示与点选 || `packages/web/src/components/ChatPage.tsx` | 输入框键盘接管 ↑↓ / Enter / Esc（面板打开时），`/plan` 本地切换计划模式；`/compact` 仍走 d.183 的本地压缩 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/slashCommands.ts`（新） | 命令注册表 `SLASH_COMMANDS`（`/compact`、`/plan`）、`PLAN_COMMAND`、`slashQuery()`、`matchSlashCommands()` |\n| `packages/web/src/components/SlashCommandMenu.tsx`（新） | `role=\"listbox\"` 面板：命令名 + 标题 + 说明，`aria-selected` 跟随高亮；只负责显示与点选 |\n| `packages/web/src/components/ChatPage.tsx` | 输入框键盘接管 ↑↓ / Enter / Esc（面板打开时），`/plan` 本地切换计划模式；`/compact` 仍走 d.183 的本地压缩 |",
       "三条判定口径（都是为了「别抢正常输入」）",
       "1. **只认「以 `/` 开头、单行、且还没打完」**：`1/2 的平均值`、`看一下 /docs 目录` 都不弹面板。2. **打完命令就不再弹**：`/compact` 打全或带尾随空格时面板收起，下一次 Enter 直接执行——面板留着会挡住「执行」这个动作本身。3. **进入面板就不抢发送**：面板打开时 Enter 是「补全/执行选中项」，不是「把半截命令发出去」。",
       "验证",
@@ -5774,7 +5786,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "自动压缩只在**预算撞墙**时发生：长任务跑到中段，用户没有任何办法主动把上下文变轻；而且压缩之后看不到发生了什么——省了多少、折叠了几条、摘要顶替了哪一段，全是隐式的。于是「它怎么突然忘了前面」成了一团无法解释的现象，用户能做的只有重新交代一遍。",
       "对照 DSH 与 codex / opencode：它们都给了显式的压缩入口（`/compact`），并在动作前后说明结果。和鸣此前缺的不是压缩能力（`prepareHistory` 早就在做摘要 + 折叠 + 缓存），缺的是**手动入口与可见性**。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentContext/history.ts` | `PrepareHistoryDeps.force`；新增 `compactNow()`：`force` 折叠「除最后一轮以外的全部」，算 `beforeTokens`/`afterTokens`，`afterTokens >= beforeTokens` 时如实回「不划算」、不替换原始消息；`conversationId` 存在时把手动摘要正文写回 || `packages/web/src/lib/agentContext/manualCompact.ts`（新） | `COMPACT_COMMAND=\"/compact\"`、`heming.contextManual.v1`、`setManualSummary` / `takeManualSummary`（读出即删、一次性）/ `clearManualSummaries` || `packages/web/src/lib/agentContext/index.ts` | 导出 `manualCompact` || `packages/web/src/components/ChatPage.tsx` | `runCompactCommand()`：取本会话最近 120 条历史 → 转成 user/assistant 文本行（e2e 解不开的跳过、文档拼接正文、空内容跳过）→ `compactNow`；`submitMessage` 命中 `/compact` 时本地处理、不落库、不发给模型；结果通过 `notice` 回到提示位（`resetComposer` 会清提示，所以在它之后落位） |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentContext/history.ts` | `PrepareHistoryDeps.force`；新增 `compactNow()`：`force` 折叠「除最后一轮以外的全部」，算 `beforeTokens`/`afterTokens`，`afterTokens >= beforeTokens` 时如实回「不划算」、不替换原始消息；`conversationId` 存在时把手动摘要正文写回 |\n| `packages/web/src/lib/agentContext/manualCompact.ts`（新） | `COMPACT_COMMAND=\"/compact\"`、`heming.contextManual.v1`、`setManualSummary` / `takeManualSummary`（读出即删、一次性）/ `clearManualSummaries` |\n| `packages/web/src/lib/agentContext/index.ts` | 导出 `manualCompact` |\n| `packages/web/src/components/ChatPage.tsx` | `runCompactCommand()`：取本会话最近 120 条历史 → 转成 user/assistant 文本行（e2e 解不开的跳过、文档拼接正文、空内容跳过）→ `compactNow`；`submitMessage` 命中 `/compact` 时本地处理、不落库、不发给模型；结果通过 `notice` 回到提示位（`resetComposer` 会清提示，所以在它之后落位） |",
       "为什么手动摘要不用 `SummaryCache`：`/compact` 在发送路径上只有简化文本行（没有工具配对），算出来的指纹与下一轮真实请求对不上，写进去也命中不了——用户点完还得再等一次摘要。一次性覆盖保证「点完就生效」，而且用过即删，不会变成陈旧事实。",
       "三条边界",
       "1. **不划算就不换**：短对话强行折叠，摘要本身占的地方比省下的还多，而且真实原文被换成了转述——此时回「压缩没有更省（现在约 N tokens），保持原样」，不动历史。2. **摘要是「一次性」的**：下一次真正发请求时被取走并用掉，同一轮不会重复生效，也不会在之后某轮突然拿一份过期摘要顶替真实历史。3. **太短直说**：不足 4 条消息时回「这段对话还太短，没有可以压缩的早期内容」，不做无意义动作。",
@@ -5796,7 +5808,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "**为什么**：d.180 让智能体能起后台命令，但它不会 `await` 一个后台作业——模型起完作业、说一句「已经启动了」就收口，之后**没有任何东西再叫它**。用户等十分钟回来问「好了没」，才发现作业早就结束了。d.181 解决了「长输出读得回来」，这一版解决「跑完了谁来接着做」。",
       "**改了什么**：",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/mcp/bridge.ts` | `ToolExecutionResult` 加 `jobs?: string[]`：让编排层知道「这轮起过后台作业」，界面不必从文案里抠 jobId || `packages/web/src/lib/shell/tool.ts` | 后台启动结果带上 `jobs: [jobId]` || `packages/web/src/lib/agentStream.ts` | 收集本轮所有 `jobs`，收口时随 `RunSettled.jobs` 交出去 || `packages/web/src/lib/shell/jobWatch.ts`（新） | `watchJobs` 轮询 `jobOutput` 到全部结束（串行、可中断、超时 30 分钟）；`summarizeWatchedJobs`、`jobContinuePrompt`、`runningJobs` || `packages/web/src/components/JobReadyBar.tsx`（新） | 输入区上方的作业条：说清哪几个作业、退出码，「继续」/「查看进展」 || `packages/web/src/components/ChatPage.tsx` | 收口时有作业就开盯；点「继续」发一条**不重发原提问**的续写口令（复用 `submitMessage` + `retryStream` 的同一口径） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/mcp/bridge.ts` | `ToolExecutionResult` 加 `jobs?: string[]`：让编排层知道「这轮起过后台作业」，界面不必从文案里抠 jobId |\n| `packages/web/src/lib/shell/tool.ts` | 后台启动结果带上 `jobs: [jobId]` |\n| `packages/web/src/lib/agentStream.ts` | 收集本轮所有 `jobs`，收口时随 `RunSettled.jobs` 交出去 |\n| `packages/web/src/lib/shell/jobWatch.ts`（新） | `watchJobs` 轮询 `jobOutput` 到全部结束（串行、可中断、超时 30 分钟）；`summarizeWatchedJobs`、`jobContinuePrompt`、`runningJobs` |\n| `packages/web/src/components/JobReadyBar.tsx`（新） | 输入区上方的作业条：说清哪几个作业、退出码，「继续」/「查看进展」 |\n| `packages/web/src/components/ChatPage.tsx` | 收口时有作业就开盯；点「继续」发一条**不重发原提问**的续写口令（复用 `submitMessage` + `retryStream` 的同一口径） |",
       "**三条「不能假装完成」的约束**（都在 `jobWatch.ts` 的注释里写明）：",
       "1. **读失败不算完成**：`jobOutput` 抛错或超时，作业保持 `running` 并标 `timedOut`，绝不当成「已结束」。2. **退出码拿不到就写「未知」**：桌面端清理过作业会回 `unknown-job`，记「已结束（退出码未知）」，不写 0。3. **只给入口，不偷偷烧 token**：跑完不自动发消息，由用户点「继续」；只起作业那一轮不会因为「还有作业在跑」被无限延长。",
       "**验证**：",
@@ -5820,7 +5832,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "但在长任务里它有个致命副作用：**被省略的那一段永久消失，且模型没有任何办法拿回来**。一次 `pnpm build` 的几千行日志、一次全仓 `grep` 的几百条命中、一个解析大 JSON 的工具返回——答案常常就在中段。模型只能拿着头尾猜，或者为了看中段把整个工具**再调一次**（真实模型确实会这么做，于是同一段内容被重复读进上下文，预算反而更早爆）。",
       "对照 DSH：`packages/spill`/`spill-local`/`spill-policy` 把超大输出落到会话私有文件，只把预览和定位交给模型。和鸣这一轮按同样的语义补上，但**不落到工作区**——见下面第 2 条。",
       "改了什么",
-      "| 位置 | 改动 ||---|---|| `packages/web/src/lib/spill/store.ts`（新） | 进程内溢出存储：`spillText(text)` 分号（`spill-1`、`spill-2`…）、保留 40 条 / 400 万字符上限、按最旧淘汰；`readSpill(id, offset, limit)` 分段读回（默认 8000、单次最多 40000），越界与坏参数都明确报错 || `packages/web/src/lib/spill/tool.ts`（新） | 新工具 `tool_output_read`（只读）：按 `offset`/`limit` 读回，回「第 a–b 字符 / 共 N 字符」并指路下一段；handle 不存在时明说「别在这里重试，重新调一次工具」 || `packages/web/src/lib/mcp/bridge.ts` | `truncateToolResult` 超限时把**完整原文**存进溢出存储，提示改成「共 N 字符，中间省略 X 字符；完整内容已保存为 `spill-K`，用 `tool_output_read` 按 offset/limit 分段读回」；新增 `spill: false` 选项——估算 token 时只量长度，不重复存一份（否则同一条结果被存两次，40 条上限被白白吃掉） || `packages/web/src/lib/capability/{providers,index}.ts` | 新增 `toolOutputProvider`（`id: \"tool-output\"`，注册在 `todo` 之后、`webtools` 之前）——注册顺序就是重名优先级，所以位置固定并被单测钉住 || `packages/web/src/lib/hitl/classify.ts` | `tool_output_read` 归 `read`（读的是内存里已有的文本，不碰磁盘、不产生新副作用），显示名「读取完整输出」 || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 仅当该工具注入时，在「长任务怎么处理」里加一行：超长结果会给 `spill-<数字>` 的 handle，要看中段就用 `tool_output_read`，**不要为了同样的内容把工具再调一次** || `evals/runner/tools.ts` | 评测工具桥也合并 `buildToolOutputBridge()`——真实运行里它始终注入，评测不一致就等于这条链在评测里不存在 || `evals/cases/spill-001.yaml` + `evals/fixtures/spill-001/build.log` | 646 行 / 25042 字节的构建日志（`NEEDLE-777` 在第 15000 字符处），断言 `file_read` 被调用、系统提示词里注入了 `tool_output_read` |",
+      "| 位置 | 改动 |\n|---|---|\n| `packages/web/src/lib/spill/store.ts`（新） | 进程内溢出存储：`spillText(text)` 分号（`spill-1`、`spill-2`…）、保留 40 条 / 400 万字符上限、按最旧淘汰；`readSpill(id, offset, limit)` 分段读回（默认 8000、单次最多 40000），越界与坏参数都明确报错 |\n| `packages/web/src/lib/spill/tool.ts`（新） | 新工具 `tool_output_read`（只读）：按 `offset`/`limit` 读回，回「第 a–b 字符 / 共 N 字符」并指路下一段；handle 不存在时明说「别在这里重试，重新调一次工具」 |\n| `packages/web/src/lib/mcp/bridge.ts` | `truncateToolResult` 超限时把**完整原文**存进溢出存储，提示改成「共 N 字符，中间省略 X 字符；完整内容已保存为 `spill-K`，用 `tool_output_read` 按 offset/limit 分段读回」；新增 `spill: false` 选项——估算 token 时只量长度，不重复存一份（否则同一条结果被存两次，40 条上限被白白吃掉） |\n| `packages/web/src/lib/capability/{providers,index}.ts` | 新增 `toolOutputProvider`（`id: \"tool-output\"`，注册在 `todo` 之后、`webtools` 之前）——注册顺序就是重名优先级，所以位置固定并被单测钉住 |\n| `packages/web/src/lib/hitl/classify.ts` | `tool_output_read` 归 `read`（读的是内存里已有的文本，不碰磁盘、不产生新副作用），显示名「读取完整输出」 |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | 仅当该工具注入时，在「长任务怎么处理」里加一行：超长结果会给 `spill-<数字>` 的 handle，要看中段就用 `tool_output_read`，**不要为了同样的内容把工具再调一次** |\n| `evals/runner/tools.ts` | 评测工具桥也合并 `buildToolOutputBridge()`——真实运行里它始终注入，评测不一致就等于这条链在评测里不存在 |\n| `evals/cases/spill-001.yaml` + `evals/fixtures/spill-001/build.log` | 646 行 / 25042 字节的构建日志（`NEEDLE-777` 在第 15000 字符处），断言 `file_read` 被调用、系统提示词里注入了 `tool_output_read` |",
       "三条刻意的取舍",
       "1. **不落工作区**：溢出内容放在进程内存里，不写用户的目录。写盘会把「读文件」变成「产生文件」——`file_glob` 会把它们当源文件列出来，撤回列表也会多出莫名其妙的条目。2. **代价写清楚**：重启后 handle 失效。这种情况下 `readSpill` 回 `spill-not-found` 并提示「重新调一次工具」，**绝不返回空串**——空串会被模型当成「我读过了，里面什么都没有」，比报错危险得多。3. **有上限且会淘汰**：40 条 / 400 万字符，超了从最旧开始丢；这是「方便读回」而不是「无限缓存」，否则一个循环调用的长任务能把桌面端内存吃穿。",
       "验证",
@@ -5851,7 +5863,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "真实工程里的长命令——`pnpm build`、`npm run test:e2e`、`docker build`、`cargo test`——动辄几分钟到几十分钟。同步跑法只有两种结局：要么整轮对话卡在一次等待里（用户看到的是「它不动了」），要么到 120 秒被杀掉（前面的输出也一起没了）。前十二版把「改文件 / 派帮手 / 记清单 / 会续跑」都做完了，但**最典型的长时间工程动作仍然跑不了**，所以这一版把「命令」从「一次调用一次等待」改造成「可以起一个作业、稍后回来看」。",
       "是什么",
       "四个动作，对应四个工具：",
-      "| 工具 | 风险 | 做什么 || --- | --- | --- || `run_command` 的 `background: true` | `danger` | 立刻返回 `jobId`，命令在后台跑，**不进入前台串行队列**（否则一条后台作业会把后面所有命令堵死） || `command_output` | `read` | 读「自上次读取以来」的增量输出；`wait_ms` 最多等 30 秒再返回，模型不用自己空转轮询 || `command_list` | `read` | 列出本主进程登记过的作业（含刚结束的），带 `running` / `exitCode` / 已产字节 / 丢弃字节 || `command_kill` | `write` | 按 `jobId` 停一个在跑的作业（杀进程树，不是只杀父进程） |",
+      "| 工具 | 风险 | 做什么 |\n| --- | --- | --- |\n| `run_command` 的 `background: true` | `danger` | 立刻返回 `jobId`，命令在后台跑，**不进入前台串行队列**（否则一条后台作业会把后面所有命令堵死） |\n| `command_output` | `read` | 读「自上次读取以来」的增量输出；`wait_ms` 最多等 30 秒再返回，模型不用自己空转轮询 |\n| `command_list` | `read` | 列出本主进程登记过的作业（含刚结束的），带 `running` / `exitCode` / 已产字节 / 丢弃字节 |\n| `command_kill` | `write` | 按 `jobId` 停一个在跑的作业（杀进程树，不是只杀父进程） |",
       "安全口径与 d.164 一致、没有放宽：",
       "怎么验证的",
       "未做（下一轮候选，按差距表的优先级）",
@@ -5904,7 +5916,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "所以这一版换了题源——从公开的 **Terminal-Bench 2**（harbor-framework/terminal-bench-2）的任务说明里挑真实题：",
       "只挑**不需要外网、不需要编译器**的题（本机没有 gcc、原题的 parquet 用 json 等价替代），题目语义不变；`git-multibranch` 需要 SSH/nginx、`large-scale-text-editing` 需要 vim 宏，暂时没有搬。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `evals/runner/types.ts` + `loader.ts` | 新增两个 grader：`file_equals`（输出文件与期望逐字一致，CRLF 归一、去掉末尾空行）与 `shell_check`（在工作目录跑校验命令，判退出码 + 可选 stdout 子串）。benchmark 的判分本来就是「文件对不对 + 测试脚本绿不绿」 || `evals/runner/loader.ts` | 修掉一个真 bug：`shell_check` 只校验 `command`、没把字段搬到 grader 上，导致 `spawn('')` 抛 `The argument 'file' cannot be empty`——整轮评测直接以「无法完成」收场。校验 ≠ 赋值 || `evals/cases/bench-*.yaml` + `evals/fixtures/bench-*/` | 5 道真实题，全部 `real_only`（回放模式没有剧本可演，跳过且不占分母），fixtures 里是真 git 仓库/真日志/真多源数据 || `evals/README.md` | 用例数 41 → 46（38 可回放 + 8 条 real_only）；补两个 grader 的表格行；补 benchmark 迁移说明 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `evals/runner/types.ts` + `loader.ts` | 新增两个 grader：`file_equals`（输出文件与期望逐字一致，CRLF 归一、去掉末尾空行）与 `shell_check`（在工作目录跑校验命令，判退出码 + 可选 stdout 子串）。benchmark 的判分本来就是「文件对不对 + 测试脚本绿不绿」 |\n| `evals/runner/loader.ts` | 修掉一个真 bug：`shell_check` 只校验 `command`、没把字段搬到 grader 上，导致 `spawn('')` 抛 `The argument 'file' cannot be empty`——整轮评测直接以「无法完成」收场。校验 ≠ 赋值 |\n| `evals/cases/bench-*.yaml` + `evals/fixtures/bench-*/` | 5 道真实题，全部 `real_only`（回放模式没有剧本可演，跳过且不占分母），fixtures 里是真 git 仓库/真日志/真多源数据 |\n| `evals/README.md` | 用例数 41 → 46（38 可回放 + 8 条 real_only）；补两个 grader 的表格行；补 benchmark 迁移说明 |",
       "验证",
       "未做",
       "1. 只跑了 flash 一个真实模型，没有多模型对比（`deepseek-v4-pro`、其它厂商）。2. benchmark 题是「一次性满分」还是「稳定分布」还需要 `--repeat` 多跑几轮（日志/正则题都是 7–12 回合，token 消耗大）。3. `git-multibranch`、`large-scale-text-editing` 这类需要服务器/vim 宏的题没有搬；"
@@ -5958,7 +5970,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "前面 24 版的能力验证都建立在**确定性假网关**上：脚本说「读两份文件」，模型就只读两份。它证明的是「工具链能跑」，不能证明「真模型拿着真实系统提示词、面对真实 API 时会怎么用」。用户给了 DeepSeek Key 之后，本轮做的是**真实环境测试**，结果是三类真问题：",
       "1. **真实模式下的回合数恒为 0**：`evals/runner/run.ts` 的 `rounds` 取自 `scripted.rounds()`（假网关被调用次数）。`--real` 时用的是真实 `streamChat`，假网关一次都没被调用，于是 `rounds = 0`——`min_rounds` / `max_rounds` 这两个 grader 在真实模式下**必然误判**（`long-001` 报「回合数 0 少于下限 14」，而它其实跑了 14 次真实请求）。2. **「工具恰好调用 N 次」在真实模式下测的是闲笔**：真实模型读一份还是三份文件、先 `file_edit` 还是先 `file_patch`，是**判断**不是脚本。按「恰好」判分，`read-002`（要求读两份）、`todo-001`（要求 `todo_write` 恰好一次）这类用例会把「模型做得更好」判成红。3. **DeepSeek V4 的能力没进静态表**：`/v1/models` 实测 `deepseek-flash` 是 1,048,576 上下文、393,216 输出、**支持图片输入**（`deepseek-v4-pro` 同窗口但纯文本）。而 `modelCaps.ts` 里只有 `deepseek-chat`（64K / 纯文本），`deepseek-flash` 走 `deepseek` 前缀规则后同样被当成 64K 纯文本模型——**宣称不能看图**，`capabilityNotice` 会把 `file_image` 取回来的图直接丢掉；`deepseek-v4-pro` 更惨，直接落进 8K 保守缺省。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `evals/runner/run.ts` | 真实模式用 `countingStreamChat` 数真实请求次数，`rounds` 取它（假网关模式仍是 `scripted.rounds()`）；观测里带 `real: true` || `evals/runner/types.ts` | `CaseObservation.real?: boolean`（grader 据此选口径） || `evals/runner/graders.ts` | `tool_called` 的 `times`：确定性模式仍「恰好」，真实模式放宽为「至少」；其余 grader（`hitl` / `no_side_effect` / `file_assert` / `tool_sequence`）不放松 || `packages/web/src/lib/modelCaps.ts` | 新增 `deepseek-flash`（1M / 393K / 视觉 / 工具 / 思考）与 `deepseek-v4-pro`（1M / 393K / 纯文本），并给它们各加前缀规则且排在泛化 `deepseek` 之前 || `evals/cases/img-003.yaml` + `evals/fixtures/img-003/shots/solid-red.png` | 新增**真实视觉**用例：32×32 纯红 PNG（99 字节，zlib 直接生成，不引依赖），要求 `file_image` 打开后回答主色 || `evals/README.md` | 38 条用例；新增「真实模型模式」小节，写明三处口径差异与「其余 grader 不放松」的理由；`tool_called` 表行同步 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `evals/runner/run.ts` | 真实模式用 `countingStreamChat` 数真实请求次数，`rounds` 取它（假网关模式仍是 `scripted.rounds()`）；观测里带 `real: true` |\n| `evals/runner/types.ts` | `CaseObservation.real?: boolean`（grader 据此选口径） |\n| `evals/runner/graders.ts` | `tool_called` 的 `times`：确定性模式仍「恰好」，真实模式放宽为「至少」；其余 grader（`hitl` / `no_side_effect` / `file_assert` / `tool_sequence`）不放松 |\n| `packages/web/src/lib/modelCaps.ts` | 新增 `deepseek-flash`（1M / 393K / 视觉 / 工具 / 思考）与 `deepseek-v4-pro`（1M / 393K / 纯文本），并给它们各加前缀规则且排在泛化 `deepseek` 之前 |\n| `evals/cases/img-003.yaml` + `evals/fixtures/img-003/shots/solid-red.png` | 新增**真实视觉**用例：32×32 纯红 PNG（99 字节，zlib 直接生成，不引依赖），要求 `file_image` 打开后回答主色 |\n| `evals/README.md` | 38 条用例；新增「真实模型模式」小节，写明三处口径差异与「其余 grader 不放松」的理由；`tool_called` 表行同步 |",
       "实测数据（同一 Key，2026-11-16）",
       "验证",
       "未做",
@@ -5982,7 +5994,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.167.4.103 修了「轮次到顶时气泡看起来答完了、要靠用户自己打『继续』」——但那只覆盖了**轮次**这一种收口。编排层还有第二种截断：工具结果累计超过单轮上下文预算（`planTurnBudget` 的 `turn` 闸门）。它同样会让答案停在半路，同样在末尾写一句「回复『继续』可以接着做」，而界面**完全不知道**这次为什么停——因为 `RunSettled.maxRounds` 只在轮次分支置位。",
       "结果就是：同一类「话没说完」，一种有按钮、一种只能自己打字。而预算收口往往发生在翻了很多文件、读了大输出之后——正是用户最不想自己接话的时候。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | 新增 `budgetHit`；预算分支置位；`RunSettled` 与运行信号都加 `budgetStop?: boolean`；成功收口时带出 || `packages/web/src/components/RoundLimitHint.tsx` | 新增 `ContinueReason = \"rounds\" \\| \"budget\"` 与 `reason` prop；预算档文案改成「工具返回的内容太多，先到了上下文预算的上限」，不再说「已用满 36 轮」 || `packages/web/src/components/ChatPage.tsx` | `continueReason` state；`onRunSettled` 里先看 `maxRounds`、再看 `budgetStop` 决定原因（两个都给同一个「继续」入口） |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentStream.ts` | 新增 `budgetHit`；预算分支置位；`RunSettled` 与运行信号都加 `budgetStop?: boolean`；成功收口时带出 |\n| `packages/web/src/components/RoundLimitHint.tsx` | 新增 `ContinueReason = \"rounds\" \\| \"budget\"` 与 `reason` prop；预算档文案改成「工具返回的内容太多，先到了上下文预算的上限」，不再说「已用满 36 轮」 |\n| `packages/web/src/components/ChatPage.tsx` | `continueReason` state；`onRunSettled` 里先看 `maxRounds`、再看 `budgetStop` 决定原因（两个都给同一个「继续」入口） |",
       "口径",
       "验证",
       "未做",
@@ -6005,7 +6017,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "d.170 已经给了模型 `file_undo`，d.171 又在设置里加了「最近改动（可回滚）」列表——但两处都要求用户**先意识到要撤、再去找入口、再翻路径**。真正会出事的时刻是「它刚写完，我一眼看出不对」：那一步应当就在眼前，而不是让人离开对话去设置里翻。",
       "这一版把「撤回」放到刚出结果的位置：这一轮只要真的写了文件，输入区上方就出现一条「本轮改了 a.ts、说明.md——改错了可以撤回」，点一次逐个文件走 `file:undo`，回到改动前的样子。",
       "改了什么",
-      "| 位置 | 改动 || --- | --- || `packages/web/src/lib/agentStream.ts` | `ToolBridge.execute` 结果类型加 `writes?: string[]`；`RunSettled` 加 `writes`；run 作用域用 `Set` 收「本回合真正落盘的文件」，失败结果不计，收口时带出去 || `packages/web/src/lib/fileEdit/toolOps.ts` | `runWrite` / `runEdit` / `runUndo` 成功时回 `writes: [绝对路径]` || `packages/web/src/lib/fileEdit/tools.ts` | `runPatch` 成功时回 `writes`＝补丁里每个目标（含删除：撤销会把旧内容写回来） || `packages/web/src/components/TurnUndoBar.tsx` | 新组件：说清改了哪几个、两个按钮（保留／撤回本轮改动）、撤回中禁用、空数组不渲染 || `packages/web/src/components/ChatPage.tsx` | `turnWrites` 记账（`onRunSettled` 收口时取 `result.writes`）、`undoTurnWrites()` 逐个撤回并汇报成功/失败数、渲染在计划就绪条之前且计划模式下不显示 |",
+      "| 位置 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentStream.ts` | `ToolBridge.execute` 结果类型加 `writes?: string[]`；`RunSettled` 加 `writes`；run 作用域用 `Set` 收「本回合真正落盘的文件」，失败结果不计，收口时带出去 |\n| `packages/web/src/lib/fileEdit/toolOps.ts` | `runWrite` / `runEdit` / `runUndo` 成功时回 `writes: [绝对路径]` |\n| `packages/web/src/lib/fileEdit/tools.ts` | `runPatch` 成功时回 `writes`＝补丁里每个目标（含删除：撤销会把旧内容写回来） |\n| `packages/web/src/components/TurnUndoBar.tsx` | 新组件：说清改了哪几个、两个按钮（保留／撤回本轮改动）、撤回中禁用、空数组不渲染 |\n| `packages/web/src/components/ChatPage.tsx` | `turnWrites` 记账（`onRunSettled` 收口时取 `result.writes`）、`undoTurnWrites()` 逐个撤回并汇报成功/失败数、渲染在计划就绪条之前且计划模式下不显示 |",
       "两条实现口径",
       "1. **路径由工具桥显式返回，不从文案反推。** 结果文案为了可读性随时会改（「已覆盖」/「已创建」/「替换 1 处」），从文案里抠路径，一次改动就会变成「撤错文件」。2. **失败必须说清。** 一份备份只能用一次，所以逐个撤回时可能部分成功：提示写成「已撤回 2 个文件；新建.md 没有可用的旧版本（可能之前已撤销过，或这轮是新建）」，而不是笼统的「已撤回」。",
       "验证",
@@ -6030,7 +6042,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "四条口径（都是「不做错」比「做得多」更重要）",
       "1. **引用不等于授权**：根外路径不读盘，只进「没读到」清单——不能因为用户点了一下就越权。2. **有上限**：单文件 6000 字、合计 12000 字、最多 3 个。超长截断并写明「只给了前 N 字，需要后面的用 `file_read` 读」——静默截断会让模型以为已经看全。3. **读不到要说出来**：文件被删、是二进制、空文件，都在段落里留一行「这几个没读到，不要凭文件名猜内容」。沉默会让模型凭文件名编内容。4. **失败不阻断**：桥不在（浏览器端）、一个都读不到 → 这一段为空，这一轮照常发。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/fileEdit/fileRefs.ts`（新） | `collectFileRefs`：按根定位、读内容、逐条与总量上限、截断说明、没读到清单拼段 || `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.files` / `BuiltContext.filesSection`；顺序 `[base, rules, runtime, files, memory, skills]`；零注入时 `systemPrompt` 严格等于 `basePrompt`（旧契约不破） || `packages/web/src/components/FileRefPicker.tsx`（新） | 对话框：搜索、勾选、上限 3、确定/取消；只列路径不读内容；列目录失败给 `role=\"alert\"`，没有桥时说明不可用 || `packages/web/src/components/ChatPage.tsx` | `fileRefs` state + `fileRefsRef`（`buildSystemPrompt` 是 `useCallback` 闭包，点选后立刻发送时 state 还没落）；菜单项；引用条（可删）；`buildSystemPrompt` 里 `await collectFileRefs(...)` 并传 `files`；`onRunSettled` 清空 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/fileEdit/fileRefs.ts`（新） | `collectFileRefs`：按根定位、读内容、逐条与总量上限、截断说明、没读到清单拼段 |\n| `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.files` / `BuiltContext.filesSection`；顺序 `[base, rules, runtime, files, memory, skills]`；零注入时 `systemPrompt` 严格等于 `basePrompt`（旧契约不破） |\n| `packages/web/src/components/FileRefPicker.tsx`（新） | 对话框：搜索、勾选、上限 3、确定/取消；只列路径不读内容；列目录失败给 `role=\"alert\"`，没有桥时说明不可用 |\n| `packages/web/src/components/ChatPage.tsx` | `fileRefs` state + `fileRefsRef`（`buildSystemPrompt` 是 `useCallback` 闭包，点选后立刻发送时 state 还没落）；菜单项；引用条（可删）；`buildSystemPrompt` 里 `await collectFileRefs(...)` 并传 `files`；`onRunSettled` 清空 |",
       "验证`context.test.ts` +3 例（缺省不注入、排在运行环境之后、空白等同不传）。",
       "未做",
       "1. 输入框里直接打 `@` 触发——和鸣的 mention 机制目前服务智能体选择，再塞一套键盘弹层会和它抢按键、抢候选列表，而且 IME 组合态下容易吞键。对话框是确定性的，先把「能点」做出来。2. 引用的目录（整目录递归）——现在只能选文件；目录级引用要先定上限与展示口径。3. 引用条不落库：刷新页面后这一轮的引用就没了（内容已经进过提示词，重放不需要它）。"
@@ -6055,13 +6067,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       "DSH / Claude Code / opencode 都会在工作区里读一份约定文件（`AGENTS.md` / `CLAUDE.md`）。这是「像团队里的人」和「像通用聊天机器人」的分界线之一——同一个问题，前者会先 `pnpm --filter` 再动手，后者会 `npm install` 然后问你为什么报错。",
       "是什么",
       "每次生成前，从**本会话工作区**（不是整个磁盘）里找这几个文件，读到就接在人设之后、运行环境之前：",
-      "| 顺序 | 文件 | 说明 || --- | --- | --- || 1 | `AGENTS.md` | 通用约定（DSH / Claude Code 同名，写一份两边都认） || 2 | `HEMING.md` | 和鸣专属约定 || 3 | `.heming/AGENTS.md` | 想藏在隐藏目录里时用 || 4 | `.heming/rules.md` | 同上，长文用 |",
+      "| 顺序 | 文件 | 说明 |\n| --- | --- | --- |\n| 1 | `AGENTS.md` | 通用约定（DSH / Claude Code 同名，写一份两边都认） |\n| 2 | `HEMING.md` | 和鸣专属约定 |\n| 3 | `.heming/AGENTS.md` | 想藏在隐藏目录里时用 |\n| 4 | `.heming/rules.md` | 同上，长文用 |",
       "最多读 **2 个**、单文件 **4000 字**、合计 **6000 字**——约定是给人看的，可能几千行，全塞进提示词会挤掉记忆与历史。",
       "四条口径（都写进注释了）",
       "1. **只认固定文件名，不扫全仓**：约定必须是显式的、有主的，否则用户不知道模型读了什么。不做 glob 搜索。2. **只读工作区所在目录，不往上层找**：上层属于别人的工作区，读它等于把别的项目的规矩套到这一轮上。工作区是根目录本身、还是根下面的一层，都能算对相对路径。3. **截断要说话**：单文件超长只读开头，并明写「只读了前 4000 字，需要后面的用 `file_read` 读 `<rel>`」；读满两个之后剩下的文件名也列出来，不静默丢。4. **失败静默**：桥不存在（浏览器端）、文件不存在、不是文本、读盘抛错——都当「这一轮没有约定」，不阻断生成、不在提示词里留半句残话。",
       "冲突口径写在段内正文里：**约定是仓库的规矩，用户这一轮明确要求的优先**，遇到冲突要在回答里点出来。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/projectRules.ts`（新） | `PROJECT_RULE_FILES` / `MAX_PROJECT_RULE_FILES=2` / `MAX_PROJECT_RULE_CHARS=4000` / `MAX_PROJECT_RULES_TOTAL_CHARS=6000` / `PROJECT_RULES_HEADING` / `normalizeRuleText` / `collectProjectRules({bridge, roots, workspace})` || `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.rules`、`BuiltContext.rulesSection`；拼接顺序 `[base, rules, runtime, memory, skills]`；零注入时 `systemPrompt` 仍严格等于 `basePrompt` || `packages/web/src/components/ChatPage.tsx` | `buildSystemPrompt` 里先 `collectProjectRules({ bridge: getFileBridge(), roots: fileRootsFor(workspace), workspace })`，失败只丢这一段 |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/projectRules.ts`（新） | `PROJECT_RULE_FILES` / `MAX_PROJECT_RULE_FILES=2` / `MAX_PROJECT_RULE_CHARS=4000` / `MAX_PROJECT_RULES_TOTAL_CHARS=6000` / `PROJECT_RULES_HEADING` / `normalizeRuleText` / `collectProjectRules({bridge, roots, workspace})` |\n| `packages/web/src/lib/agentRuntime/context.ts` | `BuildContextInput.rules`、`BuiltContext.rulesSection`；拼接顺序 `[base, rules, runtime, memory, skills]`；零注入时 `systemPrompt` 仍严格等于 `basePrompt` |\n| `packages/web/src/components/ChatPage.tsx` | `buildSystemPrompt` 里先 `collectProjectRules({ bridge: getFileBridge(), roots: fileRootsFor(workspace), workspace })`，失败只丢这一段 |",
       "验证",
       "未做",
       "1. 不读**上层目录**的 `AGENTS.md`（比如用户主目录里的全局约定），也不读跨项目的组织规范。2. 没有界面入口：用户在设置里看不到「这一轮读了哪个约定文件」，只能从回答里推断。3. 约定文件改了要下一轮才生效（每次生成前现读，但不监听文件变化）。"
@@ -6088,7 +6100,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "三个实现上的坑（都写进注释了）",
       "1. **顺序**：必须先把「计划模式关闭」落下去（state + 存储 + 清桥缓存），再发消息。发送路径会重建工具桥和系统提示词，晚一步就会带着只读桥跑这一轮——界面关了、模型以为还只读。2. **闭包陈旧**：`buildToolsFor` 与 `buildSystemPrompt` 原来读的是渲染闭包里的 `planMode` state。`executePlan` 在同一个 tick 里先写存储再发消息，state 还没落，读闭包会拿到上一轮的 `true`，于是这一轮既没有写工具、提示词里又写着「本轮只读」。改成以 `loadPlanMode(convId)`（存储）为准——**单一事实来源是存储，state 只负责让按钮变色**。3. **不重发原提问**：执行口令只说「照这份计划做」，不把用户原问题再发一遍（同 `retryStream` 的理由：重发会让模型看到同一问题被问两次、已执行的工具再跑一遍）。计划与被读过的文件都在历史里，它知道从哪接。",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/planMode.ts` | 新增 `PLAN_EXECUTE_PROMPT`（照计划执行 / 每步更新清单 / 改完先验证再汇报） || `packages/web/src/components/PlanReadyBar.tsx`（新） | `role=\"status\" aria-live=\"polite\"` 的提示条；「接受计划，开始执行」+ 可选「继续讨论」 || `packages/web/src/components/ChatPage.tsx` | `planReadyStreamId` state；`onRunSettled` 在计划模式下记账；`onStart` / 切会话清空；`executePlan()`（关开关 + 延后一帧发口令，避开同一 tick 的提示词陈旧）；渲染在 `TodoPanel` 之后、轮次提示之前 || `packages/web/src/components/ChatPage.tsx`（修 d.172 遗留） | 计划按钮与提示条原来用 `bg-accent-soft` / `text-accent-ink` / `border-accent-line`，这三个类**在 Tailwind 配置里不存在**（只是没报错，即「按下没变色」）。改成真实 token：`bg-subtle-3`、`text-[var(--heming-accent)]`、`border-line` + `bg-subtle-2` |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/planMode.ts` | 新增 `PLAN_EXECUTE_PROMPT`（照计划执行 / 每步更新清单 / 改完先验证再汇报） |\n| `packages/web/src/components/PlanReadyBar.tsx`（新） | `role=\"status\" aria-live=\"polite\"` 的提示条；「接受计划，开始执行」+ 可选「继续讨论」 |\n| `packages/web/src/components/ChatPage.tsx` | `planReadyStreamId` state；`onRunSettled` 在计划模式下记账；`onStart` / 切会话清空；`executePlan()`（关开关 + 延后一帧发口令，避开同一 tick 的提示词陈旧）；渲染在 `TodoPanel` 之后、轮次提示之前 |\n| `packages/web/src/components/ChatPage.tsx`（修 d.172 遗留） | 计划按钮与提示条原来用 `bg-accent-soft` / `text-accent-ink` / `border-accent-line`，这三个类**在 Tailwind 配置里不存在**（只是没报错，即「按下没变色」）。改成真实 token：`bg-subtle-3`、`text-[var(--heming-accent)]`、`border-line` + `bg-subtle-2` |",
       "验证",
       "未做",
       "1. 没有「计划 → 执行后自动跑验证」的闭环：执行完仍然靠模型自己按 d.156 人设里的「改完先验证」去做，没有编排层强制的验证步骤。2. 计划模式下 `run_command` 仍被摘（risk=danger），「先跑一次测试看看现状」还是做不到。3. 没有跨会话记忆：每次新对话默认关闭计划模式。"
@@ -6115,7 +6127,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "和鸣缺这一档，直接后果是：用户必须在提示词里反复叮嘱「别改」，而模型一旦忘了，文件已经改了。",
       "是什么（口径：产品意图，不是安全边界）",
       "改了什么",
-      "| 文件 | 改动 || --- | --- || `packages/web/src/lib/agentRuntime/planMode.ts`（新） | `PLAN_MODE_KEY` / `PLAN_MODE_MAX_ROOMS=50` / `PLAN_MODE_BLOCK_TEXT`；`loadPlanMode` / `savePlanMode` / `resetPlanMode`；`isWriteRisk`（write、danger）；`planModeAllows`（只认 `risk === \"read\"`）；`withPlanMode(bridge)`（过滤 `tools`、拦 `execute`、`meta` 原样透传） || `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | `RuntimeSectionInput.planMode`；在工具清单之后、长任务之前插入 `## 计划模式（本轮只读，不改东西）` 两行——**必须写进提示词**，否则模型只看到工具变少，会以为「权限没配好」而开始解释限制，而不是干活 || `packages/web/src/components/ChatPage.tsx` | `planMode` state（按会话读）、`buildToolsFor` 外面包 `withPlanMode`、运行环境段带上 `planMode`、切会话重置、`togglePlanMode()`（改 state + 落存储 + 清桥缓存三步）、输入区「◉/○ 计划」按钮（`aria-pressed` + `title`，颜色不是唯一信号） |",
+      "| 文件 | 改动 |\n| --- | --- |\n| `packages/web/src/lib/agentRuntime/planMode.ts`（新） | `PLAN_MODE_KEY` / `PLAN_MODE_MAX_ROOMS=50` / `PLAN_MODE_BLOCK_TEXT`；`loadPlanMode` / `savePlanMode` / `resetPlanMode`；`isWriteRisk`（write、danger）；`planModeAllows`（只认 `risk === \"read\"`）；`withPlanMode(bridge)`（过滤 `tools`、拦 `execute`、`meta` 原样透传） |\n| `packages/web/src/lib/agentRuntime/runtimePrompt.ts` | `RuntimeSectionInput.planMode`；在工具清单之后、长任务之前插入 `## 计划模式（本轮只读，不改东西）` 两行——**必须写进提示词**，否则模型只看到工具变少，会以为「权限没配好」而开始解释限制，而不是干活 |\n| `packages/web/src/components/ChatPage.tsx` | `planMode` state（按会话读）、`buildToolsFor` 外面包 `withPlanMode`、运行环境段带上 `planMode`、切会话重置、`togglePlanMode()`（改 state + 落存储 + 清桥缓存三步）、输入区「◉/○ 计划」按钮（`aria-pressed` + `title`，颜色不是唯一信号） |",
       "存储为什么用单调时间戳",
       "`PLAN_MODE_MAX_ROOMS=50` 靠 `at` 排序淘汰最旧的。第一版用裸 `Date.now()`，测试里同毫秒连开 55 个会话：所有 `at` 相等 → `sort` 的稳定性把「插入顺序」当结论 → **淘汰的是最新的、留下的是最旧的**（刚开的那个重启后就没了）。改成模块级 `stamp()`（`Math.max(Date.now(), lastStamp + 1)`）保证严格递增。同一教训在 d.155 的任务清单存储里已经踩过一次。",
       "验证",
@@ -6424,7 +6436,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这一版补上这两条，顺带修掉评测框架自己的两处盲区——它们会让「让评测更可信」这件事本身不可信。",
       "改了什么",
       "两条新用例",
-      "| 用例 | 干什么 | 断言 || --- | --- | --- || `cmd-004` | `node -e \"setTimeout(() => {}, 10000)\"`，`timeout_ms: 1000` | 工具结果含「命令超时」，且整轮在 1 秒级结束（不是挂到 10 秒） || `cmd-005` | `node -e \"console.log('x'.repeat(700000))\"`（700KB > 512KB 采集上限） | 工具结果含「输出过大」，命令被终止而不是「截断后当成功」 |",
+      "| 用例 | 干什么 | 断言 |\n| --- | --- | --- |\n| `cmd-004` | `node -e \"setTimeout(() => {}, 10000)\"`，`timeout_ms: 1000` | 工具结果含「命令超时」，且整轮在 1 秒级结束（不是挂到 10 秒） |\n| `cmd-005` | `node -e \"console.log('x'.repeat(700000))\"`（700KB > 512KB 采集上限） | 工具结果含「输出过大」，命令被终止而不是「截断后当成功」 |",
       "两条都 `shell: true` + `allow_danger: true`，都带空夹具（只提供可写工作目录，不依赖任何文件）。",
       "评测框架的两处修正",
       "1. **沙箱清理不再把「杀进程」误报成「框架坏了」**（`evals/runner/run.ts`）：`cmd-004` 会真的 spawn 一个子进程再杀掉，Windows 上句柄释放是异步的，紧接着 `rm` 会拿到`EBUSY: resource busy or locked`，整轮评测以「无法完成（退出码 2）」收场——看起来像框架坏了，实际是用例在正确工作。新增 `removeSandbox()`：`fs.rm` 的 `maxRetries` 之外再包 6 次退避重试，只对 `EBUSY/EPERM/ENOTEMPTY` 重试；确实删不掉就**留现场并警告**，不把清理失败算成用例失败。",
@@ -6614,7 +6626,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "本版把评测补到能断言它们，顺带给性能断言加了一层：`todo_state` 直接读真实 store，`subagent_script` 驱动真实子代理循环。",
       "一、评测运行器",
       "二、三条新用例",
-      "| 用例 | 断言什么 | 为什么值得一条 || --- | --- | --- || `todo-001` | 工具清单里有 `todo_write`；调用一次；**清单终态**共 2 条、进行中 1、待开始 1、已完成 0 | 证明清单是真的写进本会话 store，而不是模型嘴上说说 || `subagent-001` | 主对话只调一次 `agent_task`；子会话真的读到了 `docs/a.md`（结论里出现「安装步骤」出现在工具结果里） | 证明子代理的循环真的跑起来、结论真的回灌主对话 || `subagent-002`（security） | 子代理被要求写 `escape.md`：`file_write` 不执行、**文件不存在** | 证明「只读白名单」是执行层拦截，不是提示词里的君子协定 |",
+      "| 用例 | 断言什么 | 为什么值得一条 |\n| --- | --- | --- |\n| `todo-001` | 工具清单里有 `todo_write`；调用一次；**清单终态**共 2 条、进行中 1、待开始 1、已完成 0 | 证明清单是真的写进本会话 store，而不是模型嘴上说说 |\n| `subagent-001` | 主对话只调一次 `agent_task`；子会话真的读到了 `docs/a.md`（结论里出现「安装步骤」出现在工具结果里） | 证明子代理的循环真的跑起来、结论真的回灌主对话 |\n| `subagent-002`（security） | 子代理被要求写 `escape.md`：`file_write` 不执行、**文件不存在** | 证明「只读白名单」是执行层拦截，不是提示词里的君子协定 |",
       "三、验证",
       "四、未做"
     ]
@@ -7648,7 +7660,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "行为",
       "两个踩到的坑改用全局 `Var hemingKeepPath` / `Var hemingDataMoved`。",
       "真包验证（`packages/desktop/release/和鸣 Setup d.140.3.74.11.exe`）",
-      "| 场景 | 结果 || --- | --- || GUI 卸载、不勾选 | 程序文件清空，`<安装目录>\\data` 与其中的 `test-keep.txt`、`plugins/state.json` 全在；无 `heming-keep-data` 残留 || GUI 卸载、勾选「同时删除」 | 整个安装目录消失 || 静默 `Uninstall.exe /S` | data 保留 || 静默 `/S --delete-app-data` | 整个安装目录消失 || 卸载欢迎页 | 「卸载 和鸣」+ 新说明（不再复用安装文案） |",
+      "| 场景 | 结果 |\n| --- | --- |\n| GUI 卸载、不勾选 | 程序文件清空，`<安装目录>\\data` 与其中的 `test-keep.txt`、`plugins/state.json` 全在；无 `heming-keep-data` 残留 |\n| GUI 卸载、勾选「同时删除」 | 整个安装目录消失 |\n| 静默 `Uninstall.exe /S` | data 保留 |\n| 静默 `/S --delete-app-data` | 整个安装目录消失 |\n| 卸载欢迎页 | 「卸载 和鸣」+ 新说明（不再复用安装文案） |",
       "文件"
     ]
   },
@@ -9483,7 +9495,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "用户要求：「云端用一个插件仓库，预留好接口，用户可以在这里下载插件使用」；接着要求「插件页面也弄一个下载安装，可以查看云端插件库列表并选择安装」。",
       "一、服务端：一份云端插件仓库（公开读 + 密钥写）",
       "目录布局不变：`<HEMING_PLUGIN_DIR>/<id>/<version>/plugin.json`（原样字节）。接口补齐为：",
-      "| 方法 | 路径 | 鉴权 | 说明 ||---|---|---|---|| GET | `/api/plugins` | 公开 | 每个插件最新版元数据 || GET | `/api/plugins/:id` | 公开 | 该插件**全部版本**（新→旧，坏版本跳过） || GET | `/api/plugins/:id/:version/manifest` | 公开 | 原样清单 + `X-Plugin-Sha256` || PUT | `/api/plugins/:id/:version` | `x-publish-key` | 发布/覆盖（路径 id/版本必须与清单一致；201/200） || DELETE | `/api/plugins/:id/:version` | `x-publish-key` | 下线某个版本 |",
+      "| 方法 | 路径 | 鉴权 | 说明 |\n|---|---|---|---|\n| GET | `/api/plugins` | 公开 | 每个插件最新版元数据 |\n| GET | `/api/plugins/:id` | 公开 | 该插件**全部版本**（新→旧，坏版本跳过） |\n| GET | `/api/plugins/:id/:version/manifest` | 公开 | 原样清单 + `X-Plugin-Sha256` |\n| PUT | `/api/plugins/:id/:version` | `x-publish-key` | 发布/覆盖（路径 id/版本必须与清单一致；201/200） |\n| DELETE | `/api/plugins/:id/:version` | `x-publish-key` | 下线某个版本 |",
       "二、客户端：插件区「仓库」Tab + 插件页「下载安装」空插件页给「从云端安装」「手动粘贴清单」两个动作。",
       "三、发布工具链",
       "四、测试与验证"
@@ -10718,7 +10730,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "和鸣插件仍是**纯声明式能力包**：不执行第三方代码、不引入 stdio/命令类 MCP、不做插件市场下载——安全边界不变，变的是「一套模型说清所有能力从哪来」。",
       "一、清单 v3：一份声明装下四类贡献",
       "`plugin.json` 的 `schemaVersion: 3`：",
-      "| 字段 | 说明 ||---|---|| `contributions.skills[]` | 技能（≤50，字段与技能池一致） || `contributions.mcpServers[]` | 远程 MCP（≤10，https / 本机 http） || `contributions.commands[]` | 插件命令（≤30），`target` 支持 `page` / `skill` / `plugin` || `permissions.network / tools / files` | 权限声明：网络主机白名单、工具风险上限、预留文件根 |",
+      "| 字段 | 说明 |\n|---|---|\n| `contributions.skills[]` | 技能（≤50，字段与技能池一致） |\n| `contributions.mcpServers[]` | 远程 MCP（≤10，https / 本机 http） |\n| `contributions.commands[]` | 插件命令（≤30），`target` 支持 `page` / `skill` / `plugin` |\n| `permissions.network / tools / files` | 权限声明：网络主机白名单、工具风险上限、预留文件根 |",
       "二、权限：声明即约束，运行时只能收紧",
       "三、统一能力目录：工具第一次能枚举",
       "新增 `lib/plugins/catalog.ts`（`describeCapabilityCatalog`）：按**执行优先级**（MCP → 内置 → self）汇总内置工具、MCP 工具与插件工具，标注归属、风险（`meta.risk ?? riskOfName`，与执行期同源）、启用状态；同名工具只留首个（与 `mergeToolBridges` 的「前者胜出」一致）。",
@@ -10752,7 +10764,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "d.62 统一了「页面级」排版，这一版把「组件级」也收成一套：设置卡片内部、按钮与输入框、表格与列表行、空态与骨架、登录页。目标不是换风格，而是让**同类东西长得一样**——以前同一屏里会出现三种按钮高度、四种说明文字字号。",
       "一、新增控件与列表基元（`index.css`）",
-      "| 类 | 规格 | 替代掉的写法 ||---|---|---|| `.ui-input` | 高 32、13px、`line-strong` 边框、focus 转 ink、禁用态 | 各处 `h-8/h-9`、边框色不一的输入框 || `.ui-btn` + `.ui-btn-sm(28)/.ui-btn-md(32)` + `primary/ghost/danger` | 12px、图标间距、hover/禁用态 | `h-7/h-8/h-9` 混用、手写主/次/危险按钮 || `.ui-chip` | 高 20、11px、浅底描边 | 10px/11px 混用的中性徽标 || `.ui-table` | th 11px muted、td 12px、行分隔、hover | 各页手写的表格行/表头 || `.ui-list-row` | 行高 44、左右 12、hover、末行无分隔 | 名册/列表各写一套行样式 || `.ui-empty*` | 图标槽 32、标题 13/600、说明 12/muted、按钮槽 | 各页自己拼的空态 || `.ui-skeleton` | `bg-line-soft` + pulse，尊重 `prefers-reduced-motion` | 各页各写一遍的骨架块 |",
+      "| 类 | 规格 | 替代掉的写法 |\n|---|---|---|\n| `.ui-input` | 高 32、13px、`line-strong` 边框、focus 转 ink、禁用态 | 各处 `h-8/h-9`、边框色不一的输入框 |\n| `.ui-btn` + `.ui-btn-sm(28)/.ui-btn-md(32)` + `primary/ghost/danger` | 12px、图标间距、hover/禁用态 | `h-7/h-8/h-9` 混用、手写主/次/危险按钮 |\n| `.ui-chip` | 高 20、11px、浅底描边 | 10px/11px 混用的中性徽标 |\n| `.ui-table` | th 11px muted、td 12px、行分隔、hover | 各页手写的表格行/表头 |\n| `.ui-list-row` | 行高 44、左右 12、hover、末行无分隔 | 名册/列表各写一套行样式 |\n| `.ui-empty*` | 图标槽 32、标题 13/600、说明 12/muted、按钮槽 | 各页自己拼的空态 |\n| `.ui-skeleton` | `bg-line-soft` + pulse，尊重 `prefers-reduced-motion` | 各页各写一遍的骨架块 |",
       "设计约束：字号只走 `ui-*` 档位，点击区 ≥28px，hover 过渡 150ms，焦点环继续由 `GlobalFocusRing` 统一提供。",
       "二、设置卡片与弹窗（12 张卡 + SettingsPage + 3 个弹窗）",
       "三、表格、列表与密集控件（7 个页面）",
@@ -10785,7 +10797,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "这一版不动功能与交互，只把「每个页面各写一套」的排版收成一套：统一的标题档位、统一的页头与内边距、统一的内容宽度与滚动归属，并把聊天正文的行宽收到可读区间。改动前审计到的现状：字号散落 11 档（10/11/12px 各上百处）、页面标题 15/16/17px 混用、内边距 24/32px 混用、内容宽度通栏/520/900 三种、页头与滚动容器位置不一、1440 宽屏下聊天正文行宽近 980px。",
       "一、语义排版档位（`index.css` 的 `ui-*` 类）",
       "新增 8 个语义类，页面标题/副标题/分区标题只允许用这几档，避免继续长出新字号：",
-      "| 类 | 规格 | 用途 ||---|---|---|| `ui-page-title` | 18/24 · 600 · -0.01em | 页面级标题（全站唯一档） || `ui-page-sub` | 12/20 · muted | 标题下一句话说明 || `ui-section-title` | 13/20 · 600 | 卡片/分区标题 || `ui-body` | 13/22 | 正文 || `ui-body-sm` | 12/20 | 次要正文/表格 || `ui-caption` | 11/16 · muted | 注释/时间/辅助 || `ui-micro` | 10/14 · 500 · muted | 角标/徽标（仅此用途） || `ui-numeric` | tabular-nums | 数字对齐 |",
+      "| 类 | 规格 | 用途 |\n|---|---|---|\n| `ui-page-title` | 18/24 · 600 · -0.01em | 页面级标题（全站唯一档） |\n| `ui-page-sub` | 12/20 · muted | 标题下一句话说明 |\n| `ui-section-title` | 13/20 · 600 | 卡片/分区标题 |\n| `ui-body` | 13/22 | 正文 |\n| `ui-body-sm` | 12/20 | 次要正文/表格 |\n| `ui-caption` | 11/16 · muted | 注释/时间/辅助 |\n| `ui-micro` | 10/14 · 500 · muted | 角标/徽标（仅此用途） |\n| `ui-numeric` | tabular-nums | 数字对齐 |",
       "行高刻意比默认松一点：中文方块字在 1.55–1.7 行高下才不挤。",
       "二、布局基元 `PageShell`",
       "三、逐页落地（16 个页面）",
@@ -12092,7 +12104,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "打这一版时卡了 **1 小时 16 分还没成功**（被迫中止）。根因不是代码：",
       "electron-builder 每轮打包都要**清空**上一版的 `win-unpacked`，而内置运行时`resources/runtime` 里有 **7367 个小文件**（5026 个 `.py`）。",
       "实测（300 个小文件）：",
-      "| 操作 | C 盘 | D 盘 ||---|---|---|| 创建 | 56ms（5357/秒） | 108ms（2778/秒） || 删除 | **89168ms**（3.4/秒） | 72/秒 |",
+      "| 操作 | C 盘 | D 盘 |\n|---|---|---|\n| 创建 | 56ms（5357/秒） | 108ms（2778/秒） |\n| 删除 | **89168ms**（3.4/秒） | 72/秒 |",
       "删 7367 个文件要 2~36 分钟，**每轮打包都在重复付这个代价，期间零产出**。",
       "解法：**改名让位，不是删除**。`build-desktop.mjs` 在跑 electron-builder 之前，把旧 `win-unpacked` `renameSync` 成 `win-unpacked.stale-<ts>`——同盘改名是元数据操作，瞬时完成，electron-builder 面对不存在的目录，从根上跳过删除。",
       "清理放在打包**之后**且**异步**：同步等删除等于把「打包慢」挪到收尾阶段，没解决任何事。",
@@ -12183,7 +12195,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "在此之前消息正文是 `whitespace-pre-wrap` 的纯文本——**保留了换行，但代码块、表格、列表、引用全是裸文本**。模型一旦输出代码或对比表，观感立刻掉档。竞品（Cherry Studio / LobeHub / Chatbox）都渲染 markdown。",
       "做法：复用竞品验证过的选型，但不碰它们的代码",
       "主仓库许可证差别很大：Cherry Studio 是 **AGPL-3.0**、Chatbox 是 **GPLv3**、LobeHub 是 Apache-2.0 附加商用条款——直接复制代码会把和鸣拖进传染性开源。但它们**自己也是用第三方库实现这些功能的**，所以用同一批库即可：",
-      "| 用途 | 库 | 许可 ||---|---|---|| markdown 渲染 | `react-markdown` + `remark-gfm` | MIT || 代码高亮 | `shiki`（VS Code 同款语法与主题） | MIT |",
+      "| 用途 | 库 | 许可 |\n|---|---|---|\n| markdown 渲染 | `react-markdown` + `remark-gfm` | MIT |\n| 代码高亮 | `shiki`（VS Code 同款语法与主题） | MIT |",
       "一个必须记下来的体积坑",
       "shiki 的便捷入口 `createHighlighter({ langs: [...] })` **不会**只打包你传的数组——它的语言表是动态 import 的，Rollup 无法静态裁剪。实测把 shiki 支持的上百种语言全打进产物：**构建产物 685KB → 12MB，多出 309 个 JS 文件**，里面全是emacs-lisp、wolfram、vue-vine 这些永远不会用到的语法。",
       "改用 `createHighlighterCore` + 逐个 `import(\"shiki/langs/xxx.mjs\")`（静态依赖可精确裁剪）：**12MB → 2.7MB，18 个 JS 文件**。只注册 15 种常用语言，其余回落纯文本。",
@@ -12210,11 +12222,11 @@ export const CHANGELOG: ChangelogEntry[] = [
       "主因：打包时排除了 `.pyc`，每次启动都重新编译 Python 字节码",
       "上一版为了减小安装包体积，给 `extraResources` 的 filter 加了`!**/__pycache__/**` 和 `!**/*.pyc`。结果两个 MCP 服务每次启动都要把Python 源码现编译一遍——`windows_mcp.tools` 一个包就多花 **2.9 秒**，串行连接两个服务从 7.8 秒劣化到 **16.2 秒**。",
       "代价算下来完全不成比例：",
-      "| 方案 | 增量体积 | 启动耗时 ||---|---|---|| 无 `.pyc`（上一版） | 0 | **16.2 秒** || 只编译两个 MCP 包 | **1.7MB** | **7.8 秒** || 全量编译 site-packages | 64MB | 7.8 秒 |",
+      "| 方案 | 增量体积 | 启动耗时 |\n|---|---|---|\n| 无 `.pyc`（上一版） | 0 | **16.2 秒** |\n| 只编译两个 MCP 包 | **1.7MB** | **7.8 秒** |\n| 全量编译 site-packages | 64MB | 7.8 秒 |",
       "全量编译和只编译两个包**耗时完全相同**——瓶颈就是这两个包自己。所以只编译它们，多出来的 63.5MB 一分没花。",
       "次因：MCP 连接从串行改并行",
       "`autoConnectAll` 原本刻意串行，理由写的是「并行拉起子进程容易互相抢 CPU/网络」。那个理由建立在**首次使用要联网下载依赖**（一两分钟）之上——运行时全内置之后这个前提已经不成立了。实测 Windows-MCP 5.4s、Scrapling 2.4s，互不抢资源：",
-      "| | 串行 | 并行 ||---|---|---|| 两个服务都就绪 | 7.8 秒 | **5.4 秒** |",
+      "| | 串行 | 并行 |\n|---|---|---|\n| 两个服务都就绪 | 7.8 秒 | **5.4 秒** |",
       "补了两条测试守住并行语义，并验证过「改回串行会变红」——一条测三台各延迟 80ms 时总耗时 < 180ms（串行必然 ≥240ms），一条测结果顺序仍与启用顺序一致（并行最容易坏的就是这个）。",
       "合起来",
       "**MCP 工具可用时间：16.2 秒 → 5.4 秒（-66%）**，安装包只增 1.7MB。",
@@ -12297,7 +12309,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     "paragraphs": [
       "用户给出 `https://github.com/larashero3-dotcom/lieflat-less-ai-tone`。形态与前两个仓库都不同：它**不是库也不是服务，而是一份基于 283 万字语料统计的研究 + 规则集**（629 篇文章：300 篇五个模型生成 + 329 篇人类写作，检验 26 项「公认 AI 文风」候选特征）。许可 MIT。",
       "**这份研究最有价值的部分，是它推翻了流行认知**——所以「不查什么」和「查什么」一样重要：",
-      "| 特征 | 实测（R = 生成侧 ÷ 人类侧） | 结论 ||---|---|---|| 比喻 | 0.42 | **人类用得比 AI 多 2.4 倍**，独立成段多 8 倍 || 正文设问 | 0.05 | **人类是 AI 的 17 倍**——「删设问」会让文本更不像人写的 || 句长参差 | 0.87 | 无差别，「制造节奏」型改写没有依据 || 段首零回指评论 | 4.4 | 区分力最强的一项 || 拟人化喻体 | 7.3 | 「像一位智慧的导师」这类理想化职业人格 |算子负责「哪里命中了哪条」，改写范围自然被框死（漏了会把「像一个老师傅」误报——而具体的人当喻体是人类写法）"
+      "| 特征 | 实测（R = 生成侧 ÷ 人类侧） | 结论 |\n|---|---|---|\n| 比喻 | 0.42 | **人类用得比 AI 多 2.4 倍**，独立成段多 8 倍 |\n| 正文设问 | 0.05 | **人类是 AI 的 17 倍**——「删设问」会让文本更不像人写的 |\n| 句长参差 | 0.87 | 无差别，「制造节奏」型改写没有依据 |\n| 段首零回指评论 | 4.4 | 区分力最强的一项 |\n| 拟人化喻体 | 7.3 | 「像一位智慧的导师」这类理想化职业人格 |算子负责「哪里命中了哪条」，改写范围自然被框死（漏了会把「像一个老师傅」误报——而具体的人当喻体是人类写法）"
     ]
   },
   {

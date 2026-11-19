@@ -6645,6 +6645,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - `exportedAt` 是毫秒数（`Date.parse`），`at` 是 ISO 字符串；写测试用例时别传 `Date`。
 
 
+## 更新日志解析器：表格按行保留（d.408）
+
+- `scripts/changelog-parser.mjs` 里以 `|` 开头的行不再走「续行合并」，而是同类连续行用 `\n` 拼成一个段落（`lastKind = "table"`）。
+- 否则 `paragraphs.join` 会把整张表压成一行 `| a | b || --- | --- || …`，界面上看不出是表。
+- 改完必须重新 `node scripts/build-changelog.mjs` —— 生成文件是提交物，不重建等于没改。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6663,6 +6670,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

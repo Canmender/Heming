@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 ﻿/**
  * 找出「看起来像条目标题、却没被解析」的行（d.391）。
@@ -125,6 +125,14 @@ export function parseChangelog(markdown) {
     // 条目内的小标题（### 一、xxx）：保留文字、去掉井号，界面不再显示字面量 `###`
     const text = line.trim().replace(/^#{1,6}\s+/, "");
     if (!text) continue;
+    // 表格行：必须按行保留（表格靠单换行分行），不能并成一段
+    if (text.startsWith("|")) {
+      const i = current.paragraphs.length - 1;
+      if (lastKind === "table" && i >= 0) current.paragraphs[i] += `\n${text}`;
+      else current.paragraphs.push(text);
+      lastKind = "table";
+      continue;
+    }
     if (lastKind === "bullet" && current.bullets.length > 0) {
       // 硬折行的续行：并回上一条要点
       const i = current.bullets.length - 1;
