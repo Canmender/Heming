@@ -3614,15 +3614,30 @@ export function ChatPage({
             setSendNotice("这一轮已经收尾，正接着处理你插的那条（下一轮就是它）。", "info");
             startRun(queued.mentions, queued.text);
           }
-        } else if (steerQueueOf(convId).size() > 0) {
-          const missed = steerQueueOf(convId).size();
-          steerQueueOf(convId).clear();
-          setSendNotice(
-            result.status === "aborted"
-              ? `你点了停止：排队里的 ${missed} 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）。`
-              : `这一轮出错了：排队里的 ${missed} 条插话没有发出去（内容留在会话里，重试时会一起看到）。`,
-            "info",
-          );
+        } else {
+          /*
+           * 收口不是 ok：不动队列里的用户插话（它们的正文已落库，下一轮历史里能看到），
+           * 但**后台子代理的结论没有落库副本**——清了就是真丢了（d.358）。
+           * 所以取走全部条目、只把 job 那几条原序放回去，等下一轮开始注入。
+           */
+          const items = steerQueueOf(convId).takeItems();
+          const keptJobs = items.filter((item) => item.source === "job");
+          const droppedUsers = items.length - keptJobs.length;
+          for (const item of keptJobs) steerQueueOf(convId).push(item);
+          const notes: string[] = [];
+          if (droppedUsers > 0) {
+            notes.push(
+              result.status === "aborted"
+                ? `你点了停止：排队里的 ${droppedUsers} 条插话这次没有发出去（它们已经在会话里，点「接着做」或重新发送时模型会看到）。`
+                : `这一轮出错了：排队里的 ${droppedUsers} 条插话没有发出去（内容留在会话里，重试时会一起看到）。`,
+            );
+          }
+          if (keptJobs.length > 0) {
+            notes.push(
+              `还有 ${keptJobs.length} 条后台子代理的结论没交给模型：它们没有存档，我留着，下一轮开始时会先看到。`,
+            );
+          }
+          if (notes.length > 0) setSendNotice(notes.join(" "), "info");
         }
         // 排队条跟着真实队列走（d.227）：收口后要么被取走一条（继续跑）、要么被清空
         setSteerPendingCount(steerQueueOf(convId).size());
@@ -3971,7 +3986,13 @@ export function ChatPage({
     const running = (runsRef.current[job.conversationId]?.size ?? 0) > 0;
     if (running) {
       const queue = steerQueueOf(job.conversationId);
-      queue.push({ text, mentions: [] });
+      // d.358：标成 "job"——这条结论没有落库副本，收口时不能跟用户插话一起清掉；
+      // mentions 带上它自己的身份，收口后 `shift()` 另起一轮时才知道该找谁。
+      queue.push({
+        text,
+        mentions: [{ agentId: job.agentId, name: job.agentName }],
+        source: "job",
+      });
       setSteerPendingCount(queue.size());
       setSendNotice(
         `后台子代理「${job.label}」交回了结论：这一轮的下一次工具之后它就会看到。`,

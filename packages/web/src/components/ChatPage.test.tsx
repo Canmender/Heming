@@ -46,6 +46,8 @@ import {
 import { PLAN_MODE_KEY, loadPlanMode, resetPlanMode } from "../lib/agentRuntime/planMode.js";
 import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
 import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/subagentRuns.js";
+// d.358：后台子代理在跑的一轮里交回结论，收口时不能被当成「用户插话」清掉
+import { enqueueSubagentJob, resetSubagentJobs } from "../lib/agentRuntime/subagentJobs.js";
 // d.218：收口后会留下「上一轮」小结，跨用例不清会把上一条用例的数字带进来
 import { resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
 import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
@@ -4442,6 +4444,55 @@ describe("ChatPage", () => {
     expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1);
     // 提示里说清了去向（插话正文已上行，会话历史里能看到）
     expect(screen.getByText(/点「接着做」或重新发送时模型会看到/)).toBeInTheDocument();
+  }, 30_000);
+
+  it("I4c 停止后，后台子代理的结论不会跟着插话一起清掉（d.358）", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    const seen: string[] = [];
+    vi.mocked(streamChat).mockImplementation(
+      (_p, messages, o) => {
+        seen.push(messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"));
+        return new Promise<string>((_res, rej) => {
+          o.onDelta("半句");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        });
+      },
+    );
+
+    await pickAndSend("@和小鸣 先做第一件");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+
+    // 后台子代理在这期间交回结论：进插话队列（没有落库副本）
+    let finishJob!: (value: { ok: boolean; text: string; rounds: number; toolCalls: number }) => void;
+    act(() => {
+      enqueueSubagentJob({
+        conversationId: "c1",
+        agentId: "a1",
+        agentName: "和小鸣",
+        label: "查入口",
+        task: "查入口在哪",
+        taskId: "bg-358",
+        run: () =>
+          new Promise((resolve) => {
+            finishJob = resolve;
+          }),
+      });
+    });
+    await act(async () => {
+      finishJob({ ok: true, text: "入口在 core/app.ts", rounds: 1, toolCalls: 2 });
+    });
+    await waitFor(() => expect(screen.getByText(/交回了结论/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    await waitFor(() => expect(screen.getByText(/没有存档/)).toBeInTheDocument());
+    // 队列里只剩这条结论：条数照实显示，别让它看着像「已经交给模型了」
+    expect(screen.getByText(/已排队 1 条插话/)).toBeInTheDocument();
+    // 它没有落库副本，所以不能像用户插话那样「从历史里捞回来」——必须留在队列里等下一轮
+    expect(screen.queryByText(/点「接着做」或重新发送时模型会看到/)).toBeNull();
+    act(() => resetSubagentJobs());
   }, 30_000);
 
   it("I4b 排队中的插话看得见条数，也能收回：取消后不长出一条新消息，这一轮照常收尾（d.227）", async () => {

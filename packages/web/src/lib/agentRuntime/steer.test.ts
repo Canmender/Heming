@@ -57,4 +57,29 @@ describe("steer 插话队列", () => {
     expect(q.size()).toBe(0);
     expect(q.take()).toEqual([]);
   });
+
+  it("takeItems 取走全部条目并保住来源与 @（收口后要挑出后台结论，d.358）", () => {
+    const q = createSteerQueue();
+    q.push(item("用户插话"));
+    q.push({ text: "子代理结论", mentions: [{ agentId: "a2", name: "查入口" }], source: "job" });
+    const taken = q.takeItems();
+    expect(taken).toEqual([
+      { text: "用户插话", mentions: [{ agentId: "a1", name: "和小鸣" }] },
+      { text: "子代理结论", mentions: [{ agentId: "a2", name: "查入口" }], source: "job" },
+    ]);
+    // 取走即清空：放回去由调用方按来源决定
+    expect(q.size()).toBe(0);
+    expect(q.takeItems()).toEqual([]);
+  });
+
+  it("source 记在条目上：默认没有，job 的读得回来（pending 也是拷贝）", () => {
+    const q = createSteerQueue();
+    q.push(item("普通"));
+    q.push({ text: "后台", mentions: [], source: "job" });
+    const list = q.pending();
+    expect(list[0].source).toBeUndefined();
+    expect(list[1].source).toBe("job");
+    list[1].source = "user";
+    expect(q.pending()[1].source).toBe("job");
+  });
 });

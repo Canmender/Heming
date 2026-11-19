@@ -26,6 +26,14 @@ export interface SteerItem {
   text: string;
   /** 这句 @ 了谁：收尾后另起一轮时要用同一条路径（绑定校验、流归属）。 */
   mentions: SteerMentions[];
+  /**
+   * 这条插话从哪来（d.358）：
+   * - `"user"`（默认）＝用户自己发的，正文已经作为用户消息落库；
+   * - `"job"`＝后台子代理交回的结论，**没有**落库副本。
+   *
+   * 收口时要区别对待：用户那条丢了还能从历史里捞回来，job 那条丢了就是真丢了。
+   */
+  source?: "user" | "job";
 }
 
 export interface SteerQueue {
@@ -35,6 +43,13 @@ export interface SteerQueue {
   take: () => string[];
   /** 取走一条（先进先出），用于收口后另起一轮。 */
   shift: () => SteerItem | undefined;
+  /**
+   * 取走全部条目（保留来源与 @ 信息），队列清空。
+   *
+   * 收口时用它而不是 `clear()`：用户插话丢了还能从历史里捞回来，
+   * 后台子代理的结论没有落库副本，得挑出来留着（d.358）。
+   */
+  takeItems: () => SteerItem[];
   /** 队内条数。 */
   size: () => number;
   /** 队内快照（只读，测试与提示用）。 */
@@ -50,7 +65,14 @@ export function createSteerQueue(): SteerQueue {
       const text = item.text.trim();
       // 空白不排队：调用方已 trim 过，这里再兜一次，避免把空行喂给模型。
       if (!text) return items.length;
-      items = [...items, { text, mentions: [...item.mentions] }];
+      items = [
+        ...items,
+        {
+          text,
+          mentions: [...item.mentions],
+          ...(item.source ? { source: item.source } : {}),
+        },
+      ];
       return items.length;
     },
     take: () => {
@@ -64,8 +86,22 @@ export function createSteerQueue(): SteerQueue {
       items = rest;
       return first;
     },
+    takeItems: () => {
+      const taken = items.map((item) => ({
+        text: item.text,
+        mentions: [...item.mentions],
+        ...(item.source ? { source: item.source } : {}),
+      }));
+      items = [];
+      return taken;
+    },
     size: () => items.length,
-    pending: () => items.map((item) => ({ text: item.text, mentions: [...item.mentions] })),
+    pending: () =>
+      items.map((item) => ({
+        text: item.text,
+        mentions: [...item.mentions],
+        ...(item.source ? { source: item.source } : {}),
+      })),
     clear: () => {
       items = [];
     },
