@@ -168,10 +168,13 @@ export interface ContextViewUsage {
 export function ContextView({
   conversationId,
   usage: reported,
+  onCompact,
 }: {
   conversationId: string | null;
   /** 实时用量（可选）：直接渲染的测试/独立场景不传，就回落到本机设置与逐行估算。 */
   usage?: ContextViewUsage;
+  /** 手动压缩（d.388）：看到「距阈值还有」却只能干等下一轮，这里给一个立刻压的入口。 */
+  onCompact?: () => void;
 }) {
   const messages = useChatStore((s) => (conversationId ? s.messages[conversationId] : undefined));
   const rows = messages ?? [];
@@ -315,6 +318,16 @@ export function ContextView({
         <p className="mt-0.5 text-ui-xs text-muted">
           {reported?.calibrated ? "估算已按本机实测校准" : "估算值（与压缩链同一估算器）"}
         </p>
+        {onCompact ? (
+          <button
+            type="button"
+            onClick={onCompact}
+            className="ui-btn mt-2 h-7 px-2 text-ui-xs"
+            title="立刻把早期消息折成摘要（和输入框里发 /compact 是同一件事）"
+          >
+            现在压缩
+          </button>
+        ) : null}
         {/*
          * 分段占比（d.350，参考 billion-context 的 context 面板）：
          * 一根条只说「用了多少」，用户看不出**是什么在占**。这里按三块真实来源拆开，
@@ -501,3 +514,4 @@ export function ContextView({
     </section>
   );
 }
+

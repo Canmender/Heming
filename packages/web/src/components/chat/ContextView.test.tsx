@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
 import { useChatStore } from "../../store/chat.js";
@@ -422,3 +422,18 @@ describe("ContextView · DSH 口径的窗口占用（d.351）", () => {
     expect(screen.getByTestId("context-percent")).toHaveTextContent("65%");
   });
 });
+
+describe("ContextView · 手动压缩入口（d.388）", () => {
+  it("给了 onCompact 才出现「现在压缩」，点了就调", () => {
+    const onCompact = vi.fn();
+    const { rerender } = render(
+      <ContextView conversationId="c1" usage={{ used: 60_000, budget: 126_272, window: 200_000 }} onCompact={onCompact} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "现在压缩" }));
+    expect(onCompact).toHaveBeenCalledTimes(1);
+    rerender(<ContextView conversationId="c1" usage={{ used: 60_000, budget: 126_272, window: 200_000 }} />);
+    expect(screen.queryByRole("button", { name: "现在压缩" })).toBeNull();
+  });
+});
+
+

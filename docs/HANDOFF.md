@@ -6532,6 +6532,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **全部测一遍（d.388）**：★ 「已添加的来源」标题旁加「全部测一遍」：按 `providers` 顺序串行跑 `provider test <id>`，结论照旧写各自行上，最后在告警条报「几家通、几家连不上」★ 复用行上的 `testProvider`，单点与批量共用一套判定与文案；进行中按钮变「正在一家家测…」并禁用 ★ 串行而非并发：真发请求，同时打出去容易被对端限流 ★ spec 新增 §3.10；验证：ModelPage 125 例全绿、typecheck 通过。
+## 上下文页的「现在压缩」入口（d.389）
+
+- `ContextView` 新增可选 `onCompact?: () => void`；`ChatPage` 传入 `() => void runCompactCommand([{ agentId: conv.agent.id, name: nameOf(conv.agent.id) }])`。
+- **必须复用 `runCompactCommand`**（`ChatPage.tsx` 约 4792 行，`/compact` 走的就是它），不要另写一套压缩：它已经处理了「force 分支」「压完不比原来省就如实说」「写 fold 记录 + 提示」。
+- 按钮只在给了回调解构时渲染，测试里可以直接断言它不出现（`ContextView` 也被独立渲染在别处）。
+- 留白：没有「压缩中」禁用态（本地同步动作），压缩后不主动刷新占用（等下一轮 `refreshContextUsage`）。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6550,6 +6558,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

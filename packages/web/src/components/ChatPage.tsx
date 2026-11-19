@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -7351,6 +7351,15 @@ export function ChatPage({
               conversationId={convId}
               // 预算还没算出来（首次加载）就不传：让页签按本机设置回落，避免闪一下 0 / 0。
               usage={contextUsage.budget > 0 ? contextUsage : undefined}
+              // 手动压缩（d.388）：和输入框里发 /compact 走同一条路，不另造一套。
+              onCompact={
+                conv
+                  ? () =>
+                      void runCompactCommand([
+                        { agentId: conv.agent.id, name: nameOf(conv.agent.id) },
+                      ])
+                  : undefined
+              }
             />
           </div>
         </div>

@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.389.4.130.14",
+    "date": "2026-11-19",
+    "title": "看到快满了，可以立刻压",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上下文页会告诉你「距阈值还有 12.4K」，可你没有别的办法——只能等下一轮让系统自己压。`/compact` 这条命令早就在，但它藏在输入框里，用户得先知道它存在。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `chat/ContextView.tsx` | 新增可选 `onCompact`；给了就渲染「现在压缩」按钮，`title` 说明它和发 `/compact` 是同一件事 || `ChatPage.tsx` | 传 `onCompact={() => void runCompactCommand([{ agentId: conv.agent.id, name: nameOf(conv.agent.id) }])}`——复用现有 `runCompactCommand`，不另造一套压缩逻辑 |",
+      "**怎么验证。** `ContextView.test.tsx` 21 → 22 例（给了回调才出现按钮、点了调一次、不给就不渲染）；web 全量 6716 例（唯一失败是并行会话正在改的 `magpieUsage.test.ts`）；typecheck 通过。",
+      "**留白。** 按钮不做「压缩中」禁用态——压缩本身是本地同步动作，跑完会走原有的提示；也不在压缩后自动刷新占用，仍按下一轮的 `refreshContextUsage` 更新。"
+    ]
+  },
+  {
     "version": "d.388.4.130.14",
     "date": "2026-11-19",
     "title": "全部测一遍：换机器之后，一家一家问「还通不通」",

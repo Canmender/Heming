@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.389.4.130.14",
+    "date": "2026-11-19",
+    "title": "看到快满了，可以立刻压",
+    "bullets": [
+      "上下文页多了一个「现在压缩」按钮：不用等下一轮，也不用记 `/compact`。",
+      "压的是发给模型的那份上下文，界面里的消息仍在。",
+      "压完会照常说省了多少；不划算就明说，不拿摘要换掉真实内容。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.388.4.130.14",
     "date": "2026-11-19",
     "title": "「全部测一遍」：一次问清哪家还通",
