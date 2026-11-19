@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.361.4.130.12",
+    "date": "2026-11-19",
+    "title": "状态跟着回答走，小结留在输入框下面",
+    "bullets": [
+      "`packages/web/src/components/TurnProgressLine.test.tsx` 6 → 7 例（新增位置切换与两种间距）",
+      "`packages/web/src/components/ChatPage.test.tsx` 205 例全过（I3x 的三处断言按新位置改写；查行时按容器取，避免别的用例留下的小结串进来）",
+      "`pnpm --filter @heming/web typecheck` 通过",
+      "全量 `npx vitest run`（`packages/web`）：**458 文件 / 6616 例全绿**",
+      "只挪位置，不改文案：仍然是「第 N 步 · 正在执行 X · 已跑 M 秒」，没有学 DSH 的 `深度求索中，用时 12 秒`",
+      "消息流末尾这条不折叠、不带「停止」入口：「停止」仍在输入框右侧那个圆按钮上",
+      "滚动跟随没有额外改动：进度行出现时流式气泡本来就会触发贴底"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "d.350 把「第 3 步 · 正在执行 file_read · 已跑 42 秒」放在输入框下方，和「N 轮 · M 步」同一区域。问题是**跑起来之后用户的眼睛在消息流末尾**——回答正在那里一个字一个字长出来，状态行却在屏幕另一头，看它还得把视线从正文挪开。DSH 把运行状态放在消息流末尾（`RunningStatus` 跟着`ChatFlow` 的 keyed 列表走），我们这个位置一直是个例外。",
+      "同时保留 d.218 的小结语义：跑完之后那行「上一轮：5 步 · 用时 1 分 12 秒」属于**上一轮的账**，不属于正在读的正文，继续留在输入框下方。",
+      "做了什么",
+      "| 变化 | 落地 || --- | --- || 进度行支持两种位置 | `TurnProgressLine` 新增 `placement?: \"composer\" | \"stream\"`，并写进 `data-placement`；`stream` 用 `mb-3`（贴消息列，不吃左右边距），`composer` 保持 `mx-4 mb-1` || 跑动中放到消息流末尾 | `ChatPage` 在流式气泡之后、贴底哨兵之前渲染 `<TurnProgressLine placement=\"stream\" />`（只在 `turnProgress && !done` 时） || 收口后回输入框下方 | 输入框下方只在 `turnProgress?.done` 时渲染（默认 `composer`）——同一时刻只有一条状态行，不会上下各说一遍 || 测试口径 | I3x 改成「跑动行在消息列内、`data-placement=\"stream\"`」「收口行在表单内、`data-placement=\"composer\"`、在输入框之后」；`TurnProgressLine` 补一例位置切换 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.361.4.129.12",
     "date": "2026-11-19",
     "title": "建分组不用自己想了：三套模板，五个设置",
@@ -33,28 +56,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       "参数生成集中在 `packages/web/src/lib/magpieGroups.ts`：`GROUP_TEMPLATES`（kind/id/说明）、`groupTemplateArgs()`、`GROUP_SETTING_FIELDS`（键/标签/说明/选项）、`groupSetArgs()`。没接的键（`weight`/`fast`/`pick`/`classifier`/`intent-sure`）在注释里写了原因：它们要么得跟模型清单一起才对得上，要么得先选一个分类模型，硬塞进同一张表只会变成「填了也不知道后果」。",
       "怎么验证`groupSetArgs` 只发填了的项、空值返回 `null`、没 ID 返回 `null`、未知键被忽略「组的设置」断言按钮初始不可点、填完 ID 与两项后发出 `[\"group\",\"set\",\"fleet\",\"stays=session\",\"context=272k\"]`（顺序固定、没填的不发）",
       "留白等内核升上来再接，本轮不猜参数名"
-    ]
-  },
-  {
-    "version": "d.361.4.128.13",
-    "date": "2026-11-19",
-    "title": "状态跟着回答走，小结留在输入框下面",
-    "bullets": [
-      "`packages/web/src/components/TurnProgressLine.test.tsx` 6 → 7 例（新增位置切换与两种间距）",
-      "`packages/web/src/components/ChatPage.test.tsx` 205 例全过（I3x 的三处断言按新位置改写；查行时按容器取，避免别的用例留下的小结串进来）",
-      "`pnpm --filter @heming/web typecheck` 通过",
-      "只挪位置，不改文案：仍然是「第 N 步 · 正在执行 X · 已跑 M 秒」，没有学 DSH 的 `深度求索中，用时 12 秒`",
-      "消息流末尾这条不折叠、不带「停止」入口：「停止」仍在输入框右侧那个圆按钮上",
-      "滚动跟随没有额外改动：进度行出现时流式气泡本来就会触发贴底"
-    ],
-    "paragraphs": [
-      "为什么做",
-      "d.350 把「第 3 步 · 正在执行 file_read · 已跑 42 秒」放在输入框下方，和「N 轮 · M 步」同一区域。问题是**跑起来之后用户的眼睛在消息流末尾**——回答正在那里一个字一个字长出来，状态行却在屏幕另一头，看它还得把视线从正文挪开。DSH 把运行状态放在消息流末尾（`RunningStatus` 跟着`ChatFlow` 的 keyed 列表走），我们这个位置一直是个例外。",
-      "同时保留 d.218 的小结语义：跑完之后那行「上一轮：5 步 · 用时 1 分 12 秒」属于**上一轮的账**，不属于正在读的正文，继续留在输入框下方。",
-      "做了什么",
-      "| 变化 | 落地 || --- | --- || 进度行支持两种位置 | `TurnProgressLine` 新增 `placement?: \"composer\" | \"stream\"`，并写进 `data-placement`；`stream` 用 `mb-3`（贴消息列，不吃左右边距），`composer` 保持 `mx-4 mb-1` || 跑动中放到消息流末尾 | `ChatPage` 在流式气泡之后、贴底哨兵之前渲染 `<TurnProgressLine placement=\"stream\" />`（只在 `turnProgress && !done` 时） || 收口后回输入框下方 | 输入框下方只在 `turnProgress?.done` 时渲染（默认 `composer`）——同一时刻只有一条状态行，不会上下各说一遍 || 测试口径 | I3x 改成「跑动行在消息列内、`data-placement=\"stream\"`」「收口行在表单内、`data-placement=\"composer\"`、在输入框之后」；`TurnProgressLine` 补一例位置切换 |",
-      "怎么验证",
-      "留白"
     ]
   },
   {

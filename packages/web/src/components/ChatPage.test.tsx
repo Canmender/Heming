@@ -7171,32 +7171,46 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 工具还没返回：进度行必须说清「第 1 步 · 正在执行 file_read」，而不是一句静态的「生成中」
-    const line = await screen.findByTestId("turn-progress", undefined, { timeout: 5000 });
+    // d.361：跑动中的那一行在消息流末尾，所以按容器取——文件里别的用例可能留下一条收口小结。
+    const line = await waitFor(
+      () => within(screen.getByTestId("message-list")).getByTestId("turn-progress"),
+      { timeout: 5000 },
+    );
+    expect(line.getAttribute("data-placement")).toBe("stream");
     expect(line.textContent).toContain("第 1 步");
     expect(line.textContent).toContain("正在执行 file_read");
     expect(line.textContent).toContain("已跑");
 
-    // d.346：这一行在输入框下方、不在输入框里面（用户要求「上一轮…」显示在对话框下面）
+    // d.346：这一行不属于输入框内部；d.361 起「跑动中」的状态行挪到消息流末尾——
+    // 用户的眼睛在后面那条回答上，状态跟着回答走。
     const composer = screen.getByLabelText("消息输入框").closest('div[class*="rounded-[24px]"]');
     expect(composer).not.toBeNull();
     expect(composer!.contains(line)).toBe(false);
-    expect(
-      screen.getByLabelText("消息输入框").compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(line.getAttribute("data-placement")).toBe("stream");
+    expect(screen.getByTestId("message-list").contains(line)).toBe(true);
 
     release();
     // 收口后不能再显示「正在执行 / 已跑」（那是还在跑的意思），但也不能空着——
     // d.218：换成一行小结，说清这一轮跑了几轮、几次工具、用了多久。
+    // 小结在输入框**下方**（仍在表单内），按表单取能避开别的用例可能留下的旧行。
+    const form = screen.getByLabelText("消息输入框").closest("form")!;
     await waitFor(
       () => {
-        const settled = screen.getByTestId("turn-progress");
+        const settled = within(form).getByTestId("turn-progress");
         expect(settled.getAttribute("data-done")).toBe("true");
         expect(settled.textContent).toContain("上一轮");
         expect(settled.textContent).not.toContain("已跑");
       },
       { timeout: 5000 },
     );
-    expect(screen.getByTestId("turn-progress").textContent).toContain("1 步");
+    expect(within(form).getByTestId("turn-progress").textContent).toContain("1 步");
+    // 收口后同一条状态行回到输入框下方：这里回答的是「上一轮」，不属于正在读的正文。
+    const settledLine = within(form).getByTestId("turn-progress");
+    expect(settledLine.getAttribute("data-placement")).toBe("composer");
+    expect(screen.getByTestId("message-list").contains(settledLine)).toBe(false);
+    expect(
+      screen.getByLabelText("消息输入框").compareDocumentPosition(settledLine) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     await screen.findByText(/读到了/);
 
     // d.359：重开应用（内存清空、只从落盘重放）之后，这一行小结还得在——

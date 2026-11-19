@@ -1,4 +1,4 @@
-﻿import { render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { TurnProgressLine } from "./TurnProgressLine.js";
@@ -81,5 +81,23 @@ describe("收口小结（d.218）", () => {
     );
     const dot = container.querySelector('[aria-hidden="true"]');
     expect(dot?.className).not.toContain("animate-pulse");
+  });
+
+  it("位置可切换：跑动中放消息流末尾，收口后回输入框下方（d.361）", () => {
+    const { rerender } = render(
+      <TurnProgressLine progress={progress({ phase: "tool", tool: "file_read" })} now={AT + 3_000} placement="stream" />,
+    );
+    const running = screen.getByTestId("turn-progress");
+    expect(running.getAttribute("data-placement")).toBe("stream");
+    // 消息流里没有上下外边距（那一列本来就贴边），只留底部间距
+    expect(running.className).not.toContain("mx-4");
+    expect(running.className).toContain("mb-3");
+
+    rerender(
+      <TurnProgressLine progress={progress({ done: true, endedAt: AT + 5_000 })} now={AT + 5_000} placement="composer" />,
+    );
+    const settled = screen.getByTestId("turn-progress");
+    expect(settled.getAttribute("data-placement")).toBe("composer");
+    expect(settled.className).toContain("mx-4");
   });
 });

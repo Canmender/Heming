@@ -15,9 +15,16 @@ export interface TurnProgressLineProps {
   progress: TurnProgress | null;
   /** 当前时间（由上层每秒推进一次；缺省用渲染时刻，便于单独测文案）。 */
   now?: number;
+  /**
+   * 放在哪儿（d.361）。
+   *
+   * `"stream"`：跑动中，贴在消息流末尾——用户的眼睛在那里，状态跟着回答走（DSH 同款位置）。
+   * `"composer"`：收口后，留在输入框下方当小结——那是「上一轮」的账，不属于正在读的这段文字。
+   */
+  placement?: "composer" | "stream";
 }
 
-export function TurnProgressLine({ progress, now }: TurnProgressLineProps) {
+export function TurnProgressLine({ progress, now, placement = "composer" }: TurnProgressLineProps) {
   if (!progress) return null;
   // 收口后不再走秒：小结里的「用时」是固定的，左边那个呼吸点也该停（否则像还在跑）
   const running = !progress.done;
@@ -28,9 +35,10 @@ export function TurnProgressLine({ progress, now }: TurnProgressLineProps) {
       aria-live="polite"
       data-testid="turn-progress"
       data-done={progress.done ? "true" : "false"}
-      className={`mx-4 mb-1 flex items-center gap-2 rounded-md border px-3 py-1 text-ui-sm ${
-        running ? "border-line-soft bg-subtle text-muted" : "border-line-soft bg-subtle-2 text-muted"
-      }`}
+      data-placement={placement}
+      className={`flex items-center gap-2 rounded-md border px-3 py-1 text-ui-sm ${
+        placement === "stream" ? "mb-3" : "mx-4 mb-1"
+      } ${running ? "border-line-soft bg-subtle text-muted" : "border-line-soft bg-subtle-2 text-muted"}`}
     >
       <span
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${running ? "animate-pulse bg-accent" : "bg-muted"}`}

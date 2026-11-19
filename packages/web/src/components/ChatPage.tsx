@@ -6346,6 +6346,11 @@ export function ChatPage({
               : {})}
           />
         ))}
+        {/* 跑动中的进度跟着最后一条回答走（d.361，对齐 DSH）：用户的眼睛在回答末尾，
+            状态行放到这里才看得见；收口后它回到输入框下方当「上一轮」的小结。 */}
+        {turnProgress && !turnProgress.done ? (
+          <TurnProgressLine progress={turnProgress} now={progressNow || undefined} placement="stream" />
+        ) : null}
         <div ref={bottomRef} />
         </div>
       </div>
@@ -7068,7 +7073,11 @@ export function ChatPage({
         </div>
         {/* 主对话进度（d.346）：轮次/工具/用时放在输入框下方——用户在框里打字时
             最不该被这条挤占视线，收口后的「上一轮」总结留在原位。 */}
-        <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
+        {/* d.361：输入框下方只留收口后的小结；跑动中的状态已经挪到消息流末尾。
+            这样同一时刻只存在一条状态行，不会上下各说一遍。 */}
+        {turnProgress?.done ? (
+          <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
+        ) : null}
         {/* 本对话的轮数与步数（d.350）：居中、完整显示。
             轮 = 用户输入 + AI 输出 + 停止；步 = AI 每一次工具操作。
             不再显示快捷键提示（用户要求去掉那行「Enter 发送 · …」）。 */}
