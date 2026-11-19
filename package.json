@@ -29,7 +29,7 @@
       "electron"
     ]
   },
-  "hemingVersion": "d.362.4.130.13",
+  "hemingVersion": "d.362.4.130.14",
   "devDependencies": {
     "js-yaml": "^5.5.0",
     "tsx": "^4.23.15"

@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.362.4.130.14",
+    "date": "2026-11-19",
+    "title": "来源能自己踩刹车了：并发、排队、休息",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 之前的模型页能加来源、能看额度，但来源被打爆这件事只能干看着：三个 ZCode 账号一起上被厂商拒（上游 Discord #405 那条），OpenRouter 免费模型每分钟 20 次的软限，厂商说「额度用完」又没说什么时候回来。magpie 的 Provider 编辑器里有一组「别把它打爆」的开关，对标的这一轮把它们接上了。",
+      "**做了什么。**",
+      "| 能力 | 页面在哪 | 背后是 || --- | --- | --- || 一次只上几个账号，其余排队 | 来源「高级 → 调流（可选）」的「同时用几个账号」 | `provider at-once <id> <n\\|off>` || 每个账号每分钟最多几个请求 | 同一处的「每分钟请求」 | `provider rpm <id> <n\\|off>` || 排队几个、最多等几秒 | 「排队」填 `20` 或 `20:30` | `provider queue <id> <len> [sec]` || 额度用完、又没说什么时候回来时歇多久 | 「额度用完后歇多久」 | `provider quota-rest <id> <dur\\|default>` || 连续失败或被限流时最多歇多久 | 「连续失败最多歇多久」 | `provider rest-cap <id> <dur\\|off\\|default>` |",
+      "一次只发改过的项，一项一条命令：内核每个键各自校验，前一条失败不该挡住后面几条。留空是「这次不改」，和下拉里的「回到默认」不是一回事。填了看不懂的值不静默吞掉——页面直接把那一格点出来，能看懂的先发出去。",
+      "**怎么验证。** `npx vitest run src/lib/magpieSourceTune.test.ts` 8 例；`npx vitest run src/components/ModelPage.test.tsx` 109 例（其中两例专门盯「只发改过的项」和「看不懂的点名」）；定向 16 文件 / 229 例全绿；packages/web 全量 459 文件 / 6626 例全绿（182.83s）；`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** `quota-rest` 的「到每天某个时刻」（`until 08:00`）和按账号、按 Key 的 `account-weight` / `account-concurrency` / `account-cap` 没进页面——它们要挑具体账号，塞进一个不分账号的表单会误导，仍留命令行。参考实现的「组绑定点名账号」（`Group.Accounts`）也还做不了：随包的 magpie 内核里 `groups_cli.go` 没有 `accounts=` 这个键。"
+    ]
+  },
+  {
     "version": "d.362.4.130.13",
     "date": "2026-11-19",
     "title": "干活时也别让屏幕空着",
