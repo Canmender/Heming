@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.379.4.130.14",
+    "date": "2026-11-19",
+    "title": "用量图能画首字了：这个月是不是变快了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮把每条请求的首字接进「最近请求」之后，很自然的下一个问题是「这一个月首字有没有变快、哪几天特别慢」。图上看不出来——柱状图只有两个指标：每天请求数、每天 Token。内核的按天数据（`usage.Point` 内嵌 `Totals`）本来就带着 `timed` 与 `ttft_ms`，页面没读这两列而已。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieUsage.ts` | `UsageSeriesPoint` 补 `timed` / `ttft_ms`；新增 `pointTTFT`（某天的平均首字，那天没有被计时的流式回复就返回 null）；`chartBars` 的指标类型收敛成导出的 `ChartMetric = \"calls\" \\| \"tokens\" \\| \"ttft\"` || `packages/web/src/components/ModelUsageView.tsx` | 指标切换由两个变三个（`CHART_METRICS` 表驱动：请求 / Token / 首字）；标题、颜色、悬停文案、刻度都跟着表走：首字的标题写「每天平均首字（只算流式回复）」，刻度写「单日最高 平均 900ms」，柱子的悬停是「11-07：平均 800ms」 || `packages/web/src/index.css` | 亮色与暗色各加一个 `--chart-3`（琥珀）：与蓝、蓝绿都不同色相；首字慢是体验问题，不用告警红 |",
+      "**怎么验证。** `npx vitest run src/lib/magpieUsage.test.ts src/components/ModelUsageView.test.tsx` 16 例通过（数据层 10 例，新增「按天的首字：有计时的天才给数，柱状图按这个指标取平均」；视图 6 例，新增「图表能切到首字：每天平均首字，只算有计时的那些天」）。连带 `ModelPage.test.tsx` 一起跑 **135 例全绿**。`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** 首字只统计流式回复（内核的 `timed` 就是这么记的），非流式的那部分在图里是空的；没被计时的日子在图上不画柱子，也不假装是 0ms。"
+    ]
+  },
+  {
     "version": "d.378.4.130.14",
     "date": "2026-11-19",
     "title": "停了就说停了",
