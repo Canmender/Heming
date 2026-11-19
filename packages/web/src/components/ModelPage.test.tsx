@@ -2220,6 +2220,29 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(await screen.findByText("全部测过：1 家都通。")).toBeInTheDocument();
   });
 
+  it("运行页顶上有「跳到哪一块」：每块都在页上，点了不报错也不换页签", async () => {
+    installBridge({}, {});
+    render(<ModelPage />);
+    await screen.findByText("mock");
+
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+
+    const nav = await screen.findByRole("navigation", { name: "跳到运行页的某一块" });
+    const labels = ["轨迹", "智能体", "路由分组", "用量", "备份与同步", "更多"];
+    for (const label of labels) {
+      expect(within(nav).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+
+    // 每个按钮指向的那一块确实在页上——id 与 RUN_ANCHORS 对得上，才叫「跳得到」。
+    for (const id of ["run-trace", "run-agents", "run-groups", "run-usage", "run-backup", "run-more"]) {
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+
+    // jsdom 里没有 scrollIntoView；点一下只该静默跳过，不该抛错，也不该切走页签。
+    fireEvent.click(within(nav).getByRole("button", { name: "用量" }));
+    expect(screen.getByRole("tab", { name: "运行" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("来源模型清单：显示这个来源暴露的模型，增删与整套切换都走 provider models", async () => {
     const { calls } = installBridge(
       {},

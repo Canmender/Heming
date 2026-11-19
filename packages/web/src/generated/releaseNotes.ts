@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.398.4.136.14",
+    "date": "2026-11-19",
+    "title": "运行页顶上一排「跳到哪一块」",
+    "bullets": [],
+    "paragraphs": [
+      "1. 运行页顶部多了一排按钮：轨迹、智能体、路由分组、用量、备份与同步、更多。2. 点一下直接滚到那一块，不用再从页尾往上找。3. 切换页签、筛选条件一概不动——它只负责带你过去。4. 这一页东西多是因为「来源 / 运行」只剩两个页签；少点两下，本该如此。"
+    ]
+  },
+  {
     "version": "d.397.4.136.14",
     "date": "2026-11-19",
     "title": "用 /compact 打字压，顶部说明也立刻出来",

@@ -233,6 +233,29 @@ const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
 ];
 
 /**
+ * 运行页上那排「跳到哪一块」（d.398）：轨迹、智能体、路由分组、用量、备份与同步、更多。
+ *
+ * 只做「滚到那儿」，不做筛选——每块本来就在页上，这排只是省得一路滚。
+ * id 由下面各块的容器提供（`run-trace` / `run-agents` / …），改 id 时两边一起改。
+ */
+const RUN_ANCHORS = [
+  { id: "run-trace", label: "轨迹" },
+  { id: "run-agents", label: "智能体" },
+  { id: "run-groups", label: "路由分组" },
+  { id: "run-usage", label: "用量" },
+  { id: "run-backup", label: "备份与同步" },
+  { id: "run-more", label: "更多" },
+] as const;
+
+/** 滚到运行页的某一块；被测环境没有 scrollIntoView 时静默跳过，不让点击抛错。 */
+function jumpToRun(id: string): void {
+  const target = document.getElementById(id);
+  if (target && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+/**
  * 智能体模型下拉的「自定义…」值：给不在网关目录里的模型留一个出口，
  * 不让下拉把「模型列表没刷新」变成「无法选」。
  */
@@ -3449,9 +3472,26 @@ export function ModelPage() {
         {/* ── 运行 ───────────────────────────────────────────── */}
         {tab === "run" && (
           <section aria-label="运行" className="space-y-4">
-            <ModelTraceView />
+            {/* 运行页已经把轨迹、智能体、路由分组、用量、备份与同步都放在一页上（d.398）：
+                内容够长之后，先给一排「跳到哪一块」，省得一路滚。 */}
+            <nav aria-label="跳到运行页的某一块" className="flex flex-wrap items-center gap-2">
+              {RUN_ANCHORS.map((anchor) => (
+                <button
+                  key={anchor.id}
+                  type="button"
+                  className="rounded-full border border-line px-2 py-0.5 text-ui-xs text-muted transition-colors hover:text-ink"
+                  onClick={() => jumpToRun(anchor.id)}
+                >
+                  {anchor.label}
+                </button>
+              ))}
+            </nav>
 
-            <section aria-label="智能体" className="space-y-4">
+            <div id="run-trace">
+              <ModelTraceView />
+            </div>
+
+            <section id="run-agents" aria-label="智能体" className="space-y-4">
               <div className="ui-alert ui-alert-warn block p-4">
                 <div className="flex items-start gap-2">
                   <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
@@ -3771,7 +3811,7 @@ export function ModelPage() {
             </section>
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
-            <details className="ui-disclosure ui-card p-4 lg:col-span-2">
+            <details id="run-groups" className="ui-disclosure ui-card p-4 lg:col-span-2">
               <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <TextField
@@ -4022,15 +4062,19 @@ export function ModelPage() {
 
             {/* 用量不再包一层卡片：它自身就是「标题行 + 指标卡 + 图表卡」的区块，
                 再套一张 .ui-card 会形成卡中卡（d.124 视觉审计） */}
-            <ModelUsageView
-              onExportCsv={(period) => void run("导出用量", ["usage", "--csv", period])}
-            />
+            <div id="run-usage">
+              <ModelUsageView
+                onExportCsv={(period) => void run("导出用量", ["usage", "--csv", period])}
+              />
+            </div>
 
-            <BackupPanel />
+            <div id="run-backup" className="space-y-4">
+              <BackupPanel />
 
-            <CloudSyncCard />
+              <CloudSyncCard />
+            </div>
 
-            <details className="ui-disclosure ui-card p-4">
+            <details id="run-more" className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>

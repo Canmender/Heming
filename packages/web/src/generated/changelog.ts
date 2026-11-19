@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.398.4.136.14",
+    "date": "2026-11-19",
+    "title": "运行页顶上一排「跳到哪一块」",
+    "bullets": [
+      "表在 `RUN_ANCHORS`（`packages/web/src/components/ModelPage.tsx`），滚动作在 `jumpToRun(id)`：先判 `scrollIntoView` 是不是函数再调，测试环境（jsdom）里静默跳过、不抛错。",
+      "只做「跳」，不做「筛」：这一页的东西本来就都在，多一层筛选反而要记「现在筛着什么」。",
+      "`npx vitest run src/components/ModelPage.test.tsx` 127 例（新增：六个锚点都在、六个 id 都在、点「用量」不抛错也不切走页签）",
+      "`pnpm --filter @heming/web typecheck` 通过",
+      "没有「当前在哪一块」的高亮（要做就得挂 IntersectionObserver，收益不值）。",
+      "不做吸顶：这排只在运行页顶部出现一次，滚下去就跟着走掉。",
+      "「更多」那四张卡仍是四张卡，这一轮没把它们照「来源 › 更多设置」收成一处——那是下一轮的事。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "从 d.359 起模型页只剩「来源 / 运行」两个页签，代价全压在运行页上：轨迹、本机智能体、路由分组、用量、备份与同步、再加四张「更多」卡（资源库与搜索、网关密钥、会话与启动器、高级命令）都在同一页。找一样东西得一路滚，滚过头还得往回找——合并页签是为了少点两下，不该换来「滚半天」。",
+      "做了什么",
+      "| 之前 | 现在 || --- | --- || 找「用量」靠滚 | 顶上六个锚点：轨迹 / 智能体 / 路由分组 / 用量 / 备份与同步 / 更多 || 点了会换页签、改筛选 | 只滚到那块，别的一概不动 || 各块没有稳定 id | `run-trace`、`run-agents`、`run-groups`、`run-usage`、`run-backup`、`run-more` |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.397.4.136.14",
     "date": "2026-11-19",
     "title": "用 /compact 打字压，顶部说明也立刻出来",

@@ -374,6 +374,18 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
   不让人以为库里总共就这么几条。
 - 过滤在已读出的行上做，不额外请求；筛空时表里留一句「最近读出的这几条里没有没成的」。
 
+### 4.3 运行页的「跳到哪一块」
+
+运行页把轨迹、本机智能体、路由分组、用量、备份与同步、以及四张「更多」卡都放在一页上（d.359 合并页签的代价），
+内容够长之后一路滚很烦。所以顶部有一排锚点：
+
+- `RUN_ANCHORS`（`packages/web/src/components/ModelPage.tsx`）六项：轨迹 / 智能体 / 路由分组 / 用量 /
+  备份与同步 / 更多；点一下滚到对应块（`jumpToRun(id)` → `scrollIntoView`），**不切页签、不筛选**。
+- 各块容器带 id：`run-trace`、`run-agents`、`run-groups`、`run-usage`、`run-backup`、`run-more`。
+  改 id 时 `RUN_ANCHORS` 与容器两边一起改，测试会盯着（存在性 + 点击不抛错）。
+- 测试环境（jsdom）没有 `scrollIntoView`，`jumpToRun` 里先判 `typeof … === "function"` 再调，
+  点击静默跳过而不是抛错。
+
 ## 5. 还没对齐的部分（明确留白）
 
 - **Web search（Settings › Models 的 search 一段）**：`searcher`、`searcherThen`、`searcherEffort`、
