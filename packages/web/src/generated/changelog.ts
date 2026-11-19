@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.397.4.136.14",
+    "date": "2026-11-19",
+    "title": "用 /compact 打字压，顶部说明也立刻出来",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮修好了「手动压缩不写记录」，但只覆盖了上下文页那个按钮——从输入框敲 `/compact` 走的是另一个入口，压完同样不改消息数，顶部那条折叠说明要等到下一条消息才出现。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` 的斜杠命令分发 | `/compact` 成功后 `setFoldTick(n + 1)` + `refreshContextUsage()`，与按钮那条路一致 |",
+      "**怎么验证。** `ChatPage.test.tsx` 209 例全过；web 全量 **6744 例全绿**。",
+      "**留白。** typecheck 当前被并行会话的 `ModelPage.tsx`（`RUN_ANCHORS`/`jumpToRun` 未定义）挡住，与本轮无关；`ChatPage.tsx` 本身无类型错误。"
+    ]
+  },
+  {
     "version": "d.397.4.135.14",
     "date": "2026-11-19",
     "title": "自己压的，也得留个记录",

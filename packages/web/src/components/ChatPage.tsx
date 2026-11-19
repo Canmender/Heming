@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -4984,7 +4984,16 @@ export function ChatPage({
     const customPrompt = expandCustomCommand(text, customCommandsRef.current);
     if (customPrompt !== null) return submitMessage(customPrompt, mentions, taskId, attachment, options);
     // 只对用户手打的单条命令生效：`/compact` 不落库、不发给模型，本地压缩完给结果。
-    if (text === COMPACT_COMMAND) return await runCompactCommand(mentions);
+    if (text === COMPACT_COMMAND) {
+      const result = await runCompactCommand(mentions);
+      // d.398：走 /compact 时也要重读折叠记录、重算占用——压缩不改消息数，
+      // contextFold 的 memo 不会自己失效（d.390 只覆盖了「现在压缩」按钮那条路）。
+      if (result.ok) {
+        setFoldTick((n) => n + 1);
+        refreshContextUsage();
+      }
+      return result;
+    }
     if (text === PLAN_COMMAND) {
       const next = !loadPlanMode(convId);
       togglePlanMode();

@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.397.4.136.14",
+    "date": "2026-11-19",
+    "title": "用 /compact 打字压，顶部说明也立刻出来",
+    "bullets": [
+      "在输入框里敲 /compact 压缩之后，消息列表顶部那条说明立刻出现，不用等下一句话。",
+      "和上下文页「现在压缩」按钮的行为一致了。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.397.4.135.14",
     "date": "2026-11-19",
     "title": "自己压的，也得留个记录",

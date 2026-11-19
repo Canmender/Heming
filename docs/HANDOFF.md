@@ -6582,6 +6582,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 改 `recordContextFold` 签名时注意：第 3 参是 `now`，`manual` 是第 4 参；`getContextFold` 会原样带出 `manual`。
 
 
+## 打字的 /compact 也要立刻刷新（d.397.4.136）
+
+- d.396/d.397 只覆盖了上下文页「现在压缩」按钮这条路径；输入框敲 `/compact` 是另一个入口，压完 `messages.length` 不变，`contextFold` 的 memo 不会重跑，顶部说明要等下一句才出现。
+- 现在斜杠命令分发里 `/compact` 成功后同样 `setFoldTick(n + 1)` + `refreshContextUsage()`。
+- 教训：**凡是会改变「折叠/占用」的入口都要显式刷新**——目前共三处：自动折（`prepareHistory` 里本来就跟着新一轮走）、按钮、`/compact`。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6600,6 +6607,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 
