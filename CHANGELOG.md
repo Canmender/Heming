@@ -1,3 +1,18 @@
+﻿## d.390.4.131.14（2026-11-19）— 按下「现在压缩」，数字就动
+
+**为什么做。** 上一轮加了「现在压缩」按钮，但点完百分比一格不动：占用是 `refreshContextUsage()` 算的，只在轮次边界刷新；折叠记录也只在 `messages.length` 变时重读，而压缩不改消息数。按钮看着像没生效。
+
+**做了什么。**
+
+| 位置 | 变化 |
+| --- | --- |
+| `ChatPage.tsx` | `onCompact` 改成 async：`await runCompactCommand(...)` → `refreshContextUsage()` → `setFoldTick(n + 1)` |
+| `ChatPage.tsx` | 新增 `foldTick` state，并进 `contextFold` 的 `useMemo` 依赖（压缩不改消息数，只能靠它触发重读） |
+
+**怎么验证。** `pnpm --filter @heming/web typecheck` 通过；`ChatPage.test.tsx` 209 例全过；web 全量 **6717 例全绿**。
+
+**留白。** 「现在压缩」是本地同步动作，没有「压缩中」的进度态；压缩失败（比如没绑模型）仍走 `/compact` 原有的提示文案，不额外造一套。
+
 ## d.390.4.130.14（2026-11-19）— 用量图能画花费了：每天花了多少，一眼看得出
 
 **为什么做。** 用量图原来有三个指标：每天的请求数、Token、首字。可「这个月到底花了多少、哪天花得多」只能看概览卡上那一个总数——看不到分布。内核按天的 `usage.Point`（内嵌 `Totals`）本来就带着 `cost` 与 `unpriced`，页面的 series 也早就解析了 `cost`，只是柱状图没用这一列。
@@ -16797,6 +16812,8 @@ vitest 写 SSR 缓存会 EPERM，导致 shared 包「72 用例全过但退出码
 - 工具调用暂无「每次调用前确认」；高风险工具需自行把控授权
 - 思考过程依赖模型能力（DeepSeek 系、部分网关），不支持的模型不显示该区块
 - 浏览器端不支持语音/视频通话（桌面端限定）
+
+
 
 
 

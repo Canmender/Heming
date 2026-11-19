@@ -6541,6 +6541,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **用量图能画花费了（d.390）**：★ 用量图指标从三个变四个——请求 / Token / 首字 / 花费，柱高就是那天的 `cost`（未定价的天照实给 0，不折算）★ `ChartMetric` 加 `"cost"`，`chartBars` 按 `point.cost` 取值；悬停与「单日最高」走 `formatCost`，与概览卡同口径 ★ `index.css` 亮暗各加 `--chart-4`（紫）★ spec 新增 §4.1 记录四个指标各取哪个字段 ★ 验证：magpieUsage 11 例 + ModelUsageView 7 例 = 18 例全绿、typecheck 通过。
+## 手动压缩之后要自己刷新（d.390）
+
+- `ChatPage.tsx` 的 `onCompact` 现在是 async：`await runCompactCommand(...)` 之后调 `refreshContextUsage()`，再 `setFoldTick((n) => n + 1)`。
+- `contextFold` 的 `useMemo` 依赖里有 `messages.length`，而**压缩不会改变消息数**——只补 `refreshContextUsage` 的话，顶部那条「更早的 N 条折成了摘要」要等下一轮才出现。新增 `foldTick` 就是为了这个。
+- 以后再加「压缩完立刻可见」的东西（例如用量药丸里的 token），同样记得手动触发一次刷新，别指望轮次边界。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6559,6 +6566,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

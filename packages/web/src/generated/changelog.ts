@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.390.4.131.14",
+    "date": "2026-11-19",
+    "title": "按下「现在压缩」，数字就动",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮加了「现在压缩」按钮，但点完百分比一格不动：占用是 `refreshContextUsage()` 算的，只在轮次边界刷新；折叠记录也只在 `messages.length` 变时重读，而压缩不改消息数。按钮看着像没生效。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` | `onCompact` 改成 async：`await runCompactCommand(...)` → `refreshContextUsage()` → `setFoldTick(n + 1)` || `ChatPage.tsx` | 新增 `foldTick` state，并进 `contextFold` 的 `useMemo` 依赖（压缩不改消息数，只能靠它触发重读） |",
+      "**怎么验证。** `pnpm --filter @heming/web typecheck` 通过；`ChatPage.test.tsx` 209 例全过；web 全量 **6717 例全绿**。",
+      "**留白。** 「现在压缩」是本地同步动作，没有「压缩中」的进度态；压缩失败（比如没绑模型）仍走 `/compact` 原有的提示文案，不额外造一套。"
+    ]
+  },
+  {
     "version": "d.390.4.130.14",
     "date": "2026-11-19",
     "title": "用量图能画花费了：每天花了多少，一眼看得出",

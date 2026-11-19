@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -2629,7 +2629,9 @@ export function ChatPage({
    * 折完只在上方提示条里说一句，用户回头翻不到「为什么它忘了刚才说的」，所以这里再留一个
    * 常驻的、可展开的说明，位置在消息列表最上面（折的正是最上面那段）。
    */
-  const contextFold = useMemo(() => getContextFold(convId), [convId, messages.length]);
+  // 手动压缩后消息数不变，所以光靠 messages.length 不会重读折叠记录（d.390）。
+  const [foldTick, setFoldTick] = useState(0);
+  const contextFold = useMemo(() => getContextFold(convId), [convId, messages.length, foldTick]);
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
 
@@ -7354,10 +7356,16 @@ export function ChatPage({
               // 手动压缩（d.388）：和输入框里发 /compact 走同一条路，不另造一套。
               onCompact={
                 conv
-                  ? () =>
-                      void runCompactCommand([
-                        { agentId: conv.agent.id, name: nameOf(conv.agent.id) },
-                      ])
+                  ? () => {
+                      // 压完立刻重算占用、重读折叠记录（d.390）：不然按钮点完数字一格不动。
+                      void (async () => {
+                        await runCompactCommand([
+                          { agentId: conv.agent.id, name: nameOf(conv.agent.id) },
+                        ]);
+                        refreshContextUsage();
+                        setFoldTick((n) => n + 1);
+                      })();
+                    }
                   : undefined
               }
             />
@@ -7409,6 +7417,7 @@ export function ChatPage({
     </div>
   );
 }
+
 
 
 

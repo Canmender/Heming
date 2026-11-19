@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.390.4.131.14",
+    "date": "2026-11-19",
+    "title": "按下「现在压缩」，数字就动",
+    "bullets": [
+      "点「现在压缩」之后，占用百分比和「距阈值还有多少」立刻重算。",
+      "消息列表顶部那条「更早的 N 条折成了摘要」也会马上出现，不用等下一轮。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.390.4.130.14",
     "date": "2026-11-19",
     "title": "用量图多了「花费」",
