@@ -10,7 +10,9 @@ import {
   fetchUsageRequests,
   formatCost,
   formatTokens,
+  pointTTFT,
   type UsageRequestRow,
+  type UsageSeriesPoint,
   type UsageSummary,
 } from "./magpieUsage.js";
 
@@ -201,5 +203,19 @@ describe("展示函数", () => {
     expect(averageTTFT({ id: "m", calls: 4, errors: 0, input: 0, output: 0, cost: 0, timed: 4, ttft_ms: 3200 })).toBe(800);
     expect(averageTTFT({ id: "m", calls: 4, errors: 0, input: 0, output: 0, cost: 0, timed: 0, ttft_ms: 3200 })).toBeNull();
     expect(averageTTFT({ id: "m", calls: 4, errors: 0, input: 0, output: 0, cost: 0 })).toBeNull();
+  });
+
+  it("按天的首字：有计时的天才给数，柱状图按这个指标取平均", () => {
+    const series: UsageSeriesPoint[] = [
+      { label: "11-06", time: "", calls: 2, errors: 0, input: 0, output: 0, cost: 0, unpriced: 0 },
+      { label: "11-07", time: "", calls: 3, errors: 0, input: 0, output: 0, cost: 0, unpriced: 0, timed: 2, ttft_ms: 1600 },
+      { label: "11-08", time: "", calls: 5, errors: 0, input: 0, output: 0, cost: 0, unpriced: 0, timed: 4, ttft_ms: 1200 },
+    ];
+    expect(pointTTFT(series[0]!)).toBeNull();
+    expect(pointTTFT(series[1]!)).toBe(800);
+    const bars = chartBars(series, "ttft");
+    expect(bars.map((bar) => bar.value)).toEqual([0, 800, 300]);
+    expect(bars[2]!.ratio).toBeCloseTo(300 / 800);
+    expect(chartBars(series, "calls").map((bar) => bar.value)).toEqual([2, 3, 5]);
   });
 });

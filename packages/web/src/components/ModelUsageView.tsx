@@ -12,6 +12,7 @@ import {
   fetchUsageRequests,
   formatCost,
   formatTokens,
+  type ChartMetric,
   type UsageBreakdownKind,
   type UsagePeriod,
   type UsageRequests,
@@ -28,6 +29,12 @@ import { SkeletonBlock } from "../components/ui/Skeleton.js";
  * 概览数字、按天的请求/token 柱状图、按模型/Agent/账号的拆分、以及最近的请求明细。
  * 页面只读，不改任何记账；导出 CSV 仍走模型服务命令。
  */
+
+const CHART_METRICS = [
+  { key: "calls", label: "请求", title: "每天请求数", fill: "var(--chart-1)" },
+  { key: "tokens", label: "Token", title: "每天 Token", fill: "var(--chart-2)" },
+  { key: "ttft", label: "首字", title: "每天平均首字（只算流式回复）", fill: "var(--chart-3)" },
+] as const satisfies readonly { key: ChartMetric; label: string; title: string; fill: string }[];
 
 const PERIODS: { key: UsagePeriod; label: string }[] = [
   { key: "today", label: "今天" },
@@ -80,7 +87,8 @@ export function ModelUsageView({
   const [requests, setRequests] = useState<UsageRequests | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [metric, setMetric] = useState<"calls" | "tokens">("calls");
+  const [metric, setMetric] = useState<ChartMetric>("calls");
+  const chart = CHART_METRICS.find((item) => item.key === metric) ?? CHART_METRICS[0];
   const [breakdown, setBreakdown] = useState<UsageBreakdownKind>("models");
 
   const load = useCallback(
@@ -204,17 +212,17 @@ export function ModelUsageView({
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="ui-block-title">{metric === "calls" ? "每天请求数" : "每天 Token"}</h3>
+                <h3 className="ui-block-title">{chart.title}</h3>
                 <div role="group" aria-label="图表指标" className="ui-segment-group p-0.5">
-                  {(["calls", "tokens"] as const).map((key) => (
+                  {CHART_METRICS.map((item) => (
                     <button
-                      key={key}
+                      key={item.key}
                       type="button"
-                      aria-pressed={metric === key}
+                      aria-pressed={metric === item.key}
                       className="ui-segment px-2.5 py-0.5 text-ui-xs"
-                      onClick={() => setMetric(key)}
+                      onClick={() => setMetric(item.key)}
                     >
-                      {key === "calls" ? "请求" : "Token"}
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -239,10 +247,14 @@ export function ModelUsageView({
                         width={14}
                         height={height}
                         rx={3}
-                        fill={metric === "calls" ? "var(--chart-1)" : "var(--chart-2)"}
+                        fill={chart.fill}
                         opacity={0.85}
                       >
-                        <title>{`${bar.label}：${bar.value}`}</title>
+                        <title>
+                          {metric === "ttft"
+                            ? `${bar.label}：平均 ${bar.value}ms`
+                            : `${bar.label}：${bar.value}`}
+                        </title>
                       </rect>
                       {bar.showLabel && (
                         <text x={x + 7} y={139} textAnchor="middle" fontSize="12" fill="var(--chart-label)">
@@ -261,7 +273,9 @@ export function ModelUsageView({
                   单日最高{" "}
                   {metric === "calls"
                     ? `${Math.max(0, ...bars.map((bar) => bar.value))} 次`
-                    : formatTokens(Math.max(0, ...bars.map((bar) => bar.value)))}
+                    : metric === "ttft"
+                      ? `平均 ${Math.max(0, ...bars.map((bar) => bar.value))}ms`
+                      : formatTokens(Math.max(0, ...bars.map((bar) => bar.value)))}
                 </span>
               </p>
             </div>

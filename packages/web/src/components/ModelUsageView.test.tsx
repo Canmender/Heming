@@ -18,7 +18,18 @@ const usage = {
   unpriced: 2,
   series: [
     { label: "Oct 10", time: "1", calls: 0, errors: 0, input: 0, output: 0, cost: 0, unpriced: 0 },
-    { label: "Oct 11", time: "2", calls: 4, errors: 1, input: 1200, output: 800, cost: 0.25, unpriced: 2 },
+    {
+      label: "Oct 11",
+      time: "2",
+      calls: 4,
+      errors: 1,
+      input: 1200,
+      output: 800,
+      cost: 0.25,
+      unpriced: 2,
+      timed: 2,
+      ttft_ms: 1800,
+    },
   ],
   agents: [{ id: "heming", name: "和鸣", calls: 4, errors: 1, input: 1200, output: 800, cost: 0.25 }],
   models: [{ id: "mock/mock-model", provider: "mock", model: "mock/mock-model", calls: 4, input: 1200, output: 800, cost: 0.25, timed: 4, ttft_ms: 3200 }],
@@ -125,6 +136,26 @@ describe("ModelUsageView", () => {
     expect(cell).toHaveTextContent("720ms");
     expect(screen.getByText("这一试失败，交给了下一条")).toBeInTheDocument();
     expect(screen.getByTitle("rate limited by the vendor")).toHaveTextContent("429");
+  });
+
+  it("图表能切到首字：每天平均首字，只算有计时的那些天", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) =>
+        String(input).includes("/magpie/usage/requests")
+          ? new Response(JSON.stringify(requests), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify(usage), { status: 200, headers: { "content-type": "application/json" } }),
+      ),
+    );
+    render(<ModelUsageView />);
+    await screen.findByText("每天请求数");
+    fireEvent.click(screen.getByRole("button", { name: "首字" }));
+    expect(screen.getByText("每天平均首字（只算流式回复）")).toBeInTheDocument();
+    expect(screen.getByText("单日最高 平均 900ms")).toBeInTheDocument();
+    const barTitles = [...document.querySelectorAll("svg rect title")].map((node) => node.textContent);
+    expect(barTitles).toContain("Oct 11：平均 900ms");
+    fireEvent.click(screen.getByRole("button", { name: "Token" }));
+    expect(screen.getByText("每天 Token")).toBeInTheDocument();
   });
 
   it("没有调用时给空态，不画空图", async () => {

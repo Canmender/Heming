@@ -16,6 +16,10 @@ export interface UsageSeriesPoint {
   output: number;
   cost: number;
   unpriced: number;
+  /** 这一天里首字被计时的流式回复数；没有计时就不给数（老记录没有这列）。 */
+  timed?: number;
+  /** 这些回复的首字毫秒之和：除以 timed 才是平均首字。 */
+  ttft_ms?: number;
 }
 
 export interface UsageBucket {
@@ -153,6 +157,8 @@ export async function fetchUsage(
         output: num(point.output),
         cost: num(point.cost),
         unpriced: num(point.unpriced),
+        timed: num(point.timed) || undefined,
+        ttft_ms: num(point.ttft_ms) || undefined,
       }))
     : [];
   return {
@@ -289,15 +295,27 @@ export interface ChartBar {
   showLabel: boolean;
 }
 
+export type ChartMetric = "calls" | "tokens" | "ttft";
+
+/** 一天的平均首字：只有那天有被计时的流式回复才给数。 */
+export function pointTTFT(point: UsageSeriesPoint): number | null {
+  const timed = point.timed ?? 0;
+  const total = point.ttft_ms ?? 0;
+  if (timed <= 0 || total <= 0) return null;
+  return Math.round(total / timed);
+}
+
 /** 柱状图：按指标取每日桶，ratio 为相对最大值（0..1），供 SVG 画高度。 */
 export function chartBars(
   series: readonly UsageSeriesPoint[],
-  metric: "calls" | "tokens" = "calls",
+  metric: ChartMetric = "calls",
   maxLabels = 7,
 ): ChartBar[] {
-  const values = series.map((point) =>
-    metric === "calls" ? point.calls : point.input + point.output,
-  );
+  const values = series.map((point) => {
+    if (metric === "calls") return point.calls;
+    if (metric === "tokens") return point.input + point.output;
+    return pointTTFT(point) ?? 0;
+  });
   const max = Math.max(1, ...values);
   const step = Math.max(1, Math.ceil(series.length / maxLabels));
   return series.map((point, index) => ({
