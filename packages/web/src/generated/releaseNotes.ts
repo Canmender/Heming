@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.395.4.133.14",
+    "date": "2026-11-19",
+    "title": "压缩中就别再按了",
+    "bullets": [
+      "点「现在压缩」之后按钮会变成「压缩中…」并禁用，跑完才恢复。",
+      "连点不会再压第二次，也就不会把刚压好的摘要再压一遍。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.394.4.133.14",
     "date": "2026-11-19",
     "title": "云同步：看得见、点得动",

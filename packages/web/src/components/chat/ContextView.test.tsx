@@ -437,3 +437,19 @@ describe("ContextView · 手动压缩入口（d.388）", () => {
 });
 
 
+
+  it("压缩中按钮禁用并写「压缩中…」（d.394）", () => {
+    const onCompact = vi.fn();
+    render(
+      <ContextView
+        conversationId="c1"
+        usage={{ used: 60_000, budget: 126_272, window: 200_000 }}
+        onCompact={onCompact}
+        compacting
+      />,
+    );
+    const button = screen.getByRole("button", { name: "压缩中…" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onCompact).not.toHaveBeenCalled();
+  });

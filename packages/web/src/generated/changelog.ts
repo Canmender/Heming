@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.395.4.133.14",
+    "date": "2026-11-19",
+    "title": "压缩中就别再按了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 「现在压缩」如果要用模型生成摘要，就得先请求一次模型；这期间按钮还是可点的。连点两下会压两次，第二次是在刚压完的摘要上再压——纯属浪费一次调用，结果也更糊。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `chat/ContextView.tsx` | 新增可选 `compacting`：为真时按钮 `disabled`、`aria-busy`、文案「压缩中…」，`onClick` 置空 || `ChatPage.tsx` | 新增 `compacting` state；`onCompact` 里 `try/finally` 包住 `runCompactCommand`，跑完再刷新占用与折叠记录 |",
+      "**怎么验证。** `ContextView.test.tsx` 22 → 23 例（压缩中按钮禁用、点了不触发回调）；`ChatPage.test.tsx` 209 例；typecheck 通过。web 全量跑到 `magpieSync` 时失败——那是并行会话正在改的文件（`magpieSync.ts`、`CloudSyncCard.tsx` 同批），不是本轮引入。",
+      "**留白。** 失败没有单独的错误态：`runCompactCommand` 自己会提示「没省下来」这类结果，这里只负责不让连点。"
+    ]
+  },
+  {
     "version": "d.394.4.133.14",
     "date": "2026-11-19",
     "title": "云同步从「填命令」变成一张卡片",

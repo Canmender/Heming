@@ -2631,6 +2631,8 @@ export function ChatPage({
    */
   // 手动压缩后消息数不变，所以光靠 messages.length 不会重读折叠记录（d.390）。
   const [foldTick, setFoldTick] = useState(0);
+  /** 手动压缩是否在跑（d.394）：请求摘要要走一次模型，期间按钮禁用，避免连点。 */
+  const [compacting, setCompacting] = useState(false);
   const contextFold = useMemo(() => getContextFold(convId), [convId, messages.length, foldTick]);
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
@@ -7354,16 +7356,22 @@ export function ChatPage({
               // 预算还没算出来（首次加载）就不传：让页签按本机设置回落，避免闪一下 0 / 0。
               usage={contextUsage.budget > 0 ? contextUsage : undefined}
               // 手动压缩（d.388）：和输入框里发 /compact 走同一条路，不另造一套。
+              compacting={compacting}
               onCompact={
                 conv
                   ? () => {
                       // 压完立刻重算占用、重读折叠记录（d.390）：不然按钮点完数字一格不动。
                       void (async () => {
-                        await runCompactCommand([
+                        setCompacting(true);
+                        try {
+                          await runCompactCommand([
                           { agentId: conv.agent.id, name: nameOf(conv.agent.id) },
-                        ]);
-                        refreshContextUsage();
-                        setFoldTick((n) => n + 1);
+                          ]);
+                          refreshContextUsage();
+                          setFoldTick((n) => n + 1);
+                        } finally {
+                          setCompacting(false);
+                        }
                       })();
                     }
                   : undefined
@@ -7417,6 +7425,7 @@ export function ChatPage({
     </div>
   );
 }
+
 
 
 

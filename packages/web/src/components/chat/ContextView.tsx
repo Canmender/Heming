@@ -169,12 +169,15 @@ export function ContextView({
   conversationId,
   usage: reported,
   onCompact,
+  compacting = false,
 }: {
   conversationId: string | null;
   /** 实时用量（可选）：直接渲染的测试/独立场景不传，就回落到本机设置与逐行估算。 */
   usage?: ContextViewUsage;
   /** 手动压缩（d.388）：看到「距阈值还有」却只能干等下一轮，这里给一个立刻压的入口。 */
   onCompact?: () => void;
+  /** 正在压缩（d.394）：请求摘要要走一次模型，按钮期间禁用，避免连点压两次。 */
+  compacting?: boolean;
 }) {
   const messages = useChatStore((s) => (conversationId ? s.messages[conversationId] : undefined));
   const rows = messages ?? [];
@@ -321,11 +324,13 @@ export function ContextView({
         {onCompact ? (
           <button
             type="button"
-            onClick={onCompact}
-            className="ui-btn mt-2 h-7 px-2 text-ui-xs"
+            onClick={compacting ? undefined : onCompact}
+            disabled={compacting}
+            aria-busy={compacting}
+            className="ui-btn mt-2 h-7 px-2 text-ui-xs disabled:opacity-60"
             title="立刻把早期消息折成摘要（和输入框里发 /compact 是同一件事）"
           >
-            现在压缩
+            {compacting ? "压缩中…" : "现在压缩"}
           </button>
         ) : null}
         {/*
@@ -514,4 +519,5 @@ export function ContextView({
     </section>
   );
 }
+
 
