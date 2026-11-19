@@ -6418,6 +6418,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 - **来源能说清自己是什么了（d.365）**：★ 来源「高级」多了一组「它是什么（可选）」——「算免费」（Free first / Cheapest 会先挑它）、「上下文带宽」（`200000` / `200k` / `1.5m` 与内核 `provider.ParseTokens` 同口径，写错当场点名且整条不发）、「族标签」（规则里按族挑）、「原文照发」（这一家不吃脱敏，共用中转地址别开）；★ 四项合成一条 `provider set`（`free=` / `context=` / `family=` / `unmasked=`），留空＝这次不改、下拉首项也是「不改」，页面不读当前值免得覆盖；★ 参数生成在 `packages/web/src/lib/magpieSourceProfile.ts`（`SOURCE_PROFILE_FIELDS` / `parseTokensInput` / `sourceProfileRejected` / `sourceProfilePairs` / `sourceProfileCommand`），`magpieSourceProfile.test.ts` 7 例 + `ModelPage.test.tsx` 1 例（111 → 112），定向 17 文件 208 例全绿、typecheck 通过；★ `prompt=` / `additional-tools=` / `user-agent=` / `search=` / `compaction=` 仍留命令行（端专用排查开关，摆上页面会误导）。
 
+- **来源的可选设置收进一处（d.366）**：★ 来源行「高级」里原本并排四个折叠区（请求 / 调流 / 清单 / 它是什么），五个来源就是二十行标题、把模型 chip 挤下去——现在收进同一个「更多设置（可选）：请求、调流、清单、它是什么」，展开一次再挑一块，默认仍全收着；★ 只是嵌套一层，四块的内容、按钮、命令一个字没动，这层不保存任何东西；★ 测试新增 1 例（四块都在同一个折叠区里且默认收着，112 → 113），定向 14 文件 184 例全绿、typecheck 通过；★ 留白：折叠标题上看不出「这个来源有没有自定义头 / 调流参数」，得先把 `provider show` 的字段接进行数据。
+
 ## 7. 快速上手命令
 
 ```bash

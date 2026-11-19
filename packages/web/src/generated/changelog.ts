@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.366.4.130.14",
+    "date": "2026-11-19",
+    "title": "来源的可选设置收进一处：四个折叠区变一行",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮把「它是什么」四项接上之后，来源行展开「高级」里并排躺着四个折叠区（请求 / 调流 / 清单 / 它是什么）。五个来源就是二十行标题，把真正要看的模型 chip、备用链挤到了下面——设置越全，越不好用。参考实现把这些放在一个编辑器里分块，本轮先解决「看得见」的问题。",
+      "**做了什么。**",
+      "| 做了什么 | 在哪 || --- | --- || 四块可选设置收进同一个「更多设置（可选）：请求、调流、清单、它是什么」 | `packages/web/src/components/ModelPage.tsx` 来源行的「高级」 || 默认仍然全收着：展开一次，再挑需要的那一块 | 同上（嵌套 `<details>`） || 每块自己的按钮、发的命令一个字都没动；这层不保存任何东西 | 同上 summary 里写明 |",
+      "**怎么验证。** `ModelPage.test.tsx` 112 → 113 例（新增：四块都在「更多设置」这一个折叠区里、且默认收着）；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/lib/magpieSourceProfile.test.ts` 14 文件 / 184 例全绿；`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** 现在只是收拢，没做「哪块改过」的提示——四个折叠标题上看不出这个来源有没有自定义头、有没有调流参数；要做得好得先把 `provider show` 里这些字段接进行数据。"
+    ]
+  },
+  {
     "version": "d.365.4.130.14",
     "date": "2026-11-19",
     "title": "来源能说清自己是什么了：算不算免费、上下文多大、原文发不发",
