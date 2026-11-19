@@ -6540,6 +6540,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 留白：没有「压缩中」禁用态（本地同步动作），压缩后不主动刷新占用（等下一轮 `refreshContextUsage`）。
 
 
+- **用量图能画花费了（d.390）**：★ 用量图指标从三个变四个——请求 / Token / 首字 / 花费，柱高就是那天的 `cost`（未定价的天照实给 0，不折算）★ `ChartMetric` 加 `"cost"`，`chartBars` 按 `point.cost` 取值；悬停与「单日最高」走 `formatCost`，与概览卡同口径 ★ `index.css` 亮暗各加 `--chart-4`（紫）★ spec 新增 §4.1 记录四个指标各取哪个字段 ★ 验证：magpieUsage 11 例 + ModelUsageView 7 例 = 18 例全绿、typecheck 通过。
 ## 7. 快速上手命令
 
 ```bash
