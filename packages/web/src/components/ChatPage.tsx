@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -3657,7 +3657,13 @@ export function ChatPage({
         // d.218：也不直接抹掉，换成一行小结（几轮 / 几次工具 / 用时多少），
         // 免得跑完那一刻用户不在屏幕前，回头只能翻消息猜「刚才那一下干了多少」。
         // d.354：带上这一轮真正产出的字符数——「字/秒」要从它算，不能拿工具次数猜。
-        settleTurnProgress(convId, Date.now(), useChatStore.getState().streaming[streamId]?.text.length ?? 0);
+        // d.377：用户按了停止时标记出来，小结里写「已停止」，别让「上一轮」看着像自然收口。
+        settleTurnProgress(
+          convId,
+          Date.now(),
+          useChatStore.getState().streaming[streamId]?.text.length ?? 0,
+          result.status === "aborted",
+        );
         // d.363：这一轮已经收口（成功/失败/停止都算），草稿没有存在意义了；
         // 留着会让下一次启动把它当成「上次生成被中断」的残稿。
         clearLiveDraft(convId, streamId);

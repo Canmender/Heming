@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.378.4.130.14",
+    "date": "2026-11-19",
+    "title": "停了就说停了",
+    "bullets": [
+      "你按「停止」的那一轮，输入框下面不再假装是正常说完的：小结会写「上一轮：已停止 · 3 步 · 用时 1 分 12 秒」。",
+      "这个标记重开应用也还在，回头翻记录能分清哪次是被你停掉的。",
+      "正常说完的一轮文案没有变化。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.377.4.130.14",
     "date": "2026-11-19",
     "title": "最近的请求：首字慢在哪儿，一眼看得出来",

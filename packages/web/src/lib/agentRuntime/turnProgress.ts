@@ -49,6 +49,8 @@ export interface TurnProgress {
    * 输出时保持 null，界面就不会编一个「首字 0 秒」出来。
    */
   firstTokenAt?: number | null;
+  /** 用户点了停止（d.377）：小结里要标出来。 */
+  stopped?: boolean;
   /** 这一轮到底产出了多少正文字符（d.354）：收口时由调用方带上，用来算「字/秒」。 */
   chars?: number;
 }
@@ -76,6 +78,8 @@ type StoredSummary = {
   at: number;
   firstTokenAt: number | null;
   chars: number;
+  /** 用户点了停止（d.377）；老档没有这个字段。 */
+  stopped?: boolean;
 };
 
 const progress = new Map<string, TurnProgress>();
@@ -125,6 +129,7 @@ function readSummaries(): Record<string, StoredSummary> {
       at: numberOr(record.at, endedAt),
       firstTokenAt: typeof firstAt === "number" && Number.isFinite(firstAt) && firstAt >= startedAt ? firstAt : null,
       chars: Math.max(0, Math.floor(numberOr(record.chars, 0))),
+      ...(record.stopped === true ? { stopped: true } : {}),
     };
   }
   return out;
@@ -153,6 +158,7 @@ function summaryOf(state: TurnProgress): StoredSummary {
     at: state.at,
     firstTokenAt: state.firstTokenAt ?? null,
     chars: state.chars ?? 0,
+    ...(state.stopped ? { stopped: true } : {}),
   };
 }
 
@@ -172,6 +178,7 @@ export function hydrateTurnSummaries(): void {
       endedAt: saved.endedAt,
       firstTokenAt: saved.firstTokenAt,
       chars: saved.chars,
+      ...(saved.stopped ? { stopped: true } : {}),
     };
     progress.set(conversationId, restored);
     snapshots.set(conversationId, restored);
@@ -258,6 +265,7 @@ export function settleTurnProgress(
   conversationId: string,
   now: number = Date.now(),
   chars = 0,
+  stopped = false,
 ): void {
   if (!conversationId) return;
   const prev = progress.get(conversationId);
@@ -270,6 +278,8 @@ export function settleTurnProgress(
     done: true,
     endedAt: now,
     chars: Math.max(prev.chars ?? 0, Math.max(0, Math.floor(chars))),
+    // d.377：用户点了停止——小结要说出来，否则「上一轮」看着像正常收口的。
+    ...(stopped ? { stopped: true } : {}),
   };
   progress.set(conversationId, next);
   snapshots.set(conversationId, next);
@@ -338,6 +348,9 @@ export function describeTurnProgress(state: TurnProgress): string {
     // d.350：这里的数字是**这一步到哪了**，不是「第几轮对话」——用户说的「轮」是
     // 「一次输入 + 一次输出 + 停止」，那是输入框下方那行 `N 轮 · M 步` 的事。
     const parts: string[] = [];
+    // d.377：用户按了停止——这一轮不是自然收口的，小结里必须说，否则「上一轮」看着
+    // 像跑完了（DSH 在正文尾也标一句「已停止」）。
+    if (state.stopped) parts.push("已停止");
     if (state.tools > 0) parts.push(`${state.tools} 步`);
     parts.push(`用时 ${used}`);
     // d.354：首字延迟与出字速度（DSH 的 TTFT / tok·s⁻¹ 口径）。只在真有正文时补，
@@ -375,3 +388,5 @@ export function formatElapsed(ms: number): string {
 
 // d.359：模块加载即装回上次收口的小结——重开应用时，「上一轮跑了多少」不该凭空消失。
 hydrateTurnSummaries();
+
+

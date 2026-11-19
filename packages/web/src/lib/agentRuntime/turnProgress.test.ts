@@ -254,6 +254,31 @@ describe("首字与出字速度（d.354）", () => {
   });
 });
 
+describe("用户按了停止：小结要说出来（d.377）", () => {
+  it("停止收口的小结带「已停止」，自然收口不带", () => {
+    recordTurnProgress("c1", { round: 1, phase: "tool", tool: "file_read" });
+    settleTurnProgress("c1", 30_000, 120, true);
+    const stopped = getTurnProgress("c1")!;
+    expect(stopped.stopped).toBe(true);
+    expect(describeTurnProgress(stopped)).toMatch(/^上一轮：已停止/);
+
+    recordTurnProgress("c2", { round: 1, phase: "tool", tool: "file_read" });
+    settleTurnProgress("c2", 30_000, 120);
+    const natural = getTurnProgress("c2")!;
+    expect(natural.stopped).toBeUndefined();
+    expect(describeTurnProgress(natural)).not.toContain("已停止");
+  });
+
+  it("「已停止」也活过重启", () => {
+    const base = Date.now();
+    recordTurnProgress("c3", { round: 2, phase: "round", tool: undefined }, base);
+    settleTurnProgress("c3", base + 40_000, 300, true);
+    reloadTurnSummaries();
+    const restored = getTurnProgress("c3")!;
+    expect(restored.stopped).toBe(true);
+    expect(describeTurnProgress(restored)).toContain("已停止");
+  });
+});
 describe("收口小结活过重启（d.359）", () => {
   it("收口后重放（模拟重开应用）还能读到同一份小结", () => {
     recordTurnProgress("c1", { round: 2, phase: "tool", tool: "file_read" }, BASE);
@@ -323,3 +348,5 @@ describe("收口小结活过重启（d.359）", () => {
     expect(getTurnProgress(`c${TURN_SUMMARY_SESSIONS + 2}`)?.done).toBe(true);
   });
 });
+
+

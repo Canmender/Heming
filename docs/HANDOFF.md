@@ -6484,6 +6484,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **首字慢在哪儿（d.377）**：★ 运行页「最近请求」加「首字」一列，悬停给拆解（和鸣自己 / 先失败的那几次 / 排队 / 上游）★ 试过多次与「这一试失败交了班」写在状态旁，失败原因挂状态格悬停 ★ 拆分列表补「平均首字 xxx ms」（只算被计时的流式回复）★ 数据层补 ttft/firstText/sent/own/retried/queued/flow/tries/handedOn/err/errType/stop 与 describeRequestWait / describeRequestTries / averageTTFT ★ 留白：「为什么没走那个账号」在 Call.Fallback，账本不落，需另开轨迹接口。
+## 「已停止」标记（d.378）
+
+- `TurnProgress` 与落盘的 `StoredSummary` 都有可选 `stopped`；`settleTurnProgress(conversationId, now, chars, stopped)` 第四参由 `ChatPage` 的 `onRunSettled` 传 `result.status === "aborted"`。
+- `describeTurnProgress` 收口分支把「已停止」放在最前：`上一轮：已停止 · N 步 · 用时 …`。
+- **坑**：`readSummaries` 是逐字段白名单重建，新增字段必须同时在 `summaryOf`、`readSummaries`、`hydrateTurnSummaries` 三处补上，否则只在内存生效、重开就没了。
+- 不把「（已停止）」写进消息正文：那是服务端内容，模型下一轮会读到自己没写过的话。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6502,6 +6510,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

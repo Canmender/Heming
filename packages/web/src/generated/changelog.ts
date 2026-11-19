@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.378.4.130.14",
+    "date": "2026-11-19",
+    "title": "停了就说停了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 用户按「停止」之后，输入框下方那行小结仍写「上一轮：3 步 · 用时 1 分 12 秒」，和正常说完的一轮长得一模一样。回头翻记录时看不出那次是被中断的——DSH 会在正文尾标一句「已停止」，我们连小结都没标。这个标记只在内存时也活不过重启，d.360 落盘时同样漏了它。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `stopped`；`settleTurnProgress(convId, now, chars, stopped)` 第四参标记 || 小结文案 | 停止的一轮写成「上一轮：已停止 · 3 步 · 用时 1 分 12 秒」；自然收口不变 || 落盘 | `summaryOf` 与 `readSummaries` 都带上 `stopped`，重开应用仍能看出那一轮是停的 || `ChatPage` | `onRunSettled` 把 `result.status === \"aborted\"` 传进去 |",
+      "**怎么验证。** `turnProgress.test.ts` 新增 2 例（停止收口带「已停止」、自然收口不带；「已停止」活过 `reloadTurnSummaries()`）；`turnProgress` + `TurnProgressLine` 36 例、`ChatPage.test.tsx` 209 例全过；typecheck 通过。",
+      "**留白。** 只在「上一轮」小结里标；消息正文本身不加「（已停止）」——那是服务器上的内容，改它会让模型下一轮看到自己没写过的话。"
+    ]
+  },
+  {
     "version": "d.377.4.130.14",
     "date": "2026-11-19",
     "title": "最近的请求：首字慢在哪儿，一眼看得出来",
