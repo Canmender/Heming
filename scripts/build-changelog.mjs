@@ -37,6 +37,21 @@ if (badHeadings.length) {
   process.exit(1);
 }
 const entries = parseChangelog(changelogText);
+
+// d.398：标题里的版本号容易写错（并行会话会推高 build 段），与 package.json 对一下就报警。
+// 只警告不失败：并行会话可能先 bump、还没来得及写条目——那种情况本来就该让人看见。
+try {
+  const pkg = JSON.parse(readFileSync(join(root, "packages", "web", "package.json"), "utf8"));
+  const declared = String(pkg.hemingVersion ?? "").replace(/^d\./, "");
+  const newest = String(entries[0]?.version ?? "").replace(/^d\./, "");
+  if (declared && newest !== declared) {
+    console.warn(
+      `[build-changelog] 注意：CHANGELOG 最新条目是 d.${newest}，package.json 自报 d.${declared}。`,
+    );
+  }
+} catch {
+  // 读不到就不检查：这只是提醒，别让它挡住构建
+}
 if (!entries.length) {
   console.error("CHANGELOG.md 里没解析出任何条目：检查标题格式是否为 `## d.x.y.z（YYYY-MM-DD）— 标题`");
   process.exit(1);

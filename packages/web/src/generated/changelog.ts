@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.398.4.137.14",
+    "date": "2026-11-19",
+    "title": "标题里的版本号，和 package.json 对一下",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 版本号是并行会话在推进的，我上一轮就把标题写成 d.398、实际落在 d.397，直到生成器报「最新条目是 d.397」才发现。格式错了有 `findMalformedHeadings` 兜底，但**版本号对不对**没人管。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `scripts/build-changelog.mjs` | 解析完 CHANGELOG 后读 `packages/web/package.json` 的 `hemingVersion`，与最新条目版本比对，不一致就 `console.warn`（带两边版本号） |",
+      "只警告、不失败：并行会话可能先 bump、后写条目，那种情况本来就该让人看见，而不是卡住构建。",
+      "**怎么验证。** `node scripts/build-changelog.mjs` 在版本一致时静默通过（535 / 423 条）；比对逻辑里两边的 `d.` 前缀都先剥掉（第一版漏剥，报出「d.d.398…」）。",
+      "**留白。** 只比最新一条，不校验历史顺序；也只警告——真正要挡的「标题格式错」上一轮已经由 `findMalformedHeadings` 拦住。"
+    ]
+  },
+  {
     "version": "d.398.4.136.14",
     "date": "2026-11-19",
     "title": "运行页顶上一排「跳到哪一块」",

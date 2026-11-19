@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.398.4.137.14",
+    "date": "2026-11-19",
+    "title": "标题里的版本号，和 package.json 对一下",
+    "bullets": [
+      "内部工具改动：生成更新日志时会核对标题版本与 package 版本，不一致就提示。",
+      "对使用者没有可见变化。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.398.4.136.14",
     "date": "2026-11-19",
     "title": "运行页顶上一排「跳到哪一块」",
