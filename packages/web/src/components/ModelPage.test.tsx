@@ -1756,6 +1756,33 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(screen.getByRole("tab", { name: "来源" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("网页搜索用谁：选中就保存，清空就清回默认", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("更多设置（可选）：资源库与搜索、网关密钥、会话与启动器、高级命令").closest("summary") as HTMLElement);
+    fireEvent.click(screen.getByText("网页搜索用谁（可选）").closest("summary") as HTMLElement);
+
+    // 没设置过时，一句话说清「和鸣自己挑、先问谁由它决定、思考档用默认」。
+    expect(
+      screen.getByText(/现在：和鸣自己挑一个会搜网的模型；先问谁由和鸣决定；思考档按它自己的默认。/),
+    ).toBeTruthy();
+
+    // 先问谁：先问搜索 API。
+    fireEvent.change(screen.getByLabelText("先问谁"), { target: { value: "api" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "searchFirst", "api"]));
+
+    // 搜网用谁：不叫模型去搜，只走搜索 API。
+    fireEvent.change(screen.getByLabelText("搜网用谁"), { target: { value: "off" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "searcher", "off"]));
+
+    // 思考档：挑一个就发，选回「用它自己的默认」就 reset（settings set 不收空值）。
+    fireEvent.change(screen.getByLabelText("搜索时想多深"), { target: { value: "high" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "searcherEffort", "high"]));
+    fireEvent.change(screen.getByLabelText("搜索时想多深"), { target: { value: "" } });
+    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "searcherEffort"]));
+  });
+
   it("网络代理：跟随环境发 reset，直连发 direct，自定义发地址", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

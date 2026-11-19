@@ -154,6 +154,7 @@ import {
   type SourceWireKey,
 } from "../lib/magpieSourceWire.js";
 import { describeProxy, parseProxy, proxyArgs, proxyProblem, type ProxyMode } from "../lib/magpieProxy.js";
+import { parseSearchRoute, type SearchRoute } from "../lib/magpieSearch.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -180,6 +181,7 @@ import {
 } from "../lib/modelGlobals.js";
 import { GlobalModelSettings } from "./model/GlobalModelSettings.js";
 import { ImageModelSettings } from "./model/ImageModelSettings.js";
+import { SearchProviderSettings } from "./model/SearchProviderSettings.js";
 import { textSetting } from "../lib/modelSettings.js";
 import { supportsModelTier } from "../lib/modelTier.js";
 import {
@@ -587,6 +589,8 @@ export function ModelPage() {
   // 网络代理（d.402）：三选一 + 一个地址。值来自设置里那份表，改完立刻重读。
   const [proxyMode, setProxyMode] = useState<ProxyMode>("system");
   const [proxyAddress, setProxyAddress] = useState("");
+  /** 网页搜索交给谁、先问谁、想多深（`settings` 的三项）。 */
+  const [searchRoute, setSearchRoute] = useState<SearchRoute>({ searcher: "", effort: "", first: "" });
   /** 名字 / 说明 / id 里任一处含这个词就算匹配（不区分大小写）；空搜索词一律算匹配。 */
   const matchesSourceFilter = (id: string, name: string, desc: string) => {
     const query = sourceFilter.trim().toLowerCase();
@@ -790,6 +794,8 @@ export function ModelPage() {
         const proxy = parseProxy(textSetting(values, "proxy"));
         setProxyMode(proxy.mode);
         setProxyAddress(proxy.address);
+        // 搜索交给谁这三项也在这份表里，一次读全。
+        setSearchRoute(parseSearchRoute(values));
       }),
     [cli, once],
   );
@@ -4390,6 +4396,16 @@ export function ModelPage() {
                   。
                 </p>
               </details>
+              <SearchProviderSettings
+                rows={modelRows}
+                route={searchRoute}
+                cliReady={cli !== null}
+                onRun={async (title, args) => {
+                  const result = await runDetailed(title, args);
+                  if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
+                  return result.ok;
+                }}
+              />
             </details>
             </div>
           </section>

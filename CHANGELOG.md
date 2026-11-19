@@ -1,4 +1,53 @@
-﻿## d.405.4.140.14（2026-11-19）— 轨迹页的行能用键盘展开
+## d.408.4.140.14（2026-11-19）— 网页搜索交给谁，页面上能选了
+
+### 为什么做
+
+模型想上网查点东西时，「让谁去查」「先问来源自己的搜索还是先问搜索 API」「查的时候想多深」是内核的三项设置
+（`searcher` / `searchFirst` / `searcherEffort`，`vendor/magpie-core/internal/settings/settings.go:519-541`）。
+这三项在 `settings list --json` 里一直读得到，页面上却没有任何入口：想让搜索走别家、或者干脆别让模型去搜
+（只走配好的搜索 API），只能开终端。
+
+### 做了什么
+
+| 之前 | 现在 |
+| --- | --- |
+| 三项只能命令行设 | 运行页「更多设置（可选）」里多一块「网页搜索用谁（可选）」 |
+| 不知道现在谁在搜 | 下面一行「现在：用 X 搜网；先问搜索 API；搜索时按 high 档思考。」 |
+| 挑模型要自己记 id | 下拉里直接列网关目录中的模型；现在设的那个若已不在目录里也保留一项 |
+| 清空说不清 | 选回「和鸣自己挑 / 用它自己的默认 / 和鸣自己决定」就 `settings reset`，不发空串 |
+
+- 三项都是**选中就保存**，与「看图与画图模型」同一套做法（`settingArgs`：有值 set、空值 reset）。
+- 取值与文案在 `packages/web/src/lib/magpieSearch.ts`（`parseSearchRoute` / `describeSearchRoute` / `searcherChoices`）。
+- 三项一起从 `loadSettings` 的那份表里读，不再多发 `settings get`。
+
+### 怎么验证
+
+- `npx vitest run src/lib/magpieSearch.test.ts` 6 例（没设置过就是空、去空白、`searchFirst` 只认 model/api、
+  三句话分别怎么拼、下拉补齐当前值、`off` 与空值不补）
+- `npx vitest run src/components/ModelPage.test.tsx` 131 例（新增一例走完三条保存路径，含「选回默认就 reset」）
+- `npx vitest run src/components/ModelPage.test.tsx src/lib/magpieSearch.test.ts src/components/model` 15 文件 / 215 例全绿
+- `pnpm --filter @heming/web typecheck` 通过
+
+### 留白
+
+- `searcherThen`（第一二三顺位再问谁）是列表值，`settings set` 对列表的写法没把握，先留在命令行。
+- 按来源的搜索开关（`provider search=yes|no`）在 d.373 已做，属于另一件事。
+- 页面上「现在：…」是按下拉值拼的，不是内核现算的；以此为准的是内核，不是这句话。
+
+## d.407.4.140.14（2026-11-19）— 导出的文件头上补「跑了多少」
+
+**为什么做。** 导出的 Markdown 头只有消息数。拿到文件的人（或评审的同事）想知道这段会话跑了多少轮、多少步、有没有失败的步骤，只能从头数。
+
+**做了什么。**
+
+| 位置 | 变化 |
+| --- | --- |
+| \lib/export/conversation.ts\ | 头部新增「- 轮次：N（用户发了几条）」与「- 过程：M 步 · K 步没成」（\K\ 为 0 时不写后半句） |
+| 统计口径 | 轮次 = \kind === "user"\ 的消息数；步数 = 每条消息 \process\ 的条目数；失败 = \status\ 为 \error\/\denied\ 的条目数 |
+
+**怎么验证。** \conversation.test.ts\ 9 → 10 例（1 轮、2 步、1 步被拒 → 头里两行都在）；typecheck 通过。
+
+## d.405.4.140.14（2026-11-19）— 轨迹页的行能用键盘展开
 
 **为什么做。** 轨迹页每一行的「展开参数/结果」是绑在整行 \	r\ 上的 \onClick\，键盘用户按不到，读屏也读不出「这行可以展开」。
 
@@ -17300,6 +17349,7 @@ vitest 写 SSR 缓存会 EPERM，导致 shared 包「72 用例全过但退出码
 - 工具调用暂无「每次调用前确认」；高风险工具需自行把控授权
 - 思考过程依赖模型能力（DeepSeek 系、部分网关），不支持的模型不显示该区块
 - 浏览器端不支持语音/视频通话（桌面端限定）
+
 
 
 

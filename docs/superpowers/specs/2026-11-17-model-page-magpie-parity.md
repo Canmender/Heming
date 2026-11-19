@@ -436,6 +436,32 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 值来自 `settings list --json` 里那份表（`loadSettings` 已经整份读下来了，不再多发一条 `settings get`）。
 - 只影响和鸣自己发出的请求；别走代理的程序不受影响——这句话写在折叠里，免得有人以为它是系统级开关。
 
+### 4.7 网页搜索用谁：searchFirst / searcher / searcherEffort
+
+内核把「上网查东西」这件事的归属拆成三项设置（`vendor/magpie-core/internal/settings/settings.go:519-541`），
+之前页面上一个入口都没有——`searcher` / `searcherEffort` / `searchFirst` 三键在 `settings list --json` 里读得到，
+但没有地方设。
+
+| 键 | 内核意思 | 页面上的那一格 |
+| --- | --- | --- |
+| `searcher` | 用哪家来搜网；`off`＝只走配置好的搜索 API，不叫模型去搜；空＝和鸣自己挑 | 「搜网用谁」下拉：和鸣自己挑 / 不叫模型去搜 / 目录里的模型 |
+| `searcherEffort` | 搜索模型搜索时的思考档，取 `catalog.EffortRank`（`none…ultra`），空＝它自己的默认 | 「搜索时想多深」下拉（八级 + 用它自己的默认） |
+| `searchFirst` | 一个自己搜不了网的模型，来源和搜索 API 都能搜时先问谁：`model`（先问来源）或 `api`（先问搜索 API），空＝和鸣自己决定 | 「先问谁」下拉三选一 |
+
+做法与「看图与画图模型」一致：**选中就保存**，走 `settingArgs(key, value)`（`packages/web/src/lib/modelSettings.ts:38`）——
+有值 `settings set <key> <value>`，选回空值就 `settings reset <key>`（`settings set` 不收空串）。
+三项都从 `loadSettings` 那份 `settings list --json` 里一次读出（`parseSearchRoute`），不再各发一条 `settings get`。
+
+- 组件：`packages/web/src/components/model/SearchProviderSettings.tsx`，挂在运行页「更多设置（可选）」里、网络代理之后。
+- 纯粹的取值与文案在 `packages/web/src/lib/magpieSearch.ts`：`parseSearchRoute` / `describeSearchRoute` / `searcherChoices`。
+- 「现在：…」那句是按当前下拉值拼的，不是内核现算的——所以它随你改而变，改完保存成功才是真的。
+- 下拉里的模型取自网关列出的目录；现在设的那个若已不在目录里，仍保留一项，免得一打开就被悄悄改掉（`searcherChoices`）。
+
+没收的两项：`searcherThen`（依次再问的第二三四家）是列表，`settings set` 对列表的写法没有把握，先留在命令行；
+按来源的搜索开关（`provider search=yes|no`）在 d.373 就已经做过，是另一件事。
+
+## 5. 还没对齐的部分（明确留白）
+
 ## 5. 还没对齐的部分（明确留白）
 
 ## 5. 还没对齐的部分（明确留白）
