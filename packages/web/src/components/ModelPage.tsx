@@ -3747,6 +3747,14 @@ export function ModelPage() {
                 >
                   保存分组
                 </Button>
+                <Button
+                  type="button"
+                  size="sm" variant="ghost"
+                  disabled={!cli}
+                  onClick={() => void run("分组清单", ["groups"])}
+                >
+                  看分组清单
+                </Button>
                 <TextField
                   label="分组 ID"
                   placeholder="分组名（查看/删除用）"
@@ -3777,6 +3785,9 @@ export function ModelPage() {
                   删除
                 </Button>
               </div>
+              <p className="ui-caption mt-1">
+                「看分组清单」会把你自己建的组和 magpie 自己找到的组一起列出来（结果在页面底部）。
+              </p>
 
               <div className="mt-3 border-t border-line pt-3">
                 <div className="text-ui-sm font-semibold">按模板建组（可选）：不必自己想填哪些模型</div>

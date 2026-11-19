@@ -2530,6 +2530,15 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("看分组清单：一条命令把你自己建的组和 magpie 找到的组都列出来", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("路由分组（可选）"));
+    fireEvent.click(screen.getByRole("button", { name: "看分组清单" }));
+    await waitFor(() => expect(calls).toContainEqual(["groups"]));
+  });
+
   it("模型目录按来源分组，显示名与能力摘要来自网关目录", async () => {
     installBridge();
     useLlmStore.setState({

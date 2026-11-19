@@ -295,6 +295,14 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
   只有 `+id` / `-id` / `all` / `best` / `none`，顺序跟着厂商目录；没有排序命令，也没有标签命令。
 - `model alias`（把某个模型的用量算到另一个 id 上）是计费口径，不属于「模型设置」的视觉面；
   原版也藏在命令里，需要时用「运行 → 高级命令」直接敲。
+- **候选链（`packages/web/src/components/RouteGroupsCard.tsx`）已删（d.384）**：那是本地
+  「模型路由」页下线前的候选链编辑器，magpie 的路由组取代了它之后没有任何页面渲染它
+  （只有它自己的测试），却和「路由分组」两套并存。留着会让人以为有两处能配候选链，
+  所以连同测试一起删掉；`store/llm.ts`、`lib/llmRoute.ts`、`lib/llmHealth.ts` 是 ChatPage
+  在用的，没动。
+- 分组清单目前只能跑命令看：运行页「路由分组」里新增「看分组清单」（`magpie groups`），
+  输出在页面底部。内核那份清单是给人看的表格（组名、ids、成员、谁在用），没有 JSON，
+  这一轮不硬解析成卡片——解析错了比直接给人看原文更糟。
 - 用量页的按模型/按来源透视是 `ModelUsageView` 的另一套，不在此文档范围。
 - 「速度档」依赖内核支持 `model tier`：参考源码（`internal\cli\model_cli.go:186` 的
   `case "tier", "speed", "fast"`）有，但本机随桌面端发布的 `magpie 0.1.3246-heming`
