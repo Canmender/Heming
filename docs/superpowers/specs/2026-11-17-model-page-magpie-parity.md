@@ -386,6 +386,18 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 测试环境（jsdom）没有 `scrollIntoView`，`jumpToRun` 里先判 `typeof … === "function"` 再调，
   点击静默跳过而不是抛错。
 
+### 4.4 运行页末尾四块收在一处：更多设置（可选）
+
+运行页最后原本是四张并列的卡（资源库与网页搜索 / 网关密钥 / 会话与启动器 / 高级命令），
+四个标题各占一行、谁也不常用。d.399 起照「来源 › 更多设置」收进一个父级折叠：
+
+- 父级 `<details id="run-more">` 的 summary 是「更多设置（可选）：资源库与搜索、网关密钥、会话与启动器、高级命令」，
+  下面一句「这四块都不常用：要用哪块就展开哪块，每块里的按钮自己发命令，这里什么都不保存」。
+- 四个内层 `<details className="ui-disclosure mt-2">`（去掉 `ui-card p-4`，不再各带边框底纹）；
+  **默认收着**，锚点 `run-more` 落在父级上，跳过去看见的就是这一行。
+- 原来带 `id="run-more"` 的那张（资源库与网页搜索）把 id 让给父级，其余三张本来没有 id。
+- 内层内容整体右移两格（父级多一层），脚本改完检查了 `<details>` 深度平衡与内层数量（4 个）。
+
 ## 5. 还没对齐的部分（明确留白）
 
 - **Web search（Settings › Models 的 search 一段）**：`searcher`、`searcherThen`、`searcherEffort`、

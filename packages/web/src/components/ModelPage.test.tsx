@@ -1740,6 +1740,21 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(within(card as HTMLElement).getByText("重新登录")).toBeInTheDocument();
   });
 
+  it("运行页的可选设置收在一处：四块折成一行，要用哪块再展开", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    const parent = screen
+      .getByText("更多设置（可选）：资源库与搜索、网关密钥、会话与启动器、高级命令")
+      .closest("details");
+    expect(parent).not.toBeNull();
+    // 默认收着：四块不再各占一屏，先看见这一行。
+    expect(parent).not.toHaveAttribute("open");
+    for (const label of ["资源库与网页搜索", "网关密钥", "会话与启动器", "高级命令"]) {
+      expect(parent).toContainElement(screen.getByText(label));
+    }
+  });
+
   it("高级命令在「运行」里：流式输出写进面板", async () => {
     const { bridge, calls, emit } = installBridge();
     render(<ModelPage />);

@@ -4075,229 +4075,233 @@ export function ModelPage() {
             </div>
 
             <details id="run-more" className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
-                  查看库
-                </Button>
-                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
-                  同步到智能体
-                </Button>
-                <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库指令", ["library", "instructions"])}>
-                  查看共享指令
-                </Button>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                <TextField
-                  label="搜索 API"
-                  placeholder="搜索 API（如 tavily）"
-                  value={searchForm.api}
-                  onChange={(event) => setSearchForm({ ...searchForm, api: event.target.value })}
-                />
-                <TextField
-                  label="搜索 Key"
-                  type="password"
-                  placeholder="Key"
-                  value={searchForm.key}
-                  onChange={(event) => setSearchForm({ ...searchForm, key: event.target.value })}
-                />
-                <TextField
-                  label="删除搜索 API"
-                  placeholder="要删除的 API 名称"
-                  value={searchForm.target}
-                  onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
-                />
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {/* 以前是一个「执行」按钮按填了哪个字段猜动作：既藏了三种语义，也让删除和
-                    添加共用同一颗主按钮。拆成三个显式动作，删除单独走确认。 */}
-                <Button
-                  type="button"
-                  size="sm" variant="primary"
-                  disabled={!cli || !searchForm.api.trim()}
-                  onClick={() =>
-                    void run("添加搜索来源", ["search", "add", searchForm.api.trim(), searchForm.key.trim()])
-                  }
-                >
-                  添加来源
-                </Button>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  onClick={() => void run("搜索来源", ["search"])}
-                >
-                  查看已有
-                </Button>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli || !searchForm.target.trim()}
-                  onClick={() => {
-                    const target = searchForm.target.trim();
-                    setConfirmAction({
-                      title: "删除搜索来源？",
-                      desc: `搜索来源「${target}」删除后不可恢复（地址与 Key 一并移除）。`,
-                      confirmLabel: "删除",
-                      action: () => void run("删除搜索来源", ["search", "rm", target]),
-                    });
-                  }}
-                >
-                  删除来源
-                </Button>
-              </div>
-            </details>
-
-            <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
-              <p className="mt-1 ui-caption">
-                给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <TextField
-                  label="新密钥名称"
-                  placeholder="名称（如 我的笔记本）"
-                  value={gatewayKeyForm.name}
-                  onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, name: event.target.value })}
-                />
-                <label className="ui-caption flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={gatewayKeyForm.readOnly}
-                    onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, readOnly: event.target.checked })}
+              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />更多设置（可选）：资源库与搜索、网关密钥、会话与启动器、高级命令</summary>
+              <p className="mt-1 ui-caption">这四块都不常用：要用哪块就展开哪块，每块里的按钮自己发命令，这里什么都不保存。</p>
+              <details className="ui-disclosure mt-2">
+                <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
+                    查看库
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
+                    同步到智能体
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={!cli} onClick={() => void run("库指令", ["library", "instructions"])}>
+                    查看共享指令
+                  </Button>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <TextField
+                    label="搜索 API"
+                    placeholder="搜索 API（如 tavily）"
+                    value={searchForm.api}
+                    onChange={(event) => setSearchForm({ ...searchForm, api: event.target.value })}
                   />
-                  只读
-                </label>
-                <Button
-                  type="button"
-                  size="sm" variant="primary"
-                  disabled={!cli || !gatewayKeyForm.name.trim()}
-                  onClick={() => {
-                    const args = ["gateway-key", "add", gatewayKeyForm.name.trim()];
-                    if (gatewayKeyForm.readOnly) args.push("--read-only");
-                    void run("新建网关密钥", args);
-                  }}
-                >
-                  新建密钥
-                </Button>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  onClick={() => void run("网关密钥", ["gateway-key", "list"])}
-                >
-                  列出密钥
-                </Button>
-                <TextField
-                  label="密钥 ID"
-                  placeholder="密钥 ID（轮换/删除用）"
-                  value={gatewayKeyForm.target}
-                  onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, target: event.target.value })}
-                />
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli || !gatewayKeyForm.target.trim()}
-                  onClick={() => void run("轮换密钥", ["gateway-key", "rotate", gatewayKeyForm.target.trim()])}
-                >
-                  轮换
-                </Button>
-                <Button
-                  type="button"
-                  size="sm" variant="danger"
-                  disabled={!cli || !gatewayKeyForm.target.trim()}
-                  onClick={() =>
-                    setConfirmAction({
-                      title: "删除密钥？",
-                      desc: `密钥「${gatewayKeyForm.target.trim()}」删除后不可恢复。`,
-                      confirmLabel: "删除",
-                      action: () =>
-                        void run("删除密钥", ["gateway-key", "remove", gatewayKeyForm.target.trim()]),
-                    })
-                  }
-                >
-                  删除
-                </Button>
-              </div>
-            </details>
+                  <TextField
+                    label="搜索 Key"
+                    type="password"
+                    placeholder="Key"
+                    value={searchForm.key}
+                    onChange={(event) => setSearchForm({ ...searchForm, key: event.target.value })}
+                  />
+                  <TextField
+                    label="删除搜索 API"
+                    placeholder="要删除的 API 名称"
+                    value={searchForm.target}
+                    onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {/* 以前是一个「执行」按钮按填了哪个字段猜动作：既藏了三种语义，也让删除和
+                      添加共用同一颗主按钮。拆成三个显式动作，删除单独走确认。 */}
+                  <Button
+                    type="button"
+                    size="sm" variant="primary"
+                    disabled={!cli || !searchForm.api.trim()}
+                    onClick={() =>
+                      void run("添加搜索来源", ["search", "add", searchForm.api.trim(), searchForm.key.trim()])
+                    }
+                  >
+                    添加来源
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    onClick={() => void run("搜索来源", ["search"])}
+                  >
+                    查看已有
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli || !searchForm.target.trim()}
+                    onClick={() => {
+                      const target = searchForm.target.trim();
+                      setConfirmAction({
+                        title: "删除搜索来源？",
+                        desc: `搜索来源「${target}」删除后不可恢复（地址与 Key 一并移除）。`,
+                        confirmLabel: "删除",
+                        action: () => void run("删除搜索来源", ["search", "rm", target]),
+                      });
+                    }}
+                  >
+                    删除来源
+                  </Button>
+                </div>
+              </details>
 
-            <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
-              <p className="mt-1 ui-caption">
-                看各智能体最近的会话记录；启动器命令由模型服务提供（在终端里直接运行它给出的那条），
-                只影响那一次会话，不改配置。
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  onClick={() => void run("最近会话", ["sessions", "--limit", "10"])}
-                >
-                  查看最近会话
-                </Button>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  onClick={() => void run("会话（7 天）", ["sessions", "--days", "7", "--limit", "20"])}
-                >
-                  近 7 天
-                </Button>
-              </div>
-            </details>
+              <details className="ui-disclosure mt-2">
+                <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
+                <p className="mt-1 ui-caption">
+                  给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
+                </p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <TextField
+                    label="新密钥名称"
+                    placeholder="名称（如 我的笔记本）"
+                    value={gatewayKeyForm.name}
+                    onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, name: event.target.value })}
+                  />
+                  <label className="ui-caption flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={gatewayKeyForm.readOnly}
+                      onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, readOnly: event.target.checked })}
+                    />
+                    只读
+                  </label>
+                  <Button
+                    type="button"
+                    size="sm" variant="primary"
+                    disabled={!cli || !gatewayKeyForm.name.trim()}
+                    onClick={() => {
+                      const args = ["gateway-key", "add", gatewayKeyForm.name.trim()];
+                      if (gatewayKeyForm.readOnly) args.push("--read-only");
+                      void run("新建网关密钥", args);
+                    }}
+                  >
+                    新建密钥
+                  </Button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    onClick={() => void run("网关密钥", ["gateway-key", "list"])}
+                  >
+                    列出密钥
+                  </Button>
+                  <TextField
+                    label="密钥 ID"
+                    placeholder="密钥 ID（轮换/删除用）"
+                    value={gatewayKeyForm.target}
+                    onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, target: event.target.value })}
+                  />
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli || !gatewayKeyForm.target.trim()}
+                    onClick={() => void run("轮换密钥", ["gateway-key", "rotate", gatewayKeyForm.target.trim()])}
+                  >
+                    轮换
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="danger"
+                    disabled={!cli || !gatewayKeyForm.target.trim()}
+                    onClick={() =>
+                      setConfirmAction({
+                        title: "删除密钥？",
+                        desc: `密钥「${gatewayKeyForm.target.trim()}」删除后不可恢复。`,
+                        confirmLabel: "删除",
+                        action: () =>
+                          void run("删除密钥", ["gateway-key", "remove", gatewayKeyForm.target.trim()]),
+                      })
+                    }
+                  >
+                    删除
+                  </Button>
+                </div>
+              </details>
 
-            <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
-              <div className="mt-2 flex flex-wrap items-start gap-2">
+              <details className="ui-disclosure mt-2">
+                <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
+                <p className="mt-1 ui-caption">
+                  看各智能体最近的会话记录；启动器命令由模型服务提供（在终端里直接运行它给出的那条），
+                  只影响那一次会话，不改配置。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    onClick={() => void run("最近会话", ["sessions", "--limit", "10"])}
+                  >
+                    查看最近会话
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    onClick={() => void run("会话（7 天）", ["sessions", "--days", "7", "--limit", "20"])}
+                  >
+                    近 7 天
+                  </Button>
+                </div>
+              </details>
+
+              <details className="ui-disclosure mt-2">
+                <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
+                <div className="mt-2 flex flex-wrap items-start gap-2">
+                  <TextField
+                    label="命令"
+                    className="flex-1"
+                    placeholder="providers"
+                    value={termCommand}
+                    onChange={(event) => setTermCommand(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void startTerminalRun();
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm" variant="primary" className="mt-5"
+                    disabled={!cli || !termCommand.trim()}
+                    onClick={() => void startTerminalRun()}
+                  >
+                    运行
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!runId}
+                    onClick={() => {
+                      if (runId) void cli?.cliKill(runId);
+                      setRunId(null);
+                    }}
+                  >
+                    取消
+                  </Button>
+                </div>
+                <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-console-bg p-3 text-ui-sm text-console-ink">
+                  {live || "（输出会出现在这里）"}
+                </pre>
                 <TextField
-                  label="命令"
-                  className="flex-1"
-                  placeholder="providers"
-                  value={termCommand}
-                  onChange={(event) => setTermCommand(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void startTerminalRun();
+                  label="命令输入"
+                  className="mt-2"
+                  placeholder="回车把这一行发给正在运行的命令"
+                  value={terminalInput}
+                  onChange={(event) => setTerminalInput(event.target.value)}
+                  onKeyDown={async (event) => {
+                    if (event.key !== "Enter" || !runId || !cli) return;
+                    const text = `${terminalInput}\n`;
+                    setTerminalInput("");
+                    await cli.cliInput(runId, text);
                   }}
                 />
-                <Button
-                  type="button"
-                  size="sm" variant="primary" className="mt-5"
-                  disabled={!cli || !termCommand.trim()}
-                  onClick={() => void startTerminalRun()}
-                >
-                  运行
-                </Button>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!runId}
-                  onClick={() => {
-                    if (runId) void cli?.cliKill(runId);
-                    setRunId(null);
-                  }}
-                >
-                  取消
-                </Button>
-              </div>
-              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-console-bg p-3 text-ui-sm text-console-ink">
-                {live || "（输出会出现在这里）"}
-              </pre>
-              <TextField
-                label="命令输入"
-                className="mt-2"
-                placeholder="回车把这一行发给正在运行的命令"
-                value={terminalInput}
-                onChange={(event) => setTerminalInput(event.target.value)}
-                onKeyDown={async (event) => {
-                  if (event.key !== "Enter" || !runId || !cli) return;
-                  const text = `${terminalInput}\n`;
-                  setTerminalInput("");
-                  await cli.cliInput(runId, text);
-                }}
-              />
+              </details>
             </details>
             </div>
           </section>
