@@ -363,6 +363,17 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 颜色：`--chart-1`..`--chart-4` 在 `index.css` 亮暗各一套（蓝 / 蓝绿 / 琥珀 / 紫），
   四个色相互不混淆，也不借「告警红」。
 
+### 4.2 最近请求：只看没成的
+
+「最近请求」默认读最近 12 条；出问题时摘要上写着「N 次失败」，12 条里却可能一条都没有。
+所以表头多一个勾选框「只看没成的」：
+
+- 判定在 `problemRequests(rows)`（`packages/web/src/lib/magpieUsage.ts`）：状态码 ≥ 400、
+  重试过（`tries > 1`）、或是一试失败交出去的那条（`handedOn`）——这三种才值得逐条看。
+- 勾上之后把上限从 12 提到 100 再取一次数（`requestLimit`），并明说「在最近读出的 N 条里」，
+  不让人以为库里总共就这么几条。
+- 过滤在已读出的行上做，不额外请求；筛空时表里留一句「最近读出的这几条里没有没成的」。
+
 ## 5. 还没对齐的部分（明确留白）
 
 - **Web search（Settings › Models 的 search 一段）**：`searcher`、`searcherThen`、`searcherEffort`、

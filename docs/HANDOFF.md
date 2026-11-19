@@ -6573,6 +6573,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 为什么要这个：要模型生成摘要时压缩是一次真实调用，连点会压两遍，第二次是在新摘要上再压。
 - 失败态不在这里做：`runCompactCommand` 自己会提示「没省下来」「没生成摘要」这类结果。
 - **云同步换过什么，看得见也撤得回（d.396）**：★ 内核 `magpie webdav` 末尾那段「这次换了谁的东西」以前整段丢掉，现在读成 `restored` / `changedHere` / `changedThere` / `saved` / `signIns`，卡片在状态下面多一块提醒：整套从服务器搬来、换了本机哪几份、换了服务器哪几份、旧副本留在哪个目录、同步来的设置要用哪些本机没登录的账号。★ 只有真说过 Restored 时才给「拿回原来的设置」（`webdav undo`）——别的情形内核撤不回来，给了按钮等于骗人；其余情形只给「知道了」（`dismiss`），旧副本仍然留着。什么都没换过就不弹这块。★ 解析在 `packages/web/src/lib/magpieSync.ts`，卡片在 `packages/web/src/components/model/CloudSyncCard.tsx`；`npx vitest run src/lib/magpieSync.test.ts src/components/model/CloudSyncCard.test.tsx` 20 例、`ModelPage.test.tsx` + `components/model` 15 文件 216 例全绿，`pnpm --filter @heming/web typecheck` 通过。★ `set`（同步哪些东西）仍留「高级命令」；旧副本不能从页面挑一份恢复。
+- **最近请求能只看没成的（d.397）**：★ 「最近请求」现在有个「只看没成的」勾选框，判定收在 `problemRequests(rows)`（`packages/web/src/lib/magpieUsage.ts`）：状态 ≥ 400、重试过（`tries > 1`）、一试失败交出去（`handedOn`）这三种才算，别的都不算。★ 勾上时把取数上限从 12 提到 100 再读一次，并写明「在最近读出的 N 条里」——摘要写着 N 次失败、12 条里却一条碰不上，是这轮要解决的糊涂事；筛空时给一句「放宽时间或换个区间」。★ 开关状态不记忆，换区间回默认；`usage --csv` 导出不受影响。★ `npx vitest run src/lib/magpieUsage.test.ts src/components/ModelUsageView.test.tsx` 20 例、`ModelPage.test.tsx` + `components/model` 14 文件 204 例全绿，`pnpm --filter @heming/web typecheck` 通过。
 
 ## 7. 快速上手命令
 

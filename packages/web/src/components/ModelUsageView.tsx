@@ -12,6 +12,7 @@ import {
   fetchUsageRequests,
   formatCost,
   formatTokens,
+  problemRequests,
   type ChartMetric,
   type UsageBreakdownKind,
   type UsagePeriod,
@@ -91,6 +92,10 @@ export function ModelUsageView({
   const [metric, setMetric] = useState<ChartMetric>("calls");
   const chart = CHART_METRICS.find((item) => item.key === metric) ?? CHART_METRICS[0];
   const [breakdown, setBreakdown] = useState<UsageBreakdownKind>("models");
+  // 「只看没成的」：默认读最近 12 条；要看问题时多读一些，否则 12 条里可能一条问题都没有
+  // （摘要上明明写着 N 次失败，列表却空着，比不筛更让人糊涂）。
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const requestLimit = onlyProblems ? 100 : 12;
 
   const load = useCallback(
     async (signal: AbortSignal) => {
@@ -99,7 +104,7 @@ export function ModelUsageView({
       try {
         const [nextSummary, nextRequests] = await Promise.all([
           fetchUsage(baseUrl, period, { signal }),
-          fetchUsageRequests(baseUrl, period, 12, { signal }),
+          fetchUsageRequests(baseUrl, period, requestLimit, { signal }),
         ]);
         if (signal.aborted) return;
         setSummary(nextSummary);
@@ -111,7 +116,7 @@ export function ModelUsageView({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [baseUrl, period],
+    [baseUrl, period, requestLimit],
   );
 
   useEffect(() => {
@@ -126,6 +131,7 @@ export function ModelUsageView({
     [summary, breakdown],
   );
   const maxCalls = Math.max(1, ...rows.map((row) => row.calls));
+  const problemRows = useMemo(() => problemRequests(requests?.rows ?? []), [requests]);
 
   return (
     <section aria-label="用量" className="space-y-4">
@@ -333,9 +339,29 @@ export function ModelUsageView({
 
             {requests && requests.rows.length > 0 && (
               <div className="overflow-x-auto ui-card p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="ui-block-title">最近请求</h3>
-                  <span className="ui-caption">共 {requests.total} 条</span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label
+                      className="flex items-center gap-2 ui-caption"
+                      title="状态到 400 以上、重试过、或者一试失败交出去的那几条"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-brand"
+                        aria-label="只看没成的"
+                        checked={onlyProblems}
+                        onChange={(event) => setOnlyProblems(event.target.checked)}
+                      />
+                      只看没成的
+                      {onlyProblems && `（${problemRows.length}）`}
+                    </label>
+                    <span className="ui-caption">
+                      {onlyProblems
+                        ? `在最近读出的 ${requests.rows.length} 条里`
+                        : `共 ${requests.total} 条`}
+                    </span>
+                  </div>
                 </div>
                 {/* d.141 P2「表格规范」：改用 .ui-table（表头/行距/hover/last-border 只在
                     index.css 定义一次），不再各页手拼 padding 与字号。 */}
@@ -352,7 +378,7 @@ export function ModelUsageView({
                     </tr>
                   </thead>
                   <tbody>
-                    {requests.rows.map((row) => {
+                    {(onlyProblems ? problemRows : requests.rows).map((row) => {
                       const wait = describeRequestWait(row);
                       const tries = describeRequestTries(row);
                       return (
@@ -376,6 +402,13 @@ export function ModelUsageView({
                         </tr>
                       );
                     })}
+                    {onlyProblems && problemRows.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="ui-caption">
+                          最近读出的这几条里没有没成的——时间放宽一点，或者换一个区间看看。
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

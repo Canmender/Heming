@@ -278,6 +278,14 @@ export function describeRequestTries(row: UsageRequestRow): string {
 }
 
 /**
+ * 「没成的」是哪些：状态码到 400 以上、重试过、或者是一试失败交出去的那条。
+ * 用法是「最近请求」里夹一个开关——出问题的这几条才值得逐条看。
+ */
+export function problemRequests(rows: UsageRequestRow[]): UsageRequestRow[] {
+  return rows.filter((row) => (row.status ?? 0) >= 400 || (row.tries ?? 0) > 1 || Boolean(row.handedOn));
+}
+
+/**
  * 一组调用（按模型 / Agent / 账号）的平均首字：内核只把真被计时的流式回复记进
  * timed 与 ttft_ms 的和，所以这里也只在有计时的时候给数，没有就给 null。
  */

@@ -110,6 +110,41 @@ describe("ModelUsageView", () => {
     expect(await screen.findByText(/平均首字 800ms/)).toBeInTheDocument();
   });
 
+  it("只看没成的：勾上就只留失败与重试过的那几条，没问题的藏起来", async () => {
+    const mixed = {
+      period: "30d",
+      total: 2,
+      rows: [
+        {
+          route_id: 21, t: "2026-11-08T10:00:00Z", agent: "heming", model: "mock/mock-model",
+          req: "mock/mock-model", in: 3, out: 5, ms: 61, status: 200, cost: 0,
+        },
+        {
+          route_id: 22, t: "2026-11-08T10:05:00Z", agent: "heming", model: "mock/other-model",
+          req: "mock/other-model", in: 3, out: 0, ms: 900, status: 429,
+          err: "rate limited by the vendor", tries: 2, cost: 0,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: string) =>
+      String(input).includes("/magpie/usage/requests")
+        ? new Response(JSON.stringify(mixed), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify(usage), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<ModelUsageView />);
+    await screen.findByText("最近请求");
+    const bodyRows = () => container.querySelectorAll("tbody tr");
+    expect(bodyRows().length).toBe(2);
+    fireEvent.click(screen.getByRole("checkbox", { name: "只看没成的" }));
+    await waitFor(() => expect(bodyRows().length).toBe(1));
+    expect(container.querySelector("tbody")?.textContent ?? "").toContain("mock/other-model");
+    // 勾上之后要多读一些，否则 12 条里可能一条问题都没有
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("limit=100"))).toBe(true),
+    );
+  });
+
   it("切换周期会用新周期重新取数；切「按 Agent」换拆分维度", async () => {
     const fetchMock = mockFetch();
     render(<ModelUsageView />);

@@ -11,6 +11,7 @@ import {
   formatCost,
   formatTokens,
   pointTTFT,
+  problemRequests,
   type UsageRequestRow,
   type UsageSeriesPoint,
   type UsageSummary,
@@ -229,5 +230,16 @@ describe("展示函数", () => {
     expect(bars.map((bar) => bar.value)).toEqual([0.42, 1.5, 0]);
     expect(bars[1]!.ratio).toBe(1);
     expect(bars[0]!.ratio).toBeCloseTo(0.42 / 1.5);
+  });
+
+  it("problemRequests：状态到 400、重试过、交过班的那几条才是「没成的」", () => {
+    const rows = [
+      { route_id: 1, status: 200 } as unknown as UsageRequestRow,
+      { route_id: 2, status: 429, tries: 1 } as unknown as UsageRequestRow,
+      { route_id: 3, status: 200, tries: 3 } as unknown as UsageRequestRow,
+      { route_id: 4, status: 200, handedOn: true } as unknown as UsageRequestRow,
+      { route_id: 5 } as unknown as UsageRequestRow,
+    ];
+    expect(problemRequests(rows).map((row) => row.route_id)).toEqual([2, 3, 4]);
   });
 });
