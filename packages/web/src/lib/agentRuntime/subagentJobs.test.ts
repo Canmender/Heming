@@ -17,6 +17,7 @@ import {
   setSubagentJobDelivery,
   subagentDeliveryText,
   takeUndeliveredJobs,
+  undeliveredJobsOf,
   type SubagentJob,
 } from "./subagentJobs.js";
 
@@ -237,3 +238,35 @@ describe("subagentJobs · 重启恢复（d.353）", () => {
     expect(restoreInterruptedJobs()).toHaveLength(0);
   });
 });
+describe("undeliveredJobsOf：只数不取（d.383）", () => {
+  it("算完没交付的才算，还在跑的不算", async () => {
+    const done = enqueueSubagentJob({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      label: "查入口",
+      task: "查入口",
+      taskId: "bg-1",
+      run: () => Promise.resolve({ ok: true, text: "好了", rounds: 1, toolCalls: 0 }),
+    });
+    const slow = enqueueSubagentJob({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      label: "慢的",
+      task: "慢的",
+      taskId: "bg-2",
+      run: () => new Promise<{ ok: boolean; text: string; rounds: number; toolCalls: number }>(() => {}),
+    });
+    await Promise.resolve();
+    const pending = undeliveredJobsOf("c1");
+    expect(pending.map((job) => job.id)).toContain(done.id);
+    expect(pending.map((job) => job.id)).not.toContain(slow.id);
+    // 数了不等于取了：按 id 判（别的用例可能留下同会话、尚未落定的作业）
+    expect(takeUndeliveredJobs("c1").map((job) => job.id)).toContain(done.id);
+    expect(undeliveredJobsOf("c1").map((job) => job.id)).not.toContain(done.id);
+  });
+});
+
+
+

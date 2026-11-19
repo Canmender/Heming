@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Conversation, Message, Workspace } from "@heming/shared";
 import { EmptyState } from "../ui/EmptyState.js";
@@ -14,6 +14,7 @@ import {
 } from "../../lib/workspace/group.js";
 import { WorkspaceDialog, type WorkspaceDialogMode } from "./WorkspaceDialog.js";
 import { UnfinishedTurnBadge } from "../UnfinishedTurnBadge.js";
+import { PendingJobBadge } from "../PendingJobBadge.js";
 import { RunningTurnBadge } from "../RunningTurnBadge.js";
 import type { ConversationContentHit, ConversationContentSearchResult } from "../../lib/api.js";
 import {
@@ -489,6 +490,8 @@ export function ConversationRail({
             {/* d.212：「正在跑」只是此刻的事实；与下面「未跑完」（过去没跑完）互不替代。 */}
             <RunningTurnBadge conversationId={conv.id} />
             <UnfinishedTurnBadge conversationId={conv.id} />
+            {/* d.383：后台子代理算完了，结论在等这个会话被打开。 */}
+            <PendingJobBadge conversationId={conv.id} />
             {conv.lastMessageAt ? (
               <span className="shrink-0 text-ui-xs tabular-nums text-muted">
                 {formatClock(conv.lastMessageAt)}
@@ -880,3 +883,4 @@ export function ConversationRail({
     </aside>
   );
 }
+

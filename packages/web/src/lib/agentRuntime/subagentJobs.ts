@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 后台子代理的排队与交付（d.349）。
  *
  * 为什么需要：`agent_task` 以前是同步的——主对话派出去就得停在那里等它跑完，
@@ -386,6 +386,17 @@ function deliver(job: SubagentJob): void {
  * 取走即标记已交付：同一份结论不能让模型看两遍——重复注入会浪费上下文，
  * 还可能让它把同一件事重做一次。
  */
+/**
+ * 这个会话里有多少条后台子代理的结论还没送进去（d.383）。
+ *
+ * 与 `takeUndeliveredJobs` 的区别：只数、不取、不标记——侧栏要靠它显示一个
+ * 「有结论等你回来」的提示，取走就等于交付了，用户还没看就没了。
+ */
+export function undeliveredJobsOf(conversationId: string): readonly SubagentJob[] {
+  return jobs.filter(
+    (job) => job.conversationId === conversationId && !job.delivered && !isRunning(job),
+  );
+}
 export function takeUndeliveredJobs(conversationId: string): SubagentJob[] {
   const taken = jobs.filter(
     (job) => job.conversationId === conversationId && !job.delivered && !isRunning(job),
@@ -482,4 +493,5 @@ export function subagentDeliveryText(job: SubagentJob): string {
     "这条是它跑完之后自动送回的：请把结论纳入当前这一轮的处理，再给用户一个完整的答复。",
   ].join("\n");
 }
+
 

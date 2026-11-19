@@ -6522,6 +6522,15 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **来源行上写清「谁在用」（d.386）**：★ 内核 `providers` 说明列里的 `← Claude Code, Codex` 接进 `ProviderRow.usedBy`（`usedByHint` 只取 `←` 到 `⤷` 之间，按逗号拆；停用那句与备用链不算）★ 来源行在「备用 a → b」之后加一句「← Claude Code、Codex」，悬停写全 ★ 删来源之前先看这一句，别删正在用的 ★ 验证：magpieCli 18 例 + ModelPage 123 例 = 141 例全绿，typecheck 通过。
+## 后台结论的待办徽标（d.387）
+
+- 为什么需要：`takeUndeliveredJobs(convId)` 只在**打开该会话**时调用；切走期间结论一直排队，但界面没有任何提示，用户不知道该回哪条。
+- `subagentJobs.ts` 新增 `undeliveredJobsOf(conversationId)`：与 `take` 的区别是**只数不取**——取走即标记 `delivered:true`，用户还没看就丢了。
+- `PendingJobBadge.tsx` 用 `useSyncExternalStore(subscribeSubagentJobs, listSubagentJobs)`，`data-testid="pending-job-badge"`，文案「结论」；tooltip 里报条数与在跑数。
+- `ConversationRail.tsx` 里紧跟在 `UnfinishedTurnBadge` 之后。三个徽标语义不同：正在跑（此刻在算）/ 未跑完（上一轮断了）/ 结论（算完了、等你回来）。
+- 测试坑：`subagentJobs.test.ts` 是**模块级状态**，前面的用例可能留下未落定的作业（promise 在后续用例里才 resolve）；新增用例要么 `beforeEach(resetSubagentJobs)`，要么按 id 断言、别断言总数。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6540,6 +6549,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

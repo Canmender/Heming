@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.387.4.130.14",
+    "date": "2026-11-19",
+    "title": "后台算完了，侧栏告诉你回来收",
+    "bullets": [
+      "后台子代理在别的会话里算完，侧栏那条会话会挂一个「结论」。",
+      "点开那条会话，结论就自动送进对话。",
+      "提示里会说明还有几条在跑，不会让你以为全都完了。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.386.4.130.14",
     "date": "2026-11-19",
     "title": "来源行上能看到「谁在用」",

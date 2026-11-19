@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.387.4.130.14",
+    "date": "2026-11-19",
+    "title": "后台算完了，侧栏告诉你回来收",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 后台子代理的结论只往**当前**会话投递；你切去别的会话干活时，结论会排队等回来。可侧栏一声不响，用户根本不知道该回哪一条会话——「结论会自动送回来」就成了空话。原型里的原则是「只在有人要行动时说话」，而「有结论等你回来」正是要行动的事。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `subagentJobs.ts` | 新增 `undeliveredJobsOf(conversationId)`：只数、不取、不标记（`takeUndeliveredJobs` 会取走并标记已交付，那等于交付给模型了） || `PendingJobBadge.tsx`（新增） | 订阅作业表，有未交付结论时显示「结论」chip；tooltip 说明「点开会话就会送到」（若仍有作业在跑，额外注明） || `ConversationRail.tsx` | 行内挂在「正在跑」「未跑完」之后，三者互不替代 |",
+      "**怎么验证。** `PendingJobBadge.test.tsx` 2 例（有结论出现、取走后消失；别的会话的结论不算）；`subagentJobs.test.ts` 12 例（新增 1：只数不取、在跑的不算）；web 全量 **6712 例全绿**；typecheck 通过。",
+      "**留白。** 徽标不区分「成功」与「失败」（都是等你看的结论）；也不显示条数——侧栏本来就窄，tooltip 里有。"
+    ]
+  },
+  {
     "version": "d.386.4.130.14",
     "date": "2026-11-19",
     "title": "来源行上写清「谁在用」",
