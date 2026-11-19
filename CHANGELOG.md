@@ -1,3 +1,23 @@
+## d.375.4.130.14（2026-11-19）— 备份带什么、恢复覆盖什么，勾一下就行
+
+**为什么做。** 备份与恢复面板此前只会发两条裸命令：`magpie backup <file>` 与 `magpie restore <file>`。可内核这两条命令的默认值**正反面不统一**——备份默认带 Key、带技能与 MCP 库、**不带**订阅与插件的登录（要带得显式 `--sign-ins`）；恢复则三样全恢复，少恢复哪样才加 `--no-agents` / `--no-library` / `--no-sign-ins`。记反一次，要么 Key 悄悄没进备份，要么把不该覆盖的登录覆盖掉了。
+
+**做了什么。**
+
+| 以前 | 现在 |
+| --- | --- |
+| 只能发裸命令，flag 得自己记 | 新建备份前三个勾：带来源的 Key、带技能与 MCP 库、带订阅与插件的登录（默认与内核一致） |
+| 恢复是「全盖」，没有选择 | 确认框里三个勾：本机工具的模型设置、技能与 MCP 库、订阅与插件的登录，取消哪块就加对应的 `--no-` |
+| 勾了什么心里没底 | 面板里写一句人话：「现在：带Key、带技能库、不带登录。」；恢复前写「覆盖工具设置、覆盖技能库、覆盖登录；来源与账号总会恢复。」 |
+| 「登录要不要带上」是个安全问题，容易被忽略 | 那一勾带着说明：带上就意味着拿到文件又知道口令的人能用这些账号 |
+
+- `packages/web/src/lib/magpieBackupParts.ts`：`BACKUP_PARTS` / `RESTORE_PARTS`（每块带 label、hint、`byDefault`、`mode: "when" | "unless"`、`flag`）、`backupArgs` / `restoreArgs`（flag 顺序固定、路径永远最后）、`describeBackupParts` / `describeRestoreParts`。
+- `packages/web/src/components/model/BackupPanel.tsx`：两块勾选框（可访问名带前缀，`新建备份：…` / `恢复：…`），`startBackup` / `startRestore` 改用上面的构造函数，交互面板的提示里也带上这句人话。
+
+**怎么验证。** `magpieBackupParts.test.ts` 9 例（默认值与内核一致、三种勾选组合、flag 顺序、恢复这头没有 keys / 备份这头没有 agents、两句人话）；`BackupPanel.test.tsx` 4 → 6 例（取消 Key 并勾上登录 → `["backup","--no-keys","--sign-ins",<路径>]`；对话框取消登录 → `["restore","--no-sign-ins",<路径>]`）；`components/model + magpieBackupParts + magpieCli` 15 文件 210 例全绿。
+
+**留白。** 口令仍在内核的交互面板里输入，页面不接管；内核没有 `backup --dry-run`，所以做不了「先看会写什么再决定」；定时自动备份也还没有——内核侧没有对应命令，页面不自己造。`typecheck` 这次的红在另一个会话的 `src/components/chat/StreamTail.test.tsx`（`AgentStreamState` 少 `lastAt`），与本轮文件无关。
+
 ﻿## d.374.4.130.14（2026-11-19）— 打字机不再拖着整页一起重画
 
 **为什么做。** `ChatPage` 一直订阅整张 `streaming` 表。每个 delta 都会换一次对象引用，于是整页（七千行函数、几百个节点）每帧重渲染一次；真正在变的只有末尾那一两个气泡。`docs/STREAMING.md` 差距 #2 说的就是它，之前没做是因为自动贴底依赖「各流文本长度之和」这个 tick，而那个 tick 只能从父组件的渲染里算出来。

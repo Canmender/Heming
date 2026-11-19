@@ -6468,6 +6468,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - `hasLiveStream`（watchdog 门控）改用 `useChatStore.getState().streaming` 现取。
 
 
+- **备份带上什么、覆盖什么（d.375）**：
+★ 内核 `backup` 与 `restore` 的默认值正反面不统一（备份默认带 Key / 带技能库 / 不带登录；恢复默认三样全恢复），命令行容易记反——面板改成三块各一个勾，默认与内核一致；
+★ 翻译在 `packages/web/src/lib/magpieBackupParts.ts`：`BACKUP_PARTS` / `RESTORE_PARTS` 每块带 `byDefault` / `mode: "when" | "unless"` / `flag`，`backupArgs` / `restoreArgs` 保证 flag 顺序固定、路径永远最后，`describeBackupParts` / `describeRestoreParts` 给一句人话；
+★ `BackupPanel.tsx` 勾选框可访问名带前缀（`新建备份：…` / `恢复：…`），因为两块会同时在 DOM 里；交互面板提示也带上那句人话；
+★ 测试：`magpieBackupParts` 9 例 + `BackupPanel` 4 → 6 例（`--no-keys` + `--sign-ins` 组合、`--no-sign-ins`），`components/model + magpieBackupParts + magpieCli` 210 例全绿；
+★ 留白：口令仍在内核交互面板里输入；内核没有 `backup --dry-run`，做不了「先预览再决定」；定时自动备份没有内核命令，页面不自己造。
+
 ## 7. 快速上手命令
 
 ```bash
