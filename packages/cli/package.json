@@ -1,6 +1,6 @@
 {
   "name": "@heming/cli",
-  "version": "391.4.132",
+  "version": "391.4.133",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,5 +15,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.391.4.132.14"
+  "hemingVersion": "d.391.4.133.14"
 }

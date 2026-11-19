@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.391.4.133.14",
+    "date": "2026-11-19",
+    "title": "对照表的账要对上",
+    "bullets": [
+      "内部文档更新：把「和 DSH 的流式差距」表里已经做完的四项标清楚，避免重复排期。",
+      "对使用者没有可见变化。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.391.4.132.14",
     "date": "2026-11-19",
     "title": "标题写歪了，构建直接报错",
