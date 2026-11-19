@@ -1749,11 +1749,51 @@ describe("ChatPage", () => {
       // d.175：引用工作区文件（读内容，不是上传）。
       "工作区文件（引用内容，不上传）",
       "语音输入",
+      // d.356：整段对话导成 Markdown（正文 + 收起来的过程）。
+      "导出这段对话（Markdown）",
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "关闭更多操作" }));
     expect(screen.queryByRole("menu", { name: "更多操作菜单" })).not.toBeInTheDocument();
     expect(more).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("更多操作 → 导出这段对话：下载 Markdown，正文与过程都在（d.356）", async () => {
+    bindAssistant();
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((value: Blob | MediaSource) => {
+      blobs.push(value as Blob);
+      return "blob:export";
+    });
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+
+    // 转录（思考/工具）挂在消息上，`transcriptOf` 按 TranscriptMessage 读；Message 本身不带这两个字段。
+    const agent = {
+      ...agentMsg("m2", "入口在 app.ts", "2026-11-19T04:01:00.000Z"),
+      tools: [
+        { id: "t1", name: "file_read", args: "core/app.ts", status: "ok", startedAt: 0, endedAt: 500 },
+      ],
+      steps: [{ kind: "tool", toolId: "t1" }],
+    } as unknown as Message;
+    mockMessagesFetch([msg("m1", "登录挂了", "2026-11-19T04:00:00.000Z"), agent]);
+    render(<ChatPage />);
+    await act(async () => {});
+    await screen.findByText("入口在 app.ts");
+
+    clickAttachItem("导出这段对话（Markdown）");
+
+    expect(blobs).toHaveLength(1);
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]).toMatch(/^和鸣-.*\.md$/);
+    const markdown = await blobs[0]!.text();
+    expect(markdown).toContain("登录挂了");
+    expect(markdown).toContain("入口在 app.ts");
+    expect(markdown).toContain("<summary>过程（1 步）</summary>");
+    expect(markdown).toContain("file_read");
+    expect(screen.getByText(/已导出这段对话：2 条消息/)).toBeInTheDocument();
   });
 
   it("动作行模型徽标：未绑定显示「未绑定模型」，点击就地开切换弹窗（d.195）", async () => {

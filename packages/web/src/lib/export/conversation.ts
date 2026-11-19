@@ -14,6 +14,18 @@ export interface ExportAttachment {
   size: number;
 }
 
+/** 过程里的一步（d.356）：思考段或一次工具调用。 */
+export interface ExportStep {
+  kind: "think" | "tool";
+  /** 一行摘要：思考取原文单行，工具取「工具名 · 参数」。 */
+  label: string;
+  status?: "ok" | "error" | "denied" | "running";
+  /** 与 `status` 配套的说明（失败原因、被拒原因）。 */
+  detail?: string;
+  /** 工具耗时（毫秒）；拿不到就省略，不编 0。 */
+  ms?: number;
+}
+
 export interface ExportMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -24,6 +36,11 @@ export interface ExportMessage {
   text: string;
   attachment?: ExportAttachment;
   recalled?: boolean;
+  /**
+   * 过程（d.356）：思考段与工具调用。导出时收进 `<details>`——
+   * 要复盘的人点开，只读正文的人不被打断。缺省不写这一段。
+   */
+  process?: readonly ExportStep[];
 }
 
 export interface ConversationExportInput {
@@ -77,6 +94,53 @@ function attachmentLine(file: ExportAttachment): string {
   return `**附件**：${file.name}（${file.mime}，${formatBytes(file.size)}）`;
 }
 
+/** 过程最多列这么多步：导出文件是给人读的，不是一份工具日志。 */
+export const MAX_EXPORT_STEPS = 40;
+
+/** `<details>` 里是 HTML，摘要不转义会把正文吃成标签。 */
+function escapeHtml(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function statusMark(status: ExportStep["status"]): string {
+  switch (status) {
+    case "ok":
+      return "✓";
+    case "error":
+      return "✗";
+    case "denied":
+      return "⊘";
+    case "running":
+      return "…";
+    default:
+      return "·";
+  }
+}
+
+function stepLine(step: ExportStep): string {
+  const took = typeof step.ms === "number" ? ` · ${step.ms < 1000 ? `${step.ms}ms` : `${(step.ms / 1000).toFixed(1)}s`}` : "";
+  const mark = step.kind === "tool" ? statusMark(step.status) : "·";
+  const kind = step.kind === "tool" ? "工具" : "思考";
+  const note = step.detail?.trim() ? ` · ${step.detail.trim()}` : "";
+  return `${mark} ${kind} · ${step.label.trim()}${took}${note}`;
+}
+
+function processBlock(steps: readonly ExportStep[]): string {
+  const usable = steps.filter((step) => step.label.trim().length > 0 || step.detail?.trim());
+  if (usable.length === 0) return "";
+  const shown = usable.slice(0, MAX_EXPORT_STEPS).map((step) => `- ${escapeHtml(stepLine(step))}`);
+  const hidden = usable.length - Math.min(usable.length, MAX_EXPORT_STEPS);
+  if (hidden > 0) shown.push(`- …还有 ${hidden} 步（导出时只保留前 ${MAX_EXPORT_STEPS} 步）`);
+  return [
+    "<details>",
+    `<summary>过程（${usable.length} 步）</summary>`,
+    "",
+    ...shown,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 export function buildConversationMarkdown(input: ConversationExportInput): string {
   const lines: string[] = [
     `# 会话：${input.title}`,
@@ -97,6 +161,8 @@ export function buildConversationMarkdown(input: ConversationExportInput): strin
     }
     if (m.text) lines.push(m.text, "");
     if (m.attachment) lines.push(attachmentLine(m.attachment), "");
+    const process = m.process ? processBlock(m.process) : "";
+    if (process) lines.push(process, "");
   }
 
   return `${lines.join("\n").trimEnd()}\n`;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_EXPORT_STEPS,
   buildConversationJson,
   buildConversationMarkdown,
   conversationFileName,
@@ -77,5 +78,90 @@ describe("会话导出", () => {
     expect(formatBytes(2 * 1024 * 1024)).toBe("2.0 MB");
     expect(formatBytes(Number.NaN)).toBe("大小未知");
     expect(formatExportTime("not-a-date")).toBe("not-a-date");
+  });
+
+  it("过程收进 <details>：一次工具调用一行，带状态/耗时/原因（d.356）", () => {
+    const md = buildConversationMarkdown({
+      ...input,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          sender: "和小鸣",
+          at: "2026-10-21T01:00:00.000Z",
+          text: "读到了",
+          process: [
+            { kind: "think", label: "先确认入口在哪" },
+            { kind: "tool", label: "file_read · core/app.ts", status: "ok", ms: 120 },
+            { kind: "tool", label: "file_write", status: "denied", detail: "没有写盘权限" },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("<summary>过程（3 步）</summary>");
+    expect(md).toContain("· 思考 · 先确认入口在哪");
+    expect(md).toContain("✓ 工具 · file_read · core/app.ts · 120ms");
+    expect(md).toContain("⊘ 工具 · file_write · 没有写盘权限");
+    expect(md).toContain("</details>");
+  });
+
+  it("过程里的尖括号被转义，不把 <details> 结构顶坏（d.356）", () => {
+    const md = buildConversationMarkdown({
+      ...input,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          sender: "和小鸣",
+          at: "2026-10-21T01:00:00.000Z",
+          text: "好",
+          process: [{ kind: "tool", label: "<script>alert(1)</script>", status: "ok" }],
+        },
+      ],
+    });
+    expect(md).not.toContain("<script>");
+    expect(md).toContain("&lt;script&gt;");
+  });
+
+  it("过程太长只列前若干步，并如实写还有多少步（d.356）", () => {
+    const process = Array.from({ length: MAX_EXPORT_STEPS + 3 }, (_, i) => ({
+      kind: "tool" as const,
+      label: `file_read · f${i}.ts`,
+      status: "ok" as const,
+    }));
+    const md = buildConversationMarkdown({
+      ...input,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          sender: "和小鸣",
+          at: "2026-10-21T01:00:00.000Z",
+          text: "完",
+          process,
+        },
+      ],
+    });
+    expect(md).toContain(`<summary>过程（${MAX_EXPORT_STEPS + 3} 步）</summary>`);
+    expect(md).toContain("…还有 3 步");
+    expect(md).toContain(`f${MAX_EXPORT_STEPS - 1}.ts`);
+    expect(md).not.toContain(`f${MAX_EXPORT_STEPS + 2}.ts`);
+  });
+
+  it("没有过程时不留空 <details>（d.356）", () => {
+    const md = buildConversationMarkdown({
+      ...input,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          sender: "和小鸣",
+          at: "2026-10-21T01:00:00.000Z",
+          text: "直接答",
+          process: [],
+        },
+      ],
+    });
+    expect(md).not.toContain("<details>");
   });
 });

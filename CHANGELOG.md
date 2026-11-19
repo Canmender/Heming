@@ -1,3 +1,37 @@
+## d.357.4.128.12（2026-11-19）— 这段对话，可以带走了
+
+### 为什么做
+
+导出这件事曾经有过，又在 d.147.4.89.11 连「选择消息」一起被移除了：
+`packages/web/src/lib/export/conversation.ts` 一直留着，`ChatPage` 却只从里面取 `formatBytes` 给附件标签用。
+结果是：想把一次排查过程贴进 issue、发给同事、或者存档，只能自己选中复制——**时间没了，工具调用全丢**，
+而「它当时到底读了哪些文件、为什么这么答」恰恰是复盘时最要紧的部分。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| 入口回来 | 「更多操作」菜单末尾加「导出这段对话（Markdown）」，点一下直接下载 `.md` |
+| 复用既有格式 | 走 d.25 那份 `buildConversationMarkdown`：标题、会话 ID、导出时间、消息数、附件元信息，格式不变 |
+| 过程可选可见 | `ExportMessage` 新增 `process?: ExportStep[]`，思考段与每次工具调用收进 `<details><summary>过程（N 步）</summary>`；正文不被十几行日志打断 |
+| 一步一行说清 | 工具行带状态记号（✓/✗/⊘/…）、耗时（120ms / 1.2s）、参数摘要与失败/被拒原因；缺字段就省略，不编 0 |
+| 长过程有上限 | 最多列 `MAX_EXPORT_STEPS = 40` 步，其余写「…还有 N 步」——导出文件是给人读的，不是日志堆 |
+| 不糊 HTML | `<details>` 里是 HTML，摘要先转义 `& < >`；否则一句 `<script>` 就能把结构顶坏 |
+| 只导能解的明文 | E2E 消息走 `plainById` 的明文；解不开的不拿 base64 密文凑数——文件是给人读的 |
+| 借用同一套命名 | 文件名沿用 `conversationFileName()`（`和鸣-<标题>-YYYYMMDD-HHMM.md`，非法字符已清） |
+
+### 怎么验证
+
+- `packages/web/src/lib/export/conversation.test.ts` 5 → 9 例：过程 `<details>`（思考/工具/被拒原因）、尖括号转义、40 步截断与「还有 N 步」、空过程不留空 `<details>`
+- `packages/web/src/components/ChatPage.test.tsx` 新增「更多操作 → 导出这段对话」：断言 `createObjectURL` 收到 1 个 Blob、下载名匹配 `和鸣-*.md`、Markdown 里同时有正文与 `<summary>过程（1 步）</summary>`；菜单项清单同步加一项
+- `npx vitest run`（packages/web）457 文件 / 6595 例全绿；`pnpm --filter @heming/web typecheck` 通过
+
+### 留白
+
+- 附件只导元信息，不把解析出来的正文再抄一份（原文件在用户手里，抄一份只会让文件变大）
+- JSON 版本（`buildConversationJson`）还没有界面入口——先把 Markdown 这条走通
+- 解不开的 E2E 消息整条跳过（正文为空、也没有过程）；这种会话导出后看起来会比屏幕上短，属于设计边界而不是漏导
+
 ## d.356.4.128.12（2026-11-19）— 国产智能体把能接的都接上：Trae CN 与 MiniMax Code 不再是空话
 
 ### 为什么做

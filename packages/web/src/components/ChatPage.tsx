@@ -37,7 +37,13 @@ import { registerConversationAbort } from "../lib/runAbort.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
-import { formatBytes } from "../lib/export/conversation.js";
+// d.356：导出（Markdown）与附件大小共用同一个格式化口径。
+import {
+  buildConversationMarkdown,
+  conversationFileName,
+  formatBytes,
+  type ExportStep,
+} from "../lib/export/conversation.js";
 // d.355：会话用量与上下文页共用同一个显示口径（850 / 12.4K / 1.2M）。
 import { formatTokens } from "../lib/agentContext/contextMeter.js";
 import { useAuthStore } from "../store/auth.js";
@@ -3812,6 +3818,78 @@ export function ChatPage({
     }
   };
   /**
+   * 导出这段对话（d.356）：整成一份 Markdown 文件。
+   *
+   * 只导出**已经能解开**的正文（`plainById` / `payload.text`）；解不开的 E2E 消息
+   * 不拿密文去凑数——文件是给人读的，一段 base64 只会让人以为导出坏了。
+   * 过程（思考段 + 工具调用）收进 `<details>`：要复盘的人点开，读正文的人不被打断。
+   */
+  const exportConversation = () => {
+    setAttachOpen(false);
+    const state = useChatStore.getState();
+    const plains = state.plainById[convId] ?? {};
+    const rows = state.messages[convId] ?? [];
+    const flat = (value: string, max = 120): string => {
+      const one = value.replaceAll(/\s+/g, " ").trim();
+      return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+    };
+    const messages = rows
+      .map((m) => {
+        const text = m.enc === "e2e" ? (plains[m.id]?.text ?? "") : (m.payload?.text ?? "");
+        const transcript = transcriptOf(m);
+        const toolsById = new Map((transcript?.tools ?? []).map((tool) => [tool.id, tool]));
+        const process: ExportStep[] = (transcript?.steps ?? []).flatMap<ExportStep>((step) => {
+          if (step.kind === "tool") {
+            const tool = step.toolId ? toolsById.get(step.toolId) : undefined;
+            if (!tool) return step.text ? [{ kind: "tool" as const, label: flat(step.text) }] : [];
+            const args = typeof tool.args === "string" ? flat(tool.args, 80) : "";
+            const ms =
+              tool.startedAt !== undefined && tool.endedAt !== undefined
+                ? Math.max(0, tool.endedAt - tool.startedAt)
+                : undefined;
+            return [
+              {
+                kind: "tool" as const,
+                label: args ? `${tool.name} · ${args}` : tool.name,
+                status: tool.status,
+                ...(ms !== undefined ? { ms } : {}),
+                ...(tool.denyCause ? { detail: tool.denyCause } : {}),
+              },
+            ];
+          }
+          return step.text?.trim() ? [{ kind: "think" as const, label: flat(step.text) }] : [];
+        });
+        return {
+          id: m.id,
+          role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
+          sender: m.senderType === "user" ? "你" : nameOf(m.senderId),
+          at: m.createdAt,
+          text,
+          ...(process.length > 0 ? { process } : {}),
+        };
+      })
+      .filter((m) => m.text.trim().length > 0 || (m.process?.length ?? 0) > 0);
+    if (messages.length === 0) {
+      setSendNotice("这个会话还没有可导出的内容。", "info");
+      return;
+    }
+    const title = conv ? conversationTitle(conv, rows) : "会话";
+    const now = Date.now();
+    try {
+      const markdown = buildConversationMarkdown({ id: convId, title, exportedAt: now, messages });
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = conversationFileName(title, now, "md");
+      link.click();
+      URL.revokeObjectURL(url);
+      setSendNotice(`已导出这段对话：${messages.length} 条消息（Markdown）。`, "info");
+    } catch {
+      setSendNotice("导出失败：这个环境不允许下载文件。", "error");
+    }
+  };
+  /**
    * 把「中断本会话」登记给跨组件登记表（d.86）：任务区右栏的汇总卡据此停止运行，
    * 不必把 ChatPage 的 runsRef 上提成全局状态。用 ref 包一层，避免每次渲染都重登记。
    */
@@ -6804,6 +6882,15 @@ export function ChatPage({
                   >
                     <MicIcon width={16} height={16} aria-hidden="true" />
                     语音输入
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
+                    onClick={exportConversation}
+                  >
+                    <FileIcon width={16} height={16} aria-hidden="true" />
+                    导出这段对话（Markdown）
                   </button>
                 </div>
               </>
