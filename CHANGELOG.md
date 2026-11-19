@@ -1,3 +1,24 @@
+## d.373.4.130.14（2026-11-19）— 端的小开关：搜索、压缩、User-Agent
+
+**为什么做。** 有些来源在「请求发出前」还有三件事可以定：网页搜索由谁做（把客户端发来的搜索请求原样转给它，还是照客户端发的）、上下文压缩由谁做（Codex 这类自己会压，交给它就更省），以及请求该带谁的 User-Agent（智能体自己的，还是和鸣自己的——订阅账号按自己的客户端签，用错了对不上）。内核三个键都支持（`search=` / `compaction=` / `user-agent=`），而且 `provider show` 三个都读得回来，只差页面上的入口。
+
+**做了什么。**
+
+| 以前 | 现在 |
+| --- | --- |
+| 这三项只有命令行 | 「更多设置」里第五块「端的小开关」：三个下拉，各带一句「什么时候才需要动它」 |
+| 写了也不知道现在是什么 | 折叠里说一句「现在：和鸣自己的 UA · 搜索由来源做 · 压缩交给来源」，读的是同一个 show 缓存，不多发命令 |
+| 三项要敲三条命令 | 三项合成一条 `provider set`，只发你改过的那几项 |
+| 「保存设置」按钮孤零零落在折叠外面 | 搬进「请求」那一组里，改名「保存请求设置」——它保存的就是那几格 |
+
+- `packages/web/src/lib/magpieSourceWire.ts`：`SOURCE_WIRE_FIELDS`（三个下拉的文案与选项）、`sourceWirePairs`（顺序 userAgent → search → compaction，值不在选项里的不发）、`sourceWireCommand`（合成一条 `provider set`，没来源 id 就返回 `null`）。
+- `packages/web/src/lib/magpieSourceShow.ts`：`LINE` 也认 `search` / `compaction` / `user-agent` 三行，`SourceShowFlags` 多三个布尔，`describeShowFlags` 追加「搜索由来源做」「压缩交给来源」「带和鸣的 UA」。
+- `packages/web/src/components/ModelPage.tsx`：`providerForm` 多三格、`wireSetters` 三格各自成 setter；折叠内三个 `<select>` 首项统一是「不改」；按钮「保存这几项」在三格都没选时不给按。
+
+**怎么验证。** `magpieSourceWire.test.ts` 5 例（键顺序、只发填过的、不认识的值不发、合成一条 / 没 id 为 null、现状一句）；`magpieSourceShow.test.ts` 6 → 7 例（三行新解析）；页面新增一例「没选就不发，选了就合成一条 `provider set`」；`ModelPage + components/model + components/ui + 来源四个 lib + CommandPalette` 29 文件 316 例全绿；`pnpm --filter @heming/web typecheck` 通过；`node scripts/check-source-encoding.mjs` OK。
+
+**留白。** `prompt=`（Antigravity 订阅原样发系统提示）与 `additional-tools=` 是端专属、show 又读不回来，仍留命令行；订阅账号带 `user-agent=agent` 内核会自己报错（它本来就用自己的客户端），页面不预判，让内核把话说清楚。
+
 ## d.372.4.130.14（2026-11-19）— 想「先别用它」的时候，不必删掉
 
 **为什么做。** 来源列表里一直只有「删除」这一个动作。可用户真正想要的往往是「先别用它」：Key 还想留着、额度下周可能回来、换一家对比两天。删掉是不可逆的，地址、Key、模型记录一起没了；不删又没法让它先别掺和路由。内核本来就有这个开关——`provider off <id>` 把整家关掉，Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它，`provider on <id>` 原样开回来。页面此前没接。

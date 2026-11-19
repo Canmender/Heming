@@ -6451,6 +6451,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 - **来源可以先停用再删（d.372）**：★ 来源行只有「删除」这一个动作，而用户想要的常常是「先别用它」——现在「测试」旁边多一个可逆开关，停用发 `provider off <id>`、启用发 `provider on <id>`，Key 与记录都留着，只是智能体拿不到它的模型；★ 状态从 `magpie providers` 那行的说明 `magpie provider on <id>` 里认（`packages/web/src/lib/magpieCli.ts` 的 `offHint`，id 相同才算，别家提到不算），停用行名字后多一个「已停用」徽标，停着时按钮只剩「启用」；★ 不弹确认框——可逆的事不该再问一遍，确认只留给删除；★ 测试：`parseProviders` 1 例 + 页面 2 例（116 → 118），定向 15 文件 204 例全绿、typecheck 通过；★ 留白：`listed no`（只经分组服务）是另一件事，仍在「模型清单」那组里；停用状态只能从那一行说明里认，等内核给它单独一列再改成直读。
 
+- **来源的端的小开关（d.373）**：
+★ 内核 `search=` / `compaction=` / `user-agent=` 三个键早就支持，`provider show` 也读得回来，只是页面没入口——现在「更多设置」里多第五块「端的小开关」，三个下拉首项统一「不改」；
+★ 参数生成在 `packages/web/src/lib/magpieSourceWire.ts`（`SOURCE_WIRE_FIELDS` / `sourceWirePairs` / `sourceWireCommand`）：三项**合成一条** `provider set`，顺序 userAgent → search → compaction，值不在选项里的不发、没来源 id 返回 `null`；
+★ 现状从 `provider show` 读：`magpieSourceShow.ts` 的 `LINE` 也认 `search` / `compaction` / `user-agent` 三行（只在真设过时才出现），折叠里写「现在：… · 搜索由来源做 · 压缩交给来源」，同一次 show 复用不多发命令；
+★ 顺手把折叠外的「保存设置」搬进「请求」组并改名「保存请求设置」——它保存的就是那几格；
+★ 测试：`magpieSourceWire` 5 例、`magpieSourceShow` 6 → 7 例、页面 118 → 119 例，定向 29 文件 316 例全绿、typecheck 通过；
+★ 留白：`prompt=` / `additional-tools=` 是端专属且 show 读不回来，仍留命令行；订阅账号带 `user-agent=agent` 让内核自己报错，页面不预判。
+
 ## 7. 快速上手命令
 
 ```bash
