@@ -183,6 +183,14 @@ import {
   subscribePanelJobs,
 } from "../lib/shell/jobPanel.js";
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
+import {
+  activeSubagentJobCount,
+  cancelSubagentJobsOf,
+  setSubagentJobDelivery,
+  subagentDeliveryText,
+  takeUndeliveredJobs,
+  type SubagentJob,
+} from "../lib/agentRuntime/subagentJobs.js";
 import { decidePanelAutoOpen } from "../lib/agentRuntime/panelAuto.js";
 import { withPanelTool } from "../lib/agentRuntime/panelTool.js";
 import { withWorkflowTool } from "../lib/agentRuntime/workflow.js";
@@ -1844,6 +1852,8 @@ export function ChatPage({
       ? withSubagentTool(capturing, {
           agentId,
           conversationId: convId,
+          // 交付文案里的显示名（d.349）：后台任务跑完要另起一轮，得用同一个身份。
+          agentName: nameOf(agentId),
           // 进度推给界面（d.200）：谁在跑、第几轮、正在调哪个只读工具；跑在哪一步就报哪一步。
           onProgress: applySubagentProgress,
           // 界面「停止」只管子代理（d.200）：主对话的停止信号仍走 `execOpts.signal`，
@@ -3633,9 +3643,15 @@ export function ChatPage({
     useHitlStore.getState().cancelAll("用户中断");
     // d.230：「停止」只停这一轮对话，后台作业不受影响。不说清的话，
     // 用户会以为全停了，回头发现构建还在跑、或者以为被杀了。
-    if (hasRunningPanelJobs()) {
+    // d.349：后台子代理同理——它们跑完还会把结论送回来，更要说清楚。
+    const bgJobs = hasRunningPanelJobs();
+    const bgAgents = activeSubagentJobCount();
+    if (bgJobs || bgAgents > 0) {
+      const parts: string[] = [];
+      if (bgJobs) parts.push("后台还有作业在跑");
+      if (bgAgents > 0) parts.push(`后台还有 ${bgAgents} 个子代理在跑`);
       setSendNotice(
-        "已停止这一轮。后台还有作业在跑（点停止不会停它们）：在「后台作业」面板里可以逐条停，或者让它跑完。",
+        `已停止这一轮。${parts.join("，")}（这一轮的停止不影响它们）：作业在「后台作业」里逐条停，子代理在进度条上点「停止」；也可以让它们跑完、结论会自动送回来。`,
         "info",
       );
     }
@@ -3708,6 +3724,44 @@ export function ChatPage({
     );
   };
 
+  /**
+   * 后台子代理的交付（d.349）：它跑完时，我们可能正在跑、已经收口、甚至已经切了会话。
+   * 三种情况分开处理——
+   * - 还在跑：进插话队列，下一次工具轮模型就能看到（不打断当前这一轮）；
+   * - 已收口且就在这个会话：直接另起一轮（`startRun` 不写用户消息，会话里不会多出一条假消息）；
+   * - 已经切到别的会话：先不送（返回 false，任务保持未交付），切回去再补——
+   *   不能把 A 会话的结论送进 B 会话。
+   */
+  const deliverSubagentJob = (job: SubagentJob): boolean => {
+    if (job.conversationId !== convIdRef.current) return false;
+    const text = subagentDeliveryText(job);
+    const running = (runsRef.current[job.conversationId]?.size ?? 0) > 0;
+    if (running) {
+      const queue = steerQueueOf(job.conversationId);
+      queue.push({ text, mentions: [] });
+      setSteerPendingCount(queue.size());
+      setSendNotice(
+        `后台子代理「${job.label}」交回了结论：这一轮的下一次工具之后它就会看到。`,
+        "info",
+      );
+      return true;
+    }
+    setSendNotice(`后台子代理「${job.label}」交回了结论，我接着处理。`, "info");
+    startRun([{ agentId: job.agentId, name: job.agentName }], text);
+    return true;
+  };
+  // 交付器注册一次：它读 ref，所以切会话/换状态都不会拿到旧的闭包。
+  const deliverSubagentJobRef = useRef(deliverSubagentJob);
+  deliverSubagentJobRef.current = deliverSubagentJob;
+  useEffect(() => {
+    setSubagentJobDelivery((job) => deliverSubagentJobRef.current(job));
+    // 页面从别的页签切回来时，可能已经有结论攒着了（交付器不在时只标未交付）。
+    for (const job of takeUndeliveredJobs(convIdRef.current)) {
+      deliverSubagentJobRef.current(job);
+    }
+    return () => setSubagentJobDelivery(null);
+  }, []);
+
   // 切会话清输入区浮层：表情/语音都是会话级（ChatPage 常驻不重挂）。
   // 语音必须真正 stop 旧识别器并清实例——只复位 listening 标志的话，旧实例仍在后台
   // 识别：onresult 回填新会话草稿、晚到的 onend 误清新指示。
@@ -3731,6 +3785,8 @@ export function ChatPage({
     convIdRef.current = convId;
     // 视图也是会话级：换会话回到「对话」，不要停在上一个会话的轨迹页。
     setView("chat");
+    // 切回来时补送这个会话里跑完、但当时不在前台的结论（d.349）。
+    for (const job of takeUndeliveredJobs(convId)) deliverSubagentJobRef.current(job);
   }, [convId]);
 
   // 消息/模型绑定变了就重算上下文用量（d.187）：换模型会换预算，来新消息会换用量。
@@ -6382,11 +6438,16 @@ export function ChatPage({
             onDismiss={() => setRoundLimitStreamId(null)}
           />
         ) : null}
-        {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。 */}
+        {/* 并行子代理在跑（d.200）：谁在跑、第几轮、在调什么；「停止」只中断子代理。
+            d.349：后台派出去的那些也归这一个按钮管（它们不在当前流程里，用户按停止
+            就是想让它们也停，不该留一堆跑不完的活）。 */}
         <SubagentRuns
           runs={subagentRuns}
           writable={subagentWrite}
-          onStop={() => subagentStopsRef.current[convId]?.abort()}
+          onStop={() => {
+            subagentStopsRef.current[convId]?.abort();
+            cancelSubagentJobsOf(convId);
+          }}
         />
         {/* 后台作业（d.203）：哪几条在跑、跑了多久、结束成没成；「停止」只停那一条。 */}
         <JobPanel

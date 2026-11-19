@@ -17,6 +17,11 @@ import {
   withSubagentTool,
 } from "./subagent.js";
 import { parseSubagentDefs } from "./subagentDefs.js";
+import {
+  listSubagentJobs,
+  resetSubagentJobs,
+  setSubagentJobDelivery,
+} from "./subagentJobs.js";
 
 /** 从 OpenAI spec 里取函数定义，省得每处都做类型断言。 */
 function fnOf(spec: unknown): {
@@ -123,6 +128,21 @@ describe("parseSubagentArgs", () => {
       const result = parseSubagentArgs(JSON.stringify({ task: "查", max_rounds: value }));
       expect(result.ok).toBe(false);
     }
+  });
+
+  it("background 缺省是前台，只接受 true/false（别的值明确报错，d.349）", () => {
+    const dflt = parseSubagentArgs('{"task":"查 docs"}');
+    expect(dflt.ok && dflt.args.background).toBe(false);
+
+    const bg = parseSubagentArgs('{"task":"查 docs","background":true}');
+    expect(bg.ok).toBe(true);
+    if (!bg.ok) throw new Error("unreachable");
+    expect(bg.args.background).toBe(true);
+
+    const bad = parseSubagentArgs(JSON.stringify({ task: "查", background: "yes" }));
+    expect(bad.ok).toBe(false);
+    if (bad.ok) throw new Error("unreachable");
+    expect(bad.error).toContain("background");
   });
 });
 
@@ -728,5 +748,69 @@ describe("自定义子代理（d.287）", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(result.text).toContain("没执行");
     expect(result.text).toContain("子代理「escalate」");
+  });
+});
+
+describe("后台派发（d.349）", () => {
+  const readTool = { type: "function", function: { name: "file_read" } };
+  const baseBridge = {
+    tools: [readTool],
+    meta: () => undefined,
+    execute: vi.fn(async () => ({ text: "基座结果", ok: true })),
+  };
+
+  beforeEach(() => {
+    resetSubagentJobs();
+    setSubagentJobDelivery(null);
+    vi.clearAllMocks();
+  });
+
+  it("background: true 时工具立刻返回一句话，子任务进后台队列", async () => {
+    const chat = vi.fn(async () => "结论：a.md 是安装说明。");
+    const wrapped = withSubagentTool(baseBridge, { agentId: "a1", conversationId: "c1", chat, agentName: "和小鸣" });
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "读 a.md", background: true }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("后台");
+    expect(result.text).toContain("可以继续");
+    expect(listSubagentJobs()).toHaveLength(1);
+    expect(listSubagentJobs()[0]).toMatchObject({
+      conversationId: "c1",
+      agentName: "和小鸣",
+      status: expect.stringMatching(/running|done|queued/),
+    });
+  });
+
+  it("后台跑完后把结论交给交付器（带任务原文，主对话知道这是谁交回来的）", async () => {
+    const delivered: string[] = [];
+    setSubagentJobDelivery((job) => {
+      delivered.push(job.text ?? "");
+    });
+    const chat = vi.fn(async () => "结论：a.md 是安装说明。");
+    const wrapped = withSubagentTool(baseBridge, { agentId: "a1", conversationId: "c1", chat });
+    await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ task: "读 a.md", background: true }),
+    });
+    // 等两条微任务：runSubagentTask 收口 → enqueue 的 run 收口 → deliver
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(listSubagentJobs()[0]?.status).toBe("done");
+    expect(delivered.join("\n")).toContain("安装说明");
+  });
+
+  it("一次 tasks 数组在后台各开一个任务，编号不重复", async () => {
+    const chat = vi.fn(async () => "结论");
+    const wrapped = withSubagentTool(baseBridge, { agentId: "a1", conversationId: "c1", chat });
+    await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ tasks: ["查 a", "查 b"], background: true }),
+    });
+    const jobs = listSubagentJobs();
+    expect(jobs).toHaveLength(2);
+    expect(new Set(jobs.map((job) => job.taskId)).size).toBe(2);
+    expect(jobs.map((job) => job.task).sort()).toEqual(["查 a", "查 b"]);
   });
 });

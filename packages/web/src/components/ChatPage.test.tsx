@@ -4461,7 +4461,7 @@ describe("ChatPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
     await waitFor(() => expect(screen.getByText(/后台还有作业在跑/)).toBeInTheDocument());
     // 说清了「停止不动它们」，而不是含糊地「已停止」
-    expect(screen.getByText(/点停止不会停它们/)).toBeInTheDocument();
+    expect(screen.getByText(/点停止不会停它们|这一轮的停止不影响它们/)).toBeInTheDocument();
     resetPanelJobs();
   }, 30_000);
 

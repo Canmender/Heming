@@ -40,6 +40,7 @@ import type { ToolBridge } from "../agentStream.js";
 import type { ChatMessage } from "../llmClient.js";
 import { resolveBoundProfile, streamChatRouted } from "../llmRoute.js";
 import { SUBAGENT_NAME_RE, describeSubagentDefs, findSubagentDef, type SubagentDef } from "./subagentDefs.js";
+import { enqueueSubagentJob, queuedSubagentJobCount, SUBAGENT_MAX_ACTIVE } from "./subagentJobs.js";
 
 /** 工具名：模型看到的就是这个名字。 */
 export const SUBAGENT_TOOL = "agent_task";
@@ -156,6 +157,13 @@ export interface SubagentArgs {
   maxRounds: number;
   /** 工作区自定义子代理名（d.287）：来自 `.heming/agents/<名字>.md`；不点名时为 null。 */
   agent: string | null;
+  /**
+   * 是否派到后台（d.349）：true 时工具立刻返回，子代理继续跑，结论稍后自动送回。
+   *
+   * 缺省 false 保持 d.162 的同步语义——「我要等这个结论才能往下走」时同步更简单，
+   * 后台只用在「派出去、我继续干别的」。
+   */
+  background: boolean;
 }
 
 export type SubagentParseResult =
@@ -227,6 +235,10 @@ export function subagentSpec(writable = false, agents: readonly SubagentDef[] = 
   const base = writable
     ? `派子代理去查资料、并在需要时改文件：它能读文件/列文件/搜内容，本轮用户已授权它用 file_write / file_edit 改工作区内的文件（改哪几个文件要在任务里写清楚）。适合「要翻很多文件才知道答案」或「几处互不相关的小改动」。${selfContained}`
     : `派只读子代理去查资料：它只能读文件/列文件/搜内容，把结论带回来。适合「要翻很多文件才知道答案」的检索，避免把大量原文拉进主对话。${selfContained}`;
+  // d.349：异步派发（对齐 DSH：工具立即返回、结果另投递）。描述里必须写清
+  // 「哪种情况该用 background」，否则模型会在必须等结论时也派后台、把顺序搞乱。
+  const backgroundNote =
+    "要跑很久、而你手上还有别的活能先干时，加 `background: true`：它会立刻返回，在后台继续跑，结论跑完自动送回这段对话（同时最多 5 个在跑，多的自动排队；想停就在子代理进度条上按「停止」）。必须等它的结论才能往下走时，别用 background——同步调用拿到的结论更直接。";
   const agentNote = agents.length
     ? `工作区里定义了这些子代理：${describeSubagentDefs(agents)}——要它按某一份的专门要求干活，就在 agent 里写那个名字（要求写在工作区的 .heming/agents/<名字>.md）。`
     : "";
@@ -234,7 +246,7 @@ export function subagentSpec(writable = false, agents: readonly SubagentDef[] = 
     type: "function",
     function: {
       name: SUBAGENT_TOOL,
-      description: agentNote ? `${base}${agentNote}` : base,
+      description: `${base}${backgroundNote}${agentNote}`,
       parameters: {
         type: "object",
         properties: {
@@ -255,6 +267,11 @@ export function subagentSpec(writable = false, agents: readonly SubagentDef[] = 
             minimum: 1,
             maximum: SUBAGENT_MAX_ROUNDS_LIMIT,
             description: `每个子代理最多跑几轮工具（默认 ${SUBAGENT_MAX_ROUNDS_DEFAULT}，上限 ${SUBAGENT_MAX_ROUNDS_LIMIT}）`,
+          },
+          background: {
+            type: "boolean",
+            description:
+              "true = 派到后台，立刻返回，结论跑完自动送回；false/不传 = 同步等它跑完（同时最多 5 个后台任务在跑，多的排队）",
           },
           ...(agents.length
             ? {
@@ -303,7 +320,13 @@ export function parseSubagentArgs(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, error: "agent_task 的参数必须是 JSON 对象：{\"task\":\"…\"}。" };
   }
-  const obj = parsed as { task?: unknown; tasks?: unknown; max_rounds?: unknown; agent?: unknown };
+  const obj = parsed as {
+    task?: unknown;
+    tasks?: unknown;
+    max_rounds?: unknown;
+    agent?: unknown;
+    background?: unknown;
+  };
   const tasks: string[] = [];
   if (Array.isArray(obj.tasks)) {
     if (obj.tasks.length === 0) {
@@ -382,7 +405,17 @@ export function parseSubagentArgs(
     }
     agent = value;
   }
-  return { ok: true, args: { task: tasks[0], tasks, maxRounds, agent } };
+  let background = false;
+  if (obj.background !== undefined && obj.background !== null) {
+    if (typeof obj.background !== "boolean") {
+      return {
+        ok: false,
+        error: `agent_task 的 background 必须是 true 或 false（收到 ${JSON.stringify(obj.background)}）：true = 派到后台、立刻返回。`,
+      };
+    }
+    background = obj.background;
+  }
+  return { ok: true, args: { task: tasks[0], tasks, maxRounds, agent, background } };
 }
 
 /** 子代理这次能看见的工具名：只读三件，授权写盘时再加两件写工具（d.202）。 */
@@ -645,6 +678,11 @@ export interface WithSubagentToolOptions {
    * 不会改变工具白名单、轮次上限或只读/可写。
    */
   agents?: readonly SubagentDef[];
+  /**
+   * 智能体显示名（d.349）：后台子代理交付时要用它另起一轮，
+   * 不能凭 id 猜名字（界面上的名字可能被用户改过）。
+   */
+  agentName?: string;
 }
 
 /** 把两个中断信号合成一个：任一方 abort 都算中断（缺一方就返回另一方）。 */
@@ -693,10 +731,10 @@ export function withSubagentTool(
           ok: false,
         };
       }
-      const signal = combineSignals(opts.createSignal?.(), execOpts?.signal);
-      const results = await runSubagentBatch(parsed.args.tasks, parsed.args.maxRounds, {
+      /** 同步与后台共用的依赖：差别只在信号（后台用任务自己的控制器）。 */
+      const buildDeps = (runSignal: AbortSignal | undefined): SubagentDeps => ({
         tools: bridge.tools,
-        ...(signal ? { signal } : {}),
+        ...(runSignal ? { signal: runSignal } : {}),
         ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
         ...(writable ? { writable: true } : {}),
         ...(opts.onWrite ? { onWrite: opts.onWrite } : {}),
@@ -723,13 +761,62 @@ export function withSubagentTool(
             });
           }),
       });
-      // 单任务保持 d.162 的文案形状（评测与既有用例都按它断言）；多任务按「【任务 N】」分段，
-      // 每段都带自己的轮次用量——主模型据此判断哪一件没查完、要不要补派。
-      // d.202：授权写盘时把「只读」如实改成「可写」，别让主模型以为子代理没动过文件。
       const mode = writable ? "可写" : "只读";
       // d.287：点名的自定义子代理在文案里带上名字——主模型与用户都能看出「这一份结论
       // 是按哪份要求查的」，多任务时也能分辨哪些段用了同一个角色。
       const agentLabel = agentDef ? `「${agentDef.name}」` : "";
+      /**
+       * 后台派发（d.349）：立刻把工具调用还给模型，结论稍后由 `deliverSubagentJob`
+       * 送回这段对话。**不合并主对话的中断信号**——用户点停止停的是这一轮，
+       * 后台任务按 DSH 的口径继续跑完（要停它们有单独入口）。
+       */
+      if (parsed.args.background) {
+        const stamp = Date.now().toString(36);
+        const started = parsed.args.tasks.map((task, index) => {
+          const taskId = `bg-${stamp}-${index + 1}`;
+          return enqueueSubagentJob({
+            conversationId: opts.conversationId,
+            agentId: opts.agentId,
+            agentName: opts.agentName ?? "和小鸣",
+            label: agentDef?.name ?? "通用子代理",
+            task,
+            taskId,
+            run: (signal) =>
+              runSubagentTask(
+                task,
+                parsed.args.maxRounds,
+                buildDeps(signal),
+                taskId,
+                SUBAGENT_MAX_ROUNDS_LIMIT,
+              ),
+          });
+        });
+        const queued = queuedSubagentJobCount();
+        const list = started
+          .map((job, index) => {
+            const head = started.length > 1 ? `【任务 ${index + 1}】` : "";
+            const brief = job.task.length > 60 ? `${job.task.slice(0, 60)}…` : job.task;
+            return `${head}${brief}（任务 ${job.id}）`;
+          })
+          .join("\n");
+        return {
+          text: [
+            `已派出 ${started.length} 个${mode}后台子代理，它们会自己跑，结论跑完自动送回这段对话（同时最多 ${SUBAGENT_MAX_ACTIVE} 个在跑，${queued > 0 ? `当前 ${queued} 个排队` : "当前没有排队"}）。`,
+            list,
+            "你现在可以继续做别的事，不必等它们；用户点停止不会停这些后台任务。需要它们的结论才能继续时，等结论到了会自动叫你。",
+          ].join("\n"),
+          ok: true,
+        };
+      }
+      const signal = combineSignals(opts.createSignal?.(), execOpts?.signal);
+      const results = await runSubagentBatch(
+        parsed.args.tasks,
+        parsed.args.maxRounds,
+        buildDeps(signal),
+      );
+      // 单任务保持 d.162 的文案形状（评测与既有用例都按它断言）；多任务按「【任务 N】」分段，
+      // 每段都带自己的轮次用量——主模型据此判断哪一件没查完、要不要补派。
+      // d.202：授权写盘时把「只读」如实改成「可写」，别让主模型以为子代理没动过文件。
       const sections = results.map((result, index) => {
         const head = `子代理${agentLabel}（${mode}，${result.rounds} 轮 / ${result.toolCalls} 次工具调用）结论：`;
         const task = parsed.args.tasks[index] ?? "";

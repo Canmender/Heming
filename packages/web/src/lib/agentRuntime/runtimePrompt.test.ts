@@ -162,6 +162,17 @@ describe("buildRuntimeSection", () => {
     expect(buildRuntimeSection({ ...base, tools: [] })).not.toContain("任务要自包含");
   });
 
+  it("教模型什么时候派到后台、并且派完别干等（d.349）", () => {
+    const subagent = [{ name: "agent_task", title: "派子代理", risk: "read" as const }];
+    const text = buildRuntimeSection({ ...base, tools: subagent });
+    expect(text).toContain("background: true");
+    expect(text).toContain("最多 5 个");
+    // 「还会自动回来」比「不要等」更重要：模型怕漏结论，才不敢派后台
+    expect(text).toContain("自动送回");
+    expect(text).toContain("别反复去问");
+    expect(buildRuntimeSection({ ...base, tools: [] })).not.toContain("background: true");
+  });
+
   it("把上下文用量写进提示词，超过 70% 才催「先派活或收口」（d.348）", () => {
     const subagent = [{ name: "agent_task", title: "派子代理", risk: "read" as const }];
     const low = buildRuntimeSection({

@@ -1,7 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRun } from "../lib/agentRuntime/subagentRuns.js";
+import {
+  enqueueSubagentJob,
+  resetSubagentJobs,
+} from "../lib/agentRuntime/subagentJobs.js";
 import { SubagentRuns } from "./SubagentRuns.js";
 
 /** 造一条运行记录：默认在跑、第 0 轮。 */
@@ -21,6 +25,26 @@ function run(extra: Partial<SubagentRun> = {}): SubagentRun {
 }
 
 describe("SubagentRuns（d.200）", () => {
+  beforeEach(() => {
+    resetSubagentJobs();
+  });
+
+  it("后台排队的也报数（d.349）：派了 6 个时不会只显示 5 个", () => {
+    for (let index = 0; index < 6; index++) {
+      enqueueSubagentJob({
+        conversationId: "c1",
+        agentId: "a1",
+        agentName: "和小鸣",
+        label: "通用子代理",
+        task: `查第 ${index + 1} 件`,
+        taskId: `bg-${index}`,
+        run: () => new Promise(() => {}),
+      });
+    }
+    render(<SubagentRuns runs={[]} onStop={vi.fn()} />);
+    expect(screen.getByText(/0 个在跑 · 1 个排队/)).toBeInTheDocument();
+  });
+
   it("两个在跑时列出两行事实：轮次 + 正在调的工具", () => {
     render(
       <SubagentRuns

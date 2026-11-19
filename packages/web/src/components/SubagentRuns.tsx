@@ -1,5 +1,10 @@
+import { useSyncExternalStore } from "react";
 import { Button } from "./ui/Button.js";
 import type { SubagentRun } from "../lib/agentRuntime/subagentRuns.js";
+import {
+  listSubagentJobs,
+  subscribeSubagentJobs,
+} from "../lib/agentRuntime/subagentJobs.js";
 
 /** 任务描述压成一行：面板只有一条，长的任务书会把「第几轮 / 在调什么」挤掉。 */
 function shortTask(task: string, max = 48): string {
@@ -35,7 +40,11 @@ export function SubagentRuns({
   writable?: boolean;
 }) {
   const running = runs.filter((run) => run.status === "running");
-  if (running.length === 0) return null;
+  // 后台子代理有全局并发上限（d.349）：排队的也得让用户看见，否则「派了 8 个」时
+  // 面板只显示 5 个，用户会以为丢了 3 个。
+  const jobs = useSyncExternalStore(subscribeSubagentJobs, listSubagentJobs);
+  const queued = jobs.filter((job) => job.status === "queued").length;
+  if (running.length === 0 && queued === 0) return null;
   return (
     <div
       role="status"
@@ -46,6 +55,7 @@ export function SubagentRuns({
     >
       <span className="shrink-0 font-medium">
         {writable ? "子代理（可写）" : "只读子代理"} · {running.length} 个在跑
+        {queued > 0 ? ` · ${queued} 个排队` : ""}
       </span>
       <ul className="min-w-0 flex-1 basis-64 space-y-0.5">
         {running.map((run) => (
