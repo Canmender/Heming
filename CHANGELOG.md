@@ -1,4 +1,37 @@
-﻿## d.351.4.128.12（2026-11-19）— 轨迹当账本，预算照 DSH
+## d.352.4.128.12（2026-11-19）— 过程收起来，字画得动
+
+### 为什么做
+
+跟 DSH 的流式链路逐段对了一遍（结果写成 `docs/STREAMING.md`），差距集中在两处最扎眼的地方：
+
+一是「每个 token 都写一次 store」。模型吐一个字就 `setState` 一次，等于每个字都提交一次 React 渲染——长回答滚起来发涩，输入框也跟着卡。DSH 的做法是「按绘制帧发布」：同一帧里攒下的增量只提交一次。
+
+二是「过程全摊开」。一轮长任务十几二十次工具调用，历史里每条消息都把思考与工具步骤铺满屏幕，翻回去找答案得先滚过一屏过程。DSH 在回合结束时会把它收成一行「已完成，用时 …」，想看再点开。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| 对照文档 | 新增 `docs/STREAMING.md`：两仓链路图、DSH 屏幕上到底出现哪些行、渲染性能三招、和鸣现状与十条差距、分三步的优化清单、不建议照搬项、验收方式 |
+| 绘制帧合并 | `onLocalDelta` 不再逐次写 store：同一 `requestAnimationFrame` 内的增量攒成一笔，帧尾统一 `upsertStream`；工具行、思考块、收口之前先 `flushLocalDeltas()`，保证「正文 → 工具 → 思考」顺序不颠倒 |
+| 测试环境不吃合并 | jsdom 的 rAF 是定时器模拟的，合并会让断言依赖计时；检测到 jsdom 时退回逐次写入，测试跑得更快也更确定 |
+| 历史过程收起 | 新增 `MessageProcess`：落定后的消息只留一行「处理过程 · N 次工具调用 · 思考 M 字」，点开才是分步的思考与工具；正文始终可见 |
+| 流式气泡不变 | 正在跑的时候仍然显示完整分步过程（那是「现在在干什么」），只有落定后才收起 |
+
+### 怎么验证
+
+- `packages/web/src/components/AgentStreamBubble.test.tsx` 33 例：33 例通过，新增「MessageProcess 摘要写清调用次数与思考字数、点开才铺步骤」
+- `packages/web/src/components/ChatPage.test.tsx` 202 例：历史消息先看到「处理过程」，点开再看到分步思考（d.126-C 用例按新结构改）
+- `npx vitest run`（packages/web）456 文件 / 6566 例全绿；`pnpm --filter @heming/web typecheck` 通过
+
+### 留白
+
+- 工具轮的「我这就去查」这类中间话术仍是**故意缓冲**的：拿到工具调用时整段丢弃，不写进最终答案。DSH 会把它当正文实时显示——要改这个语义得同时动 `agentStream.ts` 的上行与去重规则，本轮没动，文档里列为待定项
+- 没有做 DSH 的「消息流末尾运行行」（它把「深度求索中，用时 12 秒」放在消息列表尾部）；和鸣目前仍在输入框下方显示第几步
+- 没有做 Markdown 增量解析（DSH 冻结前文、只重解析尾部两块）；和鸣仍整段重解析
+- 断线补齐、停止保留半截正文，都需要改传输层，不在本轮
+
+## d.351.4.128.12（2026-11-19）— 轨迹当账本，预算照 DSH
 
 ### 为什么做
 
@@ -26,8 +59,7 @@
 - packages/web/src/lib/agentContext/modelBudget.test.ts 11 例：0.8 / 0.16 / 65536 三个口径、大窗口取压力预算、小窗口按 80% 压、窗口未知回 6000
 - packages/web/src/components/ContextSettingsCard.test.tsx 6 例：不再有预算/轮数下拉与自动分配开关、两个开关即时落盘、有模型时展示算出来的数
 - packages/web/src/components/ChatPage.test.tsx 202 例：设置里残留的手填值不再生效、LLM 摘要按真实超阈值触发、两个页签文案
-- 
-px vitest run（packages/web）456 文件 / 6565 例全绿；pnpm --filter @heming/web typecheck 通过
+- `npx vitest run`（packages/web）456 文件 / 6565 例全绿；`pnpm --filter @heming/web typecheck` 通过
 
 ### 留白
 

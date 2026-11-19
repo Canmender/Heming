@@ -4185,9 +4185,13 @@ describe("ChatPage", () => {
     expect(screen.queryByText("生成中…")).not.toBeInTheDocument(); // 流气泡已收口
 
     // 转录写进消息：默认折叠，展开可见；且已落盘（刷新后拉历史仍能贴回）
+    // d.352：历史消息先把整段过程收成一行「处理过程」，点开才是分步的思考/工具。
+    const process = screen.getByRole("button", { name: "处理过程" });
+    expect(process).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("先想一下怎么答")).not.toBeInTheDocument();
+    fireEvent.click(process);
     const thinking = screen.getByRole("button", { name: "思考过程" });
     expect(thinking).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("先想一下怎么答")).not.toBeInTheDocument();
     fireEvent.click(thinking);
     expect(screen.getByText("先想一下怎么答")).toBeInTheDocument();
     expect(localStorage.getItem("heming.transcript.c1")).toContain("先想一下怎么答");

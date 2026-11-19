@@ -169,6 +169,56 @@ export function MessageSteps({
   );
 }
 
+/**
+ * 落定后的处理过程（d.352，对齐 DSH 的 turn-process）。
+ *
+ * 为什么不再直接摊开：一轮长任务动辄十几次调用，历史里每条消息都把步骤全铺开，
+ * 会话会被「过程」淹掉，翻找答案反而更慢。DSH 的做法是收成一行「已完成，用时 …」，
+ * 想看再点开；这里只收「过程」，正文始终可见。
+ */
+export function MessageProcess({ steps, tools }: { steps: TranscriptStep[]; tools: ToolTrace[] }) {
+  const [open, setOpen] = useState(false);
+  let toolCalls = 0;
+  let thinkChars = 0;
+  for (const step of steps) {
+    if (step.kind === "tool") toolCalls += 1;
+    else thinkChars += step.text?.length ?? 0;
+  }
+  const parts = [
+    toolCalls > 0 ? `${toolCalls} 次工具调用` : null,
+    thinkChars > 0 ? `思考 ${thinkChars} 字` : null,
+  ].filter((part): part is string => part !== null);
+  return (
+    <div data-testid="message-process" className="mt-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="处理过程"
+        onClick={() => setOpen((value) => !value)}
+        className={`flex w-full items-center gap-1 text-left text-ui-xs text-muted hover:text-ink ${FOCUS_RING_TIGHT}`}
+      >
+        <ChevronIcon
+          width={12}
+          height={12}
+          aria-hidden="true"
+          className={`shrink-0 transition-transform duration-fast motion-reduce:transition-none ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <span className="shrink-0">处理过程</span>
+        {parts.length > 0 ? (
+          <span className="truncate text-ui-xs text-muted">· {parts.join(" · ")}</span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="mt-1">
+          <MessageSteps steps={steps} tools={tools} streaming={false} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** 思考过程：流式中默认展开，结束后自动收起（仍可手动展开）。历史消息里默认折叠。 */
 export function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {  const [open, setOpen] = useState(streaming);
   // 只处理「流式 → 结束」这一次切换：结束后自动收起，用户之后手动展开不再被干预

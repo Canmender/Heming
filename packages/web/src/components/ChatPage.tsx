@@ -110,7 +110,7 @@ import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIc
 import { buildSearchRows, findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
-  MessageSteps,
+  MessageProcess,
   ReasoningBlock,
   ToolTraceGroup,
 } from "./AgentStreamBubble.js";
@@ -1727,6 +1727,45 @@ export function ChatPage({
     streamMarksRef.current[streamId] = [...marks, current.length];
   };
   /**
+   * 流式文本的绘制合并（d.352，对齐 DSH 的「按绘制帧发布」）。
+   *
+   * 每个 token 都写一次 store，等于每个 token 提交一次 React 渲染：长回答会发烫，
+   * 滚动和输入都会发涩。这里把同一绘制帧内的多次 delta 攒成一笔，帧尾统一写入。
+   *
+   * 为什么在测试里退回逐次写入：jsdom 的 requestAnimationFrame 是定时器模拟的，
+   * 合并会让断言依赖计时；测试里保持旧行为，跑得快也更确定。
+   */
+  const immediateDeltas =
+    typeof window === "undefined" ||
+    typeof window.requestAnimationFrame !== "function" ||
+    (typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom"));
+  const pendingDeltasRef = useRef<
+    Record<string, { agentId: string; conversationId: string; text: string }>
+  >({});
+  const deltaFrameRef = useRef<number | null>(null);
+  /** 把攒着的流式文本一次写进 store（工具、收口、停止之前都要先调，保证顺序不颠倒）。 */
+  const flushLocalDeltas = () => {
+    if (deltaFrameRef.current !== null) {
+      window.cancelAnimationFrame(deltaFrameRef.current);
+      deltaFrameRef.current = null;
+    }
+    const pending = pendingDeltasRef.current;
+    pendingDeltasRef.current = {};
+    if (Object.keys(pending).length === 0) return;
+    const now = Date.now();
+    for (const [streamId, entry] of Object.entries(pending)) {
+      upsertStream(streamId, {
+        agentId: entry.agentId,
+        conversationId: entry.conversationId,
+        text: entry.text,
+        status: "streaming",
+        lastAt: now,
+        // 清掉可能残留的 watchdog 误报（恢复即自愈）
+        errorMessage: undefined,
+      });
+    }
+  };
+  /**
    * 把「累计思考 + 工具轨迹 + 分界点」还原成交错的分步记录。
    *
    * 切分依据：`marks[i]` 是第 i 次工具调用开始时的思考长度。第 i 段思考是
@@ -2942,14 +2981,29 @@ export function ChatPage({
         const meta = streamMeta.current[streamId];
         if (!meta) return;
         // 本机流文本已本地累积（不等 WS 回声），回声由 onWsEvent 按 streamOwner 跳过
-        upsertStream(streamId, {
+        if (immediateDeltas) {
+          upsertStream(streamId, {
+            agentId: meta.agentId,
+            conversationId: convId,
+            text: acc,
+            status: "streaming",
+            lastAt: Date.now(), // Task 7 watchdog：累积即刷新
+            errorMessage: undefined, // 清掉可能残留的 watchdog 误报（恢复即自愈）
+          });
+          return;
+        }
+        // d.352：同一帧内的多次 delta 只写一次，帧尾统一渲染。
+        pendingDeltasRef.current[streamId] = {
           agentId: meta.agentId,
           conversationId: convId,
           text: acc,
-          status: "streaming",
-          lastAt: Date.now(), // Task 7 watchdog：累积即刷新
-          errorMessage: undefined, // 清掉可能残留的 watchdog 误报（恢复即自愈）
-        });
+        };
+        if (deltaFrameRef.current === null) {
+          deltaFrameRef.current = window.requestAnimationFrame(() => {
+            deltaFrameRef.current = null;
+            flushLocalDeltas();
+          });
+        }
       },
       onStart: (streamId, mention) => {
         streamMeta.current[streamId] = { ...mention, text, attachment };
@@ -3236,6 +3290,8 @@ export function ChatPage({
       onReasoning: (streamId, text) => {
         const meta = streamMeta.current[streamId];
         if (!meta) return;
+        // d.352：先落盘攒着的正文，别让思考块跑到正文前面。
+        flushLocalDeltas();
         upsertStream(streamId, {
           agentId: meta.agentId,
           conversationId: convId,
@@ -3248,6 +3304,8 @@ export function ChatPage({
       onToolTrace: (streamId, e) => {
         const meta = streamMeta.current[streamId];
         if (!meta) return;
+        // d.352：工具行之前先把攒着的正文落盘，保持「正文 → 工具」的先后。
+        flushLocalDeltas();
         const taskId = streamTaskRef.current[streamId];
         const list = (toolTraceRef.current[streamId] ??= []);
         const idx = list.findIndex((t) => t.id === e.id);
@@ -3434,6 +3492,8 @@ export function ChatPage({
       // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
       // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
       onRunSettled: (streamId, result) => {
+        // d.352：收口前先把攒着的正文落盘，否则最后一段文字会被收口覆盖掉。
+        flushLocalDeltas();
         // d.189：这一轮收口了（成功/失败/用户停止都算），清掉「没跑完」的标记。
         // 注意必须在下面「aborted 分支」之前清——标记的语义是「应用没机会收口」，
         // 而不是「这一轮结果不好」。
@@ -6073,11 +6133,7 @@ export function ChatPage({
                         </time>
                       </div>
                       {transcript?.steps && transcript.steps.length > 0 ? (
-                        <MessageSteps
-                          steps={transcript.steps}
-                          tools={transcript.tools ?? []}
-                          streaming={false}
-                        />
+                        <MessageProcess steps={transcript.steps} tools={transcript.tools ?? []} />
                       ) : (
                         <>
                           {transcript?.thinking ? (

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
+import { AgentStreamBubble, MessageProcess, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
 import type { ToolTrace } from "../store/chat.js";
 
 describe("AgentStreamBubble", () => {
@@ -537,5 +537,39 @@ describe("工具行折叠（d.243：长任务不再把正文挤没）", () => {
     // 名字不再占视觉空间：读屏文案（sr-only）里仍有，但界面文本里没有。
     expect(screen.queryByText(longName)).toBeNull();
     expect(screen.queryByText("生成中…")).toBeNull();
+  });
+});
+
+describe("MessageProcess：落定后的过程默认收起（d.352）", () => {
+  const tool = (id: string): ToolTrace => ({
+    id,
+    name: "file_read",
+    args: "{}",
+    status: "ok",
+    result: "内容",
+    startedAt: 1,
+    endedAt: 2,
+  });
+
+  it("一行摘要写清调用次数与思考字数，点开才铺步骤", () => {
+    render(
+      <MessageProcess
+        steps={[
+          { kind: "think", text: "先看看仓库" },
+          { kind: "tool", toolId: "t1" },
+          { kind: "think", text: "接着写" },
+        ]}
+        tools={[tool("t1")]}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "处理过程" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.textContent).toContain("1 次工具调用");
+    expect(toggle.textContent).toContain("思考 8 字");
+    // 收起时不渲染步骤，正文里也看不到思考内容
+    expect(screen.queryByTestId("agent-steps")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("agent-steps")).toBeInTheDocument();
   });
 });
