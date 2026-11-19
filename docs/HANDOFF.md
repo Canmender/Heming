@@ -6483,6 +6483,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 原始提示条（`foldNoticeText` → `setSendNotice`）仍然保留，二者不重复也不冲突：提示条是「刚刚发生」，这一行是「回头还能查」。
 
 
+- **首字慢在哪儿（d.377）**：★ 运行页「最近请求」加「首字」一列，悬停给拆解（和鸣自己 / 先失败的那几次 / 排队 / 上游）★ 试过多次与「这一试失败交了班」写在状态旁，失败原因挂状态格悬停 ★ 拆分列表补「平均首字 xxx ms」（只算被计时的流式回复）★ 数据层补 ttft/firstText/sent/own/retried/queued/flow/tries/handedOn/err/errType/stop 与 describeRequestWait / describeRequestTries / averageTTFT ★ 留白：「为什么没走那个账号」在 Call.Fallback，账本不落，需另开轨迹接口。
 ## 7. 快速上手命令
 
 ```bash
