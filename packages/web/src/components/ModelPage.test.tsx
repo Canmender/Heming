@@ -2197,6 +2197,33 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("按模板建组：不用自己想该填哪些模型", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("路由分组（可选）"));
+    fireEvent.click(screen.getByRole("button", { name: "先用便宜的" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["group", "template", "thrifty"]),
+    );
+  });
+
+  it("组的设置：只发改过的那几项，留「不改」的不发", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("路由分组（可选）"));
+    const apply = screen.getByRole("button", { name: "应用设置" });
+    expect(apply).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("分组 ID"), { target: { value: "fleet" } });
+    fireEvent.change(screen.getByLabelText("会话亲和"), { target: { value: "session" } });
+    fireEvent.change(screen.getByLabelText("上下文带宽"), { target: { value: "272k" } });
+    fireEvent.click(apply);
+    await waitFor(() =>
+      expect(calls).toContainEqual(["group", "set", "fleet", "stays=session", "context=272k"]),
+    );
+  });
+
   it("模型目录按来源分组，显示名与能力摘要来自网关目录", async () => {
     installBridge();
     useLlmStore.setState({

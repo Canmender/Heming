@@ -117,6 +117,12 @@ import {
 } from "../lib/magpieReminder.js";
 import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import {
+  GROUP_SETTING_FIELDS,
+  GROUP_TEMPLATES,
+  groupSetArgs,
+  groupTemplateArgs,
+} from "../lib/magpieGroups.js";
+import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   checkinFailed,
@@ -520,6 +526,8 @@ export function ModelPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const [groupForm, setGroupForm] = useState({ name: "", models: "", routing: "smart", target: "" });
+  /** 组的设置项（会话亲和 / 是否列出 / 推理档 / 上下文 / 族），空字符串＝不改。 */
+  const [groupSettings, setGroupSettings] = useState<Record<string, string>>({});
   /** 来源高级设置（只在展开某个来源时显示）。 */
   const [advancedProvider, setAdvancedProvider] = useState<string | null>(null);
   const [providerForm, setProviderForm] = useState({
@@ -3349,6 +3357,98 @@ export function ModelPage() {
                 >
                   删除
                 </Button>
+              </div>
+
+              <div className="mt-3 border-t border-line pt-3">
+                <div className="text-ui-sm font-semibold">按模板建组（可选）：不必自己想填哪些模型</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {GROUP_TEMPLATES.map((template) => (
+                    <Button
+                      key={template.kind}
+                      type="button"
+                      size="sm" variant="ghost"
+                      disabled={!cli}
+                      onClick={() =>
+                        void run(
+                          `按模板建组 ${template.label}`,
+                          groupTemplateArgs(template.kind, groupForm.name),
+                        )
+                      }
+                    >
+                      {template.label}
+                    </Button>
+                  ))}
+                </div>
+                <p className="ui-caption mt-1">
+                  {GROUP_TEMPLATES.map((template) => `${template.label}：${template.desc}`).join("；")}。
+                  建出来的组 id 是 {GROUP_TEMPLATES.map((template) => template.id).join(" / ")}
+                  ，名字被占用时内核会自己编号，不会替换现有分组；用的都是你已经接上的模型。
+                </p>
+              </div>
+
+              <div className="mt-3 border-t border-line pt-3">
+                <div className="text-ui-sm font-semibold">
+                  组的设置（可选）：改的是上面「分组 ID」填的那个组
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {GROUP_SETTING_FIELDS.map((field) =>
+                    field.options ? (
+                      <label key={field.key} className="grid gap-1">
+                        <span className="ui-caption">{field.label}</span>
+                        <select
+                          className="ui-input"
+                          aria-label={field.label}
+                          value={groupSettings[field.key] ?? ""}
+                          onChange={(event) =>
+                            setGroupSettings({ ...groupSettings, [field.key]: event.target.value })
+                          }
+                        >
+                          <option value="">不改（{field.hint}）</option>
+                          {field.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <TextField
+                        key={field.key}
+                        label={field.label}
+                        hint={field.hint}
+                        placeholder={field.placeholder}
+                        value={groupSettings[field.key] ?? ""}
+                        onChange={(event) =>
+                          setGroupSettings({ ...groupSettings, [field.key]: event.target.value })
+                        }
+                      />
+                    ),
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm" variant="primary"
+                    disabled={!cli || groupSetArgs(groupForm.target, groupSettings) === null}
+                    onClick={() => {
+                      const args = groupSetArgs(groupForm.target, groupSettings);
+                      if (args) void run("改分组设置", args);
+                    }}
+                  >
+                    应用设置
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={Object.keys(groupSettings).length === 0}
+                    onClick={() => setGroupSettings({})}
+                  >
+                    清空选择
+                  </Button>
+                  <span className="ui-caption">
+                    只发你改过的那几项，留「不改」的不会发给内核——空值等于把设置清回默认，那是另一件事。
+                  </span>
+                </div>
               </div>
 
               <div className="mt-3 border-t border-line pt-3">

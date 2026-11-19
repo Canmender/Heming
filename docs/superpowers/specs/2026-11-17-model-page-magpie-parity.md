@@ -73,6 +73,26 @@
   （`2 exposed of 2 from … · fetched …` + 缩进的 `id  显示名`），并生成上面那些命令参数。
 - 任何一条模型命令成功后都会重读一次 `provider <id>`，所以 chip、地址、套餐徽标同步更新。
 
+### 3.1 路由分组：按模板建组、按需改设置
+
+分组原本只有「名字 + 模型列表 + 策略」三格，等于要求用户先自己决定填哪些模型。内核早就有模板
+（`vendor/magpie-core/internal/provider/grouptemplate.go:39 TemplateKinds` = smart / thrifty / steady，
+id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`），本轮把它接了出来：
+
+| 内核能力 | 和鸣模型页现在的行为 | 背后的命令 |
+| --- | --- | --- |
+| 三套模板：难易分流 / 先用便宜的 / 不会卡住 | 「路由分组（可选）」里三个按钮，点一下直接建；名字沿用「分组名称」格子（留空则由内核起名，**被占用时内核自己编号，绝不替换现有组**） | `group template <smart\|thrifty\|steady> [name]` |
+| `group set` 的十余个键（`groups_cli.go:420-590`） | 只收五个能一句话说清的：会话亲和 `stays`、是否列给智能体 `listed`、推理档谁说了算 `effort`、上下文 `context`、族标签 `family`；**只发用户改过的项**（空值等于把设置清回默认，那是另一件事） | `group set <id> stays=… listed=… effort=… context=… family=…` |
+| — | 「应用设置」改的是「分组 ID」那一格填的组；没填 ID 或一项没选时按钮不可点 | 同上 |
+
+- 参数生成在 `packages/web/src/lib/magpieGroups.ts`（`GROUP_TEMPLATES` / `groupTemplateArgs` /
+  `GROUP_SETTING_FIELDS` / `groupSetArgs`），测试 `magpieGroups.test.ts` 覆盖「空值不发」「未知键忽略」
+  「没 ID 不发」三种边界。
+- **没收的键**：`weight` / `fast` / `pick` / `classifier` / `intent-sure` —— 它们要么要跟模型清单一起
+  才对得上，要么要先选一个分类模型；塞进同一张表会变成「填了也不知道后果」，留给命令行。
+- **做不到的**：参考实现有「组绑定点名账号」（`Group.Accounts`），但随桌面端发的这个内核
+  `groups_cli.go` 里**没有 `accounts=` 这个键**（grep 零命中），所以本轮不做——等内核升上来再接。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
