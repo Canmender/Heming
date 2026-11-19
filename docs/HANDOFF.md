@@ -6501,6 +6501,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 同 d.378 的坑：`readSummaries` 是白名单重建，新字段要在三处（`summaryOf` / `readSummaries` / `hydrateTurnSummaries`）都补。
 
 
+- **换过账号的请求说清了为什么（d.381）**：★ 运行页请求详情加「试过谁、为什么没成」——按顺序列每一试，失败行标红，原因照内核 `tries[].fail`/`error` 原话写 ★ `magpieTrace.ts` 的 `TraceTry` 补 `ttft`/`firstText`/`fail`/`error`，新增 `tryWho` 与 `describeTry`（成功写首字与总耗时、失败写原因、未结束写正在试）★ `Call.Fallback` 摘要不另接（每次尝试自己的 fail 已经更细）★ 验证：trace 两文件 15 例 + ModelPage 134 例全绿。
 ## 7. 快速上手命令
 
 ```bash

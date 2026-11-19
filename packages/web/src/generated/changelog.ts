@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.381.4.130.14",
+    "date": "2026-11-19",
+    "title": "换过账号的请求：上一个为什么没成，写清楚了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 运行页的「最近请求是怎么走的」原来只说到最后落在哪个账号。可真正需要解释的是「为什么换了人」——额度用完？被限流？超时？内核的 `/v1/magpie/trace` 里，每一次尝试都带着结局（`tries[]` 的 `status` / `ms` / `ttft` / `fail` / `error`），页面此前只读了状态与耗时，把「为什么」丢掉了。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieTrace.ts` | `TraceTry` 补 `ttft` / `firstText` / `fail` / `error`；新增 `tryWho`（按候选顺序把尝试的 id 认回「哪个账号/Key」，认不到就用 id 本身）与 `describeTry`（一句话：成功 →「答上了（首字 320ms，共 1400ms）」，失败 →「没成 —— 额度用完（insufficient_quota）」，没结束 →「正在试」） || `packages/web/src/components/ModelTraceView.tsx` | 请求详情里加「试过谁、为什么没成」：按顺序列出每一试，失败行标红 |",
+      "**怎么验证。** `npx vitest run src/lib/magpieTrace.test.ts src/components/ModelTraceView.test.tsx` 15 例通过（新增「每一试说清落在了谁身上」「describeTry：成功带首字与耗时，失败带原因」「换过账号的请求：详情里说清『试过谁、为什么没成』」）。连带 `ModelPage.test.tsx` 一起跑 **134 例全绿**；`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** 网关侧 `Call.Fallback` 那句「哪些先失败了、为什么」没有单独接——每次尝试自己的 `fail` 已经更细，再引一份摘要反而两处会漂。`firstText` 读进来了但暂不展示（推理先出时它比首字早，等有真实样本再定怎么讲）。"
+    ]
+  },
+  {
     "version": "d.380.4.130.14",
     "date": "2026-11-19",
     "title": "慢在工具还是慢在模型",
