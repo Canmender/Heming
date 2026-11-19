@@ -1760,6 +1760,43 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls.some((call) => call[0] === "provider" && call[1] === "refresh-every")).toBe(false);
   });
 
+  it("它是什么：四项合成一条 provider set，看不懂的窗口不发", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("它是什么（可选）：算不算免费、上下文多大、原文发不发"));
+
+    // 一项都没选时不给按。
+    expect(screen.getByRole("button", { name: "保存这些设置" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("这个来源怎么算钱"), { target: { value: "yes" } });
+    fireEvent.change(screen.getByLabelText("上下文带宽"), { target: { value: "272k" } });
+    fireEvent.change(screen.getByLabelText("族标签"), { target: { value: "fast" } });
+    fireEvent.change(screen.getByLabelText("原文照发"), { target: { value: "yes" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存这些设置" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "provider",
+        "set",
+        "mock",
+        "free=yes",
+        "context=272k",
+        "family=fast",
+        "unmasked=yes",
+      ]),
+    );
+
+    // 窗口写错：当场点出来，一条都不发。
+    calls.length = 0;
+    fireEvent.change(screen.getByLabelText("上下文带宽"), { target: { value: "很多" } });
+    expect(screen.getByText(/这几格看不懂/)).toHaveTextContent("上下文带宽");
+    expect(screen.getByRole("button", { name: "保存这些设置" })).toBeDisabled();
+    expect(calls.some((call) => call[1] === "set")).toBe(false);
+  });
+
   it("保存来源设置之后，余额卡与走向图也跟着重读（写命令会动到 Key 和限额）", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

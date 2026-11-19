@@ -135,6 +135,28 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 收的边界：`refresh-every` 只在网关（`magpie serve` 或和鸣）跑着时生效，页面不另起定时器；
   「重新读取」按钮仍走 `provider refresh <id>`（另一处，不在这个折叠区里）。
 
+### 3.4 它是什么：算不算免费、上下文多大、原文发不发
+
+前两轮把「怎么发请求」和「清单怎么长」接上了，剩下的是一组描述来源本身属性的键——
+它们都是 `provider set` 的键，所以四项合成**一条**命令，而不是像调流那样一项一条：
+
+| 想定的事 | 页面上的样子 | 背后的命令 |
+| --- | --- | --- |
+| 这个来源怎么算钱 | 「这个来源怎么算钱」下拉：算免费（免费额度）/ 按价目收费 | `provider set <id> free=yes\|no` |
+| 它实际能给多大上下文 | 「上下文带宽」输入框，`200000` / `200k` / `1.5m` 都行 | `provider set <id> context=<tokens>` |
+| 给一组来源打个共同标签 | 「族标签」输入框（如 `fast`），规则里能按族挑 | `provider set <id> family=<tag>` |
+| 发过去的话要不要脱敏 | 「原文照发」下拉：吃脱敏（默认）/ 原文照发（不脱敏） | `provider set <id> unmasked=yes\|no` |
+
+- 参数生成在 `packages/web/src/lib/magpieSourceProfile.ts`（`SOURCE_PROFILE_FIELDS` /
+  `parseTokensInput` / `sourceProfileRejected` / `sourceProfilePairs` / `sourceProfileCommand`）。
+- `parseTokensInput` 与内核 `provider.ParseTokens`（`internal/provider/ruleparse.go`）同口径：
+  只认 `200000`、`200k`、`1.5m` 这一类，下划线先去掉；页面先判一遍，看不懂的当场点出来、整条不发，
+  不必等内核回 `tokens %q is not a length (200000, 200k, 1m)`。
+- 「算免费」只是路由口径（Free first / Cheapest 会先挑它），价目与用量里的花费照旧按各家价格算；
+  「原文照发」是这一家的账号收到的就是原文、不吃和鸣的脱敏，与别家共用的中转地址不建议开。
+- 收的边界：`prompt=`（系统提示原样发）、`additional-tools=`、`user-agent=`、`search=`、
+  `compaction=` 这几个更底层的键仍留在命令行——它们多半是某个端专用的排查开关，摆到页面上会误导。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。

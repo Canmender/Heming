@@ -135,6 +135,12 @@ import {
   type SourceModelsKey,
 } from "../lib/magpieSourceModels.js";
 import {
+  SOURCE_PROFILE_FIELDS,
+  sourceProfileCommand,
+  sourceProfileRejected,
+  type SourceProfileKey,
+} from "../lib/magpieSourceProfile.js";
+import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   checkinFailed,
@@ -559,6 +565,10 @@ export function ModelPage() {
     listed: "",
     refreshEvery: "",
     autoInclude: "",
+    free: "",
+    context: "",
+    family: "",
+    unmasked: "",
   });
   /** 调流那几格各写各的：留空就是「这次不改」，不是「改回默认」。 */
   const tuneSetters: Record<SourceTuneKey, (value: string) => void> = {
@@ -573,6 +583,13 @@ export function ModelPage() {
     listed: (value) => setProviderForm({ ...providerForm, listed: value }),
     refreshEvery: (value) => setProviderForm({ ...providerForm, refreshEvery: value }),
     autoInclude: (value) => setProviderForm({ ...providerForm, autoInclude: value }),
+  };
+  /** 「它是什么」那几格：算不算免费、上下文多大、族标签、原文发不发。 */
+  const profileSetters: Record<SourceProfileKey, (value: string) => void> = {
+    free: (value) => setProviderForm({ ...providerForm, free: value }),
+    context: (value) => setProviderForm({ ...providerForm, context: value }),
+    family: (value) => setProviderForm({ ...providerForm, family: value }),
+    unmasked: (value) => setProviderForm({ ...providerForm, unmasked: value }),
   };
   /** 每个来源「添加模型」输入框里的内容。 */
   const [modelAdd, setModelAdd] = useState<Record<string, string>>({});
@@ -2535,6 +2552,14 @@ export function ModelPage() {
                     autoInclude: providerForm.autoInclude,
                   };
                   const modelsCommands = sourceModelsCommands(row.id, modelsValues);
+                  const profileValues = {
+                    free: providerForm.free,
+                    context: providerForm.context,
+                    family: providerForm.family,
+                    unmasked: providerForm.unmasked,
+                  };
+                  const profileCommand = sourceProfileCommand(row.id, profileValues);
+                  const profileRejected = sourceProfileRejected(profileValues);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2999,6 +3024,64 @@ export function ModelPage() {
                               }}
                             >
                               {sourceModelsSummary(modelsCommands)}
+                            </Button>
+                          </details>
+
+                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                              它是什么（可选）：算不算免费、上下文多大、原文发不发
+                            </summary>
+                            <p className="mt-1 ui-caption">
+                              有些来源的免费额度不走价目表，有些厂商报的窗口比自己实际能给的小，
+                              还有些地址值得原样发过去。留空就是这次不改。
+                            </p>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              {SOURCE_PROFILE_FIELDS.map((field) =>
+                                field.options ? (
+                                  <label key={field.key} className="grid gap-1">
+                                    <span className="ui-caption">{field.label}</span>
+                                    <select
+                                      className="ui-input"
+                                      aria-label={field.label}
+                                      value={providerForm[field.key]}
+                                      onChange={(event) => profileSetters[field.key](event.target.value)}
+                                    >
+                                      <option value="">不改</option>
+                                      {field.options.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="ui-caption">{field.hint}</span>
+                                  </label>
+                                ) : (
+                                  <TextField
+                                    key={field.key}
+                                    label={field.label}
+                                    hint={field.hint}
+                                    placeholder={field.placeholder}
+                                    value={providerForm[field.key]}
+                                    onChange={(event) => profileSetters[field.key](event.target.value)}
+                                  />
+                                ),
+                              )}
+                            </div>
+                            {profileRejected.length > 0 && (
+                              <p className="mt-2 ui-caption text-danger">
+                                这几格看不懂，先不发：{profileRejected.join("、")}
+                              </p>
+                            )}
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost" className="mt-2"
+                              disabled={!cli || profileCommand === null}
+                              onClick={() => {
+                                if (!profileCommand) return;
+                                void run(`来源画像 ${row.id}`, profileCommand, { refresh: true });
+                              }}
+                            >
+                              保存这些设置
                             </Button>
                           </details>
 
