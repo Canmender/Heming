@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TURN_PROGRESS_MAX_ROUND,
@@ -102,11 +102,11 @@ describe("主对话进度（d.214）", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("文案只说事实：轮次 + 正在执行的工具，或「正在想下一步」", () => {
+  it("文案只说事实：第几步 + 正在执行的工具，或「正在想下一步」", () => {
     expect(describeTurnProgress(make({ round: 3, phase: "tool", tool: "file_grep" }))).toBe(
-      "第 3 轮 · 正在执行 file_grep",
+      "第 3 步 · 正在执行 file_grep",
     );
-    expect(describeTurnProgress(make({ round: 1 }))).toBe("第 1 轮 · 正在想下一步");
+    expect(describeTurnProgress(make({ round: 1 }))).toBe("第 1 步 · 正在想下一步");
   });
 
   it("耗时按人话格式化：不足一分钟报秒，超过报「x 分」/「x 分 y 秒」", () => {
@@ -132,7 +132,7 @@ describe("收口后留下小结（d.218）", () => {
     expect(state?.startedAt).toBe(BASE);
   });
 
-  it("收口后不再说「正在执行」，改成「上一轮：几轮 · 几次工具 · 用时多少」", () => {
+  it("收口后不再说「正在执行」，改成「上一轮：几步 · 用时多少」", () => {
     recordTurnProgress("c1", { round: 1, phase: "round" }, BASE);
     recordTurnProgress("c1", { round: 3, phase: "tool", tool: "file_grep" }, BASE + 60_000);
     settleTurnProgress("c1", BASE + 72_000);
@@ -142,13 +142,13 @@ describe("收口后留下小结（d.218）", () => {
     expect(settled?.phase).toBe("round");
     expect(settled?.tool).toBeNull();
     expect(settled?.tools).toBe(1);
-    expect(describeTurnProgress(settled as TurnProgress)).toBe("上一轮：3 轮 · 1 次工具 · 用时 1 分 12 秒");
+    expect(describeTurnProgress(settled as TurnProgress)).toBe("上一轮：1 步 · 用时 1 分 12 秒");
   });
 
-  it("一个工具都没用过就不写「0 次工具」（宁可不提，不要拉长）", () => {
+  it("一个工具都没用过就不写「0 步」（宁可不提，不要拉长）", () => {
     recordTurnProgress("c1", { round: 1, phase: "round" }, BASE);
     settleTurnProgress("c1", BASE + 30_000);
-    expect(describeTurnProgress(getTurnProgress("c1") as TurnProgress)).toBe("上一轮：1 轮 · 用时 30 秒");
+    expect(describeTurnProgress(getTurnProgress("c1") as TurnProgress)).toBe("上一轮：用时 30 秒");
   });
 
   it("收口后再来进度 = 新一轮：计时与次数重新起算，不会累加到上一轮头上", () => {

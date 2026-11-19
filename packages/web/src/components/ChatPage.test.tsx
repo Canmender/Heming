@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
@@ -619,7 +619,7 @@ describe("ChatPage", () => {
     const composerWrap = form?.querySelector(columnSelector);
     expect(composerWrap).not.toBeNull();
     expect(screen.getByLabelText("消息输入框").closest(columnSelector)).not.toBeNull();
-    expect(screen.getByLabelText("输入快捷键提示").closest(columnSelector)).not.toBeNull();
+    expect(screen.getByTestId("conversation-meter").closest(columnSelector)).not.toBeNull();
   });
 
   it("会话内搜索命中窗口外的老消息：自动扩窗后高亮（d.33）", async () => {
@@ -851,7 +851,7 @@ describe("ChatPage", () => {
 
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "还没发出去的话" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("连接未就绪，消息未发送");
     expect(input).toHaveValue("还没发出去的话"); // 草稿未被清空
@@ -868,7 +868,7 @@ describe("ChatPage", () => {
 
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "你好" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({ kind: "text", text: "你好" }); // 另带会话绑定的 mentions
@@ -924,7 +924,7 @@ describe("ChatPage", () => {
     const input = screen.getByPlaceholderText("输入消息…");
     await waitFor(() => expect(input).toHaveValue("你好")); // 挂载时读回草稿
 
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await lastSealed(send);
 
     await waitFor(() => expect(input).toHaveValue(""));
@@ -935,7 +935,7 @@ describe("ChatPage", () => {
   /** 在助手会话里发出指定文本（流式用例共用前奏）。 */
   async function pickAndSend(text: string) {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
   }
 
 
@@ -1210,68 +1210,47 @@ describe("ChatPage", () => {
     expect(seen![0].content).toContain("todo_write");
   });
 
-  it("I3f 轮次打满时输入区给「继续」，点一下就以续写口令接着做（d.167.4.103）", async () => {
+  it("I3f 长任务不再有轮次上限：跑 15 轮工具也不会被收口，更不出「已用满 36 轮」（d.350）", async () => {
     await setupAgentChat();
     bindAssistant();
     localStorage.clear();
     resetTodoStore();
 
-    // 每轮都只要工具（清单全是 completed → 不自动续跑，第 12 轮就撞上限收口）
     let round = 0;
     const seen: Parameters<typeof streamChat>[1][] = [];
     vi.mocked(streamChat).mockImplementation(async (_profile, messages, opts) => {
       seen.push(messages);
       round += 1;
-      opts.onToolCalls?.([
-        {
-          id: `call-${round}`,
-          type: "function",
-          function: {
-            name: "todo_write",
-            arguments: JSON.stringify({ todos: [{ content: "已完成的一步", status: "completed" }] }),
+      if (round <= 15) {
+        opts.onToolCalls?.([
+          {
+            id: `call-${round}`,
+            type: "function",
+            function: {
+              name: "todo_write",
+              arguments: JSON.stringify({ todos: [{ content: "已完成的一步", status: "completed" }] }),
+            },
           },
-        },
-      ]);
-      return "";
+        ]);
+        return "";
+      }
+      opts.onDelta("十五轮之后，终于做完了");
+      return "十五轮之后，终于做完了";
     });
 
     await pickAndSend("@和小鸣 帮我跑一个很长的任务");
 
-    // 收口后：不是「错误行」，而是一条说明 + 一次点击。
-    const hint = await screen.findByText(/这一轮已用满 36 轮工具调用/, undefined, { timeout: 15_000 });
-    expect(hint).toBeInTheDocument();
-    // 说明里要带真实上限（12 轮 × 3 段 = 36），用户才知道点一下还能跑多久
-    expect(hint).toHaveTextContent("3 段");
-    expect(screen.queryByRole("alert")).toBeNull();
-
-    const callsBefore = seen.length;
-    expect(callsBefore).toBeGreaterThanOrEqual(1);
-    // 续写这一轮正常收口（否则它又会撞上限、提示重新出现——那是正确行为，不是本用例要验的）
-    let continuedMessages: Parameters<typeof streamChat>[1] | undefined;
-    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
-      continuedMessages = messages;
-      return "好，接着做完了";
+    await waitFor(() => expect(screen.getByText(/十五轮之后，终于做完了/)).toBeInTheDocument(), {
+      timeout: 15_000,
     });
-    fireEvent.click(screen.getByRole("button", { name: "继续" }));
-
-    // 续写指令作为一条用户消息发出去（不重发原提问）
-    await waitFor(() => expect(continuedMessages).toBeDefined());
-    expect(
-      continuedMessages!.some((m) => m.content.includes("接着上一轮往下写")),
-    ).toBe(true);
-    // 续写这一轮不能把原提问再发一遍（历史里重复用户消息会让模型自我重复）：
-    // 末条 user 行必须是续写口令本身。
-    const userRows = continuedMessages!.filter((m) => m.role === "user");
-    expect(userRows[userRows.length - 1].content).toContain("接着上一轮往下写");
-    // 点过之后提示消失，不留在输入区
-    await waitFor(() =>
-      expect(screen.queryByText(/这一轮已用满 36 轮工具调用/)).toBeNull(),
-    );
-    // 清单是本用例主动写的（待办面板会在别的用例里多出一个 role=status），用完必须清干净
+    // 旧实现第 12 轮就强行收口，并给一条「已用满 36 轮工具调用」的继续提示；现在都不该出现。
+    expect(screen.queryByText(/已用满/)).toBeNull();
+    expect(screen.queryByText(/自动接着做/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(seen.length).toBeGreaterThanOrEqual(15);
     localStorage.removeItem(TODOS_KEY);
     resetTodoStore();
-    // 12 个工具轮 + 一次续写，jsdom 里比默认 5 秒慢
-  }, 30_000);
+  }, 40_000);
 
   it("I3b fetchHistory 带回上一轮工具链：tool_calls 与 role=tool 严格配对", async () => {
     type SentRow = {
@@ -1720,7 +1699,7 @@ describe("ChatPage", () => {
     expect(screen.queryByLabelText("语音输入")).not.toBeInTheDocument();
 
     // 单框：textarea 与动作行同处一个圆角边框容器里，只有一层 border
-    const box = more.closest('[class*="rounded-[26px]"]');
+    const box = more.closest('[class*="rounded-[24px]"]');
     expect(box).not.toBeNull();
     expect(box).toContainElement(input);
     expect(box).toContainElement(screen.getByRole("button", { name: "发送" }));
@@ -2172,7 +2151,7 @@ describe("ChatPage", () => {
 
   /** 点输入区发送按钮：附件用例统一走这里，避免每条重复 getByRole。 */
   function clickSend() {
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
   }
 
   it("选中文件 → 密文上传共享库 → 发纯附件消息（file.key 随密文，POST 体非明文）", async () => {
@@ -3385,7 +3364,7 @@ describe("ChatPage", () => {
     // 文本发送拦截：不发帧、草稿保留；不再叠第二条同文案提示（横幅已是 role=alert）
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "偷偷发" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(input).toHaveValue("偷偷发");
@@ -3565,7 +3544,7 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "只出一条" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({ kind: "text", text: "只出一条" });
     // 取最后一条 send_message（绑定后有 chunk/finish 回声，末次调用不一定是正文）
@@ -3605,7 +3584,7 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "自发密文" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({ kind: "text", text: "自发密文" });
     // 取最后一条 send_message（绑定后有 chunk/finish 回声，末次调用不一定是正文）
@@ -3647,7 +3626,7 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "重载也要在" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     expect(await lastSealed(send)).toMatchObject({ kind: "text", text: "重载也要在" });
     const ev = send.mock.calls
       .map((c) => c[0] as { type?: string; cipher: string; chainKid: string; n: number })
@@ -4050,7 +4029,7 @@ describe("ChatPage", () => {
     await act(async () => {});
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "发不出去的话" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("消息发送失败");
@@ -4252,7 +4231,7 @@ describe("ChatPage", () => {
 
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "别改文件了，先跑测试" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 消息照常发出（插话不是「先拦住」）：落帧仍是 e2e 信封
     const plain = await lastSealed(send);
@@ -4282,7 +4261,7 @@ describe("ChatPage", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     const line = await screen.findByText(/本会话用量：1 轮/, undefined, { timeout: 8000 });
     expect(line.textContent).toContain("输入 900");
@@ -4335,7 +4314,7 @@ describe("ChatPage", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 写个文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "看清单" }));
@@ -4370,7 +4349,7 @@ describe("ChatPage", () => {
 
     // 运行中插一句：进队列（正文照常上行落库，界面提示「已插话」）
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "插一句：别改文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(screen.getByText(/已插话/)).toBeInTheDocument());
     expect(await lastSealed(send)).toMatchObject({ kind: "text", text: "插一句：别改文件" });
 
@@ -4405,7 +4384,7 @@ describe("ChatPage", () => {
     // 连发两条插话：两条都上行落库，界面应显示「已排队 2 条插话」
     for (const text of ["插一句：别改文件", "再插一句：先跑测试"]) {
       fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
-      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
       await waitFor(() => expect(screen.getByText(/已插话/)).toBeInTheDocument());
       expect(await lastSealed(send)).toMatchObject({ kind: "text", text });
     }
@@ -4542,7 +4521,7 @@ describe("ChatPage", () => {
     // 12,000 个中文 ≈ 12,000 tokens，正好压在提醒线上
     const longText = "啊".repeat(MESSAGE_WARN_TOKENS);
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: longText } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await waitFor(() => expect(screen.getByText(/比一般消息大得多/)).toBeInTheDocument());
     // 第一下什么都没发出去：不静默截断，也不偷偷发
@@ -4555,7 +4534,7 @@ describe("ChatPage", () => {
     expect(vi.mocked(streamChat)).not.toHaveBeenCalled();
 
     // 第二下照发，且内容一个字没改
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1));
     expect(await lastSealed(send)).toMatchObject({ kind: "text", text: longText });
   }, 30_000);
@@ -4591,7 +4570,7 @@ describe("ChatPage", () => {
 
     // 发出去时换成那段提示词（会落库、会调工具，不是本地动作）
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/review" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(1));
     const rows = vi.mocked(streamChat).mock.calls[0][1];
     const joined = rows.map((row) => String(row.content ?? "")).join("\n");
@@ -4668,7 +4647,7 @@ describe("ChatPage 工具轮可视化接线", () => {
   /** 与 ChatPage describe 内同名助手等价（那个是块内私有，这里用局部版）。 */
   async function pickAndSend(text: string) {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
   }
 
   /** 起一个已连接、工具已授权的 MCP 服务（用完即删，避免污染其他用例）。 */
@@ -4717,8 +4696,9 @@ describe("ChatPage 工具轮可视化接线", () => {
 
       await pickAndSend("@和小鸣 用 echo 查一下");
 
-      // 思考过程即时可见
-      await waitFor(() => expect(screen.getByText("思考过程")).toBeInTheDocument());
+      // 思考过程即时可见（d.350 分步渲染：每段思考是一个可展开的块）
+      await waitFor(() => expect(screen.getByTestId("agent-steps")).toBeInTheDocument());
+      fireEvent.click(screen.getAllByRole("button", { name: "思考过程" })[0]!);
       expect(screen.getByText("先确认要查什么")).toBeInTheDocument();
 
       // 工具轨迹：命名空间化工具名 + 成功态
@@ -4795,7 +4775,7 @@ describe("ChatPage 工具轮可视化接线", () => {
       expect(String(toolMsg?.content)).not.toContain("用户拒绝");
 
       // 轨迹显式标「已拒绝」，对话本身继续（第二轮请求已断言）
-      await waitFor(() => expect(screen.getByText("已拒绝")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByText("已拒绝").length).toBeGreaterThanOrEqual(1));
     } finally {
       gateState.failReview = false;
       dispose();
@@ -5004,7 +4984,7 @@ describe("ChatPage 复盘分身接线", () => {
 
   async function pickAndSendLocal(text: string) {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
   }
 
   it("成功轮次收尾后触发一次复盘，并带上本轮内容与工具调用数", async () => {
@@ -5468,14 +5448,13 @@ describe("UX-A 未绑定模型与对话空态", () => {
     expect(screen.getByText("还没有消息")).toBeInTheDocument();
   });
 
-  it("输入区常驻弱化快捷键提示（Enter / Shift+Enter / Esc）", async () => {
+  it("底部不再常驻快捷键提示（d.350）", async () => {
     bindAssistant();
     render(<ChatPage />);
     await act(async () => {});
-    const hints = screen.getByLabelText("输入快捷键提示");
-    expect(hints).toHaveTextContent("Enter");
-    expect(hints).toHaveTextContent("Shift+Enter");
-    expect(hints).toHaveTextContent("Esc");
+    // 快捷键改由 placeholder 提示一次：底部那行常驻小字已按用户要求删掉。
+    expect(screen.queryByLabelText("输入快捷键提示")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shift\+Enter 换行/)).not.toBeInTheDocument();
   });
 
   /**
@@ -5757,7 +5736,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 先别改，看看现状" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(seen.length).toBe(1));
     expect(seen[0][0].content).not.toContain("## 计划模式");
     expect(screen.getByRole("button", { name: /计划模式/ })).toHaveAttribute("aria-pressed", "false");
@@ -5783,7 +5762,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 那就先出方案" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(seen.length).toBe(1));
     expect(seen[0][0].content).toContain("## 计划模式（本轮只读，不改东西）");
     expect(seen[0][0].content).toContain("不是权限坏了，是用户选的");
@@ -5813,7 +5792,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 给个改法计划" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 这一轮只给方案 → 输入区上方出现「计划模式：这一轮只给了方案」
     const bar = await screen.findByText(/这一轮只给了方案/, undefined, { timeout: 5000 });
@@ -5836,11 +5815,11 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
   });
 
 
-  it("I3j 预算收口也给「继续」，但说了原因（d.176.4.105）", async () => {
+  it("I3j 大段工具结果不再触发预算收口：照常跑完，不出「工具返回的内容太多」（d.350）", async () => {
     await setupAgentChat();
     bindAssistant();
 
-    // 一条可读根 + 假桌面桥：两次 file_read 各回 13000 字，累计超单轮预算。
+    // 两次 file_read 各回 13000 字：旧实现在这里按累计 token 收口，逼用户点「继续」。
     localStorage.setItem(
       "heming.fileEdit.roots.v1",
       JSON.stringify({ roots: [{ name: "评测区", path: "D:/评测区", mode: "read" }], outOfRoot: "ask" }),
@@ -5867,16 +5846,17 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
         ]);
         return "";
       }
-      return "先给结论。";
+      opts?.onDelta?.("两个文件都看完了，先给结论。");
+      return "两个文件都看完了，先给结论。";
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 看看这两个文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
-    const hint = await screen.findByText(/工具返回的内容太多/, undefined, { timeout: 8000 });
-    expect(hint).toBeInTheDocument();
-    // 同一条入口：仍然有「继续」可点。
-    expect(screen.getByRole("button", { name: "继续" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/两个文件都看完了/)).toBeInTheDocument(), { timeout: 8000 });
+    expect(screen.queryByText(/工具返回的内容太多/)).toBeNull();
+    expect(screen.queryByText(/回复「继续」/)).toBeNull();
+    expect(round).toBe(2);
 
     delete (window as unknown as { __heming_files?: unknown }).__heming_files;
     localStorage.removeItem("heming.fileEdit.roots.v1");
@@ -5930,7 +5910,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 建个说明文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     const bar = await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
     expect(bar).toBeInTheDocument();
@@ -5998,7 +5978,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 改一下那行字" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "看清单" }));
@@ -6051,7 +6031,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.click(within(picker).getByRole("button", { name: "确定引用" }));
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 看看引用的文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     const issue = await screen.findByTestId("file-ref-issue", undefined, { timeout: 5000 });
     // 说清是哪个文件、说清后果（模型这一轮确实没看到），而不是沉默
@@ -6075,7 +6055,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     vi.mocked(streamChat).mockResolvedValue("意图：压缩历史；结论：早期内容已归档；待办：无");
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/compact" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/已压缩 \d+ 条早期消息/, undefined, { timeout: 8000 })).toBeInTheDocument();
     // 命令本身不落库：界面上不该出现「/compact」这条用户消息
@@ -6163,7 +6143,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 建两个文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await screen.findByText(/改错了可以撤回/, undefined, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "看清单" }));
@@ -6194,7 +6174,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
 
     vi.mocked(streamChat).mockResolvedValue("好，接着改。");
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 接着做" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await waitFor(() => expect(streamChat).toHaveBeenCalled());
     const firstCall = vi.mocked(streamChat).mock.calls[0];
@@ -6214,7 +6194,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     vi.mocked(streamChat).mockClear();
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/环境自检/, undefined, { timeout: 8000 })).toBeInTheDocument();
     // 自检是本地命令：不发给模型，也不在历史里留一条「/status」
@@ -6267,7 +6247,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/另有 1 个自定义子代理/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByText(/\.heming\/agents\/\*\.md/)).toBeInTheDocument();
@@ -6288,7 +6268,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     resetRewindCheckpoints();
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/还没有可回滚的检查点/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(streamChat).not.toHaveBeenCalled();
@@ -6326,7 +6306,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     };
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/已退回 1 轮：还原 1 个文件/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(write).toHaveBeenCalledTimes(1);
@@ -6338,7 +6318,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     // 已退过：再发一次就「没有 1 轮可退」
     await act(async () => {
       fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
-      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     });
     expect(await screen.findByText(/没有 1 轮可退/, undefined, { timeout: 8000 })).toBeInTheDocument();
 
@@ -6373,7 +6353,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     };
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/跑过 2 条命令/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByText(/命令改了哪些文件这里看不到，也没有原文，退不回去/)).toBeInTheDocument();
@@ -6427,7 +6407,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/rewind 1" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/对话退了 1 条，你那句提问已放回输入框/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(deletes).toEqual([{ convId: "c1", ids: ["m2"] }]);
@@ -6580,7 +6560,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     vi.mocked(streamChat).mockClear();
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/init" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 真任务：确实调了模型（与 /status、/goal 这类本地命令相反）
     await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalled(), { timeout: 8000 });
@@ -6639,7 +6619,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 读一下笔记" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     expect(await screen.findByText(/读不到。/, undefined, { timeout: 8000 })).toBeInTheDocument();
     // 工具确实走的是失败路径（假桥明确回了 not-found）
     expect(read).toHaveBeenCalled();
@@ -6647,7 +6627,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(getToolFailureStats("c1")?.codes).toContainEqual({ code: "not-found", count: 1 });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 全量跑时前一个用例的迟到事件可能也记进 c1，所以只认「有这一项」而不是精确总数；
     // 「次数/前三条/最多」的排版细节由 statusReport.test.ts 单测覆盖。
@@ -6668,7 +6648,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "/goal 把登录改成扫码" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/已设为目标：把登录改成扫码/, undefined, { timeout: 8000 })).toBeInTheDocument();
     // 本地命令：不发模型、不在历史里留一条「/goal …」
@@ -6694,7 +6674,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "/subagent write on" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     expect(await screen.findByText(/已允许子代理改文件/, undefined, { timeout: 8000 })).toBeInTheDocument();
     // 本地命令：不发模型、也不在历史里留一条命令
@@ -6706,7 +6686,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "/subagent write off" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     expect(await screen.findByText(/已收回子代理写盘授权/, undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(isSubagentWriteEnabled("c1")).toBe(false);
   }, 30_000);
@@ -6843,7 +6823,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
   /** 发送一段文本（本 describe 自己的前奏，不依赖外层 describe 里的同名 helper）。 */
   function sendText(text: string) {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
   }
 
   it("点「停止生成」后给一次「继续」：接着跑不重发原提问", async () => {
@@ -6920,7 +6900,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     vi.mocked(streamChat).mockImplementation(async () => "构建也过了，可以收工。");
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 跑一下构建" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await waitFor(() => expect(message).toHaveBeenCalled(), { timeout: 8000 });
     expect(message).toHaveBeenCalledWith(
@@ -6929,7 +6909,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
 
     // /notify off：本地生效、命令不落库、开关真的写进存储
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/notify off" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await screen.findByText(/已关闭系统通知/);
     expect(localStorage.getItem("heming.desktopNotify.v1")).toBe("0");
     // 关掉之后同一轮再收口也不弹（这里的重跑由单元测试覆盖，界面只验开关落库）
@@ -6991,9 +6971,10 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 记一下这个" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
-    // 收口后出现会话级台账（下一轮还在，不像「本轮可撤回」那样被覆盖）
+    // 收口后出现会话级台账（d.350：台账移到右侧「会话进度」栏，输入框上方不再挂改动）
+    fireEvent.click(screen.getByRole("button", { name: "会话进度" }));
     const bar = await screen.findByTestId("session-changes", undefined, { timeout: 5000 });
     expect(bar.textContent).toContain("本会话改过 台账.md");
 
@@ -7055,16 +7036,16 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 读一下那个文件" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
-    // 工具还没返回：进度行必须说清「第 1 轮 · 正在执行 file_read」，而不是一句静态的「生成中」
+    // 工具还没返回：进度行必须说清「第 1 步 · 正在执行 file_read」，而不是一句静态的「生成中」
     const line = await screen.findByTestId("turn-progress", undefined, { timeout: 5000 });
-    expect(line.textContent).toContain("第 1 轮");
+    expect(line.textContent).toContain("第 1 步");
     expect(line.textContent).toContain("正在执行 file_read");
     expect(line.textContent).toContain("已跑");
 
     // d.346：这一行在输入框下方、不在输入框里面（用户要求「上一轮…」显示在对话框下面）
-    const composer = screen.getByLabelText("消息输入框").closest('div[class*="rounded-[26px]"]');
+    const composer = screen.getByLabelText("消息输入框").closest('div[class*="rounded-[24px]"]');
     expect(composer).not.toBeNull();
     expect(composer!.contains(line)).toBe(false);
     expect(
@@ -7083,7 +7064,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
       },
       { timeout: 5000 },
     );
-    expect(screen.getByTestId("turn-progress").textContent).toContain("1 次工具");
+    expect(screen.getByTestId("turn-progress").textContent).toContain("1 步");
     await screen.findByText(/读到了/);
 
     delete (window as unknown as { __heming_files?: unknown }).__heming_files;
@@ -7159,7 +7140,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
 
     vi.mocked(streamChat).mockResolvedValue("好，我用图表增强来做。");
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "@和小鸣 画个图" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await waitFor(() => expect(streamChat).toHaveBeenCalled());
     const rows = vi.mocked(streamChat).mock.calls.at(-1)![1] as Array<{ role: string; content: string }>;
@@ -7211,7 +7192,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     fireEvent.click(await screen.findByTestId("safety-scope-manual"));
     await waitFor(() => expect(screen.getByTestId("safety-scope-label").textContent).toBe("手动"));
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "/status" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(screen.getByText(/安全范围：手动/)).toBeTruthy());
 
     // 收尾：恢复「自动」，避免影响同文件后续用例（档位是模块级存储）
@@ -7244,7 +7225,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "@和小鸣 按计划做三步" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // 侧栏被打开，且说清「谁打开、为什么」——用户不会以为栏在自己弹。
     const note = await screen.findByTestId("progress-agent-note", undefined, { timeout: 5000 });

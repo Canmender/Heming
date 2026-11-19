@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import {
   MAX_TOOL_IMAGES,
   MAX_TOOL_RESULT_CHARS,
@@ -66,10 +66,13 @@ describe("truncateToolResult", () => {
     expect(back.ok).toBe(true);
     if (back.ok) expect(back.text).toContain(middle);
   });
-  it("默认上限是公开常量（8000 字符量级）", () => {
+  it("默认不截断（d.350）：调用方明确给上限时才截", () => {
+    // MAX_TOOL_RESULT_CHARS 仍在，但只是「显式传参时」的参考值：
+    // 用户要求不要给工具结果设上限，否则长任务会被拦腰截断、看起来像会话中断。
     expect(MAX_TOOL_RESULT_CHARS).toBe(8000);
-    expect(truncateToolResult("x".repeat(8000))).toHaveLength(8000);
-    expect(truncateToolResult("x".repeat(8001))).toContain("省略");
+    expect(truncateToolResult("x".repeat(8001))).toHaveLength(8001);
+    expect(truncateToolResult("x".repeat(90000))).toHaveLength(90000);
+    expect(truncateToolResult("x".repeat(8001), MAX_TOOL_RESULT_CHARS)).toContain("省略");
   });
 });
 
@@ -109,7 +112,7 @@ describe("executeToolCall", () => {
     expect(result.text).toContain("已中断");
   });
 
-  it("工具报错也走截断（错误详情可能很长）", async () => {
+  it("工具报错也完整回给模型（d.350 不再按长度截断）", async () => {
     const callTool = vi.fn(async () => ({
       text: "E".repeat(20000),
       isError: true,
@@ -122,10 +125,11 @@ describe("executeToolCall", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.text.startsWith("工具返回错误：")).toBe(true);
-    expect(result.text).toContain("省略");
+    expect(result.text).not.toContain("省略");
+    expect(result.text.length).toBeGreaterThan(20000);
   });
 
-  it("正常结果超长时被截断，调用方拿不到无限大的字符串", async () => {
+  it("正常结果超长时也原样返回（d.350：不设内容上限）", async () => {
     const callTool = vi.fn(async () => ({
       text: "R".repeat(50000),
       isError: false,
@@ -137,7 +141,7 @@ describe("executeToolCall", () => {
       { clientFor: () => fakeClient(callTool as HttpMcpClient["callTool"]) },
     );
     expect(result.ok).toBe(true);
-    expect(result.text.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 200);
+    expect(result.text).toHaveLength(50000);
   });
 });
 

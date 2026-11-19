@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+﻿import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
@@ -377,5 +377,16 @@ describe("ContextView · 实时用量与折叠（d.346）", () => {
     expect(fold).toHaveTextContent("折成摘要");
     expect(fold).toHaveTextContent("120");
     expect(fold).toHaveTextContent("刚刚");
+  });
+});
+
+describe("ContextView · 分段占比（d.350，参考 billion-context）", () => {
+  it("把预算按「消息 / 工具 / 预留」拆开画，并给出剩余额度", () => {
+    render(<ContextView conversationId="c1" />);
+    const box = screen.getByTestId("context-breakdown");
+    expect(box).toHaveTextContent("消息");
+    expect(box).toHaveTextContent("工具");
+    expect(box).toHaveTextContent("预留 900");
+    expect(box).toHaveTextContent("剩余 6000（100%）");
   });
 });

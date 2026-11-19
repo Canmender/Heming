@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+﻿import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { TurnProgressLine } from "./TurnProgressLine.js";
@@ -28,7 +28,7 @@ describe("主对话进度行（d.214）", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("执行工具时说清第几轮、在调哪个工具、已经跑了多久", () => {
+  it("执行工具时说清第几步、在调哪个工具、已经跑了多久", () => {
     render(
       <TurnProgressLine
         progress={progress({ round: 3, phase: "tool", tool: "file_grep", tools: 2 })}
@@ -36,7 +36,7 @@ describe("主对话进度行（d.214）", () => {
       />,
     );
     const line = screen.getByTestId("turn-progress");
-    expect(line.textContent).toContain("第 3 轮 · 正在执行 file_grep");
+    expect(line.textContent).toContain("第 3 步 · 正在执行 file_grep");
     expect(line.textContent).toContain("已跑 42 秒");
     expect(line.getAttribute("role")).toBe("status");
     expect(line.getAttribute("data-done")).toBe("false");
@@ -44,7 +44,7 @@ describe("主对话进度行（d.214）", () => {
 
   it("模型在想下一步时不假装在调工具", () => {
     render(<TurnProgressLine progress={progress({ round: 1 })} now={AT + 3_000} />);
-    expect(screen.getByTestId("turn-progress").textContent).toContain("第 1 轮 · 正在想下一步");
+    expect(screen.getByTestId("turn-progress").textContent).toContain("第 1 步 · 正在想下一步");
   });
 
   it("跑过一分钟就把秒换成「x 分」", () => {
@@ -69,7 +69,7 @@ describe("收口小结（d.218）", () => {
       />,
     );
     const line = screen.getByTestId("turn-progress");
-    expect(line.textContent).toContain("上一轮：3 轮 · 5 次工具 · 用时 1 分 12 秒");
+    expect(line.textContent).toContain("上一轮：5 步 · 用时 1 分 12 秒");
     // 收口后时钟不再走：用别的时间渲染也不该冒出「已跑」
     expect(line.textContent).not.toContain("已跑");
     expect(line.getAttribute("data-done")).toBe("true");

@@ -152,17 +152,18 @@ export function resetTurnProgress(): void {
   listeners.clear();
 }
 
-/** 一句话说清现在在干什么；收口后说清这一轮干了多少（界面与 /status 共用同一口径）。 */
+/** 一句话说清现在在干什么；收口后说清这一轮走了多少步（界面与 /status 共用同一口径）。 */
 export function describeTurnProgress(state: TurnProgress): string {
   if (state.done) {
     const endedAt = state.endedAt ?? state.at;
     const used = formatElapsed(endedAt - state.startedAt);
-    const rounds = `${state.round} 轮`;
-    const tools = state.tools > 0 ? ` · ${state.tools} 次工具` : "";
-    return `上一轮：${rounds}${tools} · 用时 ${used}`;
+    // d.350：这里的数字是**这一步到哪了**，不是「第几轮对话」——用户说的「轮」是
+    // 「一次输入 + 一次输出 + 停止」，那是输入框下方那行 `N 轮 · M 步` 的事。
+    const steps = state.tools > 0 ? `${state.tools} 步 · ` : "";
+    return `上一轮：${steps}用时 ${used}`;
   }
-  if (state.phase === "tool" && state.tool) return `第 ${state.round} 轮 · 正在执行 ${state.tool}`;
-  return `第 ${state.round} 轮 · 正在想下一步`;
+  if (state.phase === "tool" && state.tool) return `第 ${state.round} 步 · 正在执行 ${state.tool}`;
+  return `第 ${state.round} 步 · 正在想下一步`;
 }
 
 /** 把毫秒数说成人话（不足 1 分钟只报秒，超过 1 分钟报「x 分 y 秒」）。 */

@@ -16,15 +16,8 @@ import { IMAGE_TOKEN_COST, estimateRowsTokens, estimateTokens } from "./agentCon
 import { foldToolResults } from "./agentContext/toolResults.js";
 import { DEFAULT_TURN_CAPS, planTurnBudget } from "./agentContext/turnBudget.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
-import { truncateToolResult, type ToolImage } from "./mcp/bridge.js";
+import type { ToolImage } from "./mcp/bridge.js";
 import { resolveCapability } from "./modelCaps.js";
-import {
-  LONG_TASK_MAX_ROUNDS,
-  longTaskLimitNotice,
-  longTaskNotice,
-  longTaskVerdict,
-  unfinishedTodoCount,
-} from "./agentRuntime/longTask.js";
 import { coreToolNames } from "./agentRuntime/coreTools.js";
 import {
   describeUpstreamError,
@@ -37,26 +30,22 @@ import type { RolloutEvidence, RolloutInput, RolloutTurnFailure, RolloutUsage } 
 import type { ToolFailure } from "./toolError.js";
 
 /**
- * 工具调用最多允许的连续轮次。
+ * 历史上工具调用最多允许的连续轮次（d.350 起**不再执行**）。
  *
- * 曾经是 3——真实任务（搜→读→改→验证）刚好第 4 步就被砍，而用户看不出是被截断的。
- * 现在提到 12，只作为「防死循环」的兜底；真正的收敛条件是 `MAX_TURN_TOOL_TOKENS`
- * 与 `MAX_TOOL_CONTEXT_TOKENS`（预算驱动，而不是轮次驱动）。
+ * 保留这个常量只为兼容既有引用与测试里的旧口径；编排层已取消轮次上限——
+ * 长任务跑多少轮由模型自己决定，不再在中途输出「达到上限」并收口。
  */
 export const MAX_TOOL_ROUNDS = 12;
 
 /**
- * 单次运行里**回灌给模型的工具结果总量上限**（token）。
+ * 历史上单次运行回灌工具结果的 token 上限（d.350 起**不再执行**）。
  *
- * 工具轮每轮都把「历史 + 已累积的全部工具结果」重发一遍，输入成本随轮次线性涨。
- * 到这里就收口：把已有文本给用户，并明确告知「还能继续」，而不是悄悄停在半路。
- *
- * P2-T11：这个数值现在来自统一账本 `DEFAULT_TURN_CAPS.turnTool`，此处保留导出
- * 只为兼容旧引用；新代码请用 `planTurnBudget`。
+ * 保留导出只为兼容旧引用；预算账本仍在别处用于历史裁剪，但不会在这次运行中途
+ * 因为「工具结果太多」而停止。
  */
 export const MAX_TURN_TOOL_TOKENS = DEFAULT_TURN_CAPS.turnTool;
 
-/** P2-T11：本次运行的三个预算上限（来自统一账本，改上限只改账本）。 */
+/** 历史裁剪等其它路径仍在用的预算账本（与本轮工具轮次无关）。 */
 const turnCaps = DEFAULT_TURN_CAPS;
 
 /**
@@ -283,31 +272,12 @@ function createLimiter(limit: number): <T>(job: () => Promise<T>) => Promise<T> 
   };
 }
 
-/**
- * 把工具带回的来源拼成确定性脚注。
- *
- * 为什么由编排层拼而不是让模型自己写：模型会漏、会编、会改标题；
- * 脚注只在**工具真的返回过该来源**时出现，按首次出现顺序去重，
- * 与模型是否在正文里引用无关——它至少保证「用了知识库就有可点核的来源」。
+/*
+ * d.350：原来这里有一个 `sourceFooter()`，把工具带回的来源拼成确定性脚注
+ * （「来源（来自本机知识库）：…」）追加在答案末尾。用户明确要求去掉这段：
+ * 回复应当像 DSH 一样只给结论与必要的引用，不再由编排层统一贴脚注。
+ * 工具来源仍然随工具结果交给模型，模型需要时可以在正文里说明出处。
  */
-export function sourceFooter(sources: ToolSource[]): string {
-  const seen = new Set<string>();
-  const uniq: ToolSource[] = [];
-  for (const s of sources) {
-    const id = String(s?.id ?? "").trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    uniq.push({ ...s, id });
-    if (uniq.length >= MAX_SOURCES) break;
-  }
-  if (!uniq.length) return "";
-  const line = (s: ToolSource) =>
-    `- ${String(s.title ?? s.id).replace(/\s+/g, " ").slice(0, 120)}（${s.id.replace(/[\r\n]+/g, " ")}）`;
-  const hasArchive = uniq.some((s) => s.kind === "archive");
-  const hasWiki = uniq.some((s) => s.kind !== "archive");
-  const label = hasArchive && hasWiki ? "来源（本机知识库与本机归档）" : hasArchive ? "来源（来自本机归档）" : "来源（来自本机知识库）";
-  return `\n\n---\n${label}：\n${uniq.map(line).join("\n")}`;
-}
 
 /** 工具来源分类：展示与归属用，**不参与** HITL 风险判定。 */
 export type ToolOrigin = "mcp" | "builtin" | "self" | "plugin";
@@ -1453,47 +1423,22 @@ export function runAgentMentions(
           };
           let extra: ChatMessage[] = [];
           let reasoning = "";
-          /** 本次尝试里已回灌的工具结果总量（token）：预算驱动的收敛条件，见 MAX_TURN_TOOL_TOKENS。 */
+          /** 本次尝试里已回灌的工具结果总量（token，只用于观测，不再触发收口）。 */
           let toolTokens = 0;
           /** 本轮尝试里工具实际返回过的来源（被拒/失败的不算）。 */
           const sources: ToolSource[] = [];
-          /** 把来源脚注补在答案末尾（无来源时不发）。 */
-          const emitFooter = () => {
-            const footer = sourceFooter(sources);
-            if (footer) emitDelta(footer, aggressive);
-          };
           /**
-           * 自动续跑的段起点（d.157）：到 `MAX_TOOL_ROUNDS` 时若任务清单还有未完成项，
-           * 不收口而是开始下一段。用「段起点」而不是重置 `round`，是因为 `round` 还决定
-           * 了别的行为（`round > 0` 才检查预算），重置会让预算闸门失效。
+           * d.350：不再在答案末尾拼「来源（来自本机知识库）：」脚注。
+           * 用户明确要求去掉这段；来源信息仍随工具结果交给模型，由模型自己决定
+           * 要不要在正文里提（与 DSH 的回复形态一致）。
            */
-          let segmentStart = 0;
           for (let round = 0; ; round++) {
             // 主对话进度（d.214）：先让界面知道「进到第几轮了」，工具执行时再补一条。
             // 放在预算收口之前——用户看到「第 N 轮」总比看到界面静止强。
             deps.onProgress?.({ round: round + 1, phase: "round" });
-            /**
-             * 预算驱动收口（G1）：工具结果累计超过单轮上限就不再开新一轮。
-             *
-             * P2-T11：上限来自统一账本（`planTurnBudget` 的 `turn` 闸门），
-             * 与历史预算、工具折叠预算共用同一个 `DEFAULT_TURN_CAPS`。
-             *
-             * 与「轮次到顶」的区别在**告知**：这里明确告诉用户「已达预算、可以继续」，
-             * 而不是静默停在半路——用户看不懂为什么话没说完，只会觉得模型变笨了。
-             */
-            const budget = planTurnBudget({ systemTokens: promptTokens, toolTokens });
-            if (round > 0 && budget.over.includes("turn")) {
-              budgetHit = true;
-              emitDelta(
-                `\n\n（本次工具返回的内容已达预算上限，先给出当前结论。回复「继续」可以接着做。）`,
-                aggressive,
-              );
-              emitFooter();
-              console.warn(
-                `工具结果累计 ${toolTokens} token 超过单轮预算 ${budget.caps.turnTool}（账本：${budget.over.join("/")}）`,
-              );
-              return;
-            }
+            // d.350：不再按「工具结果累计 token」中途收口。
+            // 用户实测这种「预算上限」收口会让一轮对话停在半路，看起来像异常中断；
+            // 工具能调多少轮、结果有多长，交给模型自己判断，编排层不再设闸门。
             // 工具轮的文本先攒着（可能是「我这就去查」这类中间话术，等工具结果回来再决定是否上行）。
             // 但要**按片攒**而不是拼成一个字符串——最终答案逐片发出才能保住打字机效果。
             // 拼成整段会让用户看到「文字突然整块蹦出来」，与无工具路径的表现不一致。
@@ -1671,7 +1616,6 @@ export function runAgentMentions(
                 );
               }
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
-              emitFooter();
               return;
             }
             if (truncated) {
@@ -2055,9 +1999,10 @@ export function runAgentMentions(
                   hasImages && !vision
                     ? `\n（本次返回了 ${result!.images!.length} 张图片，但当前模型不支持读图，已省略）`
                     : "";
-                // 单条工具结果硬上限：MCP 桥那边已经截过，但内置/插件工具不走那座桥，
-                // 一条几十万字的输出会跟着每一轮重发，把预算和 400 一起顶爆。
-                const capped = truncateToolResult(String(result?.text ?? ""));
+                // d.350：不再截断工具结果。用户明确要求不要给「工具返回内容」设上限——
+                // 一次构建日志、一次整文件读取被砍掉中段，模型就只能凭猜测继续，
+                // 看起来像会话异常中断。完整结果原样回灌，由模型自己决定怎么用。
+                const capped = String(result?.text ?? "");
                 return {
                   role: "tool" as const,
                   tool_call_id: call.id,
@@ -2084,13 +2029,11 @@ export function runAgentMentions(
               }
               extra.push({ role: "user", content: "（工具返回的图片）", contentParts: parts });
             }
-            // 累计回灌量，供下一轮的预算收口判断（见 MAX_TURN_TOOL_TOKENS）
-            // 口径必须是**真正发出去的那份文本**：按原始 result.text 计，
-            // 一条被截到 8000 字符的大输出会被算成几万 token，直接把预算判死。
+            // 累计回灌量（只做观测：d.350 起它不再触发任何收口）。
             toolTokens += calls.reduce(
               (sum, _call, i) =>
                 sum +
-                estimateTokens(truncateToolResult(String(results[i]?.text ?? ""), undefined, { spill: false })) +
+                estimateTokens(String(results[i]?.text ?? "")) +
                 // 与预算层同一个口径（图片不便宜，别按 800 凑合）
                 (results[i]?.images?.length ?? 0) * IMAGE_TOKEN_COST,
               0,
@@ -2102,40 +2045,10 @@ export function runAgentMentions(
              * 于是「读了 12 份还差 1 份」时那一份既没读也没回结果，模型只看到自己的
              * 请求石沉大海。清单续跑把这个坑放大了（续跑＝接着请求下一段，丢的是跨段边界）。
              */
-            if (round + 1 - segmentStart >= MAX_TOOL_ROUNDS) {
-              /**
-               * 长任务续跑：`roundsDone` 是**本次用户输入以来**累计走完的工具轮次
-               * （不是本段轮次）——上限是全轮总量，段只是「每次充电」。
-               */
-              const roundsDone = round + 1;
-              const verdict = longTaskVerdict({
-                roundsDone,
-                unfinished: unfinishedTodoCount(conversationId),
-                aborted,
-              });
-              if (verdict.continue) {
-                // 中间话术照常上行：用户能看到「它在接着做」，而不是盯着转圈。
-                for (const chunk of roundChunks) emitDelta(chunk, aggressive);
-                emitDelta(longTaskNotice(roundsDone), aggressive);
-                segmentStart = round + 1;
-                console.info(
-                  `任务清单仍有未完成项，自动续跑：已用 ${roundsDone} 轮，上限 ${LONG_TASK_MAX_ROUNDS} 轮`,
-                );
-                continue;
-              }
-              maxRoundsHit = true;
-              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
-              // 到总量上限（而不是「没有未完成项」）时才说 36 轮：否则用户看到 36 会以为哪里算错了。
-              emitDelta(
-                verdict.reason === "limit"
-                  ? longTaskLimitNotice()
-                  : `\n\n（本次已连续调用 ${MAX_TOOL_ROUNDS} 轮工具，达到上限，先给出当前结论。回复「继续」可以接着做。）`,
-                aggressive,
-              );
-              emitFooter();
-              console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用（${verdict.reason}）`);
-              return;
-            }
+            // d.350：工具轮次不再设上限，也不再「自动接着做」或提示「达到上限」。
+            // 什么时候停由模型自己决定（它不再调用工具、给出最终答复即收口）；
+            // 编排层只负责把每一轮真实结果交回去。用户明确要求不要出现
+            // 「任务清单还有未完成项，正在自动接着做…」「本次已连续调用 N 轮工具…」这类文案。
           }
         };
         /**

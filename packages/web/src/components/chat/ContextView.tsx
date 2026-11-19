@@ -244,6 +244,41 @@ export function ContextView({
         <p className="mt-0.5 text-ui-xs text-muted">
           {reported?.calibrated ? "估算已按本机实测校准" : "估算值（与压缩链同一估算器）"}
         </p>
+        {/*
+         * 分段占比（d.350，参考 billion-context 的 context 面板）：
+         * 一根条只说「用了多少」，用户看不出**是什么在占**。这里按三块真实来源拆开，
+         * 剩余额度单独留白——长任务里「工具结果占了八成」是要立刻能看出来的。
+         */}
+        <div className="mt-3" data-testid="context-breakdown">
+          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-subtle-3" aria-hidden="true">
+            {([
+              ["消息", msgTokens, "bg-accent"],
+              ["工具结果", toolTokens, "bg-warn"],
+              ["注入预留", DEFAULT_RESERVED_TOKENS, "bg-line-strong"],
+            ] as const).map(([label, tokens, tone]) => {
+              const width = budget > 0 ? Math.min(100, (tokens / budget) * 100) : 0;
+              if (width <= 0) return null;
+              return <span key={label} className={`${tone} h-full`} style={{ width: `${width}%` }} />;
+            })}
+          </div>
+          <ul className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-xs text-muted">
+            <li className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-accent" />
+              消息 {formatTokens(msgTokens)}
+            </li>
+            <li className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-warn" />
+              工具 {formatTokens(toolTokens)}
+            </li>
+            <li className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-line-strong" />
+              预留 {formatTokens(DEFAULT_RESERVED_TOKENS)}
+            </li>
+            <li className="ml-auto tabular-nums">
+              剩余 {formatTokens(Math.max(0, budget - used))}（{Math.round(Math.max(0, 1 - ratio) * 100)}%）
+            </li>
+          </ul>
+        </div>
       </div>
       {/* 明细三行：数字全部来自本会话真实数据（消息条数 / 工具结果条数 / 注入预留额度）。 */}
       <ul aria-label="上下文明细" className="mt-3 list-none space-y-1.5 p-0">

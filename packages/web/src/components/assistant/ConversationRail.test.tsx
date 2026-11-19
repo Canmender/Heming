@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+﻿import { describe, it, expect, afterEach, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Conversation } from "@heming/shared";
 import { ConversationRail, type ConversationRailProps } from "./ConversationRail.js";
@@ -539,13 +539,13 @@ describe("会话行「正在跑」徽标（d.212）", () => {
     renderRail({ conversations: [conv("c1", "长任务"), conv("c2", "另一个")] });
     const running = screen.getByRole("button", { name: "打开会话：长任务" });
     const other = screen.getByRole("button", { name: "打开会话：另一个" });
-    expect(within(running).getByText("正在跑")).toBeInTheDocument();
-    expect(within(other).queryByText("正在跑")).toBeNull();
+    expect(within(running).getByLabelText("正在跑")).toBeInTheDocument();
+    expect(within(other).queryByLabelText("正在跑")).toBeNull();
   });
 
   it("别的窗口派来的流不点亮（不是这个窗口在跑）", () => {
     useChatStore.setState({ streaming: { s1: streamingOf("c1") }, streamOwner: {} });
     renderRail({ conversations: [conv("c1", "长任务")] });
-    expect(screen.queryByText("正在跑")).toBeNull();
+    expect(screen.queryByLabelText("正在跑")).toBeNull();
   });
 });

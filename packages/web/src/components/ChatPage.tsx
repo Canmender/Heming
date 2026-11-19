@@ -20,6 +20,7 @@ import {
   type E2eOpenHandler,
   type E2eOpenOutcome,
   type MessageTranscript,
+  type TranscriptStep,
   type ToolTrace,
 } from "../store/chat.js";
 import { useUiStore, type TaskDraft } from "../store/ui.js";
@@ -79,7 +80,7 @@ import {
   type HistoryRow,
   type VisionImageSlot,
 } from "../lib/vision/history.js";
-import { MAX_TOOL_ROUNDS, MAX_VISIBLE_TOOLS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
+import { MAX_VISIBLE_TOOLS, TOOL_SEARCH_THRESHOLD, runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { recordRollout, rolloutLog } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
@@ -108,6 +109,7 @@ import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIc
 import { buildSearchRows, findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import {
   AgentStreamBubble,
+  MessageSteps,
   ReasoningBlock,
   ToolTraceGroup,
 } from "./AgentStreamBubble.js";
@@ -143,10 +145,12 @@ import { peekPluginInstallNotices, takePluginInstallNotices } from "../lib/plugi
 import { collectFileRefs, describeFileRefIssues, fileRefIssues, type FileRefIssues } from "../lib/fileEdit/fileRefs.js";
 import { FileRefPicker } from "./FileRefPicker.js";
 import { ModelSwitcher } from "./ModelSwitcher.js";
-import { TurnUndoBar } from "./TurnUndoBar.js";
+// d.350：`TurnUndoBar` 收进输入框内部第一行；`SessionChangesBar` 移到右侧「会话进度」栏——
+// 输入框上方不再挂「改动了哪些文件」，但查看/对照的入口还在。
 import { ChangeDiffDialog, type ChangeDiffState } from "./ChangeDiffDialog.js";
-import { MyTasksDialog } from "./MyTasksDialog.js";
 import { SessionChangesBar } from "./SessionChangesBar.js";
+import { TurnUndoBar } from "./TurnUndoBar.js";
+import { MyTasksDialog } from "./MyTasksDialog.js";
 import {
   getSessionChanges,
   recordSessionChanges,
@@ -248,7 +252,7 @@ import { capabilityNotice } from "../lib/capabilityNotice.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
 import { ChatEmptyState } from "./ux/ChatEmptyState.js";
 import { ErrorState } from "./ui/ErrorState.js";
-import { ComposerHints } from "./ux/ComposerHints.js";
+// d.350：底部不再显示快捷键提示行（`ComposerHints`），键盘说明改在输入框占位符里。
 // d.158：任务清单渲染（`todo_write` 的可见落点），放在输入栏上方
 import { TodoPanel } from "./TodoPanel.js";
 import { getTodos } from "../lib/todo/store.js";
@@ -961,6 +965,27 @@ export function ChatPage({
    * 收口/停止/切会话都清掉，免得上一轮的数字留在屏幕上被当成「现在还在跑」。
    */
   const turnProgress = useSyncExternalStore(subscribeTurnProgress, () => getTurnProgress(convId));
+  /**
+   * 本对话的「轮 / 步」（d.350）。
+   *
+   * 口径按用户的定义来：
+   * - **轮** = 一次用户输入 + 这一次 AI 的全部输出（含中间工具、一直到停止或收口）；
+   * - **步** = AI 每做一件事（一次工具调用算一步；思考与正文不单独计步）。
+   * 之前在进度条上把「工具轮次」也叫「轮」，和用户理解的「轮」对不上——
+   * 所以这里统一用消息数数轮、用转录里的工具调用数数步。
+   * 跑着的那一轮还没落库，用 `turnProgress.tools` 补上实时步数。
+   */
+  const conversationStats = useMemo(() => {
+    let rounds = 0;
+    let steps = 0;
+    for (const m of messages) {
+      if (m.senderType === "user") rounds += 1;
+      steps += transcriptOf(m)?.tools?.length ?? 0;
+    }
+    return { rounds, steps };
+  }, [messages]);
+  const liveSteps =
+    conversationStats.steps + (turnProgress && !turnProgress.done ? turnProgress.tools : 0);
   /** 让「已跑 X 秒」自己往前走：只有真的在跑时才开秒表；收口后（小结）不需要再 tick。 */
   const [progressNow, setProgressNow] = useState(0);
   useEffect(() => {
@@ -1683,6 +1708,50 @@ export function ChatPage({
   /** 新一轮开始时清掉旧轨迹。 */
   const resetToolTrace = (streamId: string) => {
     toolTraceRef.current[streamId] = [];
+    delete streamMarksRef.current[streamId];
+  };
+  /**
+   * 分步思考的分界点（d.350）。
+   *
+   * 模型每次调用工具时，当前这段思考就结束了——把当时的累计长度记下来，
+   * 之后就能把一整段累计的 reasoning 切回「想 → 做 → 再想」的若干段。
+   * 只用内存：它是本次流式的临时结构，收口时折成 `steps` 落进消息转录。
+   */
+  const streamMarksRef = useRef<Record<string, number[]>>({});
+  const markReasoningBreak = (streamId: string) => {
+    const current = useChatStore.getState().streaming[streamId]?.reasoning ?? "";
+    const marks = streamMarksRef.current[streamId] ?? [];
+    streamMarksRef.current[streamId] = [...marks, current.length];
+  };
+  /**
+   * 把「累计思考 + 工具轨迹 + 分界点」还原成交错的分步记录。
+   *
+   * 切分依据：`marks[i]` 是第 i 次工具调用开始时的思考长度。第 i 段思考是
+   * `[marks[i-1], marks[i])`，第 i 个工具插在它后面；最后一段是 `[marks.at(-1), 末尾)`。
+   * 没有分界点（纯思考、或模型一次都没调工具）时退化成单段思考。
+   */
+  const stepsOfStream = (
+    reasoning: string | undefined,
+    tools: ToolTrace[] | undefined,
+    marks: number[] | undefined,
+  ): TranscriptStep[] => {
+    const text = reasoning ?? "";
+    const list = tools ?? [];
+    const cuts = (marks ?? []).filter((m) => Number.isFinite(m) && m >= 0 && m <= text.length);
+    const steps: TranscriptStep[] = [];
+    let from = 0;
+    for (let i = 0; i < Math.max(cuts.length, list.length, text.trim() ? 1 : 0); i += 1) {
+      const to = i < cuts.length ? cuts[i]! : i === 0 ? text.length : from;
+      const segment = text.slice(from, to).trim();
+      if (segment) steps.push({ kind: "think", text: segment });
+      from = Math.max(from, to);
+      const tool = list[i];
+      if (tool) steps.push({ kind: "tool", toolId: tool.id });
+    }
+    // 收尾：最后一个工具之后如果还有思考，补一段。
+    const tail = text.slice(from).trim();
+    if (tail && steps[steps.length - 1]?.kind !== "think") steps.push({ kind: "think", text: tail });
+    return steps;
   };
   /** 消息署名：自己「我」；智能体会话为智能体名。 */
   const displaySenderName = (m: Message) =>
@@ -1710,9 +1779,11 @@ export function ChatPage({
         : t,
     );
     if (!reasoning?.trim() && tools.length === 0) return undefined;
+    const steps = stepsOfStream(reasoning, tools, streamMarksRef.current[streamId]);
     return {
       ...(reasoning?.trim() ? { thinking: reasoning } : {}),
       ...(tools.length > 0 ? { tools } : {}),
+      ...(steps.length > 0 ? { steps } : {}),
     };
   };
   /** 通知：任务收尾进通知中心（用户常在发起任务后切去别处）。 */
@@ -3098,7 +3169,7 @@ export function ChatPage({
             })),
             tools: runtimeToolsFromSpecs(tools, (name) => toolMetaOf(name, agentId)),
             toolSearchAvailable: tools.length > TOOL_SEARCH_THRESHOLD,
-            maxToolRounds: MAX_TOOL_ROUNDS,
+            // d.350：不再把「工具轮次上限」写进提示词——上限已取消。
             // 上下文占用（d.348）：把「已经花了多少」写进提示词，模型才看得见派活的收益。
             // 与界面 ContextMeter 用同一份估算（refreshContextUsage），不另算一套。
             ...(contextUsage.budget > 0
@@ -3179,6 +3250,8 @@ export function ChatPage({
         const idx = list.findIndex((t) => t.id === e.id);
         if (e.phase === "start") {
           turnToolCount += 1;
+          // d.350：工具开始 = 当前这段思考的结尾。记下累计长度，收口时据此切段。
+          markReasoningBreak(streamId);
           const entry: ToolTrace = {
             id: e.id,
             name: e.name,
@@ -5996,12 +6069,22 @@ export function ChatPage({
                           {formatClock(m.createdAt)}
                         </time>
                       </div>
-                      {transcript?.thinking ? (
-                        <ReasoningBlock text={transcript.thinking} streaming={false} />
-                      ) : null}
-                      {transcript?.tools && transcript.tools.length > 0 ? (
-                        <ToolTraceGroup tools={transcript.tools} />
-                      ) : null}
+                      {transcript?.steps && transcript.steps.length > 0 ? (
+                        <MessageSteps
+                          steps={transcript.steps}
+                          tools={transcript.tools ?? []}
+                          streaming={false}
+                        />
+                      ) : (
+                        <>
+                          {transcript?.thinking ? (
+                            <ReasoningBlock text={transcript.thinking} streaming={false} />
+                          ) : null}
+                          {transcript?.tools && transcript.tools.length > 0 ? (
+                            <ToolTraceGroup tools={transcript.tools} />
+                          ) : null}
+                        </>
+                      )}
                       <div className="mt-1.5 break-words text-ui-base leading-7">{messageBody}</div>
                     </div>
                   )}
@@ -6073,6 +6156,7 @@ export function ChatPage({
             text={s.text}
             reasoning={s.reasoning}
             tools={s.tools}
+            steps={stepsOfStream(s.reasoning, s.tools, streamMarksRef.current[id])}
             attempts={s.attempts}
             status={s.status}
             errorMessage={s.errorMessage}
@@ -6208,25 +6292,31 @@ export function ChatPage({
             ) : null}
           </div>
         ) : null}
-        {/* 输入框上方的常驻信息（d.346）：任务清单、本轮改动与会话改动都放在框外——
-            以前它们挤在圆角容器里，等于把正文区一段段吃掉。 */}
+        {/* 输入框上方的常驻信息（d.346）：任务清单放在框外。
+            d.350：用户要求对话框**上方**不再显示「改动了哪些文件」——
+            `SessionChangesBar` 移除；`TurnUndoBar` 收进输入框内部第一行，
+            仍可撤回本轮改动，但不再占正文上方那一块。 */}
         <TodoPanel conversationId={convId} />
-        <SessionChangesBar changes={sessionChanges} onOpen={openSessionChanges} />
+        {/* 圆角输入容器（d.147.4.90 起仿 Codex/ChatGPT 的单框样式；d.350 重做层次）：
+            d.350 用户反馈「输入框不显眼、没有层次」。现在用三层把它从正文里区分出来：
+            ① 一层更明显的描边 + 内外阴影（聚焦时加深）；② 正文区留白加大；
+            ③ 动作行单独一条浅底色带，与正文之间有一条细分隔线。 */}
+        <div className="rounded-[24px] border border-line-soft bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_40px_-32px_rgba(0,0,0,0.55)] transition-[border-color,box-shadow] focus-within:border-line-strong focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_20px_50px_-30px_rgba(0,0,0,0.62)]">
+        {/* 本轮改动（d.176，d.350 移进框内）：不再挂在正文上方，但撤回入口还在。 */}
         {turnWrites.length > 0 && !planMode ? (
-          <TurnUndoBar
-            paths={turnWrites}
-            busy={undoing}
-            busyPath={undoingPath}
-            onUndo={() => void undoTurnWrites()}
-            onUndoOne={(path) => void undoTurnFile(path)}
-            {...(hasBackupPreviewBridge(getFileBridge()) ? { onPreview: (path: string) => void previewTurnChange(path) } : {})}
-            {...(hasRevealBridge(getFileBridge()) ? { onReveal: (path: string) => void revealTurnChange(path) } : {})}
-            onDismiss={() => setTurnWrites([])}
-          />
+          <div className="border-b border-line-soft/70 px-2 pb-2 pt-2">
+            <TurnUndoBar
+              paths={turnWrites}
+              busy={undoing}
+              busyPath={undoingPath}
+              onUndo={() => void undoTurnWrites()}
+              onUndoOne={(path) => void undoTurnFile(path)}
+              {...(hasBackupPreviewBridge(getFileBridge()) ? { onPreview: (path: string) => void previewTurnChange(path) } : {})}
+              {...(hasRevealBridge(getFileBridge()) ? { onReveal: (path: string) => void revealTurnChange(path) } : {})}
+              onDismiss={() => setTurnWrites([])}
+            />
+          </div>
         ) : null}
-        {/* 圆角输入容器（d.147.4.90 起仿 Codex/ChatGPT 的单框样式）：正文在上，
-            工具与发送收进下方动作行（左下圆形「+」、右下圆形发送），只保留一层 border。 */}
-        <div className="rounded-[26px] border border-line bg-surface transition-colors focus-within:border-line-strong">
         {/* 待发附件（E1）：选中后先堆在这里，可逐个移除；发送时随正文一起提交 */}
         {pendingFiles.length > 0 ? (
           <ul
@@ -6498,7 +6588,7 @@ export function ChatPage({
             ref={composerRef}
             aria-label="消息输入框"
             aria-describedby={unboundAgent ? UNBOUND_NOTICE_ID : undefined}
-            className={`h-full w-full resize-none bg-transparent pb-1 pt-2 text-ui-base leading-6 outline-hidden placeholder:text-muted ${FOCUS_RING}`}
+            className={`h-full w-full resize-none bg-transparent px-5 pb-2 pt-3.5 text-ui-base leading-7 outline-hidden placeholder:text-muted/80 ${FOCUS_RING}`}
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
@@ -6539,7 +6629,7 @@ export function ChatPage({
             收进一个菜单；右侧当前模型徽标 + 圆形发送。 */}
         {/* d.246：动作行允许换行——窄窗口下「安全范围 / 计划 / 模型」总宽会超过一行，
             以前不换行会把发送按钮挤出可视区（或压到别的元素上）。 */}
-        <div data-testid="composer-actions" className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2">
+        <div data-testid="composer-actions" className="flex flex-wrap items-center gap-1.5 rounded-b-[24px] border-t border-line-soft/70 bg-subtle/40 px-3 py-2">
           <div className="relative">
             <button
               type="button"
@@ -6736,68 +6826,69 @@ export function ChatPage({
               ▾
             </span>
           </button>
-          {/* 停止（d.346）：运行态不再有「生成中：…」提示条，停止改由这里一键完成。 */}
+          {/* 主按钮（d.350）：不生成时是「发送」；生成中它自己变成「停止」。
+              用户明确要求「发送消息的按钮在工作时是一个可点击的停止按钮」，
+              所以不再在旁边另放一个「停止」文字按钮——同一个位置、同一个形状。 */}
           {activeLocal.length > 0 ? (
             <button
               type="button"
               aria-label="停止生成"
               title="停止这一轮生成"
               onClick={abortRuns}
-              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-ui-sm text-muted transition-colors hover:bg-subtle-2 hover:text-ink ${FOCUS_RING_TIGHT}`}
+              className={`ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line-strong bg-subtle-3 text-ink transition-colors hover:bg-subtle-2 ${FOCUS_RING}`}
             >
-              <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-[2px] bg-current" />
-              停止
+              <span aria-hidden="true" className="block h-3 w-3 rounded-[2px] bg-current" />
             </button>
-          ) : null}
-          {/* 圆形发送按钮：图标 + aria-label（读屏名与 hover 提示仍是「发送」）。 */}
-          <button
-            type="submit"
-            aria-label="发送"
-            disabled={
-              (!draft.trim() && pendingFiles.length === 0) ||
-              uploading ||
-              // 未绑定模型只拦「要正文回答」的发送：纯附件消息照旧进历史，
-              // 这条路径在 E1 之前就是通的（sendFile 从不查绑定），别在按钮上把它关掉。
-              (Boolean(unboundAgent) && draft.trim().length > 0)
-              // d.199：生成中不再禁用——纯文本会作为插话入队（带附件的由 send 里拦并说明原因）
-            }
-            title={
-              activeLocal.length > 0
-                ? "插话：这一轮下一步就能看到（带附件的话请等这一轮结束）"
-                : unboundAgent
+          ) : (
+            <button
+              type="submit"
+              aria-label="发送"
+              disabled={
+                (!draft.trim() && pendingFiles.length === 0) ||
+                uploading ||
+                // 未绑定模型只拦「要正文回答」的发送：纯附件消息照旧进历史，
+                // 这条路径在 E1 之前就是通的（sendFile 从不查绑定），别在按钮上把它关掉。
+                (Boolean(unboundAgent) && draft.trim().length > 0)
+              }
+              title={
+                unboundAgent
                   ? unboundNoticeText(unboundAgent.name)
                   : "发送"
-            }
-            className={`ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
-              focusable="false"
+              }
+              className={`ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
             >
-              <path
-                d="M8 12.5V3.5M8 3.5L4 7.5M8 3.5L12 7.5"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M8 12.5V3.5M8 3.5L4 7.5M8 3.5L12 7.5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
         </div>
         {/* 主对话进度（d.346）：轮次/工具/用时放在输入框下方——用户在框里打字时
             最不该被这条挤占视线，收口后的「上一轮」总结留在原位。 */}
         <TurnProgressLine progress={turnProgress} now={progressNow || undefined} />
-        {/* 底部只留快捷键提示（UX-A）：常驻但弱化，不占提示位。 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2">
-          <span className="ml-auto">
-            <ComposerHints streaming={activeLocal.length > 0} />
-          </span>
-        </div>
+        {/* 本对话的轮数与步数（d.350）：居中、完整显示。
+            轮 = 用户输入 + AI 输出 + 停止；步 = AI 每一次工具操作。
+            不再显示快捷键提示（用户要求去掉那行「Enter 发送 · …」）。 */}
+        <p
+          data-testid="conversation-meter"
+          className="pt-2 text-center text-ui-xs tabular-nums text-muted"
+        >
+          {conversationStats.rounds} 轮 · {liveSteps} 步
+        </p>
         </div>
       </form>
       </div>
@@ -6856,6 +6947,9 @@ export function ChatPage({
       {progressOpen ? (
         <ProgressPanel
           conversationId={convId}
+          changes={
+            <SessionChangesBar changes={sessionChanges} onOpen={openSessionChanges} />
+          }
           {...(panelAgentReason !== null ? { agentNote: panelAgentReason } : {})}
           onClose={() => {
             // 手动关栏（d.245）：记下时间——安静期内自动开栏要让位于这个动作，并把理由清掉。

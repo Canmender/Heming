@@ -98,6 +98,7 @@ export function ProgressPanel({
   onClose,
   onRevealPath,
   agentNote,
+  changes,
 }: {
   conversationId: string | null;
   onClose: () => void;
@@ -108,6 +109,8 @@ export function ProgressPanel({
    * 自动打开时是「有工具调用在等你确认」这类系统判断，显式调用时是模型给的理由。
    */
   agentNote?: string;
+  /** 本次会话改过哪些文件（d.350）：从输入框上方移进侧栏，查看/对照的入口不丢。 */
+  changes?: ReactNode;
 }) {
   const progress = useConversationProgress(conversationId);
   const phaseTone = PHASE_TONES[progress.phase];
@@ -260,6 +263,11 @@ export function ProgressPanel({
       ) : null}
       {/* 滚动只发生在面板内部：页面级滚动属于会话流，侧栏撑高整页会让用户滚丢消息。 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {changes !== undefined ? (
+          <div data-testid="progress-changes" className="border-b border-line-soft p-2">
+            {changes}
+          </div>
+        ) : null}
         {progress.hasData ? (
           <div className="flex flex-col gap-4 p-3">
             <Section title="本轮进度">

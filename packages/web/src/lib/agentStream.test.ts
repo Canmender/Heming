@@ -1,10 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES, classifyTurnFailure, MAX_PARALLEL_READS, MAX_TOOL_ROUNDS, TOOL_CALL_TIMEOUT_MS } from "./agentStream.js";
+﻿import { describe, it, expect, vi } from "vitest";
+import { runAgentMentions, newStreamId, classifyTurnFailure, MAX_PARALLEL_READS, TOOL_CALL_TIMEOUT_MS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage, StreamChatOpts } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 import { toHitlCall } from "./hitl/classify.js";
-import { LONG_TASK_MAX_ROUNDS } from "./agentRuntime/longTask.js";
 import { resetTodoStore, setTodos } from "./todo/store.js";
 
 const profile: LlmProfile = { id: "p1", label: "l", provider: "openai", apiKey: "k", model: "m" };
@@ -1025,46 +1024,12 @@ describe("runAgentMentions 工具调用（MCP 桥）", () => {
 });
 
 /**
- * 知识库来源脚注（R6）：工具真的返回过哪些页面，由编排层拼在答案末尾。
+ * 来源脚注已取消（d.350）：用户明确不要「来源（来自本机知识库）：」这种尾巴。
  *
- * 三条约束：
- * 1. 只统计**执行成功**且带回 sources 的调用（被拒/失败不算引用）；
- * 2. 按调用顺序去重，同一页面只列一次；
- * 3. 没来源就不加脚注——绝不让模型或编排层凭空造一条「来源」。
+ * 工具带回的 sources 仍会记进轨迹，但最终答复就是模型自己的话——编排层不再
+ * 往上拼任何清单，免得每条答复都拖一段看起来像模板的「引用」。
  */
-describe("sourceFooter", () => {
-  it("去重、封顶、压掉标题换行（不让来源破坏 markdown 结构）", () => {
-    const many = Array.from({ length: MAX_SOURCES + 4 }, (_, i) => ({
-      id: `wiki/${i}.md`,
-      title: `页\n${i}`,
-    }));
-    const footer = sourceFooter([{ id: "wiki/0.md", title: "重复" }, ...many]);
-    expect(footer.match(/^- /gm)).toHaveLength(MAX_SOURCES);
-    expect(footer).not.toContain("\n\n- 页");
-    expect(footer).toContain("页 1");
-    expect(footer).toContain("来源（来自本机知识库）");
-  });
-
-  it("无来源时返回空串（调用方据此决定不发脚注）", () => {
-    expect(sourceFooter([])).toBe("");
-    expect(sourceFooter([{ id: "  ", title: "空" }])).toBe("");
-  });
-
-  it("归档来源单独标注；知识库与归档混用则两者都写", () => {
-    expect(sourceFooter([{ id: "infohub:message:1", title: "叶老师 · 免检单", kind: "archive" }])).toContain(
-      "来源（来自本机归档）",
-    );
-    const mixed = sourceFooter([
-      { id: "wiki/1.md", title: "知识库页" },
-      { id: "infohub:agenda:2", title: "补交材料", kind: "archive" },
-    ]);
-    expect(mixed).toContain("来源（本机知识库与本机归档）");
-    expect(mixed).toContain("知识库页");
-    expect(mixed).toContain("补交材料");
-  });
-});
-
-describe("runAgentMentions 来源脚注", () => {
+describe("runAgentMentions 不再拼来源脚注", () => {
   function twoRounds(calls: unknown[]) {
     const rounds = [
       { text: "我先查一下", calls },
@@ -1088,7 +1053,7 @@ describe("runAgentMentions 来源脚注", () => {
     function: { name, arguments: "{}" },
   });
 
-  it("工具带回 sources → 最终答案末尾附脚注，chunk 拼接与 finish 一致", async () => {
+  it("工具带回 sources 也不再追加脚注，chunk 与 finish 只有正文", async () => {
     const streamChat = twoRounds([call("c1", "wiki_search")]);
     const { send, deps } = makeDeps({
       streamChat: streamChat as never,
@@ -1107,51 +1072,22 @@ describe("runAgentMentions 来源脚注", () => {
     const events = send.mock.calls.map((c) => c[0] as { type: string; text?: string });
     const chunks = events.filter((e) => e.type === "agent_chunk").map((e) => e.text ?? "").join("");
     const finish = events.find((e) => e.type === "agent_finish");
-    expect(chunks).toContain("来源（来自本机知识库）");
-    expect(chunks).toContain("wiki/entities/heming.md");
-    expect(finish?.text).toBe(chunks);
-    // 工具轮的「我先查一下」仍不上行
-    expect(chunks).not.toContain("我先查一下");
+    expect(chunks).toBe("答案是 42");
+    expect(finish?.text).toBe("答案是 42");
+    expect(finish?.text).not.toContain("来源");
+    expect(chunks).not.toContain("wiki/entities/heming.md");
   });
 
-  it("同一页面被多次读到只列一次（按调用顺序去重）", async () => {
-    const streamChat = twoRounds([call("c1", "wiki_search"), call("c2", "wiki_read")]);
+  it("被拒的调用与失败的结果都不会冒出「来源」", async () => {
     const { send, deps } = makeDeps({
-      streamChat: streamChat as never,
-      getTools: () => ({
-        tools: [
-          { type: "function", function: { name: "wiki_search" } },
-          { type: "function", function: { name: "wiki_read" } },
-        ],
-        execute: async (c) => ({
-          text: c.name,
-          ok: true,
-          sources: [{ id: "wiki/entities/heming.md", title: "和鸣" }],
-        }),
-      }),
-    });
-
-    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-
-    const finish = (send.mock.calls as unknown[][])
-      .map(([e]) => e as { type: string; text?: string })
-      .find((e) => e.type === "agent_finish");
-    const occurrences = finish?.text?.split("wiki/entities/heming.md").length ?? 0;
-    expect(occurrences - 1).toBe(1);
-  });
-
-  it("调用被拒绝 → 不计来源、不加脚注", async () => {
-    const execute = vi.fn(async () => ({
-      text: "读到",
-      ok: true,
-      sources: [{ id: "wiki/a.md", title: "A" }],
-    }));
-    const streamChat = twoRounds([call("c1", "wiki_search")]);
-    const { send, deps } = makeDeps({
-      streamChat: streamChat as never,
+      streamChat: twoRounds([call("c1", "wiki_search")]) as never,
       getTools: () => ({
         tools: [{ type: "function", function: { name: "wiki_search" } }],
-        execute,
+        execute: async () => ({
+          text: "读到",
+          ok: true,
+          sources: [{ id: "wiki/a.md", title: "A" }],
+        }),
       }),
       confirmToolCalls: async (calls) =>
         calls.map((c) => ({
@@ -1159,48 +1095,6 @@ describe("runAgentMentions 来源脚注", () => {
           call: toHitlCall(c),
           reason: "用户拒绝",
         })),
-    });
-
-    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-
-    expect(execute).not.toHaveBeenCalled();
-    const finish = (send.mock.calls as unknown[][])
-      .map(([e]) => e as { type: string; text?: string })
-      .find((e) => e.type === "agent_finish");
-    expect(finish?.text).toBe("答案是 42");
-    expect(finish?.text).not.toContain("来源");
-  });
-
-  it("执行失败（ok=false）即便带了 sources 也不计入", async () => {
-    const streamChat = twoRounds([call("c1", "wiki_read")]);
-    const { send, deps } = makeDeps({
-      streamChat: streamChat as never,
-      getTools: () => ({
-        tools: [{ type: "function", function: { name: "wiki_read" } }],
-        execute: async () => ({
-          text: "读了一半",
-          ok: false,
-          sources: [{ id: "wiki/a.md", title: "A" }],
-        }),
-      }),
-    });
-
-    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-
-    const finish = (send.mock.calls as unknown[][])
-      .map(([e]) => e as { type: string; text?: string })
-      .find((e) => e.type === "agent_finish");
-    expect(finish?.text).not.toContain("来源");
-  });
-
-  it("没有工具来源的普通回答不出现脚注", async () => {
-    const streamChat = twoRounds([call("c1", "wiki_search")]);
-    const { send, deps } = makeDeps({
-      streamChat: streamChat as never,
-      getTools: () => ({
-        tools: [{ type: "function", function: { name: "wiki_search" } }],
-        execute: async () => ({ text: "没有匹配", ok: true }),
-      }),
     });
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
@@ -2169,120 +2063,92 @@ describe("turn_end.failure（P3-T16：新失败必落一类）", () => {
     { id: "call_1", type: "function" as const, function: { name: "srv__echo", arguments: "{}" } },
   ];
 
-  it("工具轮打满：status ok 但仍写 max_rounds（面板据此看出「话没说完不是模型懒」）", async () => {
-    const items: { type: string; status?: string; failure?: string }[] = [];
-    // 永远要工具：第 MAX_TOOL_ROUNDS 轮会走「到上限先给结论」分支。
+  it("工具轮不再有上限：连跑 30 轮工具后仍继续，直到模型自己给出答案（d.350）", async () => {
+    const items: { type: string; status?: string; failure?: string; text?: string }[] = [];
+    const onRunSettled = vi.fn();
+    let rounds = 0;
+    // 前 30 轮一直要工具；第 31 轮才收口。旧实现到第 12 轮就会强行收口并写「自动接着做」。
     const streamChat = vi.fn(
       async (
         _p: unknown,
         _m: ChatMessage[],
         o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
       ) => {
-        o.onToolCalls?.(echoCall);
-        o.onDelta("继续");
-        return "继续";
+        rounds += 1;
+        if (rounds <= 30) {
+          o.onToolCalls?.(echoCall);
+          o.onDelta("继续");
+          return "继续";
+        }
+        o.onDelta("答案是 42");
+        return "答案是 42";
       },
     );
     const { deps } = makeDeps({
       streamChat: streamChat as never,
       onRollout: (item) => items.push(item as never),
+      onRunSettled,
       getTools: () => ({
         tools: [echoSpec as never],
         execute: async () => ({ text: "工具说", ok: true }),
       }),
     });
+
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(rounds).toBe(31);
+    expect(items.filter((it) => it.type === "tool_result")).toHaveLength(30);
+    const finals = items
+      .filter((it) => it.type === "assistant_final")
+      .map((it) => it.text ?? "")
+      .join("\n");
+    expect(finals).toContain("答案是 42");
+    // 不许再冒出「自动接着做」「预算上限」这类编排层旁白。
+    expect(finals).not.toContain("自动接着做");
+    expect(finals).not.toContain("预算上限");
     const end = items.find((it) => it.type === "turn_end");
     expect(end?.status).toBe("ok");
-    expect(end?.failure).toBe("max_rounds");
+    expect(end?.failure).toBeUndefined();
+    // 正常收口不带 maxRounds：界面不该再给「继续」入口。
+    expect(onRunSettled.mock.calls[0][1]).toMatchObject({ status: "ok" });
+    expect((onRunSettled.mock.calls[0][1] as { maxRounds?: boolean }).maxRounds).toBeFalsy();
   });
 
-  it("任务清单还有未完成项时自动续跑：不在第 12 轮停，跑到 36 轮总上限才收口（d.157）", async () => {
-    localStorage.clear(); // 清单落盘跨用例，必须先清存储再清内存
+  it("任务清单没做完也不再自动续跑（d.350：由模型自己决定停不停）", async () => {
+    localStorage.clear();
     resetTodoStore();
     setTodos("c1", [
       { content: "已完成的第一步", status: "completed" },
       { content: "还没做完的第二步", status: "in_progress" },
     ]);
-    const items: { type: string; status?: string; failure?: string; text?: string }[] = [];
-    const onRunSettled = vi.fn();
+    const items: { type: string; text?: string }[] = [];
     let rounds = 0;
-    // 永远要工具：第 12/24 轮该续跑（清单未完成），第 36 轮才到总量上限收口。
     const streamChat = vi.fn(
       async (
         _p: unknown,
         _m: ChatMessage[],
-        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+        o: { onDelta: (t: string) => void },
       ) => {
         rounds += 1;
-        o.onToolCalls?.(echoCall);
-        o.onDelta("继续");
-        return "继续";
+        o.onDelta("先给结论");
+        return "先给结论";
       },
     );
     const { deps } = makeDeps({
       streamChat: streamChat as never,
       onRollout: (item) => items.push(item as never),
-      onRunSettled,
-      getTools: () => ({
-        tools: [echoSpec as never],
-        execute: async () => ({ text: "工具说", ok: true }),
-      }),
     });
+
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-    // 第 0–35 轮各发一次请求：36 个工具轮全部执行完才到总量上限收口。
-    expect(rounds).toBe(LONG_TASK_MAX_ROUNDS);
-    // 续跑不得吞掉边界轮的调用（d.161 修的坑）：工具轮数必须等于真正执行的次数。
-    const executedRounds = items.filter((it) => it.type === "tool_result").length;
-    expect(executedRounds).toBe(LONG_TASK_MAX_ROUNDS);
-    const end = items.find((it) => it.type === "turn_end");
-    expect(end?.failure).toBe("max_rounds");
+
+    // 模型一次就答完：不再因为清单里有未完成项而自动续跑。
+    expect(rounds).toBe(1);
     const finals = items
       .filter((it) => it.type === "assistant_final")
       .map((it) => it.text ?? "")
       .join("\n");
-    // 中途要给用户解释「在自动接着做」，到顶说明总量 36 轮而不是 12 轮。
-    expect(finals).toContain("自动接着做");
-    expect(finals).toContain("36 轮");
-    // 界面要靠终态里的这个标记给「继续」入口（d.167.4.103）：状态仍是 ok，
-    // 但「回答完了 ≠ 任务做完了」，两者必须能区分开。
-    expect(onRunSettled).toHaveBeenCalledTimes(1);
-    expect(onRunSettled.mock.calls[0][1]).toMatchObject({ status: "ok", maxRounds: true });
-  });
-
-  it("清单全完成时仍按原样停在第 12 轮（不替模型脑补任务）", async () => {
-    localStorage.clear();
-    resetTodoStore();
-    setTodos("c1", [
-      { content: "第一步", status: "completed" },
-      { content: "第二步", status: "completed" },
-    ]);
-    let rounds = 0;
-    const streamChat = vi.fn(
-      async (
-        _p: unknown,
-        _m: ChatMessage[],
-        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
-      ) => {
-        rounds += 1;
-        o.onToolCalls?.(echoCall);
-        return "";
-      },
-    );
-    const onRunSettled = vi.fn();
-    const { deps } = makeDeps({
-      streamChat: streamChat as never,
-      onRunSettled,
-      getTools: () => ({
-        tools: [echoSpec as never],
-        execute: async () => ({ text: "工具说", ok: true }),
-      }),
-    });
-    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
-    // 12 个工具轮全部执行完，第 13 次请求不再发出（清单全完成 → 不续跑）。
-    expect(rounds).toBe(MAX_TOOL_ROUNDS);
-    // 即使没有清单，撞上限同样是「没做完」：界面照样要给「继续」（d.167.4.103）。
-    expect(onRunSettled.mock.calls[0][1]).toMatchObject({ status: "ok", maxRounds: true });
+    expect(finals).not.toContain("自动接着做");
+    expect(finals).toContain("先给结论");
   });
 
   it("工具报错后上游挂掉：归 tool_error（不是笼统的 provider_error）", async () => {

@@ -173,12 +173,11 @@ export function imagesFromContent(content: unknown[]): ToolImage[] {
 }
 
 /**
- * 单次工具结果回灌给模型的字符上限。
+ * 历史上单次工具结果的字符上限（d.350 起默认**不再截断**）。
  *
- * 为什么必须封顶：工具结果会被**原样塞进下一轮请求**，而上下文预算只有几千 token。
- * 一个返回 200KB JSON 的工具足以把预算一次占满，随后触发压缩→再超→重试的循环，
- * 用户看到的是「回答突然变慢变傻」。8000 字符约等于 2–3k token（中文更贵），
- * 在「够模型判断」与「不挤掉对话」之间取值。
+ * 用户实测「工具返回内容上限」会让一次读取/构建日志被砍掉中段，模型只能凭残文
+ * 下结论，最后看起来像会话异常中断。现在完整结果原样回灌；保留这个常量只为
+ * 兼容仍显式传 `maxChars` 的调用方与既有测试。
  */
 export const MAX_TOOL_RESULT_CHARS = 8000;
 
@@ -186,18 +185,19 @@ export const MAX_TOOL_RESULT_CHARS = 8000;
 const TRUNCATE_HEAD_RATIO = 2 / 3;
 
 /**
- * 按字符上限截断工具结果：保留头部 2/3 + 尾部 1/3，中间插入明确的截断标记。
+ * 按字符上限截断工具结果（d.350 起**只作为显式调用的工具函数**保留）。
  *
- * ★ 标记必须让模型看得见「这里被截断了」——否则它会基于残文下结论，
- * 而我们拿到的是一个自信的错误答案。标记里带被省略的字符数，模型据此判断要不要换策略。
+ * 默认不截断：调用方不传 `maxChars` 时原样返回。需要截断的地方必须自己给出上限，
+ * 这样「砍掉中段」是一个显式决定，而不是所有工具都默默被砍。
  */
 export function truncateToolResult(
   text: string,
-  maxChars: number = MAX_TOOL_RESULT_CHARS,
+  maxChars?: number,
   /** 估算 token 时只要长度，不该再往溢出存储里塞一份（否则同一条结果被存两次）。 */
   options: { spill?: boolean } = {},
 ): string {
   const raw = String(text ?? "");
+  if (maxChars === undefined || !Number.isFinite(maxChars) || maxChars <= 0) return raw;
   if (raw.length <= maxChars) return raw;
   const head = Math.floor(maxChars * TRUNCATE_HEAD_RATIO);
   const tail = maxChars - head;

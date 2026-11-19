@@ -15,7 +15,7 @@
  *   本段整体目标 ≤ 1.2K 字符（每轮都进提示词，且尾部变化会打断前缀缓存）。
  */
 
-import { LONG_TASK_MAX_ROUNDS, LONG_TASK_MAX_SEGMENTS } from "./longTask.js";
+// d.350：轮次上限已取消，本文件不再依赖 longTask 的「段 × 轮」常量。
 
 /**
  * 工具清单最多逐条列出的数量：再多就折成「还有 N 个，可用 tool_search 检索」。
@@ -497,21 +497,12 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   // 不给模型一条明确的「怎么读回」的路，它只会重复调用同一个工具，把预算烧在同一件事上。
   if (hasToolOutputTool(input.tools)) {
     lines.push(
-      "- 工具结果过长时会被截断，返回文本里会给一个 `spill-<数字>` 的 handle：需要看中段就用 `tool_output_read` 按 offset/limit 分段读回，不要为了同样的内容把工具再调一次。",
+      "- 有的工具（比如超长输出）会给出一个 `spill-<数字>` 的 handle：需要看中段就用 `tool_output_read` 按 offset/limit 分段读回，不要为了同样的内容把工具再调一次。",
     );
   }
-  if (input.maxToolRounds && input.maxToolRounds > 0) {
-    lines.push(
-      `- 每轮对话最多 ${input.maxToolRounds} 次工具往返：快到上限时先给出「已完成 / 未完成 / 下一步」，不要假装做完。`,
-    );
-    // 自动续跑（d.157）：轮次到顶时系统会看任务清单——还有未完成项就接着跑，
-    // 这件事必须写进提示词，否则模型到顶就习惯性收口（它以为「到上限=该停了」）。
-    if (hasTodoTool(input.tools)) {
-      lines.push(
-        `- 任务清单里还有未完成项时，到达轮次上限会**自动接着做**（最多 ${LONG_TASK_MAX_SEGMENTS} 段、共 ${LONG_TASK_MAX_ROUNDS} 轮），不需要让用户催「继续」；清单已全部完成、或到了这个总上限，才如实收口给出「已完成 / 未完成 / 下一步」。`,
-      );
-    }
-  }
+  // d.350：不再写「每轮最多 N 次工具往返」——轮次上限已取消，提示词再提上限
+  // 只会让模型提前收口。工具结果也不再统一截断，`tool_output_read` 的说明保留
+  // （仍可能有工具自己给出 handle），但不再暗示「系统会砍掉」。
   // 只读子代理（d.162）：同样只在真的注入了 `agent_task` 时才写。
   // 主对话的窗口比子会话贵得多——「先读二十个文件再回答」这种活应该交出去，
   // 否则原文全留在主历史里、之后每轮重付一遍 token，压缩后还会丢。

@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import type { ConversationProgress, ProgressStepKind } from "../../lib/progress/model.js";
 import type { ToolTrace } from "../../store/chat.js";
 import { StepStatusDot } from "../progress/FlowDiagram.js";
@@ -98,6 +99,28 @@ export function TrajectoryView({ progress }: { progress: ConversationProgress })
   const { steps, tools, hasData } = progress;
   const span = turnSpan(steps);
   const toolsById = new Map(tools.map((tool) => [tool.id, tool]));
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<ProgressStepKind | "all">("all");
+  // 类别计数按**未筛选**的步骤算：筛选后仍要能看出「工具 8 步」而不是只剩筛中的那一步。
+  const counts = useMemo(() => {
+    const out: Record<ProgressStepKind, number> = { think: 0, tool: 0, confirm: 0, answer: 0 };
+    for (const step of steps) out[step.kind] += 1;
+    return out;
+  }, [steps]);
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return steps.filter((step) => {
+      if (kind !== "all" && step.kind !== kind) return false;
+      if (!needle) return true;
+      // 搜索覆盖「步骤名 + 详情 + 工具名 + 参数」：用户记得的往往是命令或文件路径。
+      const tool = toolsById.get(step.id);
+      return [step.label, step.detail ?? "", tool?.name ?? "", tool?.args ?? ""]
+        .join("\n")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [steps, kind, query, toolsById]);
+  const filtering = kind !== "all" || query.trim().length > 0;
 
   return (
     <section aria-label="本轮轨迹" data-view-panel="trail">
@@ -124,8 +147,43 @@ export function TrajectoryView({ progress }: { progress: ConversationProgress })
                 </>
               ) : null}
             </p>
+            {/* 工具栏（d.350，参考 DSH 的轨迹工具栏）：查关键词、按类别收窄。
+                只做筛选，不做「等宽/实际时长」那类视图切换——和鸣没有逐段时间戳，
+                画时间线只能插值成假分布。 */}
+            <div role="toolbar" aria-label="轨迹工具栏" className="mb-3 flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="搜索轨迹"
+                placeholder="搜索步骤、工具或参数"
+                className="ui-input h-8 w-56 text-ui-sm"
+              />
+              <div className="flex flex-wrap items-center gap-1">
+                {(["all", "think", "tool", "confirm", "answer"] as const).map((value) => {
+                  const active = kind === value;
+                  const label = value === "all" ? `全部 ${steps.length}` : `${KIND_LABELS[value]} ${counts[value]}`;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setKind(value)}
+                      className={`ui-chip h-7 ${active ? "border-line-strong bg-subtle-2 text-ink" : "text-muted"}`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {filtering ? (
+                <span className="text-ui-xs tabular-nums text-muted" data-testid="trajectory-filter-count">
+                  {visible.length} / {steps.length} 步
+                </span>
+              ) : null}
+            </div>
             <ol className="m-0 list-none space-y-3 p-0">
-              {steps.map((step, index) => {
+              {visible.map((step, index) => {
                 const tone = STEP_TONES[step.status];
                 const duration = stepDuration(step);
                 const tool = toolsById.get(step.id);
@@ -168,7 +226,12 @@ export function TrajectoryView({ progress }: { progress: ConversationProgress })
                 );
               })}
             </ol>
-            {tools.length > 0 ? <ToolTable tools={tools} /> : null}
+            {visible.length === 0 ? (
+              <p className="text-ui-sm text-muted" data-testid="trajectory-no-match">
+                没有匹配的步骤：换个关键词，或点「全部」看回整轮。
+              </p>
+            ) : null}
+            {tools.length > 0 && !filtering ? <ToolTable tools={tools} /> : null}
           </>
         )
       ) : (

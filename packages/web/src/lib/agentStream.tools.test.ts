@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   HEARTBEAT_MS,
-  MAX_TOOL_ROUNDS,
   MAX_VISIBLE_TOOLS,
   TOOL_SEARCH_LIMIT,
   TOOL_SEARCH_NAME,
@@ -180,10 +179,12 @@ describe("工具调度：写串行 / 读并行（G3）", () => {
   });
 });
 
-describe("轮次与预算收口（G1）", () => {
-  it("模型一直要工具时，到上限会**明确告知**，而不是静默停住", async () => {
+describe("工具轮不再有内部上限（d.350）", () => {
+  it("模型一直要工具也不再中途收口：一直做到它自己给出答案", async () => {
+    const toolRound: Round = { text: "", calls: [{ id: "x", name: "srv__x" }] };
     const rounds: Round[] = [
-      { text: "", calls: [{ id: "1", name: "srv__x" }] },
+      ...Array.from({ length: 15 }, () => toolRound),
+      { text: "答案是 42", calls: [] },
     ];
     const { deps, streamChat } = makeDeps(rounds, {
       risk: () => "read",
@@ -192,35 +193,33 @@ describe("轮次与预算收口（G1）", () => {
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    // 12 个工具轮全部执行完（d.161 起不再丢掉到顶那轮的调用），第 13 次请求不再发出
-    expect(streamChat).toHaveBeenCalledTimes(MAX_TOOL_ROUNDS);
+    // 15 个工具轮全部执行完，第 16 次请求拿到最终答案
+    expect(streamChat).toHaveBeenCalledTimes(16);
     const text = finishText(deps.send);
-    expect(text).toContain("达到上限");
-    expect(text).toContain("继续");
+    expect(text).toContain("答案是 42");
+    expect(text).not.toContain("达到上限");
+    expect(text).not.toContain("自动接着做");
   });
 
-  it("工具结果超过回灌预算时提前收口，并说明可以继续", async () => {
+  it("大段工具结果不再触发中途收口（d.350：不设内容上限）", async () => {
     const rounds: Round[] = [
-      // 一轮两个调用：单条结果已被截到 8000 字符上限，两条加起来才压得动回合预算。
       { text: "", calls: [{ id: "1", name: "srv__x" }, { id: "2", name: "srv__x" }] },
-      { text: "不该跑到这一轮", calls: [] },
+      { text: "答案是 42", calls: [] },
     ];
     const settled: { status: string; maxRounds?: boolean; budgetStop?: boolean }[] = [];
     const { deps, streamChat } = makeDeps(rounds, {
       risk: () => "read",
       onSettled: (result) => settled.push(result),
-      // 每条 13000 个汉字（≈13000 token）→ 截到 8000；两条 16000 > 12000 的回合预算
       execute: async () => ({ text: "字".repeat(13000), ok: true }),
     });
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(streamChat).toHaveBeenCalledTimes(2);
     const text = finishText(deps.send);
-    expect(text).toContain("预算上限");
-    expect(text).toContain("继续");
-    // d.176.4.105：界面要据此给「继续」入口；如果只认 maxRounds，这类收口就没有入口。
-    expect(settled.at(-1)?.budgetStop).toBe(true);
+    expect(text).toContain("答案是 42");
+    expect(text).not.toContain("预算上限");
+    expect(settled.at(-1)?.budgetStop).toBeUndefined();
     expect(settled.at(-1)?.maxRounds).toBeUndefined();
   });
 });
@@ -840,8 +839,8 @@ describe("心跳：长工具调用不被界面看成卡死", () => {
     expect(finishText(deps.send)).toContain("好了");
   });
 
-  it("单条工具结果超过上限会被截断，不会跟着每一轮重发", async () => {
-    const huge = "log line\n".repeat(4000); // ≈ 3.6 万字符，远超单条上限
+  it("单条工具结果不再被截断，原样带进下一轮（d.350）", async () => {
+    const huge = "log line\n".repeat(4000); // ≈ 3.6 万字符：以前会被截到 8000
     const rounds: Round[] = [
       { text: "", calls: [{ id: "c1", name: "srv__x" }] },
       { text: "好了", calls: [] },
@@ -853,11 +852,10 @@ describe("心跳：长工具调用不被界面看成卡死", () => {
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    // 第二轮请求里带着这条工具结果：必须已经截断，且截断标记对模型可见。
     const toolRow = requests[1].find((row) => row.role === "tool");
     const content = String(toolRow?.content ?? "");
-    expect(content.length).toBeLessThan(9000);
-    expect(content).toContain("中间省略");
+    expect(content).toContain(huge);
+    expect(content).not.toContain("中间省略");
   });
 });
 
@@ -957,14 +955,14 @@ describe("本轮落盘清单（d.176）", () => {
   });
 });
 
-describe("长输出截断后仍可读回（d.181）", () => {
-  it("超限的工具结果会把完整内容留进溢出存储，中段不再凭空消失", async () => {
+describe("长输出不再需要溢出存储（d.350）", () => {
+  it("超长工具结果原样进上下文，中段不会凭空消失", async () => {
     const middle = "NEEDLE-42";
     const rounds: Round[] = [
       { text: "", calls: [{ id: "1", name: "srv__big" }] },
       { text: "看完了", calls: [] },
     ];
-    const { deps } = makeDeps(rounds, {
+    const { deps, requests } = makeDeps(rounds, {
       risk: () => "read",
       execute: async () => ({ text: "A".repeat(5800) + middle + "Z".repeat(3191), ok: true }),
     });
@@ -972,14 +970,8 @@ describe("长输出截断后仍可读回（d.181）", () => {
     resetSpills();
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    // 这是「不再永久丢失」的可观察证据：溢出存储里有这一份，且中段原文完整在
-    const items = listSpills();
-    expect(items).toHaveLength(1);
-    const stored = readSpill(items[0]!.id, 5000, 2000);
-    expect(stored.ok).toBe(true);
-    if (stored.ok) {
-      expect(stored.text).toContain(middle);
-      expect(stored.total).toBe(9000);
-    }
+    expect(listSpills()).toHaveLength(0);
+    const toolRow = requests[1].find((row) => row.role === "tool");
+    expect(String(toolRow?.content ?? "")).toContain(middle);
   });
 });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { RouteAttempt } from "../lib/llmClient.js";
-import type { ToolTrace } from "../store/chat.js";
+import type { ToolTrace, TranscriptStep } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { humanizeProviderError } from "../lib/llmFailure.js";
 import { toolNameLabel } from "../lib/toolName.js";
@@ -32,6 +32,13 @@ export interface AgentStreamBubbleProps {
   /** 本轮发生过的工具调用（按时间顺序）。 */
   tools?: ToolTrace[];
   /**
+   * 分步记录（d.350）：思考与工具按发生顺序交错。
+   *
+   * 传了就按它渲染「想一段 → 做一步 → 再想一段」，不再把整段思考堆在最上面。
+   * 不传（旧消息）时回落到 `reasoning` + `tools` 的旧版式。
+   */
+  steps?: TranscriptStep[];
+  /**
    * 在系统文件管理器里定位工具涉及的文件（d.235）。不传就不渲染「定位」。
    */
   onRevealPath?: (path: string) => void;
@@ -50,6 +57,7 @@ export function AgentStreamBubble({
   onRetry,
   reasoning,
   tools,
+  steps,
   onRevealPath,
   attempts,
 }: AgentStreamBubbleProps) {
@@ -70,14 +78,20 @@ export function AgentStreamBubble({
             d.346：连「生成中…」也不再显形；运行状态交给正文末尾的光标与输入框下方的
             进度行，读屏仍由上面的 sr-only 播报，视觉上不重复。 */}
 
-        {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
-        {tools && tools.length > 0 ? (
-          <ToolTraceList
-            tools={tools}
-            fold
-            {...(onRevealPath ? { onRevealPath } : {})}
-          />
-        ) : null}
+        {steps && steps.length > 0 ? (
+          <MessageSteps steps={steps} tools={tools ?? []} streaming={streaming} />
+        ) : (
+          <>
+            {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
+            {tools && tools.length > 0 ? (
+              <ToolTraceList
+                tools={tools}
+                fold
+                {...(onRevealPath ? { onRevealPath } : {})}
+              />
+            ) : null}
+          </>
+        )}
         {attempts && attempts.length > 0 ? <RouteTraceLine attempts={attempts} /> : null}
 
         {streaming ? (
@@ -111,9 +125,52 @@ export function AgentStreamBubble({
   );
 }
 
+/**
+ * 分步渲染（d.350）：按「想 → 做 → 再想」的顺序把一段段思考与一次次工具调用交错铺开。
+ *
+ * 为什么不能只靠两个大块：模型在工具轮里是「想一步、调一次、拿到结果再想」，
+ * 旧版式把整段思考堆在最上面、所有工具堆在下面，用户看到的是「先想很久、再一口气做很多」，
+ * 与真实过程不符，也没法把某段推理对上某次调用。
+ *
+ * 工具 id 在上层已被裁到 `tools` 里的子集；这里找不到就跳过，不渲染空行。
+ */
+export function MessageSteps({
+  steps,
+  tools,
+  streaming,
+}: {
+  steps: TranscriptStep[];
+  tools: ToolTrace[];
+  streaming: boolean;
+}) {
+  const byId = new Map(tools.map((tool) => [tool.id, tool]));
+  return (
+    <div data-testid="agent-steps" className="flex flex-col gap-0.5">
+      {steps.map((step, index) => {
+        if (step.kind === "tool") {
+          const tool = step.toolId ? byId.get(step.toolId) : undefined;
+          if (!tool) return null;
+          // 一次调用一行：失败/被拒的仍用同一套状态点与错误头，不并排折叠，
+          // 否则「哪一步出的错」在分步视图里反而看不清。
+          return <ToolTraceList key={`tool:${tool.id}`} tools={[tool]} />;
+        }
+        if (!step.text?.trim()) return null;
+        return (
+          <ReasoningBlock
+            key={`think:${index}`}
+            text={step.text}
+            // 只有最后一段、且整条还在流式时才显示「进行中」；
+            // 前面的段已经结束，不该继续跳「· 进行中」。
+            streaming={streaming && index === steps.length - 1}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 /** 思考过程：流式中默认展开，结束后自动收起（仍可手动展开）。历史消息里默认折叠。 */
-export function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(streaming);
+export function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {  const [open, setOpen] = useState(streaming);
   // 只处理「流式 → 结束」这一次切换：结束后自动收起，用户之后手动展开不再被干预
   const [wasStreaming, setWasStreaming] = useState(streaming);
   // d.247：思考片段默认只渲染一段（流式中留尾巴、回看留开头），展开才看全文。

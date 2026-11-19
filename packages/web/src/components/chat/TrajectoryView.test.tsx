@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+﻿import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TrajectoryView } from "./TrajectoryView.js";
 import type { ConversationProgress, ProgressStep } from "../../lib/progress/model.js";
 
@@ -147,5 +147,47 @@ describe("TrajectoryView · 事实条与工具表（d.346）", () => {
   it("没有工具轨迹时不渲染工具表", () => {
     render(<TrajectoryView progress={progress({ hasData: true, steps: [step({ id: "s1" })] })} />);
     expect(screen.queryByRole("table")).toBeNull();
+  });
+});
+
+describe("TrajectoryView · 工具栏（d.350，参考 DSH）", () => {
+  const twoSteps = () =>
+    progress({
+      hasData: true,
+      steps: [
+        step({ id: "s1", kind: "think", label: "先看看仓库结构", status: "ok" }),
+        step({ id: "s2", label: "调用 read_file", status: "ok", detail: "读到了 20 行" }),
+      ],
+      tools: [
+        {
+          id: "s2",
+          name: "read_file",
+          args: '{ "path": "src/a.ts" }',
+          status: "ok",
+          startedAt: 1000,
+          endedAt: 1500,
+        },
+      ],
+      counts: { total: 1, ok: 1, error: 0, denied: 0, running: 0 },
+    });
+
+  it("关键词只筛命中步骤，并给「命中 / 总数」；工具表在筛选时收起", () => {
+    const { container } = render(<TrajectoryView progress={twoSteps()} />);
+    const search = screen.getByRole("searchbox", { name: "搜索轨迹" });
+    fireEvent.change(search, { target: { value: "a.ts" } });
+    expect(container.querySelectorAll("ol > li")).toHaveLength(1);
+    expect(screen.getByTestId("trajectory-filter-count")).toHaveTextContent("1 / 2 步");
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("类别 chip 能只看工具；没有命中时给一句可操作的说明", () => {
+    const { container } = render(<TrajectoryView progress={twoSteps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^工具 1$/ }));
+    expect(container.querySelectorAll("ol > li")).toHaveLength(1);
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索轨迹" }), {
+      target: { value: "根本没有这个词" },
+    });
+    expect(container.querySelectorAll("ol > li")).toHaveLength(0);
+    expect(screen.getByTestId("trajectory-no-match")).toHaveTextContent("没有匹配的步骤");
   });
 });

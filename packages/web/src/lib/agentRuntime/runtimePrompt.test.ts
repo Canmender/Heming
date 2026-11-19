@@ -104,20 +104,15 @@ describe("buildRuntimeSection", () => {
     expect(text).toContain("不要编造查询结果");
   });
 
-  it("写了工具轮次上限，并给出「已完成/未完成/下一步」的收口要求", () => {
-    const text = buildRuntimeSection({ ...base, tools: [], maxToolRounds: 12 });
-    expect(text).toContain("最多 12 次工具往返");
-    expect(text).toContain("已完成 / 未完成 / 下一步");
-  });
-
-  it("有任务清单工具时才承诺「到顶自动续跑」，且不再让用户催继续（d.157）", () => {
+  it("不再写工具轮次上限，也不再承诺「自动接着做」（d.350）", () => {
     const todos = [{ name: "todo_write", title: "更新任务清单", risk: "read" as const }];
-    const withoutTodo = buildRuntimeSection({ ...base, tools: [], maxToolRounds: 12 });
-    expect(withoutTodo).not.toContain("自动接着做");
-
-    const withTodo = buildRuntimeSection({ ...base, tools: todos, maxToolRounds: 12 });
-    expect(withTodo).toContain("自动接着做");
-    expect(withTodo).toContain("36 轮");
+    for (const tools of [[], todos]) {
+      const text = buildRuntimeSection({ ...base, tools, maxToolRounds: 12 });
+      expect(text).not.toContain("最多 12 次工具往返");
+      expect(text).not.toContain("已完成 / 未完成 / 下一步");
+      expect(text).not.toContain("自动接着做");
+      expect(text).not.toContain("36 轮");
+    }
   });
 
   it("注入了 todo_write 才提任务清单：没注入就不承诺（d.154）", () => {

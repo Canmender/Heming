@@ -137,6 +137,22 @@ export interface ToolTrace {
 export interface MessageTranscript {
   thinking?: string;
   tools?: ToolTrace[];
+  /**
+   * 分步叙述（d.350）：一次思考 → 一次工具 → 再思考，按发生顺序排好。
+   *
+   * 之前只有一个 `thinking` 字符串 + 一组 `tools`，渲染层只能「整段思考在上、
+   * 整组工具在下」——模型明明是边想边做，界面却把它压成两大块。`steps` 把两者
+   * 交错记下来（`kind:"think"` 带那段文字，`kind:"tool"` 带工具 id），渲染时照序输出。
+   * 旧消息没有这个字段，渲染层回落到 `thinking` + `tools`，不崩也不丢。
+   */
+  steps?: TranscriptStep[];
+}
+
+/** 一条分步记录：思考段（自带文字）或工具调用（指向 `tools` 里的 id）。 */
+export interface TranscriptStep {
+  kind: "think" | "tool";
+  text?: string;
+  toolId?: string;
 }
 
 /** 带转录字段的消息：字段可选 ⇒ 与共享 `Message` 结构兼容；运行时才可能带这两个键。 */
@@ -157,6 +173,8 @@ export const TRANSCRIPT_LIMITS = {
   argsChars: 400,
   /** 单个工具结果最多保留字符数（长文档/网页抓取结果必须截断）。 */
   resultChars: 800,
+  /** 单条消息最多保留的分步记录数（思考段 + 工具，交错计数）。 */
+  steps: 40,
 } as const;
 
 /** 单会话转录落盘条数上限：超出淘汰最早写入的（等于消息窗口的两倍量级）。 */
@@ -227,20 +245,36 @@ export function truncateTranscript(t: MessageTranscript | undefined): MessageTra
     const tool = sanitizeToolTrace(raw);
     if (tool) tools.push(tool);
   }
-  if (!thinking && tools.length === 0) return undefined;
+  const known = new Set(tools.map((tool) => tool.id));
+  const steps: TranscriptStep[] = [];
+  for (const raw of Array.isArray(t.steps) ? t.steps : []) {
+    if (steps.length >= TRANSCRIPT_LIMITS.steps) break;
+    if (!raw || (raw.kind !== "think" && raw.kind !== "tool")) continue;
+    if (raw.kind === "tool") {
+      const toolId = typeof raw.toolId === "string" ? raw.toolId.slice(0, 120) : "";
+      // 工具已被 `tools` 上限裁掉时，这一步没有可渲染的内容：跳过，别留空行。
+      if (toolId && known.has(toolId)) steps.push({ kind: "tool", toolId });
+      continue;
+    }
+    const text = typeof raw.text === "string" ? raw.text.trim() : "";
+    if (text) steps.push({ kind: "think", text: text.slice(0, TRANSCRIPT_LIMITS.thinkingChars) });
+  }
+  if (!thinking && tools.length === 0 && steps.length === 0) return undefined;
   return {
     ...(thinking ? { thinking } : {}),
     ...(tools.length > 0 ? { tools } : {}),
+    ...(steps.length > 0 ? { steps } : {}),
   };
 }
 
 /** 读一条消息的转录附加信息：没有（旧消息）返回 undefined。 */
 export function transcriptOf(m: Message): MessageTranscript | undefined {
   const t = m as TranscriptMessage;
-  if (!t.thinking && !(t.tools && t.tools.length > 0)) return undefined;
+  if (!t.thinking && !(t.tools && t.tools.length > 0) && !(t.steps && t.steps.length > 0)) return undefined;
   return {
     ...(t.thinking ? { thinking: t.thinking } : {}),
     ...(t.tools && t.tools.length > 0 ? { tools: t.tools } : {}),
+    ...(t.steps && t.steps.length > 0 ? { steps: t.steps } : {}),
   };
 }
 
