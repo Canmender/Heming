@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
 import { AlertIcon, DownloadIcon, SparkIcon } from "./icons.js";
 import {
+  averageTTFT,
   breakdownOf,
   bucketLabel,
   chartBars,
+  describeRequestTries,
+  describeRequestWait,
   fetchUsage,
   fetchUsageRequests,
   formatCost,
@@ -281,26 +284,30 @@ export function ModelUsageView({
                 </div>
               </div>
               <ul className="mt-2 space-y-2">
-                {rows.map((row) => (
-                  <li key={row.id} className="flex items-center gap-2">
-                    <Avatar name={bucketLabel(row, breakdown)} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-ui-sm font-semibold">{bucketLabel(row, breakdown)}</span>
-                        <span className="shrink-0 ui-caption">
-                          {row.calls} 次 · {formatTokens(row.input + row.output)} tokens
-                          {row.cost > 0 ? ` · ${formatCost(row.cost, row.unpriced)}` : ""}
+                {rows.map((row) => {
+                  const average = averageTTFT(row);
+                  return (
+                    <li key={row.id} className="flex items-center gap-2">
+                      <Avatar name={bucketLabel(row, breakdown)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-ui-sm font-semibold">{bucketLabel(row, breakdown)}</span>
+                          <span className="shrink-0 ui-caption">
+                            {row.calls} 次 · {formatTokens(row.input + row.output)} tokens
+                            {row.cost > 0 ? ` · ${formatCost(row.cost, row.unpriced)}` : ""}
+                            {average === null ? "" : ` · 平均首字 ${average}ms`}
+                          </span>
+                        </span>
+                        <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-subtle-3">
+                          <span
+                            className="block h-full rounded-full bg-accent"
+                            style={{ width: `${Math.max(3, (row.calls / maxCalls) * 100)}%` }}
+                          />
                         </span>
                       </span>
-                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-subtle-3">
-                        <span
-                          className="block h-full rounded-full bg-accent"
-                          style={{ width: `${Math.max(3, (row.calls / maxCalls) * 100)}%` }}
-                        />
-                      </span>
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
                 {rows.length === 0 && <li className="ui-caption">这个时间段还没有可拆分的调用。</li>}
               </ul>
             </div>
@@ -320,25 +327,36 @@ export function ModelUsageView({
                       <th>Agent</th>
                       <th>模型</th>
                       <th>tokens</th>
+                      <th>首字</th>
                       <th>耗时</th>
                       <th>状态</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {requests.rows.map((row) => (
-                      <tr key={row.route_id}>
-                        <td className="ui-numeric text-muted">
-                          {new Date(row.t).toLocaleTimeString("zh-CN", { hour12: false })}
-                        </td>
-                        <td>{row.agentName || row.agent || "—"}</td>
-                        <td className="font-mono ui-micro">{row.req || row.model}</td>
-                        <td className="ui-numeric">
-                          {row.in}/{row.out}
-                        </td>
-                        <td className="ui-numeric">{row.ms ? `${row.ms}ms` : "—"}</td>
-                        <td className="text-muted">{row.status || "—"}</td>
-                      </tr>
-                    ))}
+                    {requests.rows.map((row) => {
+                      const wait = describeRequestWait(row);
+                      const tries = describeRequestTries(row);
+                      return (
+                        <tr key={row.route_id}>
+                          <td className="ui-numeric text-muted">
+                            {new Date(row.t).toLocaleTimeString("zh-CN", { hour12: false })}
+                          </td>
+                          <td>{row.agentName || row.agent || "—"}</td>
+                          <td className="font-mono ui-micro">{row.req || row.model}</td>
+                          <td className="ui-numeric">
+                            {row.in}/{row.out}
+                          </td>
+                          <td className="ui-numeric" title={wait || "这条回复不是流式的，没有首字"}>
+                            {row.ttft ? `${row.ttft}ms` : "—"}
+                          </td>
+                          <td className="ui-numeric">{row.ms ? `${row.ms}ms` : "—"}</td>
+                          <td className="text-muted" title={row.err ?? ""}>
+                            {row.status || "—"}
+                            {tries && <span className="ui-micro ml-2 text-warn">{tries}</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

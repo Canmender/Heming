@@ -66,6 +66,30 @@ export interface UsageRequestRow {
   in: number;
   out: number;
   ms: number;
+  /** 首字：从发请求到回复出现第一个内容（文字、推理或工具调用）的毫秒；没流式就没有。 */
+  ttft?: number;
+  /** 首段文字出现的时间，与 ttft 同口径；ttft 到它的差就是「先想后说」的时间。 */
+  firstText?: number;
+  /** 发出去的耗时：首字减去它，才是上游自己花的时间。 */
+  sent?: number;
+  /** sent 里属于和鸣自己的部分（读请求、翻译、挑谁答）。 */
+  own?: number;
+  /** sent 里花在「先失败的那几次试」与重试间隔上的部分。 */
+  retried?: number;
+  /** sent 里花在等并发/速率名额（排队）上的部分。 */
+  queued?: number;
+  /** 回复内容本身流了多久。 */
+  flow?: number;
+  /** 这条请求总共试了几次；大于一说明前面有试失败过。 */
+  tries?: number;
+  /** 这一试失败后把请求交给了下一试：它是过程中的一条，不是最终结果。 */
+  handedOn?: boolean;
+  /** 失败时上游给的原因（被截短过）。 */
+  err?: string;
+  /** 上游给这个错误起的类型名。 */
+  errType?: string;
+  /** 上游说它为什么结束（stop_reason / finish_reason）。 */
+  stop?: string;
   status: number;
   cost: number;
   priced?: boolean;
@@ -176,6 +200,18 @@ export async function fetchUsageRequests(
         in: num(row.in),
         out: num(row.out),
         ms: num(row.ms),
+        ttft: num(row.ttft_ms) || undefined,
+        firstText: num(row.first_text_ms) || undefined,
+        sent: num(row.sent_ms) || undefined,
+        own: num(row.own_ms) || undefined,
+        retried: num(row.retried_ms) || undefined,
+        queued: num(row.queued_ms) || undefined,
+        flow: num(row.flow_ms) || undefined,
+        tries: num(row.tries) || undefined,
+        handedOn: row.handed_on === true,
+        err: typeof row.err === "string" && row.err ? row.err : undefined,
+        errType: typeof row.err_type === "string" && row.err_type ? row.err_type : undefined,
+        stop: typeof row.stop === "string" && row.stop ? row.stop : undefined,
         status: num(row.status),
         cost: num(row.cost),
         priced: row.priced === true,
@@ -204,6 +240,46 @@ export function formatCost(cost: number, unpriced = 0): string {
   }
   const text = cost >= 1 ? cost.toFixed(2) : cost.toFixed(4);
   return unpriced > 0 ? `${text}（${unpriced} 条未定价）` : text;
+}
+
+/**
+ * 首字慢在哪儿：内核把一次请求的等待拆成和鸣自己、先失败的那几次试、排队，
+ * 剩下的才是上游（sent 减掉前三者），这里按同一口径说人话。没流式的回复没有
+ * 首字，返回空串。
+ */
+export function describeRequestWait(row: UsageRequestRow): string {
+  if (!row.ttft || row.ttft <= 0) return "";
+  const detail: string[] = [];
+  if (row.own) detail.push(`和鸣自己 ${row.own}ms`);
+  if (row.retried) detail.push(`先失败的那几次 ${row.retried}ms`);
+  if (row.queued) detail.push(`排队 ${row.queued}ms`);
+  if (row.sent) {
+    const upstream = row.sent - (row.own ?? 0) - (row.retried ?? 0) - (row.queued ?? 0);
+    if (upstream > 0) detail.push(`上游 ${upstream}ms`);
+  }
+  const head = `首字 ${row.ttft}ms`;
+  return detail.length > 0 ? `${head}（${detail.join("、")}）` : head;
+}
+
+/**
+ * 这条请求试了几次：多于一次说明前面有试失败过；handedOn 的那一行是过程中
+ * 的一试，它失败了、把请求交给了下一试，不是最终结果。
+ */
+export function describeRequestTries(row: UsageRequestRow): string {
+  if (row.handedOn) return "这一试失败，交给了下一条";
+  if ((row.tries ?? 0) > 1) return `试了 ${row.tries} 次`;
+  return "";
+}
+
+/**
+ * 一组调用（按模型 / Agent / 账号）的平均首字：内核只把真被计时的流式回复记进
+ * timed 与 ttft_ms 的和，所以这里也只在有计时的时候给数，没有就给 null。
+ */
+export function averageTTFT(bucket: UsageBucket): number | null {
+  const timed = bucket.timed ?? 0;
+  const total = bucket.ttft_ms ?? 0;
+  if (timed <= 0 || total <= 0) return null;
+  return Math.round(total / timed);
 }
 
 export interface ChartBar {
