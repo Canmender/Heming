@@ -6438,6 +6438,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 已知边界：模型重写中间段落时不再省；尾部围栏未闭合仍从开围栏那块起算尾部（与全量一致）。
 
 
+- **来源说得出自己设了什么（d.370）**：★ 展开「高级」时本来就读一次 `provider show`，但只用了地址与模型清单，`unmasked`/`free`/`header`/`refresh`/`include` 全扔掉——现在 `packages/web/src/lib/magpieSourceShow.ts` 的 `parseSourceShow` 把它们解析进 `showCache[id].flags`，「更多设置」下多说一句「现在设着：…」（`describeShowFlags`），请求头那块多一个「拉下来改」把现有头填回多行框；★ 不多发命令，`context=`/`family=` 内核 show 不打印、仍只写不读（写进 parity spec §3）；★ 解析 6 例 + 页面 1 例（115 → 116），定向 15 文件 193 例全绿、typecheck 通过；★ 顺手修了上一轮发布提交带进仓库的 0 字节 `packages/cli/package.json`（`e48e45a6`，它让所有 `pnpm` 工作区命令报 `ERR_PNPM_JSON_PARSE`）；★ 留白：收起状态的行上看不出「改过」，要做得在首屏并发读所有来源的 show（每个还带一次余额查询），代价不小。
+
 ## 7. 快速上手命令
 
 ```bash

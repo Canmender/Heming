@@ -1,3 +1,21 @@
+## d.370.4.130.14（2026-11-19）— 来源说得出自己设了什么：把 `provider show` 的那几行读回来
+
+**为什么做。** 展开「高级」时本来就会读一次 `provider show <id>`（拿地址、普通/套餐、模型清单），但读回来的整段只用了三行：`unmasked`、`free`、`header`、`refresh`、`include` 全被扔掉。于是可选设置只能「填什么发什么」——改一个请求头要把整行重敲，也看不出这个来源算不算免费、有没有原文照发。上一版的留白写的就是这件。
+
+**做了什么。**
+
+| 做了什么 | 在哪 |
+| --- | --- |
+| 解析 `provider show` 里的 `header` / `free` / `unmasked` / `refresh` / `include` | `packages/web/src/lib/magpieSourceShow.ts` 的 `parseSourceShow` |
+| 结果挂进已有的 show 缓存（`showCache[id].flags`），不多发一次命令 | `packages/web/src/components/ModelPage.tsx` |
+| 「更多设置」下多说一句「现在设着：请求头 X-Trace；算免费；每 6h 刷清单」；什么都没设时整句不出现 | 同上（`describeShowFlags`） |
+| 请求头那块多一个「拉下来改」：现有的头还原成一行一个填回多行框 | 同上（`headersToText`） |
+| 边界：`context=` 与 `family=` 内核 show 不打印，这两项仍然只写不读 | parity spec §3 |
+
+**怎么验证。** `npx vitest run src/lib/magpieSourceShow.test.ts` 6 例（含空值头、值里带冒号、现状一句话）；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/lib/magpieSourceShow.test.ts src/lib/magpieSourceHeaders.test.ts` 15 文件 / 193 例全绿（ModelPage 115 → 116 例，新增「现状显示 → 拉下来改 → 保存发原值」）；`pnpm --filter @heming/web typecheck` 通过。
+
+**留白。** 只有展开「高级」时才读得到——收起状态的行上仍然看不出「这个来源改过」。要给行上做标记，得在首屏并发读所有来源的 show（每个还带一次余额查询，最多 8 秒超时），代价不小；下一步先用缓存里已有的数据，别加首屏负担。
+
 ﻿## d.369.4.130.14（2026-11-19）— 长回答也不再每帧重扫全文
 
 **为什么做。** 流式渲染为了少解析 markdown，d.353 起就把正文切成「冻结前缀 + 尾部两块」，但**切分本身**每帧都要从头扫一遍全文（`text.split("\n")` 再逐行判断围栏/列表/表格）。回复只有几百字时没感觉；几万字的长回答就是每帧 O(全文)，主线程一直在做同一件事。
