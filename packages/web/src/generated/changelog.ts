@@ -12,10 +12,16 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    "version": "d.347.4.128.12",
+    "version": "d.348.4.128.12",
     "date": "2026-11-19",
-    "title": "复杂长任务能组队了",
+    "title": "先派活，再读文件",
     "bullets": [
+      "`packages/web/src/lib/agentRuntime/runtimePrompt.test.ts` 新增 2 例：注入 `agent_task` 时写「任务要自包含 / 看不到这段对话 / tasks」，没注入时连这几个词都不出现；用量 1.6K / 32K（5%）只报数字不催，24K / 32K（75%）追加收口提醒，没注入工具时连百分比都不出现",
+      "`packages/web/src/lib/agentRuntime/subagent.test.ts` 新增 2 例：工具描述含「看不到这段对话 / 自包含 / 只把结论带回来 / 并行」，参数说明含「自包含」；子代理系统提示含交付边界",
+      "`npx vitest run`（packages/web）455 文件 / 6561 例全绿；`pnpm --filter @heming/web typecheck` 通过",
+      "派发仍是**同一轮里等结果**再回灌主模型，不是 DSH 那种「派出即返回、完成再通知」；改成异步要动运行循环与消息投递，先把「派得对、派得早」教好",
+      "用量是估算值（与压缩链同一估算器），换模型后只做同比例校准，不保证与供应商 tokenizer 逐 token 一致",
+      "`structured_output`（子代理按 schema 交结构化结果）与 `maxDepth` 递归上限没有做：子代理白名单里没有 `agent_task`，深度恒为 1",
       "`packages/web/src/lib/agentRuntime/team.test.ts` 29 例：解析错误 13（数量、id 形状、重复、未知角色、自依赖、缺依赖、成环、未授权的 `write`、轮次夹逼）、分层 3、执行 8（依赖顺序与上游注入、并发峰值 ≤3、失败隔离、写盘只给 `write` 成员、未授权全只读、进度带角色、`onStart`/`onFinish`、7 轮长任务）",
       "`packages/web/src/lib/agentRuntime/teamRuns.test.ts` 9 例：状态流转、收口才落盘、按会话取最近一次、`resetTeamRuns` 只清在跑、上限截断、坏档静默忽略、角色解析",
       "`SubagentRuns.test.tsx` 角色显示、`CollaborationPage.test.tsx` 最近团队任务与空态、`runtimePrompt.test.ts` 注入才提团队且写清分界、`ChatPage.test.tsx` 断言本轮工具清单里真的有 `agent_team`",
@@ -26,6 +32,12 @@ export const CHANGELOG: ChangelogEntry[] = [
       "停止信号与会话绑定：切走会话会清掉在跑的团队记录，正在跑的成员由主对话的中断续跑机制收口。"
     ],
     "paragraphs": [
+      "为什么做",
+      "d.347 把 `agent_task` 和 `agent_team` 交到了模型手里，但实测它还是更愿意自己 `file_read` 十来份文件再回答：提示词只说了「可以派」，没说「什么时候值得派、任务该怎么写、你现在已经花了多少上下文」。子代理又没有主对话历史——任务写成「看一下那个文件」，它只能空跑一轮；而主对话里留下的每段原文，之后每一轮都要重付一次，压缩时还会先丢。",
+      "做了什么",
+      "| 能力 | 落地 || --- | --- || 让模型看见成本 | 运行时提示词写入本会话上下文用量（约 X / Y tokens、百分比），与界面 ContextMeter 用同一份估算；只在真的注入 `agent_task` 时出现，没注入就不凭空报数字 || 到 70% 就催 | 用量 ≥ 70% 追加一句「接下来的检索先派子代理、只要结论；凑够能交付的先收口」，提醒放在还来得及的位置，而不是等到快溢出 || 描述教「怎么派」 | `agent_task` 描述与 `task` / `tasks.items` 参数说明重写：子代理看不到这段对话、任务要自包含（路径/关键词、要回答什么、结论格式）、它只回结论不回过程、一次 `tasks` 并行派、一次 `file_read` 能答的别派 || 别重复读 | 提示词明说「子代理已经读过的文件别再自己读一遍核对」——这条是省上下文最容易漏掉的一半 || 派不下就合并 | 要查的事超过 3 件时，提示词要求先合并成 3 件、先派最费上下文的那几件，而不是硬塞 || 整合者收尾 | 团队里成员改过的文件，提示词要求主模型自己复核 diff、跑相关测试再宣布完成（对齐 DSH 的「谁整合谁负责」） || 拒绝即说明 | 子代理系统提示要求：工具被拒或超出权限时不要换参数反复试，把受限点写进结论交给主对话 || 交付边界 | 子代理系统提示补一句「主对话只会收到你的最终答复，看不到你的工具输出与中间推理」，别在结论里写「见上面」「如前所述」 || 对齐 DSH | 描述口径参考 DSH 的 `subagent`（`providerWording` / `withResultDeliveryGuidance`）；与它的差异（异步派发、`structured_output`、`maxDepth`）连同「为什么暂不做」写进 HANDOFF d.348 |",
+      "怎么验证",
+      "留白",
       "为什么做",
       "之前的派活只有两档：`agent_task` 一次派 1–3 个只读子代理，每人 4 轮，谁也不等谁；`workflow_run` 有先后依赖，但每一步都是同一模板的只读步骤。真正复杂的长任务不是这种形状：它常常要几种不同的角色（先摸清现状、再按威胁模型审、最后写方案），角色之间还有先后，跑完要让用户看得见谁做了什么、停在哪。",
       "协作页以前只能由人在页面上发起一场辩论，和会话里正在干的活不连通——用户在聊天里说「分头查清楚」，和鸣只能自己硬扛。",

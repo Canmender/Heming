@@ -151,6 +151,42 @@ describe("buildRuntimeSection", () => {
     expect(withTool).toContain("原文");
   });
 
+  it("教子代理要写成自包含的任务，并提示并行派（d.348）", () => {
+    const subagent = [{ name: "agent_task", title: "派子代理", risk: "read" as const }];
+    const text = buildRuntimeSection({ ...base, tools: subagent });
+    // 子代理没有主对话历史：不写清路径/问题/结论格式，它只能空跑一轮
+    expect(text).toContain("任务要自包含");
+    expect(text).toContain("看不到这段对话");
+    expect(text).toContain("tasks");
+    // 这一句只属于派发指引，不该在没注入 agent_task 时出现
+    expect(buildRuntimeSection({ ...base, tools: [] })).not.toContain("任务要自包含");
+  });
+
+  it("把上下文用量写进提示词，超过 70% 才催「先派活或收口」（d.348）", () => {
+    const subagent = [{ name: "agent_task", title: "派子代理", risk: "read" as const }];
+    const low = buildRuntimeSection({
+      ...base,
+      tools: subagent,
+      contextUsage: { used: 1600, budget: 32000 },
+    });
+    expect(low).toContain("1.6K / 32K");
+    expect(low).toContain("5%");
+    expect(low).not.toContain("上下文已用到");
+
+    const high = buildRuntimeSection({
+      ...base,
+      tools: subagent,
+      contextUsage: { used: 24000, budget: 32000 },
+    });
+    expect(high).toContain("75%");
+    expect(high).toContain("上下文已用到 75%");
+    expect(high).toContain("收口");
+
+    // 没注入派发工具时不谈「派子代理」，但也不该凭空出现数字
+    const noTool = buildRuntimeSection({ ...base, tools: [], contextUsage: { used: 24000, budget: 32000 } });
+    expect(noTool).not.toContain("75%");
+  });
+
   it("注入了 agent_team 才提团队派发，并说清与 agent_task 的分界（d.347）", () => {
     const team = [{ name: "agent_team", title: "派团队", risk: "read" as const }];
     const without = buildRuntimeSection({ ...base, tools: [] });
@@ -162,6 +198,9 @@ describe("buildRuntimeSection", () => {
     expect(withTeam).toContain("派一支小队");
     expect(withTeam).toContain("agent_task");
     expect(withTeam).toContain("别为三行改动组队");
+    // 整合者责任（对齐 DSH「谁整合谁跑测试」）：派完不能直接宣布完成
+    expect(withTeam).toContain("复核 diff");
+    expect(withTeam).toContain("跑相关测试");
   });
 
   it("注入了 run_command 才提命令，并且提前说清「要先请用户确认」（d.164）", () => {

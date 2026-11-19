@@ -3089,6 +3089,11 @@ export function ChatPage({
             tools: runtimeToolsFromSpecs(tools, (name) => toolMetaOf(name, agentId)),
             toolSearchAvailable: tools.length > TOOL_SEARCH_THRESHOLD,
             maxToolRounds: MAX_TOOL_ROUNDS,
+            // 上下文占用（d.348）：把「已经花了多少」写进提示词，模型才看得见派活的收益。
+            // 与界面 ContextMeter 用同一份估算（refreshContextUsage），不另算一套。
+            ...(contextUsage.budget > 0
+              ? { contextUsage: { used: contextUsage.used, budget: contextUsage.budget } }
+              : {}),
             // 后台作业（d.180）：老安装包没有作业通道时不承诺「能后台跑」。
             hasBackgroundJobs: hasJobRuntime(getShellBridge()),
             // 同理读存储：界面 state 可能还没落，提示词不能说错这一轮是不是只读。

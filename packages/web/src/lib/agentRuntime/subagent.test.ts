@@ -61,6 +61,17 @@ describe("subagentSpec", () => {
     const fn = fnOf(subagentSpec());
     expect(fn.description).toContain("只读");
   });
+
+  it("描述教「怎么派」：子代理看不到这段对话、任务要自包含、并行派（d.348）", () => {
+    const fn = fnOf(subagentSpec());
+    expect(fn.description).toContain("看不到这段对话");
+    expect(fn.description).toContain("自包含");
+    expect(fn.description).toContain("tasks");
+    // 只回结论不回过程，是「省主对话上下文」的理由；参数说明也要把自包含讲清
+    expect(fn.description).toContain("只把结论带回来");
+    expect(fn.parameters.properties?.task?.description).toContain("看不到这段对话");
+    expect(JSON.stringify(fn.parameters.properties?.tasks)).toContain("自包含");
+  });
 });
 
 describe("parseSubagentArgs", () => {
@@ -655,6 +666,24 @@ describe("自定义子代理（d.287）", () => {
     expect(system).toContain("只能在上面的规则之内加严");
     expect(result.text).toContain("子代理「review」");
     expect(result.text).toContain("登录没有限流");
+  });
+
+  it("子代理的系统提示说清「主对话只看最终答复」，逼它把依据写全（d.348）", async () => {
+    const seen: ChatMessage[][] = [];
+    const chat = vi.fn(async (messages: ChatMessage[]) => {
+      seen.push(messages);
+      return "结论：没问题。";
+    });
+    const wrapped = withSubagentTool(
+      { tools: [readTool], meta: () => undefined, execute: vi.fn() },
+      { agentId: "a1", conversationId: "c1", chat },
+    );
+    await wrapped.execute({ name: SUBAGENT_TOOL, arguments: JSON.stringify({ task: "查一下" }) });
+    const system = String(seen[0]?.[0]?.content ?? "");
+    expect(system).toContain("主对话只会收到你的最终答复");
+    expect(system).toContain("见上面");
+    // 没有审批通道：被拒就说明限制，别换参数反复试（对齐 DSH 的拒绝即说明）
+    expect(system).toContain("不要换参数反复试");
   });
 
   it("定义写什么都提不了权：工具白名单仍由程序说了算", async () => {

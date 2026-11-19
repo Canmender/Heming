@@ -67,6 +67,13 @@ export interface RuntimeSectionInput {
   /** 每轮工具往返上限（`agentStream.MAX_TOOL_ROUNDS`）；缺省不写数字。 */
   maxToolRounds?: number;
   /**
+   * 主对话当前的上下文占用估算（d.348）：让模型看见自己在花多少上下文。
+   *
+   * 数字来自 `refreshContextUsage()` 的同一套估算（不是精确 tokenizer），所以文案里
+   * 写「约」；只用于提醒「该派子代理 / 该收口了」，不参与任何裁剪决策。
+   */
+  contextUsage?: { used: number; budget: number };
+  /**
    * 计划模式（d.173）：本轮用户要求「先方案、不改动」。
    *
    * 这一轮写类工具已经从桥里摘掉了（见 `agentRuntime/planMode.ts`），但**必须写进提示词**：
@@ -510,15 +517,35 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   // 否则原文全留在主历史里、之后每轮重付一遍 token，压缩后还会丢。
   if (hasAgentTaskTool(input.tools)) {
     lines.push(
-      "- 要翻很多文件、多轮检索才能得出结论时，用 `agent_task` 派一个只读子代理：它自己读、只把结论带回来，别把几十个文件的原文都拉进主对话。",
+      "- 要翻很多文件、多轮检索才能得出结论时，用 `agent_task` 派一个只读子代理：它自己读、只把结论带回来，别把几十个文件的原文都拉进主对话。要查的事超过 3 件就先合并成 3 件，先派最费上下文的那几件。",
     );
+    // d.348：只教「可以派」不够，还要教「怎么派才真的省」。子代理没有主对话历史，
+    // 任务写得太短它只会回来问（而它没有提问通道），写得太长等于把原文又搬一遍；
+    // 另外模型看不见自己在花多少上下文，会先读十份文件才想起来派。
+    lines.push(
+      "- 派子代理时任务要自包含：写清路径/关键词、要回答什么、结论用什么格式；它看不到这段对话，别只写「去看一下那个文件」。要同时查几件事，就在一次调用里用 `tasks` 一起并行派，别一件一件串行；它已经读过的文件别再自己读一遍核对。",
+    );
+    const usage = input.contextUsage;
+    if (usage !== undefined && usage.budget > 0 && usage.used >= 0) {
+      const pct = Math.round((usage.used / usage.budget) * 100);
+      lines.push(
+        `- 这个会话的上下文已用约 ${tokenKilo(usage.used)} / ${tokenKilo(usage.budget)} tokens（${pct}%）：主对话里留下的每段原文，之后每一轮都要重付一次，压缩时还会先丢。`,
+      );
+      // 70% 是一个「还来得及」的位置：再读两份大文件就过半了，此时提醒优先派活/收口，
+      // 比等到 95% 再压更便宜。
+      if (pct >= 70) {
+        lines.push(
+          `- 上下文已用到 ${pct}%：接下来的检索先派子代理、只要结论；凑够能交付的结论就先收口（已完成 / 未完成 / 下一步），别再把长输出整段读进来。`,
+        );
+      }
+    }
   }
   // 团队任务（d.347）：只在 `agent_team` 真的注入时才教。和 `agent_task` 的分界是
   // 「一件事要不要拆成几种角色、要不要先后依赖」——不写清这个分界，模型会用单代理
   // 硬扛长任务，或者反过来把三行的小活拆成一支队伍。
   if (hasTeamTool(input.tools)) {
     lines.push(
-      "- 复杂长任务值得拆角色、分先后时，用 `agent_team` 派一支小队：每位成员写清角色与任务，用 `needs` 声明依赖，能并行的会自己并行；成员结论按人返回，你再汇总。只有一件小事时用 `agent_task` 就够，别为三行改动组队。",
+      "- 复杂长任务值得拆角色、分先后时，用 `agent_team` 派一支小队：每位成员写清角色与任务，用 `needs` 声明依赖，能并行的会自己并行；成员结论按人返回，你再汇总。只有一件小事时用 `agent_task` 就够，别为三行改动组队。成员改过的文件要你自己复核 diff、跑相关测试，再宣布完成——整合的人负责收尾。",
     );
   }
   // 撤销（d.170）：只在真的注入了 `file_undo` 时才写——承诺了却调不到比不承诺更糟。
@@ -575,6 +602,23 @@ function hasTodoTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
  * 与 `hasTodoTool` 同一个理由：提示词不承诺没注入的工具。这里写死名字而不是从
  * `subagent.ts` 引常量，是为了让本模块只依赖「工具清单」这一份数据、不反向依赖
  * 子代理实现（否则运行时提示词会顺着 import 链把 llmRoute 拉进来）。
+ */
+/**
+ * 把 token 估算拍成提示词里好读的短数字（d.348）：1600 → "1.6K"，820 → "820"。
+ *
+ * 提示词里出现 `1600 / 32000` 这种长数字，模型算百分比反而更容易错；千分位缩写
+ * 与人读界面（ContextMeter）的口径一致。
+ */
+function tokenKilo(tokens: number): string {
+  if (tokens < 1000) return `${Math.max(0, Math.round(tokens))}`;
+  const k = tokens / 1000;
+  return `${k >= 10 ? Math.round(k) : k.toFixed(1)}K`;
+}
+
+/**
+ * 这一轮是否注入了只读子代理工具（`agent_task`，d.162）。
+ *
+ * 子代理只在桌面端、且模型绑定存在时注入；提示词不承诺没注入的工具。
  */
 function hasAgentTaskTool(tools: RuntimeSectionInput["tools"] | undefined): boolean {
   if (!tools) return false;
