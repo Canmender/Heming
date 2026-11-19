@@ -80,6 +80,11 @@
   `parseHeaderLines`：分隔符认半角/全角冒号与等号，值里可以再有冒号；同一名字重复只留最后一个；
   看不懂的行在原地列出来，其余照发。控件是 d.368 新加的 `TextAreaField`
   （`packages/web/src/components/ui/Field.tsx`），和 `TextField` 共用 label / hint / error 语义。
+- 读回现状（d.369 起）：展开「高级」时本来就会读一次 `provider show <id>`，现在顺带用
+  `packages/web/src/lib/magpieSourceShow.ts` 的 `parseSourceShow` 把 `header` / `free` / `unmasked` /
+  `refresh` / `include` 解析出来，写进 `showCache[id].flags`。页面因此在「更多设置」下多说一句
+  「现在设着：…」（`describeShowFlags`，什么都没设时整句不出现），请求头那块多一个「拉下来改」
+  把现有的头填回多行框。**`context=` 与 `family=` 内核 show 不打印**，这两项仍然只写不读。
 
 ### 3.1 路由分组：按模板建组、按需改设置
 

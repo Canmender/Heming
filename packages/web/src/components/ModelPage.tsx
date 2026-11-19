@@ -118,6 +118,12 @@ import {
 import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import { parseHeaderLines } from "../lib/magpieSourceHeaders.js";
 import {
+  describeShowFlags,
+  headersToText,
+  parseSourceShow,
+  type SourceShowFlags,
+} from "../lib/magpieSourceShow.js";
+import {
   GROUP_SETTING_FIELDS,
   GROUP_TEMPLATES,
   groupSetArgs,
@@ -533,7 +539,10 @@ export function ModelPage() {
   const [customError, setCustomError] = useState<string | null>(null);
   /** 展开高级时按需读 `provider show` 的结果：chat 地址 + 普通/套餐。 */
   const [showCache, setShowCache] = useState<
-    Record<string, { chat: string; plan: PlanKind; models: ProviderModel[]; note: string }>
+    Record<
+      string,
+      { chat: string; plan: PlanKind; models: ProviderModel[]; note: string; flags: SourceShowFlags }
+    >
   >({});
   const [showLoading, setShowLoading] = useState<string | null>(null);
   /** 来源的连通性测试结论，按来源 id 记：行上直接写「通过 · 1.2 秒」或「连不上」。 */
@@ -1769,7 +1778,8 @@ export function ModelPage() {
       const plan = detectPlanFromShow(text) ?? "normal";
       const chat = parseShowUrls(text).chat;
       const { models, note } = parseProviderModels(text);
-      setShowCache((current) => ({ ...current, [id]: { chat, plan, models, note } }));
+      const flags = parseSourceShow(text);
+      setShowCache((current) => ({ ...current, [id]: { chat, plan, models, note, flags } }));
     },
     [cli],
   );
@@ -2874,6 +2884,9 @@ export function ModelPage() {
                             <p className="mt-1 ui-caption">
                               这四块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
                             </p>
+                            {info?.flags && describeShowFlags(info.flags) && (
+                              <p className="mt-1 ui-caption">现在设着：{describeShowFlags(info.flags)}</p>
+                            )}
 
                             <details className="ui-disclosure mt-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
@@ -2892,6 +2905,26 @@ export function ModelPage() {
                                 <p className="ui-caption text-danger sm:col-span-2">
                                   这几行看不懂，先不发：{requestHeaders.rejected.join("、")}
                                 </p>
+                              )}
+                              {info?.flags && info.flags.headers.length > 0 && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
+                                  <p className="ui-caption">
+                                    现在设着：{info.flags.headers.map((item) => item.name).join("、")}
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      setProviderForm({
+                                        ...providerForm,
+                                        headerText: headersToText(info.flags?.headers ?? []),
+                                      })
+                                    }
+                                  >
+                                    拉下来改
+                                  </Button>
+                                </div>
                               )}
                               <div className="flex gap-2">
                                 <TextField

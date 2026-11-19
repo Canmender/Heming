@@ -1859,6 +1859,40 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls.some((call) => call[1] === "set")).toBe(false);
   });
 
+  it("读回来源现状：设过什么写在折叠里，能一把拉下来改", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        "provider show mock": {
+          ok: true,
+          stdout:
+            "  chat       https://api.mock.test/v1\n" +
+            "  unmasked   yes  Settings' redaction leaves its requests as written\n" +
+            "  free       yes  counted free by Free first and Cheapest routing\n" +
+            "  header     X-Trace: abc\n" +
+            "  refresh    every 6h  the gateway fetches its list by itself\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+
+    // 一句话说清现在设了什么（读的是 provider show，不是猜）。
+    expect(await screen.findByText("现在设着：请求头 X-Trace；算免费；原文照发；每 6h 刷清单")).toBeInTheDocument();
+
+    // 拉下来改：一行一个填进多行框，再保存就是同一份内容。
+    fireEvent.click(screen.getByRole("button", { name: "拉下来改" }));
+    const input = screen.getByLabelText("自定义请求头") as HTMLTextAreaElement;
+    expect(input.value).toBe("X-Trace: abc");
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "set", "mock", "header.X-Trace=abc"]),
+    );
+  });
+
   it("保存来源设置之后，余额卡与走向图也跟着重读（写命令会动到 Key 和限额）", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
