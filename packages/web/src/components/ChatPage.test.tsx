@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
@@ -1754,6 +1754,7 @@ describe("ChatPage", () => {
       "语音输入",
       // d.356：整段对话导成 Markdown（正文 + 收起来的过程）。
       "导出这段对话（Markdown）",
+      "导出这段对话（JSON）",
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "关闭更多操作" }));
@@ -1799,6 +1800,35 @@ describe("ChatPage", () => {
     expect(screen.getByText(/已导出这段对话：2 条消息/)).toBeInTheDocument();
   });
 
+  it("更多操作 → 导出这段对话（JSON）：同一个内容，给程序看（d.365）", async () => {
+    bindAssistant();
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((value: Blob | MediaSource) => {
+      blobs.push(value as Blob);
+      return "blob:export-json";
+    });
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+    mockMessagesFetch([
+      msg("m1", "登录挂了", "2026-11-19T04:00:00.000Z"),
+      agentMsg("m2", "入口在 app.ts", "2026-11-19T04:01:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    await act(async () => {});
+    await screen.findByText("入口在 app.ts");
+
+    clickAttachItem("导出这段对话（JSON）");
+
+    expect(blobs).toHaveLength(1);
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]).toMatch(/^和鸣-.*\.json$/);
+    const doc = JSON.parse(await blobs[0]!.text()) as { version: number; messages: { text: string }[] };
+    expect(doc.version).toBe(1);
+    expect(doc.messages.map((m) => m.text)).toEqual(["登录挂了", "入口在 app.ts"]);
+    expect(screen.getByText(/已导出这段对话：2 条消息（JSON）/)).toBeInTheDocument();
+  });
   it("上次生成被中断：重开还能看到那半截草稿，也能丢弃（d.363）", async () => {
     bindAssistant();
     saveLiveDraft(
@@ -7535,3 +7565,5 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
   });
 
 });
+
+

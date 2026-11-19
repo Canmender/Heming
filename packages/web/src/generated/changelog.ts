@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.367.4.130.14",
+    "date": "2026-11-19",
+    "title": "会话也能导成 JSON 了",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮把「导出这段对话」接回来时只给了 Markdown——给人读够了，但想自己拿去做统计、喂给别的工具、或者做一份可 diff 的存档，Markdown 就不合适了。导出模块里本来就有 `buildConversationJson`（d.25 起就在，只是从来没有入口），这轮把入口补齐。",
+      "**做了什么。**",
+      "| 做了什么 | 在哪 || --- | --- || 「更多操作」菜单多一项「导出这段对话（JSON）」 | `ChatPage.tsx` || 导出函数按格式分派：Markdown 走 `buildConversationMarkdown`，JSON 走 `buildConversationJson`，文件名后缀随格式 | `ChatPage.tsx` 的 `exportConversation(format)` || 成功提示带上格式（`…（JSON）。`），两种导出共用同一套「空会话不导」的判断 | 同上 |",
+      "**怎么验证。** `ChatPage.test.tsx` 新增一例：点菜单项后拿到 1 个 Blob、文件名以 `.json` 结尾、内容 `JSON.parse` 后 `version === 1` 且两条正文按顺序、提示写「（JSON）」；菜单项清单断言同步补上这一项。web 全量通过、typecheck 通过。",
+      "**留白。** JSON 与 Markdown 共用同一份消息投影（含过程摘要、不含附件字节）；导出仍是「本机能解开的明文」，E2E 解不开的整条跳过（与 Markdown 一致）；没有做「只导某一轮」。"
+    ]
+  },
+  {
     "version": "d.366.4.130.14",
     "date": "2026-11-19",
     "title": "来源的可选设置收进一处：四个折叠区变一行",

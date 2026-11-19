@@ -39,6 +39,7 @@ import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 // d.356：导出（Markdown）与附件大小共用同一个格式化口径。
 import {
+  buildConversationJson,
   buildConversationMarkdown,
   conversationFileName,
   formatBytes,
@@ -3876,7 +3877,7 @@ export function ChatPage({
    * 不拿密文去凑数——文件是给人读的，一段 base64 只会让人以为导出坏了。
    * 过程（思考段 + 工具调用）收进 `<details>`：要复盘的人点开，读正文的人不被打断。
    */
-  const exportConversation = () => {
+  const exportConversation = (format: "md" | "json" = "md") => {
     setAttachOpen(false);
     const state = useChatStore.getState();
     const plains = state.plainById[convId] ?? {};
@@ -3928,15 +3929,23 @@ export function ChatPage({
     const title = conv ? conversationTitle(conv, rows) : "会话";
     const now = Date.now();
     try {
-      const markdown = buildConversationMarkdown({ id: convId, title, exportedAt: now, messages });
-      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const text =
+        format === "json"
+          ? buildConversationJson({ id: convId, title, exportedAt: now, messages })
+          : buildConversationMarkdown({ id: convId, title, exportedAt: now, messages });
+      const blob = new Blob([text], {
+        type: format === "json" ? "application/json;charset=utf-8" : "text/markdown;charset=utf-8",
+      });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = conversationFileName(title, now, "md");
+      link.download = conversationFileName(title, now, format);
       link.click();
       URL.revokeObjectURL(url);
-      setSendNotice(`已导出这段对话：${messages.length} 条消息（Markdown）。`, "info");
+      setSendNotice(
+        `已导出这段对话：${messages.length} 条消息（${format === "json" ? "JSON" : "Markdown"}）。`,
+        "info",
+      );
     } catch {
       setSendNotice("导出失败：这个环境不允许下载文件。", "error");
     }
@@ -6977,10 +6986,19 @@ export function ChatPage({
                     type="button"
                     role="menuitem"
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
-                    onClick={exportConversation}
+                    onClick={() => exportConversation("md")}
                   >
                     <FileIcon width={16} height={16} aria-hidden="true" />
                     导出这段对话（Markdown）
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ui-sm hover:bg-subtle-2"
+                    onClick={() => exportConversation("json")}
+                  >
+                    <FileIcon width={16} height={16} aria-hidden="true" />
+                    导出这段对话（JSON）
                   </button>
                 </div>
               </>
@@ -7238,3 +7256,4 @@ export function ChatPage({
     </div>
   );
 }
+

@@ -6420,6 +6420,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 - **来源的可选设置收进一处（d.366）**：★ 来源行「高级」里原本并排四个折叠区（请求 / 调流 / 清单 / 它是什么），五个来源就是二十行标题、把模型 chip 挤下去——现在收进同一个「更多设置（可选）：请求、调流、清单、它是什么」，展开一次再挑一块，默认仍全收着；★ 只是嵌套一层，四块的内容、按钮、命令一个字没动，这层不保存任何东西；★ 测试新增 1 例（四块都在同一个折叠区里且默认收着，112 → 113），定向 14 文件 184 例全绿、typecheck 通过；★ 留白：折叠标题上看不出「这个来源有没有自定义头 / 调流参数」，得先把 `provider show` 的字段接进行数据。
 
+## 会话导出多一个格式：JSON（d.367）
+
+- `ChatPage.tsx` 的 `exportConversation(format: "md" | "json")`：Markdown 用 `buildConversationMarkdown`，JSON 用 `buildConversationJson`（同一个 `ConversationExportInput`，含 `process` 摘要），文件名 `conversationFileName(title, now, format)`。
+- 菜单项顺序：表情 / 图片 / 文件 / 工作区文件 / 语音输入 / 导出 Markdown / 导出 JSON——**测试里断言的是整份清单**（`ChatPage.test.tsx` 的「更多操作」用例），加项要同步。
+- 两个格式共用「空会话不导」「E2E 解不开跳过」的判断；Blob MIME 分别是 `text/markdown` 与 `application/json`。
+- 已知取舍：JSON 里没有附件字节、没有逐条 usage；要按轮统计得自己从 `createdAt` 分。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6438,5 +6446,6 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
