@@ -2868,6 +2868,14 @@ export function ModelPage() {
 
                           <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                              更多设置（可选）：请求、调流、清单、它是什么
+                            </summary>
+                            <p className="mt-1 ui-caption">
+                              这四块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
+                            </p>
+
+                            <details className="ui-disclosure mt-2">
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               请求（请求头 / 耐心 / 错误处理）
                             </summary>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -2908,7 +2916,7 @@ export function ModelPage() {
                             </div>
                           </details>
 
-                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <details className="ui-disclosure mt-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               调流（可选）：并发、排队、休息
                             </summary>
@@ -2970,7 +2978,7 @@ export function ModelPage() {
                             </Button>
                           </details>
 
-                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <details className="ui-disclosure mt-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               模型清单（可选）：列不列、什么时候刷、新模型怎么收
                             </summary>
@@ -3027,7 +3035,7 @@ export function ModelPage() {
                             </Button>
                           </details>
 
-                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <details className="ui-disclosure mt-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               它是什么（可选）：算不算免费、上下文多大、原文发不发
                             </summary>
@@ -3083,6 +3091,7 @@ export function ModelPage() {
                             >
                               保存这些设置
                             </Button>
+                          </details>
                           </details>
 
                           <div className="mt-3 flex flex-wrap gap-2">

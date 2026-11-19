@@ -1671,6 +1671,29 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("来源高级里的可选设置收在一处：请求、调流、清单、它是什么", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+
+    const parent = screen
+      .getByText("更多设置（可选）：请求、调流、清单、它是什么")
+      .closest("details");
+    expect(parent).not.toBeNull();
+    // 默认是收着的：四块不再各占一屏，先看见这一行。
+    expect(parent).not.toHaveAttribute("open");
+    for (const label of [
+      "请求（请求头 / 耐心 / 错误处理）",
+      "调流（可选）：并发、排队、休息",
+      "模型清单（可选）：列不列、什么时候刷、新模型怎么收",
+      "它是什么（可选）：算不算免费、上下文多大、原文发不发",
+    ]) {
+      expect(parent).toContainElement(screen.getByText(label));
+    }
+  });
+
   it("调流：只发填过的项，一项一条命令，留空的不动", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
