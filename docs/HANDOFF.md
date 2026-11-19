@@ -6449,6 +6449,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 测试要点：断言 `JSON.stringify(vi.mocked(streamChat).mock.calls)` 含指令与草稿片段（用全部调用而不是 `calls[0]`：前面可能已有一次调用）。
 
 
+- **来源可以先停用再删（d.372）**：★ 来源行只有「删除」这一个动作，而用户想要的常常是「先别用它」——现在「测试」旁边多一个可逆开关，停用发 `provider off <id>`、启用发 `provider on <id>`，Key 与记录都留着，只是智能体拿不到它的模型；★ 状态从 `magpie providers` 那行的说明 `magpie provider on <id>` 里认（`packages/web/src/lib/magpieCli.ts` 的 `offHint`，id 相同才算，别家提到不算），停用行名字后多一个「已停用」徽标，停着时按钮只剩「启用」；★ 不弹确认框——可逆的事不该再问一遍，确认只留给删除；★ 测试：`parseProviders` 1 例 + 页面 2 例（116 → 118），定向 15 文件 204 例全绿、typecheck 通过；★ 留白：`listed no`（只经分组服务）是另一件事，仍在「模型清单」那组里；停用状态只能从那一行说明里认，等内核给它单独一列再改成直读。
+
 ## 7. 快速上手命令
 
 ```bash
