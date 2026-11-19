@@ -2570,7 +2570,7 @@ export function ModelPage() {
                   };
                   const profileCommand = sourceProfileCommand(row.id, profileValues);
                   const profileRejected = sourceProfileRejected(profileValues);
-  const requestHeaders = parseHeaderLines(providerForm.headerText);
+                  const requestHeaders = parseHeaderLines(providerForm.headerText);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2583,6 +2583,15 @@ export function ModelPage() {
                             >
                               {badge.label}
                             </span>
+                            {row.off && (
+                              // 用户自己停的：不是坏了，Key 与记录都在，只是智能体拿不到它的模型。
+                              <span
+                                className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
+                                title="已停用：Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它"
+                              >
+                                已停用
+                              </span>
+                            )}
                             {quota && (
                               // 额度就写在这一行：测试、换 Key、删除都在这儿，不用去另一张卡里对。
                               <span
@@ -2643,6 +2652,19 @@ export function ModelPage() {
                           onClick={() => void testProvider(row.id)}
                         >
                           测试
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm" variant="ghost"
+                          disabled={!cli}
+                          // 停用只是关掉开关：Key、模型记录、额度都还在，随时能开回来。
+                          onClick={() =>
+                            void run(row.off ? "启用来源" : "停用来源", ["provider", row.off ? "on" : "off", row.id], {
+                              refresh: true,
+                            })
+                          }
+                        >
+                          {row.off ? "启用" : "停用"}
                         </Button>
                         <IconButton
                           label={`删除来源 ${row.id}`}

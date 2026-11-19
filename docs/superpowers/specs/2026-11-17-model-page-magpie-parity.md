@@ -170,6 +170,23 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 收的边界：`prompt=`（系统提示原样发）、`additional-tools=`、`user-agent=`、`search=`、
   `compaction=` 这几个更底层的键仍留在命令行——它们多半是某个端专用的排查开关，摆到页面上会误导。
 
+### 3.5 停用与启用：先别用它，但什么都别删
+
+删掉一个来源是「不留了」，用户真正想要的常常是「先别用它」——Key 还想留着、额度下周可能回来、
+换一家对比两天。内核本来就有这个开关（`provider off <id>` / `provider on <id>`，Key 与模型记录都留着，
+只是智能体拿不到它的模型、请求也不会走它），页面此前只有「删除」，没有中间那一档。
+
+- 行上的按钮在「测试」旁边：「停用」→ `provider off <id>`，「启用」→ `provider on <id>`，都带 `refresh`；
+  确认框只留给删除——停用是可逆的，不该再问一遍。
+- 状态从 `magpie providers` 那行读出来：内核不给停用单独一列，只在那一行的说明里写一句
+  `magpie provider on <id>`（`providers()` 的 `p.Off` 分支）。`parseProviders`
+  （`packages/web/src/lib/magpieCli.ts` 的 `offHint`）认这句话里的 id **与本行 id 相同**，
+  别家提到某个 id 不算——所以 `ProviderRow` 多了一个 `off`。
+- 停用那行在名字后多一个「已停用」徽标，悬停说明「Key 与记录都留着，只是智能体拿不到它的模型」；
+  停用时按钮只剩「启用」，不会同时出现两个相反动作。
+- 收的边界：`listed no`（退出智能体清单、只经分组服务）是另一件事，仍在「模型清单」那组里；
+  这里只管整家开/关。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。

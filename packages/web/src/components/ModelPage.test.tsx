@@ -298,6 +298,39 @@ describe("ModelPage · 添加来源", () => {
     await waitFor(() => expect(calls).toContainEqual(["provider", "rm", "mock"]));
   });
 
+  it("停用的来源：行上说「已停用」，按钮变成「启用」并把它开回来", async () => {
+    const { calls } = installBridge(
+      {},
+      {
+        providers: {
+          ok: true,
+          stdout:
+            "  mock custom  mock  127.0.0.1:39001  ● •••••••  1 models  magpie provider on mock  ← Claude Code",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("已停用")).toBeInTheDocument();
+    // 停着的时候不该再出现「停用」：一个按钮只有一种意思。
+    expect(screen.queryByRole("button", { name: "停用" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() => expect(calls).toContainEqual(["provider", "on", "mock"]));
+  });
+
+  it("停用来源：Key 与记录都留着，只发 provider off", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("mock")).toBeInTheDocument();
+    expect(screen.queryByText("已停用")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "停用" }));
+    await waitFor(() => expect(calls).toContainEqual(["provider", "off", "mock"]));
+    // 不是删除：命令里没有 rm。
+    expect(calls.some((call) => call[1] === "rm")).toBe(false);
+  });
+
   it("加一个其他地址：收在来源列表那张卡里，不再单独占一张卡", async () => {
     const { calls } = installBridge({}, {});
     render(<ModelPage />);

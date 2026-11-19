@@ -97,6 +97,14 @@ export interface ProviderRow {
    * 内核在 `providers` 里用一行 `⤷ a → b` 跟在它下面，不在就别猜。
    */
   fallback: string[];
+  /**
+   * 被用户自己停用了（内核 `provider off`）。
+   *
+   * 内核的 `providers` 不给一列写这个状态，只在最后那段说明里留一句
+   * `magpie provider on <id>`——那是「撤销它」的办法，也是这里唯一的线索。
+   * Key 与记录都还在，只是智能体拿不到它的模型。
+   */
+  off: boolean;
   raw: string;
 }
 
@@ -129,9 +137,20 @@ export function parseProviders(raw: string): ProviderRow[] {
     );
     const modelIndex = tokens.findIndex((token) => /^\d+$/.test(token));
     const models = modelIndex >= 0 && /^models?$/.test(tokens[modelIndex + 1] ?? "") ? Number.parseInt(tokens[modelIndex]!, 10) : null;
-    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], raw: trimmed });
+    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], off: offHint(trimmed, id), raw: trimmed });
   }
   return rows;
+}
+
+/**
+ * 这一行是不是被停用了。
+ *
+ * 内核在停用那一行的说明里写 `magpie provider on <id>`（`providers()` 的 `p.Off` 分支），
+ * 没有别的列。所以认的是这句话里的 id 与本行 id 相同：别的行提到某家的 id（备用链）不算。
+ */
+function offHint(trimmed: string, id: string): boolean {
+  const match = /magpie provider on\s+(\S+)/.exec(trimmed);
+  return match !== null && match[1] === id;
 }
 
 /**

@@ -75,6 +75,16 @@ describe("parseProviders", () => {
     const [row] = parseProviders("  mock custom  mock  127.0.0.1:39001  ● •••••••  1 models  ");
     expect(row.fallback).toEqual([]);
   });
+
+  it("停用的那家：说明里的 `magpie provider on <id>` 认成 off，别家提到不算", () => {
+    const raw = [
+      "  deepseek  preset  deepseek  api.deepseek.com  ● •••••••  6 models  magpie provider on deepseek  ← Claude Code",
+      "  moonshot  preset  moonshot  api.moonshot.cn  ● •••••••  4 models  ← Codex",
+    ].join("\n");
+    const rows = parseProviders(raw);
+    expect(rows[0].off).toBe(true);
+    expect(rows[1].off).toBe(false);
+  });
 });
 
 describe("parseAccounts", () => {
