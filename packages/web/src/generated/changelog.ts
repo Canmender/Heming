@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.397.4.135.14",
+    "date": "2026-11-19",
+    "title": "自己压的，也得留个记录",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 手动 `/compact`（或点「现在压缩」）成功后，**没有写折叠记录**——只有自动压缩那条路径写。结果是：顶部那条「更早的 N 条消息折成了摘要」根本不会出现，用户下一次只看到「它忘了我刚说的」，明明自己刚才亲手压过。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `agentContext/contextFold.ts` | `ContextFold` 增加可选 `manual`；`recordContextFold(conversationId, foldedCount, now, manual = false)`；`getContextFold` 原样带出 || `ChatPage.tsx` 的 `runCompactCommand` | 压缩成功后补 `recordContextFold(convId, result.foldedCount, Date.now(), true)` || `ChatPage.tsx` 顶部说明 | 文案按来源区分：「你手动压缩过：更早的 N 条…」/「这轮发送时，更早的 N 条…」 |",
+      "**怎么验证。** `contextFold.test.ts` 11 → 12 例（手动标记写进去、老记录不会被误标）；`ChatPage.test.tsx` 209 例；web 全量 **6744 例全绿**；typecheck 通过。",
+      "**留白。** `manual` 只用于文案，不影响压缩逻辑；老记录没有这个字段，按「自动」显示。"
+    ]
+  },
+  {
     "version": "d.397.4.134.14",
     "date": "2026-11-19",
     "title": "最近请求能只看没成的",

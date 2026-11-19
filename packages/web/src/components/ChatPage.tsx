@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -4842,6 +4842,9 @@ export function ChatPage({
     if (!result.compacted) {
       return { ok: true, notice: `压缩没有更省（现在约 ${result.beforeTokens} tokens），保持原样。` };
     }
+    // d.397：手动压缩也要留一条记录——否则列表顶部那条说明不出现，
+    // 用户下一次只看到「它忘了我刚说的」，明明刚才自己压过。
+    recordContextFold(convId, result.foldedCount, Date.now(), true);
     return {
       ok: true,
       notice: `已压缩 ${result.foldedCount} 条早期消息（约 ${result.beforeTokens} → ${result.afterTokens} tokens），下一轮对话起生效。`,
@@ -6282,7 +6285,7 @@ export function ChatPage({
             className="mb-3 rounded-lg border border-line-soft bg-subtle/40 px-3 py-2 text-ui-xs text-muted"
           >
             <summary className="cursor-pointer select-none">
-              这轮发送时，更早的 {contextFold.foldedCount} 条消息折成了摘要
+              {contextFold.manual ? "你手动压缩过：更早的" : "这轮发送时，更早的"} {contextFold.foldedCount} 条消息折成了摘要
               {" · "}
               {formatFoldAgeMinutes(foldAgeMinutes(contextFold))}
             </summary>
@@ -7427,6 +7430,7 @@ export function ChatPage({
     </div>
   );
 }
+
 
 
 

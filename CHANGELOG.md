@@ -1,3 +1,19 @@
+﻿## d.397.4.135.14（2026-11-19）— 自己压的，也得留个记录
+
+**为什么做。** 手动 `/compact`（或点「现在压缩」）成功后，**没有写折叠记录**——只有自动压缩那条路径写。结果是：顶部那条「更早的 N 条消息折成了摘要」根本不会出现，用户下一次只看到「它忘了我刚说的」，明明自己刚才亲手压过。
+
+**做了什么。**
+
+| 位置 | 变化 |
+| --- | --- |
+| `agentContext/contextFold.ts` | `ContextFold` 增加可选 `manual`；`recordContextFold(conversationId, foldedCount, now, manual = false)`；`getContextFold` 原样带出 |
+| `ChatPage.tsx` 的 `runCompactCommand` | 压缩成功后补 `recordContextFold(convId, result.foldedCount, Date.now(), true)` |
+| `ChatPage.tsx` 顶部说明 | 文案按来源区分：「你手动压缩过：更早的 N 条…」/「这轮发送时，更早的 N 条…」 |
+
+**怎么验证。** `contextFold.test.ts` 11 → 12 例（手动标记写进去、老记录不会被误标）；`ChatPage.test.tsx` 209 例；web 全量 **6744 例全绿**；typecheck 通过。
+
+**留白。** `manual` 只用于文案，不影响压缩逻辑；老记录没有这个字段，按「自动」显示。
+
 ## d.397.4.134.14（2026-11-19）— 最近请求能只看没成的
 
 ### 为什么做
@@ -17020,5 +17036,6 @@ vitest 写 SSR 缓存会 EPERM，导致 shared 包「72 用例全过但退出码
 - 工具调用暂无「每次调用前确认」；高风险工具需自行把控授权
 - 思考过程依赖模型能力（DeepSeek 系、部分网关），不支持的模型不显示该区块
 - 浏览器端不支持语音/视频通话（桌面端限定）
+
 
 

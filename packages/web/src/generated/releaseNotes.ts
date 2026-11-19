@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.397.4.135.14",
+    "date": "2026-11-19",
+    "title": "自己压的，也得留个记录",
+    "bullets": [
+      "手动压缩之后，消息列表顶部也会出现「你手动压缩过：更早的 N 条消息折成了摘要」。",
+      "之前只有自动压缩才留记录，手动压完像什么都没发生。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.397.4.134.14",
     "date": "2026-11-19",
     "title": "最近请求能只看没成的",

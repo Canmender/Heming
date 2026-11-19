@@ -125,3 +125,11 @@ describe("上下文折叠记录（d.217）", () => {
     expect(formatFoldAgeMinutes(60 * 25)).toBe("1 天前");
   });
 });
+
+  it("手动压缩的记录会被标出来，重开也还是手动（d.397）", () => {
+    recordContextFold("c1", 9, 1_000, true);
+    expect(getContextFold("c1")?.manual).toBe(true);
+    // 不写 manual 的老记录不会被误标
+    recordContextFold("c2", 3, 1_000);
+    expect(getContextFold("c2")?.manual).toBeUndefined();
+  });

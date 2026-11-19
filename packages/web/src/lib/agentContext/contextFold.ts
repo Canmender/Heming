@@ -18,6 +18,8 @@ export interface ContextFold {
   foldedCount: number;
   /** 发生时间（毫秒时间戳）。 */
   at: number;
+  /** 是不是用户手动压的（d.397）：文案要分清「这轮自动折的」与「你自己点的」。 */
+  manual?: boolean;
 }
 
 export const CONTEXT_FOLD_KEY = "heming.contextFold.v1";
@@ -80,11 +82,20 @@ function persist(): void {
 }
 
 /** 记一次折叠。`foldedCount <= 0` 视为没折叠（不覆盖上一次的真实记录）。 */
-export function recordContextFold(conversationId: string, foldedCount: number, now = Date.now()): void {
+export function recordContextFold(
+  conversationId: string,
+  foldedCount: number,
+  now = Date.now(),
+  manual = false,
+): void {
   if (!conversationId) return;
   if (!Number.isFinite(foldedCount) || foldedCount <= 0) return;
   load();
-  store.set(conversationId, { foldedCount: Math.trunc(foldedCount), at: now });
+  store.set(conversationId, {
+    foldedCount: Math.trunc(foldedCount),
+    at: now,
+    ...(manual ? { manual: true } : {}),
+  });
   persist();
 }
 
@@ -93,7 +104,13 @@ export function getContextFold(conversationId: string): ContextFold | null {
   if (!conversationId) return null;
   load();
   const fold = store.get(conversationId);
-  return fold ? { foldedCount: fold.foldedCount, at: fold.at } : null;
+  return fold
+    ? {
+        foldedCount: fold.foldedCount,
+        at: fold.at,
+        ...(fold.manual ? { manual: true } : {}),
+      }
+    : null;
 }
 
 export function clearContextFold(conversationId?: string): void {
@@ -141,3 +158,5 @@ export function formatFoldAgeMinutes(minutes: number): string {
   if (hours < 24) return `${hours} 小时前`;
   return `${Math.floor(hours / 24)} 天前`;
 }
+
+
