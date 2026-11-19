@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.368.4.130.14",
+    "date": "2026-11-19",
+    "title": "自定义请求头能一次填好几个：一行一个，留空就删",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 来源的「请求（请求头 / 耐心 / 错误处理）」里原来只有一对「请求头名称 + 请求头值」两个单行框。想加第二个头要保存一次、再清空重填；想删掉某个头根本做不到。参考实现那边请求头是一张可增删的表，内核本身也支持一次给多对（`header.X-Foo=bar`，同名先删再写，**值为空就只删**）——页面没把这个能力放出来。",
+      "**做了什么。**",
+      "| 做了什么 | 在哪 || --- | --- || 「请求头名称 + 值」两个单行框换成一块多行文本框：一行一个，写成「名称: 值」 | `packages/web/src/components/ModelPage.tsx` 来源行的「请求」 || 值留空就是删掉这个头（跟内核 `header.X=` 的语义一致） | 同上 || 翻译抽成纯函数：认半角/全角冒号与等号，值里可以再有冒号，同名只留最后一个 | `packages/web/src/lib/magpieSourceHeaders.ts` 的 `parseHeaderLines` || 看不懂的行（缺分隔符、名字带空格）在原地列出来，其余照发 | 同上 + 页面里的红字提示 || 新 UI 基元 `TextAreaField`，与 `TextField` 共用 label / hint / error 语义 | `packages/web/src/components/ui/Field.tsx` || 测试：解析 7 例 + 页面 2 例（多行一起发 / 看不懂的列出来） | `magpieSourceHeaders.test.ts`、`ModelPage.test.tsx` |",
+      "**怎么验证。** `npx vitest run src/lib/magpieSourceHeaders.test.ts` 7 例全绿；`npx vitest run src/components/ModelPage.test.tsx src/components/model src/components/ui src/lib/magpieSourceHeaders.test.ts` 25 文件 / 246 例全绿（ModelPage 113 → 115 例）；`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** 还是「填什么发什么」：已经设过的头读不回来（`provider show` 的那些行还没接进来源行数据），所以改一个头要重填整行；也没做「这个头是不是某个厂商的专用头」的提示。删除同样要自己写一行「名称:」（留空值）。"
+    ]
+  },
+  {
     "version": "d.367.4.130.14",
     "date": "2026-11-19",
     "title": "会话也能导成 JSON 了",

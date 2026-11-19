@@ -6428,6 +6428,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 已知取舍：JSON 里没有附件字节、没有逐条 usage；要按轮统计得自己从 `createdAt` 分。
 
 
+- **自定义请求头能一次填好几个（d.368）**：★ 来源「请求」里原来只有一对「名称 + 值」单行框，加第二个头要先保存再清空重填、删头根本做不到——现在是一块多行文本框，一行一个「名称: 值」，值留空＝删掉这个头；★ 翻译抽成 `packages/web/src/lib/magpieSourceHeaders.ts` 的 `parseHeaderLines`（认半角/全角冒号与等号、值里可再有冒号、同名只留最后一个、看不懂的行原地列出其余照发），顺带新增 UI 基元 `TextAreaField`（`packages/web/src/components/ui/Field.tsx`）；★ 测试：解析 7 例 + 页面 2 例（113 → 115），定向 25 文件 246 例全绿、typecheck 通过；★ 留白：已设过的头读不回来（`provider show` 的字段还没接进来源行数据），改一个头要重填整行。
+
 ## 7. 快速上手命令
 
 ```bash
