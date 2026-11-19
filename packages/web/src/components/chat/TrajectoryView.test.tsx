@@ -246,3 +246,24 @@ describe("TrajectoryView · 工具栏（d.351）", () => {
   });
 
 
+
+  it("只看没成的步：点「失败 N」筛出被拒/报错的行（d.404）", () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          message({
+            id: "a1",
+            payload: { text: "做完了" },
+            tools: [
+              { id: "t1", name: "read_file", args: "{}", status: "ok", result: "好", startedAt: 1, endedAt: 2 },
+              { id: "t2", name: "run_shell", args: "{}", status: "error", result: "炸了", startedAt: 3, endedAt: 4 },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<TrajectoryView progress={progress({ hasData: false })} conversationId="c1" />);
+    expect(screen.getByRole("button", { name: "失败 1" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "失败 1" }));
+    expect(screen.getByTestId("trajectory-filter-count")).toHaveTextContent("1 / 3 步");
+  });

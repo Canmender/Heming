@@ -12,6 +12,18 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.405.4.138.14",
+    "date": "2026-11-19",
+    "title": "轨迹页：只看没成的那几步",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 一轮跑十几步，排查「为什么慢/为什么错」时要在一屏正常步骤里翻那一两行报错。搜索能找关键词，但你不知道关键词是什么。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 工具栏 | 新增「失败 N」chip（\\\u0007ria-pressed\\），\\N\\ 是 \\error\\/\\denied\\ 的步数；0 时禁用并写明「这段对话里没有被拒或报错的步骤」 || 过滤逻辑 | \\matched\\ 同时管关键词与失败筛选；\\\filtering\\ 计入该状态，命中时顶部显示「x / y 步」 |",
+      "**怎么验证。** \\TrajectoryView.test.tsx\\ 11 → 12 例（两条工具、一条 error → 点「失败 1」后计数为「1 / 3 步」）；typecheck 通过。"
+    ]
+  },
+  {
     "version": "d.404.4.138.14",
     "date": "2026-11-19",
     "title": "网络代理也能在页面里设了",

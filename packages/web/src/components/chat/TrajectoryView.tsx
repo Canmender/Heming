@@ -3,6 +3,7 @@ import type { ConversationProgress, ProgressStep, ProgressStepKind, ProgressStep
 import { transcriptOf, useChatStore, type ToolTrace } from "../../store/chat.js";
 import type { Message } from "@heming/shared";
 import { STEP_TONES, formatDuration } from "../progress/status.js";
+import { FOCUS_RING_TIGHT } from "../../lib/a11y/focus.js";
 import { formatSeconds } from "../../lib/agentRuntime/turnProgress.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { WorkflowIcon } from "../icons.js";
@@ -276,6 +277,8 @@ export function TrajectoryView({
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(new Set());
   const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
   const [equal, setEqual] = useState(false);
+  /** d.404：只看没成的步——排查「这轮为什么慢/为什么错」时，正常步都是噪音。 */
+  const [onlyFailed, setOnlyFailed] = useState(false);
   const [openRow, setOpenRow] = useState<string | null>(null);
 
   const live = progress.hasData ? progress : null;
@@ -303,20 +306,21 @@ export function TrajectoryView({
     return turns
       .map((turn) => {
         if (selectedTurn !== null && turn.index !== selectedTurn) return null;
-        const steps = needle
-          ? turn.steps.filter((row) =>
-              [row.label, row.detail ?? "", row.args ?? "", row.result ?? "", row.text ?? ""]
-                .join("\n")
-                .toLowerCase()
-                .includes(needle),
-            )
-          : turn.steps;
+        const matched = (row: LedgerRow) =>
+          (!onlyFailed || row.status === "error" || row.status === "denied") &&
+          (!needle ||
+            [row.label, row.detail ?? "", row.args ?? "", row.result ?? "", row.text ?? ""]
+              .join("\n")
+              .toLowerCase()
+              .includes(needle));
+        const steps = needle || onlyFailed ? turn.steps.filter(matched) : turn.steps;
         return steps.length > 0 ? { ...turn, steps } : null;
       })
       .filter((turn): turn is LedgerTurn => turn !== null);
-  }, [turns, needle, selectedTurn]);
+  }, [turns, needle, selectedTurn, onlyFailed]);
 
-  const filtering = needle.length > 0 || selectedTurn !== null;
+  const failedSteps = allSteps.filter((row) => row.status === "error" || row.status === "denied").length;
+  const filtering = needle.length > 0 || selectedTurn !== null || onlyFailed;
   const visibleCount = visibleTurns.reduce((sum, turn) => sum + turn.steps.length, 0);
 
   if (turns.length === 0) {
@@ -356,6 +360,16 @@ export function TrajectoryView({
           placeholder="搜索步骤、工具、参数或结果"
           className="ui-input h-8 w-64 text-ui-sm"
         />
+        <button
+          type="button"
+          aria-pressed={onlyFailed}
+          onClick={() => setOnlyFailed((value) => !value)}
+          disabled={failedSteps === 0}
+          title={failedSteps === 0 ? "这段对话里没有被拒或报错的步骤" : "只看没成的步骤"}
+          className={`ui-chip h-7 disabled:opacity-50 ${FOCUS_RING_TIGHT}`}
+        >
+          失败 {failedSteps}
+        </button>
         <button
           type="button"
           aria-pressed={collapsed.size > 0 && visibleTurns.every((turn) => collapsed.has(turn.index))}
@@ -523,6 +537,8 @@ export function TrajectoryView({
     </section>
   );
 }
+
+
 
 
 

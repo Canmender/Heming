@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.405.4.138.14",
+    "date": "2026-11-19",
+    "title": "轨迹页：只看没成的那几步",
+    "bullets": [
+      "轨迹页工具栏多了一个「失败 N」，点了就只看被拒或报错的步骤。",
+      "没有失败时它是灰的，并说明「这段对话里没有被拒或报错的步骤」。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.404.4.138.14",
     "date": "2026-11-19",
     "title": "网络代理也能在页面里设了",
