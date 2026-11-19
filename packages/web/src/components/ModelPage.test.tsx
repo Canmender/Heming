@@ -1698,7 +1698,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
 
     fireEvent.change(screen.getByLabelText("来源分发策略"), { target: { value: "rotate" } });
     fireEvent.change(screen.getByLabelText("错误处理"), { target: { value: "pass" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
     await waitFor(() =>
       expect(calls).toContainEqual(["provider", "set", "mock", "routing=rotate", "errors=pass"]),
     );
@@ -1714,7 +1714,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     fireEvent.change(screen.getByLabelText("自定义请求头"), {
       target: { value: "X-Trace: abc\nX-Old:" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
     await waitFor(() =>
       expect(calls).toContainEqual([
         "provider",
@@ -1737,13 +1737,13 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
       target: { value: "X-Trace: abc\n这不是头" },
     });
     expect(screen.getByText(/这几行看不懂/)).toHaveTextContent("这不是头");
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
     await waitFor(() =>
       expect(calls).toContainEqual(["provider", "set", "mock", "header.X-Trace=abc"]),
     );
   });
 
-  it("来源高级里的可选设置收在一处：请求、调流、清单、它是什么", async () => {
+  it("来源高级里的可选设置收在一处：请求、调流、清单、它是什么、端的小开关", async () => {
     installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
@@ -1751,16 +1751,17 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     fireEvent.click(screen.getByRole("button", { name: "高级" }));
 
     const parent = screen
-      .getByText("更多设置（可选）：请求、调流、清单、它是什么")
+      .getByText("更多设置（可选）：请求、调流、清单、它是什么、端的小开关")
       .closest("details");
     expect(parent).not.toBeNull();
-    // 默认是收着的：四块不再各占一屏，先看见这一行。
+    // 默认是收着的：几块不再各占一屏，先看见这一行。
     expect(parent).not.toHaveAttribute("open");
     for (const label of [
       "请求（请求头 / 耐心 / 错误处理）",
       "调流（可选）：并发、排队、休息",
       "模型清单（可选）：列不列、什么时候刷、新模型怎么收",
       "它是什么（可选）：算不算免费、上下文多大、原文发不发",
+      "端的小开关（可选）：搜索、压缩、User-Agent",
     ]) {
       expect(parent).toContainElement(screen.getByText(label));
     }
@@ -1855,6 +1856,25 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls.some((call) => call[0] === "provider" && call[1] === "refresh-every")).toBe(false);
   });
 
+  it("端的小开关：没选就不发，选了就合成一条 provider set", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("端的小开关（可选）：搜索、压缩、User-Agent"));
+
+    // 三格都是「不改」时不给按。
+    expect(screen.getByRole("button", { name: "保存这几项" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("网页搜索由谁做"), { target: { value: "yes" } });
+    fireEvent.change(screen.getByLabelText("上下文压缩由谁做"), { target: { value: "native" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存这几项" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "set", "mock", "search=yes", "compaction=native"]),
+    );
+  });
   it("它是什么：四项合成一条 provider set，看不懂的窗口不发", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
@@ -1920,7 +1940,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     fireEvent.click(screen.getByRole("button", { name: "拉下来改" }));
     const input = screen.getByLabelText("自定义请求头") as HTMLTextAreaElement;
     expect(input.value).toBe("X-Trace: abc");
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
     await waitFor(() =>
       expect(calls).toContainEqual(["provider", "set", "mock", "header.X-Trace=abc"]),
     );
@@ -1935,7 +1955,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     fireEvent.change(screen.getByLabelText("来源分发策略"), { target: { value: "rotate" } });
     fireEvent.change(screen.getByLabelText("错误处理"), { target: { value: "pass" } });
     calls.length = 0;
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
 
     await waitFor(() =>
       expect(calls).toContainEqual(["provider", "set", "mock", "routing=rotate", "errors=pass"]),

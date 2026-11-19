@@ -28,10 +28,16 @@ export interface SourceShowFlags {
   refreshEvery: string;
   /** `include claude-* gpt-4o*` → 规则列表；没设是空数组。 */
   autoInclude: string[];
+  /** `search by itself` → 网页搜索由来源自己搜；没这一行就是按客户端的发。 */
+  searches: boolean;
+  /** `compaction native` → Codex 的压缩原样交给来源；没这一行就是和鸣压。 */
+  nativeCompaction: boolean;
+  /** `user-agent magpie's` → 请求带和鸣自己的 UA；没这一行就是智能体的。 */
+  magpieUserAgent: boolean;
 }
 
 /** 键与值之间的分隔；键名被 pad 到十格，所以按「至少一个空白」切。 */
-const LINE = /^\s*(unmasked|free|header|refresh|include)\s+(.+)$/;
+const LINE = /^\s*(unmasked|free|header|refresh|include|search|compaction|user-agent)\s+(.+)$/;
 
 /** 值的灰字说明用两个空格接在后面：取第一段就是真正的值。 */
 function head(value: string): string {
@@ -45,6 +51,9 @@ export function parseSourceShow(showText: string): SourceShowFlags {
     unmasked: false,
     refreshEvery: "",
     autoInclude: [],
+    searches: false,
+    nativeCompaction: false,
+    magpieUserAgent: false,
   };
 
   for (const raw of showText.replace(/\r/g, "").split("\n")) {
@@ -80,6 +89,20 @@ export function parseSourceShow(showText: string): SourceShowFlags {
     }
     if (key === "include") {
       flags.autoInclude = head(rest).split(/\s+/).filter(Boolean);
+      continue;
+    }
+    if (key === "search") {
+      // `search by itself  a client's web search goes to it as sent`
+      flags.searches = head(rest).toLowerCase().startsWith("by itself");
+      continue;
+    }
+    if (key === "compaction") {
+      flags.nativeCompaction = head(rest).toLowerCase() === "native";
+      continue;
+    }
+    if (key === "user-agent") {
+      // `user-agent magpie's  not the one the agent gave`
+      flags.magpieUserAgent = head(rest).toLowerCase().startsWith("magpie");
     }
   }
 
@@ -105,6 +128,9 @@ export function describeShowFlags(flags: SourceShowFlags): string {
   if (flags.unmasked) parts.push("原文照发");
   if (flags.refreshEvery) parts.push(`每 ${flags.refreshEvery} 刷清单`);
   if (flags.autoInclude.length > 0) parts.push(`自动收 ${flags.autoInclude.join(" ")}`);
+  if (flags.searches) parts.push("搜索由来源做");
+  if (flags.nativeCompaction) parts.push("压缩交给来源");
+  if (flags.magpieUserAgent) parts.push("带和鸣的 UA");
   return parts.join("；");
 }
 

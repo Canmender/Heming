@@ -148,6 +148,11 @@ import {
   type SourceProfileKey,
 } from "../lib/magpieSourceProfile.js";
 import {
+  SOURCE_WIRE_FIELDS,
+  sourceWireCommand,
+  type SourceWireKey,
+} from "../lib/magpieSourceWire.js";
+import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   checkinFailed,
@@ -578,6 +583,9 @@ export function ModelPage() {
     context: "",
     family: "",
     unmasked: "",
+    userAgent: "",
+    search: "",
+    compaction: "",
   });
   /** 调流那几格各写各的：留空就是「这次不改」，不是「改回默认」。 */
   const tuneSetters: Record<SourceTuneKey, (value: string) => void> = {
@@ -599,6 +607,12 @@ export function ModelPage() {
     context: (value) => setProviderForm({ ...providerForm, context: value }),
     family: (value) => setProviderForm({ ...providerForm, family: value }),
     unmasked: (value) => setProviderForm({ ...providerForm, unmasked: value }),
+  };
+  /** 端的小开关：搜索、压缩、User-Agent，同样是「不选就不改」。 */
+  const wireSetters: Record<SourceWireKey, (value: string) => void> = {
+    userAgent: (value) => setProviderForm({ ...providerForm, userAgent: value }),
+    search: (value) => setProviderForm({ ...providerForm, search: value }),
+    compaction: (value) => setProviderForm({ ...providerForm, compaction: value }),
   };
   /** 每个来源「添加模型」输入框里的内容。 */
   const [modelAdd, setModelAdd] = useState<Record<string, string>>({});
@@ -2571,6 +2585,12 @@ export function ModelPage() {
                   const profileCommand = sourceProfileCommand(row.id, profileValues);
                   const profileRejected = sourceProfileRejected(profileValues);
                   const requestHeaders = parseHeaderLines(providerForm.headerText);
+                  const wireValues = {
+                    userAgent: providerForm.userAgent,
+                    search: providerForm.search,
+                    compaction: providerForm.compaction,
+                  };
+                  const wireCommand = sourceWireCommand(row.id, wireValues);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2901,10 +2921,10 @@ export function ModelPage() {
 
                           <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
                             <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              更多设置（可选）：请求、调流、清单、它是什么
+                              更多设置（可选）：请求、调流、清单、它是什么、端的小开关
                             </summary>
                             <p className="mt-1 ui-caption">
-                              这四块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
+                              这几块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
                             </p>
                             {info?.flags && describeShowFlags(info.flags) && (
                               <p className="mt-1 ui-caption">现在设着：{describeShowFlags(info.flags)}</p>
@@ -2967,6 +2987,25 @@ export function ModelPage() {
                                     <option value="pass">原样透传</option>
                                   </select>
                                 </label>
+                              </div>
+                              <div className="mt-2">
+                                <Button
+                                  type="button"
+                                  size="sm" variant="primary"
+                                  disabled={!cli}
+                                  onClick={() => {
+                                    const pairs: string[] = [];
+                                    if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
+                                    if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
+                                    if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
+                                    if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
+                                    pairs.push(...requestHeaders.pairs);
+                                    if (!pairs.length) return;
+                                    void run("保存请求设置", ["provider", "set", row.id, ...pairs], { refresh: true });
+                                  }}
+                                >
+                                  保存请求设置
+                                </Button>
                               </div>
                             </div>
                           </details>
@@ -3147,27 +3186,56 @@ export function ModelPage() {
                               保存这些设置
                             </Button>
                           </details>
-                          </details>
 
-                          <div className="mt-3 flex flex-wrap gap-2">
+                          <details className="ui-disclosure mt-2">
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                              端的小开关（可选）：搜索、压缩、User-Agent
+                            </summary>
+                            <p className="mt-1 ui-caption">
+                              只在某个端或某个中转上有区别时才动：设过的话，下面写着现在是什么。
+                            </p>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                              {SOURCE_WIRE_FIELDS.map((field) => (
+                                <label key={field.key} className="grid gap-1">
+                                  <span className="ui-caption">{field.label}</span>
+                                  <select
+                                    className="ui-input"
+                                    aria-label={field.label}
+                                    value={providerForm[field.key]}
+                                    onChange={(event) => wireSetters[field.key](event.target.value)}
+                                  >
+                                    <option value="">不改</option>
+                                    {field.options.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <span className="ui-caption">{field.hint}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {info?.flags && (
+                              <p className="mt-2 ui-caption">
+                                现在：{info.flags.magpieUserAgent ? "和鸣自己的 UA" : "智能体自己的 UA"}
+                                {info.flags.searches ? " · 搜索由来源做" : ""}
+                                {info.flags.nativeCompaction ? " · 压缩交给来源" : ""}
+                              </p>
+                            )}
                             <Button
                               type="button"
-                              size="sm" variant="primary"
-                              disabled={!cli}
+                              size="sm" variant="ghost" className="mt-2"
+                              disabled={!cli || wireCommand === null}
                               onClick={() => {
-                                const pairs: string[] = [];
-                                if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
-                                if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
-                                if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
-                                if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
-                                pairs.push(...requestHeaders.pairs);
-                                if (!pairs.length) return;
-                                void run("保存来源设置", ["provider", "set", row.id, ...pairs], { refresh: true });
+                                if (!wireCommand) return;
+                                void run(`端开关 ${row.id}`, wireCommand, { refresh: true });
                               }}
                             >
-                              保存设置
+                              保存这几项
                             </Button>
-                          </div>
+                          </details>
+                          </details>
+
                         </div>
                       )}
                     </li>

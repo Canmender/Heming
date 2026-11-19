@@ -46,6 +46,21 @@ describe("读回来源现状", () => {
     ]);
   });
 
+  it("搜索、压缩、User-Agent 这三行也读得出来", () => {
+    const flags = parseSourceShow(
+      [
+        "  chat       https://x",
+        "  search     by itself  a client's web search goes to it as sent",
+        "  compaction native  Codex's own, sealed by the key or account that answers it",
+        "  user-agent magpie's  not the one the agent gave",
+      ].join("\n"),
+    );
+    expect(flags.searches).toBe(true);
+    expect(flags.nativeCompaction).toBe(true);
+    expect(flags.magpieUserAgent).toBe(true);
+    expect(parseSourceShow("  chat  https://x  ").searches).toBe(false);
+  });
+
   it("还原成多行文本时一行一个", () => {
     expect(headersToText([{ name: "X-A", value: "1" }, { name: "X-B", value: "" }])).toBe(
       "X-A: 1\nX-B: ",
@@ -60,6 +75,9 @@ describe("读回来源现状", () => {
         unmasked: false,
         refreshEvery: "6h",
         autoInclude: ["claude-*"],
+        searches: false,
+        nativeCompaction: false,
+        magpieUserAgent: false,
       }),
     ).toBe("请求头 X-Trace；算免费；每 6h 刷清单；自动收 claude-*");
     expect(
@@ -69,6 +87,9 @@ describe("读回来源现状", () => {
         unmasked: false,
         refreshEvery: "",
         autoInclude: [],
+        searches: false,
+        nativeCompaction: false,
+        magpieUserAgent: false,
       }),
     ).toBe("");
   });

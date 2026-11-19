@@ -187,6 +187,26 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 收的边界：`listed no`（退出智能体清单、只经分组服务）是另一件事，仍在「模型清单」那组里；
   这里只管整家开/关。
 
+### 3.6 端的小开关：搜索、压缩、User-Agent
+
+同样是「来源自己知道怎么接」的三件事，内核都支持、`provider show` 又都读得回来，所以页面既写也读：
+
+| 内核能力 | 页面行为 | 命令 |
+| --- | --- | --- |
+| 网页搜索由来源自己做（挂中转时） | 下拉「网页搜索由谁做」：by itself / 照客户端发的 | `provider set <id> search=yes\|no` |
+| 上下文压缩交给来源（如 Codex 自己的） | 下拉「上下文压缩由谁做」：native / 由和鸣压 | `provider set <id> compaction=native\|magpie` |
+| 请求带谁的 User-Agent | 下拉「请求带谁的 User-Agent」：智能体自己的 / 和鸣自己的 | `provider set <id> user-agent=agent\|magpie` |
+
+- 参数生成在 `packages/web/src/lib/magpieSourceWire.ts`（`SOURCE_WIRE_FIELDS` / `sourceWirePairs` /
+  `sourceWireCommand`），测试在 `magpieSourceWire.test.ts`：三项**合成一条** `provider set`，
+  顺序 userAgent → search → compaction，值不在选项里的不发，没来源 id 就返回 `null`。
+- 现状从 `provider show` 读：`magpieSourceShow.ts` 的 `LINE` 也认 `search` / `compaction` / `user-agent`
+  三行，`describeShowFlags` 追加「搜索由来源做」「压缩交给来源」「带和鸣的 UA」；这三行**只在真设过时
+  才出现**，没出现就是默认（照客户端发的 / 由和鸣压 / 智能体自己的 UA），所以「不改」确实是「这次不动」。
+- 折叠里还写一句「现在：…UA · 搜索由来源做 · 压缩交给来源」，读的是同一份 show 缓存，不多发命令。
+- 收的边界：`prompt=`（Antigravity 订阅原样发系统提示）、`additional-tools=` 是端专属且 show 读不回来，
+  仍留命令行；订阅账号带 `user-agent=agent` 内核会报错（它本来就用自己的客户端），页面不做预判，让内核说。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
