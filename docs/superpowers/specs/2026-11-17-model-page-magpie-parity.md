@@ -294,6 +294,25 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - **不筛**「已添加的来源」与「订阅账号」：那是每天要点的东西，藏起来会让人以为被删了。
 - 筛空的时候各排自己说一句「服务商里没有对得上「x」的；清掉搜索词就都回来」——不静默留白。
 
+### 3.12 云同步：几台电脑用同一份设置
+
+以前运行分区里是一个「多机同步」表单——选类型、选动作、填参数、点执行，等于把三条命令
+原样摊在页面上，而且看不出「现在到底开着吗、上次同步成没成」。d.392 换成一张卡片
+（`packages/web/src/components/model/CloudSyncCard.tsx` + `packages/web/src/lib/magpieSync.ts`）：
+
+| 内核能力 | 页面行为 | 命令 |
+| --- | --- | --- |
+| 看现状 | 卡片一进就念一遍，说成一句话 | `magpie webdav` |
+| 立刻同步一次 | 「现在同步一次」（同步中按钮变「正在同步…」） | `magpie webdav now` |
+| 自己隔多久同步 | 下拉（不改 / 只手动 / 3 / 15 / 30 / 60 分钟） | `magpie webdav auto <分钟\|off>` |
+| 开 / 关 | 开要输密码或令牌，交给终端；关只发 `off`，服务器上的文件留着 | `magpie webdav on <地址>`、`magpie webdav off` |
+
+- 三种通道同一套语义，内核的抬头会说是哪一种（`WebDAV sync` / `S3 sync` / `GitHub sync`），
+  页面按抬头认（`parseSyncStatus`），不按用户下拉猜。
+- **`set` 不进页面**：换「同步哪些东西」（`keys=` / `agents=` / `library=` / `usage=` / `sign-ins=`）
+  仍是低频细项，留在「高级命令」里跑——进了卡片就会再多四个勾选框，与「简化」相反。
+- 读不出来的部分不编：`auto` 没读到就不说「多久一次」；没开就说「云同步没开」。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 

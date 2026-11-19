@@ -22,6 +22,7 @@ import { Stat } from "./ui/Stat.js";
 import { TextAreaField, TextField } from "./ui/Field.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
+import { CloudSyncCard } from "./model/CloudSyncCard.js";
 import { Avatar } from "./model/Avatar.js";
 import { ModelCatalogPanel } from "./model/ModelCatalogPanel.js";
 import { SubscriptionRow } from "./model/SubscriptionRow.js";
@@ -283,21 +284,6 @@ const ROUTING_LABEL: Record<string, string> = {
   cheap: "优先便宜",
   drain: "先耗完再切换",
   expiring: "先到期先用",
-};
-
-/** 同步通道：webdav / s3 / github。 */
-const SYNC_KIND_LABEL: Record<string, string> = {
-  webdav: "WebDAV 网盘",
-  s3: "S3 / 对象存储",
-  github: "GitHub 仓库",
-};
-
-/** 同步动作：now / on / off / set。 */
-const SYNC_COMMAND_LABEL: Record<string, string> = {
-  now: "立即同步一次",
-  on: "开启自动同步",
-  off: "关闭自动同步",
-  set: "写入配置项",
 };
 
 /** 账号排名那句的色调：最紧的已经见底就红，偏紧就黄，都还宽裕就不额外强调。 */
@@ -638,9 +624,6 @@ export function ModelPage() {
     time: "",
     intent: "",
   });
-  const [syncKind, setSyncKind] = useState("webdav");
-  const [syncCommand, setSyncCommand] = useState("now");
-  const [syncValues, setSyncValues] = useState("");
   const [searchForm, setSearchForm] = useState({ api: "", key: "", target: "" });
   const [termCommand, setTermCommand] = useState("");
   /** 网关密钥（共享给其他设备/CI 用）的输入。 */
@@ -4045,51 +4028,7 @@ export function ModelPage() {
 
             <BackupPanel />
 
-            <details className="ui-disclosure ui-card p-4">
-              <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <label className="grid gap-1">
-                  <span className="ui-caption">同步类型</span>
-                  <select className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
-                    {["webdav", "s3", "github"].map((kind) => (
-                      <option key={kind} value={kind}>
-                        {SYNC_KIND_LABEL[kind] ?? kind}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1">
-                  <span className="ui-caption">同步动作</span>
-                  <select className="ui-input" value={syncCommand} onChange={(event) => setSyncCommand(event.target.value)}>
-                    {["now", "on", "off", "set"].map((command) => (
-                      <option key={command} value={command}>
-                        {SYNC_COMMAND_LABEL[command] ?? command}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <TextField
-                  label="同步参数"
-                  placeholder="写入配置时：key=value key2=value2"
-                  value={syncValues}
-                  onChange={(event) => setSyncValues(event.target.value)}
-                />
-              </div>
-              <Button
-                type="button"
-                size="sm" variant="primary" className="mt-2"
-                disabled={!cli}
-                onClick={() =>
-                  void run(`${syncKind} ${syncCommand}`, [
-                    syncKind,
-                    syncCommand,
-                    ...syncValues.trim().split(/\s+/).filter(Boolean),
-                  ])
-                }
-              >
-                执行
-              </Button>
-            </details>
+            <CloudSyncCard />
 
             <details className="ui-disclosure ui-card p-4">
               <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
