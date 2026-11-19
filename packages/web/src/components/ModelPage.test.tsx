@@ -1671,6 +1671,45 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     );
   });
 
+  it("自定义请求头：一行一个，值留空就是删掉这个头", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+
+    fireEvent.change(screen.getByLabelText("自定义请求头"), {
+      target: { value: "X-Trace: abc\nX-Old:" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "provider",
+        "set",
+        "mock",
+        "header.X-Trace=abc",
+        "header.X-Old=",
+      ]),
+    );
+  });
+
+  it("自定义请求头：看不懂的那行点出来，看得懂的照发", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+
+    fireEvent.change(screen.getByLabelText("自定义请求头"), {
+      target: { value: "X-Trace: abc\n这不是头" },
+    });
+    expect(screen.getByText(/这几行看不懂/)).toHaveTextContent("这不是头");
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "set", "mock", "header.X-Trace=abc"]),
+    );
+  });
+
   it("来源高级里的可选设置收在一处：请求、调流、清单、它是什么", async () => {
     installBridge();
     render(<ModelPage />);

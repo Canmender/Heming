@@ -19,7 +19,7 @@ import { EmptyState } from "./ui/EmptyState.js";
 import { IconButton } from "./ui/IconButton.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
 import { Stat } from "./ui/Stat.js";
-import { TextField } from "./ui/Field.js";
+import { TextAreaField, TextField } from "./ui/Field.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
 import { Avatar } from "./model/Avatar.js";
@@ -116,6 +116,7 @@ import {
   usageAlertText,
 } from "../lib/magpieReminder.js";
 import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
+import { parseHeaderLines } from "../lib/magpieSourceHeaders.js";
 import {
   GROUP_SETTING_FIELDS,
   GROUP_TEMPLATES,
@@ -553,8 +554,7 @@ export function ModelPage() {
     routing: "",
     fallback: "",
     modelsUrl: "",
-    headerName: "",
-    headerValue: "",
+    headerText: "",
     patience: "",
     errors: "",
     atOnce: "",
@@ -2560,6 +2560,7 @@ export function ModelPage() {
                   };
                   const profileCommand = sourceProfileCommand(row.id, profileValues);
                   const profileRejected = sourceProfileRejected(profileValues);
+  const requestHeaders = parseHeaderLines(providerForm.headerText);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2879,20 +2880,19 @@ export function ModelPage() {
                               请求（请求头 / 耐心 / 错误处理）
                             </summary>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <div className="flex gap-2">
-                                <TextField
-                                  label="请求头名称"
-                                  placeholder="请求头名（如 X-Trace）"
-                                  value={providerForm.headerName}
-                                  onChange={(event) => setProviderForm({ ...providerForm, headerName: event.target.value })}
-                                />
-                                <TextField
-                                  label="请求头值"
-                                  placeholder="请求头值"
-                                  value={providerForm.headerValue}
-                                  onChange={(event) => setProviderForm({ ...providerForm, headerValue: event.target.value })}
-                                />
-                              </div>
+                              <TextAreaField
+                                label="自定义请求头"
+                                hint="一行一个，写成「名称: 值」；值留空就是删掉这个头。"
+                                placeholder={"X-Trace: 一批一批来\nX-Team: data"}
+                                className="sm:col-span-2"
+                                value={providerForm.headerText}
+                                onChange={(event) => setProviderForm({ ...providerForm, headerText: event.target.value })}
+                              />
+                              {requestHeaders.rejected.length > 0 && (
+                                <p className="ui-caption text-danger sm:col-span-2">
+                                  这几行看不懂，先不发：{requestHeaders.rejected.join("、")}
+                                </p>
+                              )}
                               <div className="flex gap-2">
                                 <TextField
                                   label="请求耐心"
@@ -3105,9 +3105,7 @@ export function ModelPage() {
                                 if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
                                 if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
                                 if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
-                                if (providerForm.headerName.trim() && providerForm.headerValue.trim()) {
-                                  pairs.push(`header.${providerForm.headerName.trim()}=${providerForm.headerValue.trim()}`);
-                                }
+                                pairs.push(...requestHeaders.pairs);
                                 if (!pairs.length) return;
                                 void run("保存来源设置", ["provider", "set", row.id, ...pairs], { refresh: true });
                               }}
