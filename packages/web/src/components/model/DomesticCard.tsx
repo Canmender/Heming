@@ -5,7 +5,7 @@ import type { DomesticAgent } from "../../lib/magpieDomestic.js";
 import type { AgentQuota } from "../../lib/agentQuota.js";
 
 /**
- * 国内智能体的一张卡片（模型页 → 来源 → 订阅账号 → 国内智能体）。
+ * 国产智能体的一张卡片（模型页 → 来源 → 订阅账号 → 国产智能体）。
  *
  * 这些端的账号来自它们自己的登录态：点一下就把这份登录接进和鸣，登录过就报一共
  * 有几个账号，全都失效了才说「重新登录」——接入这一步对用户是不可见的，

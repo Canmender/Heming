@@ -3,6 +3,7 @@ import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   DOMESTIC_AGENTS,
+  DOMESTIC_GROUPS,
   DOMESTIC_KEY_NOTE,
   checkinFailed,
   checkinLine,
@@ -16,26 +17,53 @@ import {
   type CheckinEntry,
 } from "./magpieDomestic.js";
 
-/** 国内智能体端（d.280）：内核认这些端，但账号要插件才行，页面只负责说清楚。 */
+/** 国产智能体端（d.280）：内核认这些端，但账号要插件才行，页面只负责说清楚。 */
 
 function entry(patch: Partial<CheckinEntry>): CheckinEntry {
   return { user: "", vendor: "", outcome: "claimed", credit: 0, streak: 0, msg: "", ...patch };
 }
 
-describe("国内端清单", () => {
+describe("国产端清单", () => {
   it("只用内核确认过的 agent id 与插件包名", () => {
     const ids = DOMESTIC_AGENTS.map((item) => item.agent);
-    expect(ids).toEqual(["workbuddy", "workbuddy-ai", "qoder", "qoder-cn", "mimo", "zcode"]);
+    // 国内站在前、国际站在后：Trae CN 与 MiniMax Code 的包名写在 *_checkin.go 里，没有 mover
+    expect(ids).toEqual([
+      "workbuddy",
+      "qoder-cn",
+      "trae-cn",
+      "minimax-code",
+      "mimo",
+      "zcode",
+      "workbuddy-ai",
+      "qoder",
+      "minimax-code-global",
+    ]);
     for (const item of DOMESTIC_AGENTS) {
       expect(item.pkg.startsWith("@magpie-community/")).toBe(true);
       expect(item.label.length).toBeGreaterThan(0);
       expect(item.desc.length).toBeGreaterThan(0);
     }
-    // 一个包服务两个端：国际版与国内版同一套登录
-    const workbuddy = DOMESTIC_AGENTS.find((item) => item.agent === "workbuddy");
-    const workbuddyAi = DOMESTIC_AGENTS.find((item) => item.agent === "workbuddy-ai");
-    expect(workbuddy?.pkg).toBe(workbuddyAi?.pkg);
-    expect(workbuddy?.agent).not.toBe(workbuddyAi?.agent);
+    // 一个包服务两个站：国际站与国内站同一套登录
+    for (const [cn, intl] of [
+      ["workbuddy", "workbuddy-ai"],
+      ["qoder-cn", "qoder"],
+      ["minimax-code", "minimax-code-global"],
+    ] as const) {
+      const a = DOMESTIC_AGENTS.find((item) => item.agent === cn);
+      const b = DOMESTIC_AGENTS.find((item) => item.agent === intl);
+      expect(a?.pkg).toBe(b?.pkg);
+      expect(a?.site).toBe("cn");
+      expect(b?.site).toBe("intl");
+    }
+  });
+
+  it("分组只分两档，且一张卡不漏", () => {
+    expect(DOMESTIC_GROUPS.map((group) => group.title)).toEqual(["国内站", "国际站"]);
+    expect(DOMESTIC_GROUPS.flatMap((group) => group.items)).toHaveLength(DOMESTIC_AGENTS.length);
+    for (const group of DOMESTIC_GROUPS) {
+      for (const item of group.items) expect(item.site).toBe(group.site);
+      expect(group.items.length).toBeGreaterThan(0);
+    }
   });
 
   it("会封号的端都写了风险，能签到的端都标了签到", () => {
@@ -45,18 +73,26 @@ describe("国内端清单", () => {
     ]);
     expect(DOMESTIC_AGENTS.filter((item) => item.checkin).map((item) => item.agent)).toEqual([
       "workbuddy",
+      "qoder-cn",
+      "trae-cn",
+      "minimax-code",
       "workbuddy-ai",
       "qoder",
-      "qoder-cn",
+      "minimax-code-global",
     ]);
   });
 
-  it("说清哪些国内端不在账号里", () => {
-    for (const name of ["Qwen Code", "Kimi Code", "MiniMax Code"]) {
+  it("说清哪些国产端不在账号里（已能接的不再点名）", () => {
+    for (const name of ["Qwen Code", "Kimi Code"]) {
       expect(DOMESTIC_KEY_NOTE).toContain(name);
     }
-    expect(CHECKIN_VENDORS).toContain("WorkBuddy");
-    expect(CHECKIN_VENDORS).toContain("Qoder");
+    // MiniMax Code 已经有账号插件了，留在「走 Key 的端」那句话里会把人带偏
+    for (const name of ["MiniMax Code", "Trae CN", "WorkBuddy", "Qoder"]) {
+      expect(DOMESTIC_KEY_NOTE).not.toContain(name);
+    }
+    for (const name of ["WorkBuddy", "Qoder", "Trae CN", "MiniMax Code"]) {
+      expect(CHECKIN_VENDORS).toContain(name);
+    }
   });
 });
 

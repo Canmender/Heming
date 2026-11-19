@@ -125,13 +125,19 @@
   负责那一行的版式；重读额度只走页头的「重读全部」（d.320 起卡片里那个「刷新额度」已删）：
   它先按账号与 provider 逐个发 `quota refresh <vendor>`（`accounts refresh` 只续登录令牌、不重读额度），
   再走整页重读，「切到这个」走 `accounts switch <agent> <user>` 并带二次确认。
-- 国内智能体（WorkBuddy / WorkBuddy AI / Qoder / Qoder CN / MiMo Code / ZCode）走「先装插件、再登录」（d.280）：
+- 国产智能体（国内站：WorkBuddy / Qoder CN / Trae CN / MiniMax Code / MiMo Code / ZCode；
+  国际站：WorkBuddy AI / Qoder / MiniMax Code（国际））走「先装插件、再登录」（d.280、d.356）：
   内核的登录流只认 `claude`/`codex`/`copilot`/`gemini`/`antigravity`（`vendor/magpie-core/internal/provider/logins.go`
   的 `loginAgents`），国内端在 `internal/provider/migrate.go` 的 `retiredBuiltins` 里，账号由 `pluginOfAgent` 供给，
-  所以 `packages/web/src/lib/magpieDomestic.ts` 只收录 `migrate_*.go` 的 `pkg` 包名（`@magpie-community/opencode-*-auth`），
+  所以 `packages/web/src/lib/magpieDomestic.ts` 只收录内核写明的包名（`@magpie-community/opencode-*-auth`）：
+  `migrate_*.go` 里 movers 的 `pkg`，以及没有 mover、只在 `internal/provider/trae_checkin.go`、
+  `internal/provider/minimax_checkin.go` 里写明插件包的 Trae CN（`trae-cn`）与 MiniMax Code（`minimax-code`、
+  `minimax-code-global`）。不猜名字——猜错会被当成 npm 上的同名包装进来。
   卡片先 `plugin add <包名>` 再 `accounts add <agent>`，装没装以 `plugin list --json` 的 `providers[].id` 为准；
   「今日签到」走 `accounts checkin --json`（WorkBuddy/Qoder/Trae CN/MiniMax Code 与插件的 `auth.checkin`）；
   点数窗口（`windows[].amount`/`limit`/`unit: credits`）按点数说「剩 7,000 点」，不再只说百分比。
+  9 张卡按 `DOMESTIC_GROUPS` 分「国内站 / 国际站」两组列，同一个包服务的两个站因此不会混在一排里；
+  Trae 在 `internal/agent` 里没有 Agent 条目，所以它不做「本机已装」检测，MiniMax Code 有（`mcode`）。
 - 首屏只读「模型 / 智能体」要用的四路（`providers`/`ls`/`models disabled`/`visible`）加账号与设置；
   「来源」专用的五路（`quota --json`、`quota history`、`quota auto-reset`（两条）、`plugin list --json`、
   `accounts discovery`）等真正切到「来源」分区才读一次（`sourcesWarm`，页头「重读全部」会把它置真），

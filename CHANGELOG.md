@@ -1,3 +1,44 @@
+## d.356.4.128.12（2026-11-19）— 国产智能体把能接的都接上：Trae CN 与 MiniMax Code 不再是空话
+
+### 为什么做
+
+模型页「来源」里那组卡片的说明一直写着「自动签到覆盖 WorkBuddy、Qoder、Trae CN、MiniMax Code」，
+可卡片只有六张：WorkBuddy、WorkBuddy AI、Qoder、Qoder CN、MiMo Code、ZCode。
+**Trae CN 与 MiniMax Code 被点了名，却点不了「接入」**——用户看到的是承诺，伸手却是空的。
+
+原因不是内核不支持：`internal/provider/trae_checkin.go` 里写着 `TraeCNID = "trae-cn"`、
+包名 `@magpie-community/opencode-trae-auth`，`minimax_checkin.go` 里写着 `MiniMaxCodeID`、
+`MiniMaxCodeGlobalID` 与包名 `@magpie-community/opencode-minimax-auth`；
+`accounts_cli.go` 的 `pluginLogin` 分支也已放行「有插件就能登录」。
+缺的只是页面这张表没收录它们——于是这次照内核已确认的清单补齐，一个都不猜。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| 三张新卡 | `magpieDomestic.ts` 的 `DOMESTIC_AGENTS` 6 → 9：新增 Trae CN（字节）、MiniMax Code（国内站）、MiniMax Code（国际） |
+| 包名只抄内核 | 新卡的 `pkg` 取自内核签到实现里写明的插件包，不按名字猜 npm 上的同名包（猜错会把不相干的包装进来） |
+| 站别分组 | `DomesticAgent` 新增必填 `site: "cn" \| "intl"`，页面按 `DOMESTIC_GROUPS` 渲染成「国内站 6 张 / 国际站 3 张」两组小标题 |
+| 标题说准 | 「国内智能体」→「国产智能体」：九张里三张是国际站，原来那个标题自己就不成立 |
+| 走 Key 的另说 | `DOMESTIC_KEY_NOTE` 删掉 MiniMax Code（它现在是账号了），只留 Qwen Code、Kimi Code，并把「其他地址」改成按钮上的原话「加一个其他地址」 |
+| 本机识别 | `magpieAgents.ts` 的 `NAME_TO_ID` 补 `MiniMax Code → minimax-code`（桌面端与 `mcode` 同一条），装了就能亮「本机已装」 |
+| 风险提示不变 | 仍只有 WorkBuddy 两张卡带风险说明；新卡没有内核给出的封号先例，不硬编一句吓人的话 |
+
+### 怎么验证
+
+- `packages/web/src/lib/magpieDomestic.test.ts` 重写「国产端清单」：ids 精确等于九项、包名与站点成对（两个站共用一个包）、`DOMESTIC_GROUPS` 两档且不漏卡、能签到的七项精确、`DOMESTIC_KEY_NOTE` 含 Qwen Code/Kimi Code 且**不含** MiniMax Code
+- `packages/web/src/lib/magpieAgents.test.ts` 新增「MiniMax Code → minimax-code」
+- `packages/web/src/components/ModelPage.test.tsx`：标题断言改「国产智能体」，新增「国内站/国际站」「Trae CN」「MiniMax Code（国际）」断言
+- `npx vitest run`（packages/web）457 文件 / 6590 例全绿；`pnpm --filter @heming/web typecheck` 通过
+- 踩坑记一笔：新卡带「MiniMax Code」字样后，原测试里 `getByRole("button", { name: /MiniMax/ })` 变歧义；RTL 的可访问名是**不留空格的拼接**，得写 `/^MiniMax官方 API$/` 才唯一
+
+### 留白
+
+- Trae 在 `internal/agent` 里没有 Agent 条目（它只是个 IDE），所以 Trae CN 卡不会有「本机已装」徽标；这不是漏做，是没有可检测的东西
+- 没扩到 Qwen Code、Kimi Code、CodeBuddy、iFlow 这些走 Key / 套餐的端：它们占的是供应商，不是订阅账号，归「加一个其他地址」
+- 没有真机登录过（要真实账号）：卡片走的是同一套「装插件 → `accounts add` → `quota refresh`」路径，测试只验到参数与文案
+- 插件市场里内核还没确认的端一律不收——表里九项就是内核认得的全部
+
 ## d.355.4.128.12（2026-11-19）— 这个会话一共花了多少，输入框下面就能看到
 
 ### 为什么做

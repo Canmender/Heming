@@ -264,7 +264,8 @@ describe("ModelPage · 添加来源", () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    fireEvent.click(screen.getByRole("button", { name: /MiniMax/ }));
+    // 国产智能体里也有两张 MiniMax Code 的卡（国内站/国际站），这里点的是预设那张
+    fireEvent.click(screen.getByRole("button", { name: /^MiniMax官方 API$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Coding Plan Key" }));
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-cp-1" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -706,13 +707,18 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     );
   });
 
-  it("来源页列出国内智能体：点一下就接入并登录，两步合成一次点击", async () => {
+  it("来源页列出国产智能体：点一下就接入并登录，两步合成一次点击", async () => {
     const { bridge, calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    expect(await screen.findByText("国内智能体")).toBeInTheDocument();
+    expect(await screen.findByText("国产智能体")).toBeInTheDocument();
     expect(screen.getByText("WorkBuddy")).toBeInTheDocument();
     expect(screen.getByText("Qoder CN")).toBeInTheDocument();
+    // 同一个包的两个站分两组列：Trae CN 与 MiniMax Code 也在这张表里了
+    expect(screen.getByText("国内站")).toBeInTheDocument();
+    expect(screen.getByText("国际站")).toBeInTheDocument();
+    expect(screen.getByText("Trae CN")).toBeInTheDocument();
+    expect(screen.getByText("MiniMax Code（国际）")).toBeInTheDocument();
     // 还没接进来的端一律写「接入」：接入与登录是同一次点击里的事，不摆两步
     expect(screen.getAllByText("接入").length).toBe(DOMESTIC_AGENTS.length);
 
@@ -734,8 +740,8 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     const disclosure = summary.closest("details");
     expect(disclosure).not.toBeNull();
     expect(disclosure).not.toHaveAttribute("open");
-    // 收起不等于删掉：里面的登录卡片与国内智能体都还在，点一下就能用
-    expect(within(disclosure as HTMLElement).getByText("国内智能体")).toBeInTheDocument();
+    // 收起不等于删掉：里面的登录卡片与国产智能体都还在，点一下就能用
+    expect(within(disclosure as HTMLElement).getByText("国产智能体")).toBeInTheDocument();
     fireEvent.click(summary);
     expect(disclosure).toHaveAttribute("open");
   });

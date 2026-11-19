@@ -1,5 +1,5 @@
 /**
- * 国内智能体端（模型页 → 来源 → 订阅账号 的第二组）。
+ * 国产智能体端（模型页 → 来源 → 订阅账号 的第二组）：国内站与国际站的账号都在这张表里。
  *
  * 这些端不像 Claude、ChatGPT 那样有面向第三方的接入：免费额度挂在账号里——
  * WorkBuddy 每天签到给点数、Qoder 每天给一份额度——所以「用它们的额度」等于
@@ -7,18 +7,24 @@
  * 但它们的账号由社区插件供给：内核自己的登录流只认 Claude/ChatGPT/Copilot/
  * Gemini/Antigravity，所以先装插件、再登录。
  *
- * 这张表只放内核确认过的 id 与包名（`internal/provider/migrate_*.go` 里 movers
- * 的 pkg），不猜名字：猜错的名字会被当成 npm 上的同名包装进来。
+ * 这张表只放内核确认过的 id 与包名：`internal/provider/migrate_*.go` 里 movers 的
+ * pkg，以及没有 mover、只在 `internal/provider/*_checkin.go` 里写明插件包的那几个端
+ * （Trae CN、MiniMax Code）。不猜名字：猜错的名字会被当成 npm 上的同名包装进来。
  * 真正的账号与额度仍然只从 `accounts --json` 读，这里不复制内核的判断。
  */
+
+/** 卡片归哪一组：同一个包服务的两个站（国内站 / 国际站）分开列。 */
+export type DomesticSite = "cn" | "intl";
 
 export interface DomesticAgent {
   /** 内核 agent id，也是 `accounts --json` 里的 `agent`。 */
   agent: string;
-  /** 社区插件的 npm 包名（内核 movers 表里那个）。 */
+  /** 社区插件的 npm 包名（内核 movers 表或签到实现里那个）。 */
   pkg: string;
   label: string;
   desc: string;
+  /** 站点：国内站或国际站（同一个包的另一个端）。 */
+  site: DomesticSite;
   /** 支持每日签到（`magpie accounts checkin`）。 */
   checkin: boolean;
   /** 登录前必须说的事实（内核风险提示的中文说法）。 */
@@ -31,14 +37,56 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
     pkg: "@magpie-community/opencode-workbuddy-auth",
     label: "WorkBuddy",
     desc: "腾讯 · 每天签到领点数",
+    site: "cn",
     checkin: true,
     risk: "腾讯可能封禁在 WorkBuddy 之外使用的账号，国际版 WorkBuddy AI 已有先例；建议用不心疼的号。",
+  },
+  {
+    agent: "qoder-cn",
+    pkg: "@magpie-community/opencode-qoder-auth",
+    label: "Qoder CN",
+    desc: "阿里 · 每天领免费额度",
+    site: "cn",
+    checkin: true,
+  },
+  {
+    agent: "trae-cn",
+    pkg: "@magpie-community/opencode-trae-auth",
+    label: "Trae CN",
+    desc: "字节 · 每天领免费额度",
+    site: "cn",
+    checkin: true,
+  },
+  {
+    agent: "minimax-code",
+    pkg: "@magpie-community/opencode-minimax-auth",
+    label: "MiniMax Code",
+    desc: "MiniMax · 每天领免费额度",
+    site: "cn",
+    checkin: true,
+  },
+  {
+    agent: "mimo",
+    pkg: "@magpie-community/opencode-mimo-auth",
+    label: "MiMo Code",
+    desc: "小米",
+    site: "cn",
+    checkin: false,
+  },
+  {
+    agent: "zcode",
+    pkg: "@magpie-community/opencode-zcode-auth",
+    label: "ZCode",
+    desc: "智谱",
+    site: "cn",
+    checkin: false,
   },
   {
     agent: "workbuddy-ai",
     pkg: "@magpie-community/opencode-workbuddy-auth",
     label: "WorkBuddy AI",
-    desc: "腾讯 · 国际版",
+    desc: "腾讯 · 每天签到领点数",
+    site: "intl",
     checkin: true,
     risk: "已有账号因为经别的智能体调用被封，风险比国内版更高。",
   },
@@ -47,25 +95,35 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
     pkg: "@magpie-community/opencode-qoder-auth",
     label: "Qoder",
     desc: "阿里 · 每天领免费额度",
+    site: "intl",
     checkin: true,
   },
   {
-    agent: "qoder-cn",
-    pkg: "@magpie-community/opencode-qoder-auth",
-    label: "Qoder CN",
-    desc: "阿里 · 国内站",
+    agent: "minimax-code-global",
+    pkg: "@magpie-community/opencode-minimax-auth",
+    label: "MiniMax Code（国际）",
+    desc: "MiniMax · 每天领免费额度",
+    site: "intl",
     checkin: true,
   },
-  { agent: "mimo", pkg: "@magpie-community/opencode-mimo-auth", label: "MiMo Code", desc: "小米", checkin: false },
-  { agent: "zcode", pkg: "@magpie-community/opencode-zcode-auth", label: "ZCode", desc: "智谱", checkin: false },
 ];
 
 /**
- * 走 API Key 的国内端不在这张表里：Qwen Code、Kimi Code、MiniMax Code、DeepSeek
- * 这些是「Key / 套餐」，在下面的「其他地址」里加，占的是供应商，不是订阅账号。
+ * 页面上的两个小标题：9 张卡里 3 张是国际站，一排排下来分不清谁对谁，
+ * 按站分组比在每行 desc 里重复「国内站/国际站」更好扫。
+ */
+export const DOMESTIC_GROUPS: readonly { site: DomesticSite; title: string; items: readonly DomesticAgent[] }[] = [
+  { site: "cn", title: "国内站", items: DOMESTIC_AGENTS.filter((item) => item.site === "cn") },
+  { site: "intl", title: "国际站", items: DOMESTIC_AGENTS.filter((item) => item.site === "intl") },
+];
+
+/**
+ * 走 API Key 的国内端不在这张表里：Qwen Code、Kimi Code 这些是「Key / 套餐」，
+ * 在下面的「加一个其他地址」里加，占的是供应商，不是订阅账号。
+ * （MiniMax Code 以前也在这句话里，内核的账号插件已经覆盖它，改成卡片了。）
  */
 export const DOMESTIC_KEY_NOTE =
-  "Qwen Code、Kimi Code、MiniMax Code 这些走 Key 或套餐的端不在账号里：在下面「其他地址」加它们的 Key。";
+  "Qwen Code、Kimi Code 这些走 Key 或套餐的端不在账号里：点下面的「加一个其他地址」填它们的 Key。";
 
 /** 能签到的端（`accounts checkin` 覆盖的范围），空状态的说明里点一下名。 */
 export const CHECKIN_VENDORS = "WorkBuddy、Qoder、Trae CN、MiniMax Code";

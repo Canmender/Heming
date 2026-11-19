@@ -26,6 +26,8 @@ const NAME_TO_ID: Record<string, string> = {
   "Gemini CLI": "gemini",
   OpenCode: "opencode",
   "MiMo Code": "mimo",
+  /** 桌面端与 `mcode` 是同一条（`magpie ls` 只会写 MiniMax Code）。 */
+  "MiniMax Code": "minimax-code",
   Cursor: "cursor",
   "Cursor CLI": "cursor",
   "Copilot CLI": "copilot",

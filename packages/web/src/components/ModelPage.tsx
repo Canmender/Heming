@@ -124,6 +124,7 @@ import {
   checkinSwitchArgs,
   checkinSwitchState,
   DOMESTIC_AGENTS,
+  DOMESTIC_GROUPS,
   DOMESTIC_KEY_NOTE,
   parseCheckin,
   parsePluginProviders,
@@ -436,7 +437,7 @@ export function ModelPage() {
    */
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
   /**
-   * 「再加一个账号」那段（登录网格与国内智能体）：有账号时默认收起——进来是看额度
+   * 「再加一个账号」那段（登录网格与国产智能体）：有账号时默认收起——进来是看额度
    * 的，不是来登录的；一个账号都没有时默认摊开，那才是这会儿唯一的下一步。
    */
   const [addAccountOpen, setAddAccountOpen] = useState(() => accounts.length === 0);
@@ -2659,7 +2660,7 @@ export function ModelPage() {
 
                   <div className="mt-4">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 className="text-ui-md font-semibold">国内智能体</h3>
+                      <h3 className="text-ui-md font-semibold">国产智能体</h3>
                       <span className="ui-caption">接上这些软件里已经登录的账号，额度就写在卡片上</span>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
@@ -2684,18 +2685,23 @@ export function ModelPage() {
                             : "开启自动签到"}
                       </Button>
                     </div>
-                    <div className="mt-2 grid gap-2">
-                      {DOMESTIC_AGENTS.map((item) => (
-                        <DomesticCard
-                          key={item.agent}
-                          item={item}
-                          signedIn={accounts.filter((row) => row.agent === item.agent).length}
-                          lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
-                          quota={agentQuotas.get(item.agent) ?? null}
-                          local={agents.some((agent) => agent.id === item.agent)}
-                          busy={accountBusy === `domestic:${item.agent}`}
-                          onPress={prepareDomestic}
-                        />
+                    <div className="mt-2 grid gap-3">
+                      {DOMESTIC_GROUPS.map((group) => (
+                        <div key={group.site} className="grid gap-2">
+                          <div className="ui-micro">{group.title}</div>
+                          {group.items.map((item) => (
+                            <DomesticCard
+                              key={item.agent}
+                              item={item}
+                              signedIn={accounts.filter((row) => row.agent === item.agent).length}
+                              lapsed={accounts.filter((row) => row.agent === item.agent && row.lapsed).length}
+                              quota={agentQuotas.get(item.agent) ?? null}
+                              local={agents.some((agent) => agent.id === item.agent)}
+                              busy={accountBusy === `domestic:${item.agent}`}
+                              onPress={prepareDomestic}
+                            />
+                          ))}
+                        </div>
                       ))}
                     </div>
                     <p className="mt-2 ui-caption">

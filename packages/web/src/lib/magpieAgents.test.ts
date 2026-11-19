@@ -35,6 +35,11 @@ describe("parseAgents", () => {
     const agents = parseAgents("Some New Agent  model-x  ~\\.newagent\\config.json\n");
     expect(agents[0]).toMatchObject({ name: "Some New Agent", id: null, model: "model-x" });
   });
+
+  it("MiniMax Code 的桌面端/CLI 映射到账号里那个 id", () => {
+    const raw = "MiniMax Code   —  ·  provider —   ~\\.minimax\\config.yaml\n";
+    expect(parseAgents(raw)[0]).toMatchObject({ name: "MiniMax Code", id: "minimax-code" });
+  });
 });
 
 describe("isModelId", () => {
