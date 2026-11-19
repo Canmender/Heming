@@ -6531,6 +6531,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 测试坑：`subagentJobs.test.ts` 是**模块级状态**，前面的用例可能留下未落定的作业（promise 在后续用例里才 resolve）；新增用例要么 `beforeEach(resetSubagentJobs)`，要么按 id 断言、别断言总数。
 
 
+- **全部测一遍（d.388）**：★ 「已添加的来源」标题旁加「全部测一遍」：按 `providers` 顺序串行跑 `provider test <id>`，结论照旧写各自行上，最后在告警条报「几家通、几家连不上」★ 复用行上的 `testProvider`，单点与批量共用一套判定与文案；进行中按钮变「正在一家家测…」并禁用 ★ 串行而非并发：真发请求，同时打出去容易被对端限流 ★ spec 新增 §3.10；验证：ModelPage 125 例全绿、typecheck 通过。
 ## 7. 快速上手命令
 
 ```bash
