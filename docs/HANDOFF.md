@@ -6521,6 +6521,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 为什么不标 provider / 思考档位：那两个在输入框模型徽标的 `title` 里；运行行再塞会把「正在执行 X」挤掉（`min-w-0 flex-1 truncate`）。
 
 
+- **来源行上写清「谁在用」（d.386）**：★ 内核 `providers` 说明列里的 `← Claude Code, Codex` 接进 `ProviderRow.usedBy`（`usedByHint` 只取 `←` 到 `⤷` 之间，按逗号拆；停用那句与备用链不算）★ 来源行在「备用 a → b」之后加一句「← Claude Code、Codex」，悬停写全 ★ 删来源之前先看这一句，别删正在用的 ★ 验证：magpieCli 18 例 + ModelPage 123 例 = 141 例全绿，typecheck 通过。
 ## 7. 快速上手命令
 
 ```bash

@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.386.4.130.14",
+    "date": "2026-11-19",
+    "title": "来源行上能看到「谁在用」",
+    "bullets": [
+      "**删之前先看清**：来源列表里，每一家下面多了一行「← Claude Code、Codex」，写的是现在有哪几个智能体在用它。",
+      "**不猜**：这一行来自内核自己的输出；智能体还没配模型时它不显示，不会拿「可能用」凑一句。",
+      "**顺手**：鼠标停在这一行上，能看到完整的一句「这些智能体现在用它：…」。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.385.4.130.14",
     "date": "2026-11-19",
     "title": "跑起来时，看得见是谁在答",

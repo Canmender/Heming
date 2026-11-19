@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.386.4.130.14",
+    "date": "2026-11-19",
+    "title": "来源行上写清「谁在用」",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 内核 `magpie providers` 的说明列里本来就有一句 `← Claude Code, Codex`，写的是「这几个智能体现在拿它的模型」。页面此前把整列丢掉了，于是「这个来源还有人用吗」只能靠猜——删错一个正在用的来源，智能体那边下一个请求就报错。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `packages/web/src/lib/magpieCli.ts` | `ProviderRow` 多 `usedBy: string[]`；新增 `usedByHint`：同一列还挤着停用那句（`magpie provider on <id>`）与备用链（`⤷ a → b`），所以只取 `←` 到 `⤷` 之间那段、按逗号拆，没写就是空数组 || `packages/web/src/components/ModelPage.tsx` | 行上在「备用 a → b」之后加一句「← Claude Code、Codex」，悬停写「这些智能体现在用它」 |",
+      "**怎么验证。** `npx vitest run src/lib/magpieCli.test.ts src/components/ModelPage.test.tsx` **141 例全绿**（新增 cli 两例：谁在用拆成数组、箭头之后的备用链不算；新增页面一例：行上看得见）。`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** 「在用」是内核按智能体当前选的模型算出来的；智能体还没配模型时这一列是空的，页面也照实不写——不拿「可能用」凑一句。"
+    ]
+  },
+  {
     "version": "d.385.4.130.14",
     "date": "2026-11-19",
     "title": "跑起来时，看得见是谁在答",
