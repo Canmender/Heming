@@ -104,8 +104,8 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 | # | 差距 | DSH | 和鸣 | 影响 |
 |---|---|---|---|---|
 | 1 | 工具轮里「我先看一下…」这类正文 | 边到边显示，留在记录里 | 被缓存后丢弃 | 干活时空屏，像卡住 |
-| 2 | 每 token 一次 React 提交 | 三次 rAF 合并 + 整段没变就短路 | 每次 delta 一次 store 提交 | 长回答发烫、滚动发涩 |
-| 3 | 整段 Markdown 每帧重解析 | 冻结前缀，只解析尾部 2 块 | 全量重解析 | 越到后面越慢 |
+| 2 | 每 token 一次 React 提交 | 三次 rAF 合并 + 整段没变就短路 | 每次 delta 一次 store 提交 | ✅ d.352 绘制帧合并、d.374 父组件只订阅签名（逐帧只重渲气泡） |
+| 3 | 整段 Markdown 每帧重解析 | 冻结前缀，只解析尾部 2 块 | 全量重解析 | ✅ d.353 冻结前缀 + 尾 2 块；d.369 只切新增段，不再每帧扫全文 |
 | 4 | 结束后的过程 | 收成「已完成，用时 X」一行 | 工具列表全部摊开 | 历史很长、翻不动 |
 | 5 | 生成中的用时 | 消息流末尾一行实时走秒 | 输入框下方一行 | 视线要离开回答 |
 | 6 | 首 token / 速度 | 输入区胶囊：TTFT、tok/s | 没有 | 不知道自己等得值不值 |
@@ -163,4 +163,5 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 
 - 单元：`agentStream` 的工具轮正文断言（流式期间 `onLocalDelta` 收到、结束时 `finish.text` 含它）；`ChatPage` 的绘制合并用例（同一帧内多次 delta 只触发一次 `upsertStream`）。
 - 手测：长回答（> 3000 字）+ 多工具任务，观察是否还发烫、工具轮是否还有空白期、结束后过程是否收起。
+
 
