@@ -1740,6 +1740,22 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(within(card as HTMLElement).getByText("重新登录")).toBeInTheDocument();
   });
 
+  it("来源页顶上有「跳到哪一块」：六块都在页上，点了不报错也不换页签", async () => {
+    installBridge();
+    render(<ModelPage />);
+    const nav = screen.getByRole("navigation", { name: "跳到来源页的某一块" });
+    for (const label of ["服务商", "订阅", "国产端", "已添加", "模型清单"]) {
+      expect(within(nav).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    // “可用模型”那一段只在有来源时才有内容，桥里没有来源时它不渲染，所以只查前四个。
+    const present = ["source-presets", "source-subs", "source-domestic", "source-added"];
+    const missing = present.filter((id) => document.getElementById(id) === null);
+    expect(missing).toEqual([]);
+    // 点了就只是滚过去：不切页签（来源还是当前页签）。
+    fireEvent.click(within(nav).getByRole("button", { name: "模型清单" }));
+    expect(screen.getByRole("tab", { name: "来源" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("运行页的可选设置收在一处：四块折成一行，要用哪块再展开", async () => {
     installBridge();
     render(<ModelPage />);

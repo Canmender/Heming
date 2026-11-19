@@ -238,6 +238,19 @@ const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
  * 只做「滚到那儿」，不做筛选——每块本来就在页上，这排只是省得一路滚。
  * id 由下面各块的容器提供（`run-trace` / `run-agents` / …），改 id 时两边一起改。
  */
+/**
+ * 来源页顶上那排「跳到哪一块」：这一页比运行页还长（两排卡片 + 两张清单 + 模型清单 + 两个折叠）。
+ * 标签刻意用短词（订阅 / 国产端 / 已添加 / 模型清单）：全称与页内标题同字，
+ * getByText 会撞成「Found multiple elements」，既有用例会挂。
+ */
+const SOURCE_ANCHORS: { id: string; label: string }[] = [
+  { id: "source-presets", label: "服务商" },
+  { id: "source-subs", label: "订阅" },
+  { id: "source-domestic", label: "国产端" },
+  { id: "source-added", label: "已添加" },
+  { id: "source-models", label: "模型清单" },
+];
+
 const RUN_ANCHORS = [
   { id: "run-trace", label: "轨迹" },
   { id: "run-agents", label: "智能体" },
@@ -248,7 +261,7 @@ const RUN_ANCHORS = [
 ] as const;
 
 /** 滚到运行页的某一块；被测环境没有 scrollIntoView 时静默跳过，不让点击抛错。 */
-function jumpToRun(id: string): void {
+function jumpTo(id: string): void {
   const target = document.getElementById(id);
   if (target && typeof target.scrollIntoView === "function") {
     target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2139,7 +2152,22 @@ export function ModelPage() {
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="ui-section-title">API Key 服务商</h2>
+                <nav aria-label="跳到来源页的某一块" className="flex flex-wrap items-center gap-2">
+            {SOURCE_ANCHORS.map((anchor) => (
+              <Button
+                key={anchor.id}
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="transition-colors"
+                onClick={() => jumpTo(anchor.id)}
+              >
+                {anchor.label}
+              </Button>
+            ))}
+          </nav>
+
+          <h2 id="source-presets" className="ui-section-title">API Key 服务商</h2>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
               {!cli && (
@@ -2281,7 +2309,7 @@ export function ModelPage() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <div className="ui-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="ui-section-title">订阅账号</h2>
+                  <h2 id="source-subs" className="ui-section-title">订阅账号</h2>
                   <div className="flex items-center gap-2">
                     <span className={`ui-caption ${readErrors.accounts ? "text-danger" : ""}`}>
                       {readErrors.accounts
@@ -2428,7 +2456,7 @@ export function ModelPage() {
 
                   <div className="mt-4">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 className="text-ui-md font-semibold">国产智能体</h3>
+                      <h3 id="source-domestic" className="text-ui-md font-semibold">国产智能体</h3>
                       <span className="ui-caption">接上这些软件里已经登录的账号，额度就写在卡片上</span>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
@@ -2566,7 +2594,7 @@ export function ModelPage() {
 
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="ui-section-title">已添加的来源（{providers.length}）</h2>
+                <h2 id="source-added" className="ui-section-title">已添加的来源（{providers.length}）</h2>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
@@ -3399,7 +3427,7 @@ export function ModelPage() {
                 )}
               </ul>
             </div>
-            <section aria-label="可用模型" className="space-y-4">
+            <section id="source-models" aria-label="可用模型" className="space-y-4">
               {loading && modelRows.length === 0 ? (
                 <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">
                   {[0, 1].map((index) => (
@@ -3480,7 +3508,7 @@ export function ModelPage() {
                   key={anchor.id}
                   type="button"
                   className="rounded-full border border-line px-2 py-0.5 text-ui-xs text-muted transition-colors hover:text-ink"
-                  onClick={() => jumpToRun(anchor.id)}
+                  onClick={() => jumpTo(anchor.id)}
                 >
                   {anchor.label}
                 </button>

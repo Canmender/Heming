@@ -398,6 +398,25 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 原来带 `id="run-more"` 的那张（资源库与网页搜索）把 id 让给父级，其余三张本来没有 id。
 - 内层内容整体右移两格（父级多一层），脚本改完检查了 `<details>` 深度平衡与内层数量（4 个）。
 
+### 4.5 来源页的「跳到哪一块」
+
+运行页有了锚点（d.398）之后，来源页显得更脏：这一页从上到下是找服务商、十二张预设卡、订阅账号、
+九张国产智能体卡、已添加的来源、可用模型、全局模型设置、看图与画图。想直接看「已添加的来源」，
+得从一屏卡片里滚过去。
+
+- `SOURCE_ANCHORS`（`packages/web/src/components/ModelPage.tsx`）五项：服务商 / 订阅 / 国产端 / 已添加 /
+  模型清单，滚动作与运行页共用 `jumpTo(id)`（同一份实现，改名自 `jumpToRun`）。
+- 目标 id：`source-presets`（API Key 服务商 h2）、`source-subs`（订阅账号 h2）、
+  `source-domestic`（国产智能体 h3）、`source-added`（已添加的来源 h2）、`source-models`（可用模型 section）。
+- **标签刻意用短词**（订阅 / 国产端 / 已添加 / 模型清单）：写成全称就会与页内标题同字，
+  `getByText("订阅账号")` 会撞成「Found multiple elements」，既有用例整片挂。
+- **「其余来源的额度」没设锚点**：那张卡只在真有孤儿额度（或读额度失败）时才渲染，
+  拿它当锚点等于有时候点了没反应——宁可少一个入口，也不给一个点了不动的按钮。
+- 「可用模型」那一段在没有来源时不渲染内容，所以测试里只校验前四个 id 存在；
+  锚点本身仍保留（有来源时它就在）。
+
+## 5. 还没对齐的部分（明确留白）
+
 ## 5. 还没对齐的部分（明确留白）
 
 - **Web search（Settings › Models 的 search 一段）**：`searcher`、`searcherThen`、`searcherEffort`、
