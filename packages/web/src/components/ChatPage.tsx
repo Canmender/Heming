@@ -38,6 +38,8 @@ import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { formatBytes } from "../lib/export/conversation.js";
+// d.355：会话用量与上下文页共用同一个显示口径（850 / 12.4K / 1.2M）。
+import { formatTokens } from "../lib/agentContext/contextMeter.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import { recordsForConversation, totalsOf, useTokenUsageStore } from "../store/tokenUsage.js";
@@ -989,6 +991,18 @@ export function ChatPage({
   }, [messages]);
   const liveSteps =
     conversationStats.steps + (turnProgress && !turnProgress.done ? turnProgress.tools : 0);
+  /*
+   * 本会话累计用掉的 token（d.355，对齐 DSH 的用量药丸）。
+   *
+   * 只在**模型真的报了 usage** 时才有数：账本里 `reportedTokens` 为 null 的记录不计入总额，
+   * 所以这里拿不到数就不显示，而不是写一个「0 tokens」假装算过。订阅账本本身是为了
+   * 每轮收口后自动刷新——之前只在 /status 里读过它，聊天页看不到。
+   */
+  const usageRecords = useTokenUsageStore((s) => s.records);
+  const conversationUsage = useMemo(
+    () => totalsOf(recordsForConversation(usageRecords, convId)),
+    [usageRecords, convId],
+  );
   /** 让「已跑 X 秒」自己往前走：只有真的在跑时才开秒表；收口后（小结）不需要再 tick。 */
   const [progressNow, setProgressNow] = useState(0);
   useEffect(() => {
@@ -6955,6 +6969,17 @@ export function ChatPage({
           className="pt-2 text-center text-ui-xs tabular-nums text-muted"
         >
           {conversationStats.rounds} 轮 · {liveSteps} 步
+          {/* d.355：本轮起把「这个会话一共烧了多少 token」也放在同一行——
+              模型没报 usage 的会话不显示，不写 0 糊弄。悬停给输入/输出的拆分。 */}
+          {conversationUsage.total > 0 ? (
+            <span
+              title={`输入 ${formatTokens(conversationUsage.input)} · 输出 ${formatTokens(conversationUsage.output)}`}
+            >
+              {` · ${formatTokens(conversationUsage.total)} tokens`}
+            </span>
+          ) : (
+            ""
+          )}
         </p>
         </div>
       </form>

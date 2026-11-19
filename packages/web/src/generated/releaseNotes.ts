@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.355.4.128.12",
+    "date": "2026-11-19",
+    "title": "这个会话一共花了多少，输入框下面就能看到",
+    "bullets": [
+      "输入框下面那行「几轮 · 几步」后面，多了这个会话累计用掉的 token，比如「12 轮 · 34 步 · 12.4K tokens」。",
+      "鼠标停在上面能看输入与输出的拆分，不用再去手打 `/status`。",
+      "只在模型真的报了用量时才显示；一条都没报过就不写「0 tokens」糊弄人。",
+      "数量按轮更新：这一轮跑完、账记上了，这一行自己就变，不用切换页面。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.354.4.128.12",
     "date": "2026-11-19",
     "title": "上一轮跑得急不急，现在看得见",

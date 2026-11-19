@@ -600,6 +600,34 @@ describe("ChatPage", () => {
     await waitFor(() => expect(rows()).toHaveLength(DEFAULT_WINDOW * 2));
   });
 
+  it("会话用量药丸：模型报过 usage 才在轮/步后面补「N tokens」（d.355）", async () => {
+    mockMessagesFetch([msg("m1", "看过这条", "2026-10-14T00:00:00.000Z")]);
+    useTokenUsageStore.getState().reset();
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("看过这条")).toBeInTheDocument());
+
+    // 没报过 usage：只写轮与步，不写「0 tokens」假装算过。
+    const meter = screen.getByTestId("conversation-meter");
+    expect(meter.textContent).toMatch(/^\d+ 轮 · \d+ 步$/);
+
+    // 账本里有一条真实用量 → 同一行补上总量（1 200 → 1.2K）。
+    act(() => {
+      useTokenUsageStore.getState().record("m", 1_200, undefined, {
+        conversationId: "c1",
+        input: 900,
+        output: 300,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("conversation-meter").textContent).toContain("1.2K tokens"),
+    );
+    // 未上报（tokens=null）的记录不算进总量：它不该把 1.2K 变成别的数
+    act(() => {
+      useTokenUsageStore.getState().recordUnreported("m", undefined, { conversationId: "c1" });
+    });
+    expect(screen.getByTestId("conversation-meter").textContent).toContain("1.2K tokens");
+  });
+
   it("d.62 / d.346：消息列 1080 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
     mockMessagesFetch([msg("l1", "布局检查", "2026-10-14T00:00:00.000Z")]);
     render(<ChatPage />);

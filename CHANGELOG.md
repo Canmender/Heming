@@ -1,3 +1,34 @@
+## d.355.4.128.12（2026-11-19）— 这个会话一共花了多少，输入框下面就能看到
+
+### 为什么做
+
+用量账本（d.230）一直在记：每轮收口时把 provider 报回来的 token 写进 `heming.tokenUsage.v1`，`/status` 也能查。
+但它只活在两个角落：一是 `/status`，要手打；二是设置里的用量面板，看的是全局与按模型的聚合。
+**具体到「我现在聊的这个会话」花了多少，聊天页上看不到**——而这恰恰是用户最常想知道的那个数（尤其换模型、开长任务之前）。
+DSH 在每个回合结束后有用量药丸（provider/model、input/output、缓存），和鸣这一轮先补上「本会话累计」，口径用账本里已有的真数。
+
+### 做了什么
+
+| 能力 | 落地 |
+| --- | --- |
+| 本会话用量 | `ChatPage` 订阅 token 账本，按会话聚合 `totalsOf(recordsForConversation(records, convId))` |
+| 显示位置 | 输入框下方那行「N 轮 · M 步」后面补 ` · 12.4K tokens`，不新开面板、不加一行 |
+| 只显示真数 | 账本里 `reportedTokens` 为 null 的记录不计入；一条都没报过就整段不显示，不写「0 tokens」 |
+| 悬停拆分 | 药丸上给 `title`：`输入 9.8K · 输出 2.6K`（同一份 totals，不另算） |
+| 自动刷新 | 订阅 `useTokenUsageStore` 的 `records`：每轮收口记账后这一行自己变，不需要切页刷新 |
+
+### 怎么验证
+
+- `packages/web/src/components/ChatPage.test.tsx` 203 例（新增 1 例）：没报 usage 时 meter 精确等于「N 轮 · M 步」；写入一条 1 200 → 出现「1.2K tokens」；再写一条未上报记录，数字不变
+- `pnpm --filter @heming/web typecheck` 通过；`npx vitest run`（packages/web）457 文件 / 6588 例全绿
+- 人工口径核对：显示 1.2K / 12.4K / 1.2M 与上下文页共用 `formatTokens`，不会出现两处不同的缩写
+
+### 留白
+
+- 只有总量与输入/输出拆分，没有缓存命中与推理 token——账本里还没分开记
+- 不是实时累加：按轮收口记账，正在跑的这一轮要等它收口才进总数
+- 没有做「每条消息各自的用量」与 DSH 的 provider/model 药丸；换模型的会话只能看总量
+
 ## d.354.4.128.12（2026-11-19）— 上一轮跑得急不急，现在看得见
 
 ### 为什么做
