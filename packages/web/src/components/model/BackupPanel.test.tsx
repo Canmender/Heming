@@ -87,4 +87,41 @@ describe("BackupPanel", () => {
     render(<BackupPanel />);
     expect(screen.getByRole("button", { name: "新建备份" })).toBeDisabled();
   });
+
+  it("带上什么：默认一条 flag 都不加，取消 Key 加 --no-keys、勾上登录加 --sign-ins", async () => {
+    const { begin } = installBridge();
+    render(<BackupPanel />);
+    await screen.findByText("model-20261108.backup");
+    // 默认与内核一致：带 Key、带技能库、不带登录。
+    expect(screen.getByText("现在：带Key、带技能库、不带登录。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("新建备份：来源的 Key"));
+    fireEvent.click(screen.getByLabelText("新建备份：订阅与插件的登录"));
+    expect(screen.getByText("现在：不带Key、带技能库、带登录。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建备份" }));
+    await waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
+    const args = begin.mock.calls[0]![0];
+    expect(args).toEqual(["backup", "--no-keys", "--sign-ins", expect.stringMatching(/model-.+\.backup$/)]);
+  });
+
+  it("覆盖什么：对话框里取消哪块就加对应的 --no-", async () => {
+    const { begin } = installBridge();
+    render(<BackupPanel />);
+    await screen.findByText("model-20261108.backup");
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    expect(
+      screen.getByText("覆盖工具设置、覆盖技能库、覆盖登录；来源与账号总会恢复。系统会先保留一份自动备份。"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("恢复：订阅与插件的登录"));
+    fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith([
+        "restore",
+        "--no-sign-ins",
+        "D:/backups/model-20261108.backup",
+      ]),
+    );
+  });
 });

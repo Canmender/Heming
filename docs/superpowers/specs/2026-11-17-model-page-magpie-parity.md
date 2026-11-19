@@ -59,6 +59,24 @@
 - 写模型前有二次确认（会写进别的工具的配置，和鸣不替用户静默改）。
 - `visible` 的解析在 `packages/web/src/lib/magpieVisible.ts`（`only models picked`、`N shown, M not` 都认）；过滤在 `packages/web/src/lib/modelCatalog.ts` 的 `rowsForAgent`。
 
+### 2.1 备份与恢复：带上什么、覆盖什么
+
+`packages/web/src/components/model/BackupPanel.tsx` 在运行分区末尾。内核的 flag **正反面不统一**，
+命令行里很容易记反，所以页面按「这一块要不要」来勾，由 `packages/web/src/lib/magpieBackupParts.ts` 翻译成 flag。
+
+| 内核默认（`vendor/magpie-core/internal/cli/backup_cmd.go`） | 页面行为 | 背后的命令 |
+| --- | --- | --- |
+| `backup` 默认**带** Key、**带**技能与 MCP 库、**不带**订阅/插件登录 | 三个勾默认「带 Key、带技能库、不带登录」，取消哪块加对应 flag，勾上登录才加 `--sign-ins` | `magpie backup [--no-keys] [--no-library] [--sign-ins] <file>` |
+| `restore` 默认三样全恢复 | 确认框里三个勾默认全勾，取消哪块加对应 `--no-` | `magpie restore [--no-agents] [--no-library] [--no-sign-ins] <file>` |
+
+- 面板里写一句人话再执行：「现在：带Key、带技能库、不带登录。」；恢复确认框里写「覆盖工具设置、覆盖技能库、覆盖登录；来源与账号总会恢复。」
+  （`describeBackupParts` / `describeRestoreParts`）。
+- flag 顺序固定（Key → 技能库 → 登录），路径永远在最后；测试 `magpieBackupParts.test.ts` 9 例断言了默认值、
+  三种组合、顺序、以及「恢复这头没有 keys、备份这头没有 agents」。
+- 勾选框的可访问名带前缀（`新建备份：来源的 Key` / `恢复：订阅与插件的登录`），因为两块可能同时出现在 DOM 里。
+- 留白：口令仍在内核的交互面板里输入（`ConsolePanel`），页面不接管；内核没有 `backup --dry-run`，
+  所以没有「先预览会写什么再决定」；定时自动备份也还没有——内核侧没有对应命令，页面不自己造。
+
 ## 3. 来源分区（`ModelPage.tsx` 的「高级」）
 
 | 原版 magpie 的行为 | 和鸣来源页现在的行为 | 背后的命令 |

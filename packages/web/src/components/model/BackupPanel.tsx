@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { getMagpieCliBridge, type CloudBackupFile } from "../../lib/magpieCli.js";
+import {
+  BACKUP_PARTS,
+  RESTORE_PARTS,
+  backupArgs,
+  defaultBackupParts,
+  defaultRestoreParts,
+  describeBackupParts,
+  describeRestoreParts,
+  restoreArgs,
+} from "../../lib/magpieBackupParts.js";
 import { ArchiveIcon, AlertIcon } from "../icons.js";
 import { SectionCard } from "./SectionCard.js";
 import { ConsolePanel } from "./ConsolePanel.js";
@@ -10,6 +20,9 @@ import { Button } from "../../components/ui/Button.js";
  *
  * 备份文件放在应用自己的目录（主进程提供），口令在交互面板里输入，只存在内存中。
  * 恢复前会要求确认——这是会覆盖当前来源与账号配置的操作。
+ *
+ * d.374 起「带上什么 / 覆盖什么」不再需要记内核的 flag：三块各自一个勾，默认值与内核一致
+ * （见 `lib/magpieBackupParts.ts`），勾完在面板里用一句人话说清会发生什么。
  */
 export function BackupPanel() {
   const bridge = getMagpieCliBridge();
@@ -19,6 +32,8 @@ export function BackupPanel() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ title: string; args: string[]; hint?: string } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [backupParts, setBackupParts] = useState(defaultBackupParts);
+  const [restoreParts, setRestoreParts] = useState(defaultRestoreParts);
 
   const load = useCallback(async () => {
     if (!bridge) {
@@ -50,8 +65,8 @@ export function BackupPanel() {
     const path = `${dir}\\model-${stamp}.backup`;
     setPending({
       title: "新建备份",
-      args: ["backup", path],
-      hint: "会要求输入一个加密口令：输入后回车，再输一次确认。",
+      args: backupArgs(path, backupParts),
+      hint: `会要求输入一个加密口令：输入后回车，再输一次确认。这一次${describeBackupParts(backupParts)}。`,
     });
   };
 
@@ -59,8 +74,8 @@ export function BackupPanel() {
     setConfirmRestore(null);
     setPending({
       title: "恢复备份",
-      args: ["restore", filePath],
-      hint: "会要求输入备份时的口令；恢复会覆盖当前的来源、账号与设置。",
+      args: restoreArgs(filePath, restoreParts),
+      hint: `会要求输入备份时的口令。这一次${describeRestoreParts(restoreParts)}；来源与账号总会恢复。`,
     });
   };
 
@@ -102,6 +117,28 @@ export function BackupPanel() {
         </div>
       }
     >
+      <div className="mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+        <p className="ui-caption">新建备份时带上这三块里的哪些：</p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+          {BACKUP_PARTS.map((part) => (
+            <label key={part.key} className="flex items-center gap-2 ui-caption" title={part.hint}>
+              <input
+                type="checkbox"
+                className="accent-brand"
+                aria-label={`新建备份：${part.label}`}
+                checked={backupParts[part.key]}
+                disabled={!bridge}
+                onChange={(event) =>
+                  setBackupParts({ ...backupParts, [part.key]: event.target.checked })
+                }
+              />
+              {part.label}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 ui-caption">现在：{describeBackupParts(backupParts)}。</p>
+      </div>
+
       {error && (
         <div role="alert" className="ui-alert ui-alert-danger">
           <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
@@ -147,7 +184,26 @@ export function BackupPanel() {
             <div className="min-w-0">
               <div className="text-ui-sm font-semibold">确认恢复这个备份？</div>
               <p className="mt-1 ui-caption break-all">{confirmRestore}</p>
-              <p className="mt-1 ui-caption">恢复会覆盖当前的来源、账号与设置。系统会先保留一份自动备份。</p>
+              <p className="ui-caption">这次恢复要覆盖哪些：</p>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+                {RESTORE_PARTS.map((part) => (
+                  <label key={part.key} className="flex items-center gap-2 ui-caption" title={part.hint}>
+                    <input
+                      type="checkbox"
+                      className="accent-brand"
+                      aria-label={`恢复：${part.label}`}
+                      checked={restoreParts[part.key]}
+                      onChange={(event) =>
+                        setRestoreParts({ ...restoreParts, [part.key]: event.target.checked })
+                      }
+                    />
+                    {part.label}
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1 ui-caption">
+                {describeRestoreParts(restoreParts)}；来源与账号总会恢复。系统会先保留一份自动备份。
+              </p>
               <div className="mt-2 flex gap-2">
                 <Button
                   type="button"
