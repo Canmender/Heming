@@ -1712,6 +1712,54 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls.some((call) => call[0] === "provider" && call[1] === "rpm")).toBe(false);
   });
 
+  it("清单规矩：列不列、多久刷、新模型怎么收，一项一条命令", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("模型清单（可选）：列不列、什么时候刷、新模型怎么收"));
+
+    // 三项都没选时不给按：不选就是这次不改。
+    expect(screen.getByRole("button", { name: "保存清单规矩" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("列给智能体"), { target: { value: "no" } });
+    fireEvent.change(screen.getByLabelText("多久自己刷一次清单"), { target: { value: "6h" } });
+    fireEvent.change(screen.getByLabelText("新模型自动收"), {
+      target: { value: "claude-*, gpt-4o*" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存清单规矩（3 项）" }));
+
+    await waitFor(() => expect(calls).toContainEqual(["provider", "listed", "mock", "no"]));
+    expect(calls).toContainEqual(["provider", "refresh-every", "mock", "6h"]);
+    expect(calls).toContainEqual([
+      "provider",
+      "auto-include",
+      "mock",
+      "claude-*",
+      "gpt-4o*",
+    ]);
+  });
+
+  it("清单规矩：填 none 就是清空自动收的规则", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.click(screen.getByText("模型清单（可选）：列不列、什么时候刷、新模型怎么收"));
+
+    fireEvent.change(screen.getByLabelText("新模型自动收"), { target: { value: "none" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存清单规矩（1 项）" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "auto-include", "mock", "none"]),
+    );
+    // 另外两项没选，一条都不发。
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "listed")).toBe(false);
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "refresh-every")).toBe(false);
+  });
+
   it("保存来源设置之后，余额卡与走向图也跟着重读（写命令会动到 Key 和限额）", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

@@ -129,6 +129,12 @@ import {
   type SourceTuneKey,
 } from "../lib/magpieSourceTune.js";
 import {
+  SOURCE_MODELS_FIELDS,
+  sourceModelsCommands,
+  sourceModelsSummary,
+  type SourceModelsKey,
+} from "../lib/magpieSourceModels.js";
+import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
   checkinFailed,
@@ -550,6 +556,9 @@ export function ModelPage() {
     queue: "",
     quotaRest: "",
     restCap: "",
+    listed: "",
+    refreshEvery: "",
+    autoInclude: "",
   });
   /** 调流那几格各写各的：留空就是「这次不改」，不是「改回默认」。 */
   const tuneSetters: Record<SourceTuneKey, (value: string) => void> = {
@@ -558,6 +567,12 @@ export function ModelPage() {
     queue: (value) => setProviderForm({ ...providerForm, queue: value }),
     quotaRest: (value) => setProviderForm({ ...providerForm, quotaRest: value }),
     restCap: (value) => setProviderForm({ ...providerForm, restCap: value }),
+  };
+  /** 模型清单那几格同理：不选就是这次不改。 */
+  const modelsSetters: Record<SourceModelsKey, (value: string) => void> = {
+    listed: (value) => setProviderForm({ ...providerForm, listed: value }),
+    refreshEvery: (value) => setProviderForm({ ...providerForm, refreshEvery: value }),
+    autoInclude: (value) => setProviderForm({ ...providerForm, autoInclude: value }),
   };
   /** 每个来源「添加模型」输入框里的内容。 */
   const [modelAdd, setModelAdd] = useState<Record<string, string>>({});
@@ -2514,6 +2529,12 @@ export function ModelPage() {
                   };
                   const tuneCommands = sourceTuneCommands(row.id, tuneValues);
                   const tuneRejected = sourceTuneRejected(tuneValues);
+                  const modelsValues = {
+                    listed: providerForm.listed,
+                    refreshEvery: providerForm.refreshEvery,
+                    autoInclude: providerForm.autoInclude,
+                  };
+                  const modelsCommands = sourceModelsCommands(row.id, modelsValues);
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2921,6 +2942,63 @@ export function ModelPage() {
                               }}
                             >
                               保存调流{tuneCommands.length > 1 ? `（${tuneCommands.length} 项）` : ""}
+                            </Button>
+                          </details>
+
+                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                              模型清单（可选）：列不列、什么时候刷、新模型怎么收
+                            </summary>
+                            <p className="mt-1 ui-caption">
+                              厂商后加的模型默认不会自己进来。这里定三件事：它的模型要不要出现在智能体的可选清单里、
+                              清单多久自己去拉一次、新模型 id 命中哪些规则就自动收。不选就是这次不改。
+                            </p>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              {SOURCE_MODELS_FIELDS.map((field) =>
+                                field.options ? (
+                                  <label key={field.key} className="grid gap-1">
+                                    <span className="ui-caption">{field.label}</span>
+                                    <select
+                                      className="ui-input"
+                                      aria-label={field.label}
+                                      value={providerForm[field.key]}
+                                      onChange={(event) => modelsSetters[field.key](event.target.value)}
+                                    >
+                                      <option value="">不改</option>
+                                      {field.options.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="ui-caption">{field.hint}</span>
+                                  </label>
+                                ) : (
+                                  <TextField
+                                    key={field.key}
+                                    label={field.label}
+                                    hint={field.hint}
+                                    placeholder={field.placeholder}
+                                    value={providerForm[field.key]}
+                                    onChange={(event) => modelsSetters[field.key](event.target.value)}
+                                  />
+                                ),
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost" className="mt-2"
+                              disabled={!cli || modelsCommands.length === 0}
+                              onClick={() => {
+                                void (async () => {
+                                  for (const command of modelsCommands) {
+                                    // 一样一条一条发：前一条被内核拒了，后面的照样发得出去。
+                                    await run(`清单规矩 ${row.id}`, command, { refresh: true });
+                                  }
+                                })();
+                              }}
+                            >
+                              {sourceModelsSummary(modelsCommands)}
                             </Button>
                           </details>
 

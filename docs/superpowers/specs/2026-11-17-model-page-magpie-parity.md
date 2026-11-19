@@ -116,6 +116,25 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
   `account-weight` / `account-concurrency` / `account-cap` 仍留命令行——它们要么要挑具体账号，
   要么要写时刻，塞进一个不分账号的表单会误导。
 
+### 3.3 模型清单的规矩：列不列、什么时候刷、新模型怎么收
+
+来源的模型清单不是加一次就定了：厂商会加新型号，有的来源只该经分组被选中、不该出现在
+智能体的可选清单里。参考实现把这三件事放在 Provider 编辑器的 listing 区，本轮接在来源
+「高级 → 模型清单（可选）」里，同样是三项各一条内核子命令：
+
+| 想定的事 | 页面上的样子 | 背后的命令 |
+| --- | --- | --- |
+| 它的模型要不要出现在智能体的可选清单里 | 「列给智能体」下拉：列给智能体（默认）/ 只给分组用 | `provider listed <id> yes\|no` |
+| 清单多久自己去拉一次 | 「多久自己刷一次清单」下拉：30m / 6h / 1d / 不自动刷 | `provider refresh-every <id> <30m\|6h\|1d\|off>` |
+| 新模型 id 命中什么规则就自动收 | 「新模型自动收」输入框，空格或逗号分开，`*` 当通配 | `provider auto-include <id> <rule…\|none>` |
+
+- 参数生成在 `packages/web/src/lib/magpieSourceModels.ts`（`SOURCE_MODELS_FIELDS` /
+  `parseAutoInclude` / `sourceModelsCommands` / `sourceModelsSummary`），测试
+  `magpieSourceModels.test.ts` 7 例覆盖「留空不发」「none 清空」「分隔符」「没来源 ID 不发」。
+- 下拉首项是「不改」：页面不读当前值、也不猜默认值，免得一保存就把人家原来的设置覆盖掉。
+- 收的边界：`refresh-every` 只在网关（`magpie serve` 或和鸣）跑着时生效，页面不另起定时器；
+  「重新读取」按钮仍走 `provider refresh <id>`（另一处，不在这个折叠区里）。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
