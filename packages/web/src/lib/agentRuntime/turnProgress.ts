@@ -49,6 +49,8 @@ export interface TurnProgress {
    * 输出时保持 null，界面就不会编一个「首字 0 秒」出来。
    */
   firstTokenAt?: number | null;
+  /** 工具总共花了多久（d.379）：让「上一轮」能分清慢在工具还是慢在模型。 */
+  toolMs?: number;
   /** 用户点了停止（d.377）：小结里要标出来。 */
   stopped?: boolean;
   /** 这一轮到底产出了多少正文字符（d.354）：收口时由调用方带上，用来算「字/秒」。 */
@@ -78,6 +80,8 @@ type StoredSummary = {
   at: number;
   firstTokenAt: number | null;
   chars: number;
+  /** 工具总耗时（d.379）；老档没有这个字段。 */
+  toolMs?: number;
   /** 用户点了停止（d.377）；老档没有这个字段。 */
   stopped?: boolean;
 };
@@ -129,6 +133,7 @@ function readSummaries(): Record<string, StoredSummary> {
       at: numberOr(record.at, endedAt),
       firstTokenAt: typeof firstAt === "number" && Number.isFinite(firstAt) && firstAt >= startedAt ? firstAt : null,
       chars: Math.max(0, Math.floor(numberOr(record.chars, 0))),
+      ...(numberOr(record.toolMs, 0) > 0 ? { toolMs: Math.floor(numberOr(record.toolMs, 0)) } : {}),
       ...(record.stopped === true ? { stopped: true } : {}),
     };
   }
@@ -159,6 +164,7 @@ function summaryOf(state: TurnProgress): StoredSummary {
     firstTokenAt: state.firstTokenAt ?? null,
     chars: state.chars ?? 0,
     ...(state.stopped ? { stopped: true } : {}),
+    ...(state.toolMs ? { toolMs: state.toolMs } : {}),
   };
 }
 
@@ -179,6 +185,7 @@ export function hydrateTurnSummaries(): void {
       firstTokenAt: saved.firstTokenAt,
       chars: saved.chars,
       ...(saved.stopped ? { stopped: true } : {}),
+      ...(saved.toolMs ? { toolMs: saved.toolMs } : {}),
     };
     progress.set(conversationId, restored);
     snapshots.set(conversationId, restored);
@@ -266,6 +273,7 @@ export function settleTurnProgress(
   now: number = Date.now(),
   chars = 0,
   stopped = false,
+  toolMs?: number,
 ): void {
   if (!conversationId) return;
   const prev = progress.get(conversationId);
@@ -280,6 +288,10 @@ export function settleTurnProgress(
     chars: Math.max(prev.chars ?? 0, Math.max(0, Math.floor(chars))),
     // d.377：用户点了停止——小结要说出来，否则「上一轮」看着像正常收口的。
     ...(stopped ? { stopped: true } : {}),
+    // d.379：工具耗时单独记一笔，小结里能看出慢在工具还是慢在模型。
+    ...(typeof toolMs === "number" && Number.isFinite(toolMs) && toolMs > 0
+      ? { toolMs: Math.floor(toolMs) }
+      : {}),
   };
   progress.set(conversationId, next);
   snapshots.set(conversationId, next);
@@ -353,6 +365,10 @@ export function describeTurnProgress(state: TurnProgress): string {
     if (state.stopped) parts.push("已停止");
     if (state.tools > 0) parts.push(`${state.tools} 步`);
     parts.push(`用时 ${used}`);
+    // d.379：工具占了多久。总共 1 分 40 秒里如果 1 分 30 秒是工具，那就不该怪模型慢；
+    // 占比过小（不到 1 秒）不写，免得每轮都挂个「工具 0.2 秒」。
+    const toolMs = state.toolMs ?? 0;
+    if (toolMs >= 500) parts.push(`工具 ${formatSeconds(toolMs)}`);
     // d.354：首字延迟与出字速度（DSH 的 TTFT / tok·s⁻¹ 口径）。只在真有正文时补，
     // 纯工具轮不编这两个数字。
     const firstAt = state.firstTokenAt ?? null;
@@ -388,5 +404,8 @@ export function formatElapsed(ms: number): string {
 
 // d.359：模块加载即装回上次收口的小结——重开应用时，「上一轮跑了多少」不该凭空消失。
 hydrateTurnSummaries();
+
+
+
 
 

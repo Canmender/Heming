@@ -6493,6 +6493,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **用量图多了首字（d.379）**：★ 用量图的指标从两个变三个——请求 / Token / 首字，首字画每天的平均首字（只算被计时的流式回复，没计时的日子不画柱）★ 数据层 `UsageSeriesPoint` 补 `timed`/`ttft_ms`，新增 `pointTTFT`，`chartBars` 指标类型收敛为 `ChartMetric` ★ `CHART_METRICS` 表驱动标题/颜色/悬停/刻度，`index.css` 亮暗各加 `--chart-3`（琥珀）★ 验证：数据层 10 例 + 视图 6 例 + ModelPage 135 例全绿。
+## 小结里的工具耗时（d.380）
+
+- `TurnProgress.toolMs` / `StoredSummary.toolMs`；`settleTurnProgress(conversationId, now, chars, stopped, toolMs)` 第五参由 `ChatPage.onRunSettled` 传入：本轮流每条工具 `(endedAt ?? now) - startedAt` 求和。
+- `describeTurnProgress` 在「用时」之后补「工具 80 秒」（<500ms 不写）。
+- **口径**：求的是各工具耗时之和，不是墙上时间；并行工具会重复计入，所以它回答「工具一共干了多久」，不回答「其中多少秒在等工具」。要精确看每一步的起止，用轨迹页。
+- 同 d.378 的坑：`readSummaries` 是白名单重建，新字段要在三处（`summaryOf` / `readSummaries` / `hydrateTurnSummaries`）都补。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6511,6 +6519,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

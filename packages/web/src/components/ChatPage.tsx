@@ -3663,6 +3663,11 @@ export function ChatPage({
           Date.now(),
           useChatStore.getState().streaming[streamId]?.text.length ?? 0,
           result.status === "aborted",
+          // d.379：这一轮工具总共占了多少时间（没结束的那次按收口时刻算）。
+          (toolTraceRef.current[streamId] ?? []).reduce(
+            (sum, t) => sum + Math.max(0, (t.endedAt ?? Date.now()) - t.startedAt),
+            0,
+          ),
         );
         // d.363：这一轮已经收口（成功/失败/停止都算），草稿没有存在意义了；
         // 留着会让下一次启动把它当成「上次生成被中断」的残稿。

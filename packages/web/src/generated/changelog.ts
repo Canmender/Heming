@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.380.4.130.14",
+    "date": "2026-11-19",
+    "title": "慢在工具还是慢在模型",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 「上一轮：8 步 · 用时 1 分 40 秒」只说总共多久。可这 1 分 40 秒里到底是模型在慢慢想，还是工具（跑测试、装依赖、搜大仓库）在慢慢跑？两种情况下用户该做的事完全不同：前者该换个更快的模型，后者只能等。DSH 的回合检查器里有时间拆分，我们的小结里没有任何线索。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `turnProgress.ts` | `TurnProgress` / 落盘结构新增 `toolMs`；`settleTurnProgress(convId, now, chars, stopped, toolMs)` || 小结文案 | 工具累计 ≥ 0.5 秒时写「工具 80 秒」：`上一轮：8 步 · 用时 1 分 40 秒 · 工具 80 秒` || 落盘 | `summaryOf` / `readSummaries` / `hydrateTurnSummaries` 三处都带上，重开应用仍看得到 || `ChatPage` | 收口时把本轮流每条工具 `(endedAt ?? now) - startedAt` 求和传进去 |",
+      "**怎么验证。** `turnProgress.test.ts` 31 例（新增 2：工具耗时写进小结、不到 1 秒不写；工具耗时活过 `reloadTurnSummaries()`）；`turnProgress` + `TurnProgressLine` 38 例、`ChatPage.test.tsx` 209 例全过；typecheck 通过。",
+      "**留白。** 工具是并行跑的，这里求的是「各工具耗时的和」，不是墙上时间；一次调用里模型和工具可能重叠，所以「工具 80 秒」不等于「其中 80 秒在等工具」。真要精确得记每一步的起止并画甘特图——那是轨迹页的事（那边已有每步耗时）。"
+    ]
+  },
+  {
     "version": "d.379.4.130.14",
     "date": "2026-11-19",
     "title": "用量图能画首字了：这个月是不是变快了",

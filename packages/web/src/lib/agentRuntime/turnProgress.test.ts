@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TURN_PROGRESS_MAX_ROUND,
@@ -269,6 +269,29 @@ describe("用户按了停止：小结要说出来（d.377）", () => {
     expect(describeTurnProgress(natural)).not.toContain("已停止");
   });
 
+  it("工具耗时单独写出来：慢在工具还是慢在模型一眼能分（d.379）", () => {
+    const base = Date.now();
+    recordTurnProgress("c4", { round: 1, phase: "tool", tool: "shell" }, base);
+    settleTurnProgress("c4", base + 90_000, 400, false, 80_000);
+    const state = getTurnProgress("c4")!;
+    expect(state.toolMs).toBe(80_000);
+    const line = describeTurnProgress(state);
+    expect(line).toContain("工具 80 秒");
+    expect(line).toContain("用时 1 分 30 秒");
+
+    // 工具不到 1 秒不写，免得每轮都挂个「工具 0.2 秒」。
+    recordTurnProgress("c5", { round: 1, phase: "tool", tool: "file_read" }, base);
+    settleTurnProgress("c5", base + 3_000, 100, false, 200);
+    expect(describeTurnProgress(getTurnProgress("c5")!)).not.toContain("工具 ");
+  });
+
+  it("工具耗时也活过重启", () => {
+    const base = Date.now();
+    recordTurnProgress("c6", { round: 1, phase: "round", tool: undefined }, base);
+    settleTurnProgress("c6", base + 50_000, 200, false, 20_000);
+    reloadTurnSummaries();
+    expect(getTurnProgress("c6")!.toolMs).toBe(20_000);
+  });
   it("「已停止」也活过重启", () => {
     const base = Date.now();
     recordTurnProgress("c3", { round: 2, phase: "round", tool: undefined }, base);
@@ -348,5 +371,7 @@ describe("收口小结活过重启（d.359）", () => {
     expect(getTurnProgress(`c${TURN_SUMMARY_SESSIONS + 2}`)?.done).toBe(true);
   });
 });
+
+
 
 

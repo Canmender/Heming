@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.380.4.130.14",
+    "date": "2026-11-19",
+    "title": "慢在工具还是慢在模型",
+    "bullets": [
+      "每轮结束的小结多一个数：工具一共花了多久。1 分 40 秒里如果有 80 秒是工具在跑，现在一眼能看出来。",
+      "工具总耗时不到半秒就不写，免得每行都挂一个没意义的数字。",
+      "重开应用之后这个数还在。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.379.4.130.14",
     "date": "2026-11-19",
     "title": "用量图多了「首字」",
