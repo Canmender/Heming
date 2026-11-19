@@ -6502,6 +6502,15 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **换过账号的请求说清了为什么（d.381）**：★ 运行页请求详情加「试过谁、为什么没成」——按顺序列每一试，失败行标红，原因照内核 `tries[].fail`/`error` 原话写 ★ `magpieTrace.ts` 的 `TraceTry` 补 `ttft`/`firstText`/`fail`/`error`，新增 `tryWho` 与 `describeTry`（成功写首字与总耗时、失败写原因、未结束写正在试）★ `Call.Fallback` 摘要不另接（每次尝试自己的 fail 已经更细）★ 验证：trace 两文件 15 例 + ModelPage 134 例全绿。
+## 轨迹页的时间汇总（d.382）
+
+- `TrajectoryView.tsx` 的小结条：`{轮数} 轮 · {步数} 步 · {工具调用} 次工具调用 · 工具 X · 全程 Y`。
+- 工具 = 所有 `kind === "tool"` 行的 `msOf(row)` 之和；全程 = 所有**同时有 `startedAt` 与 `endedAt`** 的行里 `min(startedAt)` 到 `max(endedAt)`。
+- 为什么排除只有起点的行：用户消息用 `createdAt`、思考段没有时间、正在跑的那一步只有起点；混进来会得到「刚发的消息与十分钟前的工具差了好几天」这种荒唐值（本轮先在测试里踩到）。
+- 阈值：工具 < 500ms、全程 < 1000ms 都不写。
+- 与 d.380 的分工：d.380 是**上一轮**（内存 + 落盘的 turnSummary），这里是**整段会话**（从消息转录里现算）；两者独立，不要合并成一个数。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6520,6 +6529,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

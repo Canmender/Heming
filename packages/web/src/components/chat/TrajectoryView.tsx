@@ -3,6 +3,7 @@ import type { ConversationProgress, ProgressStep, ProgressStepKind, ProgressStep
 import { transcriptOf, useChatStore, type ToolTrace } from "../../store/chat.js";
 import type { Message } from "@heming/shared";
 import { STEP_TONES, formatDuration } from "../progress/status.js";
+import { formatSeconds } from "../../lib/agentRuntime/turnProgress.js";
 import { EmptyState } from "../ui/EmptyState.js";
 import { WorkflowIcon } from "../icons.js";
 
@@ -268,6 +269,21 @@ export function TrajectoryView({
   const turns = useMemo(() => buildTurns(messages, live), [messages, live]);
   const allSteps = useMemo(() => turns.flatMap((turn) => turn.steps), [turns]);
   const toolCalls = allSteps.filter((row) => row.kind === "tool").length;
+  // d.381：把「工具一共干了多久 / 整段对话跨了多久」也摆出来。上一轮小结（d.380）只看得到最近一轮，
+  // 这里看得到整段会话；两者都以各步的起止时间为准，没有时间戳的老消息不编。
+  const toolMs = allSteps.reduce((sum, row) => (row.kind === "tool" ? sum + (msOf(row) ?? 0) : sum), 0);
+  const spanMs = (() => {
+    let first: number | null = null;
+    let last: number | null = null;
+    for (const row of allSteps) {
+      // 只按「有起止两端的步骤」算：用户消息、思考段、正在跑的那一步都只有起点或都没有，
+      // 拿它们参与会算出荒唐的数字（刚发的消息与十分钟前的工具之间差了好几天）。
+      if (row.startedAt === undefined || row.endedAt === undefined) continue;
+      if (first === null || row.startedAt < first) first = row.startedAt;
+      if (last === null || row.endedAt > last) last = row.endedAt;
+    }
+    return first !== null && last !== null && last > first ? last - first : 0;
+  })();
 
   const needle = query.trim().toLowerCase();
   const visibleTurns = useMemo(() => {
@@ -312,6 +328,8 @@ export function TrajectoryView({
         <p className="text-ui-xs tabular-nums text-muted" data-testid="trajectory-summary">
           {turns.length} 轮 · {allSteps.length} 步
           {toolCalls > 0 ? ` · ${toolCalls} 次工具调用` : ""}
+          {toolMs >= 500 ? ` · 工具 ${formatSeconds(toolMs)}` : ""}
+          {spanMs >= 1000 ? ` · 全程 ${formatSeconds(spanMs)}` : ""}
         </p>
       </div>
 
@@ -491,3 +509,7 @@ export function TrajectoryView({
     </section>
   );
 }
+
+
+
+

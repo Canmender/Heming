@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.382.4.130.14",
+    "date": "2026-11-19",
+    "title": "轨迹页也能看出时间花在哪",
+    "bullets": [
+      "轨迹页顶部那行现在多两个数：工具一共花了多久、整段对话跨了多久。",
+      "工具不到半秒、全程不到一秒就不写，免得数字比正文还吵。",
+      "只有起止时间都齐的步骤参与计算——刚发的消息、还在跑的步骤不会被算进去。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.381.4.130.14",
     "date": "2026-11-19",
     "title": "换过账号的请求，能看到上一个为什么没成",

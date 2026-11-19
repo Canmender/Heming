@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+﻿import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { TrajectoryView } from "./TrajectoryView.js";
@@ -136,6 +136,27 @@ describe("TrajectoryView · 会话账本", () => {
     expect(timeline.querySelectorAll("button")).toHaveLength(2);
   });
 
+  it("小结里带上工具耗时与全程跨度（d.381）", () => {
+    const turn = oneTurn();
+    const agent = turn[1] as unknown as { tools: unknown[] } & Message;
+    agent.tools = [
+      { id: "t1", name: "read_file", args: '{"path":"src/login.ts"}', status: "ok", result: "ok", startedAt: 1_000, endedAt: 5_000 },
+    ];
+    useChatStore.setState({ messages: { c1: turn } });
+    render(<TrajectoryView progress={progress()} conversationId="c1" />);
+    const summary = screen.getByTestId("trajectory-summary");
+    expect(summary).toHaveTextContent("工具 4.0 秒");
+    expect(summary).toHaveTextContent("全程 4.0 秒");
+  });
+
+  it("没有时间戳的老消息不编耗时", () => {
+    useChatStore.setState({
+      messages: { c1: [message({ id: "a9", payload: { text: "老消息" }, steps: [{ kind: "think", text: "想过" }] })] },
+    });
+    render(<TrajectoryView progress={progress()} conversationId="c1" />);
+    expect(screen.getByTestId("trajectory-summary")).not.toHaveTextContent("全程");
+    expect(screen.getByTestId("trajectory-summary")).not.toHaveTextContent("工具 ");
+  });
   it("正在跑的那一步会接在最后一轮末尾，并标「进行中」", () => {
     useChatStore.setState({ messages: { c1: oneTurn() } });
     render(
@@ -200,3 +221,6 @@ describe("TrajectoryView · 工具栏（d.351）", () => {
     expect(screen.getByRole("table").textContent).toContain("500ms");
   });
 });
+
+
+
