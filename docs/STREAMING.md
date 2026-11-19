@@ -133,10 +133,11 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 ### B. 第二步（中等改动）
 
 4. **Markdown 增量渲染** ✅ d.353（前缀冻结 + 尾部 2 块，见 `packages/web/src/lib/markdown/blocks.ts`；代码块未闭合时从围栏那块起都算尾部）
-5. **消息流末尾的运行行** ⬜
-   - `已用 12 秒` + 呼吸点，位置在最后一个气泡之后；输入框下方那行保留「第几步 · 正在做什么」。
-6. **TTFT / tok/s** ⬜
-   - 在回合结束的用量处补两项，数据来自供应商 usage 与首 chunk 时间（本地已有 `startedAt`/首个 delta 时刻可算）。
+5. **消息流末尾的运行行** ✅ d.361（`TurnProgressLine` 新增 `placement="stream"`：跑动中贴在最后一个气泡之后，收口后 `placement="composer"` 回输入框下方；两处互斥，见 HANDOFF d.361）
+   - 只挪位置，文案仍是「第 N 步 · 正在执行 X · 已跑 M 秒」；没有学 DSH 的「深度求索中，用时 12 秒」。
+6. **TTFT / tok/s** ✅ d.354
+   - 收口小结追加「首字 1.2 秒 · 38 字/秒」，数据来自 `turnProgress` 的 `firstTokenAt` 与 `chars`（`noteTurnFirstToken` / `settleTurnProgress` 第三参）。
+   - 仍未放进 DSH 那种输入区胶囊，留在「上一轮」那行里。
 
 ### C. 需要动传输/存储（先记着）
 
