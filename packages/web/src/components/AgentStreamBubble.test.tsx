@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+﻿import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentStreamBubble, MessageProcess, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
 import type { ToolTrace } from "../store/chat.js";
@@ -573,3 +573,20 @@ describe("MessageProcess：落定后的过程默认收起（d.352）", () => {
     expect(screen.getByTestId("agent-steps")).toBeInTheDocument();
   });
 });
+
+  it("工具耗时不短时，收起状态也写出来（d.392）", () => {
+    render(
+      <MessageProcess
+        steps={[{ kind: "tool", toolId: "t1" }]}
+        tools={[{ id: "t1", name: "file_read", args: "{}", status: "ok", result: "内容", startedAt: 1_000, endedAt: 5_000 }]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "处理过程" }).textContent).toContain("工具 4.0s");
+  });
+
+  it("工具太快（不到 1 秒）不占位置", () => {
+    render(<MessageProcess steps={[{ kind: "tool", toolId: "t1" }]} tools={[{ id: "t1", name: "file_read", args: "{}", status: "ok", result: "内容", startedAt: 1, endedAt: 2 }]} />);
+    expect(screen.getByRole("button", { name: "处理过程" }).textContent).not.toContain("工具 ");
+  });
+
+

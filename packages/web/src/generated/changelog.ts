@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.393.4.133.14",
+    "date": "2026-11-19",
+    "title": "收起的「处理过程」也写用时",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 历史消息里的过程被收成一行「处理过程 · N 次工具调用 · 思考 M 字」，但**看不到花了多久**——同样的字数和调用次数，可能是 4 秒也可能是 4 分钟。轨迹页有每步耗时，收起状态却什么都没有。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `AgentStreamBubble.tsx` 的 `MessageProcess` | 按 `steps` 里的工具步去找对应的 `ToolTrace`，把 `endedAt - startedAt` 累加；≥1 秒时在摘要里追加「工具 X」，<1 秒不占位置 |",
+      "口径与轨迹页、总结行一致：**各工具耗时之和**（并行工具会重复计入，不等于墙上时间）。",
+      "**怎么验证。** `AgentStreamBubble.test.tsx` 33 → 35 例（4.0 秒写出、不到 1 秒不写）；web 全量 **6732 例全绿**；typecheck 通过。",
+      "**留白。** 只写工具耗时，不写模型耗时与首字延迟——那两项属于「上一轮」小结，收起的消息里再塞会变长。"
+    ]
+  },
+  {
     "version": "d.391.4.133.14",
     "date": "2026-11-19",
     "title": "对照表的账要对上",

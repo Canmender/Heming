@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace, TranscriptStep } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
@@ -180,13 +180,21 @@ export function MessageProcess({ steps, tools }: { steps: TranscriptStep[]; tool
   const [open, setOpen] = useState(false);
   let toolCalls = 0;
   let thinkChars = 0;
+  let toolMs = 0;
   for (const step of steps) {
-    if (step.kind === "tool") toolCalls += 1;
-    else thinkChars += step.text?.length ?? 0;
+    if (step.kind === "tool") {
+      toolCalls += 1;
+      // d.392：这一轮慢在工具还是慢在模型，收起状态也看得见（与轨迹页同一口径：各工具耗时之和）。
+      const tool = tools.find((item) => item.id === step.toolId);
+      if (tool?.endedAt !== undefined) toolMs += Math.max(0, tool.endedAt - tool.startedAt);
+    } else {
+      thinkChars += step.text?.length ?? 0;
+    }
   }
   const parts = [
     toolCalls > 0 ? `${toolCalls} 次工具调用` : null,
     thinkChars > 0 ? `思考 ${thinkChars} 字` : null,
+    toolMs >= 1_000 ? `工具 ${formatDuration(toolMs)}` : null,
   ].filter((part): part is string => part !== null);
   return (
     <div data-testid="message-process" className="mt-1">
@@ -644,3 +652,4 @@ function statusColor(status: ToolTrace["status"]): string {
   if (status === "ok") return "text-success";
   return "text-danger";
 }
+

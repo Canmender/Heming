@@ -6557,6 +6557,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 想临时验证：`node -e "import('./scripts/changelog-parser.mjs').then(m=>console.log(m.findMalformedHeadings('## d.1.2.3.4 — x')))"`。
 
 
+## 收起的「处理过程」写工具耗时（d.393）
+
+- `AgentStreamBubble.tsx` 的 `MessageProcess`：遍历 `steps`，`kind === "tool"` 时按 `step.toolId` 在 `tools` 里找 `ToolTrace`，累加 `endedAt - startedAt`；`>= 1_000` 才追加 `工具 ${formatDuration(toolMs)}`。
+- `formatDuration` 用**本文件已有的那个**（`AgentStreamBubble.tsx` 约 616 行的局部函数，输出 `4.0s`）；不要去 import `./progress/status.js` 的同名函数——那会和局部声明冲突（TS2440）。
+- 口径：各工具耗时之和，并行工具会重复计入，不等于墙上时间；与 d.380 小结、d.382 轨迹页同一口径。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6575,6 +6582,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

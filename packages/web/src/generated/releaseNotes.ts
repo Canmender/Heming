@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.393.4.133.14",
+    "date": "2026-11-19",
+    "title": "收起的「处理过程」也写用时",
+    "bullets": [
+      "历史消息里收起的那行过程，现在会写「工具 4.0s」。",
+      "一眼看出这条回答是快是慢，不用点开。",
+      "不到 1 秒不写，免得每行都挂个 0.1s。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.391.4.133.14",
     "date": "2026-11-19",
     "title": "对照表的账要对上",
