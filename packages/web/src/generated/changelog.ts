@@ -12,6 +12,30 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.404.4.138.14",
+    "date": "2026-11-19",
+    "title": "网络代理也能在页面里设了",
+    "bullets": [
+      "值从 `settings list --json` 那份表里取（`loadSettings` 本来整份读下来了，不再多发一条 `settings get`）。",
+      "判断与拼命令都在 `packages/web/src/lib/magpieProxy.ts`（`parseProxy` / `proxyProblem` / `proxyArgs` / `describeProxy`），页面只负责三选一与显示。",
+      "折叠里写明「只影响和鸣自己发出的请求，不动别的程序」——它不是系统级开关，别让人误会。",
+      "`npx vitest run src/lib/magpieProxy.test.ts` 9 例（空值＝跟随环境而非直连、`direct` 的同义词、三种地址写法放行、空/带空格/说不清形态各自报什么、命令拼装、状态一句话）",
+      "`npx vitest run src/components/ModelPage.test.tsx` 130 例（新增「网络代理：跟随环境发 reset，直连发 direct，自定义发地址」，含「地址不合法时按钮是死的」）",
+      "`pnpm --filter @heming/web typecheck` 通过",
+      "只做内核给的那一个全局代理，不做按来源的代理（内核也没有这个键）。",
+      "不做「测试这个代理通不通」——那要真发一次请求，属于另一件事。",
+      "环境变量里已有的代理设置，页面不读取也不覆盖：显示「跟着系统的环境变量走」就是全部实话。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "内核一直有 `settings` 的 `proxy` 键（`vendor/magpie-core/internal/settings/settings.go:110-119`），意思是「和鸣自己去问模型服务时走哪条线」：空着跟着系统环境变量、`direct` 直连、其余按地址走。但页面上没有任何地方能设它——网络需要代理才能出门的人，只能自己开终端敲 `magpie settings set proxy …`，而且很容易把「空值」误当成「不走代理」（这是两件事）。",
+      "做了什么",
+      "| 之前 | 现在 || --- | --- || 只能命令行设代理 | 运行页「更多设置（可选）」里第五块：三选一 + 地址框 || 不知道现在是什么状态 | 「现在：跟着系统的环境变量走 / 直连，不走代理 / 走 http://…」 || 地址写错了要发出去才被拒 | 空、带空格、形态不对的，按钮直接是死的，并在旁边点出原因 || 「清空」等于什么说不清 | 选「跟随系统」发的是 `settings reset proxy`，不是发一个空串 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.403.4.138.14",
     "date": "2026-11-19",
     "title": "那串 token 数字，可以点开",

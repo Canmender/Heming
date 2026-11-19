@@ -1756,6 +1756,33 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(screen.getByRole("tab", { name: "来源" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("网络代理：跟随环境发 reset，直连发 direct，自定义发地址", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("更多设置（可选）：资源库与搜索、网关密钥、会话与启动器、高级命令").closest("summary") as HTMLElement);
+    fireEvent.click(screen.getByText("网络代理（可选）").closest("summary") as HTMLElement);
+
+    // 默认是「跟随系统」：这时保存＝把 proxy 清回默认值，不是发一个空串。
+    expect(screen.getByText(/现在：跟着系统的环境变量走/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存代理设置" }));
+    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "proxy"]));
+
+    // 直连。
+    fireEvent.change(screen.getByLabelText("代理怎么走"), { target: { value: "direct" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存代理设置" }));
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "proxy", "direct"]));
+
+    // 自定义：地址不合法时按钮是死的，填对了才发。
+    fireEvent.change(screen.getByLabelText("代理怎么走"), { target: { value: "custom" } });
+    const button = screen.getByRole("button", { name: "保存代理设置" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("代理地址"), { target: { value: "http://127.0.0.1:7890" } });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "proxy", "http://127.0.0.1:7890"]));
+  });
+
   it("运行页的可选设置收在一处：四块折成一行，要用哪块再展开", async () => {
     installBridge();
     render(<ModelPage />);

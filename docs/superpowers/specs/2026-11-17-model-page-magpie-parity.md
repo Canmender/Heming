@@ -415,6 +415,29 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 「可用模型」那一段在没有来源时不渲染内容，所以测试里只校验前四个 id 存在；
   锚点本身仍保留（有来源时它就在）。
 
+### 4.6 网络代理（可选）：和鸣自己去问模型服务时走哪条线
+
+内核把代理放在设置里（`settings` 的 `proxy` 键，`vendor/magpie-core/internal/settings/settings.go:110-119`）：
+
+| 值 | 意思 |
+| --- | --- |
+| 空 | 跟着系统的环境变量走（`HTTPS_PROXY` 之类）；**不是**「不走代理」 |
+| `direct` | 直连，不走代理 |
+| `http://…` / `https://…` / `socks5://…` | 走这个代理 |
+| `host:port` | 同上，内核当 http 用 |
+
+页面在运行页「更多设置（可选）」里加了第五块「网络代理（可选）」：
+
+- 三选一（跟随系统环境变量 / 直连不走代理 / 自己指定地址）＋ 选「自己指定」时出现地址框；
+  保存发一条命令：跟随系统 → `settings reset proxy`（把值清回默认，**不是发空串**）、
+  直连 → `settings set proxy direct`、自定义 → `settings set proxy <地址>`。
+- 地址先在 `proxyProblem(address)`（`packages/web/src/lib/magpieProxy.ts`）里挡一道：
+  空、带空格、既不是 `scheme://host` 也不是 `host:port` 的，按钮直接是死的，并在「现在：」那句后面点出原因。
+- 值来自 `settings list --json` 里那份表（`loadSettings` 已经整份读下来了，不再多发一条 `settings get`）。
+- 只影响和鸣自己发出的请求；别走代理的程序不受影响——这句话写在折叠里，免得有人以为它是系统级开关。
+
+## 5. 还没对齐的部分（明确留白）
+
 ## 5. 还没对齐的部分（明确留白）
 
 ## 5. 还没对齐的部分（明确留白）

@@ -153,6 +153,7 @@ import {
   sourceWireCommand,
   type SourceWireKey,
 } from "../lib/magpieSourceWire.js";
+import { describeProxy, parseProxy, proxyArgs, proxyProblem, type ProxyMode } from "../lib/magpieProxy.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -583,6 +584,9 @@ export function ModelPage() {
    * 已添加的来源、订阅账号都不动——那是每天要点的，藏起来会让人以为被删了。
    */
   const [sourceFilter, setSourceFilter] = useState("");
+  // 网络代理（d.402）：三选一 + 一个地址。值来自设置里那份表，改完立刻重读。
+  const [proxyMode, setProxyMode] = useState<ProxyMode>("system");
+  const [proxyAddress, setProxyAddress] = useState("");
   /** 名字 / 说明 / id 里任一处含这个词就算匹配（不区分大小写）；空搜索词一律算匹配。 */
   const matchesSourceFilter = (id: string, name: string, desc: string) => {
     const query = sourceFilter.trim().toLowerCase();
@@ -783,6 +787,9 @@ export function ModelPage() {
         setVisionModel(textSetting(values, "vision"));
         setVisionEffort(textSetting(values, "visionEffort"));
         setImageGenModel(textSetting(values, "imageGen"));
+        const proxy = parseProxy(textSetting(values, "proxy"));
+        setProxyMode(proxy.mode);
+        setProxyAddress(proxy.address);
       }),
     [cli, once],
   );
@@ -4329,6 +4336,59 @@ export function ModelPage() {
                     await cli.cliInput(runId, text);
                   }}
                 />
+              </details>
+
+              <details className="ui-disclosure mt-2">
+                <summary className="cursor-pointer text-ui-md font-semibold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网络代理（可选）</summary>
+                <p className="mt-1 ui-caption">
+                  和鸣自己去问模型服务时走哪条线。空着是跟着系统的环境变量走，直连是不走代理，
+                  也可以指定一个地址（http:// / socks5://，只写 host:port 时当 http 用）。
+                  只影响和鸣自己发出的请求，不动别的程序。
+                </p>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <label className="grid gap-1">
+                    <span className="ui-caption">怎么走</span>
+                    <select
+                      className="ui-input mt-2"
+                      aria-label="代理怎么走"
+                      value={proxyMode}
+                      disabled={!cli}
+                      onChange={(event) => setProxyMode(event.target.value as ProxyMode)}
+                    >
+                      <option value="system">跟随系统环境变量</option>
+                      <option value="direct">直连，不走代理</option>
+                      <option value="custom">自己指定地址</option>
+                    </select>
+                  </label>
+                  {proxyMode === "custom" && (
+                    <TextField
+                      label="代理地址"
+                      hint="如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                      className="min-w-64"
+                      value={proxyAddress}
+                      disabled={!cli}
+                      onChange={(event) => setProxyAddress(event.target.value)}
+                    />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli || proxyArgs(proxyMode, proxyAddress) === null}
+                    onClick={() => {
+                      const args = proxyArgs(proxyMode, proxyAddress);
+                      if (args) void run("设置网络代理", args, { refresh: true });
+                    }}
+                  >
+                    保存代理设置
+                  </Button>
+                </div>
+                <p className="mt-1 ui-caption">
+                  现在：{describeProxy(proxyMode, proxyAddress)}
+                  {proxyMode === "custom" && proxyProblem(proxyAddress) !== "" && (
+                    <span className="text-danger">（{proxyProblem(proxyAddress)}）</span>
+                  )}
+                  。
+                </p>
               </details>
             </details>
             </div>
