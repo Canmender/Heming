@@ -3417,8 +3417,10 @@ describe("ChatPage", () => {
     // 工具轮下首次尝试的文字**不上行**（它是「我这就去查」这类中间话术的候选，
     // 失败了也未必是答案）。重试成功后 finish 全文是干净的「好」，
     // 用户不会先看到半截话再被覆盖——这比无工具路径更干净。
-    expect(framesOf(send, "agent_chunk")).toHaveLength(0);
-    expect(sealedTexts("chunk")).toEqual([]);
+    // d.362 起工具轮正文也边到边上行：首次尝试的「半」用户看到过，就留在流里；
+    // 重试成功后 finish 的全文是重试那次的累积（不含上一次的「半」），气泡以 finish 为准。
+    expect(framesOf(send, "agent_chunk")).toHaveLength(1);
+    expect(sealedTexts("chunk")).toEqual(["半"]);
     expect(framesOf(send, "agent_finish")).toHaveLength(1); // finish 只发一次
     expect(sealedTexts("text")).toEqual(["@和小鸣 查下上下文", "好"]); // 本条 user 轮 + 重试成功全文
     expect(framesOf(send, "agent_error")).toHaveLength(0);
@@ -5052,7 +5054,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     // 因此会补一句「以上是中断前的过程说明」（P1-5）。
     const sealed = sealedTexts("text");
     expect(sealed.some((t) => (t ?? "").includes("半"))).toBe(true);
-    expect(sealed.some((t) => (t ?? "").includes("不是最终答案"))).toBe(true);
+    expect(sealed.some((t) => (t ?? "").includes("不是最终答案"))).toBe(false);
   });
 
   it("显式关掉自我优化时不注入 self 工具（旧版配置仍生效），chart 工具照常在", async () => {

@@ -1537,9 +1537,21 @@ export function runAgentMentions(
                   emitDelta(d, aggressive);
                   return;
                 }
-                roundChunks.push(d); // 工具轮先攒着：可能是「我这就去查」这类中间话术
+                /**
+                 * 工具轮也边到边显示（d.362）。
+                 *
+                 * 原先这里只攒不发、轮末若有工具调用就整段丢掉：用户看到的是一段空屏，
+                 * 只有工具行在动，像卡住了。DSH 的语义是正文块与工具块交错、都留在记录里
+                 * （`AssistantMarkdown` 按 block 渲染，text 块不会被工具调用挤掉）。
+                 *
+                 * 现在照同样口径：立刻上行 + 写进本轮累积，于是「我先看一下 app.ts」这类
+                 * 过渡话术既看得见、也留在最终回答里，不再是只存在于日志里的旁白。
+                 * 失败/中断时 `acc` 里已经有它，兜底逻辑不必再从 `buffered` 里捞。
+                 */
+                roundChunks.push(d);
                 roundText += d;
-                buffered += d; // 兜底用：中断时这些字还没上行，不能丢
+                buffered += d; // 兜底用：极端情况下（上行前抛错）这些字还能补进 partial
+                emitDelta(d, aggressive);
               },
             });
 
@@ -1615,7 +1627,7 @@ export function runAgentMentions(
                   aggressive,
                 );
               }
-              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              // d.362：正文已经在 onDelta 里逐片上行过，这里不再补发（否则每片都会出现两遍）。
               return;
             }
             if (truncated) {

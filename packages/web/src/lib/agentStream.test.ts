@@ -950,7 +950,7 @@ describe("runAgentMentions 上下文预算接线", () => {
 });
 
 describe("runAgentMentions 工具调用（MCP 桥）", () => {
-  it("先执行工具并把结果回灌，中间话术不上行，只上行最终答案", async () => {
+  it("先执行工具并把结果回灌，中间话术也边到边显示并留在答案里（d.362）", async () => {
     const executed: { name: string; arguments: string }[] = [];
     const rounds = [
       {
@@ -995,17 +995,17 @@ describe("runAgentMentions 工具调用（MCP 桥）", () => {
     expect(second.some((m) => m.role === "assistant" && m.tool_calls?.length === 1)).toBe(true);
     expect(second.some((m) => m.role === "tool" && m.content === "工具说：hi")).toBe(true);
 
-    // 上行给用户的只有最终答案（工具轮的「我先查一下」被丢弃）
+    // d.362 起工具轮的过渡话术也上行：它看得见，也留在最终回答里（与 DSH 的 text 块一致）
     const chunks = (send.mock.calls as unknown[][])
       .map(([e]) => e as { type: string; text?: string })
       .filter((e) => e.type === "agent_chunk")
       .map((e) => e.text ?? "")
       .join("");
-    expect(chunks).toBe("查到了：hi");
+    expect(chunks).toBe("我先查一下查到了：hi");
     const finish = (send.mock.calls as unknown[][])
       .map(([e]) => e as { type: string; text?: string })
       .find((e) => e.type === "agent_finish");
-    expect(finish?.text).toBe("查到了：hi");
+    expect(finish?.text).toBe("我先查一下查到了：hi");
   });
 
   it("没有工具时不注入 tools、不缓冲（行为与旧版一致）", async () => {
@@ -1072,8 +1072,8 @@ describe("runAgentMentions 不再拼来源脚注", () => {
     const events = send.mock.calls.map((c) => c[0] as { type: string; text?: string });
     const chunks = events.filter((e) => e.type === "agent_chunk").map((e) => e.text ?? "").join("");
     const finish = events.find((e) => e.type === "agent_finish");
-    expect(chunks).toBe("答案是 42");
-    expect(finish?.text).toBe("答案是 42");
+    expect(chunks).toBe("我先查一下答案是 42");
+    expect(finish?.text).toBe("我先查一下答案是 42");
     expect(finish?.text).not.toContain("来源");
     expect(chunks).not.toContain("wiki/entities/heming.md");
   });
@@ -1102,7 +1102,7 @@ describe("runAgentMentions 不再拼来源脚注", () => {
     const finish = (send.mock.calls as unknown[][])
       .map(([e]) => e as { type: string; text?: string })
       .find((e) => e.type === "agent_finish");
-    expect(finish?.text).toBe("答案是 42");
+    expect(finish?.text).toBe("我先查一下答案是 42");
   });
 });
 

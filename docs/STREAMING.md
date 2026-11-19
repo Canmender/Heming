@@ -122,9 +122,9 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 
 ### A. 立刻做（低风险，用户可感知）
 
-1. **工具轮正文实时显示，不再丢弃**（对应差距 1）⬜
-   - `agentStream.ts` 的 `onDelta` 在工具轮里同样走 `emitDelta`（首轮尝试才上行），保留 `roundText` 供上下文；删掉 `roundChunks` 的轮末补发。
-   - 结束消息的正文因此包含这些「过渡话术」，与 DSH 的 text block 语义一致。
+1. **工具轮正文实时显示，不再丢弃**（对应差距 1）✅ d.362
+   - `agentStream.ts` 的 `onDelta` 在工具轮里也走 `emitDelta`（同步累进 `acc`）；删掉了轮末 `roundChunks` 补发，避免每片出现两遍。
+   - 结束消息的正文因此包含这些「过渡话术」，与 DSH 的 text block 语义一致；中断兜底取 `acc`，不再拼「以上是中断前的过程说明」。
 2. **绘制帧合并**（差距 2）✅ d.352
    - `ChatPage.onLocalDelta` 只记最新累计文本，用 `requestAnimationFrame` 合并一次 `upsertStream`；收口/工具/错误事件到来前强制 flush，保证状态不落后。
 3. **结束后的过程收起**（差距 4）✅ d.352
