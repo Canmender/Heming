@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   describeAuto,
+  describeNotice,
   describeSync,
+  hasNotice,
   labelOf,
   parseSyncStatus,
   syncAutoArgs,
+  syncDismissArgs,
   syncNowArgs,
   syncOffArgs,
   syncOnArgs,
+  syncUndoArgs,
 } from "./magpieSync.js";
 
 /** 云同步：把 `magpie webdav` 的输出读成「开着吗、连哪儿、上次怎么样」，并拼命令。 */
@@ -112,5 +116,74 @@ describe("命令拼装", () => {
     expect(describeAuto(null)).toBe("");
     expect(describeAuto(0)).toBe("只在点「现在同步一次」时");
     expect(describeAuto(30)).toBe("网关跑着时每 30 分钟");
+  });
+
+  it("撤销与「知道了」：两条都只有前半段", () => {
+    expect(syncUndoArgs("webdav")).toEqual(["webdav", "undo"]);
+    expect(syncDismissArgs("s3")).toEqual(["s3", "dismiss"]);
+  });
+});
+
+/** 上次同步换过东西时，内核把这件事单独打在末尾；页面以前整段丢掉了。 */
+describe("上次同步改了什么", () => {
+  const RESTORED = `WebDAV sync  https://dav.example.com/dav/  me · password saved
+  syncs providers with their API keys, settings
+ ✓ synced at 09:20
+  Restored from the server: providers with their API keys, settings, profiles
+  This computer's setup from before is kept in ~/.magpie/sync (magpie webdav undo puts it back; magpie webdav dismiss clears this)
+  Syncs by itself every 15 minutes (magpie webdav auto changes it)`;
+
+  const REPLACED = `WebDAV sync  https://dav.example.com/dav/
+  syncs settings, profiles
+ ✓ synced at 09:20
+  Replaced here by newer ones from another computer: settings
+  Replaced on the server by this computer's newer ones: profiles
+  The copies replaced are kept in ~/.magpie/sync (magpie restore opens one; magpie webdav dismiss clears this)
+  Syncs only when asked: magpie webdav now syncs once`;
+
+  it("整套从服务器搬来：说清搬了哪几份、旧的放哪儿，并给得出「撤销」", () => {
+    const status = parseSyncStatus(RESTORED);
+    expect(status.restored).toBe(true);
+    expect(status.changedHere).toEqual([
+      "providers with their API keys",
+      "settings",
+      "profiles",
+    ]);
+    expect(status.saved).toBe("~/.magpie/sync");
+    expect(hasNotice(status)).toBe(true);
+    expect(describeNotice(status)).toEqual([
+      "上次同步把服务器那份整个搬来了：providers with their API keys、settings、profiles。",
+      "被换掉的那几份留在 ~/.magpie/sync。",
+    ]);
+  });
+
+  it("只换了某几份：本机被换的和服务器被换的分开说，不给「撤销」", () => {
+    const status = parseSyncStatus(REPLACED);
+    expect(status.restored).toBe(false);
+    expect(status.changedHere).toEqual(["settings"]);
+    expect(status.changedThere).toEqual(["profiles"]);
+    expect(describeNotice(status)).toEqual([
+      "上次同步换了本机的：settings（另一台电脑比较新）。",
+      "上次同步换了服务器上的：profiles（这台电脑比较新）。",
+      "被换掉的那几份留在 ~/.magpie/sync。",
+    ]);
+  });
+
+  it("什么都没换就一句话都不多说，也不多出按钮", () => {
+    const status = parseSyncStatus(ON_WEBDAV);
+    expect(hasNotice(status)).toBe(false);
+    expect(describeNotice(status)).toEqual([]);
+  });
+
+  it("同步来的设置要用本机没登录的账号：也要说", () => {
+    const status = parseSyncStatus(`WebDAV sync  https://dav.example.com/dav/
+  syncs settings
+ ✓ synced at 09:20
+  synced settings use these, not signed in on this computer (sync carries settings, not sign-ins, unless sign-ins=yes; to use one here: magpie accounts add <id>): qoder, workbuddy
+  Syncs only when asked`);
+    expect(status.signIns).toEqual(["qoder", "workbuddy"]);
+    expect(describeNotice(status)).toEqual([
+      "同步来的设置要用这些账号，本机还没登录：qoder、workbuddy。",
+    ]);
   });
 });

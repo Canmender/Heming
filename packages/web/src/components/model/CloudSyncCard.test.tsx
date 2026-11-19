@@ -100,4 +100,46 @@ describe("CloudSyncCard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("先填地址");
     expect(openTerminal).not.toHaveBeenCalled();
   });
+
+  /** d.395：上次同步换过东西时，内核会把这件事单独打在末尾；以前页面整段丢掉。 */
+  it("上次同步换过东西：说清换了哪几份、旧的在哪儿，并给「拿回原来的设置」", async () => {
+    const { cli } = installBridge(`WebDAV sync  https://dav.example.com/dav/
+  syncs settings, profiles
+ ✓ synced at 09:20
+  Restored from the server: settings, profiles
+  This computer's setup from before is kept in ~/.magpie/sync (magpie webdav undo puts it back; magpie webdav dismiss clears this)
+  Syncs only when asked: magpie webdav now syncs once`);
+
+    render(<CloudSyncCard />);
+    const box = await screen.findByLabelText("上次同步改了什么");
+    expect(box).toHaveTextContent("上次同步把服务器那份整个搬来了：settings、profiles。");
+    expect(box).toHaveTextContent("被换掉的那几份留在 ~/.magpie/sync。");
+
+    fireEvent.click(screen.getByRole("button", { name: "拿回原来的设置" }));
+    await waitFor(() => expect(cli).toHaveBeenCalledWith(["webdav", "undo"]));
+  });
+
+  it("只是知情：没有可撤销的时候只给「知道了」，发的是 dismiss", async () => {
+    const { cli } = installBridge(`WebDAV sync  https://dav.example.com/dav/
+  syncs settings
+ ✓ synced at 09:20
+  Replaced here by newer ones from another computer: settings
+  The copies replaced are kept in ~/.magpie/sync (magpie restore opens one; magpie webdav dismiss clears this)
+  Syncs only when asked`);
+
+    render(<CloudSyncCard />);
+    await screen.findByLabelText("上次同步改了什么");
+    expect(screen.queryByRole("button", { name: "拿回原来的设置" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    await waitFor(() => expect(cli).toHaveBeenCalledWith(["webdav", "dismiss"]));
+  });
+
+  it("什么都没换：不弹那块提醒，也不多出按钮", async () => {
+    installBridge(ON);
+    render(<CloudSyncCard />);
+    await screen.findByText(/WebDAV → https:\/\/dav\.jianguoyun\.com\/dav\//);
+    expect(screen.queryByLabelText("上次同步改了什么")).toBeNull();
+    expect(screen.queryByRole("button", { name: "知道了" })).toBeNull();
+  });
 });

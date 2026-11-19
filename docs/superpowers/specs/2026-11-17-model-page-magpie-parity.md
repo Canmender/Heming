@@ -313,6 +313,21 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
   仍是低频细项，留在「高级命令」里跑——进了卡片就会再多四个勾选框，与「简化」相反。
 - 读不出来的部分不编：`auto` 没读到就不说「多久一次」；没开就说「云同步没开」。
 
+**上次同步改了什么（d.395）**：内核在 `syncShow` 末尾另有一段，专门说「这次换过谁的东西」——
+`Restored from the server: …`（整套从服务器搬来）、`Replaced here by newer ones from another computer: …`（换的是本机）、
+`Replaced on the server by this computer's newer ones: …`（换的是服务器）、
+`kept in <目录>`（被换掉的旧副本在哪）、以及「同步来的设置要用这些账号、本机还没登录」。
+这段以前整段丢掉，用户只能自己去命令行看。现在 `parseSyncStatus` 读成 `restored` / `changedHere` /
+`changedThere` / `saved` / `signIns`，卡片在状态下面多一块提醒，并且：
+
+| 情形 | 按钮 | 命令 |
+| --- | --- | --- |
+| 整套从服务器搬来过 | 「拿回原来的设置」 | `magpie webdav undo` |
+| 只换过某几份 | 只给「知道了」 | `magpie webdav dismiss` |
+
+`undo` 只在内核真说过「Restored」时给——那是它唯一能拿回来的情形；单纯「换了几份」不那么给，
+免得按钮点了什么也不发生。`dismiss` 只是别再提，旧副本仍然留在那个目录里（文案照说）。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 

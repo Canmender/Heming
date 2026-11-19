@@ -30,6 +30,16 @@ export interface SyncStatus {
   error: string;
   /** 隔多少分钟自己同步一次；0 表示只在手动时同步；null 表示没读到。 */
   auto: number | null;
+  /** 上次同步把服务器那份整套搬到了本机（内核说 `Restored from the server`）。 */
+  restored: boolean;
+  /** 上次同步换了本机的哪几份（另一台电脑的更新）。 */
+  changedHere: string[];
+  /** 上次同步换了服务器上的哪几份（本机更新）。 */
+  changedThere: string[];
+  /** 被换掉的那几份的旧副本放在哪（内核显示为 `~/…`）。 */
+  saved: string;
+  /** 同步下来的设置里用到、但本机还没登录的账号。 */
+  signIns: string[];
 }
 
 const KIND_OF_PREFIX: Record<string, SyncKind> = {
@@ -37,6 +47,14 @@ const KIND_OF_PREFIX: Record<string, SyncKind> = {
   S3: "s3",
   GitHub: "github",
 };
+
+/** `providers with their API keys, settings, profiles` → 三段。 */
+function splitParts(text: string | undefined): string[] {
+  return (text ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
 
 /** 从 `magpie webdav` 的输出里读出云同步现状。 */
 export function parseSyncStatus(text: string, fallback: SyncKind = "webdav"): SyncStatus {
@@ -51,6 +69,11 @@ export function parseSyncStatus(text: string, fallback: SyncKind = "webdav"): Sy
     last: "",
     error: "",
     auto: null,
+    restored: false,
+    changedHere: [],
+    changedThere: [],
+    saved: "",
+    signIns: [],
   };
 
   const off = /^(WebDAV|S3|GitHub) sync is off$/.exec(head);
@@ -84,6 +107,42 @@ export function parseSyncStatus(text: string, fallback: SyncKind = "webdav"): Sy
     const failed = /^couldn't sync:\s*(.+)$/.exec(line);
     if (failed) {
       status.error = failed[1]?.trim() ?? "";
+      continue;
+    }
+
+    // 上次同步到底换了谁的东西：内核把这件事单独打在末尾，页面以前整段丢掉。
+    const restored = /^Restored from the server:\s*(.+)$/.exec(line);
+    if (restored) {
+      status.restored = true;
+      status.changedHere = splitParts(restored[1]);
+      continue;
+    }
+
+    const here = /^Replaced here by newer ones from another computer:\s*(.+)$/.exec(line);
+    if (here) {
+      status.changedHere = splitParts(here[1]);
+      continue;
+    }
+
+    const there = /^Replaced on the server by this computer's newer ones:\s*(.+)$/.exec(line);
+    if (there) {
+      status.changedThere = splitParts(there[1]);
+      continue;
+    }
+
+    const kept = /\bkept in\s+(\S+)\s+\(/.exec(line);
+    if (kept) {
+      status.saved = kept[1]?.trim() ?? "";
+      continue;
+    }
+
+    // 行里前面还有个 "(to use one here: magpie accounts add <id>)"，所以认最后一个 "): " 之后那段。
+    const signIns = /not signed in on this computer.*\):\s*(.+)$/.exec(line);
+    if (signIns) {
+      status.signIns = (signIns[1] ?? "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
       continue;
     }
 
@@ -140,6 +199,46 @@ export function syncOnArgs(kind: SyncKind, address: string, user = ""): string[]
 /** 关掉云同步：服务器上的文件留着，只是不再同步。 */
 export function syncOffArgs(kind: SyncKind): string[] {
   return [kind, "off"];
+}
+
+/** 撤销上次「整套换成服务器那份」：把本机原来的设置拿回来。 */
+export function syncUndoArgs(kind: SyncKind): string[] {
+  return [kind, "undo"];
+}
+
+/** 只是别再提这件事——被换掉的旧副本仍然留着。 */
+export function syncDismissArgs(kind: SyncKind): string[] {
+  return [kind, "dismiss"];
+}
+
+/**
+ * 上次同步到底动了什么：只在真有话说时返回。
+ *
+ * 三种情况：整套从服务器搬来（`restored`）、换了本机几份、换了服务器几份。
+ * 有话说时页面还应该给「撤销」（只有整套搬来能撤）与「知道了」两个按钮。
+ */
+export function describeNotice(status: SyncStatus): string[] {
+  const lines: string[] = [];
+  if (status.restored) {
+    lines.push(`上次同步把服务器那份整个搬来了：${status.changedHere.join("、") || "全部"}。`);
+  } else {
+    if (status.changedHere.length > 0) {
+      lines.push(`上次同步换了本机的：${status.changedHere.join("、")}（另一台电脑比较新）。`);
+    }
+    if (status.changedThere.length > 0) {
+      lines.push(`上次同步换了服务器上的：${status.changedThere.join("、")}（这台电脑比较新）。`);
+    }
+  }
+  if (status.saved !== "") lines.push(`被换掉的那几份留在 ${status.saved}。`);
+  if (status.signIns.length > 0) {
+    lines.push(`同步来的设置要用这些账号，本机还没登录：${status.signIns.join("、")}。`);
+  }
+  return lines;
+}
+
+/** 有没有需要人看一眼的事（要撤销或至少要知情）。 */
+export function hasNotice(status: SyncStatus): boolean {
+  return describeNotice(status).length > 0;
 }
 
 /** 把现状说成一句话（没开也有话说）。 */

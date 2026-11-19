@@ -1,4 +1,42 @@
-﻿## d.395.4.133.14（2026-11-19）— 压缩中就别再按了
+## d.396.4.133.14（2026-11-19）— 云同步换过什么，页面上说得出、也撤得回
+
+### 为什么做
+
+上一版把云同步做成了一张卡片（d.394），能看状态、能同步、能改间隔。但内核在 `magpie webdav` 的末尾还另有一段，
+专门说「这次同步换过谁的东西」——整套从服务器搬过来了、换了本机哪几份、换了服务器哪几份、被换掉的旧副本放在哪个目录、
+同步来的设置要用哪些本机还没登录的账号。这一整段之前被丢掉了，用户想知道「刚才那一下动了什么、能不能撤回」，
+还是得自己开命令行看，而且看完也不一定敢动手。
+
+### 做了什么
+
+| 内核说的 | 页面现在 |
+| --- | --- |
+| `Restored from the server: …` | 一句「上次同步把服务器那份整个搬来了：…」＋「拿回原来的设置」按钮（`webdav undo`） |
+| `Replaced here by newer ones from another computer: …` | 「上次同步换了本机的：…（另一台电脑比较新）」 |
+| `Replaced on the server by this computer's newer ones: …` | 「上次同步换了服务器上的：…（这台电脑比较新）」 |
+| `kept in <目录>` | 「被换掉的那几份留在 <目录>」 |
+| `not signed in on this computer: …` | 「同步来的设置要用这些账号，本机还没登录：…」 |
+| `dismiss` | 「知道了」，只是别再提；旧副本仍然留着 |
+
+- 「拿回原来的设置」只在真说过 `Restored` 时出现——那是内核唯一能撤销的情形，别的情形给了按钮点了也不会发生什么。
+- 解析在 `packages/web/src/lib/magpieSync.ts`（`restored` / `changedHere` / `changedThere` / `saved` / `signIns` +
+  `describeNotice` / `hasNotice` / `syncUndoArgs` / `syncDismissArgs`），卡片在 `packages/web/src/components/model/CloudSyncCard.tsx`。
+- 什么都没换过就不弹这块提醒，也不多出按钮——不制造「好像出事了」的错觉。
+
+### 怎么验证
+
+- `npx vitest run src/lib/magpieSync.test.ts` 13 例（新增：整套搬来、只换某几份、什么都没换、要用本机没登录的账号）
+- `npx vitest run src/components/model/CloudSyncCard.test.tsx` 7 例（新增：撤销发 `undo`、只知情发 `dismiss`、无事不生提醒）
+- `npx vitest run src/components/ModelPage.test.tsx src/components/model src/lib/magpieSync.test.ts` 15 文件 / 216 例全绿
+- `pnpm --filter @heming/web typecheck` 通过
+
+### 留白
+
+- 「同步哪些东西」（`set keys= / agents= / library= / usage= / sign-ins=`）仍留在「高级命令」，不进卡片。
+- 被换掉的旧副本不能从页面里挑一份恢复——`magpie restore <文件>` 仍要自己跑；这条挂在「备份」那边更合适。
+- 只在卡片进页面时读一次；同步之后会自己重读一遍，但别的电脑改了东西，这边不会自己刷新（点「读一次现状」）。
+
+## d.395.4.133.14（2026-11-19）— 压缩中就别再按了
 
 **为什么做。** 「现在压缩」如果要用模型生成摘要，就得先请求一次模型；这期间按钮还是可点的。连点两下会压两次，第二次是在刚压完的摘要上再压——纯属浪费一次调用，结果也更糊。
 
@@ -12,6 +50,7 @@
 **怎么验证。** `ContextView.test.tsx` 22 → 23 例（压缩中按钮禁用、点了不触发回调）；`ChatPage.test.tsx` 209 例；typecheck 通过。web 全量跑到 `magpieSync` 时失败——那是并行会话正在改的文件（`magpieSync.ts`、`CloudSyncCard.tsx` 同批），不是本轮引入。
 
 **留白。** 失败没有单独的错误态：`runCompactCommand` 自己会提示「没省下来」这类结果，这里只负责不让连点。
+
 
 ## d.394.4.133.14（2026-11-19）— 云同步从「填命令」变成一张卡片
 

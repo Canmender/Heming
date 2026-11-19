@@ -2,13 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { getMagpieCliBridge } from "../../lib/magpieCli.js";
 import {
   describeAuto,
+  describeNotice,
   describeSync,
   labelOf,
   parseSyncStatus,
   syncAutoArgs,
+  syncDismissArgs,
   syncNowArgs,
   syncOffArgs,
   syncOnArgs,
+  syncUndoArgs,
   type SyncKind,
   type SyncStatus,
 } from "../../lib/magpieSync.js";
@@ -116,6 +119,16 @@ export function CloudSyncCard() {
     void send("关掉了云同步", syncOffArgs(status.kind));
   };
 
+  const undoRestore = () => {
+    if (!status) return;
+    void send("拿回了原来的设置", syncUndoArgs(status.kind));
+  };
+
+  const dismissNotice = () => {
+    if (!status) return;
+    void send("不再提这件事", syncDismissArgs(status.kind));
+  };
+
   const turnOn = async () => {
     if (!bridge) return;
     const args = syncOnArgs(kind, address, user);
@@ -137,6 +150,7 @@ export function CloudSyncCard() {
   };
 
   const hint = status?.on ? describeAuto(status.auto) : "";
+  const notice = status?.on ? describeNotice(status) : [];
 
   return (
     <SectionCard
@@ -208,10 +222,45 @@ export function CloudSyncCard() {
               读一次现状
             </Button>
           </div>
+          {notice.length > 0 && (
+            <div role="alert" className="ui-alert mt-2 block" aria-label="上次同步改了什么">
+              <div className="flex items-start gap-2">
+                <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  {notice.map((line) => (
+                    <p key={line} className="ui-caption">
+                      {line}
+                    </p>
+                  ))}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {status.restored && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="primary"
+                        disabled={!bridge || busy}
+                        onClick={undoRestore}
+                      >
+                        拿回原来的设置
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={!bridge || busy}
+                      onClick={dismissNotice}
+                    >
+                      知道了
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {said && <p className="ui-caption text-muted">{said}</p>}
         </div>
-      ) : (
-        <div className="mt-2 space-y-2">
+      ) : (        <div className="mt-2 space-y-2">
           <p className="ui-caption">{describeSync((status ?? emptyStatus(kind)) as SyncStatus)}</p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="ui-caption" htmlFor="cloud-sync-kind">
@@ -266,7 +315,21 @@ export function CloudSyncCard() {
 
 /** 还没读到时不编内容：只说没开。 */
 function emptyStatus(kind: SyncKind): SyncStatus {
-  return { on: false, kind, url: "", who: [], parts: [], last: "", error: "", auto: null };
+  return {
+    on: false,
+    kind,
+    url: "",
+    who: [],
+    parts: [],
+    last: "",
+    error: "",
+    auto: null,
+    restored: false,
+    changedHere: [],
+    changedThere: [],
+    saved: "",
+    signIns: [],
+  };
 }
 
 function firstLine(text: string): string {
