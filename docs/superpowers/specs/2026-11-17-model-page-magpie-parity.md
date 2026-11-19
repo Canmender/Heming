@@ -303,6 +303,23 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 画图模型不在默认目录里：`packages/web/src/lib/magpieClient.ts` 的 `fetchGatewayImageModels` 单独问 `?kind=image`（失败按「没有」处理，退回手填）。
 - 看图/画图的读写与解析在 `packages/web/src/lib/modelSettings.ts`：`settings get` 的 JSON 字符串（空值是 `""`）与裸文本都认；`settings set` 不接受空值，所以清空走 `settings reset`。
 
+### 4.1 用量图：每天请求 / Token / 首字 / 花费
+
+运行页的用量图（`packages/web/src/components/ModelUsageView.tsx`）四个指标都从内核按天的
+`usage.Point`（内嵌 `Totals`）里取，页面只做取数与格式化：
+
+| 指标 | 取哪个字段 | 说明 |
+| --- | --- | --- |
+| 请求 | `calls` | 每天多少次 |
+| Token | `input + output` | 不含缓存读写 |
+| 首字 | `ttft_ms / timed` | 只算被计时的流式回复（`pointTTFT`），没计时的日子不画柱 |
+| 花费 | `cost` | 按模型服务自己的记账口径；未定价的条数不折算成钱 |
+
+- 指标表在 `CHART_METRICS`（`label` / `title` / `fill` 三个字段驱动按钮、标题、柱子颜色），
+  柱高由 `chartBars(series, metric)` 算，悬停文案与「单日最高」按指标分支（钱走 `formatCost`）。
+- 颜色：`--chart-1`..`--chart-4` 在 `index.css` 亮暗各一套（蓝 / 蓝绿 / 琥珀 / 紫），
+  四个色相互不混淆，也不借「告警红」。
+
 ## 5. 还没对齐的部分（明确留白）
 
 - **Web search（Settings › Models 的 search 一段）**：`searcher`、`searcherThen`、`searcherEffort`、

@@ -295,7 +295,7 @@ export interface ChartBar {
   showLabel: boolean;
 }
 
-export type ChartMetric = "calls" | "tokens" | "ttft";
+export type ChartMetric = "calls" | "tokens" | "ttft" | "cost";
 
 /** 一天的平均首字：只有那天有被计时的流式回复才给数。 */
 export function pointTTFT(point: UsageSeriesPoint): number | null {
@@ -314,6 +314,7 @@ export function chartBars(
   const values = series.map((point) => {
     if (metric === "calls") return point.calls;
     if (metric === "tokens") return point.input + point.output;
+    if (metric === "cost") return point.cost;
     return pointTTFT(point) ?? 0;
   });
   const max = Math.max(1, ...values);

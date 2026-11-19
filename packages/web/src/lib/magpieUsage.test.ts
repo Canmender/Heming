@@ -218,4 +218,16 @@ describe("展示函数", () => {
     expect(bars[2]!.ratio).toBeCloseTo(300 / 800);
     expect(chartBars(series, "calls").map((bar) => bar.value)).toEqual([2, 3, 5]);
   });
+
+  it("按天的花费：柱高就是那天的钱，未定价的那天照实给 0", () => {
+    const series: UsageSeriesPoint[] = [
+      { label: "11-06", time: "", calls: 2, errors: 0, input: 0, output: 0, cost: 0.42, unpriced: 0 },
+      { label: "11-07", time: "", calls: 3, errors: 0, input: 0, output: 0, cost: 1.5, unpriced: 2 },
+      { label: "11-08", time: "", calls: 5, errors: 0, input: 0, output: 0, cost: 0, unpriced: 3 },
+    ];
+    const bars = chartBars(series, "cost");
+    expect(bars.map((bar) => bar.value)).toEqual([0.42, 1.5, 0]);
+    expect(bars[1]!.ratio).toBe(1);
+    expect(bars[0]!.ratio).toBeCloseTo(0.42 / 1.5);
+  });
 });

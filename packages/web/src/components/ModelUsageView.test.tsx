@@ -158,6 +158,24 @@ describe("ModelUsageView", () => {
     expect(screen.getByText("每天 Token")).toBeInTheDocument();
   });
 
+  it("图表能切到花费：每天花了多少，钱按模型服务的记账方式写", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) =>
+        String(input).includes("/magpie/usage/requests")
+          ? new Response(JSON.stringify(requests), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify(usage), { status: 200, headers: { "content-type": "application/json" } }),
+      ),
+    );
+    render(<ModelUsageView />);
+    await screen.findByText("每天请求数");
+    fireEvent.click(screen.getByRole("button", { name: "花费" }));
+    expect(screen.getByText("每天花费（按模型服务记账）")).toBeInTheDocument();
+    expect(screen.getByText("单日最高 0.2500")).toBeInTheDocument();
+    const barTitles = [...document.querySelectorAll("svg rect title")].map((node) => node.textContent);
+    expect(barTitles).toContain("Oct 11：0.2500");
+  });
+
   it("没有调用时给空态，不画空图", async () => {
     vi.stubGlobal(
       "fetch",

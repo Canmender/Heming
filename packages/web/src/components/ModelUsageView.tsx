@@ -34,6 +34,7 @@ const CHART_METRICS = [
   { key: "calls", label: "请求", title: "每天请求数", fill: "var(--chart-1)" },
   { key: "tokens", label: "Token", title: "每天 Token", fill: "var(--chart-2)" },
   { key: "ttft", label: "首字", title: "每天平均首字（只算流式回复）", fill: "var(--chart-3)" },
+  { key: "cost", label: "花费", title: "每天花费（按模型服务记账）", fill: "var(--chart-4)" },
 ] as const satisfies readonly { key: ChartMetric; label: string; title: string; fill: string }[];
 
 const PERIODS: { key: UsagePeriod; label: string }[] = [
@@ -253,7 +254,9 @@ export function ModelUsageView({
                         <title>
                           {metric === "ttft"
                             ? `${bar.label}：平均 ${bar.value}ms`
-                            : `${bar.label}：${bar.value}`}
+                            : metric === "cost"
+                              ? `${bar.label}：${formatCost(bar.value)}`
+                              : `${bar.label}：${bar.value}`}
                         </title>
                       </rect>
                       {bar.showLabel && (
@@ -275,7 +278,9 @@ export function ModelUsageView({
                     ? `${Math.max(0, ...bars.map((bar) => bar.value))} 次`
                     : metric === "ttft"
                       ? `平均 ${Math.max(0, ...bars.map((bar) => bar.value))}ms`
-                      : formatTokens(Math.max(0, ...bars.map((bar) => bar.value)))}
+                      : metric === "cost"
+                        ? formatCost(Math.max(0, ...bars.map((bar) => bar.value)))
+                        : formatTokens(Math.max(0, ...bars.map((bar) => bar.value)))}
                 </span>
               </p>
             </div>
