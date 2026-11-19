@@ -6416,6 +6416,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 边界：`LIVE_DRAFT_MIN_CHARS = 20`、`LIVE_DRAFT_CAP = 4`；只在本机，不跨设备；最多差最后 3 秒的字，不做逐字回放。
 
 
+- **来源能说清自己是什么了（d.365）**：★ 来源「高级」多了一组「它是什么（可选）」——「算免费」（Free first / Cheapest 会先挑它）、「上下文带宽」（`200000` / `200k` / `1.5m` 与内核 `provider.ParseTokens` 同口径，写错当场点名且整条不发）、「族标签」（规则里按族挑）、「原文照发」（这一家不吃脱敏，共用中转地址别开）；★ 四项合成一条 `provider set`（`free=` / `context=` / `family=` / `unmasked=`），留空＝这次不改、下拉首项也是「不改」，页面不读当前值免得覆盖；★ 参数生成在 `packages/web/src/lib/magpieSourceProfile.ts`（`SOURCE_PROFILE_FIELDS` / `parseTokensInput` / `sourceProfileRejected` / `sourceProfilePairs` / `sourceProfileCommand`），`magpieSourceProfile.test.ts` 7 例 + `ModelPage.test.tsx` 1 例（111 → 112），定向 17 文件 208 例全绿、typecheck 通过；★ `prompt=` / `additional-tools=` / `user-agent=` / `search=` / `compaction=` 仍留命令行（端专用排查开关，摆上页面会误导）。
+
 ## 7. 快速上手命令
 
 ```bash
