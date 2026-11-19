@@ -104,6 +104,41 @@ describe("ModelTraceView", () => {
     expect(screen.getByTestId("trace-edge-1")).toBeInTheDocument();
   });
 
+  it("换过账号的请求：详情里说清「试过谁、为什么没成」", async () => {
+    mockFetch({
+      seq: 9,
+      now: "2026-11-08T02:00:09Z",
+      routes: [
+        {
+          id: 9,
+          seq: 9,
+          time: "2026-11-08T02:00:09Z",
+          agent: "claude",
+          model: "gpt-4o",
+          provider: "openai",
+          order: [
+            { id: "a1", provider: "openai", name: "OpenAI", who: "主号", kind: "account", model: "gpt-4o" },
+            { id: "a2", provider: "openai", name: "OpenAI", who: "备用号", kind: "account", model: "gpt-4o" },
+          ],
+          tries: [
+            { id: "a1", done: true, status: 429, fail: "额度用完", error: "insufficient_quota" },
+            { id: "a2", done: true, status: 200, ttft: 320, ms: 1400 },
+          ],
+          done: true,
+          status: 200,
+          ms: 1800,
+        },
+      ],
+    });
+    render(<ModelTraceView />);
+    await screen.findByRole("img", { name: "路由节点图" });
+    const rowButtons = screen.getAllByRole("button", { name: /由 备用号 回答/ });
+    fireEvent.click(rowButtons[rowButtons.length - 1]!);
+    expect(screen.getByText("试过谁、为什么没成")).toBeInTheDocument();
+    expect(screen.getByText("主号：没成 —— 额度用完（insufficient_quota）")).toBeInTheDocument();
+    expect(screen.getByText("备用号：答上了（首字 320ms，共 1400ms）")).toBeInTheDocument();
+  });
+
   it("没有请求时给引导，不伪造节点", async () => {
     mockFetch({ seq: 0, now: "2026-11-08T02:00:00Z", routes: [] });
     render(<ModelTraceView />);

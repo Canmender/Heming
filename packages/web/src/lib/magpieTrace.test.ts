@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildTraceGraph, fetchTrace, shortTime, type TraceRoute } from "./magpieTrace.js";
+import { buildTraceGraph, describeTry, fetchTrace, shortTime, tryWho, type TraceRoute } from "./magpieTrace.js";
 
 /** 实时链路的纯函数（d.101）：读快照、节点图构建、状态口径。 */
 
@@ -99,5 +99,21 @@ describe("展示辅助", () => {
   it("shortTime 对坏时间给出 —", () => {
     expect(shortTime("not-a-time")).toBe("—");
     expect(shortTime("2026-11-08T02:03:04Z")).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("每一试说清落在了谁身上：候选里的 who 优先，找不到就用 id", () => {
+    expect(tryWho({ id: "deepseek-key", done: true, status: 200 }, route())).toBe("工作号");
+    expect(tryWho({ id: "陌生", done: true, status: 200 }, route())).toBe("陌生");
+  });
+
+  it("describeTry：成功带首字与耗时，失败带原因，没结束就说正在试", () => {
+    expect(describeTry({ id: "deepseek-key", done: true, status: 200, ttft: 320, ms: 1400 }, route())).toBe(
+      "工作号：答上了（首字 320ms，共 1400ms）",
+    );
+    expect(describeTry({ id: "deepseek-key", done: true, status: 429 }, route())).toBe("工作号：没成 —— HTTP 429");
+    expect(
+      describeTry({ id: "deepseek-key", done: true, status: 429, fail: "额度用完", error: "insufficient_quota" }, route()),
+    ).toBe("工作号：没成 —— 额度用完（insufficient_quota）");
+    expect(describeTry({ id: "deepseek-key", done: false }, route())).toBe("工作号：正在试");
   });
 });

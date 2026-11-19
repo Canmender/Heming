@@ -30,6 +30,13 @@ export interface TraceTry {
   done: boolean;
   status?: number;
   ms?: number;
+  /** 首字：从这一试发出到第一个内容来的毫秒（只流式才有）。 */
+  ttft?: number;
+  /** 第一个字来的毫秒（推理先出时比 TTFT 早）。 */
+  firstText?: number;
+  /** 这一试为什么没成，内核写的原话。 */
+  fail?: string;
+  error?: string;
 }
 
 export interface TraceRoute {
@@ -197,6 +204,39 @@ export function shortTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+/**
+ * 这一试落在谁身上：先按候选顺序找同一个 id，找不到就用 id 本身。
+ *
+ * 换过账号/Key 时，tries 里的 id 与 order 里的 id 是同一套（内核给的），
+ * 所以这里只做一次查找，不自己拼名字。
+ */
+export function tryWho(tryItem: TraceTry, route: TraceRoute): string {
+  const weighed = route.order?.find((item) => item.id === tryItem.id);
+  return weighed?.who || weighed?.name || weighed?.provider || tryItem.id || "未知账号";
+}
+
+/**
+ * 这一试是怎么结束的，一句话：成功带首字、失败带原因、还没结束就说在进行。
+ *
+ * 内核在 `Try.Fail` 里写的是「为什么失败」（例如额度用完、429、超时），
+ * 在 `Error` 里写的是上游原话；两个都有时以前者为主、后者括起来。
+ */
+export function describeTry(tryItem: TraceTry, route: TraceRoute): string {
+  const name = tryWho(tryItem, route);
+  if (!tryItem.done) return `${name}：正在试`;
+  const failed = (tryItem.status ?? 0) >= 400 || Boolean(tryItem.fail || tryItem.error);
+  if (failed) {
+    const why = tryItem.fail || tryItem.error || `HTTP ${tryItem.status ?? "失败"}`;
+    const detail = tryItem.fail && tryItem.error && tryItem.error !== tryItem.fail ? `（${tryItem.error}）` : "";
+    return `${name}：没成 —— ${why}${detail}`;
+  }
+  const parts: string[] = [];
+  if (tryItem.ttft) parts.push(`首字 ${tryItem.ttft}ms`);
+  if (tryItem.ms) parts.push(`共 ${tryItem.ms}ms`);
+  const tail = parts.length > 0 ? `（${parts.join("，")}）` : "";
+  return `${name}：答上了${tail}`;
 }
 
 /** 颜色 / 文案（页面与图例共用，避免两处漂移）。 */

@@ -225,6 +225,25 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 收的边界：`prompt=`（Antigravity 订阅原样发系统提示）、`additional-tools=` 是端专属且 show 读不回来，
   仍留命令行；订阅账号带 `user-agent=agent` 内核会报错（它本来就用自己的客户端），页面不做预判，让内核说。
 
+### 3.7 轨迹里每一次尝试：落在谁身上、为什么没成
+
+`/v1/magpie/trace` 的 `routes[].tries[]` 本来就带着每次尝试的结局（内核 `gateway.Try` 的 `id` / `status` /
+`ms` / `ttft` / `firstText` / `fail` / `error`），页面此前只读 `id` / `status` / `ms`，把「换过账号」的理由丢了：
+
+| 内核字段 | 页面怎么用 | 位置 |
+| --- | --- | --- |
+| `tries[].fail` / `error` | 「没成 —— 额度用完（insufficient_quota）」，有 fail 时 error 括起来 | `describeTry` |
+| `tries[].ttft` / `ms` | 成功那条写「答上了（首字 320ms，共 1400ms）」 | `describeTry` |
+| `tries[].done = false` | 「正在试」 | `describeTry` |
+| `tries[].id` → `order[].who/name` | 试的是哪个账号/Key（`tryWho`，找不到就用 id） | 详情面板 |
+
+- 类型与纯函数在 `packages/web/src/lib/magpieTrace.ts`（`TraceTry` 补 `ttft` / `firstText` / `fail` / `error`，
+  新增 `tryWho` / `describeTry`），测试在 `magpieTrace.test.ts`。
+- 渲染在 `packages/web/src/components/ModelTraceView.tsx` 的「请求详情」里：「试过谁、为什么没成」按顺序列出
+  每一试，失败行标红；测试在 `ModelTraceView.test.tsx`。
+- 收的边界：`Call.Fallback` 那句「哪些先失败了、为什么」仍在网关侧（`gateway.Call.Fallback`），现在用的
+  是每次尝试自己的 `fail`，比那句更细；不另开接口。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。

@@ -4,6 +4,7 @@ import { AlertIcon, WorkflowIcon } from "./icons.js";
 import {
   EDGE_STATE_LABEL,
   buildTraceGraph,
+  describeTry,
   fetchTrace,
   shortTime,
   type EdgeState,
@@ -534,6 +535,21 @@ export function ModelTraceView() {
             </div>
           )}
           {seen?.route.error && <div className="mt-1 text-danger">{seen.route.error}</div>}
+          {seen && (seen.route.tries?.length ?? 0) > 0 && (
+            <div className="mt-2">
+              <div className="font-semibold">试过谁、为什么没成</div>
+              <ol className="mt-1 space-y-0.5">
+                {(seen.route.tries ?? []).map((tryItem, index) => (
+                  <li key={`${tryItem.id}-${index}`} className="ui-caption">
+                    <span className="mr-1 text-ink-4">{index + 1}.</span>
+                    <span className={(tryItem.status ?? 0) >= 400 || tryItem.fail || tryItem.error ? "text-danger" : ""}>
+                      {describeTry(tryItem, seen.route)}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </div>
       )}
     </section>
