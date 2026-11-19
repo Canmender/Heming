@@ -319,6 +319,22 @@ describe("ModelPage · 添加来源", () => {
     await waitFor(() => expect(calls).toContainEqual(["provider", "on", "mock"]));
   });
 
+  it("谁在用这一家：说明里的「← Claude Code, Codex」写在行上，删之前看得见", async () => {
+    installBridge(
+      {},
+      {
+        providers: {
+          ok: true,
+          stdout: "  mock custom  mock  127.0.0.1:39001  ● •••••••  1 models  ← Claude Code, Codex",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("← Claude Code、Codex")).toBeInTheDocument();
+  });
+
   it("收起时也看得出这家改过：show 里有的才标，没设过的不标", async () => {
     installBridge(
       {},

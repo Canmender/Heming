@@ -85,6 +85,26 @@ describe("parseProviders", () => {
     expect(rows[0].off).toBe(true);
     expect(rows[1].off).toBe(false);
   });
+
+  it("谁在用：`← Claude Code, Codex` 拆成数组，没有就是空数组", () => {
+    const raw = [
+      "  deepseek  preset  deepseek  api.deepseek.com  ● •••••••  6 models  ← Claude Code, Codex",
+      "  moonshot  preset  moonshot  api.moonshot.cn  ● •••••••  4 models  ",
+    ].join("\n");
+    const rows = parseProviders(raw);
+    expect(rows[0].usedBy).toEqual(["Claude Code", "Codex"]);
+    expect(rows[1].usedBy).toEqual([]);
+  });
+
+  it("在用的那几家后面还跟着备用链：箭头之后的部分不算「在用」", () => {
+    const raw = [
+      "  deepseek  preset  deepseek  api.deepseek.com  ● •••••••  6 models  ← Claude Code",
+      "  ⤷ openrouter/x  ",
+    ].join("\n");
+    const [row] = parseProviders(raw);
+    expect(row.usedBy).toEqual(["Claude Code"]);
+    expect(row.fallback).toEqual(["openrouter/x"]);
+  });
 });
 
 describe("parseAccounts", () => {

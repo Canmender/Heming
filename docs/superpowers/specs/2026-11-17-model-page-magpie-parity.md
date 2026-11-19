@@ -257,8 +257,22 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
   `at-once` / `rpm` / `queue` / `quota-rest` / `rest-cap` / `listed`）标不出来——这些改没改，
   仍要靠展开时自己填的格子判断。
 
-## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
+### 3.9 谁在用这一家：删之前先看一眼
 
+内核 `providers` 的说明列里，`← Claude Code, Codex` 写的是「这几个智能体现在拿它的模型」。
+页面此前把整列丢掉了，于是「这个来源还有人用吗」只能靠猜——删错一个正在用的来源，智能体那边
+下一个请求就报错。
+
+| 内核输出 | 页面 | 位置 |
+| --- | --- | --- |
+| `← Claude Code, Codex`（`providers()` 的 `r.uses`） | 行上加一句「← Claude Code、Codex」，悬停写「这些智能体现在用它」 | `parseProviders` 的 `usedByHint` → `ProviderRow.usedBy` |
+
+- 同一列还挤着停用那句（`magpie provider on <id>`）与备用链（`⤷ a → b`），所以解析只取 `←` 到
+  `⤷` 之间那段、按逗号拆；没写就是空数组（`packages/web/src/lib/magpieCli.ts`）。
+- 测试：`magpieCli.test.ts`（谁在用 / 没有就是空数组 / 箭头之后的备用链不算 / 停用那句不算）、
+  `ModelPage.test.tsx`（行上看得见）。
+
+## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 
 | 原版 magpie 的行为 | 和鸣模型页现在的行为 | 背后的命令 |

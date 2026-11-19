@@ -2676,6 +2676,15 @@ export function ModelPage() {
                               备用 {row.fallback.join(" → ")}
                             </span>
                           )}
+                          {row.usedBy.length > 0 && (
+                            // 谁在用这一家：删之前先看这一句，别把正在用的来源删了。
+                            <span
+                              className="block truncate ui-caption"
+                              title={`这些智能体现在用它：${row.usedBy.join("、")}`}
+                            >
+                              ← {row.usedBy.join("、")}
+                            </span>
+                          )}
                           {testState[row.id] && (
                             // 测试结论就写在行上：通过带耗时，失败写「连不上」，原因在悬停里。
                             <span

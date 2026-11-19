@@ -105,6 +105,12 @@ export interface ProviderRow {
    * Key 与记录都还在，只是智能体拿不到它的模型。
    */
   off: boolean;
+  /**
+   * 现在有哪几个智能体在用它（内核 `providers` 说明列里的 `← Claude Code, Codex`）。
+   *
+   * 与 `off`、备用链挤在同一列，所以按记号认：`←` 之后到 `⤷` 之前那段，按逗号拆。
+   */
+  usedBy: string[];
   raw: string;
 }
 
@@ -137,9 +143,25 @@ export function parseProviders(raw: string): ProviderRow[] {
     );
     const modelIndex = tokens.findIndex((token) => /^\d+$/.test(token));
     const models = modelIndex >= 0 && /^models?$/.test(tokens[modelIndex + 1] ?? "") ? Number.parseInt(tokens[modelIndex]!, 10) : null;
-    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], off: offHint(trimmed, id), raw: trimmed });
+    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], off: offHint(trimmed, id), usedBy: usedByHint(trimmed), raw: trimmed });
   }
   return rows;
+}
+
+/**
+ * 这一行被哪些智能体用着。
+ *
+ * 内核在说明列里写 `← Claude Code, Codex`（`providers()` 的 `r.uses`），同一列还可能有
+ * 停用那句与备用链 `⤷ a → b`。所以只取 `←` 到 `⤷` 之间那段，按逗号拆。
+ */
+function usedByHint(trimmed: string): string[] {
+  const match = /←\s*([^\n]+)/.exec(trimmed);
+  if (match === null) return [];
+  const list = match[1]!.split("⤷")[0]!;
+  return list
+    .split(/[,，]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 /**
