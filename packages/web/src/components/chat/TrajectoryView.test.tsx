@@ -287,3 +287,26 @@ describe("TrajectoryView · 工具栏（d.351）", () => {
     expect(chip).toBeDisabled();
     expect(chip).toHaveAttribute("title", "这段对话里没有被拒或报错的步骤");
   });
+
+  it("行内容是可聚焦的按钮：回车展开，不用点整行（d.407）", () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          message({
+            id: "a1",
+            payload: { text: "做完了" },
+            tools: [
+              { id: "t1", name: "read_file", args: "a.ts", status: "ok", result: "内容", startedAt: 1, endedAt: 9 },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<TrajectoryView progress={progress({ hasData: false })} conversationId="c1" />);
+    const toggle = screen.getAllByTestId("trajectory-row-toggle")[0]!;
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getAllByTestId("trajectory-row-toggle")[0]).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByText("内容").length).toBeGreaterThan(0);
+  });
+

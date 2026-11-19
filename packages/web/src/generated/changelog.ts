@@ -12,6 +12,18 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.405.4.140.14",
+    "date": "2026-11-19",
+    "title": "轨迹页的行能用键盘展开",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 轨迹页每一行的「展开参数/结果」是绑在整行 \\\tr\\ 上的 \\onClick\\，键盘用户按不到，读屏也读不出「这行可以展开」。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 行内容列 | 可展开的行改成真正的 \\<button>\\（\\\u0007ria-expanded\\、\\data-testid=\"trajectory-row-toggle\"\\、焦点环），回车/空格即可展开；整行点击仍保留 || 不可展开的行 | 仍是纯文本，不会多出一个按了没反应的按钮 |",
+      "**怎么验证。** \\TrajectoryView.test.tsx\\ 13 → 14 例（\\\u0007ria-expanded\\ 由 false → true，展开后能看到结果正文）；typecheck 通过。"
+    ]
+  },
+  {
     "version": "d.405.4.139.14",
     "date": "2026-11-19",
     "title": "筛不到东西时，说清是「筛太小」还是「真没有」",

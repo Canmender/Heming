@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.405.4.140.14",
+    "date": "2026-11-19",
+    "title": "轨迹页的行能用键盘展开",
+    "bullets": [
+      "轨迹页每一行现在都可以用 Tab 聚焦、回车展开参数与结果。",
+      "不可展开的行不会多出一个按了没反应的按钮。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.405.4.139.14",
     "date": "2026-11-19",
     "title": "筛不到东西时，说清是「筛太小」还是「真没有」",

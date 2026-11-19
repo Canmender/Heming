@@ -6632,6 +6632,12 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 单靠 `disabled={failedSteps === 0}` 不够：先有失败、再点筛选、期间数据被清掉也会落到空态，文案得说清怎么退出来。
 
 
+## 轨迹页行的键盘可达性（d.405.4.140）
+
+- 可展开行（`expandable`）的标签渲染成 `<button aria-expanded>`（`data-testid="trajectory-row-toggle"`），整行 `onClick` 保留作为鼠标快捷方式；不可展开行仍是纯文本。
+- 测试断言 `aria-expanded` 变化与结果正文出现，不要用 `getByText`（同一段文字在参数与标题里可能重复）。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6650,6 +6656,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

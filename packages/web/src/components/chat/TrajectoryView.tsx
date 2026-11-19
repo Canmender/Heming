@@ -479,9 +479,25 @@ export function TrajectoryView({
                           </span>
                         </td>
                         <td className="min-w-0 py-1.5 pr-2">
-                          <span className="block truncate text-ink" title={row.label}>
-                            {row.label}
-                          </span>
+                          {expandable ? (
+                            <button
+                              type="button"
+                              aria-expanded={expanded}
+                              data-testid="trajectory-row-toggle"
+                              title={`${row.label}（回车可展开）`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenRow(expanded ? null : row.id);
+                              }}
+                              className={`block w-full truncate text-left text-ink ${FOCUS_RING_TIGHT}`}
+                            >
+                              {row.label}
+                            </button>
+                          ) : (
+                            <span className="block truncate text-ink" title={row.label}>
+                              {row.label}
+                            </span>
+                          )}
                           {row.detail ? (
                             <span className="mt-0.5 block truncate text-ui-xs text-muted" title={row.detail}>
                               {row.detail}
