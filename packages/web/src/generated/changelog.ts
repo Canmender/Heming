@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.384.4.130.14",
+    "date": "2026-11-19",
+    "title": "分组清单有入口了，候选链的旧组件删掉",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 运行页的「路由分组」能建组、能看某一组的详情、能删，却没有「现在都有哪些组」这一步——建了三个组之后想确认，只能靠记。另外 `packages/web/src/components/RouteGroupsCard.tsx` 从「本地模型路由页下线」那天起就没有任何页面渲染它了（只有它自己的测试在渲染），却和「路由分组」两套并存。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 「路由分组」里新增「看分组清单」按钮，跑 `magpie groups`——你自己建的组与 magpie 自己找到的组一起列出来；旁边一句说明写清「结果在页面底部」 || `packages/web/src/components/RouteGroupsCard.tsx`、`RouteGroupsCard.test.tsx` | 删除（候选链编辑器，已被 magpie 路由组取代，无页面引用） || `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` | §5 记下这两件事：为什么删、为什么分组清单不做成卡片 |",
+      "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx src/lib/magpieGroups.test.ts` **132 例全绿**（新增「看分组清单：一条命令把你自己建的组和 magpie 找到的组都列出来」）。`pnpm --filter @heming/web typecheck` 这一轮报的是并发会话正在写的 `ChatPage.tsx(6568,20): Cannot find name 'profile'`，与本轮改动无关。",
+      "**留白。** 分组清单是内核给人看的表格（组名、ids、成员、谁在用），没有 JSON 输出，所以这一轮只给入口、不硬解析成卡片——解析错了比直接给人看原文更糟。"
+    ]
+  },
+  {
     "version": "d.383.4.130.14",
     "date": "2026-11-19",
     "title": "收起的来源行上，看得出这家改过",
