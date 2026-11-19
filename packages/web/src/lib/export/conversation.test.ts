@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   MAX_EXPORT_STEPS,
   buildConversationJson,
@@ -165,3 +165,30 @@ describe("会话导出", () => {
     expect(md).not.toContain("<details>");
   });
 });
+
+describe("导出统计", () => {
+  it("导出的头上有轮次与过程统计（d.408）", () => {
+    const md = buildConversationMarkdown({
+      id: "c1",
+      title: "统计",
+      exportedAt: Date.parse("2026-11-19T10:00:00+08:00"),
+      messages: [
+        { id: "m1", role: "user", at: "2026-11-19T09:59:00+08:00", sender: "我", text: "跑一下" },
+        {
+          id: "m2",
+          role: "assistant" as const,
+          at: "2026-11-19T10:00:00+08:00",
+          sender: "和小鸣",
+          text: "好了",
+          process: [
+            { kind: "tool", label: "read_file", status: "ok" },
+            { kind: "tool", label: "run_shell", status: "denied" },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("- 轮次：1（用户发了几条）");
+    expect(md).toContain("- 过程：2 步 · 1 步没成");
+  });
+});
+

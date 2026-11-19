@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 会话导出：把本机已解密的明文整理成 Markdown / JSON。
  *
  * 边界：
@@ -142,12 +142,21 @@ function processBlock(steps: readonly ExportStep[]): string {
 }
 
 export function buildConversationMarkdown(input: ConversationExportInput): string {
+  /* d.408：导出件也要能一眼看出「跑了多少」——否则拿到文件的人只能从头数。 */
+  const rounds = input.messages.filter((m) => m.role === "user").length;
+  const steps = input.messages.reduce((sum, m) => sum + (m.process?.length ?? 0), 0);
+  const failed = input.messages.reduce(
+    (sum, m) => sum + (m.process?.filter((s) => s.status === "error" || s.status === "denied").length ?? 0),
+    0,
+  );
   const lines: string[] = [
     `# 会话：${input.title}`,
     "",
     `- 会话 ID：${input.id}`,
     `- 导出时间：${formatExportTime(input.exportedAt)}`,
     `- 消息数：${input.messages.length}`,
+    `- 轮次：${rounds}（用户发了几条）`,
+    `- 过程：${steps} 步${failed > 0 ? ` · ${failed} 步没成` : ""}`,
     "",
     "> 由和鸣在本机生成，仅包含本机可解密的明文消息；附件正文未导出。",
     "",
@@ -186,3 +195,4 @@ export function buildConversationJson(input: ConversationExportInput): string {
   };
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
+
