@@ -182,7 +182,7 @@ describe("SettingsPage 个人资料", () => {
     expect(screen.queryByText("上下文预算")).not.toBeInTheDocument();
   });
 
-  it("上下文预算卡：默认值回填、改动即时落盘", () => {
+  it("上下文预算卡：不再有手填预算，只有两个开关，改动即时落盘", () => {
     render(<SettingsPage />);
     goTab("高级");
     expect(screen.getByText("上下文预算")).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe("SettingsPage 个人资料", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.getByLabelText("预算")).toHaveValue("6000");
+    expect(screen.queryByLabelText("预算")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "用模型生成早期摘要" }));
     expect(JSON.parse(localStorage.getItem("heming.context.v1") as string).llmSummary).toBe(false);

@@ -1,114 +1,108 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
-  TURN_BUDGET_TOKENS,
-  BUDGET_WINDOW_RATIO,
-  MAX_AUTO_BUDGET,
+  COMPACT_HEADROOM_TOKENS,
+  COMPACT_RETAIN_RATIO,
+  COMPACT_THRESHOLD_RATIO,
   MAX_AUTO_TURNS,
   MIN_AUTO_BUDGET,
   MIN_AUTO_TURNS,
+  TURN_BUDGET_TOKENS,
   applyModelBudget,
   autoBudgetTokens,
   autoKeepRecentTurns,
+  compactSpec,
   windowBudgetTokens,
 } from "./modelBudget.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "./settings.js";
 import { DEFAULT_CAPABILITY } from "../modelCaps.js";
 
 /**
- * d.160：预算按模型窗口分配。
+ * 上下文预算（d.351）：照 DSH 的压缩规则从窗口算，不再有手动档。
  *
- * 这里的每个数字都是产品口径，不是实现细节：
- * 60% 留给历史（其余给系统提示词/工具声明/输出），自动档封顶 3.2 万（再大不划算），
- * 每 750 token 算一轮、夹在 8–24 轮之间。改这些常量必须同步改本文件。
+ * 三个数是产品口径，不是实现细节：
+ * - 用到窗口 80% 才该压；
+ * - 摘要请求本身留 64K 余量，阈值取「窗口 80%」与「窗口 − 输出 − 余量」的较小值；
+ * - 压缩时保留最近 16% 原文（换算成轮数）。改这些常量必须同步改本文件。
  */
 
-describe("modelBudget 按模型窗口分配历史预算", () => {
-  it("窗口比例是 60%（改这个数要连设置卡一起看）", () => {
-    expect(BUDGET_WINDOW_RATIO).toBeCloseTo(0.6, 10);
+describe("modelBudget 按 DSH 规则算上下文预算", () => {
+  it("阈值/保留/余量三个比例与 DSH 同值", () => {
+    expect(COMPACT_THRESHOLD_RATIO).toBeCloseTo(0.8, 10);
+    expect(COMPACT_RETAIN_RATIO).toBeCloseTo(0.16, 10);
+    expect(COMPACT_HEADROOM_TOKENS).toBe(65_536);
   });
 
-  it("窗口预算 = 窗口 × 60%，能力未知 → 0（由调用方回默认）", () => {
-    expect(windowBudgetTokens({ contextWindow: 200_000, maxOutput: 8_192 })).toBe(120_000);
-    expect(windowBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(4_915);
+  it("大窗口：阈值 = 窗口 80%，保留量 = 消息预算的 16%", () => {
+    const spec = compactSpec({ contextWindow: 200_000, maxOutput: 8_192 });
+    expect(spec).not.toBeNull();
+    expect(spec!.messageBudgetTokens).toBe(191_808);
+    expect(spec!.pressureBudgetTokens).toBe(191_808 - 65_536);
+    expect(spec!.thresholdTokens).toBe(126_272);
+    expect(spec!.retainTokens).toBe(Math.floor(191_808 * 0.16));
+    // 保留量必须小于阈值，否则「压缩」反而留下更多原文
+    expect(spec!.retainTokens).toBeLessThan(spec!.thresholdTokens);
+  });
+
+  it("中窗口：压力预算比 80% 更紧时，以压力预算为阈值", () => {
+    // 64K 窗口：80% = 52.4K，压力预算 = 64K-4K-64K = 负 → 走小窗口分支
+    const spec = compactSpec({ contextWindow: 64_000, maxOutput: 4_096 });
+    expect(spec).not.toBeNull();
+    expect(spec!.thresholdTokens).toBe(Math.floor(64_000 * 0.8));
+  });
+
+  it("小窗口（比余量还小）：按窗口 80% 压，不返回负数预算", () => {
+    const spec = compactSpec({ contextWindow: 8_192, maxOutput: 4_096 });
+    expect(spec!.thresholdTokens).toBe(Math.floor(8_192 * 0.8));
+    expect(spec!.pressureBudgetTokens).toBeGreaterThan(0);
+    expect(windowBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(6_553);
+  });
+
+  it("窗口未知：compactSpec 返回 null，预算回落到保守默认", () => {
+    expect(compactSpec(null)).toBeNull();
+    expect(compactSpec(undefined)).toBeNull();
+    expect(compactSpec({ contextWindow: 0, maxOutput: 0 })).toBeNull();
+    expect(compactSpec({ contextWindow: Number.NaN, maxOutput: 1 })).toBeNull();
     expect(windowBudgetTokens(null)).toBe(0);
-    expect(windowBudgetTokens(undefined)).toBe(0);
-    expect(windowBudgetTokens({ contextWindow: 0, maxOutput: 0 })).toBe(0);
-    expect(windowBudgetTokens({ contextWindow: Number.NaN, maxOutput: 1 })).toBe(0);
   });
 
-  it("自动档预算：大窗口封顶 3.2 万，小窗口不越过 60% 硬塞", () => {
-    // 200K 的 60% 是 12 万，但自动档不让它无限涨
-    expect(autoBudgetTokens({ contextWindow: 200_000, maxOutput: 8_192 })).toBe(MAX_AUTO_BUDGET);
-    // 64K 的 60% 是 38.4K，同样封顶
-    expect(autoBudgetTokens({ contextWindow: 64_000, maxOutput: 4_096 })).toBe(MAX_AUTO_BUDGET);
-    // 32K 的 60% = 19.66K，没到上限，按实际值
-    expect(autoBudgetTokens({ contextWindow: 32_768, maxOutput: 4_096 })).toBe(19_660);
-    // 8K 窗口：60% = 4.9K，低于下限 6K——**不能**为了凑下限去超窗
-    expect(autoBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(4_915);
-    // 能力未知：保持历史默认值，不偷偷改小
+  it("自动预算：窗口已知走阈值，未知回 6000", () => {
+    expect(autoBudgetTokens({ contextWindow: 200_000, maxOutput: 8_192 })).toBe(126_272);
     expect(autoBudgetTokens(null)).toBe(MIN_AUTO_BUDGET);
+    expect(autoBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(4_096);
   });
 
-  it("保留轮数随预算放大，但夹在 8–24 轮", () => {
-    expect(autoKeepRecentTurns(MIN_AUTO_BUDGET)).toBe(MIN_AUTO_TURNS);
-    expect(autoKeepRecentTurns(MAX_AUTO_BUDGET)).toBe(MAX_AUTO_TURNS);
-    expect(autoKeepRecentTurns(9_000)).toBe(12);
-    expect(autoKeepRecentTurns(0)).toBe(MIN_AUTO_TURNS);
-    expect(autoKeepRecentTurns(Number.NaN)).toBe(MIN_AUTO_TURNS);
-    // 每轮 750 token 是换算口径本身
+  it("保留轮数：按 16% 保留量换算，夹在 8–40 轮", () => {
+    expect(autoKeepRecentTurns(6_000)).toBe(MIN_AUTO_TURNS);
+    // 大窗口：保留量 30_689 token ≈ 40 轮，正好是上限
+    expect(autoKeepRecentTurns(126_272, { contextWindow: 200_000, maxOutput: 8_192 })).toBe(MAX_AUTO_TURNS);
     expect(TURN_BUDGET_TOKENS).toBe(750);
-    expect(Math.floor(MAX_AUTO_BUDGET / TURN_BUDGET_TOKENS)).toBeGreaterThanOrEqual(MAX_AUTO_TURNS);
+    expect(Math.floor(30_689 / TURN_BUDGET_TOKENS)).toBe(40);
   });
 
-  it("自动档：默认设置 + 20 万窗口 → 3.2 万预算 / 24 轮（d.159 之前是 6000 / 8）", () => {
+  it("applyModelBudget：窗口已知用 DSH 阈值，其余开关原样带过来", () => {
     const out = applyModelBudget(DEFAULT_CONTEXT_SETTINGS, { contextWindow: 200_000, maxOutput: 8_192 });
-    expect(out.budgetTokens).toBe(MAX_AUTO_BUDGET);
+    expect(out.budgetTokens).toBe(126_272);
     expect(out.keepRecentTurns).toBe(MAX_AUTO_TURNS);
-    // 其余开关原样带过来
     expect(out.enabled).toBe(true);
     expect(out.llmSummary).toBe(true);
-    expect(out.autoBudget).toBe(true);
   });
 
-  it("自动档 + 未知模型：行为与 d.159 一致（6000 / 8），不因查不到就变差", () => {
+  it("applyModelBudget：窗口未知保持 6000 / 至少 8 轮", () => {
     const out = applyModelBudget(DEFAULT_CONTEXT_SETTINGS, null);
     expect(out.budgetTokens).toBe(6000);
     expect(out.keepRecentTurns).toBe(8);
   });
 
-  it("自动档 + 保守缺省能力（8K 窗口）：取 60% 上限，不超窗", () => {
+  it("applyModelBudget：旧设置里残留的手填值不再起作用", () => {
+    const manual = { ...DEFAULT_CONTEXT_SETTINGS, budgetTokens: 12_000, autoBudget: false, keepRecentTurns: 4 };
+    const out = applyModelBudget(manual, { contextWindow: 200_000, maxOutput: 8_192 });
+    expect(out.budgetTokens).toBe(126_272);
+    expect(out.keepRecentTurns).toBe(MAX_AUTO_TURNS);
+  });
+
+  it("保守缺省能力（8K 窗口）不超窗", () => {
     const out = applyModelBudget(DEFAULT_CONTEXT_SETTINGS, DEFAULT_CAPABILITY);
-    expect(out.budgetTokens).toBe(4_915);
+    expect(out.budgetTokens).toBe(4_096);
     expect(out.keepRecentTurns).toBe(MIN_AUTO_TURNS);
   });
-
-  it("手动档：尊重用户手填值，但仍收敛到窗口上限（超窗只会换来 400）", () => {
-    const manual = { ...DEFAULT_CONTEXT_SETTINGS, autoBudget: false, budgetTokens: 6_000, keepRecentTurns: 4 };
-    const same = applyModelBudget(manual, { contextWindow: 200_000, maxOutput: 8_192 });
-    expect(same.budgetTokens).toBe(6_000);
-    expect(same.keepRecentTurns).toBe(4);
-
-    const tooBig = applyModelBudget({ ...manual, budgetTokens: 200_000 }, { contextWindow: 8_192, maxOutput: 4_096 });
-    expect(tooBig.budgetTokens).toBe(4_915);
-    expect(tooBig.keepRecentTurns).toBe(4);
-  });
-
-  it("手动档 + 能力未知：一个字都不改", () => {
-    const manual = { ...DEFAULT_CONTEXT_SETTINGS, autoBudget: false, budgetTokens: 9_999 };
-    expect(applyModelBudget(manual, null)).toEqual(manual);
-  });
-
-  it("关掉自动档不会擦掉手填值（开关语义，不是覆盖语义）", () => {
-    // 自动档下用户手填 12000 仍留着：再开回来的时候不会变成 6000 之外的意外值
-    const on = applyModelBudget(
-      { ...DEFAULT_CONTEXT_SETTINGS, budgetTokens: 12_000 },
-      { contextWindow: 200_000, maxOutput: 8_192 },
-    );
-    expect(on.budgetTokens).toBe(MAX_AUTO_BUDGET);
-    const off = applyModelBudget({ ...on, autoBudget: false }, { contextWindow: 200_000, maxOutput: 8_192 });
-    // 关掉后用的是「当时算出来的值」，不是用户很久以前手填的 12000——
-    // 这是刻意的：界面上看到多少，关掉之后就是多少，不会突然退回旧值。
-    expect(off.budgetTokens).toBe(MAX_AUTO_BUDGET);
-  });
 });
-

@@ -88,6 +88,7 @@ import {
   applyModelBudget,
   calibrateEstimate,
   compactNow,
+  compactSpec,
   contextCalibrationRatio,
   countFoldedMessages,
   foldNoticeText,
@@ -1319,11 +1320,13 @@ export function ChatPage({
    * 只在这里存一份快照，渲染交给 `ContextMeter`（安静档自己隐掉）。
    * 为什么不每帧算：`loadMessages` 是异步的，且用户打字时不需要重算。
    */
-  const [contextUsage, setContextUsage] = useState<{ used: number; budget: number; calibrated: boolean }>({
-    used: 0,
-    budget: 0,
-    calibrated: false,
-  });
+  const [contextUsage, setContextUsage] = useState<{
+    used: number;
+    budget: number;
+    /** 模型窗口（d.351）：上下文页的占用率分母。 */
+    window: number;
+    calibrated: boolean;
+  }>({ used: 0, budget: 0, window: 0, calibrated: false });
   /** 正在单独撤回的那个文件（d.185；与「全部撤回」互斥的进度显示）。 */
   const [undoingPath, setUndoingPath] = useState<string | null>(null);
   /**
@@ -4422,10 +4425,9 @@ export function ChatPage({
       const plainOf = useChatStore.getState().plainById[convId] ?? {};
       const rows = contextRowsOf(messages.slice(-HISTORY_MESSAGE_WINDOW), plainOf);
       const profile = resolveProfile(conv?.agent.id ?? "system-assistant");
-      const settings = applyModelBudget(
-        loadContextSettings(),
-        profile ? resolveCapability(profile) : null,
-      );
+      const caps = profile ? resolveCapability(profile) : null;
+      const spec = compactSpec(caps);
+      const settings = applyModelBudget(loadContextSettings(), caps);
       // 校准（d.215）：真实上报的提示 token 与估算差多少，按模型记住倍率；
       // 只修正显示与提醒，压缩决策仍用未校准的估算（避免一次异常样本让整段历史被误压）。
       const raw = estimateRowsTokens(rows);
@@ -4434,6 +4436,7 @@ export function ChatPage({
       setContextUsage({
         used: calibrateEstimate(raw, model),
         budget: settings.budgetTokens,
+        window: spec?.contextWindow ?? 0,
         calibrated: ratio !== 1,
       });
     } catch {
@@ -6900,7 +6903,7 @@ export function ChatPage({
           className="flex-1 overflow-y-auto px-chat-gutter py-6"
         >
           <div className="mx-auto w-full max-w-[min(100%,1080px)]">
-            <TrajectoryView progress={progress} />
+            <TrajectoryView progress={progress} conversationId={convId} />
           </div>
         </div>
       ) : null}

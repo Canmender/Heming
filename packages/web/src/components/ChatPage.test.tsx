@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
@@ -3195,9 +3195,10 @@ describe("ChatPage", () => {
   const framesOf = (send: ReturnType<typeof vi.fn>, type: string) =>
     send.mock.calls.map((c) => c[0]).filter((e) => e.type === type);
 
-  it("上下文预算开启：历史按预算切分，早期对话以摘要 system 段前置（确定性摘要 = 零额外请求）", async () => {
+  it("设置里残留的手填预算与轮数不再生效：按 DSH 规则（窗口未知 → 6000 / 8 轮）", async () => {
     await setupLongHistoryChat(6);
-    setContextSettings({ keepRecentTurns: 2, autoBudget: false }); // 手动档：只保留近 2 轮，历史1..4 进 older
+    // d.351：预算/轮数已从设置里删掉；旧存档里还写着 2 轮与 4000 token，也必须被忽略。
+    setContextSettings({ keepRecentTurns: 2, budgetTokens: 4000, autoBudget: false });
 
     let seen: Parameters<typeof streamChat>[1] | undefined;
     vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
@@ -3209,15 +3210,12 @@ describe("ChatPage", () => {
     await waitFor(() => expect(seen).toBeDefined());
 
     expect(streamChat).toHaveBeenCalledTimes(1); // 确定性摘要不发额外请求
-    expect(seen).toHaveLength(4); // 合并后的 system（提示词 + 摘要）+ 近 2 轮 + 本条 user 轮
+    // 合并后的 system + 6 条历史 + 本条 user：短历史没超阈值，一条都不压
+    expect(seen).toHaveLength(8);
     expect(seen![0].role).toBe("system");
     expect(seen![0].content).toContain("你是和小鸣");
-    expect(seen![0].content).toContain("【早期对话摘要】");
-    expect(seen![0].content).toContain("意图：历史1；历史2；历史3");
-    expect(seen![1]).toEqual({ role: "user", content: "历史5" });
-    expect(seen![2]).toEqual({ role: "user", content: "历史6" });
-    expect(seen![3]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
-    expect(seen!.map((r) => r.content)).not.toContain("历史4"); // 早期原文不直发
+    expect(seen![0].content).not.toContain("【早期对话摘要】");
+    expect(seen!.map((r) => r.content)).toContain("历史1");
   });
 
   it("d.187 上下文用量：短对话安静不渲染", async () => {
@@ -3265,9 +3263,20 @@ describe("ChatPage", () => {
     expect(seen!.map((row) => row.content)).toContain("历史1");
   });
 
-  it("LLM 摘要：用该 agent 绑定的 profile 调 streamChat（提示词为摘要骨架），结果作背景段且不上行", async () => {
-    const send = await setupLongHistoryChat(6);
-    setContextSettings({ keepRecentTurns: 2, llmSummary: true, autoBudget: false });
+  it("LLM 摘要：历史超出 DSH 阈值时，用该 agent 绑定的 profile 调 streamChat（提示词为摘要骨架），结果作背景段且不上行", async () => {
+    // d.351：预算不可手调之后，要靠「历史真的超过阈值」触发摘要。
+    // 8 条各 1000 个汉字（≈1000 token）远超 6000 的阈值，早期的必然进 older。
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const filler = "上下文测试".repeat(200);
+    const longHistory = Array.from({ length: 8 }, (_, i) =>
+      msg(`m${i + 1}`, `历史${i + 1} ${filler}`, `2026-10-14T01:00:0${i}.000Z`),
+    );
+    mockMessagesFetch(longHistory);
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+    setContextSettings({ llmSummary: true });
 
     const calls: { profile: LlmProfile; messages: Parameters<typeof streamChat>[1] }[] = [];
     vi.mocked(streamChat).mockImplementation(async (profile, messages, o) => {
@@ -3285,7 +3294,7 @@ describe("ChatPage", () => {
 
     expect(calls[0].profile).toEqual(testProfile); // 摘要走该 agent 绑定的连接（Key 不出设备）
     expect(calls[0].messages[0].content).toContain("压缩成背景摘要");
-    expect(calls[0].messages[1].content).toContain("用户：历史1");
+    expect(calls[0].messages[1].content).toContain("用户：");
 
     const main = calls[1].messages;
     // 摘要段与主提示词合并进同一条 system（供应商对多条 system 兼容性差）
@@ -5646,7 +5655,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
     const trail = await screen.findByRole("tabpanel", { name: "轨迹" });
-    expect(within(trail).getByRole("heading", { level: 2, name: "这一轮还没有轨迹" }))
+    expect(within(trail).getByRole("heading", { level: 2, name: "还没有轨迹" }))
       .toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "轨迹" })).toHaveAttribute("aria-selected", "true");
 
@@ -5656,11 +5665,11 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("还没发出去的草稿");
   });
 
-  it("切「上下文」：出上下文面板，进度条 aria-valuenow 是数字、明细三行齐全", async () => {
+  it("切「上下文」：出上下文面板，窗口占用条 aria-valuenow 是数字、明细三行齐全", async () => {
     await setup();
     fireEvent.click(screen.getByRole("tab", { name: "上下文" }));
     const context = await screen.findByRole("tabpanel", { name: "上下文" });
-    const bar = within(context).getByRole("progressbar", { name: "上下文预算" });
+    const bar = within(context).getByRole("progressbar", { name: "上下文窗口占用" });
     expect(Number(bar.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(0);
     expect(within(context).getByRole("list", { name: "上下文明细" })).toBeInTheDocument();
   });

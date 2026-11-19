@@ -2,39 +2,57 @@ import type { ModelCapability } from "../modelCaps.js";
 import type { ContextSettings } from "./settings.js";
 
 /**
- * 按模型上下文窗口分配历史预算（d.160）。
+ * 上下文预算（d.351）：按 DSH 的压缩规则从模型窗口算，不再让用户手填。
  *
- * 为什么需要这一层：`settings.budgetTokens` 的默认值是 6000，是给「未知模型 + 8K 窗口」
- * 定下的保守值。但真实连接的模型常见 64K/128K/200K 窗口——6K 预算等于**每几轮就把
- * 前面全压成摘要**，长任务做到一半，前面读过的文件、定下的约束就只剩一段摘要，
- * 模型开始重复劳动、或者忘了已经改过什么。用户看到的就是「聊久了像失忆」。
+ * DSH 的口径（`packages/compaction/compaction-basic/src/config.ts`）：
+ * - `thresholdRatio = 0.8`：上下文用到窗口的 80% 之前不压缩；
+ * - `headroomTokens = 65536`：给摘要请求本身留的余量，实际阈值取「窗口 80%」与
+ *   「窗口 − 输出预留 − 余量」中较小的那个；
+ * - `retainRatio = 0.16`：压缩时保留最近 16% 的原文，其余折成摘要。
  *
- * 两条口径（刻意的取舍）：
- * - **只用窗口的一部分**（`BUDGET_WINDOW_RATIO`）：剩下要放系统提示词、工具声明、
- *   这一轮的工具结果和输出；把窗口全拿去装历史，供应商会直接 400。
- * - **有上限**（`MAX_AUTO_BUDGET`）：窗口再大也不无限放大。单轮 10 万 token 的历史
- *   意味着每轮都要重新读一遍（缓存命中率下降、首字延迟上升、按量计费的用户账单变厚），
- *   超过 3.2 万之后继续涨的收益很小——那时候更该做的是压缩，而不是硬塞。
+ * 和鸣把这三个数照抄过来，但用途只有一半：我们没有「摘要请求」这一层，
+ * 所以 `thresholdTokens` 就是历史原文能占的预算（`budgetTokens`），
+ * `retainTokens / TURN_BUDGET_TOKENS` 换算成「保留最近几轮原文」。
+ * 窗口未知时仍回落到保守的 6000 / 8 轮，和 d.160 的行为一致。
+ *
+ * 为什么不再给用户自定义：预算低于窗口阈值只会让长对话更早被压成摘要，
+ * 高于窗口又会换来 400；两个方向都不是「调优」，是挖坑。
  */
 
-/** 历史预算占模型窗口的比例（与设置卡里的「按窗口 60% 计」是同一个数，必须同源）。 */
-export const BUDGET_WINDOW_RATIO = 0.6;
+/** 上下文用到窗口的这个比例开始压缩（与 DSH 同值）。 */
+export const COMPACT_THRESHOLD_RATIO = 0.8;
 
-/** 自动档的下限：不低于历史默认值，避免小窗口模型反而被调小。 */
+/** 压缩时保留的原文比例（与 DSH 同值）。 */
+export const COMPACT_RETAIN_RATIO = 0.16;
+
+/** 摘要/输出余量（与 DSH 默认同值）：阈值还要给这次请求的输出留位置。 */
+export const COMPACT_HEADROOM_TOKENS = 65_536;
+
+/** 窗口未知时的预算与轮数：保持 d.159 的保守口径。 */
 export const MIN_AUTO_BUDGET = 6000;
+export const MIN_AUTO_TURNS = 8;
 
-/** 自动档的上限：再大就不划算（见文件头）。 */
-export const MAX_AUTO_BUDGET = 32_000;
-
-/** 一轮（user + assistant + 工具往返）大约占多少 token，用来把预算换算成保留轮数。 */
+/** 一轮（user + assistant + 工具往返）大约占多少 token，用来把保留量换算成轮数。 */
 export const TURN_BUDGET_TOKENS = 750;
 
-/** 保留轮数的上下限。 */
-export const MIN_AUTO_TURNS = 8;
-export const MAX_AUTO_TURNS = 24;
+/** 保留轮数的硬上限：再多也只是把摘要推后，不改变「原文很贵」这件事。 */
+export const MAX_AUTO_TURNS = 40;
 
-/** 只取本模块需要的两个字段：窗口与单次输出上限。 */
+/** 只取本模块需要的字段：窗口与单次输出上限。 */
 export type ModelWindow = Pick<ModelCapability, "contextWindow" | "maxOutput">;
+
+/** 一次压缩规则的完整数值（窗口未知时调用方拿 `null`，不要编）。 */
+export interface CompactSpec {
+  contextWindow: number;
+  /** 消息可用的窗口：窗口减去这次请求的输出预留。 */
+  messageBudgetTokens: number;
+  /** 再减去摘要余量后的压力预算。 */
+  pressureBudgetTokens: number;
+  /** 真正开始压缩的阈值 = min(窗口 × 80%, 压力预算)。 */
+  thresholdTokens: number;
+  /** 压缩时保留的原文 token。 */
+  retainTokens: number;
+}
 
 function usableWindow(caps: ModelWindow | null | undefined): number {
   const window = caps?.contextWindow;
@@ -42,61 +60,100 @@ function usableWindow(caps: ModelWindow | null | undefined): number {
   return Math.floor(window);
 }
 
-/**
- * 窗口允许的最大历史预算（`floor(窗口 × 60%)`）；能力未知时返回 0（调用方按默认值走）。
- */
-export function windowBudgetTokens(caps: ModelWindow | null | undefined): number {
-  const window = usableWindow(caps);
-  if (!window) return 0;
-  return Math.floor(window * BUDGET_WINDOW_RATIO);
+/** 这次请求的输出预留：模型声明的 maxOutput，缺省 8192（与 DSH 的常见档一致）。 */
+function reservedOutput(caps: ModelWindow | null | undefined): number {
+  const maxOutput = caps?.maxOutput;
+  if (typeof maxOutput !== "number" || !Number.isFinite(maxOutput) || maxOutput < 0) return 8192;
+  return Math.floor(maxOutput);
 }
 
 /**
- * 自动档预算。
+ * 按 DSH 规则算一次压缩规格；窗口未知返回 `null`（调用方回落默认预算）。
  *
- * - 能力未知 → `MIN_AUTO_BUDGET`（保持 d.159 及以前的行为，不因为查不到就偷偷改小）；
- * - 窗口很小的模型（60% 仍不到下限）→ 就用窗口允许的值，**不越过窗口硬塞**；
- * - 其余按窗口比例，封顶 `MAX_AUTO_BUDGET`。
+ * `thresholdRatio` 与 `retainRatio` 可覆写，只为测试与将来的模型特例留口；
+ * 业务路径不要传。
+ */
+export function compactSpec(
+  caps: ModelWindow | null | undefined,
+  overrides: { thresholdRatio?: number; retainRatio?: number; headroomTokens?: number } = {},
+): CompactSpec | null {
+  const contextWindow = usableWindow(caps);
+  if (!contextWindow) return null;
+  const thresholdRatio = overrides.thresholdRatio ?? COMPACT_THRESHOLD_RATIO;
+  const retainRatio = overrides.retainRatio ?? COMPACT_RETAIN_RATIO;
+  const headroom = overrides.headroomTokens ?? COMPACT_HEADROOM_TOKENS;
+  const messageBudgetTokens = contextWindow - reservedOutput(caps);
+  if (messageBudgetTokens <= 0) return null;
+  const pressureBudgetTokens = messageBudgetTokens - headroom;
+  if (pressureBudgetTokens <= 0) {
+    // 窗口比余量还小（小模型）：没有「摘要余量」可留，就按窗口 80% 压。
+    const thresholdTokens = Math.floor(contextWindow * thresholdRatio);
+    return {
+      contextWindow,
+      messageBudgetTokens,
+      pressureBudgetTokens: messageBudgetTokens,
+      thresholdTokens,
+      retainTokens: Math.floor(messageBudgetTokens * retainRatio),
+    };
+  }
+  const thresholdTokens = Math.floor(
+    Math.min(contextWindow * thresholdRatio, pressureBudgetTokens),
+  );
+  return {
+    contextWindow,
+    messageBudgetTokens,
+    pressureBudgetTokens,
+    thresholdTokens,
+    retainTokens: Math.floor(messageBudgetTokens * retainRatio),
+  };
+}
+
+/** 窗口允许的最大历史预算；能力未知时返回 0（调用方按默认值走）。 */
+export function windowBudgetTokens(caps: ModelWindow | null | undefined): number {
+  return compactSpec(caps)?.thresholdTokens ?? 0;
+}
+
+/**
+ * 自动档预算：窗口已知走 DSH 阈值，未知回落 `MIN_AUTO_BUDGET`。
+ *
+ * 窗口小到阈值低于默认值时**以阈值为准**——越过窗口硬塞只会换来一次 400。
  */
 export function autoBudgetTokens(caps: ModelWindow | null | undefined): number {
-  const limit = windowBudgetTokens(caps);
-  if (!limit) return MIN_AUTO_BUDGET;
-  if (limit <= MIN_AUTO_BUDGET) return limit;
-  return Math.min(limit, MAX_AUTO_BUDGET);
+  const spec = compactSpec(caps);
+  if (!spec) return MIN_AUTO_BUDGET;
+  return Math.max(2000, Math.min(spec.thresholdTokens, spec.messageBudgetTokens));
 }
 
-/** 预算换算保留轮数：预算越大留越多原文，但夹在 8–24 轮之间。 */
-export function autoKeepRecentTurns(budgetTokens: number): number {
-  const budget =
-    typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens > 0
-      ? budgetTokens
-      : MIN_AUTO_BUDGET;
-  const turns = Math.floor(budget / TURN_BUDGET_TOKENS);
+/** 保留最近几轮原文：按 DSH 的 16% 保留量换算，夹在 8–40 轮之间。 */
+export function autoKeepRecentTurns(budgetTokens: number, caps?: ModelWindow | null): number {
+  const spec = compactSpec(caps);
+  const retain = spec ? spec.retainTokens : budgetTokens * COMPACT_RETAIN_RATIO;
+  const turns = Math.floor(retain / TURN_BUDGET_TOKENS);
   return Math.min(MAX_AUTO_TURNS, Math.max(MIN_AUTO_TURNS, turns));
 }
 
 /**
  * 把设置与真实模型窗口合起来，得到本次真正要用的预算。
  *
- * - `autoBudget === true`（默认）：预算与轮数都按窗口自动算，用户手填的数值被忽略但不擦除
- *   （关掉自动档后原值还在，这是「开关」而不是「覆盖」）。
- * - `autoBudget === false`：尊重用户手填值；但**仍会收敛到窗口允许的上限**——超窗的预算
- *   不会换来更多上下文，只会换来一次 400。
+ * d.351 起没有「手动档」：`budgetTokens`/`keepRecentTurns` 一律由 DSH 规则算出，
+ * 设置里残留的旧值不再生效（保留在存储里只为回滚，不参与计算）。
  */
 export function applyModelBudget(
   settings: ContextSettings,
   caps: ModelWindow | null | undefined,
 ): ContextSettings {
-  const limit = windowBudgetTokens(caps);
-  if (!settings.autoBudget) {
-    if (!limit) return settings;
-    if (settings.budgetTokens <= limit) return settings;
-    return { ...settings, budgetTokens: limit };
+  const spec = compactSpec(caps);
+  if (!spec) {
+    return {
+      ...settings,
+      budgetTokens: MIN_AUTO_BUDGET,
+      keepRecentTurns: Math.max(MIN_AUTO_TURNS, settings.keepRecentTurns),
+    };
   }
-  const budgetTokens = autoBudgetTokens(caps);
+  const budgetTokens = Math.max(2000, Math.min(spec.thresholdTokens, spec.messageBudgetTokens));
   return {
     ...settings,
     budgetTokens,
-    keepRecentTurns: autoKeepRecentTurns(budgetTokens),
+    keepRecentTurns: autoKeepRecentTurns(budgetTokens, caps),
   };
 }

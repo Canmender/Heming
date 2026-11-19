@@ -97,6 +97,33 @@ function formatTokens(n: number): string {
   return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+/**
+ * 占用环（d.351，参照 DSH 的 `ContextMeter` 圆环）：14 的比例放大到 56px 的整页版本。
+ * 用 `stroke-dasharray` 画进度，颜色沿用主题的 accent；超过 80% 转 warn，提示该收口了。
+ */
+function ContextRing({ percent }: { percent: number }) {
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const tone = clamped >= 80 ? "var(--heming-warn, #d97706)" : "var(--heming-accent, #2563eb)";
+  return (
+    <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true" className="shrink-0">
+      <circle cx="28" cy="28" r={radius} fill="none" stroke="var(--heming-line-soft, #e5e7eb)" strokeWidth="4" />
+      <circle
+        cx="28"
+        cy="28"
+        r={radius}
+        fill="none"
+        stroke={tone}
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeDasharray={`${(circumference * clamped) / 100} ${circumference}`}
+        transform="rotate(-90 28 28)"
+      />
+    </svg>
+  );
+}
+
 function formatMs(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
@@ -130,7 +157,10 @@ const FAILURE_LABELS: Record<RolloutTurnFailure, string> = {
  */
 export interface ContextViewUsage {
   used: number;
+  /** 压缩阈值（DSH 规则算出来的历史预算）。 */
   budget: number;
+  /** 模型上下文窗口：占用率的分母。 */
+  window?: number;
   /** 估算是否已按本机实测校准（校准前后口径不同，要在界面上说清）。 */
   calibrated?: boolean;
 }
@@ -172,8 +202,6 @@ export function ContextView({
   const budget = reported?.budget ?? loadContextSettings().budgetTokens;
   // 用量优先用调用方校准后的值：本条页签与输入框上方的 ContextMeter 必须同一个数。
   const used = reported?.used ?? rowsTokens;
-  // 进度条宽度按比例给，但 aria-valuenow 报真实用量（超预算时进度条封顶、数字说真话）。
-  const ratio = budget > 0 ? Math.min(1, used / budget) : 0;
   const fold = useMemo(() => getContextFold(conversationId ?? ""), [conversationId]);
 
   // 本会话的**真实消耗**（P0-T2）：只认显式带 conversationId 的记账，归不到的不算进来。
@@ -219,28 +247,71 @@ export function ContextView({
     }
   }, [conversationId]);
 
+  // 窗口 = 占用率的分母；拿不到窗口就退回压缩阈值，至少不会除以 0。
+  const windowTokens = reported?.window && reported.window > 0 ? reported.window : budget;
+  const occupancy = windowTokens > 0 ? Math.min(1, used / windowTokens) : 0;
+  const percent = Math.round(occupancy * 100);
+
   return (
     <section aria-label="上下文" data-view-panel="context">
       <h3 className="ui-section-title mb-3">上下文</h3>
+      {/* 头部（d.351，按 DSH 的占用口径重排）：左边是「用掉窗口多少」，右边是三个绝对值。
+          估算值会有偏差，所以百分比与绝对值并排，用户能自己判断该不该收口。 */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="flex items-center gap-4">
+          <ContextRing percent={percent} />
+          <div>
+            <div
+              className="text-3xl font-semibold leading-none tabular-nums text-ink"
+              data-testid="context-percent"
+            >
+              {percent}%
+            </div>
+            <div className="mt-1.5 text-ui-xs text-muted">上下文已用</div>
+          </div>
+        </div>
+        <dl className="grid grid-cols-3 gap-x-6 gap-y-1 text-ui-xs tabular-nums">
+          <div>
+            <dt className="text-muted">窗口</dt>
+            <dd className="mt-0.5 text-ui-sm text-ink">{formatTokens(windowTokens)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">已用</dt>
+            <dd className="mt-0.5 text-ui-sm text-ink">{formatTokens(used)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">压缩阈值</dt>
+            <dd className="mt-0.5 text-ui-sm text-ink">{formatTokens(budget)}</dd>
+          </div>
+        </dl>
+      </div>
       <div className="rounded-lg border border-line-soft bg-surface p-3">
         <div
           role="progressbar"
-          aria-label="上下文预算"
+          aria-label="上下文窗口占用"
           aria-valuemin={0}
-          aria-valuemax={budget}
+          aria-valuemax={windowTokens}
           aria-valuenow={used}
-          aria-valuetext={`${used} / ${budget} tokens`}
-          className="h-2 w-full overflow-hidden rounded-full bg-subtle-3"
+          aria-valuetext={`${used} / ${windowTokens} tokens`}
+          className="h-2.5 w-full overflow-hidden rounded-full bg-subtle-3"
         >
           <div
-            className="h-full rounded-full bg-accent transition-[width] motion-reduce:transition-none"
-            style={{ width: `${Math.round(ratio * 100)}%` }}
+            className={`h-full rounded-full transition-[width] motion-reduce:transition-none ${
+              used >= budget ? "bg-warn" : "bg-accent"
+            }`}
+            style={{ width: `${Math.round(occupancy * 100)}%` }}
           />
         </div>
         <p className="mt-2 text-ui-sm tabular-nums text-ink">
-          {used} / {budget} tokens
+          {used} / {windowTokens} tokens
+          {used >= budget ? (
+            <span className="ml-2 text-ui-xs text-warn">已到压缩阈值，下一轮会先压缩历史</span>
+          ) : (
+            <span className="ml-2 text-ui-xs text-muted">
+              距阈值还有 {formatTokens(Math.max(0, budget - used))}
+            </span>
+          )}
         </p>
-        {/* 估算口径要说清：校准过与没校准过是两套精度，不能混成一句「约」。 */}
         <p className="mt-0.5 text-ui-xs text-muted">
           {reported?.calibrated ? "估算已按本机实测校准" : "估算值（与压缩链同一估算器）"}
         </p>
@@ -252,16 +323,20 @@ export function ContextView({
         <div className="mt-3" data-testid="context-breakdown">
           <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-subtle-3" aria-hidden="true">
             {([
+              ["注入预留", DEFAULT_RESERVED_TOKENS, "bg-line-strong"],
               ["消息", msgTokens, "bg-accent"],
               ["工具结果", toolTokens, "bg-warn"],
-              ["注入预留", DEFAULT_RESERVED_TOKENS, "bg-line-strong"],
             ] as const).map(([label, tokens, tone]) => {
-              const width = budget > 0 ? Math.min(100, (tokens / budget) * 100) : 0;
+              const width = windowTokens > 0 ? Math.min(100, (tokens / windowTokens) * 100) : 0;
               if (width <= 0) return null;
               return <span key={label} className={`${tone} h-full`} style={{ width: `${width}%` }} />;
             })}
           </div>
           <ul className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-xs text-muted">
+            <li className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-line-strong" />
+              预留 {formatTokens(DEFAULT_RESERVED_TOKENS)}
+            </li>
             <li className="flex items-center gap-1">
               <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-accent" />
               消息 {formatTokens(msgTokens)}
@@ -270,16 +345,14 @@ export function ContextView({
               <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-warn" />
               工具 {formatTokens(toolTokens)}
             </li>
-            <li className="flex items-center gap-1">
-              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-line-strong" />
-              预留 {formatTokens(DEFAULT_RESERVED_TOKENS)}
-            </li>
             <li className="ml-auto tabular-nums">
-              剩余 {formatTokens(Math.max(0, budget - used))}（{Math.round(Math.max(0, 1 - ratio) * 100)}%）
+              剩余 {formatTokens(Math.max(0, windowTokens - used))}（
+              {Math.round(Math.max(0, 1 - occupancy) * 100)}%）
             </li>
           </ul>
         </div>
       </div>
+
       {/* 明细三行：数字全部来自本会话真实数据（消息条数 / 工具结果条数 / 注入预留额度）。 */}
       <ul aria-label="上下文明细" className="mt-3 list-none space-y-1.5 p-0">
         <li className="flex items-baseline justify-between gap-3 text-ui-sm">

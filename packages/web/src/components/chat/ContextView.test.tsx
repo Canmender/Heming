@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { Message } from "@heming/shared";
 import { ContextView } from "./ContextView.js";
@@ -52,7 +52,7 @@ describe("ContextView · 上下文预算", () => {
     expect(section).toHaveAttribute("aria-label", "上下文");
     expect(screen.getByRole("heading", { level: 3, name: "上下文" })).toBeInTheDocument();
 
-    const bar = screen.getByRole("progressbar", { name: "上下文预算" });
+    const bar = screen.getByRole("progressbar", { name: "上下文窗口占用" });
     expect(bar).toHaveAttribute("aria-valuemin", "0");
     expect(bar).toHaveAttribute("aria-valuemax", String(DEFAULT_BUDGET_TOKENS));
     expect(bar).toHaveAttribute("aria-valuenow", "0");
@@ -74,7 +74,7 @@ describe("ContextView · 上下文预算", () => {
     render(<ContextView conversationId="c1" />);
 
     const expected = estimateTokens(TEXT) + ROW_TOKEN_OVERHEAD + ROW_TOKEN_OVERHEAD;
-    const bar = screen.getByRole("progressbar", { name: "上下文预算" });
+    const bar = screen.getByRole("progressbar", { name: "上下文窗口占用" });
     expect(bar).toHaveAttribute("aria-valuenow", String(expected));
     expect(Number(bar.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
     expect(screen.getByText(`${expected} / ${DEFAULT_BUDGET_TOKENS} tokens`)).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe("ContextView · 上下文预算", () => {
 
     const detail = screen.getByRole("list", { name: "上下文明细" });
     expect(within(detail).getByText("消息").parentElement).toHaveTextContent("1 条");
-    const bar = screen.getByRole("progressbar", { name: "上下文预算" });
+    const bar = screen.getByRole("progressbar", { name: "上下文窗口占用" });
     expect(bar).toHaveAttribute("aria-valuenow", String(estimateTokens("本会话") + ROW_TOKEN_OVERHEAD));
   });
 });
@@ -354,11 +354,11 @@ describe("ContextView · 记忆注入（P3-T17）", () => {
 describe("ContextView · 实时用量与折叠（d.346）", () => {
   it("传入 usage 时，预算与用量用调用方算好的值（与 ContextMeter 同一个数）", () => {
     useChatStore.setState({ messages: { c1: [message("m1", TEXT)] } });
-    render(<ContextView conversationId="c1" usage={{ used: 1234, budget: 8000, calibrated: true }} />);
-    const bar = screen.getByRole("progressbar", { name: "上下文预算" });
-    expect(bar).toHaveAttribute("aria-valuemax", "8000");
+    render(<ContextView conversationId="c1" usage={{ used: 1234, budget: 8000, window: 32000, calibrated: true }} />);
+    const bar = screen.getByRole("progressbar", { name: "上下文窗口占用" });
+    expect(bar).toHaveAttribute("aria-valuemax", "32000");
     expect(bar).toHaveAttribute("aria-valuenow", "1234");
-    expect(bar).toHaveAttribute("aria-valuetext", "1234 / 8000 tokens");
+    expect(bar).toHaveAttribute("aria-valuetext", "1234 / 32000 tokens");
     expect(screen.getByText("估算已按本机实测校准")).toBeInTheDocument();
   });
 
@@ -388,5 +388,37 @@ describe("ContextView · 分段占比（d.350，参考 billion-context）", () =
     expect(box).toHaveTextContent("工具");
     expect(box).toHaveTextContent("预留 900");
     expect(box).toHaveTextContent("剩余 6000（100%）");
+  });
+});
+describe("ContextView · DSH 口径的窗口占用（d.351）", () => {
+  it("百分比按窗口算（不是按压缩阈值），并同时给出窗口 / 已用 / 阈值三个绝对值", () => {
+    render(
+      <ContextView
+        conversationId="c1"
+        usage={{ used: 60_000, budget: 126_272, window: 200_000, calibrated: true }}
+      />,
+    );
+    // 60K / 200K = 30%：分母是窗口，不是阈值
+    expect(screen.getByTestId("context-percent")).toHaveTextContent("30%");
+    const bar = screen.getByRole("progressbar", { name: "上下文窗口占用" });
+    expect(bar).toHaveAttribute("aria-valuemax", "200000");
+    expect(bar).toHaveAttribute("aria-valuenow", "60000");
+    expect(bar).toHaveAttribute("aria-valuetext", "60000 / 200000 tokens");
+    expect(screen.getByText("窗口")).toBeInTheDocument();
+    expect(screen.getByText("压缩阈值")).toBeInTheDocument();
+    // 阈值 126.3k、已用 60k
+    expect(screen.getByText("126.3k")).toBeInTheDocument();
+    expect(screen.getByText("60.0k")).toBeInTheDocument();
+  });
+
+  it("用到压缩阈值：条转警告色并提示下一轮会先压缩", () => {
+    render(
+      <ContextView
+        conversationId="c1"
+        usage={{ used: 130_000, budget: 126_272, window: 200_000 }}
+      />,
+    );
+    expect(screen.getByText(/已到压缩阈值/)).toBeInTheDocument();
+    expect(screen.getByTestId("context-percent")).toHaveTextContent("65%");
   });
 });
