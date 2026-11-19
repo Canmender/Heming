@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.391.4.132.14",
+    "date": "2026-11-19",
+    "title": "标题写歪了，构建直接报错",
+    "bullets": [
+      "发版脚本现在会检查更新日志的条目标题；格式不对就报错停下，不再默默漏掉一条。",
+      "这一条对使用者没有可见变化，是给维护者兜底的。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.391.4.131.14",
     "date": "2026-11-19",
     "title": "来源页能按名字找了",

@@ -6549,6 +6549,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 
 - **来源页能按名字找了（d.391）**：★ 来源页顶上「找服务商」输入框，只筛「API Key 服务商」与「国产智能体」两排卡片（id/名字/说明任一处包含，不区分大小写）★ 不筛「已添加的来源」与「订阅账号」——每天要点的东西藏起来会像被删了 ★ 筛空时各排自己说一句「没有对得上「x」的；清掉搜索词就都回来」，不静默留白 ★ spec 新增 §3.11 ★ 验证：ModelPage 126 例 + components/model 共 196 例全绿、typecheck 通过。
+## 发版脚本会拦住写歪的条目标题（d.391）
+
+- 坑：`## d.x.y.z — 标题`（缺 `（YYYY-MM-DD）`）会被 `parseChangelog` 当普通段落，条目静默消失；脚本只报「无变化」，计数还可能因并行会话的条目上涨，看着像成功。d.364 / d.369 / d.390 各踩一次。
+- 现在 `scripts/changelog-parser.mjs` 导出 `findMalformedHeadings(markdown)`，`scripts/build-changelog.mjs` 在解析 CHANGELOG 与 RELEASE-NOTES 之前先跑它，命中就打印行号并 `exit 1`。
+- 只拦 `## d.` 开头的行；`## 约定` 这类文件自身的二级标题不误伤。
+- 想临时验证：`node -e "import('./scripts/changelog-parser.mjs').then(m=>console.log(m.findMalformedHeadings('## d.1.2.3.4 — x')))"`。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6567,6 +6575,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

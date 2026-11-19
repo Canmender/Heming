@@ -10,7 +10,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseChangelog, renderChangelogModule, renderReleaseNotesModule } from "./changelog-parser.mjs";
+import {
+  findMalformedHeadings,
+  parseChangelog,
+  renderChangelogModule,
+  renderReleaseNotesModule,
+} from "./changelog-parser.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = join(root, "CHANGELOG.md");
@@ -23,7 +28,15 @@ if (!existsSync(source)) {
   process.exit(1);
 }
 
-const entries = parseChangelog(readFileSync(source, "utf8"));
+const changelogText = readFileSync(source, "utf8");
+const badHeadings = findMalformedHeadings(changelogText);
+if (badHeadings.length) {
+  console.error("[build-changelog] 这些标题看起来是版本条目，但格式不对，会被静默跳过：");
+  for (const bad of badHeadings) console.error(`  CHANGELOG.md:${bad.line}  ${bad.text}`);
+  console.error("正确格式：`## d.x.y.z（YYYY-MM-DD）— 标题`——日期括号不能省。");
+  process.exit(1);
+}
+const entries = parseChangelog(changelogText);
 if (!entries.length) {
   console.error("CHANGELOG.md 里没解析出任何条目：检查标题格式是否为 `## d.x.y.z（YYYY-MM-DD）— 标题`");
   process.exit(1);
@@ -41,7 +54,15 @@ if (previous === next) {
 
 // 用户版发布说明（可选文件）：与 CHANGELOG 同一套解析器，内容只面向用户。
 if (existsSync(notesSource)) {
-  const notes = parseChangelog(readFileSync(notesSource, "utf8"));
+  const notesText = readFileSync(notesSource, "utf8");
+  const badNotes = findMalformedHeadings(notesText);
+  if (badNotes.length) {
+    console.error("[build-changelog] docs/RELEASE-NOTES.md 里有格式不对的版本标题：");
+    for (const bad of badNotes) console.error(`  docs/RELEASE-NOTES.md:${bad.line}  ${bad.text}`);
+    console.error("正确格式：`## d.x.y.z（YYYY-MM-DD）— 标题`——日期括号不能省。");
+    process.exit(1);
+  }
+  const notes = parseChangelog(notesText);
   const nextNotes = renderReleaseNotesModule(notes);
   const prevNotes = existsSync(notesTarget) ? readFileSync(notesTarget, "utf8") : "";
   if (prevNotes === nextNotes) {

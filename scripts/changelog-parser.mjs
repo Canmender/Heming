@@ -1,4 +1,28 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
+
+﻿/**
+ * 找出「看起来像条目标题、却没被解析」的行（d.391）。
+ *
+ * 背景：`## d.390.4.131.14 — 标题`（少了日期括号）会被当成普通段落，条目静默消失，
+ * 而脚本只报「无变化」，看起来像成功。这个函数把这类行挑出来，让构建脚本直接失败。
+ *
+ * @param {string} markdown
+ * @returns {{ line: number, text: string }[]} 行号从 1 开始
+ */
+export function findMalformedHeadings(markdown) {
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  /** @type {{ line: number, text: string }[]} */
+  const bad = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const text = (lines[i] ?? "").trim();
+    if (!text.startsWith("## ")) continue;
+    if (HEADING.test(text)) continue;
+    // 只盯「像版本标题」的行：d. 开头的；其它二级标题（如 `## 约定`）是文件自己的结构
+    if (/^##\s+d\./.test(text)) bad.push({ line: i + 1, text });
+  }
+  return bad;
+}
+
 /**
  * CHANGELOG.md → 结构化条目（纯函数，无依赖）。
  *
@@ -161,3 +185,4 @@ export interface ReleaseNoteEntry {
 export const RELEASE_NOTES: ReleaseNoteEntry[] = ${json};
 `;
 }
+

@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.391.4.132.14",
+    "date": "2026-11-19",
+    "title": "标题写歪了，构建直接报错",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 这个坑已经踩了三次（d.364、d.369、d.390）：`## d.x.y.z — 标题` 少了日期括号，解析器当普通段落跳过，条目静默消失，而 `build-changelog` 只打印「无变化」——计数还会被并行会话的条目带涨，看着像成功。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `scripts/changelog-parser.mjs` | 新增导出 `findMalformedHeadings(markdown)`：挑出 `## d.` 开头却不匹配 `## d.x.y.z（YYYY-MM-DD）— 标题` 的行，返回行号；`## 约定` 这类文件自身的二级标题不算 || `scripts/build-changelog.mjs` | CHANGELOG 与 RELEASE-NOTES 两处解析前先校验，命中就逐行报错并 `exit 1`，并提示正确格式 |",
+      "**怎么验证。** `node -e` 直接调 `findMalformedHeadings(\"## d.1.2.3.4 — x\\n## d.1.2.3.4（2026-01-01）— ok\\n## 约定\")` → 只报第 1 行；`node scripts/build-changelog.mjs` 在现有文件上照常通过（524 / 412 条）。",
+      "**留白。** 只校验「版本标题的形状」，不校验版本号是否递增、日期是否合理——那两个需要版本历史，不属于构建脚本的职责。"
+    ]
+  },
+  {
     "version": "d.391.4.131.14",
     "date": "2026-11-19",
     "title": "来源页能按名字找了",
