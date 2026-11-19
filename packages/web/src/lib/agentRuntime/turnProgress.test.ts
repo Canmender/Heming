@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TURN_PROGRESS_MAX_ROUND,
+  TURN_SUMMARY_KEY,
+  TURN_SUMMARY_SESSIONS,
   clearTurnProgress,
   describeTurnProgress,
   formatElapsed,
@@ -9,6 +11,7 @@ import {
   getTurnProgress,
   noteTurnFirstToken,
   recordTurnProgress,
+  reloadTurnSummaries,
   resetTurnProgress,
   settleTurnProgress,
   subscribeTurnProgress,
@@ -248,5 +251,75 @@ describe("首字与出字速度（d.354）", () => {
     expect(formatSeconds(1_240)).toBe("1.2 秒");
     expect(formatSeconds(12_400)).toBe("12 秒");
     expect(formatSeconds(-5)).toBe("0.0 秒");
+  });
+});
+
+describe("收口小结活过重启（d.359）", () => {
+  it("收口后重放（模拟重开应用）还能读到同一份小结", () => {
+    recordTurnProgress("c1", { round: 2, phase: "tool", tool: "file_read" }, BASE);
+    recordTurnProgress("c1", { round: 3, phase: "round" }, BASE + 4_000);
+    noteTurnFirstToken("c1", BASE + 5_000);
+    settleTurnProgress("c1", BASE + 13_000, 400);
+
+    reloadTurnSummaries();
+    const restored = getTurnProgress("c1");
+    expect(restored?.done).toBe(true);
+    expect(restored?.tools).toBe(1);
+    expect(restored?.startedAt).toBe(BASE);
+    expect(restored?.endedAt).toBe(BASE + 13_000);
+    expect(restored?.firstTokenAt).toBe(BASE + 5_000);
+    expect(restored?.chars).toBe(400);
+    // 重放出来的必须是收口态：不能写着「正在执行 file_read」。
+    expect(describeTurnProgress(restored as TurnProgress)).toContain("上一轮：");
+    expect(describeTurnProgress(restored as TurnProgress)).not.toContain("正在执行");
+  });
+
+  it("跑动中的进度不落盘：重放后不会凭空出现一条假的「正在跑」", () => {
+    recordTurnProgress("c1", { round: 1, phase: "tool", tool: "file_grep" }, BASE);
+    reloadTurnSummaries();
+    expect(getTurnProgress("c1")).toBeNull();
+  });
+
+  it("坏档逐条丢弃，不整份清空；字段不成立的也不收", () => {
+    localStorage.setItem(
+      TURN_SUMMARY_KEY,
+      JSON.stringify({
+        good: { round: 1, tools: 2, startedAt: BASE, endedAt: BASE + 1_000, at: BASE + 1_000, firstTokenAt: null, chars: 9 },
+        noStart: { round: 1, tools: 2, endedAt: BASE + 1_000 },
+        inverted: { round: 1, startedAt: BASE + 5_000, endedAt: BASE + 1_000 },
+        junk: 42,
+      }),
+    );
+    reloadTurnSummaries();
+    expect(getTurnProgress("good")?.tools).toBe(2);
+    expect(getTurnProgress("noStart")).toBeNull();
+    expect(getTurnProgress("inverted")).toBeNull();
+    expect(getTurnProgress("junk")).toBeNull();
+  });
+
+  it("清掉一条会话的进度时，落盘的小结也删掉；清全部连存储键一起删", () => {
+    recordTurnProgress("c1", { round: 1, phase: "round" }, BASE);
+    settleTurnProgress("c1", BASE + 1_000, 10);
+    recordTurnProgress("c2", { round: 1, phase: "round" }, BASE);
+    settleTurnProgress("c2", BASE + 1_000, 10);
+
+    clearTurnProgress("c1");
+    reloadTurnSummaries();
+    expect(getTurnProgress("c1")).toBeNull();
+    expect(getTurnProgress("c2")?.done).toBe(true);
+
+    clearTurnProgress();
+    expect(localStorage.getItem(TURN_SUMMARY_KEY)).toBeNull();
+  });
+
+  it("只留最近 20 个会话的小结，最旧的被淘汰", () => {
+    for (let i = 0; i < TURN_SUMMARY_SESSIONS + 3; i += 1) {
+      recordTurnProgress(`c${i}`, { round: 1, phase: "round" }, BASE);
+      settleTurnProgress(`c${i}`, BASE + (i + 1) * 1_000, 1);
+    }
+    reloadTurnSummaries();
+    expect(getTurnProgress("c0")).toBeNull();
+    expect(getTurnProgress("c2")).toBeNull();
+    expect(getTurnProgress(`c${TURN_SUMMARY_SESSIONS + 2}`)?.done).toBe(true);
   });
 });

@@ -56,11 +56,135 @@ export interface TurnProgress {
 /** 一轮的上限按轮次上限来（36），这里只防脏数据把界面撑坏。 */
 export const TURN_PROGRESS_MAX_ROUND = 99;
 
+/**
+ * 收口小结的落盘位置（d.359）。
+ *
+ * 为什么只存小结、不存「正在跑」：跑动中的进度写盘没有意义，重开应用看到一条假的
+ * 「正在执行 file_grep」比什么都糟。但**跑完之后**那行小结（几步、多久、首字、字/秒）
+ * 是这一轮真实发生过的事，重开就没掉很可惜——用户往往在跑完之后才回来看。
+ */
+export const TURN_SUMMARY_KEY = "heming.turnSummary.v1";
+
+/** 最多留几个会话的小结：与 msgCache 同一思路，按最近写入淘汰最旧的。 */
+export const TURN_SUMMARY_SESSIONS = 20;
+
+type StoredSummary = {
+  round: number;
+  tools: number;
+  startedAt: number;
+  endedAt: number;
+  at: number;
+  firstTokenAt: number | null;
+  chars: number;
+};
+
 const progress = new Map<string, TurnProgress>();
 const listeners = new Set<() => void>();
 /** 每个会话的快照缓存：`useSyncExternalStore` 要求同一个会话返回同一个引用。 */
 const snapshots = new Map<string, TurnProgress>();
 const EMPTY = null as TurnProgress | null;
+
+function storage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** 从落盘读回小结；坏档（不是对象、字段不对、时间不成立）静默丢弃那一条，不整份清空。 */
+function readSummaries(): Record<string, StoredSummary> {
+  const box = storage();
+  if (!box) return {};
+  let raw: unknown;
+  try {
+    const text = box.getItem(TURN_SUMMARY_KEY);
+    if (!text) return {};
+    raw = JSON.parse(text) as unknown;
+  } catch {
+    return {};
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, StoredSummary> = {};
+  for (const [conversationId, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!conversationId || value === null || typeof value !== "object") continue;
+    const record = value as Record<string, unknown>;
+    const startedAt = numberOr(record.startedAt, 0);
+    const endedAt = numberOr(record.endedAt, 0);
+    if (startedAt <= 0 || endedAt < startedAt) continue;
+    const firstAt = record.firstTokenAt;
+    out[conversationId] = {
+      round: Math.max(1, Math.floor(numberOr(record.round, 1))),
+      tools: Math.max(0, Math.floor(numberOr(record.tools, 0))),
+      startedAt,
+      endedAt,
+      at: numberOr(record.at, endedAt),
+      firstTokenAt: typeof firstAt === "number" && Number.isFinite(firstAt) && firstAt >= startedAt ? firstAt : null,
+      chars: Math.max(0, Math.floor(numberOr(record.chars, 0))),
+    };
+  }
+  return out;
+}
+
+/** 写入全部小结；超配额/隐私模式静默失败（这是锦上添花，不能反过来弄坏界面）。 */
+function writeSummaries(map: Map<string, StoredSummary>): void {
+  const box = storage();
+  if (!box) return;
+  const entries = [...map.entries()].sort((a, b) => b[1].endedAt - a[1].endedAt).slice(0, TURN_SUMMARY_SESSIONS);
+  const payload: Record<string, StoredSummary> = {};
+  for (const [conversationId, value] of entries) payload[conversationId] = value;
+  try {
+    box.setItem(TURN_SUMMARY_KEY, JSON.stringify(payload));
+  } catch {
+    // 配额满了就放弃这次落盘：下次收口还会再试，界面不因此中断。
+  }
+}
+
+function summaryOf(state: TurnProgress): StoredSummary {
+  return {
+    round: state.round,
+    tools: state.tools,
+    startedAt: state.startedAt,
+    endedAt: state.endedAt ?? state.at,
+    at: state.at,
+    firstTokenAt: state.firstTokenAt ?? null,
+    chars: state.chars ?? 0,
+  };
+}
+
+/** 把落盘的小结装回内存（模块加载时调一次，测试里也可动手重放）。 */
+export function hydrateTurnSummaries(): void {
+  for (const [conversationId, saved] of Object.entries(readSummaries())) {
+    // 内存里已有更权威的状态（比如这一轮正在跑）就不要用旧档覆盖它。
+    if (progress.has(conversationId)) continue;
+    const restored: TurnProgress = {
+      round: saved.round,
+      phase: "round",
+      tool: null,
+      at: saved.at,
+      startedAt: saved.startedAt,
+      tools: saved.tools,
+      done: true,
+      endedAt: saved.endedAt,
+      firstTokenAt: saved.firstTokenAt,
+      chars: saved.chars,
+    };
+    progress.set(conversationId, restored);
+    snapshots.set(conversationId, restored);
+  }
+}
+
+/** 测试用：丢掉内存里的进度、按落盘重放（模拟「重开应用」），用于验证小结确实活过了重启。 */
+export function reloadTurnSummaries(): void {
+  progress.clear();
+  snapshots.clear();
+  hydrateTurnSummaries();
+  emit();
+}
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -149,6 +273,10 @@ export function settleTurnProgress(
   };
   progress.set(conversationId, next);
   snapshots.set(conversationId, next);
+  // d.359：收口小结落盘，重开应用还能看到「刚才那一轮跑了多少」。
+  const saved = readSummaries();
+  saved[conversationId] = summaryOf(next);
+  writeSummaries(new Map(Object.entries(saved)));
   emit();
 }
 
@@ -158,16 +286,26 @@ export function getTurnProgress(conversationId: string): TurnProgress | null {
   return snapshots.get(conversationId) ?? EMPTY;
 }
 
-/** 收口/停止/报错/切会话时清掉：不能让上一轮的数字留在界面上。 */
+/** 收口/停止/报错/切会话时清掉：不能让上一轮的数字留在界面上（落盘的小结也一起删）。 */
 export function clearTurnProgress(conversationId?: string): void {
   let changed = false;
   if (conversationId === undefined) {
     if (progress.size === 0) return;
     progress.clear();
     snapshots.clear();
+    try {
+      storage()?.removeItem(TURN_SUMMARY_KEY);
+    } catch {
+      // 清不掉也不影响内存里的显示。
+    }
     changed = true;
   } else if (progress.delete(conversationId)) {
     snapshots.delete(conversationId);
+    const saved = readSummaries();
+    if (conversationId in saved) {
+      delete saved[conversationId];
+      writeSummaries(new Map(Object.entries(saved)));
+    }
     changed = true;
   }
   if (changed) emit();
@@ -180,11 +318,16 @@ export function subscribeTurnProgress(listener: () => void): () => void {
   };
 }
 
-/** 测试用：清空全部（含订阅）。 */
+/** 测试用：清空全部（含订阅与落盘小结）。 */
 export function resetTurnProgress(): void {
   progress.clear();
   snapshots.clear();
   listeners.clear();
+  try {
+    storage()?.removeItem(TURN_SUMMARY_KEY);
+  } catch {
+    // 清不掉也不影响内存状态。
+  }
 }
 
 /** 一句话说清现在在干什么；收口后说清这一轮走了多少步（界面与 /status 共用同一口径）。 */
@@ -229,3 +372,6 @@ export function formatElapsed(ms: number): string {
   const seconds = total % 60;
   return seconds === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds} 秒`;
 }
+
+// d.359：模块加载即装回上次收口的小结——重开应用时，「上一轮跑了多少」不该凭空消失。
+hydrateTurnSummaries();

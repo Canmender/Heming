@@ -49,7 +49,7 @@ import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/su
 // d.358：后台子代理在跑的一轮里交回结论，收口时不能被当成「用户插话」清掉
 import { enqueueSubagentJob, resetSubagentJobs } from "../lib/agentRuntime/subagentJobs.js";
 // d.218：收口后会留下「上一轮」小结，跨用例不清会把上一条用例的数字带进来
-import { resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
+import { reloadTurnSummaries, resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
 import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
 import { getToolFailureStats, resetToolFailureStats } from "../lib/agentRuntime/toolFailureStats.js";
 import { resetPanelJobs, syncPanelJobs } from "../lib/shell/jobPanel.js";
@@ -7198,6 +7198,16 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
     );
     expect(screen.getByTestId("turn-progress").textContent).toContain("1 步");
     await screen.findByText(/读到了/);
+
+    // d.359：重开应用（内存清空、只从落盘重放）之后，这一行小结还得在——
+    // 「刚才那一轮跑了多少」是真实发生过的事，不该因为重启就消失。
+    reloadTurnSummaries();
+    const restored = await screen.findByTestId("turn-progress");
+    expect(restored.getAttribute("data-done")).toBe("true");
+    expect(restored.textContent).toContain("上一轮");
+    expect(restored.textContent).toContain("1 步");
+    expect(restored.textContent).not.toContain("正在执行");
+
 
     delete (window as unknown as { __heming_files?: unknown }).__heming_files;
     localStorage.removeItem("heming.fileEdit.roots.v1");

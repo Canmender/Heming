@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.360.4.128.12",
+    "date": "2026-11-19",
+    "title": "上一轮跑了多少，重开也还在",
+    "bullets": [
+      "`packages/web/src/lib/agentRuntime/turnProgress.test.ts` 22 → 27 例：新增「收口后重放（模拟重开应用）还能读到同一份小结」「跑动中的进度不落盘」「坏档逐条丢弃」「清一条/清全部时存储也跟着删」「只留最近 20 个会话的小结，最旧的被淘汰」",
+      "`packages/web/src/components/ChatPage.test.tsx` 的 I3x 用例补了最后一段：收口后 `reloadTurnSummaries()`（内存清空、只从落盘重放），进度行仍然显示「上一轮」且 `data-done=\"true\"`、不再出现「正在执行」",
+      "`npx vitest run`（packages/web）457 文件 / 6603 例全绿；`pnpm --filter @heming/web typecheck` 通过",
+      "只恢复了「小结」，不恢复运行中的进度：正在跑的那一轮重启后仍然要从侧栏徽标与消息历史自己判断",
+      "按会话各存一条，不保留多轮历史：这里回答「上一次」，不是「每一次」的账本（历次用量在 `/status` 与用量药丸里）",
+      "不同步到别的设备：小结落在本机，换设备看不到另一台机器上跑的那一轮"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "「上一轮：5 步 · 用时 1 分 12 秒 · 首字 1.3 秒 · 38 字/秒」这行小结是 d.218 / d.354 加的，但它只活在内存里：关掉窗口、刷新页面，这条就没了。长任务往往跑十几分钟，收口那一刻用户经常不在屏幕前——等他回来，界面上只剩一条「读完了」，没人告诉他刚才那十几分钟干了多少。「刚才那一轮到底跑了多久」是真实发生过的事，不该因为重开一次就消失。",
+      "做了什么",
+      "| 变化 | 落地 || --- | --- || 收口小结落盘 | `packages/web/src/lib/agentRuntime/turnProgress.ts` 新增 `TURN_SUMMARY_KEY = \"heming.turnSummary.v1\"`：`settleTurnProgress` 时把轮次、步数、起止时刻、首字时刻、字符数写进 localStorage || 只存收口态 | 跑动中的进度**不落盘**——重开应用看到一条假的「正在执行 file_grep」比什么都没有更糟；只有 `done: true` 的那一条才写 || 加载即装回 | `hydrateTurnSummaries()` 在模块加载时执行；内存里已有更权威的状态（这一轮正在跑）时不覆盖 || 清除同步删档 | `clearTurnProgress(id)` 同时删掉该会话的小结；不带参数清全部时连存储键一起删；`resetTurnProgress()` 也清存储 || 坏档逐条丢弃 | 缺时间、结束早于开始、类型不对的记录单独跳过，不因为一条脏数据把整份档案清空 || 最多留 20 个会话 | 按收口时刻排序保留最近 20 条（`TURN_SUMMARY_SESSIONS`），与 msgCache 同一思路 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.359.4.128.12",
     "date": "2026-11-19",
     "title": "模型页只剩两个页签，要的东西都在里面",
