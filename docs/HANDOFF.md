@@ -6475,6 +6475,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 ★ 测试：`magpieBackupParts` 9 例 + `BackupPanel` 4 → 6 例（`--no-keys` + `--sign-ins` 组合、`--no-sign-ins`），`components/model + magpieBackupParts + magpieCli` 210 例全绿；
 ★ 留白：口令仍在内核交互面板里输入；内核没有 `backup --dry-run`，做不了「先预览再决定」；定时自动备份没有内核命令，页面不自己造。
 
+## 折叠记录常驻在消息列表顶部（d.376）
+
+- `ChatPage` 里 `const contextFold = useMemo(() => getContextFold(convId), [convId, messages.length])`；渲染在「加载更早的消息」按钮之后、消息列表之前，`data-testid="context-fold-marker"`。
+- 用 `<details>`，摘要行给「这轮发送时，更早的 N 条消息折成了摘要 · {相对时间}」，展开说明「折的是发给模型的那份上下文；界面里的消息仍在」。
+- **别**把它改成「在折叠位置插入一条记录」：本机压缩按条数折、不带消息锚点，硬插会指错位置。
+- 原始提示条（`foldNoticeText` → `setSendNotice`）仍然保留，二者不重复也不冲突：提示条是「刚刚发生」，这一行是「回头还能查」。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6493,6 +6501,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

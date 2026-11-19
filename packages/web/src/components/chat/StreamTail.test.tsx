@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { StreamTail } from "../ChatPage.js";
 import { useChatStore } from "../../store/chat.js";
@@ -17,6 +17,7 @@ describe("StreamTail（d.372 流式订阅下沉）", () => {
           agentId: "a1",
           conversationId: "c1",
           text,
+          lastAt: Date.now(),
           status: "streaming",
         },
       },
@@ -29,7 +30,7 @@ describe("StreamTail（d.372 流式订阅下沉）", () => {
     useChatStore.setState((s) => ({
       streaming: {
         ...s.streaming,
-        s2: { agentId: "a2", conversationId: "c2", text: "别的会话", status: "streaming" },
+        s2: { agentId: "a2", conversationId: "c2", text: "别的会话", lastAt: Date.now(), status: "streaming" },
       },
     }));
     const onGrow = vi.fn();
@@ -74,3 +75,4 @@ describe("StreamTail（d.372 流式订阅下沉）", () => {
     expect(onGrow).toHaveBeenCalledTimes(2);
   });
 });
+

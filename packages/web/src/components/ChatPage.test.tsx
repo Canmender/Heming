@@ -49,6 +49,7 @@ import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/su
 // d.358：后台子代理在跑的一轮里交回结论，收口时不能被当成「用户插话」清掉
 import { enqueueSubagentJob, resetSubagentJobs } from "../lib/agentRuntime/subagentJobs.js";
 import { listLiveDrafts, saveLiveDraft } from "../lib/agentRuntime/liveDraft.js";
+import { recordContextFold, resetContextFolds } from "../lib/agentContext/contextFold.js";
 // d.218：收口后会留下「上一轮」小结，跨用例不清会把上一条用例的数字带进来
 import { reloadTurnSummaries, resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
 import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
@@ -1829,7 +1830,21 @@ describe("ChatPage", () => {
     expect(doc.messages.map((m) => m.text)).toEqual(["登录挂了", "入口在 app.ts"]);
     expect(screen.getByText(/已导出这段对话：2 条消息（JSON）/)).toBeInTheDocument();
   });
-  it("上次生成被中断：重开还能看到那半截草稿，也能丢弃（d.363）", async () => {
+  it("压缩过历史后，列表最上面留一条可展开的说明（d.375）", async () => {
+    bindAssistant();
+    recordContextFold("c1", 12, Date.now());
+    mockMessagesFetch([msg("m1", "先定规矩", "2026-11-19T04:00:00.000Z")]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const marker = await screen.findByTestId("context-fold-marker");
+    expect(marker).toHaveTextContent("更早的 12 条消息折成了摘要");
+    expect(marker).toHaveTextContent("刚刚");
+    expect(marker).toHaveTextContent("折的是发给模型的那份上下文");
+    expect(marker).toHaveTextContent("界面里这些消息仍在");
+
+    resetContextFolds();
+  });  it("上次生成被中断：重开还能看到那半截草稿，也能丢弃（d.363）", async () => {
     bindAssistant();
     saveLiveDraft(
       "c1",
@@ -7592,6 +7607,7 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
   });
 
 });
+
 
 
 

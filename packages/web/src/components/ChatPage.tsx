@@ -101,7 +101,9 @@ import {
   compactSpec,
   contextCalibrationRatio,
   countFoldedMessages,
+  foldAgeMinutes,
   foldNoticeText,
+  formatFoldAgeMinutes,
   getContextFold,
   recordContextFold,
   estimateRowsTokens,
@@ -2622,6 +2624,12 @@ export function ChatPage({
   useEffect(() => {
     setRecoveredDrafts(listLiveDrafts(convId));
   }, [convId, messages.length]);
+  /**
+   * 上一次「把早期消息折成摘要」（d.375）：只影响发给模型的那份上下文，界面里的消息不删。
+   * 折完只在上方提示条里说一句，用户回头翻不到「为什么它忘了刚才说的」，所以这里再留一个
+   * 常驻的、可展开的说明，位置在消息列表最上面（折的正是最上面那段）。
+   */
+  const contextFold = useMemo(() => getContextFold(convId), [convId, messages.length]);
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
 
@@ -6250,7 +6258,22 @@ export function ChatPage({
             </Button>
           </div>
         )}
-        {visibleMessages.length === 0 && streamEntries.length === 0 ? (
+        {/* d.375：折叠说明常驻在列表最上面——提示条会消失，这个不会。 */}
+        {contextFold ? (
+          <details
+            data-testid="context-fold-marker"
+            className="mb-3 rounded-lg border border-line-soft bg-subtle/40 px-3 py-2 text-ui-xs text-muted"
+          >
+            <summary className="cursor-pointer select-none">
+              这轮发送时，更早的 {contextFold.foldedCount} 条消息折成了摘要
+              {" · "}
+              {formatFoldAgeMinutes(foldAgeMinutes(contextFold))}
+            </summary>
+            <p className="mt-1 leading-relaxed">
+              折的是发给模型的那份上下文：更早的消息被换成一段摘要，模型不再逐字看到原文；界面里这些消息仍在，往上翻还能找到全文。
+            </p>
+          </details>
+        ) : null}        {visibleMessages.length === 0 && streamEntries.length === 0 ? (
           messagesLoading || !historyLoaded[convId] ? (
             // A1 首屏骨架：历史还没回来时不能把「正在加载」画成空会话
             <div
@@ -7361,6 +7384,8 @@ export function ChatPage({
     </div>
   );
 }
+
+
 
 
 
