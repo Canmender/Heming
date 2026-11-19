@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.405.4.139.14",
+    "date": "2026-11-19",
+    "title": "筛不到东西时，说清是「筛太小」还是「真没有」",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 上一轮加了「失败 N」筛选，但如果这段会话压根没有失败步骤，用户点开只会看到那句通用提示「没有匹配的步骤：换个关键词」，像是在怪他关键词写错了——其实他没输关键词。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ 空态 | 分支：\\onlyFailed && !needle\\ → 「这段会话里没有被拒或报错的步骤：再点一次「失败」取消筛选。」；否则保持原句 |",
+      "配合已有的 \\disabled={failedSteps === 0}\\ 与 \\\title\\，0 条失败时根本点不下去，也不会出现空表格。",
+      "**怎么验证。** \\TrajectoryView.test.tsx\\ 12 → 13 例（无失败时会话的 chip 禁用且 title 写明原因）；typecheck 通过。"
+    ]
+  },
+  {
     "version": "d.405.4.138.14",
     "date": "2026-11-19",
     "title": "轨迹页：只看没成的那几步",

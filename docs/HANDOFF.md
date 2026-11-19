@@ -6626,6 +6626,12 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 需要 `FOCUS_RING_TIGHT`，从 `../../lib/a11y/focus.js` 引。
 
 
+## 轨迹页空态按筛选来源分文案（d.405.4.139）
+
+- `visibleTurns.length === 0` 时：`onlyFailed && !needle` → 「这段会话里没有被拒或报错的步骤：再点一次「失败」取消筛选。」；其它情况保持「没有匹配的步骤：换个关键词…」。
+- 单靠 `disabled={failedSteps === 0}` 不够：先有失败、再点筛选、期间数据被清掉也会落到空态，文案得说清怎么退出来。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6644,6 +6650,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

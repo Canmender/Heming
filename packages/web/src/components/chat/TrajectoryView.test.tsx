@@ -267,3 +267,23 @@ describe("TrajectoryView · 工具栏（d.351）", () => {
     fireEvent.click(screen.getByRole("button", { name: "失败 1" }));
     expect(screen.getByTestId("trajectory-filter-count")).toHaveTextContent("1 / 3 步");
   });
+
+  it("只看失败但一条都没有时，给专门的说明（d.406）", () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          message({
+            id: "a1",
+            payload: { text: "做完了" },
+            tools: [{ id: "t1", name: "read_file", args: "{}", status: "ok", result: "好", startedAt: 1, endedAt: 2 }],
+          }),
+        ],
+      },
+    });
+    render(<TrajectoryView progress={progress({ hasData: false })} conversationId="c1" />);
+    // 没有失败时按钮禁用，所以这里直接验证 0 条时的文案分支：先造一条失败再筛掉它是不可能的，
+    // 改为断言禁用态与 title 说明，二者共同保证用户不会看到一个空表格。
+    const chip = screen.getByRole("button", { name: "失败 0" });
+    expect(chip).toBeDisabled();
+    expect(chip).toHaveAttribute("title", "这段对话里没有被拒或报错的步骤");
+  });

@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ConversationProgress, ProgressStep, ProgressStepKind, ProgressStepStatus } from "../../lib/progress/model.js";
 import { transcriptOf, useChatStore, type ToolTrace } from "../../store/chat.js";
 import type { Message } from "@heming/shared";
@@ -531,7 +531,9 @@ export function TrajectoryView({
 
       {visibleTurns.length === 0 ? (
         <p className="mt-3 text-ui-sm text-muted" data-testid="trajectory-no-match">
-          没有匹配的步骤：换个关键词，或清掉筛选看回整段会话。
+          {onlyFailed && !needle
+            ? "这段会话里没有被拒或报错的步骤：再点一次「失败」取消筛选。"
+            : "没有匹配的步骤：换个关键词，或清掉筛选看回整段会话。"}
         </p>
       ) : null}
     </section>

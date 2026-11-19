@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.405.4.139.14",
+    "date": "2026-11-19",
+    "title": "筛不到东西时，说清是「筛太小」还是「真没有」",
+    "bullets": [
+      "轨迹页没有失败步骤时，「失败」按钮是灰的并写明原因。",
+      "万一筛空了，提示会告诉你再点一次就取消筛选，而不是让你换关键词。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.405.4.138.14",
     "date": "2026-11-19",
     "title": "轨迹页：只看没成的那几步",
