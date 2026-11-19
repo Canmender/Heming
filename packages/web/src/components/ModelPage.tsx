@@ -556,6 +556,17 @@ export function ModelPage() {
   >({});
   /** 正在一家一家测（「全部测一遍」按着的时候）：按钮要变成进行中，也不能重复点。 */
   const [testingEvery, setTestingEvery] = useState(false);
+  /**
+   * 来源区的搜索词：只筛「API Key 服务商」与「国产智能体」这两排卡片。
+   * 已添加的来源、订阅账号都不动——那是每天要点的，藏起来会让人以为被删了。
+   */
+  const [sourceFilter, setSourceFilter] = useState("");
+  /** 名字 / 说明 / id 里任一处含这个词就算匹配（不区分大小写）；空搜索词一律算匹配。 */
+  const matchesSourceFilter = (id: string, name: string, desc: string) => {
+    const query = sourceFilter.trim().toLowerCase();
+    if (query === "") return true;
+    return [id, name, desc].some((text) => text.toLowerCase().includes(query));
+  };
   const [live, setLive] = useState("");
   const liveRef = useRef("");
   const [runId, setRunId] = useState<string | null>(null);
@@ -2109,6 +2120,16 @@ export function ModelPage() {
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
           <section aria-label="来源" className="space-y-4">
+            {/* 找预设：服务商与国产端都是「一排卡片挑一个」，多了以后扫一遍很费眼。 */}
+            <div className="ui-card p-3">
+              <TextField
+                label="找服务商"
+                hint="只筛「API Key 服务商」与「国产智能体」这两排卡片；已经添加的来源不受影响。"
+                placeholder="qwen / 通义 / 智谱 / trae"
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+              />
+            </div>
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
             <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -2126,7 +2147,7 @@ export function ModelPage() {
               )}
               {cli && (
               <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                {MAGPIE_PRESETS.map((preset) => (
+                {MAGPIE_PRESETS.filter((preset) => matchesSourceFilter(preset.id, preset.name, preset.desc)).map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
@@ -2151,6 +2172,9 @@ export function ModelPage() {
                   </button>
                 ))}
               </div>
+              )}
+              {MAGPIE_PRESETS.every((preset) => !matchesSourceFilter(preset.id, preset.name, preset.desc)) && (
+                <p className="mt-3 ui-caption">服务商里没有对得上「{sourceFilter.trim()}」的；清掉搜索词就都回来。</p>
               )}
 
               {presetKey && activePreset && activePlan && (
@@ -2424,7 +2448,14 @@ export function ModelPage() {
                       </Button>
                     </div>
                     <div className="mt-2 grid gap-3">
-                      {DOMESTIC_GROUPS.map((group) => (
+                      {DOMESTIC_GROUPS.map((group) => ({
+                        ...group,
+                        items: group.items.filter((item) =>
+                          matchesSourceFilter(item.agent, item.label, item.desc),
+                        ),
+                      }))
+                        .filter((group) => group.items.length > 0)
+                        .map((group) => (
                         <div key={group.site} className="grid gap-2">
                           <div className="ui-micro">{group.title}</div>
                           {group.items.map((item) => (
@@ -2441,6 +2472,14 @@ export function ModelPage() {
                           ))}
                         </div>
                       ))}
+                      {sourceFilter.trim() !== "" &&
+                        DOMESTIC_GROUPS.every((group) =>
+                          group.items.every((item) => !matchesSourceFilter(item.agent, item.label, item.desc)),
+                        ) && (
+                        <p className="ui-caption">
+                          国产智能体里没有对得上「{sourceFilter.trim()}」的；清掉搜索词就都回来。
+                        </p>
+                      )}
                     </div>
                     <p className="mt-2 ui-caption">
                       {DOMESTIC_KEY_NOTE}

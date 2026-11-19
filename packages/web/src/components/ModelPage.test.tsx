@@ -787,6 +787,29 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     );
   });
 
+  it("找服务商：按名字把两排卡片筛掉，清掉搜索词就都回来", async () => {
+    installBridge();
+    render(<ModelPage />);
+    expect(await screen.findByText("通义千问")).toBeInTheDocument();
+    expect(screen.getByText("Trae CN")).toBeInTheDocument();
+
+    const search = screen.getByLabelText("找服务商");
+    fireEvent.change(search, { target: { value: "trae" } });
+    // 服务商那一排里没有对得上 trae 的，只留国产端的 Trae CN
+    expect(screen.queryByText("通义千问")).not.toBeInTheDocument();
+    expect(screen.getByText("Trae CN")).toBeInTheDocument();
+    expect(screen.getByText(/服务商里没有对得上「trae」的/)).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "通义" } });
+    expect(screen.getByText("通义千问")).toBeInTheDocument();
+    expect(screen.queryByText("Trae CN")).not.toBeInTheDocument();
+    expect(screen.getByText(/国产智能体里没有对得上「通义」的/)).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByText("通义千问")).toBeInTheDocument();
+    expect(screen.getByText("Trae CN")).toBeInTheDocument();
+  });
+
   it("来源页列出国产智能体：点一下就接入并登录，两步合成一次点击", async () => {
     const { bridge, calls } = installBridge();
     render(<ModelPage />);
