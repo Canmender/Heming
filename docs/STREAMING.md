@@ -110,7 +110,7 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 | 5 | 生成中的用时 | 消息流末尾一行实时走秒 | 输入框下方一行 | 视线要离开回答 |
 | 6 | 首 token / 速度 | 输入区胶囊：TTFT、tok/s | 没有 | 不知道自己等得值不值 |
 | 7 | 刷新/断线时的半截回答 | 快照 + 游标补齐 | 气泡直接消失 | 生成中断的错觉 → ✅ d.364 草稿留底（仍无逐字回放） |
-| 8 | 停止的收尾 | 正文尾「已停止」+ 未完成调用标 stopped | 气泡消失、留一条错误 | 「刚才那些字呢」 |
+| 8 | 停止的收尾 | 正文尾「已停止」+ 未完成调用标 stopped | 小结写「已停止」，未完成调用记为中断失败，另给草稿「接着跑」 | ✅ d.364 草稿 + d.378 小结标记（正文本身不加，服务端内容不动） |
 | 9 | 压缩提示 | 行内一条可展开 | 输入区上方一句 notice | 位置不稳 |
 | 10 | 无障碍 | 流式正文刻意不进 live region，只有状态行播报 | 已一致（`sr-only` 只报状态） | — |
 
@@ -163,5 +163,6 @@ provider SSE ──► StreamChunk（text-delta / reasoning-delta / tool-call-de
 
 - 单元：`agentStream` 的工具轮正文断言（流式期间 `onLocalDelta` 收到、结束时 `finish.text` 含它）；`ChatPage` 的绘制合并用例（同一帧内多次 delta 只触发一次 `upsertStream`）。
 - 手测：长回答（> 3000 字）+ 多工具任务，观察是否还发烫、工具轮是否还有空白期、结束后过程是否收起。
+
 
 
