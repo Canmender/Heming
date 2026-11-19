@@ -1784,6 +1784,9 @@ export function ModelPage() {
     );
   };
 
+  /** 已经为「收起时也看得出改过」读过 show 的来源：每家读一次就够。 */
+  const flagsWarm = useRef(new Set<string>());
+
   /** 读一次来源详情，写进 showCache：地址、普通/套餐、以及它的模型清单。 */
   const readShowIntoCache = useCallback(
     async (id: string) => {
@@ -1797,6 +1800,29 @@ export function ModelPage() {
     },
     [cli],
   );
+
+  /**
+   * 首屏把每个来源的现状读一遍：收起时也要看得出「这家改过」。
+   *
+   * 请求头、算免费、原文照发这些只写在 `provider show` 里；以前要点开「高级」才读，
+   * 于是收起的行上永远看不出这家跟默认有什么不同。一家读一次（`flagsWarm` 记着），
+   * 一条一条来，不跟首屏那几路抢。
+   */
+  useEffect(() => {
+    if (!cli || providers.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const row of providers) {
+        if (cancelled) return;
+        if (flagsWarm.current.has(row.id)) continue;
+        flagsWarm.current.add(row.id);
+        await readShowIntoCache(row.id).catch(() => {});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cli, providers, readShowIntoCache]);
 
   /** 展开某个来源的高级设置：顺带读一次详细地址，判断它是普通还是套餐地址。 */
   const toggleAdvanced = async (id: string) => {
@@ -2591,6 +2617,9 @@ export function ModelPage() {
                     compaction: providerForm.compaction,
                   };
                   const wireCommand = sourceWireCommand(row.id, wireValues);
+                  // show 里只写着「这家跟默认不一样」的地方：收起时也要说得出来，
+                  // 不然想问「这家改过什么」只能逐条展开点一遍。
+                  const tunedSummary = info?.flags ? describeShowFlags(info.flags) : "";
                   return (
                     <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
                       <div className="flex w-full flex-wrap items-center gap-3">
@@ -2610,6 +2639,15 @@ export function ModelPage() {
                                 title="已停用：Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它"
                               >
                                 已停用
+                              </span>
+                            )}
+                            {tunedSummary && (
+                              // 这家设过点什么：一句话挂在悬停里，行上只占两个字的位。
+                              <span
+                                className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
+                                title={`这家跟默认不一样：${tunedSummary}`}
+                              >
+                                改过
                               </span>
                             )}
                             {quota && (

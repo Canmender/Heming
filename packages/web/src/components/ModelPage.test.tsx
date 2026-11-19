@@ -319,6 +319,37 @@ describe("ModelPage · 添加来源", () => {
     await waitFor(() => expect(calls).toContainEqual(["provider", "on", "mock"]));
   });
 
+  it("收起时也看得出这家改过：show 里有的才标，没设过的不标", async () => {
+    installBridge(
+      {},
+      {
+        "provider show mock": {
+          ok: true,
+          stdout:
+            "  chat       https://api.example.com/v1\n" +
+            "  free yes        counts as free when routing\n" +
+            "  header     X-Trace: abc\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    // 不点「高级」也读：总共一家，读一次就够。
+    const badge = await screen.findByTitle(/这家跟默认不一样/);
+    expect(badge).toHaveTextContent("改过");
+    expect(badge).toHaveAttribute("title", expect.stringContaining("算免费"));
+  });
+
+  it("没设过的来源不挂「改过」：空 show 就是一个字都不多说", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("mock")).toBeInTheDocument();
+    // 等首屏那几路读完，再确认行上没有这个标。
+    await waitFor(() => expect(screen.queryByText("改过")).toBeNull());
+  });
+
   it("停用来源：Key 与记录都留着，只发 provider off", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

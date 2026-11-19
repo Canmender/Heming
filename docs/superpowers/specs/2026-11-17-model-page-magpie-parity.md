@@ -244,6 +244,19 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 - 收的边界：`Call.Fallback` 那句「哪些先失败了、为什么」仍在网关侧（`gateway.Call.Fallback`），现在用的
   是每次尝试自己的 `fail`，比那句更细；不另开接口。
 
+### 3.8 收起时也看得出「这家改过」
+
+请求头、算免费、原文照发这些只写在 `provider show` 里。以前要点开「高级」才读，于是收起的行上
+永远看不出这家跟默认有什么不同，想知道只能逐条展开。
+
+- 首屏 `providers` 一到位，就用 `flagsWarm`（`ref<Set<string>>`）逐家读一次
+  `provider show`，写进同一份 `showCache`（一次一条，不跟首屏那几路抢）。
+- 行上因此多一个「改过」徽标，悬停是 `describeShowFlags` 的整句（「这家跟默认不一样：请求头
+  X-Trace；算免费；每 6h 刷清单」）；`describeShowFlags` 返回空串就不挂标。
+- 代价与边界：一家一次 show（N 家 N 次，串行）；show 里没有的东西（`context=` / `family=` /
+  `at-once` / `rpm` / `queue` / `quota-rest` / `rest-cap` / `listed`）标不出来——这些改没改，
+  仍要靠展开时自己填的格子判断。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
