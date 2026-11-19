@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -2907,6 +2907,8 @@ export function ChatPage({
   // 切会话时清掉高亮：跳转是「这一眼」的事，不该跟着换到另一段对话里。
   useEffect(() => {
     setJumpedMessageId(null);
+    // 压缩是这一段的动作（d.396）：切走了就别把「压缩中…」带给下一段。
+    setCompacting(false);
   }, [convId]);
 
   const closeSearch = () => {

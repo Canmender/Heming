@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.396.4.134.14",
+    "date": "2026-11-19",
+    "title": "切走会话，别把「压缩中」带过去",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 「压缩中…」是这一条会话的动作；切到另一条会话时按钮会继续显示禁用态，看着像那边也在压。等原会话的压缩结束才复位，这中间新会话的按钮是死的。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `ChatPage.tsx` | 切会话的 effect 里除了清跳转高亮，一并 `setCompacting(false)` |",
+      "顺带做了一次全仓构建校验（本轮之前已积了 20 多个提交没打过包）：`pnpm -r build` 全 workspace 通过，web 产物正常生成。",
+      "**怎么验证。** `pnpm -r build` 通过；`pnpm --filter @heming/web typecheck` 通过；`ChatPage.test.tsx` 209 例全过。",
+      "**留白。** 只是复位 UI 状态；原会话那次压缩请求不会被取消（它已经在路上，取消反而更难说清结果）。"
+    ]
+  },
+  {
     "version": "d.396.4.133.14",
     "date": "2026-11-19",
     "title": "云同步换过什么，页面上说得出、也撤得回",

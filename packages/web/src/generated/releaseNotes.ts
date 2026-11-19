@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.396.4.134.14",
+    "date": "2026-11-19",
+    "title": "切走会话，别把「压缩中」带过去",
+    "bullets": [
+      "在一段会话里点压缩、随即切到另一段时，新会话的按钮不再显示「压缩中…」。",
+      "这一条对使用者只是少一个困惑，没有功能变化。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.396.4.133.14",
     "date": "2026-11-19",
     "title": "云同步换过什么，看得见也撤得回",
