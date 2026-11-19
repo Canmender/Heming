@@ -7333,11 +7333,16 @@ export function ChatPage({
           {/* d.355：本轮起把「这个会话一共烧了多少 token」也放在同一行——
               模型没报 usage 的会话不显示，不写 0 糊弄。悬停给输入/输出的拆分。 */}
           {conversationUsage.total > 0 ? (
-            <span
-              title={`输入 ${formatTokens(conversationUsage.input)} · 输出 ${formatTokens(conversationUsage.output)}`}
+            <button
+              type="button"
+              // d.403：这行数字是「上下文花在哪」的入口，点一下就看得到分段与压缩阈值。
+              aria-label="查看上下文用量"
+              title={`输入 ${formatTokens(conversationUsage.input)} · 输出 ${formatTokens(conversationUsage.output)} · 点开看上下文`}
+              onClick={() => setView("context")}
+              className={`rounded-sm underline-offset-2 hover:underline ${FOCUS_RING_TIGHT}`}
             >
               {` · ${formatTokens(conversationUsage.total)} tokens`}
-            </span>
+            </button>
           ) : (
             ""
           )}

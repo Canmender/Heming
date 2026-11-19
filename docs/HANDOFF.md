@@ -6611,6 +6611,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 测试：`TrajectoryView.test.tsx` 10 → 11 例；注意该文件的消息工厂是 `message(over: Partial<Message> & {steps?, tools?})`，不是 `(id, text)` 那种。
 
 
+## 用量数字是上下文页的入口（d.403）
+
+- `ChatPage.tsx` 的 `conversation-meter` 里，「N tokens」由 `span` 改成 `button`：`aria-label="查看上下文用量"`、`onClick={() => setView("context")}`、`title` 带输入/输出拆分与「点开看上下文」。
+- 只在 `conversationUsage.total > 0` 时渲染（没报过 usage 的会话不出现死入口）。
+- 测试写法：`ChatPage.test.tsx` 里「会话用量药丸」用例末尾追加点击断言；**新建 describe 里再 `render(<ChatPage />)` 不会自动带上前面的会话夹具**，历史拉不回来，断言找得到按钮却看不到消息——所以直接扩原用例。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6629,6 +6636,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

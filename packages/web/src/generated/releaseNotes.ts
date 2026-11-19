@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.403.4.138.14",
+    "date": "2026-11-19",
+    "title": "那串 token 数字，可以点开",
+    "bullets": [
+      "输入框下方的「1.2K tokens」现在可以点，直接跳到上下文页。",
+      "那里有分段占比、压缩阈值，以及距阈值还有多少。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.402.4.138.14",
     "date": "2026-11-19",
     "title": "每一轮花了多久，标题上就写着",

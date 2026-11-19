@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.403.4.138.14",
+    "date": "2026-11-19",
+    "title": "那串 token 数字，可以点开",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 输入框下方那行「3 轮 · 12 步 · 1.2K tokens」只是展示；想知道这些 token 花在哪、离压缩阈值还有多远，得自己切到「上下文」页签。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || \\ChatPage.tsx\\ 的 \\conversation-meter\\ | 「N tokens」从 \\span\\ 改成按钮：\\\u0007ria-label=\"查看上下文用量\"\\，点击 \\setView(\"context\")\\；悬停提示输入/输出拆分并写「点开看上下文」 |",
+      "只在有真实用量（\\\total > 0\\）时出现，没报过 usage 的会话不会多一个死链接。",
+      "**怎么验证。** \\ChatPage.test.tsx\\ 的「会话用量药丸」用例追加断言（点按钮 → \\[data-view-panel=\"context\"]\\ 出现），209 例全过；typecheck 通过。"
+    ]
+  },
+  {
     "version": "d.402.4.138.14",
     "date": "2026-11-19",
     "title": "每一轮花了多久，标题上就写着",
