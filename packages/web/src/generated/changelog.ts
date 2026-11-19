@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.374.4.130.14",
+    "date": "2026-11-19",
+    "title": "打字机不再拖着整页一起重画",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** `ChatPage` 一直订阅整张 `streaming` 表。每个 delta 都会换一次对象引用，于是整页（七千行函数、几百个节点）每帧重渲染一次；真正在变的只有末尾那一两个气泡。`docs/STREAMING.md` 差距 #2 说的就是它，之前没做是因为自动贴底依赖「各流文本长度之和」这个 tick，而那个 tick 只能从父组件的渲染里算出来。",
+      "**做了什么。**",
+      "| 做了什么 | 在哪 || --- | --- || 父组件改订阅**签名**（`id:状态:智能体` 拼串）：只有「多一条 / 少一条 / 状态变了」才重渲 | `components/ChatPage.tsx` 的 `streamSignatureOf` || 气泡与跑动进度行搬进 `StreamTail`，它自己订阅整张表，正文逐帧只重渲这一块 | 同文件 `StreamTail` || 自动贴底不再靠父组件的 tick：气泡长高时 `StreamTail` 调一次 `onGrow`，直接改 `scrollTop` / 亮「新消息」，不 setState 文本 | 同文件 `onStreamGrow` || 草稿块让位判断改用「当前在跑的 streamId 集合」 | `streamingIds` |",
+      "**怎么验证。** 新增 `components/chat/StreamTail.test.tsx` 2 例：只渲染本会话的气泡、正文增量直接上屏；长高时 `onGrow` 被调、正文不变时不重复调。`ChatPage.test.tsx` 208 例、web 全量通过；typecheck 通过。",
+      "**踩坑。** 第一版用 `useShallow((s) => Object.entries(s.streaming).filter(...))` 选气泡条目——每次都是新数组、元素又是新元组，shallow 比不过，`useSyncExternalStore` 判定快照一直在变，直接「Maximum update depth exceeded」，68 个用例连带失败。改成在子组件里直接订阅 `s.streaming` 就干净了：重渲染范围仍然只有这一块。",
+      "**留白。** 签名订阅意味着「同一个流里状态不变」的更新（例如 attempts 追加）不会重渲父组件——目前 `attempts` 只影响气泡，气泡自己有订阅，没受影响。消息列表的窗口化与历史行的 memo 未动。"
+    ]
+  },
+  {
     "version": "d.373.4.130.14",
     "date": "2026-11-19",
     "title": "端的小开关：搜索、压缩、User-Agent",

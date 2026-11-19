@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -17,6 +17,7 @@ import {
   useChatStore,
   transcriptOf,
   withTranscript,
+  type AgentStreamState,
   type E2eOpenHandler,
   type E2eOpenOutcome,
   type MessageTranscript,
@@ -752,6 +753,96 @@ function contextRowsOf(msgs: Message[], plainOf: Record<string, unknown>): ChatM
  * 是返回（清空当前会话）与对话标题（h2，喂给读屏与设计审计的第二级标题），
  * 右侧是通道状态、会话进度开关与搜索入口（导出与「选择消息」已随 d.147.4.89.11 移除）。
  */
+/**
+ * 流式条目签名（d.372）：`id:状态:智能体` 用逗号连起来。
+ *
+ * 父组件拿它当订阅值——只有「多了一条 / 少了一条 / 状态变了」才变，
+ * 正文与思考增长不改签名，于是整页不再每帧重渲染（正文交给 `StreamTail`）。
+ */
+function streamSignatureOf(streaming: Record<string, AgentStreamState>, convId: string): string {
+  let out = "";
+  for (const [id, s] of Object.entries(streaming)) {
+    if (s.conversationId !== convId) continue;
+    out += `${id}:${s.status}:${s.agentId},`;
+  }
+  return out;
+}
+
+/** 把累计的思考与工具轨迹按「第几次工具调用」切成 step 序列（d.350 起用于分步呈现）。 */
+function buildStreamSteps(
+  reasoning: string | undefined,
+  tools: ToolTrace[] | undefined,
+  marks: number[] | undefined,
+): TranscriptStep[] {
+  const text = reasoning ?? "";
+  const list = tools ?? [];
+  const cuts = (marks ?? []).filter((m) => Number.isFinite(m) && m >= 0 && m <= text.length);
+  const steps: TranscriptStep[] = [];
+  let from = 0;
+  for (let i = 0; i < Math.max(cuts.length, list.length, text.trim() ? 1 : 0); i += 1) {
+    const to = i < cuts.length ? cuts[i]! : i === 0 ? text.length : from;
+    const segment = text.slice(from, to).trim();
+    if (segment) steps.push({ kind: "think", text: segment });
+    from = Math.max(from, to);
+    const tool = list[i];
+    if (tool) steps.push({ kind: "tool", toolId: tool.id });
+  }
+  const tail = text.slice(from).trim();
+  if (tail && steps[steps.length - 1]?.kind !== "think") steps.push({ kind: "think", text: tail });
+  return steps;
+}
+
+/**
+ * 消息列表尾部的流式气泡（d.372）。
+ *
+ * 自己订阅 `streaming`，正文每帧只重渲染这一小块；父组件只订阅签名。
+ * 气泡长高时调一次 `onGrow`（父组件里是「贴底或亮新消息」的副作用，不触发父组件重渲染）。
+ */
+export function StreamTail({
+  convId,
+  nameOf,
+  marksRef,
+  onGrow,
+  onRetry,
+  onRevealPath,
+}: {
+  convId: string;
+  nameOf: (agentId: string) => string;
+  marksRef: { current: Record<string, number[]> };
+  onGrow: () => void;
+  onRetry: (streamId: string) => void;
+  onRevealPath?: (path: string) => void;
+}) {
+  // 直接订阅整张表：每帧换引用，代价只是这一小块重渲染（父组件订阅的是签名）。
+  // 不要在这里用 `useShallow` 包 `Object.entries(...)`——每次都是新数组，
+  // shallow 比不过，`useSyncExternalStore` 会判定快照一直在变而无限重渲。
+  const streaming = useChatStore((s) => s.streaming);
+  const entries = Object.entries(streaming).filter(([, v]) => v.conversationId === convId);
+  const streamOwner = useChatStore((s) => s.streamOwner);
+  const grow = entries.reduce((n, [, v]) => n + (v.text?.length ?? 0) + (v.reasoning?.length ?? 0), 0);
+  useEffect(() => {
+    onGrow();
+  }, [grow, onGrow]);
+  return (
+    <>
+      {entries.map(([id, s]) => (
+        <AgentStreamBubble
+          key={id}
+          name={nameOf(s.agentId)}
+          text={s.text}
+          reasoning={s.reasoning}
+          tools={s.tools}
+          steps={buildStreamSteps(s.reasoning, s.tools, marksRef.current[id])}
+          attempts={s.attempts}
+          status={s.status}
+          errorMessage={s.errorMessage}
+          onRetry={streamOwner[id] && s.status === "error" ? () => onRetry(id) : undefined}
+          {...(onRevealPath ? { onRevealPath } : {})}
+        />
+      ))}
+    </>
+  );
+}
 export function ChatPage({
   // 待确认超时可注入：生产用 60 分钟，测试用它把「超时 → 拒绝 + 留痕」跑到，
   // 不必依赖 fake timers（那会与流式/等待逻辑互相打架）。
@@ -778,7 +869,14 @@ export function ChatPage({
   const plainById = useChatStore((s) => s.plainById);
   const appendMessage = useChatStore((s) => s.appendMessage);
   const renameConversation = useChatStore((s) => s.renameConversation);
-  const streaming = useChatStore((s) => s.streaming);
+  /**
+   * d.372：父组件**不再订阅整张 streaming 表**。
+   *
+   * 原来每个 delta 都会换一次 `streaming` 对象引用，于是整页（七千行、几百个节点）每帧
+   * 重渲染一次。现在只订阅「有哪些流、各自状态、是谁」拼成的签名字符串：正文增长不改签名，
+   * 父组件就不重渲；正文的逐帧更新交给 `StreamTail` 自己订阅。
+   */
+  const streamSignature = useChatStore((s) => streamSignatureOf(s.streaming, convId));
   const streamOwner = useChatStore((s) => s.streamOwner);
   const upsertStream = useChatStore((s) => s.upsertStream);
   const removeStream = useChatStore((s) => s.removeStream);
@@ -1818,29 +1916,8 @@ export function ChatPage({
    * `[marks[i-1], marks[i])`，第 i 个工具插在它后面；最后一段是 `[marks.at(-1), 末尾)`。
    * 没有分界点（纯思考、或模型一次都没调工具）时退化成单段思考。
    */
-  const stepsOfStream = (
-    reasoning: string | undefined,
-    tools: ToolTrace[] | undefined,
-    marks: number[] | undefined,
-  ): TranscriptStep[] => {
-    const text = reasoning ?? "";
-    const list = tools ?? [];
-    const cuts = (marks ?? []).filter((m) => Number.isFinite(m) && m >= 0 && m <= text.length);
-    const steps: TranscriptStep[] = [];
-    let from = 0;
-    for (let i = 0; i < Math.max(cuts.length, list.length, text.trim() ? 1 : 0); i += 1) {
-      const to = i < cuts.length ? cuts[i]! : i === 0 ? text.length : from;
-      const segment = text.slice(from, to).trim();
-      if (segment) steps.push({ kind: "think", text: segment });
-      from = Math.max(from, to);
-      const tool = list[i];
-      if (tool) steps.push({ kind: "tool", toolId: tool.id });
-    }
-    // 收尾：最后一个工具之后如果还有思考，补一段。
-    const tail = text.slice(from).trim();
-    if (tail && steps[steps.length - 1]?.kind !== "think") steps.push({ kind: "think", text: tail });
-    return steps;
-  };
+  // d.372：实现搬到模块级（`buildStreamSteps`），这里保留原名给历史消息渲染用。
+  const stepsOfStream = buildStreamSteps;
   /** 消息署名：自己「我」；智能体会话为智能体名。 */
   const displaySenderName = (m: Message) =>
     m.senderId === me?.id ? "我" : conv?.agent.name;
@@ -2523,8 +2600,18 @@ export function ChatPage({
     agentsRoster.find((a) => a.id === agentId)?.name ??
     "智能体";
 
-  /** 本会话的打字机项（含他机流）：渲染在消息列表尾部。 */
-  const streamEntries = Object.entries(streaming).filter(([, s]) => s.conversationId === convId);
+  /**
+   * 本会话的打字机项（含他机流）：渲染在消息列表尾部。
+   *
+   * d.372：用 `getState()` 现取、以签名为依赖——签名变了（新增/收口/报错）这里才重算，
+   * 正文增长不进来。只读快照，不额外订阅。
+   */
+  const streamEntries = useMemo(
+    () => Object.entries(useChatStore.getState().streaming).filter(([, s]) => s.conversationId === convId),
+    [streamSignature, convId],
+  );
+  /** 当前仍挂着流式条目的 id（草稿块据此让位给正在跑的那条）。 */
+  const streamingIds = useMemo(() => new Set(streamEntries.map(([id]) => id)), [streamEntries]);
   /**
    * 上次生成被中断后留下的草稿（d.363）。
    *
@@ -4295,12 +4382,13 @@ export function ChatPage({
    * A3 滚动贴底跟随：贴底时才跟着新消息与流式文本走；用户上滑后不再强行拽底，
    * 改为在右下角亮起「↓ 新消息」。切会话由上面的 convId effect 强制回到底部。
    *
-   * 用 `streamTick`（各流文本/思考长度之和）当依赖：流式每帧文本变化都会推进它，
-   * 而对象引用本身每次都变、不能直接进依赖。
+   * d.372：流式那一份交给 `StreamTail` 的 `onGrow`（气泡长高时调，父组件不重渲染）；
+   * 这里只盯「消息条数变了」——新消息落库时贴底或亮「新消息」。
    */
-  const streamTick = streamEntries
-    .map(([, s]) => (s.text?.length ?? 0) + (s.reasoning?.length ?? 0))
-    .join(",");
+  const onStreamGrow = useCallback(() => {
+    if (atBottomRef.current) scrollListToBottom("auto");
+    else setNewBelow(true);
+  }, [scrollListToBottom]);
   useEffect(() => {
     if (atBottomRef.current) {
       // 跟随新内容：直接贴底，不用 scrollIntoView（见 scrollListToBottom 注释）。
@@ -4308,7 +4396,7 @@ export function ChatPage({
     } else {
       setNewBelow(true);
     }
-  }, [messages.length, streamTick, scrollListToBottom]);
+  }, [messages.length, scrollListToBottom]);
 
   // 挂载清扫（d.244 起只清「真过期」的残留）：离开聊天页不再中止在飞的流，所以新挂载时
   // store 里的 streaming 项**可能有一个正在跑**——那是本机上一实例仍在推进的流，清掉就等于
@@ -4342,7 +4430,8 @@ export function ChatPage({
   // 把长时间无响应（>60s 未刷新）的打字机项置 error 行（阈值在 store；本机流不自动重试，error 行有手动重试）。
   // 门取「存在 streaming 项」而非「streaming 非空」——纯 error 残留（本机 retry 行 / 他机流 6s 自清窗口）
   // 不再挂表：既不空转、也不让假时钟测试的 runAllTimers 无法收敛。有在飞流即起、全部收口即卸。
-  const hasLiveStream = Object.values(streaming).some((s) => s.status === "streaming");
+  // d.372：看全局（watchdog 要管他机流），用 getState 现取；签名变化会带来重渲染。
+  const hasLiveStream = Object.values(useChatStore.getState().streaming).some((s) => s.status === "streaming");
   useEffect(() => {
     if (!hasLiveStream) return;
     const timer = window.setInterval(
@@ -6376,7 +6465,7 @@ export function ChatPage({
         })}
         {/* 上次生成被中断时留下的草稿（d.363）：内存里的流没了，但加密缓存还留着那半截 */}
         {recoveredDrafts
-          .filter((draft) => !streaming[draft.streamId])
+          .filter((draft) => !streamingIds.has(draft.streamId))
           .map((draft) => (
             <article
               key={`draft-${draft.streamId}`}
@@ -6423,24 +6512,18 @@ export function ChatPage({
               <p className="whitespace-pre-wrap break-words text-ink">{draft.text}</p>
             </article>
           ))}
-        {/* 流式打字机行（本机/他机）：渲染于消息列表尾部，finish 的 message_new 收口后移除 */}
-        {streamEntries.map(([id, s]) => (
-          <AgentStreamBubble
-            key={id}
-            name={nameOf(s.agentId)}
-            text={s.text}
-            reasoning={s.reasoning}
-            tools={s.tools}
-            steps={stepsOfStream(s.reasoning, s.tools, streamMarksRef.current[id])}
-            attempts={s.attempts}
-            status={s.status}
-            errorMessage={s.errorMessage}
-            onRetry={streamOwner[id] && s.status === "error" ? () => retryStream(id) : undefined}
-            {...(hasRevealBridge(getFileBridge())
-              ? { onRevealPath: (path: string) => void revealTurnChange(path) }
-              : {})}
-          />
-        ))}
+        {/* 流式打字机行（本机/他机）：渲染于消息列表尾部，finish 的 message_new 收口后移除。
+            d.372：气泡自己订阅 streaming，正文逐帧只重渲这一块，父组件不再跟着每帧重渲染。 */}
+        <StreamTail
+          convId={convId}
+          nameOf={nameOf}
+          marksRef={streamMarksRef}
+          onGrow={onStreamGrow}
+          onRetry={retryStream}
+          {...(hasRevealBridge(getFileBridge())
+            ? { onRevealPath: (path: string) => void revealTurnChange(path) }
+            : {})}
+        />
         {/* 跑动中的进度跟着最后一条回答走（d.361，对齐 DSH）：用户的眼睛在回答末尾，
             状态行放到这里才看得见；收口后它回到输入框下方当「上一轮」的小结。 */}
         {turnProgress && !turnProgress.done ? (
@@ -7278,4 +7361,17 @@ export function ChatPage({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 

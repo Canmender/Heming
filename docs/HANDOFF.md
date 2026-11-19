@@ -6459,6 +6459,15 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 ★ 测试：`magpieSourceWire` 5 例、`magpieSourceShow` 6 → 7 例、页面 118 → 119 例，定向 29 文件 316 例全绿、typecheck 通过；
 ★ 留白：`prompt=` / `additional-tools=` 是端专属且 show 读不回来，仍留命令行；订阅账号带 `user-agent=agent` 让内核自己报错，页面不预判。
 
+## 流式订阅下沉：父组件只订阅签名（d.374）
+
+- `ChatPage` 里 `const streaming = useChatStore((s) => s.streaming)` 已去掉。取而代之的是 `streamSignatureOf(s.streaming, convId)` 拼出的字符串 `id:status:agentId,`，签名不变就不重渲父组件。
+- `streamEntries` 仍然存在，但改为 `useMemo(() => Object.entries(useChatStore.getState().streaming).filter(...), [streamSignature, convId])`——**只读快照**，不额外订阅。
+- 气泡与「跑动中」进度行搬进 `StreamTail`（同文件导出，便于单测），它订阅 `s.streaming` 全表；**别**把它改成 `useShallow(Object.entries(...))`：每次新数组 + 新元组，shallow 恒不等，`useSyncExternalStore` 快照永远在变 → `Maximum update depth exceeded`（本轮踩过，68 个用例连带红）。
+- 自动贴底：`onStreamGrow`（`useCallback`）在气泡长高时由 `StreamTail` 的 effect 调一次；父组件只剩 `[messages.length, scrollListToBottom]` 一个 effect。不要再把 `streamTick` 加回来。
+- `hasLiveStream`（watchdog 门控）改用 `useChatStore.getState().streaming` 现取。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6477,6 +6486,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 
