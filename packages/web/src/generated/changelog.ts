@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.402.4.138.14",
+    "date": "2026-11-19",
+    "title": "每一轮花了多久，标题上就写着",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 轨迹页每轮分组头只写「第 3 轮 · 12 步」，看不出这一轮是 4 秒还是 4 分钟；底部虽有全场汇总，但定位不到慢的那一轮。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || \\chat/TrajectoryView.tsx\\ | 新增 \\\turnDuration(turn)\\：只取同时有 \\startedAt\\/\\endedAt\\ 的行，算首末跨度；分组头追加 \\· 4.0s\\ |",
+      "**关键约束**（d.382 踩过的）：用户消息的 \\createdAt\\ 是真实时间戳，**不能**当结束时间用——否则跨度会算出「1795046399 秒」。所以只统计同时有两端的行。",
+      "**怎么验证。** \\TrajectoryView.test.tsx\\ 10 → 11 例（1 条用户消息 + 1 条带 5 秒工具的回复 → 标题含「4.0s」）；web 全量除并行会话的 \\ModelPage.test.tsx\\ 外全绿；typecheck 通过。"
+    ]
+  },
+  {
     "version": "d.401.4.138.14",
     "date": "2026-11-19",
     "title": "来源页顶上也有「跳到哪一块」了",

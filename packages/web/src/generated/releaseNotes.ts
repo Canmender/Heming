@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.402.4.138.14",
+    "date": "2026-11-19",
+    "title": "每一轮花了多久，标题上就写着",
+    "bullets": [
+      "轨迹页每一轮的分组头会写出这一轮用了多久（例如「第 2 轮 · 5 步 · 4.0s」）。",
+      "慢在哪一轮一眼能看到，不用再拿总用时去猜。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.401.4.138.14",
     "date": "2026-11-19",
     "title": "来源页顶上也有「跳到哪一块」了",

@@ -224,3 +224,25 @@ describe("TrajectoryView · 工具栏（d.351）", () => {
 
 
 
+
+  it("每轮标题写出这一轮花了多久（d.401）", () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          message({ id: "u1", senderType: "user", payload: { text: "帮我查两处" } }),
+          message({
+            id: "a1",
+            payload: { text: "查完了" },
+            senderType: "agent",
+            tools: [
+              { id: "t1", name: "read_file", args: "{}", status: "ok", result: "a", startedAt: 1_000, endedAt: 5_000 },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<TrajectoryView progress={progress({ hasData: false })} conversationId="c1" />);
+    expect(screen.getByRole("button", { name: /第 1 轮/ }).textContent).toContain("4.0s");
+  });
+
+

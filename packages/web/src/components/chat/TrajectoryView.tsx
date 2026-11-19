@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import type { ConversationProgress, ProgressStep, ProgressStepKind, ProgressStepStatus } from "../../lib/progress/model.js";
 import { transcriptOf, useChatStore, type ToolTrace } from "../../store/chat.js";
 import type { Message } from "@heming/shared";
@@ -201,6 +201,19 @@ function buildTurns(messages: Message[], live: ConversationProgress | null): Led
 }
 
 /** 时间线：一轮一根条，段宽按耗时比例；没有时间戳就等宽。 */
+/** d.401：这一轮花了多久——只算同时有起止的行，别把 createdAt 当结束时间。 */
+function turnDuration(turn: LedgerTurn): string | null {
+  let first = Number.POSITIVE_INFINITY;
+  let last = 0;
+  for (const row of turn.steps) {
+    if (row.startedAt === undefined || row.endedAt === undefined) continue;
+    first = Math.min(first, row.startedAt);
+    last = Math.max(last, row.endedAt);
+  }
+  if (!Number.isFinite(first) || last <= first) return null;
+  return formatDuration(last - first);
+}
+
 function Timeline({
   turns,
   selected,
@@ -420,6 +433,7 @@ export function TrajectoryView({
                       <span className="text-ui-xs font-medium text-ink">第 {turn.index} 轮</span>
                       <span className="text-ui-xs tabular-nums text-muted">
                         {turn.steps.length} 步
+                        {turnDuration(turn) ? ` · ${turnDuration(turn)}` : ""}
                         {turn.running ? " · 进行中" : ""}
                       </span>
                     </button>
@@ -509,6 +523,8 @@ export function TrajectoryView({
     </section>
   );
 }
+
+
 
 
 
