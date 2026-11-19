@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 主对话进度行（d.214，d.218 起收口后留下小结）。
  *
  * 跑着的时候：`第 3 轮 · 正在执行 file_grep · 已跑 42 秒`。
@@ -22,9 +22,11 @@ export interface TurnProgressLineProps {
    * `"composer"`：收口后，留在输入框下方当小结——那是「上一轮」的账，不属于正在读的这段文字。
    */
   placement?: "composer" | "stream";
+  /** 正在回答的模型名（d.383）：长会话切过模型之后，回头看得见这一轮是谁答的。 */
+  model?: string;
 }
 
-export function TurnProgressLine({ progress, now, placement = "composer" }: TurnProgressLineProps) {
+export function TurnProgressLine({ progress, now, placement = "composer", model }: TurnProgressLineProps) {
   if (!progress) return null;
   // 收口后不再走秒：小结里的「用时」是固定的，左边那个呼吸点也该停（否则像还在跑）
   const running = !progress.done;
@@ -45,7 +47,13 @@ export function TurnProgressLine({ progress, now, placement = "composer" }: Turn
         aria-hidden="true"
       />
       <span className="min-w-0 flex-1 truncate">{describeTurnProgress(progress)}</span>
+      {model ? (
+        <span className="shrink-0 truncate text-ui-xs text-muted/80" data-testid="turn-progress-model">
+          {model}
+        </span>
+      ) : null}
       {running ? <span className="shrink-0 tabular-nums">已跑 {elapsed}</span> : null}
     </div>
   );
 }
+

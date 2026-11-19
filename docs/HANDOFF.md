@@ -6513,6 +6513,14 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 
 - **收起的行上看得出改过（d.383）**：★ 首屏 `providers` 到位后按 `flagsWarm`（`ref<Set<string>>`）逐家读一次 `provider show` 进同一份 `showCache`（串行，不跟首屏那几路抢）★ 行上多「改过」徽标，悬停是 `describeShowFlags` 整句；空串不挂标 ★ 标不出来：`context=`/`family=`/`at-once`/`rpm`/`queue`/`quota-rest`/`rest-cap`/`listed` 这些 show 里没有 ★ 验证：ModelPage 121 例全绿（新增两例）。
 - **分组清单有入口了，候选链旧组件删掉（d.384）**：★ 运行页「路由分组」新增「看分组清单」（`magpie groups`，输出在页面底部；内核那份是给人看的表格、没有 JSON，所以不硬解析成卡片）★ 删 `packages/web/src/components/RouteGroupsCard.tsx` 与其测试（候选链编辑器，magpie 路由组取代后无页面引用；`store/llm`/`lib/llmRoute`/`lib/llmHealth` 仍在用，没动）★ spec §5 记下两件事 ★ 验证：ModelPage + magpieGroups 132 例全绿；typecheck 红在并发会话的 `ChatPage.tsx(6568,20) Cannot find name 'profile'`。
+## 运行行现在带模型名（d.385）
+
+- `TurnProgressLine` 新增可选 `model?: string`，渲染成状态行右侧的 `text-ui-xs text-muted/80`（`data-testid="turn-progress-model"`）。
+- `ChatPage.tsx` 只给**消息流末尾那条运行行**传 `resolveProfile(conv.agent.id)?.model`；收口后留在输入框下方的小结不传（那是「上一轮」的账，模型名属于正在跑的那一轮）。
+- 没绑模型时 `resolveProfile` 返回 undefined → 不渲染，不写「未绑定模型」占位。
+- 为什么不标 provider / 思考档位：那两个在输入框模型徽标的 `title` 里；运行行再塞会把「正在执行 X」挤掉（`min-w-0 flex-1 truncate`）。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6531,6 +6539,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
   // 这里只引类型，运行时不产生任何导入。
@@ -6561,7 +6561,12 @@ export function ChatPage({
         {/* 跑动中的进度跟着最后一条回答走（d.361，对齐 DSH）：用户的眼睛在回答末尾，
             状态行放到这里才看得见；收口后它回到输入框下方当「上一轮」的小结。 */}
         {turnProgress && !turnProgress.done ? (
-          <TurnProgressLine progress={turnProgress} now={progressNow || undefined} placement="stream" />
+          <TurnProgressLine
+            progress={turnProgress}
+            now={progressNow || undefined}
+            placement="stream"
+            model={conv ? resolveProfile(conv.agent.id)?.model : undefined}
+          />
         ) : null}
         <div ref={bottomRef} />
         </div>
@@ -7395,6 +7400,8 @@ export function ChatPage({
     </div>
   );
 }
+
+
 
 
 

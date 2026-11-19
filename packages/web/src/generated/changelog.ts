@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.385.4.130.14",
+    "date": "2026-11-19",
+    "title": "跑起来时，看得见是谁在答",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 一个会话里换过模型之后，「这一轮是谁在答」只写在输入框那个小徽标上；跑起来时眼睛在消息流末尾，谁也看不见。DSH 在运行状态行旁边就带着模型名。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `TurnProgressLine.tsx` | 新增可选 `model`，渲染成状态行右侧的小字（`data-testid=\"turn-progress-model\"`） || `ChatPage.tsx` | 消息流末尾那条运行行传 `resolveProfile(conv.agent.id)?.model`；没绑模型就不传，不占位 |",
+      "**怎么验证。** `TurnProgressLine.test.tsx` 7 → 8 例（给了模型名就显示、没给不渲染）；ChatPage 209 例；web 全量 6706 例全绿；typecheck 通过。",
+      "**留白。** 只标「模型 id」，不标 provider、不标思考档位——那些在输入框徽标的 tooltip 里，运行行再塞会挤掉工具名。"
+    ]
+  },
+  {
     "version": "d.384.4.130.14",
     "date": "2026-11-19",
     "title": "分组清单有入口了，候选链的旧组件删掉",

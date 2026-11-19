@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+﻿import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { TurnProgressLine } from "./TurnProgressLine.js";
@@ -92,7 +92,6 @@ describe("收口小结（d.218）", () => {
     // 消息流里没有上下外边距（那一列本来就贴边），只留底部间距
     expect(running.className).not.toContain("mx-4");
     expect(running.className).toContain("mb-3");
-
     rerender(
       <TurnProgressLine progress={progress({ done: true, endedAt: AT + 5_000 })} now={AT + 5_000} placement="composer" />,
     );
@@ -100,4 +99,21 @@ describe("收口小结（d.218）", () => {
     expect(settled.getAttribute("data-placement")).toBe("composer");
     expect(settled.className).toContain("mx-4");
   });
+
+  it("带上模型名：长会话切过模型之后，回头看得见这一轮是谁答的（d.383）", () => {
+    render(
+      <TurnProgressLine
+        progress={progress({ phase: "tool", tool: "file_read" })}
+        now={AT + 3_000}
+        placement="stream"
+        model="deepseek-v3"
+      />,
+    );
+    expect(screen.getByTestId("turn-progress-model")).toHaveTextContent("deepseek-v3");
+    // 没给模型名时不占位
+    cleanup();
+    render(<TurnProgressLine progress={progress({ phase: "tool", tool: "file_read" })} now={AT + 3_000} placement="stream" />);
+    expect(screen.queryByTestId("turn-progress-model")).toBeNull();
+  });
 });
+

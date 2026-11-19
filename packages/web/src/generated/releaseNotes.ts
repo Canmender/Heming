@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.385.4.130.14",
+    "date": "2026-11-19",
+    "title": "跑起来时，看得见是谁在答",
+    "bullets": [
+      "生成中的状态行右侧多一个小字：这一轮是哪个模型在答。",
+      "同一个会话里换过模型之后，回头也能分辨哪段是谁写的。",
+      "没绑模型时不占位，也不会写「未绑定」。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.384.4.130.14",
     "date": "2026-11-19",
     "title": "「看分组清单」，以及一个只剩测试在建的旧组件",
