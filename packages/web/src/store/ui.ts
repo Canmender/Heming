@@ -206,7 +206,7 @@ export interface PaletteIntentData {
   card?: string;
   /** focus-tab：目标宿主页（目前只有 team / model 消费）。 */
   page?: string;
-  /** focus-tab：页内 Tab key（团队 workspace/feed/board/agenda/usage；模型 models/agents/sources/run）。 */
+  /** focus-tab：页内 Tab key（团队 workspace/feed/board/agenda/usage；模型 sources/run）。 */
   tab?: string;
 }
 

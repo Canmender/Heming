@@ -12,16 +12,43 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.359.4.128.12",
+    "date": "2026-11-19",
+    "title": "模型页只剩两个页签，要的东西都在里面",
+    "bullets": [
+      "`packages/web/src/components/ModelPage.test.tsx` 105 例全过。其中两例的口径跟着改：",
+      "— 原「打开页面只读首屏要用的：来源专用的那几路等真进去再读」→「来源是落地页：额度、插件、账号那几路进页面就读，且只读一遍」（额外断言 `quota --json` 只发 1 次）",
+      "— 原「在模型分区点过「重读全部」之后，再进来源不再重复读一遍」→「页头重读之后在「来源 / 运行」之间来回切，不会把同几路再读一遍」",
+      "— 页签图标/下划线两条用例的标签数组收到 `[\"来源\", \"运行\"]`；页签↔面板配对断言改为「来源」",
+      "`npx vitest run src/components/CommandPalette.test.tsx src/components/model`：14 文件 / 207 例全绿（命令面板检索「运行」仍投 `{page:\"model\", tab:\"run\"}`）",
+      "`npx vitest run`（`packages/web` 全量）：457 文件 / 6598 例全绿",
+      "`pnpm --filter @heming/web typecheck` 通过",
+      "「运行」里现在是「调用轨迹 + 本机智能体 + 路由/网关/会话/高级命令」四段叠在一页，滚动变长；要不要在运行内部再分一层小节标题（或把高级命令再收一层），等真机上看过滚动长度再定",
+      "对标原版 magpie 的功能补齐（`D:\\testprogram\\magpie-main (1)\\magpie-main`）这一轮只做了「入口结构」，逐条能力对照仍在 `docs/superpowers/specs/2026-11-17-model-page-magpie-parity.md` 里继续推进",
+      "桌面端真机视觉复核未做（浏览器预览无 bridge 时模型页只读、不显示来源分区）"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "模型页原本是四个页签：模型 / 智能体 / 来源 / 运行。对第一次打开的人来说，这四个名字先要猜一遍——「模型」和「来源」差在哪？「智能体」里的模型下拉跟「模型」里的清单是不是一回事？答案其实很简单：**模型从来源来，本机工具怎么用它属于运行**。既然只有两个问题，就不该让人先在四个标签之间试一遍才知道东西藏在哪。",
+      "四条并成两条的能力一件没删：`ChatPage` 自己没有模型选择器，「可用模型」还得有个看得见的地方，所以它落在「来源」末尾（来源决定有哪些模型），「按个给本机工具设模型」落在「运行」里（那是它怎么跑）。",
+      "做了什么",
+      "| 变化 | 落地 || --- | --- || 页签只剩两个 | `TabKey` 收到 `\"sources\" \\| \"run\"`；`TABS` 两项；默认页签 `\"sources\"`（来源是落地页，一进来就看得到「加来源」与现有来源） || 可用模型并进来源 | 原「模型」分区的 `<section aria-label=\"可用模型\">` 整块搬到「来源」末尾：模型清单 → 全局模型设置 → 看图与画图 || 本机智能体并进运行 | 原「智能体」分区整块搬到「运行」里、`<ModelTraceView />` 之后：先看它怎么跑，再改它用哪个模型 || 删掉首屏 0/0/0 统计条 | 并页后「订阅账号」这类名字和下面卡片标题重名（`findByText` 都撞成两个），三个 0 也没有信息量 || 空态不再让你跳走 | 「还没有可用的模型」的说明改成「在上面「API Key 服务商」「订阅账号」或「国产智能体」里加一个」，并去掉「添加来源」按钮——现在就在来源页里，点它是原地打转 || `ModelCatalogPanel` 少一个回调 | 删 `onAddSource` 与末尾「去来源添模型」按钮，同上 || 命令面板只留两个入口 | `PALETTE_VIEWS` 去掉「模型 › 模型」「模型 › 智能体」，留「模型 › 来源」「模型 › 运行」 || 副标题说清两个问题 | 「所有模型在一个地方：在「来源」里加，在「运行」里看它怎么跑。」 || 来源变落地页，那几路随之即读 | `sourcesWarm` 仍在，但默认就落在来源：进页面读一次额度 / 走向 / 自动重置 / 插件表 / 账号发现，重渲染与切页签都不再打第二遍（页头「重读全部」是显式入口） |",
+      "代码上是一次**搬动**而不是重写：两个 `<section>` 原样平移进新位置，内部结构一行没动，diff 里能看出哪段是从哪儿挪过来的（相对缩进保持不变）。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.358.4.128.12",
     "date": "2026-11-19",
     "title": "按了停止，答应过的事还在",
     "bullets": [
       "`packages/web/src/lib/agentRuntime/steer.test.ts` 6 → 8 例：`takeItems()` 取走全部并保住 `source`/mentions、取走即清空；`push` 的 `source` 在 `pending()` 里读得回来且是拷贝",
       "`packages/web/src/components/ChatPage.test.tsx` 新增「I4c 停止后，后台子代理的结论不会跟着插话一起清掉」：跑一轮 → 后台任务在跑时交回结论 → 点停止 → 断言出现「没有存档」与「已排队 1 条插话」，且**不出**「重新发送时模型会看到」",
-      "`npx vitest run src/components/ChatPage.test.tsx` 205 例全过；`npx vitest run`（packages/web）457 文件 / 6602 例全绿；`pnpm --filter @heming/web typecheck` 通过",
+      "`npx vitest run src/components/ChatPage.test.tsx` 205 例全过；`npx vitest run`（packages/web）457 文件 / 6598 例全绿；`pnpm --filter @heming/web typecheck` 通过",
       "结论留在内存队列里：应用退出就没了（和插话队列同一条边界；真正的长期存档要等服务端能存「待交付消息」）",
       "只在「这一轮不是 ok」时保；正常收口本来就靠 `shift()` 一条条接着跑，不需要保留",
-      "排查时发现「点停止后流式气泡仍显示生成中」的现象（`activeLocal` 未清），本轮未动——它属于流式收口时机的问题，与本条无关，记在这里免得下次重复发现"
+      "单元测试里点停止后气泡仍写「生成中」，是因为 `ChatPage.test.tsx` 不模拟服务端 `agent_error(aborted)` 回声；真实链路由回声清掉流（`store/chat.ts:1080` 那段注释写的就是这件事），不是产品缺陷"
     ],
     "paragraphs": [
       "为什么做",

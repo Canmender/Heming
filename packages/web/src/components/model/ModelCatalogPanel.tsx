@@ -65,7 +65,6 @@ export interface ModelCatalogPanelProps {
   rows: ModelRow[];
   disabled: DisabledPattern[];
   cliReady: boolean;
-  onAddSource: () => void;
   onRun: (
     title: string,
     args: string[],
@@ -120,7 +119,6 @@ export function ModelCatalogPanel({
   rows,
   disabled,
   cliReady,
-  onAddSource,
   onRun,
   onReadSpec,
   tierSupported = false,
@@ -637,11 +635,6 @@ export function ModelCatalogPanel({
             ))}
           </ul>
         )}
-        <div className="mt-2">
-          <Button type="button" size="sm" variant="ghost" onClick={onAddSource} disabled={!cliReady}>
-            去来源添模型
-          </Button>
-        </div>
       </details>
 
       {confirm && (

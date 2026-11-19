@@ -138,20 +138,6 @@ const PALETTE_VIEWS: PaletteViewEntry[] = [
   },
   {
     page: "model",
-    tab: "models",
-    label: "模型 › 模型",
-    description: "本机模型服务与路由分组",
-    keywords: ["模型", "服务", "路由", "models", "provider"],
-  },
-  {
-    page: "model",
-    tab: "agents",
-    label: "模型 › 智能体",
-    description: "每个智能体当前用的模型",
-    keywords: ["模型", "智能体", "agents", "agent"],
-  },
-  {
-    page: "model",
     tab: "sources",
     label: "模型 › 来源",
     description: "接入本机 CLI 与服务来源",

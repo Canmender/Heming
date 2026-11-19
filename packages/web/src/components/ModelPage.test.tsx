@@ -143,11 +143,11 @@ afterEach(() => {
 });
 
 describe("ModelPage · 结构与主路径", () => {
-  it("五个分区；默认显示可用模型与统计，不出现服务启停或第三方名称", async () => {
+  it("两个分区（来源 / 运行）；默认落在来源，可用模型与统计同屏，不出现服务启停或第三方名称", async () => {
     installBridge();
     render(<ModelPage />);
     expect(screen.getByRole("heading", { name: "模型" })).toBeInTheDocument();
-    for (const label of ["模型", "智能体", "来源", "运行"]) {
+    for (const label of ["来源", "运行"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
     expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
@@ -170,7 +170,7 @@ describe("ModelPage · 结构与主路径", () => {
   it("视觉规范：Tab 统一带图标；折叠区用统一 Chevron（不再是浏览器原生三角）", async () => {
     installBridge();
     render(<ModelPage />);
-    for (const label of ["模型", "智能体", "来源", "运行"]) {
+    for (const label of ["来源", "运行"]) {
       const tab = screen.getByRole("tab", { name: label });
       expect(tab.querySelector("svg"), `${label} tab 缺图标`).not.toBeNull();
     }
@@ -187,7 +187,7 @@ describe("ModelPage · 结构与主路径", () => {
     // 页签栏与设置页 / 插件页 / 记忆页 / 团队页共用 PAGE_TABLIST（role=tablist 也在同一处）
     const tablist = screen.getByRole("tablist", { name: "模型页分区" });
     expect(tablist.className).not.toContain("ui-segment-group");
-    for (const label of ["模型", "智能体", "来源", "运行"]) {
+    for (const label of ["来源", "运行"]) {
       const tab = screen.getByRole("tab", { name: label });
       // pageTabClass 的下划线特征：-mb-px 让选中项的 2px 下划线压住内容区分隔线
       expect(tab.className, `${label} 页签缺标准页签下划线样式`).toContain("-mb-px");
@@ -210,7 +210,7 @@ describe("ModelPage · 结构与主路径", () => {
     expect(row.className).toContain("max-[1199px]:px-4");
     // 内容面板与页签配对（同一套 tabpanel 契约，三页一致）
     const panel = screen.getByRole("tabpanel");
-    const selected = screen.getByRole("tab", { name: "模型" });
+    const selected = screen.getByRole("tab", { name: "来源" });
     expect(selected).toHaveAttribute("aria-controls", panel.id);
     expect(panel).toHaveAttribute("aria-labelledby", selected.id);
   });
@@ -882,7 +882,7 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
   it("智能体分区把订阅额度贴在名字旁边，悬停能看每个窗口", async () => {
     installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     const chip = await screen.findByText("剩 18%");
     expect(chip).toBeInTheDocument();
     expect(chip.getAttribute("title")).toContain("5 小时");
@@ -1418,7 +1418,7 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     installBridge({ cli });
 
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     expect(await screen.findByText("Cached Agent")).toBeInTheDocument();
 
     vi.unstubAllEnvs();
@@ -1689,29 +1689,25 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     expect(calls).toContainEqual(["quota", "history", "--days", "7", "--json"]);
   });
 
-  it("打开页面只读首屏要用的：来源专用的那几路等真进去再读", async () => {
+  it("来源是落地页：额度、插件、账号那几路进页面就读，且只读一遍", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     await screen.findByText(/deepseek\/deepseek-chat/);
 
+    // d.357：来源并成落地页之后，它要用的几路不再等「点进来源」——页面本身就是来源。
     for (const args of [
       ["quota", "--json"],
-      ["quota", "history", "--days", "7", "--json"],
       ["quota", "auto-reset"],
       ["plugin", "list", "--json"],
       ["accounts", "discovery"],
     ]) {
-      expect(calls).not.toContainEqual(args);
+      await waitFor(() => expect(calls).toContainEqual(args));
     }
-
-    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    await waitFor(() => expect(calls).toContainEqual(["quota", "--json"]));
-    expect(calls).toContainEqual(["quota", "auto-reset"]);
-    expect(calls).toContainEqual(["plugin", "list", "--json"]);
-    expect(calls).toContainEqual(["accounts", "discovery"]);
+    // 读一次就够：重渲染不该再打一遍（sourcesWarm 记着）
+    expect(calls.filter((args) => args[0] === "quota" && args[1] === "--json")).toHaveLength(1);
   });
 
-  it("在模型分区点过「重读全部」之后，再进来源不再重复读一遍", async () => {
+  it("页头重读之后在「来源 / 运行」之间来回切，不会把同几路再读一遍", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     await screen.findByText(/deepseek\/deepseek-chat/);
@@ -1720,6 +1716,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
     await waitFor(() => expect(calls).toContainEqual(["quota", "--json"]));
 
     calls.length = 0;
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     await screen.findByText("订阅账号");
     expect(calls).not.toContainEqual(["quota", "--json"]);
@@ -2096,7 +2093,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     const select = (await screen.findByLabelText("Claude Code 模型")) as HTMLSelectElement;
     const values = [...select.options].map((option) => option.value);
     expect(values).toContain("relay/relay-chat");
@@ -2107,7 +2104,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
   it("一次给多个工具设同一个模型：先点名会写到谁，再逐个写入", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
 
     const select = await screen.findByLabelText<HTMLSelectElement>("统一设置的模型");
     expect(calls).not.toContainEqual(["claude", "deepseek/deepseek-chat"]);
@@ -2143,7 +2140,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
 
     const select = await screen.findByLabelText<HTMLSelectElement>("统一设置的模型");
     fireEvent.change(select, { target: { value: "deepseek/deepseek-chat" } });
@@ -2173,7 +2170,7 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型目录）", 
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     const picked = await screen.findByLabelText("Claude Code 只显示挑过的模型");
     expect(picked).toBeChecked();
     fireEvent.click(picked);
@@ -2491,7 +2488,7 @@ describe("ModelPage · 智能体改模型", () => {
   it("顶部一句话就说清还有几件事没做：没落盘的、没配模型的", async () => {
     installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     // 默认夹具里 Claude Code 还没配模型（—），Codex 已经在用 space-bunny。
     expect(await screen.findByText("1 个还没配模型。")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Claude Code 模型"), {
@@ -2518,7 +2515,7 @@ describe("ModelPage · 智能体改模型", () => {
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     const select = (await screen.findByLabelText("Codex 模型")) as HTMLSelectElement;
     // 不再显示「选择模型…」：那个事实本来只写在小字里
     expect(select.value).toBe("openai/gpt-4o");
@@ -2536,7 +2533,7 @@ describe("ModelPage · 智能体改模型", () => {
   it("没被模型服务写过的工具，「恢复默认」是灰的：按下去什么都不会变", async () => {
     installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     await screen.findByText("Claude Code");
     const buttons = screen.getAllByRole("button", { name: "恢复默认" });
     // 默认夹具：Claude Code 是 —（没配过），Codex 已经在用 space-bunny。
@@ -2548,7 +2545,7 @@ describe("ModelPage · 智能体改模型", () => {
   it("列出本机智能体；应用与恢复默认都要二次确认", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     expect(await screen.findByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText(/space-bunny/)).toBeInTheDocument();
 
@@ -2587,7 +2584,7 @@ describe("ModelPage · 智能体改模型", () => {
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     expect(
       await screen.findByText(/收窄到 deepseek、relay · 12 个可见，3 个被挡住/),
     ).toBeInTheDocument();
@@ -2627,7 +2624,7 @@ describe("ModelPage · 智能体改模型", () => {
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     await screen.findByText(/收窄到 deepseek、relay/);
 
     // 还没动勾选：没有这句提示，按钮说明是「还没有改动」。
@@ -2662,7 +2659,7 @@ describe("ModelPage · 智能体改模型", () => {
       },
     );
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     await screen.findByText(/收窄到 deepseek、relay/);
 
     // 没有改动就不给这个出口：写别人的配置总得先有一份值得抄的勾选

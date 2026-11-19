@@ -1,6 +1,8 @@
 # 模型页对齐原版 magpie：功能对照与实现说明
 
 > 状态：已实施（模型页 / 来源页 / 智能体页）。
+> 分区：d.357 起只留「来源 / 运行」两个页签——原来的「模型」页签内容落在**来源**末尾，
+> 「智能体」页签内容落在**运行**里（`ModelTraceView` 之后）；下文 §1–§4 仍按能力分组描述。
 > 对象：原版 magpie（`D:\testprogram\magpie-main (1)\magpie-main`）的 Providers / Models 管理体验。
 > 原则：和鸣不复制 magpie 的 webview 界面，只让「模型管理」这件事的可做范围与结果一致；
 > 每条能力都落到一条 `magpie-core` 子命令，UI 只负责把命令的结果摆出来、把参数拼对。
@@ -18,7 +20,7 @@
 所以和鸣模型页的对齐方式是：**读网关目录 + 读 CLI 文本输出 → 渲染；用户操作 → 拼成同一条 CLI 命令**。
 没有新增第二套状态存储，模型页看到的也就是智能体/网关正在用的。
 
-## 1. 模型 tab（`packages/web/src/components/model/ModelCatalogPanel.tsx`）
+## 1. 模型清单（来源分区末尾，`packages/web/src/components/model/ModelCatalogPanel.tsx`）
 
 | 原版 magpie 的行为 | 和鸣模型页现在的行为 | 背后的命令 |
 | --- | --- | --- |
@@ -45,7 +47,7 @@
 - 编辑器保存按「名字 → spec → 价格 → 协议」逐条发命令，**一条失败就停**并把命令输出留在页脚的
   结果条里，不会出现「一半改了一半没改还显示成功」。
 
-## 2. 智能体 tab（`ModelPage.tsx`）
+## 2. 本机智能体（运行分区里、调用轨迹之后，`ModelPage.tsx`）
 
 | 原版 magpie 的行为 | 和鸣模型页现在的行为 | 背后的命令 |
 | --- | --- | --- |
@@ -57,7 +59,7 @@
 - 写模型前有二次确认（会写进别的工具的配置，和鸣不替用户静默改）。
 - `visible` 的解析在 `packages/web/src/lib/magpieVisible.ts`（`only models picked`、`N shown, M not` 都认）；过滤在 `packages/web/src/lib/modelCatalog.ts` 的 `rowsForAgent`。
 
-## 3. 来源 tab（`ModelPage.tsx` 的「高级」）
+## 3. 来源分区（`ModelPage.tsx` 的「高级」）
 
 | 原版 magpie 的行为 | 和鸣来源页现在的行为 | 背后的命令 |
 | --- | --- | --- |
@@ -73,7 +75,7 @@
 
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 
-原版 magpie 把这些放在 Settings › Models，和鸣放在模型 tab 底部的「全局模型设置」折叠区。
+原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 
 | 原版 magpie 的行为 | 和鸣模型页现在的行为 | 背后的命令 |
 | --- | --- | --- |
@@ -138,10 +140,10 @@
   点数窗口（`windows[].amount`/`limit`/`unit: credits`）按点数说「剩 7,000 点」，不再只说百分比。
   9 张卡按 `DOMESTIC_GROUPS` 分「国内站 / 国际站」两组列，同一个包服务的两个站因此不会混在一排里；
   Trae 在 `internal/agent` 里没有 Agent 条目，所以它不做「本机已装」检测，MiniMax Code 有（`mcode`）。
-- 首屏只读「模型 / 智能体」要用的四路（`providers`/`ls`/`models disabled`/`visible`）加账号与设置；
-  「来源」专用的五路（`quota --json`、`quota history`、`quota auto-reset`（两条）、`plugin list --json`、
-  `accounts discovery`）等真正切到「来源」分区才读一次（`sourcesWarm`，页头「重读全部」会把它置真），
-  读之前先用 `lib/pageCache.ts` 的缓存画（d.321）。
+- 首屏读两个分区都要的四路（`providers`/`ls`/`models disabled`/`visible`）加账号与设置；
+  「来源」专用的那几路（`quota --json`、`quota history`、`quota auto-reset`（两条）、`plugin list --json`、
+  `accounts discovery`）在落到「来源」时读一次（`sourcesWarm`）——d.357 起来源就是落地页，等于进页面就读，
+  但只读一遍，重渲染与切换页签都不再打；页头「重读全部」是显式的重读入口。读之前先用 `lib/pageCache.ts` 的缓存画（d.321）。
 - 额度走向的天数由用户在卡头选（7/14/30，`components/model/QuotaTrendCard.tsx` 的
   `TREND_DAY_CHOICES`）：`loadHistory(days)` 把它带进 `quota history --days n --json`，
   去重键是 `history:<天数>`，换档即重读（d.322）。

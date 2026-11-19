@@ -172,25 +172,25 @@ import {
 } from "../lib/magpiePresets.js";
 
 /**
- * 模型页（d.104）：三个分区，加来源 → 选模型 → 看它怎么跑。
+ * 模型页（d.104，d.357 收成两个分区）：加来源 → 选模型 → 看它怎么跑。
  *
- * 设计参考（magpie 的路由/供应商页，以及与用户四轮反馈）：
- * - 只保留三个大分区：模型 / 来源 / 运行；其余能力都折进「运行」；
+ * 设计参考（magpie 的路由/供应商页，以及与用户几轮反馈）：
+ * - 只保留两个大分区：来源（模型从哪来）/ 运行（模型怎么跑）；其余能力都折进这两处；
  * - 加来源用卡片：订阅点一下去登录，厂商点一下只填一个 Key；
  * - 模型与账号用行卡片（头像 + 名称 + 说明 + 状态），比表格更像「在选东西」；
  * - 不出现服务状态、地址、端口与启停按钮；也不出现第三方产品名；
  * - 动效克制：卡片 200ms 抬起、分区切换 300ms 淡入，尊重「减少动态效果」。
  */
 
-type TabKey = "models" | "agents" | "sources" | "run";
+type TabKey = "sources" | "run";
 
 /**
- * 四个分区：图标与全站同一套描边（icons.tsx），尺寸统一 14px；不再用文字代替图标。
- * 「来源」在浏览器端没有 CLI 时会被过滤掉，所以图标也只在可进入时渲染。
+ * 两个分区（d.357）：来源（模型从哪来）与运行（模型怎么跑）。
+ * 原来单独的「模型」「智能体」两个页签并了进来——同一件事别分在四个地方找：
+ * 可用模型回到「来源」末尾，本机智能体回到「运行」里。
+ * 图标与全站同一套描边（icons.tsx），尺寸统一 14px；「来源」在浏览器端没有 CLI 时会被过滤掉。
  */
 const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
-  { key: "models", label: "模型", icon: <ModelIcon width={14} height={14} /> },
-  { key: "agents", label: "智能体", icon: <AssistantIcon width={14} height={14} /> },
   { key: "sources", label: "来源", icon: <PlugIcon width={14} height={14} /> },
   { key: "run", label: "运行", icon: <WorkflowIcon width={14} height={14} /> },
 ];
@@ -293,7 +293,7 @@ export function ModelPage() {
   const gatewayConfig = useLlmStore((s) => s.gateway);
 
   const cli = useMemo<MagpieCliBridge | null>(() => getMagpieCliBridge(), []);
-  const [tab, setTab] = useState<TabKey>("models");
+  const [tab, setTab] = useState<TabKey>("sources");
 
   // 命令面板的二级视图入口（d.142）：见 store/ui.ts 的 `focus-tab`。
   const paletteIntent = useUiStore((s) => s.paletteIntent);
@@ -391,7 +391,7 @@ export function ModelPage() {
    */
   const [now, setNow] = useState(() => Date.now());
   /**
-   * 「智能体」分区每行贴的额度徽标（d.282）：和「来源 → 订阅账号」是同一份数据，
+   * 「运行 → 本机智能体」每行贴的额度徽标（d.282）：和「来源 → 订阅账号」是同一份数据，
    * 这样选模型时就能看见「这个智能体的免费额度还剩多少」。
    */
   const agentQuotas = useMemo(() => agentQuotaMap(accounts, now), [accounts, now]);
@@ -1579,7 +1579,7 @@ export function ModelPage() {
     if (!cli) return;
     let alive = true;
     void (async () => {
-      // 第一波：首屏（模型 / 智能体两个分区）真正要用的四样。齐了就撤骨架，
+      // 第一波：两个分区都要用的四样（来源名、本机智能体、禁用名单、可见范围）。齐了就撤骨架，
       // 不让「额度」「画图模型」「插件表」这些慢一步的东西把整页拖住。
       await Promise.all([loadProviders(), loadAgents(), loadDisabledModels(), loadVisibility()]);
       if (alive) setLoading(false);
@@ -1607,8 +1607,9 @@ export function ModelPage() {
   ]);
 
   /**
-   * 真进到「来源」才读那几路；读过就不再自动补（页头的「重读全部」是显式入口）。
-   * 读之前先按上次缓存画，不闪空。
+   * 来源那几路（额度、走向、插件、账号发现）进页面就读——d.357 之后「来源」就是落地页，
+   * 不再有「先落在别处、点进来才读」这一段。读过只标记一次，重渲染与切页签都不再打一遍；
+   * 要重读走页头的「重读全部」。读之前先按上次缓存画，不闪空。
    */
   useEffect(() => {
     if (!cli || tab !== "sources" || sourcesWarm.current) return;
@@ -1892,7 +1893,7 @@ export function ModelPage() {
   return (
     <PageShell
       title="模型"
-      subtitle="所有模型在一个地方：加一个来源，智能体就能选它的模型。"
+      subtitle="所有模型在一个地方：在「来源」里加，在「运行」里看它怎么跑。"
       width="full"
       actions={
         <Button
@@ -1966,407 +1967,6 @@ export function ModelPage() {
         aria-labelledby={`model-${tab}-tab`}
         className="rta-enter"
       >
-        {/* ── 模型 ───────────────────────────────────────────── */}
-        {tab === "models" && (
-          <section aria-label="可用模型" className="space-y-4">
-            {/* d.138：三个 0 的统计条不再占首屏——空态本身已经说明「还没有」，
-                再排一行 0/0/0 只会让页面显得像没加载完。有任意数据时才出现。 */}
-            {profiles.length + providers.length + accounts.length > 0 && (
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="可用模型" value={modelRows.length} />
-                <Stat label="已添加来源" value={providers.length} />
-                <Stat label="订阅账号" value={accounts.length} />
-              </div>
-            )}
-
-            {loading && modelRows.length === 0 ? (
-              <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">
-                {[0, 1].map((index) => (
-                  // 骨架与真实内容同形同尺寸：一块 ui-card（rounded-xl）里三行列表，
-                  // 不再是三条 h-14/rounded-2xl 的色块（审计 F2「骨架与内容形状不符」）。
-                  <SkeletonCard key={index} lines={3} />
-                ))}
-              </div>
-            ) : profiles.length === 0 ? (
-              <>
-                {/* 浏览器端最常见的就是这一屏：整页只有 h1，读屏拿不到「可用模型」这一段的大纲，
-                    运行时审计也会判成「只有一级标题」。EmptyState 的标题是 <p>（基元不在这里改），
-                    所以补一个只给辅助技术的 h2——视觉上不重复，语义上这段有名字。 */}
-                <h2 className="sr-only">可用模型</h2>
-                <EmptyState
-                  icon={<ModelIcon width={20} height={20} />}
-                  title="还没有可用的模型"
-                  desc="加一个来源，它的模型会自动出现在这里。"
-                  action={<Button onClick={() => setTab("sources")}>添加来源</Button>}
-                  framed
-                />
-              </>
-            ) : (
-              <ModelCatalogPanel
-                rows={modelRows}
-                disabled={disabledModels}
-                cliReady={cli !== null}
-                onAddSource={() => setTab("sources")}
-                onRun={runModelCommand}
-                onReadSpec={async (id) => {
-                  if (!cli) return null;
-                  const result = await cli.cli(["model", "spec", id]);
-                  return result.ok ? parseModelSpec(result.stdout) : null;
-                }}
-                tierSupported={tierSupported}
-              />
-            )}
-            {profiles.length > 0 && (
-              <GlobalModelSettings
-                suffix={suffix}
-                compact={compact}
-                contextCap={contextCap}
-                capSupported={capSupported}
-                cliReady={cli !== null}
-                onRun={async (title, args) => {
-                  const result = await runDetailed(title, args);
-                  if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
-                  return result.ok;
-                }}
-              />
-            )}
-            {profiles.length > 0 && (
-              <ImageModelSettings
-                rows={modelRows}
-                drawers={drawerModels}
-                vision={visionModel}
-                visionEffort={visionEffort}
-                imageGen={imageGenModel}
-                cliReady={cli !== null}
-                onRun={async (title, args) => {
-                  const result = await runDetailed(title, args);
-                  if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
-                  return result.ok;
-                }}
-              />
-            )}
-          </section>
-        )}
-        {tab === "agents" && (
-          <section aria-label="智能体" className="space-y-4">
-            <div className="ui-alert ui-alert-warn block p-4">
-              <div className="flex items-start gap-2">
-                <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
-                <div className="min-w-0">
-                  <div className="ui-section-title">改模型会写入本机其他工具的配置</div>
-                  <p className="mt-1 ui-caption">
-                    这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
-                    已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="ui-card p-4">
-              <div className="flex items-center justify-between">
-                <h2 className="ui-section-title">本机智能体（{agents.length}）</h2>
-                <Button
-                  type="button"
-                  size="sm" variant="ghost"
-                  disabled={!cli}
-                  onClick={() => void loadAgents()}
-                >
-                  重新检测
-                </Button>
-              </div>
-              {agentSummaryText && (
-                <p
-                  role="status"
-                  className={`mt-1 ui-caption ${agentCounts.dirty > 0 ? "text-warn" : ""}`}
-                >
-                  {agentSummaryText}
-                </p>
-              )}
-              {bulkAgents.length > 1 && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
-                  <span className="ui-caption">一次给这 {bulkAgents.length} 个工具设同一个模型</span>
-                  <select
-                    className="ui-input w-52"
-                    aria-label="统一设置的模型"
-                    value={bulkModel}
-                    disabled={!cli || busy !== null}
-                    onChange={(event) => setBulkModel(event.target.value)}
-                  >
-                    <option value="">选择模型…</option>
-                    {groupModelRows(modelRows).map((group) => (
-                      <optgroup key={group.provider} label={group.provider}>
-                        {group.rows.map((row) => (
-                          <option
-                            key={row.id}
-                            value={row.id}
-                            disabled={isModelDisabled(row, disabledModels)}
-                          >
-                            {row.name ? `${row.name}（${row.id}）` : row.id}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost"
-                    disabled={!cli || busy !== null || !isModelId(bulkModel)}
-                    onClick={() => confirmBulkModel(bulkModel.trim())}
-                  >
-                    统一应用
-                  </Button>
-                </div>
-              )}
-              <ul className="mt-2 divide-y divide-line">
-                {agents.map((agent) => (
-                  <li key={`${agent.name}-${agent.configPath}`} className="py-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Avatar name={agent.name} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate text-ui-md font-semibold">{agent.name}</span>
-                          <AgentQuotaChip quota={agent.id ? agentQuotas.get(agent.id) : undefined} />
-                        </span>
-                        <span className="block truncate ui-caption" title={agent.configPath}>
-                          {agent.model}
-                          {agent.detail ? ` · ${agent.detail}` : ""}
-                          {agentVisibleNames(agent).length > 0
-                            ? ` · 下拉只列它看得到的 ${rowsForAgent(modelRows, agentVisibleNames(agent)).length} 个模型`
-                            : ""}
-                        </span>
-                      </span>
-                      {agent.id ? (
-                        <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-                          <select
-                            className="ui-input w-52"
-                            aria-label={`${agent.name} 模型`}
-                            value={agentSelectValue(agent)}
-                            onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
-                          >
-                            <option value="">选择模型…</option>
-                            {groupModelRows(rowsForAgent(modelRows, agentVisibleNames(agent))).map(
-                              (group) => (
-                                <optgroup key={group.provider} label={group.provider}>
-                                  {group.rows.map((row) => (
-                                    <option
-                                      key={row.id}
-                                      value={row.id}
-                                      disabled={isModelDisabled(row, disabledModels)}
-                                    >
-                                      {row.name ? `${row.name}（${row.id}）` : row.id}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              ),
-                            )}
-                            <option value={AGENT_CUSTOM}>自定义…</option>
-                          </select>
-                          {agentModelOf(agent) === AGENT_CUSTOM && (
-                            <TextField
-                              label={`${agent.name} 自定义模型`}
-                              className="w-48"
-                              placeholder="provider/model"
-                              value={agentCustom[agent.name] ?? ""}
-                              onChange={(event) =>
-                                setAgentCustom((current) => ({ ...current, [agent.name]: event.target.value }))
-                              }
-                            />
-                          )}
-                          <Button
-                            type="button"
-                            size="sm" variant="primary"
-                            disabled={!cli || !isModelId(agentEffectiveModel(agent)) || !agentDirtyOf(agent)}
-                            title={agentDirtyOf(agent) ? "把这次选的模型写进它自己的配置，下次启动生效" : "和它现在用的模型一样，不用再写一次"}
-                            onClick={() => {
-                              const model = agentEffectiveModel(agent).trim();
-                              if (!agent.id || !model) return;
-                              setAgentConfirm({ id: agent.id, name: agent.name, model });
-                            }}
-                          >
-                            应用
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm" variant="ghost"
-                            disabled={!cli || agentIsDefault(agent)}
-                            title={agentIsDefault(agent) ? "它现在没有用模型服务写入的模型，不用恢复" : "撤掉模型服务写进它配置里的模型，回到它自己的默认"}
-                            onClick={() => {
-                              if (!agent.id) return;
-                              setAgentConfirm({ id: agent.id, name: agent.name, model: "default" });
-                            }}
-                          >
-                            恢复默认
-                          </Button>
-                        </span>
-                      ) : (
-                        <span className="shrink-0 ui-caption">只读（没有对应的模型命令）</span>
-                      )}
-                    </div>
-                    {agent.id && (
-                      <details className="ui-disclosure mt-2">
-                        <summary className="cursor-pointer ui-caption">
-                          <ChevronIcon width={12} height={12} className="ui-disclosure-chevron" />
-                          可见模型 · {visibilitySummary(visibilityOf(visibility, agent.id))}
-                          {visibleDirtyOf(agent) && (
-                            <span className="text-warn"> · 改过没保存</span>
-                          )}
-                        </summary>
-                        <div className="mt-2 rounded-lg border border-line bg-subtle px-3 py-2">
-                          <p className="ui-caption">
-                            只勾选要让 {agent.name} 看到的来源；全勾或不勾都等于「全部模型」。
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-                            {visibleOptionsOf(agent).map((option) => (
-                              <label key={option} className="flex items-center gap-2 ui-caption">
-                                <input
-                                  type="checkbox"
-                                  className="accent-brand"
-                                  aria-label={`${agent.name} 可见 ${option}`}
-                                  checked={visibleSelectionOf(agent).includes(option)}
-                                  disabled={!cli}
-                                  onChange={(event) =>
-                                    setVisibleDraft((current) => {
-                                      const agentId = agent.id ?? "";
-                                      const base = current[agentId] ?? visibleSelectionOf(agent);
-                                      const next = event.target.checked
-                                        ? [...new Set([...base, option])]
-                                        : base.filter((item) => item !== option);
-                                      return { ...current, [agentId]: next };
-                                    })
-                                  }
-                                />
-                                {option}
-                              </label>
-                            ))}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <label className="flex items-center gap-2 ui-caption">
-                              <input
-                                type="checkbox"
-                                className="accent-brand"
-                                aria-label={`${agent.name} 只显示挑过的模型`}
-                                checked={visibilityOf(visibility, agent.id)?.pickedOnly ?? false}
-                                disabled={!cli || busy !== null}
-                                onChange={(event) =>
-                                  void runVisibleCommand(
-                                    agent,
-                                    pickedOnlyArgs(agent.id ?? "", event.target.checked),
-                                  )
-                                }
-                              />
-                              只显示逐个挑过的模型（以后新出现的模型不自动露出来）
-                            </label>
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              size="sm" variant="primary"
-                              disabled={!cli || busy !== null || !visibleDirtyOf(agent)}
-                              title={
-                                visibleDirtyOf(agent)
-                                  ? "把这次勾选写进这个工具自己的配置"
-                                  : "还没有改动"
-                              }
-                              onClick={() => void saveVisible(agent)}
-                            >
-                              保存可见范围
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost"
-                              disabled={!cli || busy !== null}
-                              onClick={() =>
-                                void runVisibleCommand(agent, ["visible", agent.id ?? "", "all"])
-                              }
-                            >
-                              恢复全部
-                            </Button>
-                            {visibleDirtyOf(agent) && siblingTargets(agent, agents).length > 0 && (
-                              <Button
-                                type="button"
-                                size="sm" variant="ghost"
-                                disabled={!cli || busy !== null}
-                                title="把这行勾选同样写进其它已经接好的工具，只是也写一遍"
-                                onClick={() => confirmShareVisible(agent)}
-                              >
-                                同样写给其它 {siblingTargets(agent, agents).length} 个
-                              </Button>
-                            )}
-                            {visibleDirtyOf(agent) && (
-                              <span className="ui-caption text-warn">改过了，点「保存可见范围」才生效</span>
-                            )}
-                          </div>
-                        </div>
-                      </details>
-                    )}
-                  </li>
-                ))}
-                {agents.length === 0 && (
-                  <li className="py-2 ui-caption">
-                    {readErrors.agents ? (
-                      <span className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="min-w-0 text-danger">
-                          {readFailureText("agents", readErrors.agents)}
-                        </span>
-                        <button
-                          type="button"
-                          className="ui-link shrink-0"
-                          disabled={!cli}
-                          onClick={() => void loadAgents()}
-                        >
-                          重新检测
-                        </button>
-                      </span>
-                    ) : (
-                      "没有检测到本机智能体。装一个 Claude Code / Codex 之类的工具后点「重新检测」。"
-                    )}
-                  </li>
-                )}
-              </ul>
-
-              {agentConfirm && (
-                <div role="alert" className="ui-alert ui-alert-warn rta-enter mt-3 block">
-                  <div className="flex items-start gap-2">
-                    <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-ui-sm font-semibold">
-                        {agentConfirm.model === "default"
-                          ? `恢复 ${agentConfirm.name} 原来的模型？`
-                          : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
-                      </div>
-                      <p className="mt-1 ui-caption">
-                        会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
-                      </p>
-                      <div className="mt-2 flex gap-2">
-                        <Button
-                          type="button"
-                          size="sm" variant="primary"
-                          onClick={() => {
-                            const target = agentConfirm;
-                            setAgentConfirm(null);
-                            void run(
-                              target.model === "default" ? "恢复默认" : "设置模型",
-                              [target.id, target.model],
-                            ).then(() => void loadAgents());
-                          }}
-                        >
-                          确认写入
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          onClick={() => setAgentConfirm(null)}
-                        >
-                          取消
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
 
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
@@ -3278,6 +2878,73 @@ export function ModelPage() {
                 )}
               </ul>
             </div>
+            <section aria-label="可用模型" className="space-y-4">
+              {loading && modelRows.length === 0 ? (
+                <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">
+                  {[0, 1].map((index) => (
+                    // 骨架与真实内容同形同尺寸：一块 ui-card（rounded-xl）里三行列表，
+                    // 不再是三条 h-14/rounded-2xl 的色块（审计 F2「骨架与内容形状不符」）。
+                    <SkeletonCard key={index} lines={3} />
+                  ))}
+                </div>
+              ) : profiles.length === 0 ? (
+                <>
+                  {/* 浏览器端最常见的就是这一屏：整页只有 h1，读屏拿不到「可用模型」这一段的大纲，
+                      运行时审计也会判成「只有一级标题」。EmptyState 的标题是 <p>（基元不在这里改），
+                      所以补一个只给辅助技术的 h2——视觉上不重复，语义上这段有名字。 */}
+                  <h2 className="sr-only">可用模型</h2>
+                  <EmptyState
+                    icon={<ModelIcon width={20} height={20} />}
+                    title="还没有可用的模型"
+                    desc="在上面「API Key 服务商」「订阅账号」或「国产智能体」里加一个，它的模型会自动出现在这里。"
+                    framed
+                  />
+                </>
+              ) : (
+                <ModelCatalogPanel
+                  rows={modelRows}
+                  disabled={disabledModels}
+                  cliReady={cli !== null}
+                  onRun={runModelCommand}
+                  onReadSpec={async (id) => {
+                    if (!cli) return null;
+                    const result = await cli.cli(["model", "spec", id]);
+                    return result.ok ? parseModelSpec(result.stdout) : null;
+                  }}
+                  tierSupported={tierSupported}
+                />
+              )}
+              {profiles.length > 0 && (
+                <GlobalModelSettings
+                  suffix={suffix}
+                  compact={compact}
+                  contextCap={contextCap}
+                  capSupported={capSupported}
+                  cliReady={cli !== null}
+                  onRun={async (title, args) => {
+                    const result = await runDetailed(title, args);
+                    if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
+                    return result.ok;
+                  }}
+                />
+              )}
+              {profiles.length > 0 && (
+                <ImageModelSettings
+                  rows={modelRows}
+                  drawers={drawerModels}
+                  vision={visionModel}
+                  visionEffort={visionEffort}
+                  imageGen={imageGenModel}
+                  cliReady={cli !== null}
+                  onRun={async (title, args) => {
+                    const result = await runDetailed(title, args);
+                    if (result.ok) await Promise.all([loadGlobals(), loadSettings()]);
+                    return result.ok;
+                  }}
+                />
+              )}
+            </section>
+
           </section>
         )}
 
@@ -3285,6 +2952,325 @@ export function ModelPage() {
         {tab === "run" && (
           <section aria-label="运行" className="space-y-4">
             <ModelTraceView />
+
+            <section aria-label="智能体" className="space-y-4">
+              <div className="ui-alert ui-alert-warn block p-4">
+                <div className="flex items-start gap-2">
+                  <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="ui-section-title">改模型会写入本机其他工具的配置</div>
+                    <p className="mt-1 ui-caption">
+                      这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
+                      已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ui-card p-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="ui-section-title">本机智能体（{agents.length}）</h2>
+                  <Button
+                    type="button"
+                    size="sm" variant="ghost"
+                    disabled={!cli}
+                    onClick={() => void loadAgents()}
+                  >
+                    重新检测
+                  </Button>
+                </div>
+                {agentSummaryText && (
+                  <p
+                    role="status"
+                    className={`mt-1 ui-caption ${agentCounts.dirty > 0 ? "text-warn" : ""}`}
+                  >
+                    {agentSummaryText}
+                  </p>
+                )}
+                {bulkAgents.length > 1 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-subtle px-3 py-2.5">
+                    <span className="ui-caption">一次给这 {bulkAgents.length} 个工具设同一个模型</span>
+                    <select
+                      className="ui-input w-52"
+                      aria-label="统一设置的模型"
+                      value={bulkModel}
+                      disabled={!cli || busy !== null}
+                      onChange={(event) => setBulkModel(event.target.value)}
+                    >
+                      <option value="">选择模型…</option>
+                      {groupModelRows(modelRows).map((group) => (
+                        <optgroup key={group.provider} label={group.provider}>
+                          {group.rows.map((row) => (
+                            <option
+                              key={row.id}
+                              value={row.id}
+                              disabled={isModelDisabled(row, disabledModels)}
+                            >
+                              {row.name ? `${row.name}（${row.id}）` : row.id}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      size="sm" variant="ghost"
+                      disabled={!cli || busy !== null || !isModelId(bulkModel)}
+                      onClick={() => confirmBulkModel(bulkModel.trim())}
+                    >
+                      统一应用
+                    </Button>
+                  </div>
+                )}
+                <ul className="mt-2 divide-y divide-line">
+                  {agents.map((agent) => (
+                    <li key={`${agent.name}-${agent.configPath}`} className="py-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Avatar name={agent.name} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate text-ui-md font-semibold">{agent.name}</span>
+                            <AgentQuotaChip quota={agent.id ? agentQuotas.get(agent.id) : undefined} />
+                          </span>
+                          <span className="block truncate ui-caption" title={agent.configPath}>
+                            {agent.model}
+                            {agent.detail ? ` · ${agent.detail}` : ""}
+                            {agentVisibleNames(agent).length > 0
+                              ? ` · 下拉只列它看得到的 ${rowsForAgent(modelRows, agentVisibleNames(agent)).length} 个模型`
+                              : ""}
+                          </span>
+                        </span>
+                        {agent.id ? (
+                          <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+                            <select
+                              className="ui-input w-52"
+                              aria-label={`${agent.name} 模型`}
+                              value={agentSelectValue(agent)}
+                              onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
+                            >
+                              <option value="">选择模型…</option>
+                              {groupModelRows(rowsForAgent(modelRows, agentVisibleNames(agent))).map(
+                                (group) => (
+                                  <optgroup key={group.provider} label={group.provider}>
+                                    {group.rows.map((row) => (
+                                      <option
+                                        key={row.id}
+                                        value={row.id}
+                                        disabled={isModelDisabled(row, disabledModels)}
+                                      >
+                                        {row.name ? `${row.name}（${row.id}）` : row.id}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                ),
+                              )}
+                              <option value={AGENT_CUSTOM}>自定义…</option>
+                            </select>
+                            {agentModelOf(agent) === AGENT_CUSTOM && (
+                              <TextField
+                                label={`${agent.name} 自定义模型`}
+                                className="w-48"
+                                placeholder="provider/model"
+                                value={agentCustom[agent.name] ?? ""}
+                                onChange={(event) =>
+                                  setAgentCustom((current) => ({ ...current, [agent.name]: event.target.value }))
+                                }
+                              />
+                            )}
+                            <Button
+                              type="button"
+                              size="sm" variant="primary"
+                              disabled={!cli || !isModelId(agentEffectiveModel(agent)) || !agentDirtyOf(agent)}
+                              title={agentDirtyOf(agent) ? "把这次选的模型写进它自己的配置，下次启动生效" : "和它现在用的模型一样，不用再写一次"}
+                              onClick={() => {
+                                const model = agentEffectiveModel(agent).trim();
+                                if (!agent.id || !model) return;
+                                setAgentConfirm({ id: agent.id, name: agent.name, model });
+                              }}
+                            >
+                              应用
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={!cli || agentIsDefault(agent)}
+                              title={agentIsDefault(agent) ? "它现在没有用模型服务写入的模型，不用恢复" : "撤掉模型服务写进它配置里的模型，回到它自己的默认"}
+                              onClick={() => {
+                                if (!agent.id) return;
+                                setAgentConfirm({ id: agent.id, name: agent.name, model: "default" });
+                              }}
+                            >
+                              恢复默认
+                            </Button>
+                          </span>
+                        ) : (
+                          <span className="shrink-0 ui-caption">只读（没有对应的模型命令）</span>
+                        )}
+                      </div>
+                      {agent.id && (
+                        <details className="ui-disclosure mt-2">
+                          <summary className="cursor-pointer ui-caption">
+                            <ChevronIcon width={12} height={12} className="ui-disclosure-chevron" />
+                            可见模型 · {visibilitySummary(visibilityOf(visibility, agent.id))}
+                            {visibleDirtyOf(agent) && (
+                              <span className="text-warn"> · 改过没保存</span>
+                            )}
+                          </summary>
+                          <div className="mt-2 rounded-lg border border-line bg-subtle px-3 py-2">
+                            <p className="ui-caption">
+                              只勾选要让 {agent.name} 看到的来源；全勾或不勾都等于「全部模型」。
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+                              {visibleOptionsOf(agent).map((option) => (
+                                <label key={option} className="flex items-center gap-2 ui-caption">
+                                  <input
+                                    type="checkbox"
+                                    className="accent-brand"
+                                    aria-label={`${agent.name} 可见 ${option}`}
+                                    checked={visibleSelectionOf(agent).includes(option)}
+                                    disabled={!cli}
+                                    onChange={(event) =>
+                                      setVisibleDraft((current) => {
+                                        const agentId = agent.id ?? "";
+                                        const base = current[agentId] ?? visibleSelectionOf(agent);
+                                        const next = event.target.checked
+                                          ? [...new Set([...base, option])]
+                                          : base.filter((item) => item !== option);
+                                        return { ...current, [agentId]: next };
+                                      })
+                                    }
+                                  />
+                                  {option}
+                                </label>
+                              ))}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <label className="flex items-center gap-2 ui-caption">
+                                <input
+                                  type="checkbox"
+                                  className="accent-brand"
+                                  aria-label={`${agent.name} 只显示挑过的模型`}
+                                  checked={visibilityOf(visibility, agent.id)?.pickedOnly ?? false}
+                                  disabled={!cli || busy !== null}
+                                  onChange={(event) =>
+                                    void runVisibleCommand(
+                                      agent,
+                                      pickedOnlyArgs(agent.id ?? "", event.target.checked),
+                                    )
+                                  }
+                                />
+                                只显示逐个挑过的模型（以后新出现的模型不自动露出来）
+                              </label>
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm" variant="primary"
+                                disabled={!cli || busy !== null || !visibleDirtyOf(agent)}
+                                title={
+                                  visibleDirtyOf(agent)
+                                    ? "把这次勾选写进这个工具自己的配置"
+                                    : "还没有改动"
+                                }
+                                onClick={() => void saveVisible(agent)}
+                              >
+                                保存可见范围
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm" variant="ghost"
+                                disabled={!cli || busy !== null}
+                                onClick={() =>
+                                  void runVisibleCommand(agent, ["visible", agent.id ?? "", "all"])
+                                }
+                              >
+                                恢复全部
+                              </Button>
+                              {visibleDirtyOf(agent) && siblingTargets(agent, agents).length > 0 && (
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost"
+                                  disabled={!cli || busy !== null}
+                                  title="把这行勾选同样写进其它已经接好的工具，只是也写一遍"
+                                  onClick={() => confirmShareVisible(agent)}
+                                >
+                                  同样写给其它 {siblingTargets(agent, agents).length} 个
+                                </Button>
+                              )}
+                              {visibleDirtyOf(agent) && (
+                                <span className="ui-caption text-warn">改过了，点「保存可见范围」才生效</span>
+                              )}
+                            </div>
+                          </div>
+                        </details>
+                      )}
+                    </li>
+                  ))}
+                  {agents.length === 0 && (
+                    <li className="py-2 ui-caption">
+                      {readErrors.agents ? (
+                        <span className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="min-w-0 text-danger">
+                            {readFailureText("agents", readErrors.agents)}
+                          </span>
+                          <button
+                            type="button"
+                            className="ui-link shrink-0"
+                            disabled={!cli}
+                            onClick={() => void loadAgents()}
+                          >
+                            重新检测
+                          </button>
+                        </span>
+                      ) : (
+                        "没有检测到本机智能体。装一个 Claude Code / Codex 之类的工具后点「重新检测」。"
+                      )}
+                    </li>
+                  )}
+                </ul>
+
+                {agentConfirm && (
+                  <div role="alert" className="ui-alert ui-alert-warn rta-enter mt-3 block">
+                    <div className="flex items-start gap-2">
+                      <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-ui-sm font-semibold">
+                          {agentConfirm.model === "default"
+                            ? `恢复 ${agentConfirm.name} 原来的模型？`
+                            : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
+                        </div>
+                        <p className="mt-1 ui-caption">
+                          会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm" variant="primary"
+                            onClick={() => {
+                              const target = agentConfirm;
+                              setAgentConfirm(null);
+                              void run(
+                                target.model === "default" ? "恢复默认" : "设置模型",
+                                [target.id, target.model],
+                              ).then(() => void loadAgents());
+                            }}
+                          >
+                            确认写入
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm" variant="ghost"
+                            onClick={() => setAgentConfirm(null)}
+                          >
+                            取消
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
             <details className="ui-disclosure ui-card p-4 lg:col-span-2">
