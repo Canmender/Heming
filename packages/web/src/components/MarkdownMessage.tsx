@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { highlightCode } from "../lib/markdown/highlight.js";
-import { splitMarkdownBlocks } from "../lib/markdown/blocks.js";
+import { splitMarkdownBlocksFrom, type MarkdownBlocksMemo } from "../lib/markdown/blocks.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 /**
@@ -294,7 +294,12 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   // 空正文不渲染空行：调用方常在无内容时也挂载本组件
   if (!text) return null;
 
-  const parts = streaming ? splitMarkdownBlocks(text) : { stable: "", tail: text };
+  // d.368：记住上一帧冻结到哪了，下一帧只切新长出来的那一段（长回答不再每帧重扫全文）。
+  const memoRef = useRef<MarkdownBlocksMemo | null>(null);
+  const parts: { stable: string; tail: string; memo?: MarkdownBlocksMemo } = streaming
+    ? splitMarkdownBlocksFrom(text, memoRef.current)
+    : { stable: "", tail: text };
+  memoRef.current = streaming ? (parts.memo ?? null) : null;
 
   return (
     <div className="markdown-body break-words">

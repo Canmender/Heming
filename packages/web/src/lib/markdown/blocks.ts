@@ -87,3 +87,34 @@ export function splitMarkdownBlocks(text: string, keepUnstable = 2): MarkdownBlo
   const cut = lines.slice(0, cutLine).join("\n").length + (cutLine > 0 ? 1 : 0);
   return { stable: text.slice(0, cut), tail: text.slice(cut) };
 }
+
+/** 上一帧的切分结果，供增量切分复用（`text` 必须是当前正文的前缀）。 */
+export interface MarkdownBlocksMemo {
+  text: string;
+  stable: string;
+}
+
+/**
+ * 增量切分：正文只会往后长，上一帧已经冻结的前缀这一帧一定还是冻结的。
+ *
+ * 每帧都从头扫一遍全文，长回答（几万字）会把主线程占满；这里只切「新增的那一段」，
+ * 把已冻结的前缀直接拼回去。`previous.text` 不是新正文的前缀时（改字、重试）退回全量。
+ */
+export function splitMarkdownBlocksFrom(
+  text: string,
+  previous: MarkdownBlocksMemo | null | undefined,
+  keepUnstable = 2,
+): MarkdownBlocks & { memo: MarkdownBlocksMemo } {
+  if (
+    previous &&
+    previous.stable.length > 0 &&
+    previous.stable.length <= text.length &&
+    text.startsWith(previous.stable)
+  ) {
+    const inner = splitMarkdownBlocks(text.slice(previous.stable.length), keepUnstable);
+    const stable = previous.stable + inner.stable;
+    return { stable, tail: inner.tail, memo: { text, stable } };
+  }
+  const blocks = splitMarkdownBlocks(text, keepUnstable);
+  return { ...blocks, memo: { text, stable: blocks.stable } };
+}

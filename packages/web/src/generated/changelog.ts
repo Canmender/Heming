@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.369.4.130.14",
+    "date": "2026-11-19",
+    "title": "长回答也不再每帧重扫全文",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 流式渲染为了少解析 markdown，d.353 起就把正文切成「冻结前缀 + 尾部两块」，但**切分本身**每帧都要从头扫一遍全文（`text.split(\"\\n\")` 再逐行判断围栏/列表/表格）。回复只有几百字时没感觉；几万字的长回答就是每帧 O(全文)，主线程一直在做同一件事。",
+      "**做了什么。**",
+      "| 做了什么 | 在哪 || --- | --- || 新增 `splitMarkdownBlocksFrom(text, previous)`：上一帧冻结的前缀这一帧一定还冻结，只切新增的那一段再拼回去 | `lib/markdown/blocks.ts` || 前缀对不上（改字、重试、切会话）就退回全量切分，不拼错 | 同上 || `MarkdownMessage` 用一个 ref 记住上一帧切到哪，流式时走增量、收口时清空 | `components/MarkdownMessage.tsx` |",
+      "**怎么验证。** `blocks.test.ts` 13 例（新增 3 例：往后长时拼回全文一致且前缀单调变长、前缀变了退回全量、没有上一帧时与全量等价）；`MarkdownMessage.test.tsx` 16 例仍全过；web 全量通过、typecheck 通过。",
+      "**留白。** 增量只对「后缀追加」有效；模型重写中间段落时会退回全量（正确但不再省）。这是切分层的优化，markdown 解析本身仍只重解析尾部两块。"
+    ]
+  },
+  {
     "version": "d.368.4.130.14",
     "date": "2026-11-19",
     "title": "自定义请求头能一次填好几个：一行一个，留空就删",

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { splitMarkdownBlocks } from "./blocks.js";
+﻿import { describe, expect, it } from "vitest";
+import { splitMarkdownBlocks, splitMarkdownBlocksFrom } from "./blocks.js";
 
 describe("splitMarkdownBlocks（d.353）", () => {
   it("空正文没有可冻结的部分", () => {
@@ -77,5 +77,33 @@ describe("splitMarkdownBlocks（d.353）", () => {
     const { stable, tail } = splitMarkdownBlocks(text, 1);
     expect(stable).toBe("一\n\n二\n\n");
     expect(tail).toBe("三");
+  });
+});
+
+describe("splitMarkdownBlocksFrom（d.368 增量切分）", () => {
+  it("正文往后长时只切新增部分，拼回来与全文一致", () => {
+    const first = splitMarkdownBlocksFrom("# 标题\n\n第一段\n\n第二段\n\n第三段", null);
+    expect(first.stable + first.tail).toBe("# 标题\n\n第一段\n\n第二段\n\n第三段");
+    const grown = `${first.stable + first.tail}\n\n第四段又长了一点\n\n第五段`;
+    const next = splitMarkdownBlocksFrom(grown, first.memo);
+    expect(next.stable + next.tail).toBe(grown);
+    expect(next.stable.startsWith(first.stable)).toBe(true);
+    expect(next.stable.length).toBeGreaterThanOrEqual(first.stable.length);
+  });
+
+  it("前缀变了（改字/重试）就退回全量，不拼错", () => {
+    const prev = splitMarkdownBlocksFrom("第一段\n\n第二段\n\n第三段", null);
+    const rewritten = "另一段\n\n第二段\n\n第三段";
+    const next = splitMarkdownBlocksFrom(rewritten, prev.memo);
+    expect(next.stable + next.tail).toBe(rewritten);
+    expect(next.stable).not.toContain("第一段");
+  });
+
+  it("没有上一帧时等价于全量切分", () => {
+    const text = "甲\n\n乙\n\n丙\n\n丁";
+    const full = splitMarkdownBlocks(text);
+    const inc = splitMarkdownBlocksFrom(text, null);
+    expect(inc.stable).toBe(full.stable);
+    expect(inc.tail).toBe(full.tail);
   });
 });

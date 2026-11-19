@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.369.4.130.14",
+    "date": "2026-11-19",
+    "title": "长回答不再每帧重扫全文",
+    "bullets": [
+      "流式渲染原来每帧都要把整段正文从头切一遍（找块边界），回答越长越费；现在记住上一帧冻到哪，只切新长出来的那一段。",
+      "改字、重试、切换会话时自动退回全量，结果不会拼错。",
+      "这是内部性能优化，界面上看不出变化；长回答（几万字）在流式时更顺。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.368.4.130.14",
     "date": "2026-11-19",
     "title": "",
