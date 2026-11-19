@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.383.4.130.14",
+    "date": "2026-11-19",
+    "title": "收起的来源行上，看得出这家改过",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 请求头、算免费、原文照发这些只写在 `provider show` 里，页面以前要点开「高级」才读。于是收起的行上永远看不出这家跟默认有什么不同——想知道只能一家一家展开、看一眼、再收起来。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || `packages/web/src/components/ModelPage.tsx` | 首屏 `providers` 一到位，就用 `flagsWarm`（`ref<Set<string>>`）逐家读一次 `provider show`，写进同一份 `showCache`：一家一次、串行，不跟首屏那几路抢 || `packages/web/src/components/ModelPage.tsx` | 行上多一个「改过」徽标，悬停是 `describeShowFlags` 的整句（「这家跟默认不一样：请求头 X-Trace；算免费；每 6h 刷清单」）；`describeShowFlags` 返回空串就不挂标 |",
+      "**怎么验证。** `npx vitest run src/components/ModelPage.test.tsx` **121 例全绿**（新增两例：「收起时也看得出这家改过：show 里有的才标，没设过的不标」——不点「高级」也读，断言徽标与悬停文案；「没设过的来源不挂『改过』」——空 show 一个字都不多说）。`pnpm --filter @heming/web typecheck` 通过。",
+      "**留白。** show 里没有的东西标不出来：`context=` / `family=` / `at-once` / `rpm` / `queue` / `quota-rest` / `rest-cap` / `listed` 这些改了也读不回来，仍要靠展开时自己填的格子判断。代价是首屏多 N 次 `provider show`（N＝来源数，串行）。"
+    ]
+  },
+  {
     "version": "d.382.4.130.14",
     "date": "2026-11-19",
     "title": "轨迹页也能看出时间花在哪",

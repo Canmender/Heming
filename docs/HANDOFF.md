@@ -6511,6 +6511,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 与 d.380 的分工：d.380 是**上一轮**（内存 + 落盘的 turnSummary），这里是**整段会话**（从消息转录里现算）；两者独立，不要合并成一个数。
 
 
+- **收起的行上看得出改过（d.383）**：★ 首屏 `providers` 到位后按 `flagsWarm`（`ref<Set<string>>`）逐家读一次 `provider show` 进同一份 `showCache`（串行，不跟首屏那几路抢）★ 行上多「改过」徽标，悬停是 `describeShowFlags` 整句；空串不挂标 ★ 标不出来：`context=`/`family=`/`at-once`/`rpm`/`queue`/`quota-rest`/`rest-cap`/`listed` 这些 show 里没有 ★ 验证：ModelPage 121 例全绿（新增两例）。
 ## 7. 快速上手命令
 
 ```bash
