@@ -205,6 +205,13 @@ import {
   takeUndeliveredJobs,
   type SubagentJob,
 } from "../lib/agentRuntime/subagentJobs.js";
+import {
+  clearLiveDraft,
+  listLiveDrafts,
+  LIVE_DRAFT_INTERVAL_MS,
+  saveLiveDraft,
+  type LiveDraft,
+} from "../lib/agentRuntime/liveDraft.js";
 import { decidePanelAutoOpen } from "../lib/agentRuntime/panelAuto.js";
 import { withPanelTool } from "../lib/agentRuntime/panelTool.js";
 import { withWorkflowTool } from "../lib/agentRuntime/workflow.js";
@@ -1765,6 +1772,13 @@ export function ChatPage({
     Record<string, { agentId: string; conversationId: string; text: string }>
   >({});
   const deltaFrameRef = useRef<number | null>(null);
+  /**
+   * 草稿留底的时间戳（d.363）：流式正文只在本机内存里，刷新就没了。
+   *
+   * 每帧都写一遍加密缓存太贵（一次 ECB 加密 + 一次落盘），所以按流 3 秒一次；
+   * 真中断时最多丢最近 3 秒的字，比「整段没了」好得多。
+   */
+  const draftAtRef = useRef<Record<string, number>>({});
   /** 把攒着的流式文本一次写进 store（工具、收口、停止之前都要先调，保证顺序不颠倒）。 */
   const flushLocalDeltas = () => {
     if (deltaFrameRef.current !== null) {
@@ -1785,6 +1799,15 @@ export function ChatPage({
         // 清掉可能残留的 watchdog 误报（恢复即自愈）
         errorMessage: undefined,
       });
+      // d.363：顺手留一份草稿，刷新/关窗口后还能看到「生成到一半」的那半截。
+      if (now - (draftAtRef.current[streamId] ?? 0) >= LIVE_DRAFT_INTERVAL_MS) {
+        const saved = saveLiveDraft(entry.conversationId, {
+          streamId,
+          agentId: entry.agentId,
+          text: entry.text,
+        });
+        if (saved) draftAtRef.current[streamId] = now;
+      }
     }
   };
   /**
@@ -2501,6 +2524,16 @@ export function ChatPage({
 
   /** 本会话的打字机项（含他机流）：渲染在消息列表尾部。 */
   const streamEntries = Object.entries(streaming).filter(([, s]) => s.conversationId === convId);
+  /**
+   * 上次生成被中断后留下的草稿（d.363）。
+   *
+   * 只在本机加密缓存里找：正常收口的草稿会被删掉，能留到这里的只有「没走到收口」的
+   * （刷新、关窗口、崩溃）。读 `peek` 不触发解密全量扫描，随会话切换与消息数变化重算即可。
+   */
+  const [recoveredDrafts, setRecoveredDrafts] = useState<LiveDraft[]>([]);
+  useEffect(() => {
+    setRecoveredDrafts(listLiveDrafts(convId));
+  }, [convId, messages.length]);
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
 
@@ -3529,6 +3562,10 @@ export function ChatPage({
         // 免得跑完那一刻用户不在屏幕前，回头只能翻消息猜「刚才那一下干了多少」。
         // d.354：带上这一轮真正产出的字符数——「字/秒」要从它算，不能拿工具次数猜。
         settleTurnProgress(convId, Date.now(), useChatStore.getState().streaming[streamId]?.text.length ?? 0);
+        // d.363：这一轮已经收口（成功/失败/停止都算），草稿没有存在意义了；
+        // 留着会让下一次启动把它当成「上次生成被中断」的残稿。
+        clearLiveDraft(convId, streamId);
+        delete draftAtRef.current[streamId];
         // 引用只对这一轮有效（d.175）：回合收尾就清掉，避免下一次无意的发送带上旧文件。
         fileRefsRef.current = [];
         setFileRefs([]);
@@ -6328,6 +6365,33 @@ export function ChatPage({
             </Fragment>
           );
         })}
+        {/* 上次生成被中断时留下的草稿（d.363）：内存里的流没了，但加密缓存还留着那半截 */}
+        {recoveredDrafts
+          .filter((draft) => !streaming[draft.streamId])
+          .map((draft) => (
+            <article
+              key={`draft-${draft.streamId}`}
+              data-testid="live-draft-recovered"
+              className="rounded-lg border border-dashed border-line-strong bg-subtle/40 px-3 py-2 text-ui-sm"
+            >
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-ui-xs text-muted">
+                <span className="font-medium text-ink">{nameOf(draft.agentId)}</span>
+                <span className="ui-chip">上次生成被中断</span>
+                <span>下面是当时已经生成的部分，没有收进会话记录。</span>
+                <button
+                  type="button"
+                  className="ml-auto ui-btn h-6 px-2 text-ui-xs"
+                  onClick={() => {
+                    clearLiveDraft(convId, draft.streamId);
+                    setRecoveredDrafts(listLiveDrafts(convId));
+                  }}
+                >
+                  丢弃这半截
+                </button>
+              </div>
+              <p className="whitespace-pre-wrap break-words text-ink">{draft.text}</p>
+            </article>
+          ))}
         {/* 流式打字机行（本机/他机）：渲染于消息列表尾部，finish 的 message_new 收口后移除 */}
         {streamEntries.map(([id, s]) => (
           <AgentStreamBubble

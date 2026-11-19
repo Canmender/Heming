@@ -48,6 +48,7 @@ import { PLAN_EXECUTE_PROMPT } from "../lib/agentRuntime/planMode.js";
 import { applySubagentProgress, resetSubagentRuns } from "../lib/agentRuntime/subagentRuns.js";
 // d.358：后台子代理在跑的一轮里交回结论，收口时不能被当成「用户插话」清掉
 import { enqueueSubagentJob, resetSubagentJobs } from "../lib/agentRuntime/subagentJobs.js";
+import { listLiveDrafts, saveLiveDraft } from "../lib/agentRuntime/liveDraft.js";
 // d.218：收口后会留下「上一轮」小结，跨用例不清会把上一条用例的数字带进来
 import { reloadTurnSummaries, resetTurnProgress } from "../lib/agentRuntime/turnProgress.js";
 import { MESSAGE_WARN_TOKENS } from "../lib/agentRuntime/messageBudget.js";
@@ -1796,6 +1797,32 @@ describe("ChatPage", () => {
     expect(markdown).toContain("<summary>过程（1 步）</summary>");
     expect(markdown).toContain("file_read");
     expect(screen.getByText(/已导出这段对话：2 条消息/)).toBeInTheDocument();
+  });
+
+  it("上次生成被中断：重开还能看到那半截草稿，也能丢弃（d.363）", async () => {
+    bindAssistant();
+    saveLiveDraft(
+      "c1",
+      {
+        streamId: "s9",
+        agentId: "system-assistant",
+        text: "我先看一下入口文件在哪里，然后把整条调用链都理出来",
+      },
+      Date.now(),
+    );
+    mockMessagesFetch([msg("m1", "看看入口", "2026-11-19T04:00:00.000Z")]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const draft = await screen.findByTestId("live-draft-recovered");
+    expect(draft).toHaveTextContent("和小鸣");
+    expect(draft).toHaveTextContent("上次生成被中断");
+    expect(draft).toHaveTextContent("整条调用链");
+
+    fireEvent.click(screen.getByRole("button", { name: "丢弃这半截" }));
+    await act(async () => {});
+    expect(screen.queryByTestId("live-draft-recovered")).not.toBeInTheDocument();
+    expect(listLiveDrafts("c1")).toEqual([]);
   });
 
   it("动作行模型徽标：未绑定显示「未绑定模型」，点击就地开切换弹窗（d.195）", async () => {
