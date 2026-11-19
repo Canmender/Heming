@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { highlightCode } from "../lib/markdown/highlight.js";
+import { splitMarkdownBlocks } from "../lib/markdown/blocks.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 /**
@@ -177,10 +178,43 @@ function MarkdownImage({ src, alt }: { src?: string; alt: string }) {
 }
 
 /**
+ * 一段已经冻住的 markdown。
+ *
+ * 用 `memo` 挡住的不是普通重渲染，而是 `react-markdown` 的**整段重解析**：
+ * 流式时正文每帧都在变，没有这层时每一帧都要把已经写完的几千字重新解析一遍；
+ * 有了它，冻结前缀的 `text` 不变 → props 不变 → 直接返回上次的元素。
+ */
+const MarkdownChunk = memo(function MarkdownChunk({
+  text,
+  streaming,
+  components,
+}: {
+  text: string;
+  streaming: boolean;
+  components: Record<string, unknown>;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      // react-markdown 的 components 类型较宽，这里由上面统一构造
+      components={components as never}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+});
+
+/**
  * 正文渲染器。
  *
  * `streaming` 只影响代码块是否高亮；其余结构（列表、表格）随时可渲染——
  * markdown 对不完整输入本身是容错的。
+ *
+ * 流式时按 `splitMarkdownBlocks` 切成「冻结前缀 + 尾部」：前缀只解析一次，
+ * 每帧只重解析末尾两块（DSH 的 `UNSTABLE_TAIL_BLOCKS` 口径）。切分只发生在
+ * 不会拆散列表/表格/缩进续行的空行处，切错了最多是多解析一点，不会把一张
+ * 列表拆成两张。收口后仍整段解析一次——那时只发生一次，没必要冒切分的风险。
  */
 export const MarkdownMessage = memo(function MarkdownMessage({
   text,
@@ -260,15 +294,16 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   // 空正文不渲染空行：调用方常在无内容时也挂载本组件
   if (!text) return null;
 
+  const parts = streaming ? splitMarkdownBlocks(text) : { stable: "", tail: text };
+
   return (
     <div className="markdown-body break-words">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
+      {parts.stable ? (
+        <MarkdownChunk text={parts.stable} streaming={streaming} components={components} />
+      ) : null}
+      {parts.tail ? (
+        <MarkdownChunk text={parts.tail} streaming={streaming} components={components} />
+      ) : null}
     </div>
   );
 });

@@ -13,8 +13,13 @@
  *    没有交付器（页面不在）就先攒着，等界面回来 `takeUndeliveredJobs` 取走。
  * 3. `cancelSubagentJob`：只停这一条，不牵连主对话那一轮。
  *
- * 刻意不落盘：后台子代理的生命周期就是这次运行；刷新后还活着的「后台任务」
- * 只会变成永远不来的幽灵（它的模型请求已经断了）。留档的是结论——那是会话消息的事。
+ * 刻意不落盘的是**结论**与运行状态：后台子代理的生命周期就是这次运行，刷新后
+ * 它的模型请求已经断了，留一份「还在跑」的记录只会变成永远不来的幽灵。
+ *
+ * 但「一声不响地消失」也不行（d.353，对齐 dsh-superagent 的 stored work 与
+ * 「诚实报告」原则）：所以每登记/起跑/收口时把 queued|running 的**元数据**
+ * 落一份盘；下次启动读到它，就把这些任务标成「被重启中断」并交给交付器，
+ * 让模型和用户都能看到「这件事没跑完、原因是什么」，而不是当成做完了。
  */
 
 /** 同时最多几个后台子代理在跑（d.349：用户定的上限 5）。 */
@@ -83,6 +88,145 @@ let deliveryHandler: DeliveryHandler | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
 
+/** 落盘用的最小元数据：只够「下次启动时说清楚这件事没跑完」，不含结论。 */
+interface StoredJob {
+  id: string;
+  conversationId: string;
+  agentId: string;
+  agentName: string;
+  label: string;
+  task: string;
+  taskId: string;
+  status: "queued" | "running";
+  createdAt: number;
+  startedAt: number | null;
+}
+
+const STORAGE_KEY = "heming.subagentJobs.v1";
+
+/** 重启后给这些任务的原因：不假装它们失败了，也不假装它们还在跑。 */
+const RESTART_ERROR =
+  "应用重启时中断：这条子代理在运行时应用被关掉或刷新，没有跑完——不能把它当成已经做完。";
+
+function storage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** 把「还没收口」的任务元数据落盘；收口的任务不必存，结论已经进了会话。 */
+function persist(): void {
+  const store = storage();
+  if (!store) return;
+  try {
+    const snapshot: StoredJob[] = jobs
+      .filter((job): job is SubagentJob & { status: "queued" | "running" } => isRunning(job))
+      .map((job) => ({
+        id: job.id,
+        conversationId: job.conversationId,
+        agentId: job.agentId,
+        agentName: job.agentName,
+        label: job.label,
+        task: job.task,
+        taskId: job.taskId,
+        status: job.status,
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+      }));
+    store.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // 存不下就算了：丢的只是一次「说清楚」的机会，不影响正在跑的任务。
+  }
+}
+
+function clearPersisted(): void {
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(STORAGE_KEY);
+  } catch {
+    // 同 persist：拿不到存储不是致命问题。
+  }
+}
+
+/** 校验一条从盘里读出来的记录（旧版本/坏档一律丢弃，不猜）。 */
+function readStoredJob(value: unknown): StoredJob | null {
+  if (typeof value !== "object" || value === null) return null;
+  const item = value as Record<string, unknown>;
+  const text = (key: string): string | null =>
+    typeof item[key] === "string" && item[key] !== "" ? (item[key] as string) : null;
+  const id = text("id");
+  const conversationId = text("conversationId");
+  const agentId = text("agentId");
+  const agentName = text("agentName");
+  const label = text("label");
+  const task = text("task");
+  const taskId = text("taskId");
+  const status = item.status;
+  if (!id || !conversationId || !agentId || !agentName || !label || !task || !taskId) return null;
+  if (status !== "queued" && status !== "running") return null;
+  const createdAt = typeof item.createdAt === "number" ? item.createdAt : 0;
+  const startedAt = typeof item.startedAt === "number" ? item.startedAt : null;
+  return { id, conversationId, agentId, agentName, label, task, taskId, status, createdAt, startedAt };
+}
+
+/**
+ * 启动时读回上次没跑完的任务，标成「被重启中断」并等交付器补送（d.353）。
+ *
+ * 为什么是 failed 而不是继续跑：后台子代理的模型请求随页面一起断了，这里没有
+ * 可以恢复的执行现场；硬说「还在跑」会让模型一直等一个永远不来的结论。诚实的
+ * 做法是把它当成一次未完成的尝试交回会话——模型会重新派，或者自己接手。
+ *
+ * 返回读回来的任务（测试用；应用里由 ChatPage 在挂载时调用一次）。
+ */
+export function restoreInterruptedJobs(now = Date.now()): SubagentJob[] {
+  const store = storage();
+  if (!store) return [];
+  let raw: string | null = null;
+  try {
+    raw = store.getItem(STORAGE_KEY);
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  const restored: SubagentJob[] = [];
+  for (const value of Array.isArray(parsed) ? parsed : []) {
+    const item = readStoredJob(value);
+    if (!item) continue;
+    restored.push({
+      id: item.id,
+      conversationId: item.conversationId,
+      agentId: item.agentId,
+      agentName: item.agentName,
+      label: item.label,
+      task: item.task,
+      taskId: item.taskId,
+      status: "failed",
+      createdAt: item.createdAt,
+      startedAt: item.startedAt,
+      endedAt: now,
+      rounds: 0,
+      toolCalls: 0,
+      text: "",
+      error: RESTART_ERROR,
+      delivered: false,
+    });
+  }
+  clearPersisted();
+  if (restored.length === 0) return [];
+  jobs = [...jobs, ...restored].slice(-SUBAGENT_JOB_HISTORY_CAP);
+  notify();
+  return restored;
+}
+
 function notify(): void {
   for (const listener of listeners) listener();
 }
@@ -147,6 +291,7 @@ export function enqueueSubagentJob(start: SubagentJobStart, now = Date.now()): S
     delivered: false,
   };
   jobs = [...jobs, job].slice(-SUBAGENT_JOB_HISTORY_CAP);
+  persist();
   pending = [...pending, start];
   notify();
   pump();
@@ -183,6 +328,7 @@ function markRunning(id: string): void {
     job.id === id ? { ...job, status: "running" as const, startedAt: Date.now() } : job,
   );
   notify();
+  persist();
 }
 
 function settle(
@@ -212,6 +358,7 @@ function settle(
     return settled;
   });
   notify();
+  persist();
   if (settled) deliver(settled);
   pump();
 }
@@ -266,6 +413,7 @@ export function cancelSubagentJob(id: string): boolean {
         : item,
     );
     notify();
+    persist();
     return true;
   }
   controllers.get(id)?.abort();
@@ -276,6 +424,7 @@ export function cancelSubagentJob(id: string): boolean {
       : item,
   );
   notify();
+  persist();
   pump();
   return true;
 }
@@ -298,6 +447,7 @@ export function resetSubagentJobs(): void {
   pending = [];
   deliveryHandler = null;
   seq = 0;
+  clearPersisted();
   notify();
 }
 

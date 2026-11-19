@@ -191,6 +191,7 @@ import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
 import {
   activeSubagentJobCount,
   cancelSubagentJobsOf,
+  restoreInterruptedJobs,
   setSubagentJobDelivery,
   subagentDeliveryText,
   takeUndeliveredJobs,
@@ -3891,6 +3892,9 @@ export function ChatPage({
   deliverSubagentJobRef.current = deliverSubagentJob;
   useEffect(() => {
     setSubagentJobDelivery((job) => deliverSubagentJobRef.current(job));
+    // 上次运行时被关掉/刷新时没跑完的子代理（d.353）：标成「被重启中断」并补送。
+    // 必须排在 takeUndeliveredJobs 之前，恢复出来的任务才赶得上这一次补送。
+    restoreInterruptedJobs();
     // 页面从别的页签切回来时，可能已经有结论攒着了（交付器不在时只标未交付）。
     for (const job of takeUndeliveredJobs(convIdRef.current)) {
       deliverSubagentJobRef.current(job);
