@@ -18,7 +18,7 @@ import { Button } from "../ui/Button.js";
 import { TextField } from "../ui/Field.js";
 
 /**
- * 云同步（d.392）：几台电脑用同一份设置。
+ * 云同步（d.394）：几台电脑用同一份设置。
  *
  * 内核把这件事分成三步——看状态（`magpie webdav`）、立刻同步一次（`now`）、
  * 自己隔多久同步（`auto`）；开与关要输密码或令牌，所以那两步交给终端，

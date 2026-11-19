@@ -12,6 +12,34 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.394.4.133.14",
+    "date": "2026-11-19",
+    "title": "云同步从「填命令」变成一张卡片",
+    "bullets": [
+      "**看不出现在开着吗、上次同步成没成**。`magpie webdav` 的输出把地址、同步哪些东西、上次同步时间、失败原因都写了，页面一个都没显示。",
+      "**把密码暴露成参数**。`on` 与 `set` 要输密码或令牌，塞进「参数」输入框等于让人把口令打成明文。",
+      "新 `packages/web/src/lib/magpieSync.ts`：`parseSyncStatus`（抬头、地址、跟随说明、同步哪些、上次结果、失败原因、自动间隔）、`describeSync`（一句话）、`syncNowArgs` / `syncAutoArgs` /",
+      "新 `packages/web/src/components/model/CloudSyncCard.tsx`：状态行 + 三个动作。",
+      "`packages/web/src/components/ModelPage.tsx`：删掉「多机同步」表单（含 `SYNC_KIND_LABEL`、`SYNC_COMMAND_LABEL` 与三个 state），换成 `<CloudSyncCard />`。",
+      "**`set`（同步哪些东西：keys / agents / library / usage / sign-ins）不进卡片**：低频细项，留在「高级命令」里跑。这条写进了 spec §3.12，免得下轮又加回来四个勾选框。",
+      "`npx vitest run src/lib/magpieSync.test.ts`：8 例（开/关两种抬头、三种通道、失败与「还没同步过」、自动间隔的三档说法、命令只放内核认的值）。",
+      "`npx vitest run src/components/model/CloudSyncCard.test.tsx`：4 例（开着时的状态句与「现在同步一次」、改间隔只发那一档、没开时给地址交给终端、空地址不发空命令）。",
+      "`npx vitest run src/components/ModelPage.test.tsx src/components/model`：**14 文件 / 200 例全绿**。",
+      "`pnpm --filter @heming/web typecheck` 通过。",
+      "同步哪些东西（`keys=` / `agents=` / `library=` / `usage=` / `sign-ins=`）仍是命令行的活。",
+      "「上次同步换了哪几份、旧的在哪儿」内核会打，但页面没解析——它属于「要不要撤销」这个更大的话题。",
+      "桌面端真机视觉复核仍未做（浏览器预览下没有 bridge，卡片只会显示读不出）。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "运行分区里的「多机同步」原来是一个表单：选通道、选动作（`now` / `on` / `off` / `set`）、填参数、点执行。等于把三条命令原样摊在页面上，两个后果：",
+      "做了什么",
+      "| 之前 | 现在 || --- | --- || 进页面什么都不读 | 卡片一进就念一遍 `magpie webdav`，说成一句话：「WebDAV → 地址：同步 …；上次同步 …」 || 「立即同步一次」要选动作再点执行 | 一个「现在同步一次」按钮（同步中变「正在同步…」） || 自动同步只能手写 `auto 15` | 下拉：不改 / 只在我点的时候 / 3 / 15 / 30 / 60 分钟 || 开关要手写 `on <地址>` | 关只发 `off`（服务器上的文件留着）；开走终端，密码在终端里输，不经过页面 || 三种通道靠下拉猜 | 按内核抬头认（`WebDAV sync` / `S3 sync` / `GitHub sync`） |`syncOnArgs` / `syncOffArgs`（只拼内核对得上的形态，`auto` 只放 off/3/15/30/60）。",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.393.4.133.14",
     "date": "2026-11-19",
     "title": "收起的「处理过程」也写用时",

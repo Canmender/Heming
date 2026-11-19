@@ -297,7 +297,7 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 ### 3.12 云同步：几台电脑用同一份设置
 
 以前运行分区里是一个「多机同步」表单——选类型、选动作、填参数、点执行，等于把三条命令
-原样摊在页面上，而且看不出「现在到底开着吗、上次同步成没成」。d.392 换成一张卡片
+原样摊在页面上，而且看不出「现在到底开着吗、上次同步成没成」。d.394 换成一张卡片
 （`packages/web/src/components/model/CloudSyncCard.tsx` + `packages/web/src/lib/magpieSync.ts`）：
 
 | 内核能力 | 页面行为 | 命令 |
