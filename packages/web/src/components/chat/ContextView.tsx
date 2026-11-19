@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+﻿import { useMemo } from "react";
 import { transcriptOf, useChatStore } from "../../store/chat.js";
 import {
   recordsForConversation,
@@ -182,6 +182,20 @@ export function ContextView({
   const messages = useChatStore((s) => (conversationId ? s.messages[conversationId] : undefined));
   const rows = messages ?? [];
   const records = useTokenUsageStore((s) => s.records);
+  // d.400：这个会话一共几轮、走了几步、几步没成——「上下文」页也顺手回答「干了多少」。
+  const sessionStats = useMemo(() => {
+    let rounds = 0;
+    let steps = 0;
+    let failed = 0;
+    for (const row of rows) {
+      if (row.senderType === "user") rounds += 1;
+      for (const tool of transcriptOf(row)?.tools ?? []) {
+        steps += 1;
+        if (tool.status === "error" || tool.status === "denied") failed += 1;
+      }
+    }
+    return { rounds, steps, failed };
+  }, [rows]);
 
   let rowsTokens = 0;
   /**
@@ -402,6 +416,11 @@ export function ContextView({
       ) : null}
       {/* 真实消耗（P0-T2）：记账按会话/回合归因，回答「这句话花了多少、贵在哪」。
           与上面的上下文预算不是一套口径：上面是「还没发出去的行会有多大」，这里是「已经花掉多少」。 */}
+      {/* d.400：会话的量级——几轮、几步、几步没成。与下面的「本会话消耗」分工：那是钱，这是活。 */}
+      <p data-testid="context-session-stats" className="mt-3 text-ui-xs tabular-nums text-muted">
+        {sessionStats.rounds} 轮 · {sessionStats.steps} 步
+        {sessionStats.failed > 0 ? ` · ${sessionStats.failed} 步没成` : ""}
+      </p>
       <h4 className="ui-section-title mb-2 mt-5">本会话消耗</h4>
       <ul aria-label="本会话消耗" className="list-none space-y-1.5 p-0">
         <li className="flex items-baseline justify-between gap-3 text-ui-sm">
@@ -519,5 +538,6 @@ export function ContextView({
     </section>
   );
 }
+
 
 

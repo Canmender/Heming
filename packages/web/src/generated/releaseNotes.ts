@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.400.4.138.14",
+    "date": "2026-11-19",
+    "title": "上下文页也回答「这段干了多少」",
+    "bullets": [
+      "上下文页多了一行：这段对话几轮、几步、几步没成。",
+      "和输入框下方那行同口径，不用来回看。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.399.4.138.14",
     "date": "2026-11-19",
     "title": "运行页末尾四块收成一行",

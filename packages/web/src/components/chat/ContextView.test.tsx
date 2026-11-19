@@ -453,3 +453,24 @@ describe("ContextView · 手动压缩入口（d.388）", () => {
     fireEvent.click(button);
     expect(onCompact).not.toHaveBeenCalled();
   });
+
+describe("ContextView · 会话量级（d.400）", () => {
+  it("几轮、几步、几步没成：只数工具步，用户消息算轮", () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          message("m1", "帮我看看"),
+          message("m2", "看完了", {
+            senderType: "agent",
+            tools: [
+              { id: "t1", name: "read_file", status: "ok" },
+              { id: "t2", name: "run_shell", status: "error" },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<ContextView conversationId="c1" />);
+    expect(screen.getByTestId("context-session-stats")).toHaveTextContent("1 轮 · 2 步 · 1 步没成");
+  });
+});
