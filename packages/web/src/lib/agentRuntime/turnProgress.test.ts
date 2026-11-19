@@ -1,11 +1,13 @@
-﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TURN_PROGRESS_MAX_ROUND,
   clearTurnProgress,
   describeTurnProgress,
   formatElapsed,
+  formatSeconds,
   getTurnProgress,
+  noteTurnFirstToken,
   recordTurnProgress,
   resetTurnProgress,
   settleTurnProgress,
@@ -26,6 +28,9 @@ function make(overrides: Partial<TurnProgress> = {}): TurnProgress {
     tools: 0,
     done: false,
     endedAt: null,
+    // d.354 的新字段：没正文时是 null / 0，用例只在关心时覆盖。
+    firstTokenAt: null,
+    chars: 0,
     ...overrides,
   };
 }
@@ -180,5 +185,68 @@ describe("收口后留下小结（d.218）", () => {
     expect(getTurnProgress("c2")).toBeNull();
     settleTurnProgress("", BASE);
     expect(getTurnProgress("")).toBeNull();
+  });
+});
+
+/** d.354：TTFT（首字延迟）与出字速度。 */
+describe("首字与出字速度（d.354）", () => {
+  it("收口时把首字延迟与字/秒一起写进小结", () => {
+    const text = describeTurnProgress(
+      make({
+        tools: 2,
+        firstTokenAt: BASE + 1_200,
+        chars: 410,
+        endedAt: BASE + 12_000,
+        done: true,
+      }),
+    );
+    // 用时 12 秒、首字 1.2 秒、正文段 10.8 秒里出了 410 字 → 约 38 字/秒。
+    expect(text).toBe("上一轮：2 步 · 用时 12 秒 · 首字 1.2 秒 · 38 字/秒");
+  });
+
+  it("没有正文（纯工具轮）就不编「首字 0 秒」「0 字/秒」", () => {
+    const text = describeTurnProgress(make({ tools: 3, endedAt: BASE + 9_000, done: true }));
+    expect(text).toBe("上一轮：3 步 · 用时 9 秒");
+    expect(text).not.toContain("首字");
+    expect(text).not.toContain("字/秒");
+  });
+
+  it("正文太短（不足 0.5 秒）时不出「字/秒」——那个数字没有意义", () => {
+    const text = describeTurnProgress(
+      make({ firstTokenAt: BASE + 400, chars: 12, endedAt: BASE + 700, done: true }),
+    );
+    expect(text).toContain("首字 0.4 秒");
+    expect(text).not.toContain("字/秒");
+  });
+
+  it("首字时刻只记第一次；收口之后不再改", () => {
+    recordTurnProgress("c1", { round: 1, phase: "round" }, BASE);
+    noteTurnFirstToken("c1", BASE + 900);
+    noteTurnFirstToken("c1", BASE + 5_000);
+    expect(getTurnProgress("c1")?.firstTokenAt).toBe(BASE + 900);
+    settleTurnProgress("c1", BASE + 6_000, 300);
+    noteTurnFirstToken("c1", BASE + 7_000);
+    expect(getTurnProgress("c1")?.firstTokenAt).toBe(BASE + 900);
+  });
+
+  it("没有进度条目的会话不凭空记首字", () => {
+    noteTurnFirstToken("nobody", BASE);
+    expect(getTurnProgress("nobody")).toBeNull();
+  });
+
+  it("收口时字符数取最大、负数与小数夹成非负整数", () => {
+    recordTurnProgress("c1", { round: 1, phase: "round" }, BASE);
+    settleTurnProgress("c1", BASE + 1_000, -20);
+    expect(getTurnProgress("c1")?.chars).toBe(0);
+
+    recordTurnProgress("c2", { round: 1, phase: "round" }, BASE);
+    settleTurnProgress("c2", BASE + 1_000, 12.7);
+    expect(getTurnProgress("c2")?.chars).toBe(12);
+  });
+
+  it("formatSeconds 超过 10 秒取整，否则保留一位小数", () => {
+    expect(formatSeconds(1_240)).toBe("1.2 秒");
+    expect(formatSeconds(12_400)).toBe("12 秒");
+    expect(formatSeconds(-5)).toBe("0.0 秒");
   });
 });

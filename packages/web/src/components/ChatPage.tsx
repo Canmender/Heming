@@ -217,6 +217,7 @@ import {
 import {
   clearTurnProgress,
   getTurnProgress,
+  noteTurnFirstToken,
   recordTurnProgress,
   settleTurnProgress,
   subscribeTurnProgress,
@@ -2981,6 +2982,8 @@ export function ChatPage({
       onLocalDelta: (streamId, acc) => {
         const meta = streamMeta.current[streamId];
         if (!meta) return;
+        // d.354：第一个正文片段到了——这就是 TTFT 的终点，记一次就够（后面的 delta 会被忽略）。
+        noteTurnFirstToken(convId);
         // 本机流文本已本地累积（不等 WS 回声），回声由 onWsEvent 按 streamOwner 跳过
         if (immediateDeltas) {
           upsertStream(streamId, {
@@ -3504,7 +3507,8 @@ export function ChatPage({
         // 「还在跑」，而实际上它已经停了（用户会一直等一个不存在的下一轮）。
         // d.218：也不直接抹掉，换成一行小结（几轮 / 几次工具 / 用时多少），
         // 免得跑完那一刻用户不在屏幕前，回头只能翻消息猜「刚才那一下干了多少」。
-        settleTurnProgress(convId);
+        // d.354：带上这一轮真正产出的字符数——「字/秒」要从它算，不能拿工具次数猜。
+        settleTurnProgress(convId, Date.now(), useChatStore.getState().streaming[streamId]?.text.length ?? 0);
         // 引用只对这一轮有效（d.175）：回合收尾就清掉，避免下一次无意的发送带上旧文件。
         fileRefsRef.current = [];
         setFileRefs([]);

@@ -40,6 +40,17 @@ export interface TurnProgress {
   done: boolean;
   /** 收口时刻（`done` 为真时才有值）。 */
   endedAt: number | null;
+  /**
+   * 这一轮第一个正文片段到达的时刻（d.354，对齐 DSH 的 TTFT 口径）。
+   *
+   * 为什么记它：用户判断「模型快不快」看的是**多久出第一个字**，而不是总用时——
+   * 一个跑了两分钟、但十秒才开口的答复，和一个跑了两分钟、立刻开口的答复，
+   * 体感完全不同。只在有正文流时才会被 `noteTurnFirstToken` 写上；工具轮没有正文
+   * 输出时保持 null，界面就不会编一个「首字 0 秒」出来。
+   */
+  firstTokenAt?: number | null;
+  /** 这一轮到底产出了多少正文字符（d.354）：收口时由调用方带上，用来算「字/秒」。 */
+  chars?: number;
 }
 
 /** 一轮的上限按轮次上限来（36），这里只防脏数据把界面撑坏。 */
@@ -88,7 +99,26 @@ export function recordTurnProgress(
     tools: (fresh ? 0 : prev.tools) + (tool ? 1 : 0),
     done: false,
     endedAt: null,
+    // 同一轮里保留首字时刻与已产出字符数；新一轮（fresh）从零开始。
+    firstTokenAt: fresh ? null : (prev?.firstTokenAt ?? null),
+    chars: fresh ? 0 : (prev?.chars ?? 0),
   };
+  progress.set(conversationId, next);
+  snapshots.set(conversationId, next);
+  emit();
+}
+
+/**
+ * 记下这一轮「第一个正文字到达」的时刻（d.354）。
+ *
+ * 只在没有进度条目时静默忽略：没有这一轮的事实，就不能凭空造一个「首字 0.3 秒」。
+ * 已经有值就不再改写——TTFT 是一次性的，多调几次也不会把数字越改越小。
+ */
+export function noteTurnFirstToken(conversationId: string, now: number = Date.now()): void {
+  if (!conversationId) return;
+  const prev = progress.get(conversationId);
+  if (prev === undefined || prev.done || prev.firstTokenAt != null) return;
+  const next: TurnProgress = { ...prev, firstTokenAt: now };
   progress.set(conversationId, next);
   snapshots.set(conversationId, next);
   emit();
@@ -100,7 +130,11 @@ export function recordTurnProgress(
  * 只改「还在跑」的那条：已经收口过的（`done`）再调一次不重复通知——比如恢复提示条重渲染。
  * 没上报过任何进度的会话不会有小结（不能凭空造一个「0 轮」出来）。
  */
-export function settleTurnProgress(conversationId: string, now: number = Date.now()): void {
+export function settleTurnProgress(
+  conversationId: string,
+  now: number = Date.now(),
+  chars = 0,
+): void {
   if (!conversationId) return;
   const prev = progress.get(conversationId);
   if (prev === undefined || prev.done) return;
@@ -111,6 +145,7 @@ export function settleTurnProgress(conversationId: string, now: number = Date.no
     at: now,
     done: true,
     endedAt: now,
+    chars: Math.max(prev.chars ?? 0, Math.max(0, Math.floor(chars))),
   };
   progress.set(conversationId, next);
   snapshots.set(conversationId, next);
@@ -159,11 +194,31 @@ export function describeTurnProgress(state: TurnProgress): string {
     const used = formatElapsed(endedAt - state.startedAt);
     // d.350：这里的数字是**这一步到哪了**，不是「第几轮对话」——用户说的「轮」是
     // 「一次输入 + 一次输出 + 停止」，那是输入框下方那行 `N 轮 · M 步` 的事。
-    const steps = state.tools > 0 ? `${state.tools} 步 · ` : "";
-    return `上一轮：${steps}用时 ${used}`;
+    const parts: string[] = [];
+    if (state.tools > 0) parts.push(`${state.tools} 步`);
+    parts.push(`用时 ${used}`);
+    // d.354：首字延迟与出字速度（DSH 的 TTFT / tok·s⁻¹ 口径）。只在真有正文时补，
+    // 纯工具轮不编这两个数字。
+    const firstAt = state.firstTokenAt ?? null;
+    if (firstAt !== null && firstAt > state.startedAt) {
+      parts.push(`首字 ${formatSeconds(firstAt - state.startedAt)}`);
+    }
+    const chars = state.chars ?? 0;
+    const genMs = firstAt !== null ? endedAt - firstAt : 0;
+    if (chars > 0 && genMs >= 500) {
+      // 中文按「字」算，不冒充 token：这里没有分词器，叫字/秒是诚实的近似。
+      parts.push(`${Math.round((chars * 1000) / genMs)} 字/秒`);
+    }
+    return `上一轮：${parts.join(" · ")}`;
   }
   if (state.phase === "tool" && state.tool) return `第 ${state.round} 步 · 正在执行 ${state.tool}`;
   return `第 ${state.round} 步 · 正在想下一步`;
+}
+
+/** 首字延迟说成人话：保留一位小数，超过 10 秒就不再报小数（精度没有意义）。 */
+export function formatSeconds(ms: number): string {
+  const value = Math.max(0, ms) / 1000;
+  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} 秒`;
 }
 
 /** 把毫秒数说成人话（不足 1 分钟只报秒，超过 1 分钟报「x 分 y 秒」）。 */
