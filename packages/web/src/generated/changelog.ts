@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.398.4.138.14",
+    "date": "2026-11-19",
+    "title": "失败的步骤，收起来也看得见",
+    "bullets": [],
+    "paragraphs": [
+      "**为什么做。** 历史里那行「处理过程 · 3 次工具调用」看着像三次都成功；实际可能夹着一次被拒或报错——收起来之后这些过程性信息就没了，用户只看到结论和一句「做完了」。",
+      "**做了什么。**",
+      "| 位置 | 变化 || --- | --- || AgentStreamBubble.tsx 的 MessageProcess | 统计 ToolTrace.status 为 error / denied 的步数，> 0 时摘要里追加「N 步没成」 |",
+      "**怎么验证。** AgentStreamBubble.test.tsx 35 → 36 例（两次调用、一次失败 → 摘要含「1 步没成」）；web 全量 **6746 例全绿**；typecheck 通过。",
+      "**留白。** 只说「几步没成」，不点名是哪个工具——展开即可看到；摘要行再长会挤掉「思考 N 字」。"
+    ]
+  },
+  {
     "version": "d.398.4.137.14",
     "date": "2026-11-19",
     "title": "标题里的版本号，和 package.json 对一下",

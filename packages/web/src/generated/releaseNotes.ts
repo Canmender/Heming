@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.398.4.138.14",
+    "date": "2026-11-19",
+    "title": "失败的步骤，收起来也看得见",
+    "bullets": [
+      "收起的过程行里会写「1 步没成」这类提示。",
+      "不用点开也能知道这条回答里有没有被拒或报错的工具调用。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.398.4.137.14",
     "date": "2026-11-19",
     "title": "标题里的版本号，和 package.json 对一下",

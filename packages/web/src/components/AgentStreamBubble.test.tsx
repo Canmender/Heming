@@ -590,3 +590,21 @@ describe("MessageProcess：落定后的过程默认收起（d.352）", () => {
   });
 
 
+
+  it("有失败的工具步时，收起摘要里写「N 步没成」（d.399）", () => {
+    render(
+      <MessageProcess
+        steps={[
+          { kind: "tool", toolId: "t1" },
+          { kind: "tool", toolId: "t2" },
+        ]}
+        tools={[
+          { id: "t1", name: "file_read", args: "{}", status: "error", result: "失败", startedAt: 1, endedAt: 2 },
+          { id: "t2", name: "file_read", args: "{}", status: "ok", result: "内容", startedAt: 1, endedAt: 2 },
+        ]}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "处理过程" });
+    expect(toggle.textContent).toContain("2 次工具调用");
+    expect(toggle.textContent).toContain("1 步没成");
+  });

@@ -1,4 +1,4 @@
-- 当前版本：`d.345.4.128.12`（semver `345.4.128` / Windows `345.4.128.12`；d.344 的模型页几轮是同日另一条工作线，细节见 CHANGELOG）
+﻿- 当前版本：`d.345.4.128.12`（semver `345.4.128` / Windows `345.4.128.12`；d.344 的模型页几轮是同日另一条工作线，细节见 CHANGELOG）
 - d.345 这一轮：工具跑完之后，仓库自己的检查也能说话（PostToolUse hooks）——`.heming/hooks.json` 的规则新增 `on: "pre" | "post"`（缺省 pre）：执行后规则在工具真正跑完之后执行，**不能拒绝**已发生的调用，结论作为说明附在工具结果文本后面。`packages/web/src/lib/hitl/hooks.ts`：`ToolHookRule.phase`、`parseHooksConfig` 校验 `on`、`matchHooks(..., phase)`、`buildHookPayload({phase, result})`（post 时 `event: "PostToolUse"`、`result.text` 截 4000 字）、新增 `interpretPostHookResult`（超时 / exit2 / 其它非零 / stdout `{"note"}` 五档）与 `postHookNoteText`（最多 5 条、每条 400 字）；`hookRunner.ts` 抽出 `execRaw` 并新增 `runPost`；`agentStream.ts` 新增 `deps.postToolUse`，在工具结果收口时把说明拼进 `finalResult.text`；`ChatPage.tsx` 接 `toolHooksRef.current!.runPost(...)`；CLI 侧 `packages/cli/src/toolHooks.ts` 抽出 `execHookRule`、新增 `createCliPostHookRunner`，`tooling.ts` 的 `createCliTooling({ postHooks })` 在 `execute` 末尾拼说明，`run.ts`/`index.ts`/`mcpServe.ts` 接线，`describeCliHooks` 显示「（执行前 N、执行后 M）」。执行后检查自己抛错/超时只丢一条说明，绝不把成功报成失败。测试：web `hooks.test.ts` 28 例、`hookRunner.test.ts` 12 例；CLI `toolHooks.test.ts` 27 例；CLI 21 文件 / 472 例、web 453 文件 / 6507 例全绿。（semver `343.4.127` / Windows `343.4.127.12`；d.341–d.342 的模型页额度几轮是同日另一条工作线，细节见 CHANGELOG，未逐条回填这里）
 - d.343 这一轮：工作区里任何一份文本文件都能当 MCP 资源读——`heming mcp serve` 新增 `resources/templates/list`，模板 URI 是 `heming://workspace/{path}`：`packages/cli/src/mcpCatalog.ts` 新增 `MCP_RESOURCE_TEMPLATE_URI` / `McpResourceTemplate` / `describeResourceTemplates()` / `readWorkspaceResource({ cwd, uri, bridge? })`（URI 必须是工作区内的相对路径、`..` 与绝对路径与别的命名空间都拒、只给文本、二进制/目录/不存在/符号链接各一句人话、超 `MCP_CATALOG_MAX_FILE_CHARS` 截断并指回 `file_read`）；`packages/cli/src/mcp.ts` 的 `McpContext` 新增 `readResource?`，新增 `resources/templates/list`（没有模板能力时回空表而不是报错），`resources/read` 先查固定名单、再走模板读盘，`initialize` 在只有模板时也声明 `resources` 能力，`instructions` 写明模板用法；`packages/cli/src/mcpServe.ts` 注入 `readResource`。模板只读、不参与订阅推送。测试：`mcpCatalog.test.ts` +5、`mcp.test.ts` +5，CLI 21 文件 / 466 例全绿；真机 `mcp serve` 喂五条消息确认模板列出、正文读回、越界 URI 被 -32602 拒且不读盘。
 - d.339 这一轮（同日另一条工作线）：远端 MCP 服务不用再在本地起代理进程——`heming run --mcp` 的 `.heming/mcp.json` 除 `command`（stdio）外新增 `url` + `headers`（HTTP）。`packages/cli/src/mcpClient.ts` 把 `McpServerConfig` 拆成 `McpStdioConfig | McpHttpConfig` 并导出 `isHttpConfig` 收窄；`connectMcpServer` 按形状分派到新的 `connectHttpMcpServer`（每条请求一次 POST：`initialize` → `notifications/initialized` → `tools/list`，之后 `tools/call` 复用；`accept: application/json, text/event-stream`；`AbortController` 管超时；服务端下发 `mcp-session-id` 后后续请求自动带上；`text/event-stream` 走 `pickSseMessage(text, wantId)` 只取 id 对上的那条、通知丢弃；`application/json` 直接解析；错误分四类：`连不上（地址）：原因`、`返回 HTTP 503：维护中`、`在 60ms 内没有回应 initialize`、`回应看不懂（initialize）：<html>…`；`close()` 只置标记，没有进程要收）；`checkServerDecl` 新增校验（`command` 与 `url` 同时写就拒、`url` 必须 http(s)、`headers` 值必须字符串、走 HTTP 时写 `args`/`env`/`cwd` 就拒，缺两者的文案改成「需要 command（要启动什么）或 url（远端地址）」）。测试：新增 `packages/cli/src/mcpClientHttp.test.ts` 7 例（起真 `node:http` 服务：JSON 四步 + session 只在 initialize 那次为空之后都带 + 自定义头每条都在；SSE 混通知只取 id 对上的；`isError` 透传；HTTP 503；`timeoutMs: 60` 的文案；`text/html` 报「看不懂」；`close()` 后不再发请求）、`mcpClient.test.ts` +1 例覆盖新校验，CLI 21 文件 / 441 例全绿。真机冒烟：假模型 + 真 HTTP MCP 服务，`exec --json --mcp --allow-danger` → `exit 0`、`mcp__remote__upper` 成功、工具结果回到模型、服务端记录 `initialize → notifications/initialized → tools/list → tools/call` 且后三条带 session。留白：HTTP 只做「发一条等一条」、没有 server-initiated 推送与断线重连；作为客户端仍只接 `tools`；每次运行现连现断；远端工具一律按 danger 处理。
@@ -6589,6 +6589,13 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 教训：**凡是会改变「折叠/占用」的入口都要显式刷新**——目前共三处：自动折（`prepareHistory` 里本来就跟着新一轮走）、按钮、`/compact`。
 - **运行页顶上一排「跳到哪一块」（d.398）**：★ 两页签合并的代价全在运行页上（轨迹、智能体、路由分组、用量、备份与同步 + 四张「更多」卡），找东西得一路滚；现在顶部有六个锚点：轨迹 / 智能体 / 路由分组 / 用量 / 备份与同步 / 更多，点一下 `jumpToRun(id)` 滚到对应块。★ 各块容器加了稳定 id：`run-trace`、`run-agents`、`run-groups`、`run-usage`、`run-backup`、`run-more`，表在 `RUN_ANCHORS`；只滚不筛、不切页签。★ jsdom 没有 `scrollIntoView`，`jumpToRun` 先判函数存在再调，测试里静默跳过。★ `npx vitest run src/components/ModelPage.test.tsx` 127 例全绿、typecheck 通过；留白：没有「当前在哪块」高亮、不做吸顶、四张卡本轮没收成一处。
 
+## 「处理过程」摘要里的失败步数（d.398.4.138）
+
+- `MessageProcess` 遍历 `steps`，按 `toolId` 取 `ToolTrace`；`status` 为 `error` / `denied` 计入 `failed`，摘要里 `failed > 0 ? \`${failed} 步没成\``。
+- 与 d.393 的工具耗时同一处拼装，顺序：调用次数 → 思考字数 → 工具耗时 → 失败步数。
+- 只报数量不点名工具：点名要读 toolName，摘要行会挤掉其它信息，展开即可看到。
+
+
 ## 7. 快速上手命令
 
 ```bash
@@ -6607,6 +6614,7 @@ node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先�
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
+
 
 
 
