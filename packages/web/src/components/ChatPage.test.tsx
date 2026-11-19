@@ -1854,6 +1854,33 @@ describe("ChatPage", () => {
     expect(screen.queryByTestId("live-draft-recovered")).not.toBeInTheDocument();
     expect(listLiveDrafts("c1")).toEqual([]);
   });
+  it("中断的草稿可以「接着跑」：半截交给模型续写，草稿随即清掉（d.371）", async () => {
+    bindAssistant();
+    saveLiveDraft(
+      "c1",
+      {
+        streamId: "s9",
+        agentId: "system-assistant",
+        text: "我先看一下入口文件在哪里，然后把整条调用链都理出来",
+      },
+      Date.now(),
+    );
+    mockMessagesFetch([msg("m1", "看看入口", "2026-11-19T04:00:00.000Z")]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    await screen.findByTestId("live-draft-recovered");
+    fireEvent.click(screen.getByRole("button", { name: "接着跑" }));
+    await act(async () => {});
+
+    // 草稿交出去之后就清掉，不能下次重开又冒出来一份
+    expect(listLiveDrafts("c1")).toEqual([]);
+    expect(screen.queryByTestId("live-draft-recovered")).not.toBeInTheDocument();
+    // 发出去的这一轮要带上「接着写、别重复」和那半截原文
+    const sent = JSON.stringify(vi.mocked(streamChat).mock.calls);
+    expect(sent).toContain("从断点接着写");
+    expect(sent).toContain("整条调用链");
+  });
 
   it("动作行模型徽标：未绑定显示「未绑定模型」，点击就地开切换弹窗（d.195）", async () => {
     mockMessagesFetch([]);
@@ -7565,5 +7592,6 @@ describe("ChatPage 中断/关闭后接着做（d.189）", () => {
   });
 
 });
+
 
 

@@ -6389,7 +6389,29 @@ export function ChatPage({
                 <span>下面是当时已经生成的部分，没有收进会话记录。</span>
                 <button
                   type="button"
-                  className="ml-auto ui-btn h-6 px-2 text-ui-xs"
+                  className="ui-btn h-6 px-2 text-ui-xs"
+                  title="把已经写出来的这半截交给模型，从断点接着写，不重新开头"
+                  onClick={() => {
+                    // d.371：先确认这轮起得来（没有端到端封条时 startRun 会直接返回），
+                    // 起不来就留着草稿——不能因为点了一下就把用户那半截弄丢。
+                    if (!hasSubtle()) {
+                      setSendNotice(NO_E2E_NOTICE);
+                      return;
+                    }
+                    const tail = draft.text.slice(-4000);
+                    startRun(
+                      [{ agentId: draft.agentId, name: nameOf(draft.agentId) }],
+                      `上一轮生成到一半被中断了。下面是你已经写出来的部分，请从断点接着写下去：不要重新开头，也不要重复已经写过的句子。\n\n${tail}`,
+                    );
+                    clearLiveDraft(convId, draft.streamId);
+                    setRecoveredDrafts(listLiveDrafts(convId));
+                  }}
+                >
+                  接着跑
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn h-6 px-2 text-ui-xs"
                   onClick={() => {
                     clearLiveDraft(convId, draft.streamId);
                     setRecoveredDrafts(listLiveDrafts(convId));
