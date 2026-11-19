@@ -1,4 +1,40 @@
-﻿## d.408.4.141.14（2026-11-19）— 更新日志里的表格终于能摊开了
+## d.409.4.141.14（2026-11-19）— 请求头能照着常见客户端抄
+
+### 为什么做
+
+有些中转按客户端名字认人：从 Codex CLI 发出去的请求、从 Cline 发出去的请求，待遇不一样。
+参考实现里一直有一份「常见客户端的请求头」清单（`internal/gui/assets/headerpresets.js`，
+每条的值都标了出处、版本对到 2026-11-11），页面这边只有一行空白框——想抄只能自己一个个字打。
+
+### 做了什么
+
+| 之前 | 现在 |
+| --- | --- |
+| 请求头只有空白框 | 框上面多一个下拉：选一个客户端，把它的头填进框里 |
+| 抄错一个大小写就认不出来 | 名字按第一个冒号切、不分大小写比对，同一个头不会抄出两份 |
+| 抄进来会盖掉自己写的 | 你自己写过值的行原样留着，只补「没写值」和「还没有」的 |
+| 抄完以为已经生效 | 抄的只是草稿，点「保存请求设置」才真的发出去 |
+
+- 七份预设：Codex CLI、Gemini CLI、OpenCode、Kilo Code、Cline、Roo Code、Cherry Studio。
+- 清单与合并规则在 `packages/web/src/lib/magpieHeaderPresets.ts`（`HEADER_PRESETS`、`applyHeaderPreset`）。
+- 页面只多了一个下拉（`aria-label="抄一份常见客户端的请求头"`），选完自动回到「选一个客户端」。
+
+### 怎么验证
+
+- `npx vitest run src/lib/magpieHeaderPresets.test.ts` 7 例（空草稿整份抄进去、已有的留着、
+  同名没值的补上、不分大小写也不重复、空行顺手去掉、抄两遍不会变两份）
+- `npx vitest run src/components/ModelPage.test.tsx` 132 例（新增一例：抄进来只在草稿里、一个字都没发；
+  点保存才发 `header.X-Title=…` 与 `header.HTTP-Referer=…`）
+- 定向 `ModelPage + magpieHeaderPresets + magpieSearch + components/model` 16 文件 / 223 例全绿
+- `pnpm --filter @heming/web typecheck` 通过
+
+### 留白
+
+- 预设是「那一刻的版本号」：客户端升级之后这些值会旧，页面不做自动更新。
+- 不提供 Claude Code 的请求头——参考实现也没给，理由是「不伪造那个客户端」。
+- 只抄请求头，不动 `user-agent` 设置项（那件事在「端的小开关」里，两者别混）。
+
+## d.408.4.141.14（2026-11-19）— 更新日志里的表格终于能摊开了
 
 **为什么做。** 之前每一版说明里只要有表格，构建时会被当成「折行的续行」，所有行被压成一行（\| 位置 | 变化 || --- | --- || …\），在界面里读不出来是张表。
 

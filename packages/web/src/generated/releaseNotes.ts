@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.409.4.141.14",
+    "date": "2026-11-19",
+    "title": "请求头能照着常见客户端抄",
+    "bullets": [],
+    "paragraphs": [
+      "1. 来源行「更多设置 › 请求」里多了一个下拉：照着常见客户端抄一份请求头。2. 可抄的七家：Codex CLI、Gemini CLI、OpenCode、Kilo Code、Cline、Roo Code、Cherry Studio。3. 抄的时候只补空缺：你自己写过值的行原样留着，不会被盖掉。4. 抄进来的只是草稿，点「保存请求设置」才真的发出去。5. 抄两遍不会变成两份，同一个头也不会重复。6. 有些中转按客户端名字认人，抄对一份才有对应待遇——这也是它存在的理由。"
+    ]
+  },
+  {
     "version": "d.408.4.141.14",
     "date": "2026-11-19",
     "title": "更新日志里的表格终于能摊开了",

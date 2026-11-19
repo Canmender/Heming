@@ -1756,6 +1756,39 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(screen.getByRole("tab", { name: "来源" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("从常见客户端抄一份请求头：只填进草稿，保存时才发出去", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+
+    // 先自己写一行，抄预设时不该被盖掉。
+    const box = screen.getByLabelText("自定义请求头") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "X-Title: 我自己的" } });
+    fireEvent.change(screen.getByLabelText("抄一份常见客户端的请求头"), {
+      target: { value: "Cherry Studio" },
+    });
+
+    // 抄进来的两份头都在草稿里，自己的那行没被盖。
+    expect((screen.getByLabelText("自定义请求头") as HTMLTextAreaElement).value).toBe(
+      "X-Title: 我自己的\nHTTP-Referer: https://cherry-ai.com",
+    );
+    // 抄的时候什么都没发。
+    expect(calls.some((call) => call[0] === "provider" && call[1] === "set")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存请求设置" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "provider",
+        "set",
+        "mock",
+        "header.X-Title=我自己的",
+        "header.HTTP-Referer=https://cherry-ai.com",
+      ]),
+    );
+  });
+
   it("网页搜索用谁：选中就保存，清空就清回默认", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);

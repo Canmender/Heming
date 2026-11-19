@@ -155,6 +155,7 @@ import {
 } from "../lib/magpieSourceWire.js";
 import { describeProxy, parseProxy, proxyArgs, proxyProblem, type ProxyMode } from "../lib/magpieProxy.js";
 import { parseSearchRoute, type SearchRoute } from "../lib/magpieSearch.js";
+import { HEADER_PRESETS, applyHeaderPreset } from "../lib/magpieHeaderPresets.js";
 import {
   CHECKIN_SWITCHES,
   CHECKIN_VENDORS,
@@ -3116,6 +3117,34 @@ export function ModelPage() {
                                 value={providerForm.headerText}
                                 onChange={(event) => setProviderForm({ ...providerForm, headerText: event.target.value })}
                               />
+                              <label className="grid gap-1 sm:col-span-2">
+                                <span className="ui-caption">从常见客户端抄一份请求头</span>
+                                <select
+                                  className="ui-input"
+                                  aria-label="抄一份常见客户端的请求头"
+                                  defaultValue=""
+                                  onChange={(event) => {
+                                    const preset = HEADER_PRESETS.find((item) => item.name === event.target.value);
+                                    event.currentTarget.value = "";
+                                    if (preset) {
+                                      setProviderForm({
+                                        ...providerForm,
+                                        headerText: applyHeaderPreset(providerForm.headerText, preset),
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <option value="">选一个客户端，把它的请求头填进上面（你在上面写过的值不会被盖掉）</option>
+                                  {HEADER_PRESETS.map((preset) => (
+                                    <option key={preset.name} value={preset.name}>
+                                      {preset.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="ui-caption">
+                                  有些中转按客户端名字认人，抄对一份才有对应待遇。这几行只是草稿，点「保存请求设置」才真的发出去。
+                                </span>
+                              </label>
                               {requestHeaders.rejected.length > 0 && (
                                 <p className="ui-caption text-danger sm:col-span-2">
                                   这几行看不懂，先不发：{requestHeaders.rejected.join("、")}
