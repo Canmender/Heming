@@ -19,6 +19,23 @@ export type DomesticSite = "cn" | "intl";
 export interface DomesticAgent {
   /** 内核 agent id，也是 `accounts --json` 里的 `agent`。 */
   agent: string;
+  /**
+   * 内核的订阅 / provider id：`quota refresh` 要认的名字。
+   *
+   * 多数端它和 `agent` 一样（内核把内置订阅搬到了插件上，id 不变）；
+   * 小米的例外——agent 叫 `mimo`，订阅 id 是 `mimo-app`（`internal/provider/mimo.go`
+   * 的 `MiMoID`）。`quota refresh mimo` 会打到另一个同名的按量 provider 上、
+   * 静默失败，所以这条必须单独写对。
+   */
+  accountId: string;
+  /**
+   * `plugin list --json` 里能证明「这家插件已装」的 provider id（除 accountId 之外）。
+   *
+   * 一个 npm 包可能服务两个站（workbuddy/workbuddy-ai、qoder/qoder-cn、
+   * minimax-code/minimax-code-global），装一个两个 id 都会出现；这里补上另一个，
+   * 免得点其中一张卡时误判「没装」重复 `plugin add`。
+   */
+  providerIds?: readonly string[];
   /** 社区插件的 npm 包名（内核 movers 表或签到实现里那个）。 */
   pkg: string;
   label: string;
@@ -34,6 +51,8 @@ export interface DomesticAgent {
 export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   {
     agent: "workbuddy",
+    accountId: "workbuddy",
+    providerIds: ["workbuddy-ai"],
     pkg: "@magpie-community/opencode-workbuddy-auth",
     label: "WorkBuddy",
     desc: "腾讯 · 每天签到领点数",
@@ -43,6 +62,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "qoder-cn",
+    accountId: "qoder-cn",
+    providerIds: ["qoder"],
     pkg: "@magpie-community/opencode-qoder-auth",
     label: "Qoder CN",
     desc: "阿里 · 每天领免费额度",
@@ -51,6 +72,7 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "trae-cn",
+    accountId: "trae-cn",
     pkg: "@magpie-community/opencode-trae-auth",
     label: "Trae CN",
     desc: "字节 · 每天领免费额度",
@@ -59,6 +81,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "minimax-code",
+    accountId: "minimax-code",
+    providerIds: ["minimax-code-global"],
     pkg: "@magpie-community/opencode-minimax-auth",
     label: "MiniMax Code",
     desc: "MiniMax · 每天领免费额度",
@@ -67,6 +91,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "mimo",
+    // 内核的订阅 id 是 MiMoID = "mimo-app"，不是 agent 名 "mimo"。
+    accountId: "mimo-app",
     pkg: "@magpie-community/opencode-mimo-auth",
     label: "MiMo Code",
     desc: "小米",
@@ -75,6 +101,7 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "zcode",
+    accountId: "zcode",
     pkg: "@magpie-community/opencode-zcode-auth",
     label: "ZCode",
     desc: "智谱",
@@ -83,6 +110,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "workbuddy-ai",
+    accountId: "workbuddy-ai",
+    providerIds: ["workbuddy"],
     pkg: "@magpie-community/opencode-workbuddy-auth",
     label: "WorkBuddy AI",
     desc: "腾讯 · 每天签到领点数",
@@ -92,6 +121,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "qoder",
+    accountId: "qoder",
+    providerIds: ["qoder-cn"],
     pkg: "@magpie-community/opencode-qoder-auth",
     label: "Qoder",
     desc: "阿里 · 每天领免费额度",
@@ -100,6 +131,8 @@ export const DOMESTIC_AGENTS: readonly DomesticAgent[] = [
   },
   {
     agent: "minimax-code-global",
+    accountId: "minimax-code-global",
+    providerIds: ["minimax-code"],
     pkg: "@magpie-community/opencode-minimax-auth",
     label: "MiniMax Code（国际）",
     desc: "MiniMax · 每天领免费额度",
@@ -127,6 +160,17 @@ export const DOMESTIC_KEY_NOTE =
 
 /** 能签到的端（`accounts checkin` 覆盖的范围），空状态的说明里点一下名。 */
 export const CHECKIN_VENDORS = "WorkBuddy、Qoder、Trae CN、MiniMax Code";
+
+/**
+ * 判断插件是否已装：认订阅 id（accountId）或同包的另一个站（providerIds）。
+ *
+ * 不认 `agent`——小米的 agent 叫 `mimo`，可插件声明的 provider id 是 `mimo-app`；
+ * 恰好有个按量 provider 也叫 `mimo`，拿 agent 去比会把它误当成「插件装过了」。
+ */
+export function domesticPluginInstalled(item: DomesticAgent, providers: ReadonlySet<string>): boolean {
+  if (providers.has(item.accountId)) return true;
+  return Boolean(item.providerIds?.some((id) => providers.has(id)));
+}
 
 /**
  * `plugin list --json` 里插件服务的 provider id。

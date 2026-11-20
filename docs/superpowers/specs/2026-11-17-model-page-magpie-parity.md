@@ -328,6 +328,39 @@ id 由 `:243 TemplateIDs` 给成 `smart-split` / `cheap-first` / `never-stuck`�
 `undo` 只在内核真说过「Restored」时给——那是它唯一能拿回来的情形；单纯「换了几份」不那么给，
 免得按钮点了什么也不发生。`dismiss` 只是别再提，旧副本仍然留在那个目录里（文案照说）。
 
+### 3.13 所有来源汇总在一张卡 + 国产智能体接得进来
+
+以前「订阅账号」「国产智能体」「已添加的来源」分三张卡、分三段滚动，找一家来源要在页面里来回翻。
+现在三类合并进同一张卡，统一从上往下看；添加入口（预设卡片、「加一个其他地址」、国产端卡片）也都在这一页上。
+
+| 以前 | 现在 |
+| --- | --- |
+| 「订阅账号」一张卡 | 一张统一的来源卡：订阅账号列表 → 借本机账号 + 国产端 → 已添加的来源 |
+| 「已添加的来源」另一张卡（原本落在 `cli &&` 之外） | 并进上面那张卡，作为卡内一段 |
+| 国产端藏在「登录一个账号」折叠里，有账号就默认收起 | 折叠去掉，标题固定为「借一个本机已登录的账号」，国产端卡片常显 |
+
+锚点（`SOURCE_ANCHORS`：服务商 / 订阅 / 国产端 / 已添加 / 模型清单）指向卡内的小标题，仍是页内跳转。
+
+**国产智能体接不进来的 BUG（三处根因，一起修）**：
+
+1. **折叠隐藏（主因）**：国产端卡片原本挂在「再加一个账号」的 `<details>` 里，`addAccountOpen`
+   跟着「有没有账号」走——只要用户已经登录过任意一家，国产端卡片就默认收起，根本看不见入口。
+   现在去掉这个折叠与对应 state/effect，国产端卡片与登录网格一直摊开。
+2. **provider id 认错**：`pluginProviders` 来自 `plugin list --json` 的 providers[].id（插件声明的订阅 id），
+   旧代码拿它跟卡片的 `agent`（内核智能体 id）比，两个不是一回事。最典型是小米：agent 叫
+   `mimo`，插件声明的 provider id 却是 `mimo-app`（`vendor/magpie-core/internal/provider/mimo.go`
+   的 `MiMoID`）；`has("mimo")` 永远为假，于是每次点都重装插件、还假报「已接进和鸣」。
+   `quota refresh mimo` 更打到了另一个同名的按量 provider，静默失败、额度一直不刷新。
+   修法：`DomesticAgent` 增加必填 `accountId`（订阅 id，refresh 用）与可选 `providerIds`
+   （同一个 npm 包服务的另一个站）；新增 `domesticPluginInstalled(item, providers)` 只认
+   `accountId` / `providerIds`，**刻意不认 `agent`**——否则那个恰好也叫 `mimo` 的按量 provider
+   会被误判成「插件已装」。workbuddy↔workbuddy-ai、qoder-cn↔qoder、minimax-code↔minimax-code-global
+   三对同包站互相登记；`accounts add` 仍走内核别名（`mimo` 可用），`quota refresh` 改用
+   `accountId`。
+3. **测试盲点**：原来 `parsePluginProviders('{"providers":[{"id":"mimo"}]}')` 硬编码了错 id，
+   「插件已装」用例也只喂理想化的 `qoder`；现在补上 `mimo-app` 不重装、同包两站互认、
+   `quota refresh mimo-app` 三条用例，把这条链锁住。
+
 ## 4. 全局模型设置与看图/画图模型（`GlobalModelSettings.tsx`、`ImageModelSettings.tsx`）
 原版 magpie 把这些放在 Settings › Models，和鸣放在**来源**分区末尾（可用模型清单之下）的「全局模型设置」「看图与画图模型」两个折叠区。
 

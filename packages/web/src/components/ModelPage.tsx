@@ -166,6 +166,7 @@ import {
   DOMESTIC_AGENTS,
   DOMESTIC_GROUPS,
   DOMESTIC_KEY_NOTE,
+  domesticPluginInstalled,
   parseCheckin,
   parsePluginProviders,
   parseSettingValues,
@@ -498,16 +499,6 @@ export function ModelPage() {
    * 切号时也留在这一档上，方便连续处理同一类账号。
    */
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
-  /**
-   * 「再加一个账号」那段（登录网格与国产智能体）：有账号时默认收起——进来是看额度
-   * 的，不是来登录的；一个账号都没有时默认摊开，那才是这会儿唯一的下一步。
-   */
-  const [addAccountOpen, setAddAccountOpen] = useState(() => accounts.length === 0);
-  /** 账号从「一个都没有」变成「有了」时自动收起那段，反之摊开。 */
-  const noAccounts = accounts.length === 0;
-  useEffect(() => {
-    setAddAccountOpen(noAccounts);
-  }, [noAccounts]);
   const visibleAccounts = useMemo(
     () => filterAccounts(accounts, accountFilter),
     [accounts, accountFilter],
@@ -1680,7 +1671,9 @@ export function ModelPage() {
     const key = `domestic:${item.agent}`;
     setAccountBusy(key);
     try {
-      if (!pluginProviders.has(item.agent)) {
+      // plugin list 的 provider id 与卡片 agent id 不一定同一个（小米 agent=mimo、
+      // 订阅 id=mimo-app），一个包还会服务两个站；交给 helper 一并认，别重复装。
+      if (!domesticPluginInstalled(item, pluginProviders)) {
         const result = await cli.cli(["plugin", "add", item.pkg]);
         if (!result.ok) {
           const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
@@ -1695,8 +1688,9 @@ export function ModelPage() {
     }
     await runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent]);
     // 刚登录完，额度缓存可能还是空的：现在就问一次厂商，卡片上立刻有数。
+    // 用订阅 id（accountId），不是 agent 名——小米的 "mimo" 会打到别的 provider 上。
     try {
-      await cli.cli(["quota", "refresh", item.agent]);
+      await cli.cli(["quota", "refresh", item.accountId]);
       await loadAccounts();
     } catch {
       // 刷新失败不影响登录本身，下一次「重读全部」会补上。
@@ -2432,15 +2426,8 @@ export function ModelPage() {
                     </li>
                   )}
                 </ul>
-                <details
-                  className="ui-disclosure mt-3 rounded-xl border border-line bg-subtle px-3 py-2.5"
-                  open={addAccountOpen}
-                  onToggle={(event) => setAddAccountOpen(event.currentTarget.open)}
-                >
-                  <summary className="text-ui-md font-semibold">
-                    <ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                    {accounts.length === 0 ? "登录一个账号" : "再加一个账号"}
-                  </summary>
+                <div className="mt-3 rounded-xl border border-line bg-subtle px-3 py-2.5">
+                  <p className="text-ui-md font-semibold">借一个本机已登录的账号</p>
                   <p className="mt-1 ui-caption">
                     这些软件里已经登录的订阅可以直接借给和鸣用：选一个登录，额度、重置时间与余额就会出现在上面。
                   </p>
@@ -2538,7 +2525,871 @@ export function ModelPage() {
                       ))}
                     </p>
                   </div>
-                </details>
+                </div>
+                <div className="mt-4 border-t border-line pt-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 id="source-added" className="ui-section-title">已添加的来源（{providers.length}）</h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        disabled={!cli || testingEvery || providers.length === 0}
+                        title="一家一家真的发一个小请求；结论写在各自那行上，最后报个数。"
+                        onClick={() => void testEveryProvider()}
+                      >
+                        {testingEvery ? "正在一家家测…" : "全部测一遍"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm" variant="ghost"
+                        disabled={!cli}
+                        aria-expanded={custom.open}
+                        onClick={() => setCustom({ ...custom, open: !custom.open })}
+                      >
+                        {custom.open ? "收起这一栏" : "加一个其他地址"}
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-1 ui-caption">
+                    现成的服务商用上面「API Key 服务商」；中转、局域网或自建接口加在这里。
+                  </p>
+                  {custom.open && (
+                    <div className="rta-enter mt-3 grid gap-2 rounded-xl border border-line bg-subtle p-3 sm:grid-cols-2">
+                      <TextField
+                        label="来源名称"
+                        placeholder="名称（如 relay）"
+                        value={custom.id}
+                        onChange={(event) => setCustom({ ...custom, id: event.target.value })}
+                      />
+                      <TextField
+                        label="接口地址"
+                        placeholder="https://host/v1"
+                        value={custom.url}
+                        error={customUrlCheck?.error ?? null}
+                        hint={
+                          customUrlCheck && !customUrlCheck.error
+                            ? customUrlCheck.hint ?? undefined
+                            : undefined
+                        }
+                        onChange={(event) => setCustom({ ...custom, url: event.target.value })}
+                        onBlur={() => {
+                          // 能识别的地址就地规范成最终会保存的样子（补 http(s)、去尾斜杠）。
+                          if (customUrlCheck && !customUrlCheck.error && customUrlCheck.url) {
+                            setCustom((current) => ({ ...current, url: customUrlCheck.url }));
+                          }
+                        }}
+                      />
+                      <TextField
+                        label="自定义 Key"
+                        type="password"
+                        placeholder="API Key（可留空：有些中转不校验 Key）"
+                        value={custom.key}
+                        error={customKeyCheck?.error ?? null}
+                        hint={
+                          !customKeyCheck?.error && customKeyCheck?.warning
+                            ? customKeyCheck.warning
+                            : undefined
+                        }
+                        onChange={(event) => setCustom({ ...custom, key: event.target.value })}
+                      />
+                      <TextField
+                        label="模型列表"
+                        className="sm:col-span-2"
+                        placeholder="模型 id，逗号分隔（可留空自动读取）"
+                        value={custom.models}
+                        onChange={(event) => setCustom({ ...custom, models: event.target.value })}
+                      />
+                      {customError && (
+                        <p role="alert" className="sm:col-span-2 ui-caption text-danger">
+                          {customError}
+                        </p>
+                      )}
+                      <div className="flex gap-2 sm:col-span-2">
+                        <Button
+                          type="button"
+                          size="md" variant="primary"
+                          disabled={!custom.id.trim()}
+                          onClick={() => void addCustom()}
+                        >
+                          保存
+                        </Button>
+                        <Button
+                          type="button"
+                          size="md" variant="ghost"
+                          onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
+                        >
+                          取消
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {!cli && (
+                    <p className="mt-1 ui-caption">浏览器预览下只能查看：测试、换 Key 与删除来源请用桌面版。</p>
+                  )}
+                  <ul className="mt-2">
+                    {providers.map((row) => {
+                      const info = showCache[row.id];
+                      const quota = quotaByProvider.get(row.id);
+                      const badge =
+                        showLoading === row.id
+                          ? { label: "读取地址…", className: "bg-subtle-3 text-muted" }
+                          : PLAN_BADGE[info?.plan ?? "normal"];
+                      const tuneValues = {
+                        atOnce: providerForm.atOnce,
+                        rpm: providerForm.rpm,
+                        queue: providerForm.queue,
+                        quotaRest: providerForm.quotaRest,
+                        restCap: providerForm.restCap,
+                      };
+                      const tuneCommands = sourceTuneCommands(row.id, tuneValues);
+                      const tuneRejected = sourceTuneRejected(tuneValues);
+                      const modelsValues = {
+                        listed: providerForm.listed,
+                        refreshEvery: providerForm.refreshEvery,
+                        autoInclude: providerForm.autoInclude,
+                      };
+                      const modelsCommands = sourceModelsCommands(row.id, modelsValues);
+                      const profileValues = {
+                        free: providerForm.free,
+                        context: providerForm.context,
+                        family: providerForm.family,
+                        unmasked: providerForm.unmasked,
+                      };
+                      const profileCommand = sourceProfileCommand(row.id, profileValues);
+                      const profileRejected = sourceProfileRejected(profileValues);
+                      const requestHeaders = parseHeaderLines(providerForm.headerText);
+                      const wireValues = {
+                        userAgent: providerForm.userAgent,
+                        search: providerForm.search,
+                        compaction: providerForm.compaction,
+                      };
+                      const wireCommand = sourceWireCommand(row.id, wireValues);
+                      // show 里只写着「这家跟默认不一样」的地方：收起时也要说得出来，
+                      // 不然想问「这家改过什么」只能逐条展开点一遍。
+                      const tunedSummary = info?.flags ? describeShowFlags(info.flags) : "";
+                      return (
+                        <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
+                          <div className="flex w-full flex-wrap items-center gap-3">
+                            <Avatar name={row.kind} />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-1.5">
+                                <span className="truncate ui-body-sm font-semibold">{row.id}</span>
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${badge.className}`}
+                                >
+                                  {badge.label}
+                                </span>
+                                {row.off && (
+                                  // 用户自己停的：不是坏了，Key 与记录都在，只是智能体拿不到它的模型。
+                                  <span
+                                    className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
+                                    title="已停用：Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它"
+                                  >
+                                    已停用
+                                  </span>
+                                )}
+                                {tunedSummary && (
+                                  // 这家设过点什么：一句话挂在悬停里，行上只占两个字的位。
+                                  <span
+                                    className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
+                                    title={`这家跟默认不一样：${tunedSummary}`}
+                                  >
+                                    改过
+                                  </span>
+                                )}
+                                {quota && (
+                                  // 额度就写在这一行：测试、换 Key、删除都在这儿，不用去另一张卡里对。
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${QUOTA_BADGE[cardTone(quota)]}`}
+                                    title={`${quotaKindLabel(quota.kind)}${quota.plan ? ` · ${quota.plan}` : ""}${
+                                      quota.error ? `：${engineText(quota.error)}` : ""
+                                    }`}
+                                  >
+                                    {engineText(cardSummary(quota, now)) || "额度未知"}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="block truncate ui-caption">
+                                {row.kind}
+                                {row.host ? ` · ${row.host}` : ""}
+                                {row.models !== null ? ` · ${row.models} 个模型` : ""}
+                              </span>
+                              {row.fallback.length > 0 && (
+                                // 额度用完 / 被限流 / 连不上时，请求按这串顺序往下去。
+                                <span
+                                  className="block truncate ui-caption"
+                                  title={`没额度、被限流或连不上时，请求依次改用 ${row.fallback.join(" → ")}`}
+                                >
+                                  备用 {row.fallback.join(" → ")}
+                                </span>
+                              )}
+                              {row.usedBy.length > 0 && (
+                                // 谁在用这一家：删之前先看这一句，别把正在用的来源删了。
+                                <span
+                                  className="block truncate ui-caption"
+                                  title={`这些智能体现在用它：${row.usedBy.join("、")}`}
+                                >
+                                  ← {row.usedBy.join("、")}
+                                </span>
+                              )}
+                              {testState[row.id] && (
+                                // 测试结论就写在行上：通过带耗时，失败写「连不上」，原因在悬停里。
+                                <span
+                                  role="status"
+                                  className={`block truncate ui-caption ${
+                                    testState[row.id].state === "ok"
+                                      ? "text-success"
+                                      : testState[row.id].state === "bad"
+                                        ? "text-danger"
+                                        : "text-muted"
+                                  }`}
+                                  title={testState[row.id].detail}
+                                >
+                                  {testState[row.id].label}
+                                </span>
+                              )}
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={!cli}
+                              aria-expanded={advancedProvider === row.id}
+                              onClick={() => void toggleAdvanced(row.id)}
+                            >
+                              高级
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={!cli}
+                              busy={testState[row.id]?.state === "running"}
+                              onClick={() => void testProvider(row.id)}
+                            >
+                              测试
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={!cli}
+                              // 停用只是关掉开关：Key、模型记录、额度都还在，随时能开回来。
+                              onClick={() =>
+                                void run(row.off ? "启用来源" : "停用来源", ["provider", row.off ? "on" : "off", row.id], {
+                                  refresh: true,
+                                })
+                              }
+                            >
+                              {row.off ? "启用" : "停用"}
+                            </Button>
+                            <IconButton
+                              label={`删除来源 ${row.id}`}
+                              disabled={!cli}
+                              icon={<TrashIcon width={16} height={16} />}
+                              onClick={() =>
+                                setConfirmAction({
+                                  title: "删除来源？",
+                                  desc: `来源「${row.id}」删除后不可恢复（地址、Key 与模型记录一并移除）。`,
+                                  confirmLabel: "删除",
+                                  action: () =>
+                                    void run("删除来源", ["provider", "rm", row.id], { refresh: true }),
+                                })
+                              }
+                            />
+                          </div>
+                          {advancedProvider === row.id && (
+                            <div className="rta-enter mt-2 rounded-lg border border-line bg-subtle p-3">
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <div className="text-ui-sm font-semibold">{row.id} 的高级设置</div>
+                                {showCache[row.id]?.chat && (
+                                  <span
+                                    className="max-w-full truncate font-mono text-ui-xs text-muted"
+                                    title={showCache[row.id]?.chat}
+                                  >
+                                    {showCache[row.id]?.chat}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="mt-3">
+                                <div className="ui-micro">连接</div>
+                                <div className="mt-2 flex flex-wrap items-start gap-2">
+                                  <TextField
+                                    label="更新 Key"
+                                    type="password"
+                                    className="flex-1"
+                                    placeholder="换成新的 API Key（留空不改）"
+                                    value={providerForm.key}
+                                    error={
+                                      providerForm.key.trim() ? checkApiKey(providerForm.key).error : null
+                                    }
+                                    hint={
+                                      providerForm.key.trim() && !checkApiKey(providerForm.key).error
+                                        ? checkApiKey(providerForm.key).warning ?? undefined
+                                        : undefined
+                                    }
+                                    onChange={(event) => setProviderForm({ ...providerForm, key: event.target.value })}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm" variant="primary" className="mt-5"
+                                    disabled={
+                                      !cli ||
+                                      !providerForm.key.trim() ||
+                                      Boolean(providerForm.key.trim() && checkApiKey(providerForm.key).error)
+                                    }
+                                    onClick={() => void run("更新 Key", ["provider", "key", row.id, providerForm.key.trim()])}
+                                  >
+                                    更新 Key
+                                  </Button>
+                                </div>
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">来源分发策略</span>
+                                  <select
+                                    className="ui-input mt-2"
+                                    value={providerForm.routing}
+                                    onChange={(event) => setProviderForm({ ...providerForm, routing: event.target.value })}
+                                  >
+                                    <option value="">分发策略（保持默认）</option>
+                                    {GROUP_ROUTING.map((routing) => (
+                                      <option key={routing} value={routing}>
+                                        {ROUTING_LABEL[routing] ?? routing}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+
+                              <div className="mt-3">
+                                <div className="ui-micro">模型</div>
+                                <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+                                  <span className="ui-caption">
+                                    {info?.note
+                                      ? info.note
+                                      : showLoading === row.id
+                                        ? "读取模型清单…"
+                                        : "展开后读取这个来源现在暴露的模型。"}
+                                  </span>
+                                  <span className="flex gap-1">
+                                    {(["all", "best", "none"] as const).map((choice) => (
+                                      <Button
+                                        key={choice}
+                                        type="button"
+                                        size="sm" variant="ghost"
+                                        disabled={!cli}
+                                        title={PROVIDER_MODELS_CHOICE_HINT[choice]}
+                                        onClick={() =>
+                                          void runProviderModels(
+                                            row.id,
+                                            `设置 ${row.id} 的模型`,
+                                            providerModelsChoiceArgs(row.id, choice),
+                                          )
+                                        }
+                                      >
+                                        {PROVIDER_MODELS_CHOICE_LABEL[choice]}
+                                      </Button>
+                                    ))}
+                                    <Button
+                                      type="button"
+                                      size="sm" variant="ghost"
+                                      disabled={!cli}
+                                      title="重新问厂商要一次模型目录"
+                                      onClick={() =>
+                                        void runProviderModels(
+                                          row.id,
+                                          "重新读取模型目录",
+                                          refreshProviderModelsArgs(row.id),
+                                        )
+                                      }
+                                    >
+                                      重新读取
+                                    </Button>
+                                  </span>
+                                </div>
+                                {info && info.models.length > 0 && (
+                                  <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`${row.id} 的模型`}>
+                                    {info.models.map((model) => (
+                                      <li
+                                        key={model.id}
+                                        className="flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 text-ui-xs"
+                                      >
+                                        <span className="font-mono" title={model.id}>
+                                          {providerModelLabel(model)}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="text-muted hover:text-danger disabled:opacity-40"
+                                          aria-label={`移除模型 ${model.id}`}
+                                          disabled={!cli}
+                                          onClick={() =>
+                                            void runProviderModels(
+                                              row.id,
+                                              "移除模型",
+                                              removeProviderModelArgs(row.id, model.id),
+                                            )
+                                          }
+                                        >
+                                          ×
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {info && info.models.length === 0 && (
+                                  <p className="mt-2 ui-caption">这个来源现在一个模型都没暴露。</p>
+                                )}
+                                <div className="mt-2 flex flex-wrap items-start gap-2">
+                                  <TextField
+                                    label="添加模型"
+                                    className="flex-1"
+                                    placeholder="模型 id（如 deepseek/deepseek-chat）"
+                                    value={modelAdd[row.id] ?? ""}
+                                    onChange={(event) =>
+                                      setModelAdd((current) => ({ ...current, [row.id]: event.target.value }))
+                                    }
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm" variant="ghost" className="mt-5"
+                                    disabled={!cli || !(modelAdd[row.id] ?? "").trim()}
+                                    onClick={() =>
+                                      void runProviderModels(
+                                        row.id,
+                                        "添加模型",
+                                        addProviderModelArgs(row.id, modelAdd[row.id] ?? ""),
+                                      ).then((result) => {
+                                        if (result.ok) {
+                                          setModelAdd((current) => ({ ...current, [row.id]: "" }));
+                                        }
+                                      })
+                                    }
+                                  >
+                                    添加模型
+                                  </Button>
+                                </div>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  <TextField
+                                    label="模型目录地址"
+                                    placeholder="模型目录 URL（可选）"
+                                    value={providerForm.modelsUrl}
+                                    onChange={(event) => setProviderForm({ ...providerForm, modelsUrl: event.target.value })}
+                                  />
+                                  <TextField
+                                    label="备用模型"
+                                    placeholder="额度用完/故障时改用：provider/model1,provider/model2"
+                                    value={providerForm.fallback}
+                                    onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
+                                  />
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost" className="mt-2"
+                                  disabled={!cli || !providerForm.fallback.trim()}
+                                  onClick={() =>
+                                    void run("设置备用", [
+                                      "provider",
+                                      "fallback",
+                                      row.id,
+                                      ...providerForm.fallback
+                                        .split(/[,\s]+/)
+                                        .map((item) => item.trim())
+                                        .filter(Boolean),
+                                    ], { refresh: true })
+                                  }
+                                >
+                                  保存备用
+                                </Button>
+                                {row.fallback.length > 0 && (
+                                  <Button
+                                    type="button"
+                                    size="sm" variant="ghost" className="mt-2"
+                                    disabled={!cli}
+                                    onClick={() =>
+                                      void run("清掉备用", ["provider", "fallback", row.id, "none"], {
+                                        refresh: true,
+                                      })
+                                    }
+                                  >
+                                    清掉备用
+                                  </Button>
+                                )}
+                              </div>
+
+                              <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  更多设置（可选）：请求、调流、清单、它是什么、端的小开关
+                                </summary>
+                                <p className="mt-1 ui-caption">
+                                  这几块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
+                                </p>
+                                {info?.flags && describeShowFlags(info.flags) && (
+                                  <p className="mt-1 ui-caption">现在设着：{describeShowFlags(info.flags)}</p>
+                                )}
+
+                                <details className="ui-disclosure mt-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  请求（请求头 / 耐心 / 错误处理）
+                                </summary>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  <TextAreaField
+                                    label="自定义请求头"
+                                    hint="一行一个，写成「名称: 值」；值留空就是删掉这个头。"
+                                    placeholder={"X-Trace: 一批一批来\nX-Team: data"}
+                                    className="sm:col-span-2"
+                                    value={providerForm.headerText}
+                                    onChange={(event) => setProviderForm({ ...providerForm, headerText: event.target.value })}
+                                  />
+                                  <label className="grid gap-1 sm:col-span-2">
+                                    <span className="ui-caption">从常见客户端抄一份请求头</span>
+                                    <select
+                                      className="ui-input"
+                                      aria-label="抄一份常见客户端的请求头"
+                                      defaultValue=""
+                                      onChange={(event) => {
+                                        const preset = HEADER_PRESETS.find((item) => item.name === event.target.value);
+                                        event.currentTarget.value = "";
+                                        if (preset) {
+                                          setProviderForm({
+                                            ...providerForm,
+                                            headerText: applyHeaderPreset(providerForm.headerText, preset),
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <option value="">选一个客户端，把它的请求头填进上面（你在上面写过的值不会被盖掉）</option>
+                                      {HEADER_PRESETS.map((preset) => (
+                                        <option key={preset.name} value={preset.name}>
+                                          {preset.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="ui-caption">
+                                      有些中转按客户端名字认人，抄对一份才有对应待遇。这几行只是草稿，点「保存请求设置」才真的发出去。
+                                    </span>
+                                  </label>
+                                  {requestHeaders.rejected.length > 0 && (
+                                    <p className="ui-caption text-danger sm:col-span-2">
+                                      这几行看不懂，先不发：{requestHeaders.rejected.join("、")}
+                                    </p>
+                                  )}
+                                  {info?.flags && info.flags.headers.length > 0 && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
+                                      <p className="ui-caption">
+                                        现在设着：{info.flags.headers.map((item) => item.name).join("、")}
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          setProviderForm({
+                                            ...providerForm,
+                                            headerText: headersToText(info.flags?.headers ?? []),
+                                          })
+                                        }
+                                      >
+                                        拉下来改
+                                      </Button>
+                                    </div>
+                                  )}
+                                  <div className="flex gap-2">
+                                    <TextField
+                                      label="请求耐心"
+                                      placeholder="耐心（如 2m / off）"
+                                      value={providerForm.patience}
+                                      onChange={(event) => setProviderForm({ ...providerForm, patience: event.target.value })}
+                                    />
+                                    <label className="grid gap-1">
+                                      <span className="ui-caption">错误处理</span>
+                                      <select
+                                        className="ui-input"
+                                        value={providerForm.errors}
+                                        onChange={(event) => setProviderForm({ ...providerForm, errors: event.target.value })}
+                                      >
+                                        <option value="">错误处理（默认）</option>
+                                        <option value="magpie">统一处理</option>
+                                        <option value="pass">原样透传</option>
+                                      </select>
+                                    </label>
+                                  </div>
+                                  <div className="mt-2">
+                                    <Button
+                                      type="button"
+                                      size="sm" variant="primary"
+                                      disabled={!cli}
+                                      onClick={() => {
+                                        const pairs: string[] = [];
+                                        if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
+                                        if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
+                                        if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
+                                        if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
+                                        pairs.push(...requestHeaders.pairs);
+                                        if (!pairs.length) return;
+                                        void run("保存请求设置", ["provider", "set", row.id, ...pairs], { refresh: true });
+                                      }}
+                                    >
+                                      保存请求设置
+                                    </Button>
+                                  </div>
+                                </div>
+                              </details>
+
+                                <details className="ui-disclosure mt-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  调流（可选）：并发、排队、休息
+                                </summary>
+                                <p className="mt-1 ui-caption">
+                                  一个来源被打爆之前先自己踩刹车：多账号轮着上、限制每分钟请求、排个队，
+                                  额度用完和连续失败时歇一会儿。留空就是这次不改。
+                                </p>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  {SOURCE_TUNE_FIELDS.map((field) =>
+                                    field.options ? (
+                                      <label key={field.key} className="grid gap-1">
+                                        <span className="ui-caption">{field.label}</span>
+                                        <select
+                                          className="ui-input"
+                                          aria-label={field.label}
+                                          value={providerForm[field.key]}
+                                          onChange={(event) => tuneSetters[field.key](event.target.value)}
+                                        >
+                                          <option value="">不改</option>
+                                          {field.options.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <span className="ui-caption">{field.hint}</span>
+                                      </label>
+                                    ) : (
+                                      <TextField
+                                        key={field.key}
+                                        label={field.label}
+                                        hint={field.hint}
+                                        placeholder={field.placeholder}
+                                        value={providerForm[field.key]}
+                                        onChange={(event) => tuneSetters[field.key](event.target.value)}
+                                      />
+                                    ),
+                                  )}
+                                </div>
+                                {tuneRejected.length > 0 && (
+                                  <p className="mt-2 ui-caption text-danger">
+                                    这几格看不懂，先不发：{tuneRejected.join("、")}
+                                  </p>
+                                )}
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost" className="mt-2"
+                                  disabled={!cli || tuneCommands.length === 0}
+                                  onClick={() => {
+                                    void (async () => {
+                                      for (const command of tuneCommands) {
+                                        // 一条一条发：内核每个键各自校验，前一条失败不该挡住后面几条。
+                                        await run(`调流 ${row.id}`, command, { refresh: true });
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  保存调流{tuneCommands.length > 1 ? `（${tuneCommands.length} 项）` : ""}
+                                </Button>
+                              </details>
+
+                                <details className="ui-disclosure mt-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  模型清单（可选）：列不列、什么时候刷、新模型怎么收
+                                </summary>
+                                <p className="mt-1 ui-caption">
+                                  厂商后加的模型默认不会自己进来。这里定三件事：它的模型要不要出现在智能体的可选清单里、
+                                  清单多久自己去拉一次、新模型 id 命中哪些规则就自动收。不选就是这次不改。
+                                </p>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  {SOURCE_MODELS_FIELDS.map((field) =>
+                                    field.options ? (
+                                      <label key={field.key} className="grid gap-1">
+                                        <span className="ui-caption">{field.label}</span>
+                                        <select
+                                          className="ui-input"
+                                          aria-label={field.label}
+                                          value={providerForm[field.key]}
+                                          onChange={(event) => modelsSetters[field.key](event.target.value)}
+                                        >
+                                          <option value="">不改</option>
+                                          {field.options.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <span className="ui-caption">{field.hint}</span>
+                                      </label>
+                                    ) : (
+                                      <TextField
+                                        key={field.key}
+                                        label={field.label}
+                                        hint={field.hint}
+                                        placeholder={field.placeholder}
+                                        value={providerForm[field.key]}
+                                        onChange={(event) => modelsSetters[field.key](event.target.value)}
+                                      />
+                                    ),
+                                  )}
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost" className="mt-2"
+                                  disabled={!cli || modelsCommands.length === 0}
+                                  onClick={() => {
+                                    void (async () => {
+                                      for (const command of modelsCommands) {
+                                        // 一样一条一条发：前一条被内核拒了，后面的照样发得出去。
+                                        await run(`清单规矩 ${row.id}`, command, { refresh: true });
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  {sourceModelsSummary(modelsCommands)}
+                                </Button>
+                              </details>
+
+                                <details className="ui-disclosure mt-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  它是什么（可选）：算不算免费、上下文多大、原文发不发
+                                </summary>
+                                <p className="mt-1 ui-caption">
+                                  有些来源的免费额度不走价目表，有些厂商报的窗口比自己实际能给的小，
+                                  还有些地址值得原样发过去。留空就是这次不改。
+                                </p>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  {SOURCE_PROFILE_FIELDS.map((field) =>
+                                    field.options ? (
+                                      <label key={field.key} className="grid gap-1">
+                                        <span className="ui-caption">{field.label}</span>
+                                        <select
+                                          className="ui-input"
+                                          aria-label={field.label}
+                                          value={providerForm[field.key]}
+                                          onChange={(event) => profileSetters[field.key](event.target.value)}
+                                        >
+                                          <option value="">不改</option>
+                                          {field.options.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <span className="ui-caption">{field.hint}</span>
+                                      </label>
+                                    ) : (
+                                      <TextField
+                                        key={field.key}
+                                        label={field.label}
+                                        hint={field.hint}
+                                        placeholder={field.placeholder}
+                                        value={providerForm[field.key]}
+                                        onChange={(event) => profileSetters[field.key](event.target.value)}
+                                      />
+                                    ),
+                                  )}
+                                </div>
+                                {profileRejected.length > 0 && (
+                                  <p className="mt-2 ui-caption text-danger">
+                                    这几格看不懂，先不发：{profileRejected.join("、")}
+                                  </p>
+                                )}
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost" className="mt-2"
+                                  disabled={!cli || profileCommand === null}
+                                  onClick={() => {
+                                    if (!profileCommand) return;
+                                    void run(`来源画像 ${row.id}`, profileCommand, { refresh: true });
+                                  }}
+                                >
+                                  保存这些设置
+                                </Button>
+                              </details>
+
+                              <details className="ui-disclosure mt-2">
+                                <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
+                                  端的小开关（可选）：搜索、压缩、User-Agent
+                                </summary>
+                                <p className="mt-1 ui-caption">
+                                  只在某个端或某个中转上有区别时才动：设过的话，下面写着现在是什么。
+                                </p>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                                  {SOURCE_WIRE_FIELDS.map((field) => (
+                                    <label key={field.key} className="grid gap-1">
+                                      <span className="ui-caption">{field.label}</span>
+                                      <select
+                                        className="ui-input"
+                                        aria-label={field.label}
+                                        value={providerForm[field.key]}
+                                        onChange={(event) => wireSetters[field.key](event.target.value)}
+                                      >
+                                        <option value="">不改</option>
+                                        {field.options.map((option) => (
+                                          <option key={option.value} value={option.value}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <span className="ui-caption">{field.hint}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                                {info?.flags && (
+                                  <p className="mt-2 ui-caption">
+                                    现在：{info.flags.magpieUserAgent ? "和鸣自己的 UA" : "智能体自己的 UA"}
+                                    {info.flags.searches ? " · 搜索由来源做" : ""}
+                                    {info.flags.nativeCompaction ? " · 压缩交给来源" : ""}
+                                  </p>
+                                )}
+                                <Button
+                                  type="button"
+                                  size="sm" variant="ghost" className="mt-2"
+                                  disabled={!cli || wireCommand === null}
+                                  onClick={() => {
+                                    if (!wireCommand) return;
+                                    void run(`端开关 ${row.id}`, wireCommand, { refresh: true });
+                                  }}
+                                >
+                                  保存这几项
+                                </Button>
+                              </details>
+                              </details>
+
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                    {providers.length === 0 && (
+                      // d.138：方位词（「从上面选」）在滚动后失效——直接说清下一步动作名。
+                      <li className="py-2 ui-caption">
+                        {readErrors.providers ? (
+                          <span className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 text-danger">
+                              {readFailureText("providers", readErrors.providers)}
+                            </span>
+                            <button
+                              type="button"
+                              className="ui-link shrink-0"
+                              disabled={!cli}
+                              onClick={() => void loadProviders()}
+                            >
+                              重新读一次
+                            </button>
+                          </span>
+                        ) : cli ? (
+                          "还没有来源。点上面「API Key 服务商」里的一个服务商，或点「加一个其他地址」填服务地址和 Key。"
+                        ) : (
+                          "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"
+                        )}
+                      </li>
+                    )}
+                  </ul>
+
+                    </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
                   <span className="ui-caption">{discoveryText(discovery)}</span>
                   <button
@@ -2606,869 +3457,6 @@ export function ModelPage() {
             </div>
             )}
 
-            <div className="ui-card p-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id="source-added" className="ui-section-title">已添加的来源（{providers.length}）</h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost"
-                    disabled={!cli || testingEvery || providers.length === 0}
-                    title="一家一家真的发一个小请求；结论写在各自那行上，最后报个数。"
-                    onClick={() => void testEveryProvider()}
-                  >
-                    {testingEvery ? "正在一家家测…" : "全部测一遍"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm" variant="ghost"
-                    disabled={!cli}
-                    aria-expanded={custom.open}
-                    onClick={() => setCustom({ ...custom, open: !custom.open })}
-                  >
-                    {custom.open ? "收起这一栏" : "加一个其他地址"}
-                  </Button>
-                </div>
-              </div>
-              <p className="mt-1 ui-caption">
-                现成的服务商用上面「API Key 服务商」；中转、局域网或自建接口加在这里。
-              </p>
-              {custom.open && (
-                <div className="rta-enter mt-3 grid gap-2 rounded-xl border border-line bg-subtle p-3 sm:grid-cols-2">
-                  <TextField
-                    label="来源名称"
-                    placeholder="名称（如 relay）"
-                    value={custom.id}
-                    onChange={(event) => setCustom({ ...custom, id: event.target.value })}
-                  />
-                  <TextField
-                    label="接口地址"
-                    placeholder="https://host/v1"
-                    value={custom.url}
-                    error={customUrlCheck?.error ?? null}
-                    hint={
-                      customUrlCheck && !customUrlCheck.error
-                        ? customUrlCheck.hint ?? undefined
-                        : undefined
-                    }
-                    onChange={(event) => setCustom({ ...custom, url: event.target.value })}
-                    onBlur={() => {
-                      // 能识别的地址就地规范成最终会保存的样子（补 http(s)、去尾斜杠）。
-                      if (customUrlCheck && !customUrlCheck.error && customUrlCheck.url) {
-                        setCustom((current) => ({ ...current, url: customUrlCheck.url }));
-                      }
-                    }}
-                  />
-                  <TextField
-                    label="自定义 Key"
-                    type="password"
-                    placeholder="API Key（可留空：有些中转不校验 Key）"
-                    value={custom.key}
-                    error={customKeyCheck?.error ?? null}
-                    hint={
-                      !customKeyCheck?.error && customKeyCheck?.warning
-                        ? customKeyCheck.warning
-                        : undefined
-                    }
-                    onChange={(event) => setCustom({ ...custom, key: event.target.value })}
-                  />
-                  <TextField
-                    label="模型列表"
-                    className="sm:col-span-2"
-                    placeholder="模型 id，逗号分隔（可留空自动读取）"
-                    value={custom.models}
-                    onChange={(event) => setCustom({ ...custom, models: event.target.value })}
-                  />
-                  {customError && (
-                    <p role="alert" className="sm:col-span-2 ui-caption text-danger">
-                      {customError}
-                    </p>
-                  )}
-                  <div className="flex gap-2 sm:col-span-2">
-                    <Button
-                      type="button"
-                      size="md" variant="primary"
-                      disabled={!custom.id.trim()}
-                      onClick={() => void addCustom()}
-                    >
-                      保存
-                    </Button>
-                    <Button
-                      type="button"
-                      size="md" variant="ghost"
-                      onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
-                    >
-                      取消
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {!cli && (
-                <p className="mt-1 ui-caption">浏览器预览下只能查看：测试、换 Key 与删除来源请用桌面版。</p>
-              )}
-              <ul className="mt-2">
-                {providers.map((row) => {
-                  const info = showCache[row.id];
-                  const quota = quotaByProvider.get(row.id);
-                  const badge =
-                    showLoading === row.id
-                      ? { label: "读取地址…", className: "bg-subtle-3 text-muted" }
-                      : PLAN_BADGE[info?.plan ?? "normal"];
-                  const tuneValues = {
-                    atOnce: providerForm.atOnce,
-                    rpm: providerForm.rpm,
-                    queue: providerForm.queue,
-                    quotaRest: providerForm.quotaRest,
-                    restCap: providerForm.restCap,
-                  };
-                  const tuneCommands = sourceTuneCommands(row.id, tuneValues);
-                  const tuneRejected = sourceTuneRejected(tuneValues);
-                  const modelsValues = {
-                    listed: providerForm.listed,
-                    refreshEvery: providerForm.refreshEvery,
-                    autoInclude: providerForm.autoInclude,
-                  };
-                  const modelsCommands = sourceModelsCommands(row.id, modelsValues);
-                  const profileValues = {
-                    free: providerForm.free,
-                    context: providerForm.context,
-                    family: providerForm.family,
-                    unmasked: providerForm.unmasked,
-                  };
-                  const profileCommand = sourceProfileCommand(row.id, profileValues);
-                  const profileRejected = sourceProfileRejected(profileValues);
-                  const requestHeaders = parseHeaderLines(providerForm.headerText);
-                  const wireValues = {
-                    userAgent: providerForm.userAgent,
-                    search: providerForm.search,
-                    compaction: providerForm.compaction,
-                  };
-                  const wireCommand = sourceWireCommand(row.id, wireValues);
-                  // show 里只写着「这家跟默认不一样」的地方：收起时也要说得出来，
-                  // 不然想问「这家改过什么」只能逐条展开点一遍。
-                  const tunedSummary = info?.flags ? describeShowFlags(info.flags) : "";
-                  return (
-                    <li key={row.id} className="-mx-4 ui-list-row flex-wrap gap-3">
-                      <div className="flex w-full flex-wrap items-center gap-3">
-                        <Avatar name={row.kind} />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-1.5">
-                            <span className="truncate ui-body-sm font-semibold">{row.id}</span>
-                            <span
-                              className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${badge.className}`}
-                            >
-                              {badge.label}
-                            </span>
-                            {row.off && (
-                              // 用户自己停的：不是坏了，Key 与记录都在，只是智能体拿不到它的模型。
-                              <span
-                                className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
-                                title="已停用：Key 与记录都留着，只是智能体拿不到它的模型、请求也不会走它"
-                              >
-                                已停用
-                              </span>
-                            )}
-                            {tunedSummary && (
-                              // 这家设过点什么：一句话挂在悬停里，行上只占两个字的位。
-                              <span
-                                className="shrink-0 rounded-full bg-subtle-3 px-2 py-0.5 text-ui-xs text-muted"
-                                title={`这家跟默认不一样：${tunedSummary}`}
-                              >
-                                改过
-                              </span>
-                            )}
-                            {quota && (
-                              // 额度就写在这一行：测试、换 Key、删除都在这儿，不用去另一张卡里对。
-                              <span
-                                className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${QUOTA_BADGE[cardTone(quota)]}`}
-                                title={`${quotaKindLabel(quota.kind)}${quota.plan ? ` · ${quota.plan}` : ""}${
-                                  quota.error ? `：${engineText(quota.error)}` : ""
-                                }`}
-                              >
-                                {engineText(cardSummary(quota, now)) || "额度未知"}
-                              </span>
-                            )}
-                          </span>
-                          <span className="block truncate ui-caption">
-                            {row.kind}
-                            {row.host ? ` · ${row.host}` : ""}
-                            {row.models !== null ? ` · ${row.models} 个模型` : ""}
-                          </span>
-                          {row.fallback.length > 0 && (
-                            // 额度用完 / 被限流 / 连不上时，请求按这串顺序往下去。
-                            <span
-                              className="block truncate ui-caption"
-                              title={`没额度、被限流或连不上时，请求依次改用 ${row.fallback.join(" → ")}`}
-                            >
-                              备用 {row.fallback.join(" → ")}
-                            </span>
-                          )}
-                          {row.usedBy.length > 0 && (
-                            // 谁在用这一家：删之前先看这一句，别把正在用的来源删了。
-                            <span
-                              className="block truncate ui-caption"
-                              title={`这些智能体现在用它：${row.usedBy.join("、")}`}
-                            >
-                              ← {row.usedBy.join("、")}
-                            </span>
-                          )}
-                          {testState[row.id] && (
-                            // 测试结论就写在行上：通过带耗时，失败写「连不上」，原因在悬停里。
-                            <span
-                              role="status"
-                              className={`block truncate ui-caption ${
-                                testState[row.id].state === "ok"
-                                  ? "text-success"
-                                  : testState[row.id].state === "bad"
-                                    ? "text-danger"
-                                    : "text-muted"
-                              }`}
-                              title={testState[row.id].detail}
-                            >
-                              {testState[row.id].label}
-                            </span>
-                          )}
-                        </span>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          disabled={!cli}
-                          aria-expanded={advancedProvider === row.id}
-                          onClick={() => void toggleAdvanced(row.id)}
-                        >
-                          高级
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          disabled={!cli}
-                          busy={testState[row.id]?.state === "running"}
-                          onClick={() => void testProvider(row.id)}
-                        >
-                          测试
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm" variant="ghost"
-                          disabled={!cli}
-                          // 停用只是关掉开关：Key、模型记录、额度都还在，随时能开回来。
-                          onClick={() =>
-                            void run(row.off ? "启用来源" : "停用来源", ["provider", row.off ? "on" : "off", row.id], {
-                              refresh: true,
-                            })
-                          }
-                        >
-                          {row.off ? "启用" : "停用"}
-                        </Button>
-                        <IconButton
-                          label={`删除来源 ${row.id}`}
-                          disabled={!cli}
-                          icon={<TrashIcon width={16} height={16} />}
-                          onClick={() =>
-                            setConfirmAction({
-                              title: "删除来源？",
-                              desc: `来源「${row.id}」删除后不可恢复（地址、Key 与模型记录一并移除）。`,
-                              confirmLabel: "删除",
-                              action: () =>
-                                void run("删除来源", ["provider", "rm", row.id], { refresh: true }),
-                            })
-                          }
-                        />
-                      </div>
-                      {advancedProvider === row.id && (
-                        <div className="rta-enter mt-2 rounded-lg border border-line bg-subtle p-3">
-                          <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <div className="text-ui-sm font-semibold">{row.id} 的高级设置</div>
-                            {showCache[row.id]?.chat && (
-                              <span
-                                className="max-w-full truncate font-mono text-ui-xs text-muted"
-                                title={showCache[row.id]?.chat}
-                              >
-                                {showCache[row.id]?.chat}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-3">
-                            <div className="ui-micro">连接</div>
-                            <div className="mt-2 flex flex-wrap items-start gap-2">
-                              <TextField
-                                label="更新 Key"
-                                type="password"
-                                className="flex-1"
-                                placeholder="换成新的 API Key（留空不改）"
-                                value={providerForm.key}
-                                error={
-                                  providerForm.key.trim() ? checkApiKey(providerForm.key).error : null
-                                }
-                                hint={
-                                  providerForm.key.trim() && !checkApiKey(providerForm.key).error
-                                    ? checkApiKey(providerForm.key).warning ?? undefined
-                                    : undefined
-                                }
-                                onChange={(event) => setProviderForm({ ...providerForm, key: event.target.value })}
-                              />
-                              <Button
-                                type="button"
-                                size="sm" variant="primary" className="mt-5"
-                                disabled={
-                                  !cli ||
-                                  !providerForm.key.trim() ||
-                                  Boolean(providerForm.key.trim() && checkApiKey(providerForm.key).error)
-                                }
-                                onClick={() => void run("更新 Key", ["provider", "key", row.id, providerForm.key.trim()])}
-                              >
-                                更新 Key
-                              </Button>
-                            </div>
-                            <label className="grid gap-1">
-                              <span className="ui-caption">来源分发策略</span>
-                              <select
-                                className="ui-input mt-2"
-                                value={providerForm.routing}
-                                onChange={(event) => setProviderForm({ ...providerForm, routing: event.target.value })}
-                              >
-                                <option value="">分发策略（保持默认）</option>
-                                {GROUP_ROUTING.map((routing) => (
-                                  <option key={routing} value={routing}>
-                                    {ROUTING_LABEL[routing] ?? routing}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-
-                          <div className="mt-3">
-                            <div className="ui-micro">模型</div>
-                            <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
-                              <span className="ui-caption">
-                                {info?.note
-                                  ? info.note
-                                  : showLoading === row.id
-                                    ? "读取模型清单…"
-                                    : "展开后读取这个来源现在暴露的模型。"}
-                              </span>
-                              <span className="flex gap-1">
-                                {(["all", "best", "none"] as const).map((choice) => (
-                                  <Button
-                                    key={choice}
-                                    type="button"
-                                    size="sm" variant="ghost"
-                                    disabled={!cli}
-                                    title={PROVIDER_MODELS_CHOICE_HINT[choice]}
-                                    onClick={() =>
-                                      void runProviderModels(
-                                        row.id,
-                                        `设置 ${row.id} 的模型`,
-                                        providerModelsChoiceArgs(row.id, choice),
-                                      )
-                                    }
-                                  >
-                                    {PROVIDER_MODELS_CHOICE_LABEL[choice]}
-                                  </Button>
-                                ))}
-                                <Button
-                                  type="button"
-                                  size="sm" variant="ghost"
-                                  disabled={!cli}
-                                  title="重新问厂商要一次模型目录"
-                                  onClick={() =>
-                                    void runProviderModels(
-                                      row.id,
-                                      "重新读取模型目录",
-                                      refreshProviderModelsArgs(row.id),
-                                    )
-                                  }
-                                >
-                                  重新读取
-                                </Button>
-                              </span>
-                            </div>
-                            {info && info.models.length > 0 && (
-                              <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`${row.id} 的模型`}>
-                                {info.models.map((model) => (
-                                  <li
-                                    key={model.id}
-                                    className="flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 text-ui-xs"
-                                  >
-                                    <span className="font-mono" title={model.id}>
-                                      {providerModelLabel(model)}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="text-muted hover:text-danger disabled:opacity-40"
-                                      aria-label={`移除模型 ${model.id}`}
-                                      disabled={!cli}
-                                      onClick={() =>
-                                        void runProviderModels(
-                                          row.id,
-                                          "移除模型",
-                                          removeProviderModelArgs(row.id, model.id),
-                                        )
-                                      }
-                                    >
-                                      ×
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {info && info.models.length === 0 && (
-                              <p className="mt-2 ui-caption">这个来源现在一个模型都没暴露。</p>
-                            )}
-                            <div className="mt-2 flex flex-wrap items-start gap-2">
-                              <TextField
-                                label="添加模型"
-                                className="flex-1"
-                                placeholder="模型 id（如 deepseek/deepseek-chat）"
-                                value={modelAdd[row.id] ?? ""}
-                                onChange={(event) =>
-                                  setModelAdd((current) => ({ ...current, [row.id]: event.target.value }))
-                                }
-                              />
-                              <Button
-                                type="button"
-                                size="sm" variant="ghost" className="mt-5"
-                                disabled={!cli || !(modelAdd[row.id] ?? "").trim()}
-                                onClick={() =>
-                                  void runProviderModels(
-                                    row.id,
-                                    "添加模型",
-                                    addProviderModelArgs(row.id, modelAdd[row.id] ?? ""),
-                                  ).then((result) => {
-                                    if (result.ok) {
-                                      setModelAdd((current) => ({ ...current, [row.id]: "" }));
-                                    }
-                                  })
-                                }
-                              >
-                                添加模型
-                              </Button>
-                            </div>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <TextField
-                                label="模型目录地址"
-                                placeholder="模型目录 URL（可选）"
-                                value={providerForm.modelsUrl}
-                                onChange={(event) => setProviderForm({ ...providerForm, modelsUrl: event.target.value })}
-                              />
-                              <TextField
-                                label="备用模型"
-                                placeholder="额度用完/故障时改用：provider/model1,provider/model2"
-                                value={providerForm.fallback}
-                                onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost" className="mt-2"
-                              disabled={!cli || !providerForm.fallback.trim()}
-                              onClick={() =>
-                                void run("设置备用", [
-                                  "provider",
-                                  "fallback",
-                                  row.id,
-                                  ...providerForm.fallback
-                                    .split(/[,\s]+/)
-                                    .map((item) => item.trim())
-                                    .filter(Boolean),
-                                ], { refresh: true })
-                              }
-                            >
-                              保存备用
-                            </Button>
-                            {row.fallback.length > 0 && (
-                              <Button
-                                type="button"
-                                size="sm" variant="ghost" className="mt-2"
-                                disabled={!cli}
-                                onClick={() =>
-                                  void run("清掉备用", ["provider", "fallback", row.id, "none"], {
-                                    refresh: true,
-                                  })
-                                }
-                              >
-                                清掉备用
-                              </Button>
-                            )}
-                          </div>
-
-                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-subtle px-3 py-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              更多设置（可选）：请求、调流、清单、它是什么、端的小开关
-                            </summary>
-                            <p className="mt-1 ui-caption">
-                              这几块都是可选的，展开需要的那一项就行：每块自带按钮，只发你改过的那几项，这里不保存任何东西。
-                            </p>
-                            {info?.flags && describeShowFlags(info.flags) && (
-                              <p className="mt-1 ui-caption">现在设着：{describeShowFlags(info.flags)}</p>
-                            )}
-
-                            <details className="ui-disclosure mt-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              请求（请求头 / 耐心 / 错误处理）
-                            </summary>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <TextAreaField
-                                label="自定义请求头"
-                                hint="一行一个，写成「名称: 值」；值留空就是删掉这个头。"
-                                placeholder={"X-Trace: 一批一批来\nX-Team: data"}
-                                className="sm:col-span-2"
-                                value={providerForm.headerText}
-                                onChange={(event) => setProviderForm({ ...providerForm, headerText: event.target.value })}
-                              />
-                              <label className="grid gap-1 sm:col-span-2">
-                                <span className="ui-caption">从常见客户端抄一份请求头</span>
-                                <select
-                                  className="ui-input"
-                                  aria-label="抄一份常见客户端的请求头"
-                                  defaultValue=""
-                                  onChange={(event) => {
-                                    const preset = HEADER_PRESETS.find((item) => item.name === event.target.value);
-                                    event.currentTarget.value = "";
-                                    if (preset) {
-                                      setProviderForm({
-                                        ...providerForm,
-                                        headerText: applyHeaderPreset(providerForm.headerText, preset),
-                                      });
-                                    }
-                                  }}
-                                >
-                                  <option value="">选一个客户端，把它的请求头填进上面（你在上面写过的值不会被盖掉）</option>
-                                  {HEADER_PRESETS.map((preset) => (
-                                    <option key={preset.name} value={preset.name}>
-                                      {preset.name}
-                                    </option>
-                                  ))}
-                                </select>
-                                <span className="ui-caption">
-                                  有些中转按客户端名字认人，抄对一份才有对应待遇。这几行只是草稿，点「保存请求设置」才真的发出去。
-                                </span>
-                              </label>
-                              {requestHeaders.rejected.length > 0 && (
-                                <p className="ui-caption text-danger sm:col-span-2">
-                                  这几行看不懂，先不发：{requestHeaders.rejected.join("、")}
-                                </p>
-                              )}
-                              {info?.flags && info.flags.headers.length > 0 && (
-                                <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
-                                  <p className="ui-caption">
-                                    现在设着：{info.flags.headers.map((item) => item.name).join("、")}
-                                  </p>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      setProviderForm({
-                                        ...providerForm,
-                                        headerText: headersToText(info.flags?.headers ?? []),
-                                      })
-                                    }
-                                  >
-                                    拉下来改
-                                  </Button>
-                                </div>
-                              )}
-                              <div className="flex gap-2">
-                                <TextField
-                                  label="请求耐心"
-                                  placeholder="耐心（如 2m / off）"
-                                  value={providerForm.patience}
-                                  onChange={(event) => setProviderForm({ ...providerForm, patience: event.target.value })}
-                                />
-                                <label className="grid gap-1">
-                                  <span className="ui-caption">错误处理</span>
-                                  <select
-                                    className="ui-input"
-                                    value={providerForm.errors}
-                                    onChange={(event) => setProviderForm({ ...providerForm, errors: event.target.value })}
-                                  >
-                                    <option value="">错误处理（默认）</option>
-                                    <option value="magpie">统一处理</option>
-                                    <option value="pass">原样透传</option>
-                                  </select>
-                                </label>
-                              </div>
-                              <div className="mt-2">
-                                <Button
-                                  type="button"
-                                  size="sm" variant="primary"
-                                  disabled={!cli}
-                                  onClick={() => {
-                                    const pairs: string[] = [];
-                                    if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
-                                    if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
-                                    if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
-                                    if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
-                                    pairs.push(...requestHeaders.pairs);
-                                    if (!pairs.length) return;
-                                    void run("保存请求设置", ["provider", "set", row.id, ...pairs], { refresh: true });
-                                  }}
-                                >
-                                  保存请求设置
-                                </Button>
-                              </div>
-                            </div>
-                          </details>
-
-                            <details className="ui-disclosure mt-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              调流（可选）：并发、排队、休息
-                            </summary>
-                            <p className="mt-1 ui-caption">
-                              一个来源被打爆之前先自己踩刹车：多账号轮着上、限制每分钟请求、排个队，
-                              额度用完和连续失败时歇一会儿。留空就是这次不改。
-                            </p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {SOURCE_TUNE_FIELDS.map((field) =>
-                                field.options ? (
-                                  <label key={field.key} className="grid gap-1">
-                                    <span className="ui-caption">{field.label}</span>
-                                    <select
-                                      className="ui-input"
-                                      aria-label={field.label}
-                                      value={providerForm[field.key]}
-                                      onChange={(event) => tuneSetters[field.key](event.target.value)}
-                                    >
-                                      <option value="">不改</option>
-                                      {field.options.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <span className="ui-caption">{field.hint}</span>
-                                  </label>
-                                ) : (
-                                  <TextField
-                                    key={field.key}
-                                    label={field.label}
-                                    hint={field.hint}
-                                    placeholder={field.placeholder}
-                                    value={providerForm[field.key]}
-                                    onChange={(event) => tuneSetters[field.key](event.target.value)}
-                                  />
-                                ),
-                              )}
-                            </div>
-                            {tuneRejected.length > 0 && (
-                              <p className="mt-2 ui-caption text-danger">
-                                这几格看不懂，先不发：{tuneRejected.join("、")}
-                              </p>
-                            )}
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost" className="mt-2"
-                              disabled={!cli || tuneCommands.length === 0}
-                              onClick={() => {
-                                void (async () => {
-                                  for (const command of tuneCommands) {
-                                    // 一条一条发：内核每个键各自校验，前一条失败不该挡住后面几条。
-                                    await run(`调流 ${row.id}`, command, { refresh: true });
-                                  }
-                                })();
-                              }}
-                            >
-                              保存调流{tuneCommands.length > 1 ? `（${tuneCommands.length} 项）` : ""}
-                            </Button>
-                          </details>
-
-                            <details className="ui-disclosure mt-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              模型清单（可选）：列不列、什么时候刷、新模型怎么收
-                            </summary>
-                            <p className="mt-1 ui-caption">
-                              厂商后加的模型默认不会自己进来。这里定三件事：它的模型要不要出现在智能体的可选清单里、
-                              清单多久自己去拉一次、新模型 id 命中哪些规则就自动收。不选就是这次不改。
-                            </p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {SOURCE_MODELS_FIELDS.map((field) =>
-                                field.options ? (
-                                  <label key={field.key} className="grid gap-1">
-                                    <span className="ui-caption">{field.label}</span>
-                                    <select
-                                      className="ui-input"
-                                      aria-label={field.label}
-                                      value={providerForm[field.key]}
-                                      onChange={(event) => modelsSetters[field.key](event.target.value)}
-                                    >
-                                      <option value="">不改</option>
-                                      {field.options.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <span className="ui-caption">{field.hint}</span>
-                                  </label>
-                                ) : (
-                                  <TextField
-                                    key={field.key}
-                                    label={field.label}
-                                    hint={field.hint}
-                                    placeholder={field.placeholder}
-                                    value={providerForm[field.key]}
-                                    onChange={(event) => modelsSetters[field.key](event.target.value)}
-                                  />
-                                ),
-                              )}
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost" className="mt-2"
-                              disabled={!cli || modelsCommands.length === 0}
-                              onClick={() => {
-                                void (async () => {
-                                  for (const command of modelsCommands) {
-                                    // 一样一条一条发：前一条被内核拒了，后面的照样发得出去。
-                                    await run(`清单规矩 ${row.id}`, command, { refresh: true });
-                                  }
-                                })();
-                              }}
-                            >
-                              {sourceModelsSummary(modelsCommands)}
-                            </Button>
-                          </details>
-
-                            <details className="ui-disclosure mt-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              它是什么（可选）：算不算免费、上下文多大、原文发不发
-                            </summary>
-                            <p className="mt-1 ui-caption">
-                              有些来源的免费额度不走价目表，有些厂商报的窗口比自己实际能给的小，
-                              还有些地址值得原样发过去。留空就是这次不改。
-                            </p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {SOURCE_PROFILE_FIELDS.map((field) =>
-                                field.options ? (
-                                  <label key={field.key} className="grid gap-1">
-                                    <span className="ui-caption">{field.label}</span>
-                                    <select
-                                      className="ui-input"
-                                      aria-label={field.label}
-                                      value={providerForm[field.key]}
-                                      onChange={(event) => profileSetters[field.key](event.target.value)}
-                                    >
-                                      <option value="">不改</option>
-                                      {field.options.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <span className="ui-caption">{field.hint}</span>
-                                  </label>
-                                ) : (
-                                  <TextField
-                                    key={field.key}
-                                    label={field.label}
-                                    hint={field.hint}
-                                    placeholder={field.placeholder}
-                                    value={providerForm[field.key]}
-                                    onChange={(event) => profileSetters[field.key](event.target.value)}
-                                  />
-                                ),
-                              )}
-                            </div>
-                            {profileRejected.length > 0 && (
-                              <p className="mt-2 ui-caption text-danger">
-                                这几格看不懂，先不发：{profileRejected.join("、")}
-                              </p>
-                            )}
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost" className="mt-2"
-                              disabled={!cli || profileCommand === null}
-                              onClick={() => {
-                                if (!profileCommand) return;
-                                void run(`来源画像 ${row.id}`, profileCommand, { refresh: true });
-                              }}
-                            >
-                              保存这些设置
-                            </Button>
-                          </details>
-
-                          <details className="ui-disclosure mt-2">
-                            <summary className="cursor-pointer ui-micro"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
-                              端的小开关（可选）：搜索、压缩、User-Agent
-                            </summary>
-                            <p className="mt-1 ui-caption">
-                              只在某个端或某个中转上有区别时才动：设过的话，下面写着现在是什么。
-                            </p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                              {SOURCE_WIRE_FIELDS.map((field) => (
-                                <label key={field.key} className="grid gap-1">
-                                  <span className="ui-caption">{field.label}</span>
-                                  <select
-                                    className="ui-input"
-                                    aria-label={field.label}
-                                    value={providerForm[field.key]}
-                                    onChange={(event) => wireSetters[field.key](event.target.value)}
-                                  >
-                                    <option value="">不改</option>
-                                    {field.options.map((option) => (
-                                      <option key={option.value} value={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <span className="ui-caption">{field.hint}</span>
-                                </label>
-                              ))}
-                            </div>
-                            {info?.flags && (
-                              <p className="mt-2 ui-caption">
-                                现在：{info.flags.magpieUserAgent ? "和鸣自己的 UA" : "智能体自己的 UA"}
-                                {info.flags.searches ? " · 搜索由来源做" : ""}
-                                {info.flags.nativeCompaction ? " · 压缩交给来源" : ""}
-                              </p>
-                            )}
-                            <Button
-                              type="button"
-                              size="sm" variant="ghost" className="mt-2"
-                              disabled={!cli || wireCommand === null}
-                              onClick={() => {
-                                if (!wireCommand) return;
-                                void run(`端开关 ${row.id}`, wireCommand, { refresh: true });
-                              }}
-                            >
-                              保存这几项
-                            </Button>
-                          </details>
-                          </details>
-
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-                {providers.length === 0 && (
-                  // d.138：方位词（「从上面选」）在滚动后失效——直接说清下一步动作名。
-                  <li className="py-2 ui-caption">
-                    {readErrors.providers ? (
-                      <span className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="min-w-0 text-danger">
-                          {readFailureText("providers", readErrors.providers)}
-                        </span>
-                        <button
-                          type="button"
-                          className="ui-link shrink-0"
-                          disabled={!cli}
-                          onClick={() => void loadProviders()}
-                        >
-                          重新读一次
-                        </button>
-                      </span>
-                    ) : cli ? (
-                      "还没有来源。点上面「API Key 服务商」里的一个服务商，或点「加一个其他地址」填服务地址和 Key。"
-                    ) : (
-                      "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"
-                    )}
-                  </li>
-                )}
-              </ul>
-            </div>
             <section id="source-models" aria-label="可用模型" className="space-y-4">
               {loading && modelRows.length === 0 ? (
                 <div className="space-y-2" role="status" aria-busy="true" aria-label="正在读取模型">

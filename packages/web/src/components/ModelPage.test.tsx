@@ -420,8 +420,9 @@ describe("ModelPage · 添加来源", () => {
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("mock")).toBeInTheDocument();
-    // 没读地址之前按普通地址展示
-    expect(screen.getByText("普通地址")).toBeInTheDocument();
+    // 详细地址在读出来之后，行上的徽标按套餐类型显示成 Coding Plan。
+    // 不再断言「读之前是普通地址」：首屏的 flagsWarm 已经会把 show 读回来，
+    // 那个中间态什么时候消失取决于调度，拿它做断言会偶发失败。
     fireEvent.click(screen.getByRole("button", { name: "高级" }));
     await waitFor(() => expect(screen.getByText("Coding Plan")).toBeInTheDocument());
   });
@@ -835,30 +836,74 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已把 WorkBuddy 接进和鸣/)).toBeInTheDocument();
   });
 
-  it("有账号时「再加一个账号」收起来：进来先看额度，要加再点开", async () => {
+  it("三类来源汇总在一张卡里：订阅账号、国产端、已添加的来源不再分开放", async () => {
     installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    const summary = await screen.findByText("再加一个账号");
-    const disclosure = summary.closest("details");
-    expect(disclosure).not.toBeNull();
-    expect(disclosure).not.toHaveAttribute("open");
-    // 收起不等于删掉：里面的登录卡片与国产智能体都还在，点一下就能用
-    expect(within(disclosure as HTMLElement).getByText("国产智能体")).toBeInTheDocument();
-    fireEvent.click(summary);
-    expect(disclosure).toHaveAttribute("open");
+    await screen.findByText("工作号");
+    // 以「订阅账号」标题定位那张统一的卡，三类来源都应该在它里面。
+    const card = screen.getByText("订阅账号").closest(".ui-card") as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(within(card).getByLabelText("订阅账号列表")).toBeInTheDocument();
+    expect(within(card).getByText("国产智能体")).toBeInTheDocument();
+    expect(within(card).getByText(/已添加的来源/)).toBeInTheDocument();
+    // 默认 bridge 里有一个按量来源 mock：它也得在这同一张卡里，而不是另一张。
+    expect(within(card).getByText("mock")).toBeInTheDocument();
   });
 
-  it("一个账号都没有时，「登录一个账号」是摊开的：那是这会儿唯一的下一步", async () => {
+  it("有账号时国产智能体也一直看得见，不用先点开什么", async () => {
+    installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    // 以前这段挂在「再加一个账号」的折叠里：有账号就默认收起，国产端卡片跟着藏起来。
+    // 现在不管有没有账号，借账号的标题与国产端卡片都直接摊在页面上。
+    expect(await screen.findByText("借一个本机已登录的账号")).toBeInTheDocument();
+    expect(screen.getByText("国产智能体")).toBeInTheDocument();
+    expect(screen.getByText("WorkBuddy")).toBeInTheDocument();
+    expect(screen.queryByText("再加一个账号")).toBeNull();
+  });
+
+  it("一个账号都没有时，借账号标题与国产端也同样摊开", async () => {
     installBridge({}, {
       "accounts --json": { ok: true, stdout: "[]", stderr: "" },
     });
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    const summary = await screen.findByText("登录一个账号");
-    expect(summary.closest("details")).toHaveAttribute("open");
-    expect(screen.queryByText("再加一个账号")).toBeNull();
+    expect(await screen.findByText("借一个本机已登录的账号")).toBeInTheDocument();
+    expect(screen.getByText("国产智能体")).toBeInTheDocument();
     expect(screen.getByText(/还没有账号。下面这些软件里已经登录的订阅/)).toBeInTheDocument();
+  });
+
+  it("MiMo Code 的插件已装（provider id 是 mimo-app），点一下不该再装一遍", async () => {
+    const { bridge, calls } = installBridge({}, {
+      "plugin list --json": {
+        ok: true,
+        stdout: JSON.stringify({ plugins: [], loaded: [], providers: [{ id: "mimo-app" }], middleware: [] }),
+        stderr: "",
+      },
+    });
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    // 小米卡的 agent 叫 mimo，但插件声明的 provider id 是 mimo-app；
+    // 旧代码拿 agent 去比，永远判定「没装」，每次都重复 plugin add。
+    fireEvent.click(await screen.findByText("MiMo Code"));
+    await waitFor(() =>
+      expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "mimo"]),
+    );
+    expect(calls).not.toContainEqual([
+      "plugin", "add", "@magpie-community/opencode-mimo-auth",
+    ]);
+  });
+
+  it("小米的额度刷新用的是订阅 id mimo-app，不是同名的按量 provider mimo", async () => {
+    const { bridge, calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(await screen.findByText("MiMo Code"));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["quota", "refresh", "mimo-app"]),
+    );
+    expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "mimo"]);
   });
 
   it("插件已经装过时，点国内端直接登录，不再装一遍", async () => {

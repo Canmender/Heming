@@ -6,6 +6,7 @@ import {
   DOMESTIC_GROUPS,
   DOMESTIC_KEY_NOTE,
   checkinFailed,
+  domesticPluginInstalled,
   checkinLine,
   checkinSummary,
   checkinSwitchArgs,
@@ -112,7 +113,39 @@ describe("parsePluginProviders", () => {
     expect(parsePluginProviders("").size).toBe(0);
     expect(parsePluginProviders("No plugins. Add one: magpie plugin add <pkg>").size).toBe(0);
     expect(parsePluginProviders('{"providers":"nope"}').size).toBe(0);
-    expect(parsePluginProviders('{"providers":[{"id":"mimo"}]}').has("mimo")).toBe(true);
+    expect(parsePluginProviders('{"providers":[{"id":"mimo-app"}]}').has("mimo-app")).toBe(true);
+  });
+});
+
+describe("domesticPluginInstalled", () => {
+  const byAgent = (agent: string) => DOMESTIC_AGENTS.find((item) => item.agent === agent)!;
+
+  it("小米认订阅 id mimo-app，不再被 agent 名 mimo 骗着重复装插件", () => {
+    const mimo = byAgent("mimo");
+    expect(mimo.accountId).toBe("mimo-app");
+    expect(domesticPluginInstalled(mimo, new Set(["mimo-app"]))).toBe(true);
+    // 只有别的同名 provider（不是这家的订阅）在，不算装过
+    expect(domesticPluginInstalled(mimo, new Set(["mimo"]))).toBe(false);
+    expect(domesticPluginInstalled(mimo, new Set())).toBe(false);
+  });
+
+  it("一个包服务两个站：装了一边，另一边的卡也算已装", () => {
+    for (const [a, b] of [
+      ["workbuddy", "workbuddy-ai"],
+      ["qoder-cn", "qoder"],
+      ["minimax-code", "minimax-code-global"],
+    ] as const) {
+      expect(domesticPluginInstalled(byAgent(a), new Set([b]))).toBe(true);
+      expect(domesticPluginInstalled(byAgent(b), new Set([a]))).toBe(true);
+    }
+  });
+
+  it("每家卡的 accountId 都能对上内核订阅（小米单独写对）", () => {
+    for (const item of DOMESTIC_AGENTS) {
+      expect(item.accountId.length).toBeGreaterThan(0);
+    }
+    expect(byAgent("mimo").accountId).toBe("mimo-app");
+    expect(byAgent("workbuddy").accountId).toBe("workbuddy");
   });
 });
 
