@@ -5,8 +5,12 @@ import { FOCUS_RING } from "../../lib/a11y/focus.js";
 /**
  * 会话页「编排条」（T32）：两行顶栏。
  *
- * 第一行是「这一轮在什么状态下编排」：会话标题 + 三个 chip（多智能体协作 / 工具调用 /
- * 后台任务）；第二行是主区切换（对话 / 轨迹 / 上下文）。
+ * 第一行是「这一轮在什么状态下编排」：会话标题 + 两个 chip（工具调用 / 后台任务）；
+ * 第二行是主区切换（对话 / 轨迹 / 上下文）。
+ *
+ * 派发（agent_task / agent_team / 后台子代理）就发生在对话里，不需要跳到独立页面：
+ * d.409 移除了原先那个挂名「多智能体协作」的接入页——它实际是 magpie 检测本机
+ * Claude Code/Codex 的接入式辩论页，跟 DSH/Codex 式的子智能体派发不是一回事。
  *
  * 为什么 chip 只用真实数据：参考实现里的「N 个子智能体」我们没有对应实体，
  * 编一个数字出来只会让审计和用户都对不上账。工具调用取本轮进度里的真实计数、
@@ -37,8 +41,6 @@ export interface OrchestrationBarProps {
   tasksCount: number;
   view: ChatView;
   onViewChange: (view: ChatView) => void;
-  /** 打开「多智能体协作」页（导航由调用方接 store，组件不碰全局状态）；与人类的「团队」页无关。 */
-  onOpenCollab: () => void;
   /** 右侧动作槽：会话进度、会话内搜索等既有按钮原样搬进来。 */
   right?: ReactNode;
   /**
@@ -54,7 +56,6 @@ export function OrchestrationBar({
   tasksCount,
   view,
   onViewChange,
-  onOpenCollab,
   right,
   leading,
 }: OrchestrationBarProps) {
@@ -68,15 +69,6 @@ export function OrchestrationBar({
         {leading}
         <h2 className="ui-section-title min-w-0 truncate">{title}</h2>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            data-chip="collab"
-            title="多智能体协作：和鸣 + 本机智能体一起排班干活。人类的团队在左侧「团队」页，两者不是一回事。"
-            onClick={onOpenCollab}
-            className={`${CHIP_CLASS} transition-colors hover:border-line-strong hover:text-ink`}
-          >
-            多智能体协作
-          </button>
           <span data-chip="tools" tabIndex={0} className={CHIP_CLASS}>
             {toolsCount} 个工具调用
           </span>

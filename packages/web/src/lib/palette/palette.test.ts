@@ -38,14 +38,14 @@ function member(id: string, displayName: string, over: Partial<TeamMember> = {})
 }
 
 describe("palette · 页面目录", () => {
-  it("覆盖 8 个页面的固定集合（页面菜单/命令面板/Alt 快捷键共用这一份真源）", () => {
-    expect(PALETTE_PAGES).toHaveLength(8);
+  it("覆盖 7 个页面的固定集合（页面菜单/命令面板/Alt 快捷键共用这一份真源）", () => {
+    expect(PALETTE_PAGES).toHaveLength(7);
     expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual(
-      ["chat", "collab", "home", "model", "plugins", "settings", "team", "vault"],
+      ["chat", "home", "model", "plugins", "settings", "team", "vault"],
     );
   });
 
-  it("Alt 快捷键与 App 的 SHORTCUT_PAGES 绑定一致（1/2/5/6/8/0）", () => {
+  it("Alt 快捷键与 App 的 SHORTCUT_PAGES 绑定一致（1/2/6/8/0）", () => {
     const digits = Object.fromEntries(
       PALETTE_PAGES.filter((p) => p.digit).map((p) => [p.page, p.digit]),
     );
@@ -134,7 +134,7 @@ describe("palette · 最近使用（本机 ≤5）", () => {
 
   it("容量上限 5：超出淘汰最旧的一条", () => {
     const store = fakeStorage();
-    for (const id of ["home", "team", "chat", "plugins", "collab", "settings"] as const) {
+    for (const id of ["home", "team", "chat", "plugins", "vault", "settings"] as const) {
       recordRecent({ kind: "page", id }, store);
     }
     const list = loadRecent(store);
@@ -179,7 +179,7 @@ describe("palette · 空查询分组", () => {
   it("无最近使用时只有「页面跳转」与「常用动作」两组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
-    expect(groups[0].items).toHaveLength(8);
+    expect(groups[0].items).toHaveLength(7);
     expect(groups[1].items).toHaveLength(9);
   });
 
@@ -292,7 +292,7 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(17);
+    expect(flattenGroups(groups)).toHaveLength(16);
   });
 
   it("知识库笔记：vault 组排在页面之后，副标题显示所属目录", () => {

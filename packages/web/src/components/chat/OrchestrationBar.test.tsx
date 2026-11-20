@@ -7,9 +7,8 @@ import { OrchestrationBar, type ChatView } from "./OrchestrationBar.js";
  *
  * 契约：
  * - 根节点 `data-testid="chat-orchestration"`；
- * - 第一行 h2 = title；chips：`[data-chip="collab"]`（button，点击 onOpenCollab）、
- *   `[data-chip="tools"]`「N 个工具调用」、
- *   `[data-chip="tasks"]`「N 个后台任务」；
+ * - 第一行 h2 = title；chips：`[data-chip="tools"]`「N 个工具调用」、
+ *   `[data-chip="tasks"]`「N 个后台任务」；派发在对话里完成，没有独立的协作页 chip；
  * - 第二行 `role="tablist" aria-label="会话视图"`，三个 tab（对话/轨迹/上下文）
  *   带 `data-view`、`aria-selected`、`aria-controls`。
  */
@@ -21,7 +20,6 @@ function renderBar(over: Partial<Parameters<typeof OrchestrationBar>[0]> = {}) {
     tasksCount: 1,
     view: "chat" as ChatView,
     onViewChange: vi.fn(),
-    onOpenCollab: vi.fn(),
     ...over,
   };
   render(<OrchestrationBar {...props} />);
@@ -31,12 +29,13 @@ function renderBar(over: Partial<Parameters<typeof OrchestrationBar>[0]> = {}) {
 afterEach(() => cleanup());
 
 describe("OrchestrationBar · 编排事实与视图页签", () => {
-  it("标题取会话名；三个 chip 显示真实计数，没有「标准模式」", () => {
+  it("标题取会话名；两个 chip 显示真实计数，没有「标准模式」与协作页入口", () => {
     renderBar();
     expect(screen.getByTestId("chat-orchestration")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "周会纪要" })).toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: "多智能体协作" })).toHaveAttribute("data-chip", "collab");
+    expect(screen.queryByRole("button", { name: "多智能体协作" })).toBeNull();
+    expect(document.querySelector('[data-chip="collab"]')).toBeNull();
     expect(screen.queryByText("标准模式")).toBeNull();
     expect(screen.getByText("3 个工具调用")).toHaveAttribute("data-chip", "tools");
     expect(screen.getByText("1 个后台任务")).toHaveAttribute("data-chip", "tasks");
@@ -46,12 +45,6 @@ describe("OrchestrationBar · 编排事实与视图页签", () => {
     renderBar({ toolsCount: 0, tasksCount: 0 });
     expect(screen.getByText("0 个工具调用")).toBeInTheDocument();
     expect(screen.getByText("0 个后台任务")).toBeInTheDocument();
-  });
-
-  it("点「多智能体协作」chip 调 onOpenCollab", () => {
-    const props = renderBar();
-    fireEvent.click(screen.getByRole("button", { name: "多智能体协作" }));
-    expect(props.onOpenCollab).toHaveBeenCalledTimes(1);
   });
 
   it("页签固定三个、顺序为 对话/轨迹/上下文，当前 view 标 aria-selected", () => {

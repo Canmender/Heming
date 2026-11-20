@@ -45,12 +45,6 @@ const TeamPage = lazy(() => import("./components/TeamPage.js").then((m) => ({ de
 const AssistantPage = lazy(() =>
   import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })),
 );
-// 协作（d.146.5）：多智能体协作独立页，恢复的 collaboration 引擎只在进这页时下载。
-const CollaborationPage = lazy(() =>
-  import("./components/collaboration/CollaborationPage.js").then((m) => ({
-    default: m.CollaborationPage,
-  })),
-);
 const ModelPage = lazy(() => import("./components/ModelPage.js").then((m) => ({ default: m.ModelPage })));
 const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
@@ -123,15 +117,14 @@ export function PageFallback() {
  * Alt+数字键目标页。页面入口现在只有侧栏「主导航」与命令面板两处，
  * 数字键口径与 `lib/palette/pages.ts` 的 `PALETTE_PAGES.digit` 严格对应
  * （命令面板/快捷键帮助直接读那份正表，这里只是键盘监听用的映射）。
- * 1 主页、2 团队（承接原团队看板）、5 协作（和鸣 + 本机智能体）、6 设置、
- * 8 会话（单智能体的对话页）、0 插件。记忆页已删除（记忆默认全开、无界面），
- * 原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
- * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
+ * 1 主页、2 团队（人类的队伍）、6 设置、8 会话（子智能体派发就在这里）、0 插件。
+ * 5 协作页在 d.409 删除：那是 magpie 检测本机 Claude Code/Codex 的接入式辩论页，
+ * 不是 DSH/Codex 式的子智能体派发。空着比让人重新记「5 现在是什么」更省心。
+ * 记忆页也已删除（记忆默认全开、无界面），原先的 3 技能区 / 4 接口区并进了插件页。
  */
 export const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
   "1": "home",
   "2": "team",
-  "5": "collab",
   "6": "settings",
   "8": "chat",
   "0": "plugins",
@@ -568,9 +561,6 @@ function AppShell({
     ) : currentPage === "chat" ? (
       // 会话（本机运行）：单智能体的会话列表 + 对话；d.67 起承接「任务」视图
       <AssistantPage />
-    ) : currentPage === "collab" ? (
-      // 协作（d.146.5）：多智能体协作——和鸣 + 本机智能体，按顺序/主管/辩论一起干活
-      <CollaborationPage />
     ) : currentPage === "model" ? (
       // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
       <ModelPage />

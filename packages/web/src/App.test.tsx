@@ -200,8 +200,9 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(window, { key: "3", altKey: true });
     fireEvent.keyDown(window, { key: "4", altKey: true });
     expect(useUiStore.getState().page).toBe("team");
+    // 5 曾是「协作」页，d.409 删除后是空键位（不切页）
     fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("collab");
+    expect(useUiStore.getState().page).toBe("team");
     fireEvent.keyDown(window, { key: "6", altKey: true });
     expect(useUiStore.getState().page).toBe("settings");
     fireEvent.keyDown(window, { key: "8", altKey: true });
@@ -284,8 +285,9 @@ describe("App 导航快捷键与隐藏态", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "退出登录" })).not.toBeInTheDocument(),
     );
-    fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("collab");
+    // 关掉模态后导航恢复：Alt+5 现在是空键位，页面不动；Ctrl+K 重新能开面板
+    fireEvent.keyDown(window, { key: "8", altKey: true });
+    expect(useUiStore.getState().page).toBe("chat");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(await screen.findByRole("dialog", { name: "命令面板" })).toBeInTheDocument();
   });

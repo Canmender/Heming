@@ -34,12 +34,6 @@ export const PALETTE_PAGES: PalettePage[] = [
     digit: "0",
   },
   {
-    page: "collab",
-    label: "协作",
-    description: "多智能体协作：和鸣 + 本机智能体，按顺序/主管/辩论一起干活",
-    digit: "5",
-  },
-  {
     page: "vault",
     label: "知识库",
     description: "本地 vault：文件树、双链、标签、搜索与图谱，数据不出设备",

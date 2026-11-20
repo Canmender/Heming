@@ -74,6 +74,12 @@ export interface RuntimeSectionInput {
    */
   contextUsage?: { used: number; budget: number };
   /**
+   * 当前在跑的子代理数与其上限（d.410）：已满时注入「别再派、等结论或自己干」的
+   * 降级文案（对齐 DSH 的 `tool:subagent:depth` 闸门）。平时不传就不占 token。
+   */
+  activeSubagents?: number;
+  subagentLimit?: number;
+  /**
    * 计划模式（d.173）：本轮用户要求「先方案、不改动」。
    *
    * 这一轮写类工具已经从桥里摘掉了（见 `agentRuntime/planMode.ts`），但**必须写进提示词**：
@@ -509,10 +515,21 @@ export function buildRuntimeSection(input: RuntimeSectionInput): string {
   if (hasAgentTaskTool(input.tools)) {
     lines.push(
       "- 要翻很多文件、多轮检索才能得出结论时，用 `agent_task` 派一个只读子代理：它自己读、只把结论带回来，别把几十个文件的原文都拉进主对话。要查的事超过 3 件就先合并成 3 件，先派最费上下文的那几件。",
+      // d.410：对齐 DSH 的 tool:subagent 段落——并行派、别轮询、收口前收齐。
+      // 和鸣的 tasks 数组与异步投递都已具备，缺的是把「怎么用它」写进提示词。
+      "- 几件互不依赖的事，在**同一条消息里**用 `tasks` 一起并行派出去，别一件一件串行等——子代理各跑各的，只回结论。派出去之后不要 sleep、不要反复问「好了没有」：结论跑完会自动送回这段对话，到了会叫你。在给出最终答复之前，把还在跑的子代理结论收齐；必须等结论才能决定下一步时别用 background。",
       // d.349：异步派发——「派出去、我继续干别的」时不要干等；同时把上限说清，
       // 免得模型一次派十几个把队列塞满。
-      "- 派出去之后你还有别的活能干、不必等它才能往下走时，加 `background: true` 把它派到后台：工具会立刻返回，结论跑完自动送回这段对话（同时最多 5 个在跑，多的排队）。派完就继续做手头的事，别反复去问「好了没有」——结论到了会自动叫你。必须等它的结论才能决定下一步时，别用 background。",
+      "- 派出去之后你还有别的活能干、不必等它才能往下走时，加 `background: true` 把它派到后台：工具会立刻返回，结论跑完自动送回这段对话（同时最多 5 个在跑，多的排队）。派完就继续做手头的事。",
     );
+    // d.410：动态并发门（对齐 DSH 的 tool:subagent:depth 降级文案）。
+    // 只在确实已满时注入一段「别再派、等结论或自己干」，平时不占 token。
+    if (input.activeSubagents !== undefined && input.subagentLimit !== undefined &&
+        input.activeSubagents >= input.subagentLimit) {
+      lines.push(
+        `- 现在已有 ${input.activeSubagents} 个子代理在跑（同时上限 ${input.subagentLimit}）：别再派新的了，等结论送回，或者这件事你自己直接干。`,
+      );
+    }
     // d.348：只教「可以派」不够，还要教「怎么派才真的省」。子代理没有主对话历史，
     // 任务写得太短它只会回来问（而它没有提问通道），写得太长等于把原文又搬一遍；
     // 另外模型看不见自己在花多少上下文，会先读十份文件才想起来派。

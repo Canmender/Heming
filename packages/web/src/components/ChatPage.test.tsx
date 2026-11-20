@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
@@ -5898,7 +5898,7 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     expect(within(context).getByRole("list", { name: "上下文明细" })).toBeInTheDocument();
   });
 
-  it("chips 反映真实计数；点「多智能体协作」跳协作页，不再有模式 chip", async () => {
+  it("chips 反映真实计数；没有模式 chip，也没有协作页入口", async () => {
     await setup();
     const orchestration = await screen.findByTestId("chat-orchestration");
     expect(within(orchestration).getByRole("heading", { level: 2, name: "周会纪要" }))
@@ -5908,9 +5908,9 @@ describe("ChatPage · 编排条与视图页签（T32）", () => {
     // d.346：没有模式区分（标准/其他），「标准模式」chip 已删除。
     expect(document.querySelector('[data-chip="mode"]')).toBeNull();
     expect(screen.queryByText("标准模式")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "多智能体协作" }));
-    expect(useUiStore.getState().page).toBe("collab");
+    // d.409：派发在对话里完成，那个挂名「多智能体协作」的接入页已删除。
+    expect(document.querySelector('[data-chip="collab"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "多智能体协作" })).toBeNull();
   });
 
   it("切走再切回：输入框草稿仍在（面板 hidden 保活，不是重新挂载）", async () => {

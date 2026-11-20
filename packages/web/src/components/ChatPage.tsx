@@ -202,6 +202,7 @@ import {
 import { withSubagentTool } from "../lib/agentRuntime/subagent.js";
 import {
   activeSubagentJobCount,
+  SUBAGENT_MAX_ACTIVE,
   cancelSubagentJobsOf,
   restoreInterruptedJobs,
   setSubagentJobDelivery,
@@ -3391,6 +3392,10 @@ export function ChatPage({
             ...(contextUsage.budget > 0
               ? { contextUsage: { used: contextUsage.used, budget: contextUsage.budget } }
               : {}),
+            // d.410：并发门——满了就告诉模型「别再派、等结论或自己干」（对齐 DSH depth 闸门）。
+            // 只数后台在跑的；同步派发是阻塞的、本轮就一个，不需要提示。
+            activeSubagents: activeSubagentJobCount(),
+            subagentLimit: SUBAGENT_MAX_ACTIVE,
             // 后台作业（d.180）：老安装包没有作业通道时不承诺「能后台跑」。
             hasBackgroundJobs: hasJobRuntime(getShellBridge()),
             // 同理读存储：界面 state 可能还没落，提示词不能说错这一轮是不是只读。
@@ -6071,7 +6076,6 @@ export function ChatPage({
         tasksCount={runningTaskCount}
         view={view}
         onViewChange={setView}
-        onOpenCollab={() => useUiStore.getState().setPage("collab")}
         leading={
           <IconButton
             label="返回"

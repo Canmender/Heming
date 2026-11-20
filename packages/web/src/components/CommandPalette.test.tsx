@@ -62,8 +62,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 8 个导航页 + 9 个动作（模型路由页与模块 Tab 已删除；模块并入插件页）
-    expect(screen.getAllByRole("option")).toHaveLength(17);
+    // 7 个导航页 + 9 个动作（协作页 d.409 删除、模型路由页与模块 Tab 已删除）
+    expect(screen.getAllByRole("option")).toHaveLength(16);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -185,10 +185,16 @@ describe("命令面板 v2 · 检索", () => {
   it("按页面名检索并跳转", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
-    fireEvent.change(searchBox(), { target: { value: "协作" } });
-    fireEvent.click(OPTION("协作"));
-    expect(useUiStore.getState().page).toBe("collab");
+    fireEvent.change(searchBox(), { target: { value: "会话" } });
+    fireEvent.click(OPTION("会话"));
+    expect(useUiStore.getState().page).toBe("chat");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("不再有「协作」页命令（d.409：接入式协作页已删除）", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "协作" } });
+    expect(screen.queryByText("协作")).toBeNull();
   });
 
   it("按设置分区检索并直达该分区", () => {

@@ -153,8 +153,24 @@ describe("buildRuntimeSection", () => {
     expect(text).toContain("任务要自包含");
     expect(text).toContain("看不到这段对话");
     expect(text).toContain("tasks");
+    // d.410：并行派、别轮询、收口前收齐（对齐 DSH tool:subagent 段）
+    expect(text).toContain("并行派出去");
+    expect(text).toContain("不要 sleep");
+    expect(text).toContain("结论收齐");
     // 这一句只属于派发指引，不该在没注入 agent_task 时出现
     expect(buildRuntimeSection({ ...base, tools: [] })).not.toContain("任务要自包含");
+  });
+
+  it("并发已满时才注入降级文案（d.410：对齐 DSH depth 闸门）", () => {
+    const subagent = [{ name: "agent_task", title: "派子代理", risk: "read" as const }];
+    const notFull = buildRuntimeSection({ ...base, tools: subagent, activeSubagents: 2, subagentLimit: 5 });
+    expect(notFull).not.toContain("别再派新");
+    const full = buildRuntimeSection({ ...base, tools: subagent, activeSubagents: 5, subagentLimit: 5 });
+    expect(full).toContain("别再派");
+    expect(full).toContain("等结论送回");
+    // 没注入派发工具时即使传了满额数也不写
+    const noTool = buildRuntimeSection({ ...base, tools: [], activeSubagents: 5, subagentLimit: 5 });
+    expect(noTool).not.toContain("别再派");
   });
 
   it("教模型什么时候派到后台、并且派完别干等（d.349）", () => {
@@ -164,7 +180,7 @@ describe("buildRuntimeSection", () => {
     expect(text).toContain("最多 5 个");
     // 「还会自动回来」比「不要等」更重要：模型怕漏结论，才不敢派后台
     expect(text).toContain("自动送回");
-    expect(text).toContain("别反复去问");
+    expect(text).toContain("不要 sleep");
     expect(buildRuntimeSection({ ...base, tools: [] })).not.toContain("background: true");
   });
 

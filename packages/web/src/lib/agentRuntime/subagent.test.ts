@@ -704,6 +704,8 @@ describe("自定义子代理（d.287）", () => {
     expect(system).toContain("见上面");
     // 没有审批通道：被拒就说明限制，别换参数反复试（对齐 DSH 的拒绝即说明）
     expect(system).toContain("不要换参数反复试");
+    // d.410：权限派发时固定、不能自己扩权（对齐 DSH child-agent 声明）
+    expect(system).toContain("权限在你被派出时就固定");
   });
 
   it("定义写什么都提不了权：工具白名单仍由程序说了算", async () => {
