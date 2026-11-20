@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.411.4.141.14",
+    "date": "2026-11-20",
+    "title": "来源汇总在一张卡，国产智能体终于接得进来",
+    "bullets": [
+      "`src/lib/magpieDomestic.test.ts` 20 例、`src/components/ModelPage.test.tsx` 135 例，定向 15 文件 / 233 例全绿",
+      "`pnpm --filter @heming/web typecheck` 通过",
+      "「找服务商」仍只筛两排添加卡片，不筛已添加的来源与订阅账号（每天要点的，藏起来像被删）。",
+      "添加入口虽集中到一页，预设卡片、其他地址表单、国产端卡片仍各有各的位置，没有再合成单一输入框。"
+    ],
+    "paragraphs": [
+      "为什么做",
+      "找一家来源要在「订阅账号」「国产智能体」「已添加的来源」三张卡之间来回翻，太散。更要命的是国产智能体接不进来：那个「登录一个账号」的折叠会在你已经有任意账号后自动收起，国产端卡片跟着藏起来；就算找着了，小米的按钮还永远在重装插件、额度刷不出来。这次把来源汇总、把接入的 BUG 一起修了。",
+      "做了什么",
+      "| 改动 | 说明 |\n| --- | --- |\n| 三类来源一张卡 | 订阅账号列表 → 借本机账号 + 国产端 → 已添加的来源，往下滚一遍全看到；锚点仍可跳 |\n| 国产端不再折叠 | 去掉「登录一个账号 / 再加一个账号」折叠与自动收起逻辑，国产端卡片与登录网格常显 |\n| 小米 provider id 认对 | 订阅 id 是 `mimo-app` 不是 agent 名 `mimo`：`accountId` 用订阅 id、`quota refresh` 跟着改 |\n| 插件已装判定 | 新增 `domesticPluginInstalled`，认订阅 id 与同包另一站；刻意不认 agent，免得同名按量 provider 误判 |\n| 同包两站互认 | workbuddy↔workbuddy-ai、qoder-cn↔qoder、minimax-code↔minimax-code-global 装一个不重装另一个 |\n| 补测试 | 小米不重装、同包互认、`refresh mimo-app`、统一清单在一张卡、国产端常显 |",
+      "怎么验证",
+      "留白"
+    ]
+  },
+  {
     "version": "d.410.4.141.14",
     "date": "2026-11-20",
     "title": "派活就在对话里，不用再去协作页",

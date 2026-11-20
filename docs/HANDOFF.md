@@ -6664,6 +6664,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - **明确边界**：后台子代理的**结论文本不落盘**——它和消息正文一样可能敏感，写 localStorage 明文会破坏 E2E「服务端只存密文、本机缓存也走加密容器」的口径。跨重启的未交付结论仍会丢，这是写明的设计边界，不用明文存储去补。
 - 验证：`runtimePrompt`/`subagent`/`team`/`subagentJobs`/`ChatPage` 344 例全过；web 全量 468 文件 / 6740 例通过（唯一失败 `SettingsPage.test.tsx:413` 是并行会话 d.409 release note 用 `1.` 编号列表被解析成 paragraph 的既存失败，与本轮无关）；typecheck 通过。
 
+- **来源汇总一张卡，国产智能体接得进来（d.411）**：★ 订阅账号 / 国产端 / 已添加来源并进同一张卡，往下滚一遍全看到，锚点照跳 ★ 国产端不再藏进「登录一个账号」折叠——有账号也一直摊开，点一下就接 ★ 修小米 MiMo Code：订阅 id 是 mimo-app 不是 agent 名 mimo，accountId 与 quota refresh 都改用订阅 id，装过就不重装；同包两站互认不重复装 ★ 定向 233 例绿 + typecheck 通过
 ## 7. 快速上手命令
 
 ```bash
