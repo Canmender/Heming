@@ -76,6 +76,29 @@ describe("命中摘要（d.235）", () => {
     expect(excerptAround("短消息", "")).toBe("短消息");
   });
 
+  it("摘要切点落在 emoji 代理对中间时不出落单代理", () => {
+    // pad 默认 26：命中点往前 26 码元正好切在 😀 的低代理上。
+    const text = "a".repeat(50) + "😀" + "b".repeat(25) + "KEY" + "c".repeat(40);
+    const excerpt = excerptAround(text, "KEY");
+    const hasLone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+      excerpt,
+    );
+    expect(hasLone).toBe(false);
+    expect(excerpt).toContain("KEY");
+  });
+
+  it("大小写折叠会变长时（İ→i̇）仍能定位到关键词，不把它切掉", () => {
+    // 旧实现用 flat.toLowerCase().indexOf() 拿下标再去切原串，
+    // İ 小写化从 1 码元变 2，下标右移，关键词 KEY 被截成 EY。
+    const excerpt = excerptAround("İKEY", "KEY", 0);
+    expect(excerpt.toLowerCase()).toContain("key");
+  });
+
+  it("查询串含正则元字符时按字面匹配（不当语法、不报异常）", () => {
+    expect(excerptAround("a.b (x) [y] 结束", "b (x)")).toContain("b (x)");
+    expect(excerptAround("100% 完成", "%")).toContain("%");
+  });
+
   it("buildSearchRows 保持命中顺序，附上次数，跳过已撤回的时间线文本", () => {
     const rows = buildSearchRows(messages, findMessageHits(messages, "发布"), "发布");
     expect(rows.map((r) => r.id)).toEqual(["m1", "m2"]);

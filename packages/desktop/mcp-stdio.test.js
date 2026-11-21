@@ -247,6 +247,39 @@ test("连续超时到上限 → 回收该进程，下次调用重新拉起", asy
   assert.deepEqual(await fourth, { tools: [] });
 });
 
+test("旧子进程迟到的 exit 不误删已用同一 id 拉起的替代进程（d.412 回归）", async () => {
+  const kids = [];
+  const bridge = makeBridge({
+    timeoutMs: 20,
+    spawn: () => {
+      const f = fakeChild();
+      kids.push(f);
+      return f.child;
+    },
+  });
+
+  // 3 次超时触发回收：stop 同步删 entry、异步收尾子进程 A。
+  for (let i = 0; i < 3; i += 1) {
+    await assert.rejects(bridge.request("s1", { command: "x" }, "tools/call", {}), /超时/);
+  }
+  // 第 4 次请求用同一 serverId 拉起替代进程 B。
+  const fourth = bridge.request("s1", { command: "x" }, "tools/list", {});
+  assert.equal(kids.length, 2);
+  assert.deepEqual(bridge.running(), ["s1"]);
+
+  // 旧进程 A 的 exit 现在才到：它已不是当前 entry，绝不能删掉 B。
+  kids[0].child.emit("exit", 1, null);
+  assert.deepEqual(bridge.running(), ["s1"], "替代进程不能被陈旧 exit 从表里抹掉");
+
+  // B 仍能正常应答；同一 id 再请求复用 B，不再拉起 C。
+  reply(kids[1].child, { jsonrpc: "2.0", id: 1, result: { tools: [] } });
+  assert.deepEqual(await fourth, { tools: [] });
+  const fifth = bridge.request("s1", { command: "x" }, "tools/list", {});
+  assert.equal(kids.length, 2, "不该因为旧 exit 而重复拉起新进程");
+  reply(kids[1].child, { jsonrpc: "2.0", id: 2, result: { tools: [] } });
+  assert.deepEqual(await fifth, { tools: [] });
+});
+
 test("中途回得来消息就把连续超时计数清零（不会误杀活着的进程）", async () => {
   const kids = [];
   const bridge = makeBridge({

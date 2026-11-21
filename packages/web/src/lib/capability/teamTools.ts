@@ -762,6 +762,12 @@ const EVENT_KIND_LABEL: Record<TeamEvent["kind"], string> = {
   member_added: "加人",
   member_removed: "移人",
   owner_transferred: "换队长",
+  join_requested: "申请加入",
+  join_approved: "通过申请",
+  join_rejected: "拒绝申请",
+  knowledge_added: "发文档",
+  knowledge_updated: "改文档",
+  knowledge_removed: "删文档",
 };
 
 /**

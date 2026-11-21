@@ -517,6 +517,12 @@ function fileToolSummary(args: Record<string, unknown>): string | null {
   return null;
 }
 
+/** 按码点截断（带省略号），避免按 UTF-16 码元切在 emoji 代理对中间。 */
+function clipCodePoints(text: string, max: number): string {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max).join("")}…`;
+}
+
 /**
  * 参数摘要（一行）。
  *
@@ -533,6 +539,14 @@ function fileToolSummary(args: Record<string, unknown>): string | null {
  */
 export function summarizeArgs(argsJson: string, name?: string): string {
   const args = parseArgs(argsJson);
+  // 任一字段疑似密钥 ⇒ 整条摘要退化成 ***，必须在所有早返回分支之前判定。
+  // 以前这条检查只在函数末尾的兜底路径做，task/command/job_id 等早返回直接回显
+  // 原始取值——命令里的 Bearer token、子代理任务里的 sk-… 都能原样漏到确认卡和审计日志。
+  // 「摘要栏显示不了密钥」是这层的硬红线，不允许任何分支绕过。
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === "string" && isSensitive(key, value)) return "***";
+    if (typeof value === "number" && isSensitive(key, String(value))) return "***";
+  }
   // 后台作业（d.180）：摘要只放作业 id / 规模，输出正文（可能含敏感信息）不进确认卡。
   if (name === "command_list") return "列出后台作业";
   if (name === "command_output" || name === "command_kill") {
@@ -560,14 +574,14 @@ export function summarizeArgs(argsJson: string, name?: string): string {
   const subagentTask = args.task;
   if (typeof subagentTask === "string" && subagentTask.trim()) {
     const text = subagentTask.trim();
-    return `子代理任务：${text.length > 60 ? `${text.slice(0, 60)}…` : text}`;
+    return `子代理任务：${clipCodePoints(text, 60)}`;
   }
   // 本机命令（d.164）：摘要只放命令本身。整条命令可能很长，截断成一行；
   // 工作目录不放进摘要（确认卡上另有展示），避免摘要在窄栏里被挤成两行。
   const shellCommand = args.command;
   if (typeof shellCommand === "string" && shellCommand.trim()) {
     const text = shellCommand.trim().replace(/\s+/g, " ");
-    return "命令：" + (text.length > 70 ? text.slice(0, 70) + "…" : text);
+    return "命令：" + clipCodePoints(text, 70);
   }
   // 文件类新工具的专用摘要（file_write / file_edit / file_glob / file_grep）
   const fileTool = fileToolSummary(args);  if (fileTool) return fileTool;
@@ -595,7 +609,7 @@ export function summarizeArgs(argsJson: string, name?: string): string {
     else if (typeof v === "string" && k === "url") safe[k] = maskUrlUserinfo(v);
     else safe[k] = v;
   }
-  return JSON.stringify(safe).slice(0, 80);
+  return clipCodePoints(JSON.stringify(safe), 80);
 }
 
 /**

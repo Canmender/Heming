@@ -200,6 +200,40 @@ describe("WidgetSettingsCard · 通用表单", () => {
     expect(settingsSet.mock.calls[1][0].patch).toEqual({ size: 420 });
   });
 
+  it("Esc 放弃编辑：不把要丢弃的值写回，输入框恢复原值（d.412 回归）", async () => {
+    const settingsSet = vi.fn(async (input: { patch: Record<string, unknown> }) => ({
+      ...record().settings,
+      ...input.patch,
+    }));
+    window.__heming_widgets = makeBridge({ settingsSet });
+    render(<WidgetSettingsCard />);
+    await screen.findByText("桌宠");
+
+    const text = screen.getByLabelText("模型路径") as HTMLInputElement;
+    const initial = text.value;
+    fireEvent.change(text, { target: { value: "pet/CHANGED/DISCARD.model3.json" } });
+    fireEvent.keyDown(text, { key: "Escape" });
+    // Esc 不该写盘；blur 触发的 onBlur 也不能把丢弃值提交。
+    await waitFor(() => expect(text.value).toBe(initial));
+    expect(settingsSet).not.toHaveBeenCalled();
+  });
+
+  it("回车提交只写一次：blur 触发的 onBlur 不重复写（d.412 回归）", async () => {
+    const settingsSet = vi.fn(async (input: { patch: Record<string, unknown> }) => ({
+      ...record().settings,
+      ...input.patch,
+    }));
+    window.__heming_widgets = makeBridge({ settingsSet });
+    render(<WidgetSettingsCard />);
+    await screen.findByText("桌宠");
+
+    const text = screen.getByLabelText("模型路径") as HTMLInputElement;
+    fireEvent.change(text, { target: { value: "pet/ENTER/ONCE.model3.json" } });
+    fireEvent.keyDown(text, { key: "Enter" });
+    await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(1));
+    expect(settingsSet.mock.calls[0][0].patch).toEqual({ modelPath: "pet/ENTER/ONCE.model3.json" });
+  });
+
   it("写回失败显示中文错误", async () => {
     window.__heming_widgets = makeBridge({
       settingsSet: async () => {

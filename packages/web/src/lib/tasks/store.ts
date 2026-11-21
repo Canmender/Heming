@@ -905,7 +905,17 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         patchTask(get().tasks, taskId, (task) =>
           task.status === "running"
             ? task
-            : { ...task, status: "running", updatedAt: now, endedAt: undefined, error: undefined },
+            : {
+                ...task,
+                status: "running",
+                updatedAt: now,
+                endedAt: undefined,
+                error: undefined,
+                // 上一轮的结论/证据不能留到新一轮：重试时若这次没给 result，
+                // settle 只在带 result 时才覆盖，旧结论就会被当成这一轮的结果展示（d.412 修复）。
+                result: undefined,
+                evidence: undefined,
+              },
         ),
       ),
     });

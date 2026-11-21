@@ -111,6 +111,9 @@ function tokenize(query: string): string[] {
       tokens.push(piece);
       continue;
     }
+    // "click截图" 这类中英混排不含分隔符，会整体落进这个分支；若只取 CJK，
+    // 里面的 ASCII 词 "click" 就被丢了。先把连续的 ASCII 片段也收进来。
+    tokens.push(...(piece.match(/[a-z0-9]+/g) ?? []));
     const cjk = piece.match(/[\u4e00-\u9fff]/g) ?? [];
     if (cjk.length) {
       tokens.push(...cjk); // 单字兜底

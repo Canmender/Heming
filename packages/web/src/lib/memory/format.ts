@@ -146,7 +146,13 @@ function fillItems(
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1))}…`;
+  let end = Math.max(0, max - 1);
+  // 不把 emoji（代理对）劈成非法半截注入提示词：若截点前一位是高代理、
+  // 原串下一位是它的低代理，退回一个码元，让整对一起被去掉。
+  const last = text.charCodeAt(end - 1);
+  const next = text.charCodeAt(end);
+  if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
+  return `${text.slice(0, end)}…`;
 }
 
 /** 固定骨架（标题 + 分隔空行 + 页脚）与内容共用同一渲染函数，预算才能算准。 */

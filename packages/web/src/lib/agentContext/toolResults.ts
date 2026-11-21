@@ -65,7 +65,10 @@ function toolCost(row: ChatMessage): number {
 export function summarizeToolResult(row: ChatMessage): string {
   const text = String(row?.content ?? "").trim();
   const firstLine = text.split("\n")[0]?.trim() ?? "";
-  const clipped = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+  // 按码点截断：slice(0, 80) 按 UTF-16 单元切，边界落在 emoji 代理对中间会留下落单代理，
+  // 摘要回灌给模型时变成乱码方块。首行通常是路径/命令，多字节字符很常见。
+  const points = [...firstLine];
+  const clipped = points.length > 80 ? `${points.slice(0, 80).join("")}…` : firstLine;
   const name = row?.name ?? "工具";
   return `（较早的 ${name} 结果已折叠为单行摘要：${clipped || "（空）"}；原文 ${text.length} 字符，如需重查请再次调用该工具）`;
 }

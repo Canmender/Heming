@@ -90,8 +90,12 @@ async function statTree(root, options = {}) {
           }
         }
       }
-    } catch {
-      // 枚举过程中目录被删掉，继续统计剩下的
+    } catch (error) {
+      // 枚举过程中目录被删掉，继续统计剩下的；但「已取消」必须向上传播，
+      // 否则取消安装时 statTree 会正常返回，pipeline 的 isAbort 收不到信号。
+      if (error?.code === CODES.CANCELLED || signal?.aborted) {
+        throw new SetupError(CODES.CANCELLED, "已取消", null);
+      }
     }
     if (truncated) break;
   }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
 import type { StorageLike } from "../memory/types.js";
 import { compactNow, countFoldedMessages, prepareHistory } from "./history.js";
@@ -124,6 +124,22 @@ describe("compactNow：手动压缩（d.183）", () => {
     expect(result.summary).toContain("意图：");
   });
 
+  it("摘要不比折掉的内容短时不采用它，回落确定性摘要（d.412 回归）", async () => {
+    const rows = conversation(4, "……".repeat(150));
+    // 模型没守住「≤200 字」，回吐一段比被折内容还长的「摘要」
+    const verbose = "啰嗦摘要".repeat(2000);
+    const result = await compactNow(rows, {
+      settings: DEFAULT_CONTEXT_SETTINGS,
+      summarize: async () => verbose,
+    });
+
+    // 摘要被拒：用的是确定性摘要，不含那段啰嗦文本
+    expect(result.summary).not.toContain("啰嗦摘要");
+    expect(result.summary).toContain("意图：");
+    // 压完确实变短，没把请求撑大
+    expect(result.afterTokens).toBeLessThan(result.beforeTokens);
+  });
+
   it("缓存分桶按会话隔离：别的会话不会命中这条摘要", async () => {
     const rows = conversation(4, "……".repeat(150));
     const cache = new SummaryCache(memoryStorage());
@@ -146,6 +162,28 @@ describe("compactNow：手动压缩（d.183）", () => {
     expect(calls).toBe(1);
     expect(other.summary).toContain("B");
     expect(first.summary).toContain("A");
+  });
+
+  it("摘要供应商抛错时留一条可观测告警，同时照常回落确定性摘要（d.412 回归）", async () => {
+    const rows = conversation(4, "……".repeat(150));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await compactNow(rows, {
+        settings: DEFAULT_CONTEXT_SETTINGS,
+        summarize: async () => {
+          throw new Error("provider down");
+        },
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("LLM 摘要失败"),
+        expect.any(Error),
+      );
+      // 不阻断：仍产出确定性摘要
+      expect(result.compacted).toBe(true);
+      expect(result.summary).toContain("意图：");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("不 force 的 prepareHistory 不会折：手动压缩不能改变自动压缩的口径", async () => {

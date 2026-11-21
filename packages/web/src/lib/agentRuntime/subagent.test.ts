@@ -156,6 +156,13 @@ describe("clipSubagentResult", () => {
     expect(clipped.endsWith("结论在最后")).toBe(true);
     expect(clipped).toContain("省略");
   });
+
+  it("按码点保头保尾，不在 emoji 代理对中间劈出落单代理（d.412 回归）", () => {
+    const clipped = clipSubagentResult("abcdef\u{1F600}uvwxyz1234567890", 10);
+    const withoutPairs = clipped.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "");
+    expect(/[\uD800-\uDFFF]/.test(withoutPairs)).toBe(false);
+    expect(clipped).toContain("\u{1F600}");
+  });
 });
 
 describe("runSubagent", () => {

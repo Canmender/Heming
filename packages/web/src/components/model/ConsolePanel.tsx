@@ -39,33 +39,60 @@ export function ConsolePanel({
       return;
     }
     let alive = true;
-    const unsubscribe = bridge.onCli((event: MagpieCliEvent) => {
-      if (event.type === "start") {
-        if (alive) setRunId(event.runId);
-        return;
-      }
-      if (event.type === "stdout" || event.type === "stderr") {
-        bufferRef.current += event.text ?? "";
-        if (alive) setOutput(engineText(tailText(stripAnsi(bufferRef.current))));
-        return;
-      }
-      if (event.type === "exit") {
+    // onCli 是全局总线：每个窗口都收到全部命令的事件。只认自己那次 begin 的
+    // runId，绝不能用事件里的 start 覆盖——否则别人的 start 会把口令写到
+    // 别人的进程 stdin，别人的 stdout/exit 也会冒充成本命令的输出/结束。
+    let myRunId: string | null = null;
+    const pending: MagpieCliEvent[] = [];
+    const applyEvent = (event: MagpieCliEvent) => {
+      // "exit" 是运行时事件，但 MagpieCliEventType 的类型字面量未包含它，先判它。
+      if ((event.type as string) === "exit") {
         if (!alive) return;
         const ok = (event as { ok?: boolean }).ok === true;
         setStatus(ok ? "done" : "error");
         if (!ok) setError(engineText((event as { error?: string }).error || "命令失败"));
         doneRef.current?.({ ok, error: (event as { error?: string }).error });
-      }
-    });
-    void (async () => {
-      const started = await bridge.cliBegin(args);
-      if (!alive) return;
-      if (!started.ok) {
-        setStatus("error");
-        setError(started.error || "无法启动命令");
         return;
       }
-      setRunId(started.runId ?? null);
+      if (event.type === "stdout" || event.type === "stderr") {
+        bufferRef.current += event.text ?? "";
+        if (alive) setOutput(engineText(tailText(stripAnsi(bufferRef.current))));
+      }
+    };
+    const unsubscribe = bridge.onCli((event: MagpieCliEvent) => {
+      if (!alive || event.type === "start") return;
+      if (myRunId === null) {
+        // begin 还没回来：先暂存，拿到自己的 runId 后只回放确实属于本命令的。
+        if (pending.length < 200) pending.push(event);
+        return;
+      }
+      if (event.runId !== myRunId) return;
+      applyEvent(event);
+    });
+    void (async () => {
+      try {
+        const started = await bridge.cliBegin(args);
+        if (!alive) return;
+        if (!started.ok) {
+          const message = started.error || "无法启动命令";
+          setStatus("error");
+          setError(message);
+          doneRef.current?.({ ok: false, error: message });
+          return;
+        }
+        myRunId = started.runId ?? "";
+        setRunId(started.runId ?? null);
+        const buffered = pending.splice(0);
+        for (const event of buffered) {
+          if (event.runId === myRunId) applyEvent(event);
+        }
+      } catch (err) {
+        if (!alive) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setStatus("error");
+        setError(message);
+        doneRef.current?.({ ok: false, error: message });
+      }
     })();
     return () => {
       alive = false;

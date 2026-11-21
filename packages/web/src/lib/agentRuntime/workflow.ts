@@ -267,9 +267,12 @@ function upstreamContext(
     const result = byId.get(need);
     if (!result) continue;
     const body = result.text.trim();
+    // 上游结论会拼进下游子代理的任务提示：按码点截断，不能在 emoji 的代理对中间
+    // 劈出落单代理（那会把无效标量值喂给模型，也是 d.412 一系列截断修复的同款问题）。
+    const chars = Array.from(body);
     const clipped =
-      body.length > WORKFLOW_UPSTREAM_CONTEXT_MAX
-        ? `${body.slice(0, WORKFLOW_UPSTREAM_CONTEXT_MAX)}…（已截断）`
+      chars.length > WORKFLOW_UPSTREAM_CONTEXT_MAX
+        ? `${chars.slice(0, WORKFLOW_UPSTREAM_CONTEXT_MAX).join("")}…（已截断）`
         : body;
     parts.push(`- 步骤 ${need}（${result.task}）：\n${clipped}`);
   }

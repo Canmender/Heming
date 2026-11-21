@@ -836,19 +836,61 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     expect(await screen.findByText(/已把 WorkBuddy 接进和鸣/)).toBeInTheDocument();
   });
 
-  it("三类来源汇总在一张卡里：订阅账号、国产端、已添加的来源不再分开放", async () => {
-    installBridge();
+  it("来源页分区清楚：服务商、订阅与账号、其余额度、额度走向各在一张卡里", async () => {
+    const now = Date.now();
+    const at = (hoursAgo: number): string => new Date(now - hoursAgo * 3600_000).toISOString();
+    installBridge({}, {
+      "quota --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          { provider: "deepseek", name: "DeepSeek", kind: "balance", windows: [], balance: "¥2.60", last: true },
+        ]),
+        stderr: "",
+      },
+      "quota history --days 7 --json": {
+        ok: true,
+        stdout: JSON.stringify([
+          {
+            provider: "claude",
+            user: "work@example.com",
+            lines: [{ name: "5 hours", points: [
+              { at: at(4), left: 96 }, { at: at(2), left: 64 }, { at: at(0), left: 30 },
+            ] }],
+          },
+        ]),
+        stderr: "",
+      },
+    });
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     await screen.findByText("工作号");
-    // 以「订阅账号」标题定位那张统一的卡，三类来源都应该在它里面。
-    const card = screen.getByText("订阅账号").closest(".ui-card") as HTMLElement;
-    expect(card).not.toBeNull();
-    expect(within(card).getByLabelText("订阅账号列表")).toBeInTheDocument();
-    expect(within(card).getByText("国产智能体")).toBeInTheDocument();
-    expect(within(card).getByText(/已添加的来源/)).toBeInTheDocument();
-    // 默认 bridge 里有一个按量来源 mock：它也得在这同一张卡里，而不是另一张。
-    expect(within(card).getByText("mock")).toBeInTheDocument();
+
+    // 找服务商工具条、服务商、订阅与账号、其余额度、额度走向各是一张独立卡，不再全塞进一张巨型卡。
+    const toolbar = screen.getByText("找服务商").closest(".ui-card") as HTMLElement;
+    const presets = screen.getByRole("heading", { name: "API Key 服务商" }).closest(".ui-card") as HTMLElement;
+    const accounts = screen.getByRole("heading", { name: "订阅账号" }).closest(".ui-card") as HTMLElement;
+    const orphans = screen.getByRole("heading", { name: "其余来源的额度" }).closest(".ui-card") as HTMLElement;
+    const trend = screen.getByRole("heading", { name: "额度走向" }).closest(".ui-card") as HTMLElement;
+
+    expect(toolbar).not.toBeNull();
+    // 五张卡彼此独立：谁也不是谁的外层卡。
+    const all = [toolbar, presets, accounts, orphans, trend];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = 0; j < all.length; j++) {
+        if (i !== j) expect(all[i].contains(all[j])).toBe(false);
+      }
+    }
+
+    // 订阅账号那张卡里仍串着国产端与已添加来源。
+    expect(within(accounts).getByLabelText("订阅账号列表")).toBeInTheDocument();
+    expect(within(accounts).getByText("国产智能体")).toBeInTheDocument();
+    expect(within(accounts).getByText(/已添加的来源/)).toBeInTheDocument();
+    expect(within(accounts).getByText("mock")).toBeInTheDocument();
+    // 额度走向是独立卡，不再内嵌在账号卡里。
+    expect(within(accounts).queryByText("额度走向")).toBeNull();
+    expect(within(trend).getByText("额度走向")).toBeInTheDocument();
+    // 预热功能已删掉，来源页不再有它。
+    expect(screen.queryByText("额度窗口预热")).toBeNull();
   });
 
   it("有账号时国产智能体也一直看得见，不用先点开什么", async () => {
@@ -1437,57 +1479,6 @@ it("账号可以就地改名：回车写 accounts alias，列表立刻换名字"
     fireEvent.change(select, { target: { value: "5" } });
     await waitFor(() => expect(calls).toContainEqual(["settings", "set", "balanceAlert", "5"]));
     expect(await screen.findByText(/已记下：余额低到 5 或更少时提醒一次/)).toBeInTheDocument();
-  });
-
-  it("额度窗口预热：切一档就写内核设置，关掉时用重置（空串内核不收）", async () => {
-    const { calls } = installBridge({}, {
-      "settings list --json": {
-        ok: true,
-        stdout: JSON.stringify([
-          { key: "codexWarmup", value: "" },
-          { key: "claudeWarmup", value: "week" },
-          { key: "codexWarmAts", value: null },
-          { key: "claudeWarmAts", value: [] },
-        ]),
-        stderr: "",
-      },
-    });
-    render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    await screen.findByText("额度窗口预热");
-    fireEvent.change(screen.getByLabelText("ChatGPT 的预热"), { target: { value: "all" } });
-    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "codexWarmup", "all"]));
-    expect(await screen.findByText("已打开预热：窗口一重置就先替你开一次。")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Claude 的预热"), { target: { value: "off" } });
-    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "claudeWarmup"]));
-    expect(await screen.findByText("已关掉这家厂商的预热。")).toBeInTheDocument();
-  });
-
-  it("额度窗口预热：每天的时间点按列表写进内核，清空就重置", async () => {
-    const { calls } = installBridge({}, {
-      "settings list --json": {
-        ok: true,
-        stdout: JSON.stringify([
-          { key: "codexWarmup", value: "all" },
-          { key: "codexWarmAts", value: ["06:00"] },
-        ]),
-        stderr: "",
-      },
-    });
-    render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
-    const input = await screen.findByLabelText("ChatGPT 每天开 5 小时窗口的时间");
-    await waitFor(() => expect(input).toHaveValue("06:00"));
-    fireEvent.change(input, { target: { value: "15:05 9:00" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(calls).toContainEqual(["settings", "set", "codexWarmAts", "09:00,15:05"]));
-    expect(await screen.findByText("已记下：每天 09:00、15:05 各开一次。")).toBeInTheDocument();
-
-    fireEvent.change(input, { target: { value: "" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(calls).toContainEqual(["settings", "reset", "codexWarmAts"]));
-    expect(await screen.findByText("已清掉固定时间。")).toBeInTheDocument();
   });
 
   it("国内端登录之后，额度写在它自己的卡片上，不用去上面的列表里找", async () => {

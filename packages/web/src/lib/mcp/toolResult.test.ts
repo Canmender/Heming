@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_TOOL_IMAGES,
   MAX_TOOL_RESULT_CHARS,
@@ -51,6 +51,12 @@ describe("truncateToolResult", () => {
     expect(out).toContain(String(10000 - 3000));
     // 中间那段必须真的被省略（否则等于没截断）
     expect(out).not.toContain("MMMM");
+  });
+
+  it("按码点保头保尾，不在 emoji 代理对中间劈出落单代理（d.412 回归）", () => {
+    const out = truncateToolResult("ABCDE\u{1F600}XYZW", 10, { spill: false });
+    const withoutPairs = out.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "");
+    expect(/[\uD800-\uDFFF]/.test(withoutPairs)).toBe(false);
   });
 
   it("超限时把完整内容留在溢出存储里，并给出可读回的 handle（d.181）", () => {

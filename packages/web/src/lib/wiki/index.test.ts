@@ -38,6 +38,18 @@ describe("slugify：文件名安全化", () => {
     expect(s).not.toContain("/");
     expect(s).not.toContain("\\");
   });
+
+  it("emoji 标题截断按码点，不切出落单代理（做文件名时不会变 U+FFFD，d.412 回归）", () => {
+    const s = slugify("A" + "😀".repeat(40));
+    const units = s.split("").map((c) => c.charCodeAt(0));
+    const lone = units.some((c, i) => {
+      if (c >= 0xd800 && c <= 0xdbff) return !(units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff);
+      if (c >= 0xdc00 && c <= 0xdfff) return !(units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff);
+      return false;
+    });
+    expect(lone).toBe(false);
+    expect(Array.from(s).length).toBeLessThanOrEqual(60);
+  });
 });
 
 describe("frontmatter 解析与渲染", () => {
@@ -131,6 +143,15 @@ describe("buildGraph：由双链建图", () => {
     ]);
     expect(g.edges[0].target).toBe("wiki/notes/a.md");
   });
+
+  it("真正同名（标题完全相同）时链接仍解析到先出现的那一个（d.412 回归）", () => {
+    const g = buildGraph([
+      page({ path: "wiki/notes/first.md", title: "同名", body: "" }),
+      page({ path: "wiki/notes/second.md", title: "同名", body: "见 [[同名]]" }),
+    ]);
+    expect(g.edges[0].target).toBe("wiki/notes/first.md");
+    expect(g.edges[0].source).toBe("wiki/notes/second.md");
+  });
 });
 
 describe("layoutGraph：确定性力导向布局", () => {
@@ -207,6 +228,17 @@ describe("renderIndex：内容目录", () => {
     const long = "长".repeat(100);
     const md = renderIndex([page({ path: "wiki/notes/a.md", title: "A", body: long })]);
     expect(md).toContain(`${"长".repeat(60)}…`);
+  });
+
+  it("摘要含 emoji 时按码点截断，不切出落单代理（d.412 回归）", () => {
+    const md = renderIndex([page({ path: "wiki/notes/a.md", title: "A", body: "A" + "😀".repeat(40) })]);
+    const units = md.split("").map((c) => c.charCodeAt(0));
+    const lone = units.some((c, i) => {
+      if (c >= 0xd800 && c <= 0xdbff) return !(units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff);
+      if (c >= 0xdc00 && c <= 0xdfff) return !(units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff);
+      return false;
+    });
+    expect(lone).toBe(false);
   });
 
   it("跳过标题行与分隔线做摘要", () => {

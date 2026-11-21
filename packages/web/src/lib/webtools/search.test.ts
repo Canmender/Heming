@@ -176,6 +176,23 @@ describe("DuckDuckGo 结果解析", () => {
     });
   });
 
+  it("标题截断落在 emoji 中间时不劈出落单代理（按码点切）", () => {
+    // MAX_TITLE_CHARS=120：旧代码 slice(0,119) 会切在 emoji 的代理对中间。
+    const longTitle = "a".repeat(118) + "😀" + "TAIL";
+    const html = `<h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fx">${longTitle}</a></h2>`;
+    const results = parseDuckDuckGoHtml(html);
+    expect(results).toHaveLength(1);
+    const title = results[0].title;
+    // 截断点前后都不能有落单代理（高代理后必须跟低代理，低代理前必须有高代理）。
+    const hasLone = (s: string): boolean =>
+      [...s].some((ch) => {
+        const code = ch.charCodeAt(0);
+        return ch.length === 1 && code >= 0xd800 && code <= 0xdfff;
+      });
+    expect(hasLone(title)).toBe(false);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
   it("反爬页 / 空页解析出空结果（不抛错）", () => {
     expect(parseDuckDuckGoHtml(ANTI_BOT_FIXTURE)).toEqual([]);
     expect(parseDuckDuckGoHtml("")).toEqual([]);
@@ -195,10 +212,23 @@ describe("DuckDuckGo 结果解析", () => {
     expect(unwrapDuckDuckGoLink("")).toBe("");
   });
 
+  it("uddg 只解一层编码：目标 URL 里的 %20/%25 不能被二次解坏", () => {
+    // uddg 的值是 percent-encoded 的目标地址，URLSearchParams.get() 已解一层；
+    // 再 decodeURIComponent 会把目标里的 %20 变裸空格、%25 变裸 %。
+    expect(
+      unwrapDuckDuckGoLink("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%2520b&rut=x"),
+    ).toBe("https://example.com/a%20b");
+    expect(
+      unwrapDuckDuckGoLink("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fs%3Fq%3D100%2525"),
+    ).toBe("https://example.com/s?q=100%25");
+  });
+
   it("HTML 实体解码：命名 / 十进制 / 十六进制；认不出的原样保留", () => {
     expect(decodeHtmlEntities("a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39; &#x4e2d;")).toBe(
       "a & b <c> \"d\" 'e' 中",
     );
+    // HTML 允许大写 X：&#X41; 与 &#x41; 等价。
+    expect(decodeHtmlEntities("&#X41;&#X1F600;")).toBe("A😀");
     expect(decodeHtmlEntities("&unknown;")).toBe("&unknown;");
     expect(collapseWhitespace("  a \n\t b  ")).toBe("a b");
   });

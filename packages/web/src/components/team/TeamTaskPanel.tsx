@@ -119,6 +119,9 @@ export function TeamTaskPanel({
   // 退回（d.261）：做不了的人把它装回待认领池，并留一句为什么。
   const [returningId, setReturningId] = useState<string | null>(null);
   const [returnNoteDraft, setReturnNoteDraft] = useState("");
+  /** 进展（d.262）：本人/组长给任务写一句「做到哪、卡在哪」；覆盖式一条。 */
+  const [progressTaskId, setProgressTaskId] = useState<string | null>(null);
+  const [progressDraft, setProgressDraft] = useState("");
   /** 讨论（d.271）：展开哪条任务的讨论、各自的留言、输入里的草稿。 */
   const [commentTaskId, setCommentTaskId] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<string, TeamTaskComment[]>>({});
@@ -342,6 +345,12 @@ export function TeamTaskPanel({
   };
 
   const cycle = async (task: TeamTask) => {
+    // 状态机收紧（1.3）：已完成任务不能靠点胶囊退回 todo 绕过验收。
+    // 重开的正道是组长在下方「验收」区打回重做（必须写原因，任务回到进行中）。
+    if (task.status === "done") {
+      report("已完成的任务不能点状态退回：请让组长打回重做（会记下原因）");
+      return;
+    }
     if (!beginPending(task.id)) return;
     setPanelError("");
     try {
@@ -377,6 +386,41 @@ export function TeamTaskPanel({
       await refresh();
     } catch (err) {
       report(err instanceof Error && err.message ? err.message : "指派失败");
+    } finally {
+      endPending(task.id);
+    }
+  };
+
+  /** 催一下（d.265）：只有组长能催别人名下、还没完成的任务；服务端只记次数不动状态。 */
+  const nudge = async (task: TeamTask) => {
+    if (!beginPending(task.id)) return;
+    setPanelError("");
+    try {
+      await updateTeamTask(teamId, task.id, { nudge: true });
+      await refresh();
+    } catch (err) {
+      report(err instanceof Error && err.message ? err.message : "催办失败");
+    } finally {
+      endPending(task.id);
+    }
+  };
+
+  /** 写进展（d.262）：本人或组长留一句「做到哪、卡在哪」；空串清掉。 */
+  const writeProgress = async (task: TeamTask) => {
+    const note = progressDraft.trim();
+    if (note === "") {
+      report("先写一句进展，再保存");
+      return;
+    }
+    if (!beginPending(task.id)) return;
+    setPanelError("");
+    try {
+      await updateTeamTask(teamId, task.id, { progress: note });
+      setProgressTaskId(null);
+      setProgressDraft("");
+      await refresh();
+    } catch (err) {
+      report(err instanceof Error && err.message ? err.message : "写进展失败");
     } finally {
       endPending(task.id);
     }
@@ -825,10 +869,12 @@ export function TeamTaskPanel({
                   onClick={() => void cycle(task)}
                   disabled={isPending(task.id) || !canTouch(task)}
                   title={
-                    touchHint(task) ??
-                    (blockerNotes.get(task.id)?.open
-                      ? `前置还没完成：${blockerNotes.get(task.id)!.text}`
-                      : "点击切换状态")
+                    task.status === "done"
+                      ? "已完成：要重开请让组长打回重做（会记下原因）"
+                      : touchHint(task) ??
+                        (blockerNotes.get(task.id)?.open
+                          ? `前置还没完成：${blockerNotes.get(task.id)!.text}`
+                          : "点击切换状态")
                   }
                   className={`rounded-full border px-1.5 py-0.5 text-ui-xs ${STATUS_STYLE[task.status]} ${
                     isPending(task.id) ? "opacity-60" : ""
@@ -916,6 +962,33 @@ export function TeamTaskPanel({
                     退回
                   </button>
                 ) : null}
+                {leader && task.assigneeId !== null && task.assigneeId !== viewerId && task.status !== "done" ? (
+                  <button
+                    type="button"
+                    aria-label={`催一下 ${task.title}`}
+                    className="shrink-0 text-ui-xs text-muted hover:text-warn disabled:opacity-60"
+                    disabled={isPending(task.id)}
+                    title="催负责人推进一下（只记一次催办，不改任务状态）"
+                    onClick={() => void nudge(task)}
+                  >
+                    催一下
+                  </button>
+                ) : null}
+                {canTouch(task) && task.status !== "done" ? (
+                  <button
+                    type="button"
+                    aria-label={`写进展 ${task.title}`}
+                    aria-expanded={progressTaskId === task.id}
+                    className="shrink-0 text-ui-xs text-muted hover:text-ink"
+                    title="留一句做到哪、卡在哪（会替换上一条进展）"
+                    onClick={() => {
+                      setProgressTaskId((prev) => (prev === task.id ? null : task.id));
+                      setProgressDraft("");
+                    }}
+                  >
+                    写进展
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`任务讨论 ${task.title}`}
@@ -962,6 +1035,25 @@ export function TeamTaskPanel({
                     确认退回
                   </Button>
                   <Button type="button" size="sm" variant="ghost" onClick={() => setReturningId(null)}>
+                    取消
+                  </Button>
+                </div>
+              ) : null}
+              {progressTaskId === task.id ? (
+                <div data-testid="task-progress-form" className="mt-1 flex flex-wrap items-start gap-1.5">
+                  <textarea
+                    aria-label={`进展内容 ${task.title}`}
+                    value={progressDraft}
+                    onChange={(e) => setProgressDraft(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="做到哪、卡在哪（会替换上一条进展）"
+                    className="ui-input min-w-0 flex-1 py-1 text-ui-xs"
+                  />
+                  <Button type="button" size="sm" variant="primary" disabled={isPending(task.id)} onClick={() => void writeProgress(task)}>
+                    保存进展
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setProgressTaskId(null)}>
                     取消
                   </Button>
                 </div>

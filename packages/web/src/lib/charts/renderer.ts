@@ -29,7 +29,7 @@ import {
 } from "./tokens.js";
 import { pickPalette, type Palette } from "./palette.js";
 import type { ChartPoint, ChartSpec } from "./spec.js";
-import { findChartType } from "./catalog.js";
+import { ALIASES, findChartType } from "./catalog.js";
 
 /** 画布尺寸：宽固定（气泡内渲染），高按图型比例。 */
 export const CHART_W = 640;
@@ -109,49 +109,12 @@ export function renderChart(spec: ChartSpec, opts: RenderOptions = {}): Rendered
 function resolveType(spec: ChartSpec): string {
   const id = spec.type.trim().toUpperCase();
   if (findChartType(id)) return id;
-  // 别名兜底：模型选了未实现的图型时给出可画的那个
-  const alias = ALIAS_MAP[id];
+  // 别名兜底：模型选了未实现的图型时给出可画的那个。
+  // 直接复用 catalog.ALIASES（唯一真源），别再维护一份副本——之前渲染器漏了
+  // L18/L19/L20，把直方图/散点画成柱状图，就是因为两份表悄悄漂移了。
+  const alias = ALIASES[id];
   return alias ?? "F1";
 }
-
-const ALIAS_MAP: Record<string, string> = {
-  L2: "F5",
-  L3: "F2",
-  L4: "F10",
-  L6: "G22",
-  L7: "F12",
-  L8: "F13",
-  L9: "F13",
-  L10: "F10",
-  L11: "F2",
-  L12: "F5",
-  L15: "F1",
-  G4: "F4",
-  G5: "F1",
-  G6: "G22",
-  G7: "F13",
-  G8: "F3",
-  G9: "F8",
-  G11: "G22",
-  G12: "F1",
-  G13: "F4",
-  G14: "F10",
-  G15: "F8",
-  G16: "G21",
-  G17: "F2",
-  G18: "F11",
-  G19: "F14",
-  G20: "F10",
-  M1: "F10",
-  M2: "F10",
-  B1: "G22",
-  B2: "G22",
-  B3: "G22",
-  F6: "F12",
-  F15: "F12",
-  F16: "F3",
-  F17: "F2",
-};
 
 interface Ctx {
   spec: ChartSpec;
@@ -351,38 +314,52 @@ function renderBars(ctx: Ctx): RenderedChart {
   const innerW = CHART_W - PAD.left - PAD.right;
   // 顶部留 14px 给最高柱的数值标签（标签画在柱顶之上 9px）
   const innerH = chartH - PAD.top - PAD.bottom - VALUE_LABEL_SPACE;
-  const max = Math.max(1, ...points.map((d) => Math.abs(d.value)));
+  // 有负值时用带符号轴：0 落在中间，正柱向上、负柱向下；全为正时退化为原来的 0→max 单侧轴。
+  // 之前一律 Math.abs 并把负值也向上画，正负形状完全相同、无法区分涨跌（与瀑布图的口径也不一致）。
+  const rawMax = Math.max(0, ...points.map((d) => d.value));
+  const rawMin = Math.min(0, ...points.map((d) => d.value));
+  const max = Math.max(1, rawMax);
+  const min = rawMin < 0 ? rawMin : 0;
+  const range = max - min || 1;
   const slot = innerW / Math.max(1, n);
   const barW = Math.min(46, slot * 0.56);
   const baseY = PAD.top + innerH;
+  const yOf = (v: number) => baseY - ((v - min) / range) * innerH;
+  const zeroY = yOf(0);
   const parts: string[] = [];
 
-  // 网格：0 与 max 两道（上游规矩：可数刻度，不要密网格）
+  // 网格：上沿与零轴两道（上游规矩：可数刻度，不要密网格）
   parts.push(gridLine(PAD.left, PAD.top, PAD.left + innerW, PAD.top, p));
-  parts.push(gridLine(PAD.left, baseY, PAD.left + innerW, baseY, p));
+  parts.push(gridLine(PAD.left, zeroY, PAD.left + innerW, zeroY, p));
 
   const seriesNames = [...new Set(points.map((d) => d.series).filter(Boolean))] as string[];
   const multi = seriesNames.length > 1;
 
   points.forEach((d, i) => {
-    const h = (Math.abs(d.value) / max) * innerH;
+    const positive = d.value >= 0;
+    const yTop = positive ? yOf(d.value) : zeroY;
+    const h = positive ? zeroY - yOf(d.value) : yOf(d.value) - zeroY;
     const cx = PAD.left + slot * i + slot / 2;
     const x = cx - barW / 2;
     const color = multi
       ? catColor(p, seriesNames.indexOf(d.series ?? seriesNames[0] ?? ""))
-      : p.data;
-    const y = baseY - h;
-    parts.push(
-      `<g${animClass(ctx, "fade", i * MOTION.staggerBar)}>${tip(
-        `${d.label ?? ""} · ${fmtNum(d.value)}${ctx.spec.unit ?? ""}`,
-      )}${el("path", { d: barTopPath(x, y, barW, h), fill: color })}</g>`,
-    );
-    parts.push(valueText(cx, y - 9, fmtNum(d.value), p));
+      : !positive
+        ? p.data2
+        : p.data;
+    if (h > 0) {
+      parts.push(
+        `<g${animClass(ctx, "fade", i * MOTION.staggerBar)}>${tip(
+          `${d.label ?? ""} · ${fmtNum(d.value)}${ctx.spec.unit ?? ""}`,
+        )}${el("path", { d: barTopPath(x, yTop, barW, h), fill: color })}</g>`,
+      );
+    }
+    // 数值标签：正柱在顶上，负柱在底下（不压到横轴文字）
+    parts.push(valueText(cx, positive ? yTop - 9 : yTop + h + 14, fmtNum(d.value), p));
     parts.push(axisText(cx, baseY + 14, d.label ?? "", p));
   });
 
-  // 柱状图不断轴：基线必须从 0 起
-  parts.push(gridLine(PAD.left, baseY, PAD.left + innerW, baseY, p));
+  // 柱状图不断轴：零轴必须从 0 起（有负值时零轴在中间，已画在上面）
+  if (min >= 0) parts.push(gridLine(PAD.left, baseY, PAD.left + innerW, baseY, p));
   const shell = cardShell(ctx, parts.join(""), chartH);
   return { ...shell, svg: wrapSvg(shell.svg, shell.height, ctx.p) };
 }
@@ -1077,10 +1054,11 @@ function renderFunnel(ctx: Ctx): RenderedChart {
 function renderRankStrip(ctx: Ctx): RenderedChart {
   const p = ctx.p;
   const frames: { time: string; entries: { label: string; rank: number }[] }[] = ctx.spec.ranks ?? [];
-  const chartH = 240;
   const names = [...new Set(frames.flatMap((f) => f.entries.map((e) => e.label)))];
   const maxRank = Math.max(1, ...frames.flatMap((f) => f.entries.map((e) => e.rank)));
   const rowH = 22;
+  // 画布高度随实际最大名次伸展（schema 允许 rank 到 60），写死 240 会让第 11 名以后的条目落到画布外、整段数据凭空消失。
+  const chartH = Math.max(240, PAD.top + maxRank * rowH + PAD.bottom);
   const parts: string[] = [];
   const colW = (CHART_W - 120) / Math.max(1, frames.length);
 
@@ -1131,13 +1109,16 @@ function renderSankey(ctx: Ctx): RenderedChart {
   });
   const lMax = Math.max(1, ...leftTotal.values());
   const rMax = Math.max(1, ...rightTotal.values());
+  // 桑基图的带宽必须等于流量：节点与流带共用同一比例尺。
+  // 旧版左节点按 lMax、右节点按 rMax、流带按 lMax，lMax≠rMax 时右节点高度和喂给它的流带厚度对不上，读图会误判量级。
+  const flowMax = Math.max(lMax, rMax);
   const lH = chartH - 60;
   const parts: string[] = [];
 
   // 左节点
   let lY = PAD.top + 10;
   for (const name of lefts) {
-    const h = ((leftTotal.get(name) ?? 0) / lMax) * lH;
+    const h = ((leftTotal.get(name) ?? 0) / flowMax) * lH;
     parts.push(el("rect", { x: 90, y: lY, width: 12, height: Math.max(3, h), rx: 3, fill: p.data }));
     parts.push(
       text(84, lY + h / 2, name, {
@@ -1153,7 +1134,7 @@ function renderSankey(ctx: Ctx): RenderedChart {
   // 右节点
   let rY = PAD.top + 10;
   for (const name of rights) {
-    const h = ((rightTotal.get(name) ?? 0) / rMax) * lH;
+    const h = ((rightTotal.get(name) ?? 0) / flowMax) * lH;
     parts.push(el("rect", { x: CHART_W - 102, y: rY, width: 12, height: Math.max(3, h), rx: 3, fill: p.data2 }));
     parts.push(
       text(CHART_W - 108, rY + h / 2, name, {
@@ -1171,10 +1152,10 @@ function renderSankey(ctx: Ctx): RenderedChart {
   stacks.forEach((s) => {
     const l = s[0]?.label ?? "";
     const lv = Math.abs(s[0]?.value ?? 0);
-    const lh = (lv / lMax) * lH;
+    const lh = (lv / flowMax) * lH;
     s.slice(1).forEach((seg) => {
       const sv = Math.abs(seg.value);
-      const sh = (sv / lMax) * lH;
+      const sh = (sv / flowMax) * lH;
       const x1 = 102;
       const x2 = CHART_W - 102;
       const d = `M${x1} ${round(flowY)} C${round(midX)} ${round(flowY)} ${round(midX)} ${round(flowY)} ${x2} ${round(flowY)} L${x2} ${round(flowY + sh)} C${round(midX)} ${round(flowY + sh)} ${round(midX)} ${round(flowY + sh)} ${x1} ${round(flowY + sh)} Z`;

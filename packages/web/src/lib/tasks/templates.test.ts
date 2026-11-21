@@ -117,6 +117,16 @@ describe("useTemplateStore", () => {
     if (!result.ok) expect(result.error).toContain(String(MAX_PROMPT_CHARS));
   });
 
+  it("正文限长按码点算，emoji 不会因 UTF-16 双单元被误判超限", () => {
+    // 3000 个 emoji = 3000 码点（< 4000），但 6000 个 UTF-16 单元。
+    const result = useTemplateStore.getState().save({
+      name: "emoji",
+      prompt: "😀".repeat(3000),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect([...result.template.prompt]).toHaveLength(3000);
+  });
+
   it("满 12 条后保存会淘汰最旧一条", () => {
     useTemplateStore.setState({
       templates: Array.from({ length: MAX_TEMPLATES }, (_, i) =>

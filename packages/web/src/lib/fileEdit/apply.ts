@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 干跑（dry-run）：把一份解析好的计划变成「每个文件会变成什么」。
  *
  * 这一层是**唯一读盘的地方**（通过注入的 `PatchIo`），也是所有「能不能写」的判定点：
@@ -97,7 +97,10 @@ export async function planPatch(plan: PatchPlan, ctx: PlanContext): Promise<Plan
   };
 
   for (const op of plan.ops) {
-    if (changes.length >= MAX_FILES_PER_PATCH) {
+    // 一次改名 = 删旧 + 增新两个变更条目，按「这条 op 会产生几个 change」预估，
+    // 否则改名落在第 20 条时会越过上限多改一个文件。
+    const projected = changes.length + (op.kind === "update" && op.moveTo ? 2 : 1);
+    if (projected > MAX_FILES_PER_PATCH) {
       return fail(
         "too-many-files",
         `单次调用最多修改 ${MAX_FILES_PER_PATCH} 个文件，请拆成多次调用。`,

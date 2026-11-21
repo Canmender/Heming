@@ -568,10 +568,16 @@ function createPipeline(input) {
       const installStartedAt = Date.now();
 
       const polling = pollInstall(installDir, ctx);
-      const exit = await started.done;
-      ctx.stopped = true;
-      await polling;
-      installPid = null;
+      let exit;
+      try {
+        exit = await started.done;
+      } finally {
+        // 安装器 spawn 失败时 started.done 会 reject；若不在 finally 停轮询，
+        // pollInstall 会永远循环、错误页出现后还继续发 phantom progress 事件。
+        ctx.stopped = true;
+        await polling;
+        installPid = null;
+      }
       timings.installMs = Date.now() - installStartedAt;
 
       const located = await locateInstalledExe(installDir);

@@ -133,7 +133,9 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const cleanPrompt = prompt.trim();
     if (!cleanName) return { ok: false, error: "模板名称不能为空" };
     if (!cleanPrompt) return { ok: false, error: "任务目标为空，没什么可存的" };
-    if (cleanPrompt.length > MAX_PROMPT_CHARS) {
+    // 与其他路径（clip / normalizeTemplate / store.create）一致，按码点数限长；
+    // .length 数的是 UTF-16 单元，emoji 每字占 2 个单元，会被误判超限。
+    if ([...cleanPrompt].length > MAX_PROMPT_CHARS) {
       return { ok: false, error: `任务目标超过 ${MAX_PROMPT_CHARS} 字，请先精简` };
     }
     if (get().templates.some((t) => t.name === cleanName)) {

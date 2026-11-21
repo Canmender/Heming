@@ -134,6 +134,11 @@ describe("wiki 路径校验", () => {
     expect(validWikiPath("raw/source.md")).toBe("raw/source.md");
   });
 
+  it("合法文件名含两个点（版本/省略号）仍放行，不误当越级（d.412 回归）", () => {
+    const p = "wiki/notes/版本-v1..2.md";
+    expect(validWikiPath(p)).toBe(p);
+  });
+
   it("拦掉越界与非法路径", () => {
     for (const bad of [
       "../../etc/passwd",

@@ -9,6 +9,8 @@
  * 由服务端（组长才能派别人）与 `capability/teamTools.ts` 负责。
  */
 
+import { startOfDay } from "./schedule.js";
+
 export interface AssignedTeamTask {
   teamId: string;
   teamName: string;
@@ -61,7 +63,10 @@ export function describeDue(dueAt: string | null, now: number = Date.now()): str
   if (dueAt === null || dueAt === "") return "";
   const at = Date.parse(dueAt);
   if (Number.isNaN(at)) return "";
-  const days = Math.floor((at - now) / DAY_MS);
+  // 今天/明天/N 天后都是「日历日」的说法，必须按本地零点比，不能按满 24 小时——
+  // 否则「昨晚 8 点截止、现在 22 点」会被说成今天，「1 分钟前刚过」会被说成逾期 1 天。
+  // 与 schedule.ts 的 bucketOf 同一口径（startOfDay + Math.round）。
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
   if (days < 0) return `已过期 ${-days} 天`;
   if (days === 0) return "今天截止";
   if (days === 1) return "明天截止";

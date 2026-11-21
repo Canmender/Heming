@@ -370,6 +370,7 @@ export function checkinSwitchArgs(enabled: boolean): string[][] {
 export function checkinSwitchText(state: CheckinSwitchState): string {
   if (state === "on") return "每天自动签到";
   if (state === "mixed") return "部分自动签到";
-  return "每天自动签到";
+  // off（以及未来新增的未知态）不能说成"每天自动签到"——那是 on 的反面。
+  return "不自动签到";
 }
 

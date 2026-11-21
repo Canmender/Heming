@@ -6665,6 +6665,7 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 - 验证：`runtimePrompt`/`subagent`/`team`/`subagentJobs`/`ChatPage` 344 例全过；web 全量 468 文件 / 6740 例通过（唯一失败 `SettingsPage.test.tsx:413` 是并行会话 d.409 release note 用 `1.` 编号列表被解析成 paragraph 的既存失败，与本轮无关）；typecheck 通过。
 
 - **来源汇总一张卡，国产智能体接得进来（d.411）**：★ 订阅账号 / 国产端 / 已添加来源并进同一张卡，往下滚一遍全看到，锚点照跳 ★ 国产端不再藏进「登录一个账号」折叠——有账号也一直摊开，点一下就接 ★ 修小米 MiMo Code：订阅 id 是 mimo-app 不是 agent 名 mimo，accountId 与 quota refresh 都改用订阅 id，装过就不重装；同包两站互认不重复装 ★ 定向 233 例绿 + typecheck 通过
+- **来源只剩一张卡，国产端接入真打通（d.412）**：★ 来源页收成唯一一张 `.ui-card`——找服务商 / 预设 / 订阅账号 / 国产端 / 已添加 / 其余额度 / 额度走向 / 预热全是它内部小节，`QuotaTrendCard`/`WarmupCard` 加 `embedded` 去外壳避免卡片套卡片 ★ 修「没能接入 WorkBuddy：不允许的命令：plugin」：`packages/desktop/magpie-cli.js` 的 `ALLOWED_COMMANDS` 补 `plugin` 与 `quota`，三条 IPC（magpie:cli / :start / :terminal）共用 `validateCliArgs`，一处放行全覆盖；接入路径 plugin add → accounts add（终端）→ quota refresh 打通 ★ 桌面 CLI 白名单测试 +plugin/quota 断言，一张卡测试断言七分区共用外层卡；桌面全量绿、web typecheck、全量 6747 例绿、build:web 通过
 ## 7. 快速上手命令
 
 ```bash

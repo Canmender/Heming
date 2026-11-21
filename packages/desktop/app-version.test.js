@@ -51,6 +51,13 @@ test("compareVersions：预发版低于同数值正式版", () => {
   assert.equal(compareVersions("d.0.1.0.0-dev.1", "d.0.1.0.0-dev.1"), 0);
 });
 
+test("compareVersions：超长数字段（Number 溢出成 Infinity）相等时返回 0，不是 NaN", () => {
+  const huge = "9".repeat(400);
+  assert.equal(compareVersions(`d.${huge}.0.0.0`, `d.${huge}.0.0.0`), 0);
+  // 一边溢出一边正常时仍能比出大小（Infinity - 正常数 = Infinity，不是 NaN）。
+  assert.ok(compareVersions(`d.${huge}.0.0.0`, "d.1.0.0.0") > 0);
+});
+
 test("compareVersions：通道不同或非法输入一律 0（视为无更新）", () => {
   assert.equal(compareVersions("d.0.1.0.0", "m.0.0.0.0"), 0);
   assert.equal(compareVersions("d.0.1.0.0", "乱码"), 0);

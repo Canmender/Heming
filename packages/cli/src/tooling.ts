@@ -31,7 +31,7 @@ import type { CliWorkspaceRuleSet } from "./workspaceRules.js";
 import { approvalDetail, type ApprovalChoice, type CliApprover } from "./approvals.js";
 import { cliHookDeniedText, type CliHookVerdict } from "./toolHooks.js";
 import { postHookNoteText, type ToolPostHookNote } from "../../../packages/web/src/lib/hitl/hooks.js";
-import { mcpToolName, parseMcpToolName, type McpConnection } from "./mcpClient.js";
+import { mcpToolName, type McpConnection } from "./mcpClient.js";
 import { REMEMBER_TOOL, addCliMemory, rememberResultText, rememberSpec } from "./memory.js";
 import { createCliRewindJournal, type CliRewindJournal } from "./rewind.js";
 import {
@@ -534,14 +534,18 @@ export function createCliTooling(options: {
   };
   const mcp = options.mcp ?? [];
   const mcpTools: unknown[] = [];
-  const connections = new Map<string, McpConnection>();
+  // 工具名 mcp__<服务>__<工具> 在服务名含 "__" 或被截断时无法无歧义反解（模型拿到的
+  // 就是这张表里的名字），所以按「生成的全名」精确登记目标，调用时直接查表，
+  // 不再 parseMcpToolName 猜测服务/工具边界——那会把 my__server/read 误派给 my。
+  const mcpTargets = new Map<string, { connection: McpConnection; tool: string }>();
   for (const connection of mcp) {
-    connections.set(connection.server, connection);
     for (const tool of connection.tools) {
+      const name = mcpToolName(connection.server, tool.name);
+      mcpTargets.set(name, { connection, tool: tool.name });
       mcpTools.push({
         type: "function",
         function: {
-          name: mcpToolName(connection.server, tool.name),
+          name,
           description: `MCP · ${connection.server} / ${tool.name}${tool.description ? `：${tool.description}` : ""}`,
           // 对方给的 schema 原样转发；没给就用宽松的 object（别假装知道参数长什么样）。
           parameters: tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
@@ -581,9 +585,9 @@ export function createCliTooling(options: {
       if (name === SHELL_TOOL) return { risk: "danger" as const, displayName: "在本机执行命令", core: true };
       if (name === REMEMBER_TOOL) return { risk: "write" as const, displayName: "记住这件事", core: true };
       if (name === SUBAGENT_TOOL) return { risk: "read" as const, displayName: "派子代理", core: true };
-      const mcpTarget = parseMcpToolName(name);
+      const mcpTarget = mcpTargets.get(name);
       if (mcpTarget) {
-        return { risk: "danger" as const, displayName: `MCP · ${mcpTarget.server}/${mcpTarget.tool}`, core: true };
+        return { risk: "danger" as const, displayName: `MCP · ${mcpTarget.connection.server}/${mcpTarget.tool}`, core: true };
       }
       return baseBridge.meta?.(name);
     },
@@ -657,10 +661,9 @@ export function createCliTooling(options: {
       if (call.name === SHELL_TOOL) consumePermit();
 
       // MCP 工具：参数语义由对方定义，**不改写**（不套 relativizeToolArgs）。
-      const mcpTarget = parseMcpToolName(call.name);
+      const mcpTarget = mcpTargets.get(call.name);
       if (mcpTarget) {
-        const connection = connections.get(mcpTarget.server);
-        if (!connection) return { text: `MCP 服务 ${mcpTarget.server} 没有连上`, ok: false };
+        const { connection, tool: mcpTool } = mcpTarget;
         if (!dangerAllowed()) {
           return {
             text: [
@@ -679,11 +682,11 @@ export function createCliTooling(options: {
           return { text: `MCP 工具 ${call.name} 的参数不是合法 JSON`, ok: false };
         }
         try {
-          const result = await connection.callTool(mcpTarget.tool, args);
+          const result = await connection.callTool(mcpTool, args);
           return { text: result.text, ok: !result.isError };
         } catch (error) {
           return {
-            text: `MCP 调用失败（${mcpTarget.server}/${mcpTarget.tool}）：${error instanceof Error ? error.message : String(error)}`,
+            text: `MCP 调用失败（${connection.server}/${mcpTool}）：${error instanceof Error ? error.message : String(error)}`,
             ok: false,
           };
         }
@@ -781,7 +784,7 @@ export function createCliTooling(options: {
   const confirm: ToolConfirmFn = async (calls) =>
     gate(
       calls.map((call) =>
-        call.function.name === SHELL_TOOL || parseMcpToolName(call.function.name)
+        call.function.name === SHELL_TOOL || mcpTargets.has(call.function.name)
           ? call
           : { ...call, function: { ...call.function, arguments: relativizeToolArgs(call.function.arguments, cwd) } },
       ),

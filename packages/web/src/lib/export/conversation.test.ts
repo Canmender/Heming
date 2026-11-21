@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   MAX_EXPORT_STEPS,
   buildConversationJson,
@@ -63,6 +63,28 @@ describe("会话导出", () => {
     expect(doc.messages).toHaveLength(3);
     const recalled = (doc.messages as Record<string, unknown>[])[2];
     expect(recalled).toMatchObject({ id: "m3", recalled: true, text: "" });
+  });
+
+  it("JSON 也带过程投影，与 Markdown 一致（d.412 回归）", () => {
+    const doc = JSON.parse(
+      buildConversationJson({
+        ...input,
+        messages: [
+          {
+            id: "mp",
+            role: "assistant",
+            sender: "和鸣",
+            at: "2026-01-01T00:00:00.000Z",
+            text: "结论",
+            process: [
+              { kind: "tool", label: "file_read · x.md", status: "ok" },
+              { kind: "think", label: "先看一下" },
+            ],
+          },
+        ],
+      }),
+    ) as { messages: Array<{ process?: unknown[] }> };
+    expect(doc.messages[0]?.process).toHaveLength(2);
   });
 
   it("文件名剔除非法字符并带时间戳", () => {

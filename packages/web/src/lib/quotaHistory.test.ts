@@ -192,6 +192,19 @@ describe("quotaPace", () => {
     expect(quotaPace(flat, NOW)).toBeNull();
   });
 
+  it("回升后只剩 2 个点时说不准：点数门禁按最近一轮算，不按整条数组（d.412 回归）", () => {
+    // 整条 3 点达标，但最近一次回升后只有 2 点（升到 50 再掉到 40）。
+    const line = {
+      name: "5 hours",
+      points: [
+        { at: iso(48), left: 10 },
+        { at: iso(24), left: 50 }, // 回升
+        { at: iso(0), left: 40 }, // 这一轮只剩 2 点
+      ],
+    };
+    expect(quotaPace(line, NOW)).toBeNull();
+  });
+
   it("回升之前的老读数不算进来：只拟合最近这一轮，不会被上一轮的陡降骗到", () => {
     const points = [
       // 上一轮：从 100 掉到 5（很陡，按它会算成几小时后用完）

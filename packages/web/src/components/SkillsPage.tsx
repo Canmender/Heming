@@ -428,7 +428,7 @@ function SkillDetailDrawer({
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
-            <h2 className="truncate text-ui-base font-semibold">{skill.name}</h2>
+            <h2 className="truncate ui-section-title">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
               {skill.source === "builtin" ? (
                 <SystemSourceChip systemName={systemName} />
@@ -448,22 +448,22 @@ function SkillDetailDrawer({
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-ui-sm font-semibold text-muted">描述</div>
+          <div className="ui-section-title">描述</div>
           <p className="mt-1 break-words text-ui-sm text-body">
             {skill.description || "暂无描述"}
           </p>
 
-          <div className="mt-3 text-ui-sm font-semibold text-muted">触发词</div>
+          <div className="mt-3 ui-section-title">触发词</div>
           <div className="mt-1">
             <TagList items={skill.triggers} empty="暂无触发词" />
           </div>
 
-          <div className="mt-3 text-ui-sm font-semibold text-muted">标签</div>
+          <div className="mt-3 ui-section-title">标签</div>
           <div className="mt-1">
             <TagList items={skill.tags} empty="暂无标签" />
           </div>
 
-          <div className="mt-3 text-ui-sm font-semibold text-muted">指令</div>
+          <div className="mt-3 ui-section-title">指令</div>
           <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-subtle-2 p-2 font-sans text-ui-xs leading-5 text-body">
             {skill.instructions || "暂无指令"}
           </pre>

@@ -283,6 +283,32 @@ describe("MCP 连接没连上要说清（d.223）", () => {
     expect(text).toContain("调了会失败");
   });
 
+  it("很长的失败理由按码点截断，不在 emoji 中间劈出落单代理（d.412 回归）", () => {
+    // 前 39 个普通字 + 一个 emoji（2 个 UTF-16 单元）：旧版 slice(0,40) 正好落在高代理上
+    const reason = "错".repeat(39) + "😀" + "尾巴";
+    const text = buildStatusReport({
+      ...base,
+      mcp: {
+        total: 2,
+        enabled: 2,
+        connected: 1,
+        failed: [{ name: "爬虫", state: "error", error: reason }],
+        pending: 0,
+        tools: 3,
+      },
+    });
+    // 逐 UTF-16 单元检查：高代理后面必须跟低代理，低代理前面必须有高代理
+    const units = text.split("").map((ch) => ch.charCodeAt(0));
+    let orphan = false;
+    for (let i = 0; i < units.length; i += 1) {
+      const c = units[i];
+      if (c >= 0xd800 && c <= 0xdbff && !(units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)) orphan = true;
+      if (c >= 0xdc00 && c <= 0xdfff && !(units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)) orphan = true;
+    }
+    expect(orphan).toBe(false);
+    expect(text).toContain("个没连上：爬虫（");
+  });
+
   it("还没连过的单独说「还没连过」，不说成失败", () => {
     const text = buildStatusReport({
       ...base,

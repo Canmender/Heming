@@ -57,7 +57,7 @@ function BoardCard({
     <button
       type="button"
       onClick={onSelect}
-      className="w-full rounded-xl border border-line-soft bg-surface px-3 py-2.5 text-left transition-colors hover:border-line-strong focus-visible:ring-2"
+      className="w-full rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-line-soft hover:bg-subtle focus-visible:ring-2"
     >
       <span className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
@@ -251,7 +251,7 @@ export function TeamBoardView({
           errorClassName="py-10"
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <section aria-label="任务" className={`flex flex-col rounded-xl bg-subtle-2 p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
+            <section aria-label="任务" className={`flex flex-col ui-card p-4 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
               <h2 className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <TaskIcon width={14} height={14} />
                 任务
@@ -278,7 +278,7 @@ export function TeamBoardView({
               )}
             </section>
 
-            <section aria-label="日程" className={`flex flex-col rounded-xl bg-subtle-2 p-3 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
+            <section aria-label="日程" className={`flex flex-col ui-card p-4 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
               <h2 className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <span className="h-2 w-2 rounded-full bg-line-strong" aria-hidden="true" />
                 日程

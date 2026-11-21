@@ -19,6 +19,17 @@ describe("describePlatform", () => {
     expect(describePlatform("Mozilla/5.0 (X11; Linux x86_64)")).toBe("Linux");
   });
 
+  it("iOS Safari 的 UA 带 like Mac OS X 也要认成 iOS，不能误判成桌面 macOS（d.412 回归）", () => {
+    expect(
+      describePlatform("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"),
+    ).toBe("iOS");
+    expect(
+      describePlatform("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15"),
+    ).toBe("iOS");
+    // 桌面 macOS 仍认成 macOS
+    expect(describePlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe("macOS");
+  });
+
   it("认不出或空 UA 时不猜（空串/未知系统），绝不写死 Windows", () => {
     expect(describePlatform("")).toBe("");
     expect(describePlatform(undefined)).toBe("");
@@ -34,6 +45,13 @@ describe("formatLocalTime", () => {
 
   it("时区非法时回落本地时区，不抛错", () => {
     expect(formatLocalTime(NOW, "Not/AZone")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  });
+
+  it("跨午夜时日期与时分取自同一目标时区（d.412 回归）", () => {
+    // 20:00 UTC = 次日 04:00 上海；旧实现时分用上海、日期还用运行时本地（UTC），
+    // 在 TZ=UTC 的进程里会渲染成 "2026-01-01 04:00"（少一天）。
+    expect(formatLocalTime(new Date("2026-01-01T20:00:00Z"), "Asia/Shanghai")).toBe("2026-01-02 04:00");
+    expect(formatLocalTime(new Date("2026-01-01T20:00:00Z"), "UTC")).toBe("2026-01-01 20:00");
   });
 });
 

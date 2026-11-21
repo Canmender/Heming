@@ -169,6 +169,22 @@ describe("readZipEntries", () => {
     expect(readZipEntries(makeZip([]))).toEqual([]);
   });
 
+  it("注释里伪造的尾部 EOCD 不能把合法条目读成空（按注释长度 + 中央目录头校验）", () => {
+    const valid = makeZip([{ name: "SKILL.md", data: Buffer.from("# real skill") }]);
+    // 在注释末尾拼一个 totalEntries=0 的假 EOCD（签名 + 18 个零字节），
+    // 并把真 EOCD 的注释长度改成这段注释的长度。
+    const forged = Buffer.alloc(22);
+    forged.writeUInt32LE(0x06054b50, 0);
+    const comment = Buffer.concat([Buffer.from("some comment "), forged]);
+    const withComment = Buffer.from(valid);
+    withComment.writeUInt16LE(comment.length, withComment.length - 22 + 20);
+    const forgedZip = Buffer.concat([withComment, comment]);
+
+    const entries = readZipEntries(forgedZip);
+    expect(entries.map((entry) => entry.path)).toEqual(["SKILL.md"]);
+    expect(entries[0].data.toString()).toBe("# real skill");
+  });
+
   it("重复条目（同 path）→ duplicate_entry（不允许 SKILL.md 被后一条覆盖）", () => {
     const duplicate = captureZipError(() =>
       readZipEntries(

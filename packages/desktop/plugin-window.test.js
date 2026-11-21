@@ -3,6 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   normalizeWidgetSpec,
+  normalizeScales,
   normalizeScale,
   nextScale,
   widgetWindowSize,
@@ -47,6 +48,13 @@ test("normalizeWidgetSpec：合法清单原样归一，缺省值补全", () => {
   assert.equal(spec.spec.clickThrough, "none");
   assert.deepEqual(spec.spec.position, { anchor: "bottom-right", margin: 24, remember: true });
   assert.deepEqual(spec.spec.tray.items, ["toggle", "clickThrough", "resetPosition", "settings"]);
+});
+
+test("normalizeScales：合法两位小数（1.15 等）不被二进制浮点误差误杀（d.412 回归）", () => {
+  assert.deepEqual(normalizeScales([0.6, 1.15, 1.25]), [0.6, 1.15, 1.25]);
+  assert.deepEqual(normalizeScales([1.1, 1.2, 1.3]), [1.1, 1.2, 1.3]);
+  // 三位以上小数仍要拒绝。
+  assert.equal(normalizeScales([1, 1.001]), null);
 });
 
 test("normalizeWidgetSpec：id / entry / 尺寸 / 档位非法都要中文报错并给字段路径", () => {

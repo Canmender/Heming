@@ -61,10 +61,45 @@ describe("思考片段的大小控制（d.247）", () => {
   it("从末尾截时不把 emoji 切一半（代理对不能被劈开）", () => {
     const text = "甲".repeat(10) + "🙂".repeat(REASONING_PREVIEW_CHARS);
     const preview = previewReasoning(text, { mode: "tail", lines: 999 });
-    // 首字符不能是孤立的高代理（U+D800–U+DBFF）
+    // 边界若落在完整 emoji 上，首字符就是它的高代理——只要紧跟低代理就是完整的一对，
+    // 不是「孤立高代理」。真正坏掉的情况有两种：首字符是落单的低代理，或首字符是高代理
+    // 但下一个不是低代理。旧的断言「首字符不能是高代理」恰恰是在给错误实现（把完整对劈开、
+    // 只留下低代理）打掩护，这里改成检查正确的不变量：边界处没有落单的半个代理对。
     const first = preview.text.charCodeAt(0);
-    expect(first >= 0xd800 && first <= 0xdbff).toBe(false);
+    const second = preview.text.charCodeAt(1);
+    const orphanedHigh = first >= 0xd800 && first <= 0xdbff && !(second >= 0xdc00 && second <= 0xdfff);
+    const orphanedLow = first >= 0xdc00 && first <= 0xdfff;
+    expect(orphanedHigh || orphanedLow).toBe(false);
     expect(preview.text.includes("\uFFFD")).toBe(false);
+  });
+
+  it("尾截的代理对边界不劈 emoji：落点是低代理丢弃、是高代理保留整对", () => {
+    const smile = "\u{1F642}";
+    // 边界正好落在 emoji 的高代理上（落点索引 = 完整 emoji 的起点）：必须保留整对，
+    // 旧实现在这里 start += 1，把本来完整的一对劈成「低代理 + 尾文」。
+    const high = "abcd" + smile + "ef";
+    const tail = previewReasoning(high, { mode: "tail", chars: 4, lines: 999 });
+    expect(tail.text).toBe(smile + "ef");
+    expect(tail.text.includes(smile)).toBe(true);
+
+    // 边界正好落在 emoji 的低代理上（高代理被留在被裁掉的前缀里）：
+    // 落单的低代理必须丢弃，否则前面会挂一个坏字符。
+    const low = "a" + smile + "bc";
+    const tail2 = previewReasoning(low, { mode: "tail", chars: 3, lines: 999 });
+    expect(tail2.text).toBe("bc");
+    for (const ch of [...tail2.text]) {
+      const cp = ch.codePointAt(0)!;
+      expect(cp >= 0xdc00 && cp <= 0xdfff).toBe(false);
+    }
+  });
+
+  it("头截时不在 emoji 中间切开：结尾是高代理就退回一格", () => {
+    const smile = "\u{1F642}";
+    const text = "a" + smile + "bc";
+    const head = previewReasoning(text, { mode: "head", chars: 2, lines: 999 });
+    expect(head.text).toBe("a");
+    const last = head.text.charCodeAt(head.text.length - 1);
+    expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
   });
 
   it("没显示的字数按方向说清是「前面」还是「后面」", () => {

@@ -80,6 +80,21 @@ describe("会话目标", () => {
     expect(getGoal("c0")).toBeNull();
   });
 
+  it("重开应用后淘汰的仍是最久没用的会话（LRU 序号跨重启还原，不把刚用的那份删掉，d.412 回归）", () => {
+    for (let i = 0; i < MAX_STORED_GOALS; i += 1) {
+      setGoal(`c${i}`, `目标 ${i}`);
+    }
+    // 把 c(MAX-1) 变成最近用过：重写一次即可推进它的使用序号。
+    const newest = `c${MAX_STORED_GOALS - 1}`;
+    setGoal(newest, `目标 ${MAX_STORED_GOALS - 1} 刚用过`);
+    // 模拟重开应用，再写入一条新的：总数超上限，应淘汰最久没用的 c0，而不是刚用过的 newest。
+    resetGoalStore();
+    setGoal("cNew", "新目标");
+    expect(getGoal("c0")).toBeNull();
+    expect(getGoal(newest)?.text).toBe(`目标 ${MAX_STORED_GOALS - 1} 刚用过`);
+    expect(getGoal("cNew")?.text).toBe("新目标");
+  });
+
   it("订阅只在变更时通知，并能退订", () => {
     const listener = vi.fn();
     const off = subscribeGoals(listener);

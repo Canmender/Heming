@@ -64,7 +64,11 @@ export function parseSourceShow(showText: string): SourceShowFlags {
     const rest = matched[2] ?? "";
 
     if (key === "header") {
-      const text = head(rest);
+      // 请求头的值可能自带连续空格（如自定义的 User-Agent），而内核 show 这一行
+      // 不像 free/refresh/include 那样在值后面挂灰字说明（providers_cli.go:949 只有
+      // `k+": "+muted.Render(value)`），所以这里不能用 head() 按双空格截断——
+      // 否则值里 `a  b` 会被砍成 `a`，回填表单时静默丢内容。
+      const text = rest.trim();
       // 名字里不会有冒号，所以第一个冒号就是分隔（值里的冒号原样留着）；
       // 值留空时内核打出来就是 `X-Old:`，切完名字带不走那个冒号。
       const at = text.indexOf(":");

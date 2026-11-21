@@ -65,8 +65,10 @@ interface LedgerTurn {
 
 function oneLine(text: string, max = 90): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= max) return flat;
-  return `${flat.slice(0, max - 1)}…`;
+  const points = [...flat];
+  if (points.length <= max) return flat;
+  // d.412 回归：按码点截断，避免把 emoji 代理对劈成落单代理。
+  return `${points.slice(0, max - 1).join("")}…`;
 }
 
 function msOf(row: { startedAt?: number; endedAt?: number }): number | null {
@@ -229,7 +231,11 @@ function Timeline({
   return (
     <div className="mb-3 flex items-end gap-1.5" data-testid="trajectory-timeline" aria-hidden="true">
       {turns.map((turn) => {
-        const durations = turn.steps.map((row) => (equal ? 1 : (msOf(row) ?? 0)));
+        // d.412 回归：无时间戳时 durations 全是 0，宽度会都塌到 0.5%，时间线几乎全空。
+        // 文档承诺「没有时间戳就按等宽分段」，因此全部为 0 时也切成等宽。
+        const measured = turn.steps.map((row) => (equal ? 1 : (msOf(row) ?? 0)));
+        const useEqual = equal || measured.every((value) => value === 0);
+        const durations = useEqual ? turn.steps.map(() => 1) : measured;
         const total = durations.reduce((sum, value) => sum + value, 0) || turn.steps.length || 1;
         return (
           <button

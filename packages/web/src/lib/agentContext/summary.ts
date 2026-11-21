@@ -47,7 +47,8 @@ function clip(text: string, max: number): string {
 /** 首句：以中英文句末标点为界（不含标点）；无标点时整段（仍受长度上限约束）。 */
 function firstSentence(text: string): string {
   const flat = squeeze(text);
-  const end = flat.search(/[。！？!?]/);
+  // 英文句点要跟空白或结尾才算句末，避免把 d.412.4 / e.g. / 3.14 之类从中间劈开。
+  const end = flat.search(/[。！？!?]|\.(?=\s|$)/);
   const head = end >= 0 ? flat.slice(0, end) : flat;
   return clip(head.trim(), SUMMARY_CONCLUSION_CHARS);
 }

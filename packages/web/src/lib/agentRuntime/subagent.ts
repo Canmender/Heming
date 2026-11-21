@@ -446,10 +446,13 @@ function allowedSpecs(tools: unknown[], writable: boolean): unknown[] {
 /** 工具结果截断：保头保尾，中间用省略号，避免「只留开头」把结论截掉。 */
 export function clipSubagentResult(text: string, limit = SUBAGENT_TOOL_RESULT_MAX): string {
   const body = text ?? "";
-  if (body.length <= limit) return body;
+  // 按码点计长与切片：slice(0, head)/slice(-tail) 按 UTF-16 单元切，边界落在
+  // emoji/扩展汉字的代理对中间会留下落单代理，回灌给子代理模型时变成乱码方块。
+  const points = [...body];
+  if (points.length <= limit) return body;
   const head = Math.floor(limit * 0.7);
   const tail = limit - head;
-  return `${body.slice(0, head)}\n…（中间省略 ${body.length - limit} 字符）…\n${body.slice(-tail)}`;
+  return `${points.slice(0, head).join("")}\n…（中间省略 ${points.length - limit} 字符）…\n${points.slice(-tail).join("")}`;
 }
 
 /** 进度上报的小工具：没有回调时什么都不做（评测与单测都不传）。 */

@@ -346,7 +346,13 @@ function load(): UsageRecord[] {
 }
 
 function save(records: UsageRecord[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ records }));
+  // 存不下（隐私模式/quota 满）不能让记账本身失败：与其他 store 的降级口径一致，
+  // 落盘失败就只在本次会话生效，内存状态照常更新（调用方在前面会 set）。
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ records }));
+  } catch {
+    /* 存不下就只在本次会话生效 */
+  }
 }
 
 interface TokenState {

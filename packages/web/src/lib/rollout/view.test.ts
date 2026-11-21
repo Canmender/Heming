@@ -46,6 +46,11 @@ describe("相对时间", () => {
     expect(relativeLabel(start, at(3_720_000))).toBe("+1h02m");
   });
 
+  it("秒数四舍五入进位到分钟，不出现 +1m60s", () => {
+    expect(relativeLabel(start, at(119_600))).toBe("+2m00s");
+    expect(relativeLabel(start, at(179_900))).toBe("+3m00s");
+  });
+
   it("记录早于开始（时钟回拨/坏数据）显示负号，不假装成 0", () => {
     expect(relativeLabel(start, at(-3200))).toBe("-3.2s");
   });

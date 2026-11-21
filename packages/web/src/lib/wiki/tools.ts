@@ -195,7 +195,16 @@ export function validWikiPath(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const path = raw.trim().replace(/^\.\//, "");
   if (!path || path.length > 300) return null;
-  if (path.includes("..") || path.includes("\\") || path.includes("\0") || path.startsWith("/")) {
+  // 只挡真正的越级段（.. / .），别用 includes("..")——
+  // 版本名、省略号这类合法文件名（如 "版本-v1..2.md"）会被误杀，
+  // 结果 wiki_search 搜得到、wiki_read 却拒读。
+  const segments = path.split("/");
+  if (
+    segments.some((seg) => seg === ".." || seg === ".") ||
+    path.includes("\\") ||
+    path.includes("\0") ||
+    path.startsWith("/")
+  ) {
     return null;
   }
   if (!/^(wiki|raw)\/[^/]+(\/[^/]+)*\.md$/.test(path)) return null;

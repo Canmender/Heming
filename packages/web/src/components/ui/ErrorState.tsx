@@ -36,7 +36,7 @@ export interface ErrorStateProps {
    * 放在说明下方用等宽字呈现：用户报障时能直接念出来，读屏也会读到。
    */
   code?: string;
-  /** 文案对齐，默认 center；侧栏/卡片内用 `start`。 */
+  /** 文案对齐。全站统一编辑部式左对齐，默认 `start`；特殊场景可显式 `center`。 */
   align?: "center" | "start";
 }
 
@@ -48,12 +48,12 @@ export function ErrorState({
   compact = false,
   className = "",
   code,
-  align = "center",
+  align = "start",
 }: ErrorStateProps) {
   return (
     <div
       role="alert"
-      className={`ui-empty${align === "start" ? " items-start text-left" : ""}${compact ? " gap-1 py-5" : ""}${className ? ` ${className}` : ""}`}
+      className={`ui-empty${align === "center" ? " items-center text-center" : " items-start text-left"}${compact ? " gap-1 py-5" : ""}${className ? ` ${className}` : ""}`}
     >
       {/* 图标槽沿用空态的格子，但换成告警语义的符号；aria-hidden 是因为 role=alert 已经播报整块。 */}
       <div className="ui-icon-tile" aria-hidden="true">

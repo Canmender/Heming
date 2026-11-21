@@ -108,9 +108,11 @@
   /** 剩余时间只说「秒/分」，不装作精确倒计时。 */
   function formatRemaining(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) return "";
-    if (seconds < 60) return `剩 ${Math.ceil(seconds)} 秒`;
-    const minutes = Math.floor(seconds / 60);
-    const rest = Math.ceil(seconds % 60);
+    // 先向上取整到整秒再拆分，否则 119.9s 会变成「1 分 60 秒」（分钟 floor、秒 ceil 各算各的）。
+    const total = Math.ceil(seconds);
+    if (total < 60) return `剩 ${total} 秒`;
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
     return `剩 ${minutes} 分 ${String(rest).padStart(2, "0")} 秒`;
   }
 

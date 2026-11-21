@@ -31,7 +31,11 @@ const LIMITS = Object.freeze({
 function safeRelativePath(raw) {
   if (typeof raw !== "string") return null;
   const text = raw.replace(/\\/g, "/");
-  if (!text || text.length > MAX_NAME) return null;
+  // writeHeader 用 header.write(name,0,100,"utf8") 落盘：name 段只有 100 **字节**。
+  // 只按 JS 字符数校验会让 100 个多字节字符（如 100 个 é / 50 个汉字）通过，写入时被
+  // 悄悄截断到 100 字节 → 两个不同路径变成同一个（安装时后者覆盖前者，数据丢失）。
+  // 必须按 UTF-8 字节数校验，多字节名字里有限的内容也别因为截断落到错误路径。
+  if (!text || Buffer.byteLength(text, "utf8") > MAX_NAME) return null;
   if (text.includes("\0")) return null;
   if (text.startsWith("/")) return null;
   const parts = text.split("/").filter((part) => part !== "" && part !== ".");

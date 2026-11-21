@@ -66,6 +66,33 @@ describe("subagentJobs · 调度（d.349）", () => {
     expect(queuedSubagentJobCount()).toBe(1);
   });
 
+  it("超过历史上限时只淘汰已结束的任务，正在跑/排队的活任务不能被裁掉（d.412 回归）", async () => {
+    // 历史上限 40；塞 41 条且都不收口（保持 queued/running），按旧版 slice(-40) 会把最早的
+    // running 任务从 jobs 里裁掉 → 并发计数错乱、结论结算不到。修复后活任务一条都不能丢。
+    const gates = Array.from({ length: 41 }, () => deferred());
+    for (let index = 0; index < 41; index += 1) {
+      const gate = gates[index]!;
+      start(index + 1, () => gate.promise);
+    }
+    // 5 个在跑、36 个排队，全部仍是活任务；一个都不能被显示上限裁掉
+    expect(activeSubagentJobCount()).toBe(SUBAGENT_MAX_ACTIVE);
+    expect(queuedSubagentJobCount()).toBe(41 - SUBAGENT_MAX_ACTIVE);
+    // 核心回归：活任务一条都不能被显示上限裁掉（旧版 slice(-40) 会裁掉最早那条 running）
+    expect(listSubagentJobs()).toHaveLength(41);
+
+    // 逐个收口，41 条结论全都要能结算。排队的任务随 pump 分批起跑，resolve→settle→pump
+    // 是异步链，需要反复 flush 微任务直到全部交付（不能只 flush 固定几轮）。
+    const seen: SubagentJob[] = [];
+    setSubagentJobDelivery((job) => {
+      seen.push(job);
+    });
+    for (const gate of gates) gate.resolve({ ok: true, text: "结论", rounds: 1, toolCalls: 0 });
+    for (let i = 0; i < 200 && seen.length < 41; i += 1) {
+      await Promise.resolve();
+    }
+    expect(seen).toHaveLength(41);
+  });
+
   it("收口后把结论交给交付器，只交一次", async () => {
     const seen: SubagentJob[] = [];
     setSubagentJobDelivery((job) => {
@@ -135,6 +162,41 @@ describe("subagentJobs · 调度（d.349）", () => {
     expect(text).toContain("后台子代理交回结论");
     expect(text).toContain("3 轮 / 4 次工具调用");
     expect(text).toContain("查第 1 件事");
+    expect(text).toContain("结论正文");
+  });
+
+  it("交付文案里超长任务按码点截断，不劈出落单代理（d.412 回归）", () => {
+    const task = "a".repeat(159) + "😀" + "tail";
+    const job: SubagentJob = {
+      id: "bg-x-1",
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      label: "通用子代理",
+      task,
+      taskId: "bg-x-1",
+      status: "done",
+      createdAt: 0,
+      startedAt: 0,
+      endedAt: 0,
+      rounds: 1,
+      toolCalls: 0,
+      text: "结论正文",
+      error: null,
+      delivered: false,
+    };
+    const text = subagentDeliveryText(job);
+    // 走一遍 UTF-16 单元：任何高代理后面必须跟低代理，反之亦然。
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = text.charCodeAt(i + 1);
+        expect(next >= 0xdc00 && next <= 0xdfff).toBe(true);
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const prev = text.charCodeAt(i - 1);
+        expect(prev >= 0xd800 && prev <= 0xdbff).toBe(true);
+      }
+    }
     expect(text).toContain("结论正文");
   });
 

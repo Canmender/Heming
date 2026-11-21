@@ -40,6 +40,15 @@ export const CLI_COMMAND_FILE_MAX_CHARS = 20_000;
 /** 一次 `run` 里最多用一条命令，所以命令行上这条尾巴不必太长。 */
 export const CLI_COMMAND_ARGS_MAX = 2000;
 
+/**
+ * 按码点截断到 max 个字符，避免在 UTF-16 代理对中间劈开 emoji（劈开会留下孤立的
+ * 高位/低位代理，拼进提示词后显示成乱码方块）。
+ */
+function clipCodePoints(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join("");
+}
+
 /** `heming commands` 与运行提示里用的命令列表项。 */
 export interface CliCommandSummary {
   name: string;
@@ -97,7 +106,7 @@ export async function loadCliCommands(cwd: string): Promise<CliCommandsLoad> {
       const rawText = await readFile(path.join(dir, name), "utf8");
       // 记事本 / PowerShell 5 默认写 BOM：不剥掉的话 `# 标题` 认不出来，整行会混进正文。
       const text = rawText.replace(/^\uFEFF/, "");
-      sources.push({ rel: `${CUSTOM_COMMANDS_DIR}/${name}`, text: text.slice(0, CLI_COMMAND_FILE_MAX_CHARS) });
+      sources.push({ rel: `${CUSTOM_COMMANDS_DIR}/${name}`, text: clipCodePoints(text, CLI_COMMAND_FILE_MAX_CHARS) });
     } catch {
       // 单份读不到就当没有这一条：命令是锦上添花，不能因为它让整次运行失败。
     }
@@ -129,7 +138,7 @@ export function parseCliCommandInvocation(prompt: string): CliCommandInvocation 
   if (match === null) return null;
   const name = (match[1] ?? "").toLowerCase();
   if (!CUSTOM_COMMAND_NAME_RE.test(name)) return null;
-  return { name, args: (match[2] ?? "").trim().slice(0, CLI_COMMAND_ARGS_MAX) };
+  return { name, args: clipCodePoints((match[2] ?? "").trim(), CLI_COMMAND_ARGS_MAX) };
 }
 
 /** 一条命令被调用之后，真正发给模型的那段话。 */

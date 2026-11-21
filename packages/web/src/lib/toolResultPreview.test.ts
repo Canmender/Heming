@@ -55,6 +55,17 @@ describe("工具结果预览（d.234）", () => {
     expect(out.preview).toContain("尾行");
   });
 
+  it("隐藏字数是被藏文字的真实字符数（换行按分隔计，不重复多算）", () => {
+    // 4 行、头 1 尾 1：被藏的是 "b\nc"（3 字）。旧实现每行都 +1，报成 4。
+    const out = previewToolResult("a\nb\nc\nd", { headLines: 1, tailLines: 1, minChars: 0 });
+    expect(out.hiddenChars).toBe(3);
+    expect(out.preview).toContain("中间还有 2 行 / 3 字未显示");
+
+    // 3 行被藏："b\nc\nd" = 5 字。
+    const five = previewToolResult("a\nb\nc\nd\ne", { headLines: 1, tailLines: 1, minChars: 0 });
+    expect(five.hiddenChars).toBe(5);
+  });
+
   it("可以通过参数控制头尾行数与阈值（界面/测试各自按需）", () => {
     const text = lines(30);
     const out = previewToolResult(text, { headLines: 2, tailLines: 2, minChars: 10 });

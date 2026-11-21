@@ -248,7 +248,7 @@ import { autoConnectAll } from "../lib/mcp/runtime.js";
 import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
 import { createToolHookRunner, describeToolHooksState, setToolHooksEnabled, type ToolHookRunner } from "../lib/hitl/hookRunner.js";
-import { HitlPolicyStore } from "../lib/hitl/policy.js";
+import { sharedHitlPolicy } from "../lib/hitl/policy.js";
 import {
   SAFETY_SCOPES,
   SAFETY_SCOPE_TEXT,
@@ -343,7 +343,7 @@ type TurnAttachment = NonNullable<MessagePayload["file"]>;
  * （`HitlPolicyStore` 里的内存 Map）。若每次渲染新建一份，
  * 用户刚点下的「本会话内允许」会立刻失效——授权就等于没给。
  */
-const hitlPolicy = new HitlPolicyStore();
+const hitlPolicy = sharedHitlPolicy;
 
 /** 工具确认留痕的存储（与策略同在本机 localStorage）。 */
 const hitlAuditStorage: StorageLike = {
@@ -501,7 +501,7 @@ function historyToolArgs(args: string): string {
  * 关键在于**别丢**：模型不知道上一轮查过什么，就会重复查、或者把已核实的事实重新猜
  * （用户看到的「逻辑链断了」）。拒绝/中断也要留下痕迹，否则模型会以为那次调用成功了。
  */
-function historyToolText(trace: ToolTrace): string {
+export function historyToolText(trace: ToolTrace): string {
   if (trace.status === "denied") {
     // 被拒的不是只有「用户拒绝」：hooks / 记住的规则 / 闸门异常对模型的含义完全不同，
     // 一律写成用户拒绝会让它去劝用户，而不是改参数或看检查结果。
@@ -513,10 +513,20 @@ function historyToolText(trace: ToolTrace): string {
   if (trace.status === "running") return "（这次调用被中断，没有拿到结果。）";
   const raw = trace.result ?? "";
   if (!raw) return trace.status === "error" ? "（工具执行失败，没有返回内容。）" : "（工具执行完成，没有返回内容。）";
+  let clipEnd = HISTORY_TOOL_TEXT_MAX;
+  // d.412 回归：按 UTF-16 单位切会在 emoji 中间劈出落单代理，喂给模型的历史文本必须是合法标量。
+  if (
+    raw.length > HISTORY_TOOL_TEXT_MAX &&
+    clipEnd > 0 &&
+    raw.charCodeAt(clipEnd - 1) >= 0xd800 &&
+    raw.charCodeAt(clipEnd - 1) <= 0xdbff &&
+    raw.charCodeAt(clipEnd) >= 0xdc00 &&
+    raw.charCodeAt(clipEnd) <= 0xdfff
+  ) {
+    clipEnd -= 1;
+  }
   const clipped =
-    raw.length > HISTORY_TOOL_TEXT_MAX
-      ? `${raw.slice(0, HISTORY_TOOL_TEXT_MAX)}\n…（结果过长，已截断）`
-      : raw;
+    raw.length > HISTORY_TOOL_TEXT_MAX ? `${raw.slice(0, clipEnd)}\n…（结果过长，已截断）` : raw;
   return trace.status === "error" ? `（工具执行失败）\n${clipped}` : clipped;
 }
 
@@ -771,27 +781,57 @@ function streamSignatureOf(streaming: Record<string, AgentStreamState>, convId: 
   return out;
 }
 
-/** 把累计的思考与工具轨迹按「第几次工具调用」切成 step 序列（d.350 起用于分步呈现）。 */
+/**
+ * 把累计的思考、正文与工具轨迹按「第几次工具调用」切成 step 序列（d.350 起用于分步呈现）。
+ *
+ * 思考按 `marks`（每次工具开始时累计思考长度）切段；正文按 `answerMarks`（每次工具开始时
+ * 累计正文长度）切段。两组分界点一一对应同一个工具，于是每段「思考 → 回答 → 工具」都能
+ * 落在真实先后顺序上，回答不再被整体摆到所有步骤下方。
+ *
+ * `answer`/`answerMarks` 不传时行为与旧版完全一致（只产 think/tool）——历史消息的落盘
+ * 转录走这条路，正文仍由消息体单独渲染，不会与步骤重复。
+ */
 function buildStreamSteps(
   reasoning: string | undefined,
   tools: ToolTrace[] | undefined,
   marks: number[] | undefined,
+  answer?: string,
+  answerMarks?: number[],
 ): TranscriptStep[] {
-  const text = reasoning ?? "";
+  const thinkText = reasoning ?? "";
+  const answerText = answer ?? "";
   const list = tools ?? [];
-  const cuts = (marks ?? []).filter((m) => Number.isFinite(m) && m >= 0 && m <= text.length);
+  const cuts = (marks ?? []).filter((m) => Number.isFinite(m) && m >= 0 && m <= thinkText.length);
+  const answerCuts = (answerMarks ?? []).filter(
+    (m) => Number.isFinite(m) && m >= 0 && m <= answerText.length,
+  );
   const steps: TranscriptStep[] = [];
-  let from = 0;
-  for (let i = 0; i < Math.max(cuts.length, list.length, text.trim() ? 1 : 0); i += 1) {
-    const to = i < cuts.length ? cuts[i]! : i === 0 ? text.length : from;
-    const segment = text.slice(from, to).trim();
-    if (segment) steps.push({ kind: "think", text: segment });
-    from = Math.max(from, to);
+  let thinkFrom = 0;
+  let answerFrom = 0;
+  const slots = Math.max(
+    cuts.length,
+    list.length,
+    thinkText.trim() || answerText.trim() ? 1 : 0,
+  );
+  for (let i = 0; i < slots; i += 1) {
+    const thinkTo = i < cuts.length ? cuts[i]! : i === 0 ? thinkText.length : thinkFrom;
+    const answerTo =
+      i < answerCuts.length ? answerCuts[i]! : i === 0 ? answerText.length : answerFrom;
+    const thinkSeg = thinkText.slice(thinkFrom, thinkTo).trim();
+    const answerSeg = answerText.slice(answerFrom, answerTo).trim();
+    if (thinkSeg) steps.push({ kind: "think", text: thinkSeg });
+    if (answerSeg) steps.push({ kind: "answer", text: answerSeg });
+    thinkFrom = Math.max(thinkFrom, thinkTo);
+    answerFrom = Math.max(answerFrom, answerTo);
     const tool = list[i];
     if (tool) steps.push({ kind: "tool", toolId: tool.id });
   }
-  const tail = text.slice(from).trim();
-  if (tail && steps[steps.length - 1]?.kind !== "think") steps.push({ kind: "think", text: tail });
+  const thinkTail = thinkText.slice(thinkFrom).trim();
+  const answerTail = answerText.slice(answerFrom).trim();
+  if (thinkTail && steps[steps.length - 1]?.kind !== "think") {
+    steps.push({ kind: "think", text: thinkTail });
+  }
+  if (answerTail) steps.push({ kind: "answer", text: answerTail });
   return steps;
 }
 
@@ -805,6 +845,7 @@ export function StreamTail({
   convId,
   nameOf,
   marksRef,
+  answerMarksRef,
   onGrow,
   onRetry,
   onRevealPath,
@@ -812,6 +853,7 @@ export function StreamTail({
   convId: string;
   nameOf: (agentId: string) => string;
   marksRef: { current: Record<string, number[]> };
+  answerMarksRef?: { current: Record<string, number[]> };
   onGrow: () => void;
   onRetry: (streamId: string) => void;
   onRevealPath?: (path: string) => void;
@@ -835,7 +877,13 @@ export function StreamTail({
           text={s.text}
           reasoning={s.reasoning}
           tools={s.tools}
-          steps={buildStreamSteps(s.reasoning, s.tools, marksRef.current[id])}
+          steps={buildStreamSteps(
+            s.reasoning,
+            s.tools,
+            marksRef.current[id],
+            s.text,
+            answerMarksRef?.current[id],
+          )}
           attempts={s.attempts}
           status={s.status}
           errorMessage={s.errorMessage}
@@ -1843,6 +1891,7 @@ export function ChatPage({
   const resetToolTrace = (streamId: string) => {
     toolTraceRef.current[streamId] = [];
     delete streamMarksRef.current[streamId];
+    delete streamAnswerMarksRef.current[streamId];
   };
   /**
    * 分步思考的分界点（d.350）。
@@ -1852,10 +1901,19 @@ export function ChatPage({
    * 只用内存：它是本次流式的临时结构，收口时折成 `steps` 落进消息转录。
    */
   const streamMarksRef = useRef<Record<string, number[]>>({});
+  /**
+   * 正文（回答）的分界点，与 `streamMarksRef` 一一对应同一个工具（d.4xx）。
+   * 模型在工具轮里「先说一句过渡话术 → 再调工具」，正文在工具开始时的累计长度
+   * 就是这一段的结尾；收口/展示时据此把整段正文切回「回答 → 工具 → 回答」。
+   */
+  const streamAnswerMarksRef = useRef<Record<string, number[]>>({});
   const markReasoningBreak = (streamId: string) => {
-    const current = useChatStore.getState().streaming[streamId]?.reasoning ?? "";
+    const stream = useChatStore.getState().streaming[streamId];
+    const current = stream?.reasoning ?? "";
     const marks = streamMarksRef.current[streamId] ?? [];
     streamMarksRef.current[streamId] = [...marks, current.length];
+    const answerMarks = streamAnswerMarksRef.current[streamId] ?? [];
+    streamAnswerMarksRef.current[streamId] = [...answerMarks, stream?.text?.length ?? 0];
   };
   /**
    * 流式文本的绘制合并（d.352，对齐 DSH 的「按绘制帧发布」）。
@@ -6574,6 +6632,7 @@ export function ChatPage({
           convId={convId}
           nameOf={nameOf}
           marksRef={streamMarksRef}
+          answerMarksRef={streamAnswerMarksRef}
           onGrow={onStreamGrow}
           onRetry={retryStream}
           {...(hasRevealBridge(getFileBridge())

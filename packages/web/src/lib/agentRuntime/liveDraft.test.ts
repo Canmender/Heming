@@ -1,4 +1,4 @@
-﻿import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearLiveDraft,
   clearLiveDrafts,
@@ -55,6 +55,16 @@ describe("流式草稿留底（d.363）", () => {
     const drafts = listLiveDrafts(CONV);
     expect(drafts).toHaveLength(LIVE_DRAFT_CAP);
     expect(drafts.map((d) => d.streamId)).toEqual(["s2", "s3", "s4", "s5"]);
+  });
+
+  it("清空整个会话时连超出展示上限的旧草稿一起清（d.412 回归）", () => {
+    for (let i = 0; i < LIVE_DRAFT_CAP + 2; i += 1) {
+      saveLiveDraft(CONV, { streamId: `s${i}`, agentId: "a1", text: `第 ${i} 段草稿长度足够被留下来了` }, 1_000 + i);
+    }
+    clearLiveDrafts(CONV);
+    // 直接查缓存原始条目：旧实现只按 listLiveDrafts() 的前 4 条删，s0/s1 会残留。
+    const leftover = msgCache.peek(CONV).filter((entry) => entry.id.startsWith("live:"));
+    expect(leftover).toEqual([]);
   });
 
   it("不碰别人的缓存条目：普通明文消息不会被当成草稿", () => {

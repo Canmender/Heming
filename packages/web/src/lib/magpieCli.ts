@@ -141,9 +141,18 @@ export function parseProviders(raw: string): ProviderRow[] {
       (token) =>
         token !== id && (/^([a-z0-9-]+\.)+[a-z0-9-]+(:\d+)?$/i.test(token) || /^[a-z0-9-]+:\d+$/i.test(token)),
     );
-    const modelIndex = tokens.findIndex((token) => /^\d+$/.test(token));
-    const models = modelIndex >= 0 && /^models?$/.test(tokens[modelIndex + 1] ?? "") ? Number.parseInt(tokens[modelIndex]!, 10) : null;
-    rows.push({ id, kind, host: hostToken ?? "", models, fallback: [], off: offHint(trimmed, id), usedBy: usedByHint(trimmed), raw: trimmed });
+    // 内核 prints 「N models」(缓存没拉过) 或「N of M models」(拉过清单, 前者是已暴露数)：
+    // 两种都要取开头那个 N。原来只看数字后面紧跟的 token，遇到「6 of 10 models」的
+    // 「of」就放弃 → 大多数真实来源的模型数读不出来。按整段短语匹配更稳。
+    const modelMatch = /(?:^|\s)(\d+)\s+(?:of\s+\d+\s+)?models?\b/.exec(trimmed);
+    const models = modelMatch ? Number.parseInt(modelMatch[1]!, 10) : null;
+    // 备用链在内核是拼在这一行的说明列里（r.uses += "  ⤷ a → b"），不是独立的一行；
+    // 只在独立 `⤷` 行才解析会让配好的备用链在读回时整个消失（连设置面板都显示成空）。
+    const inlineFallback = trimmed.split("⤷")[1];
+    const fallback = inlineFallback
+      ? inlineFallback.split("→").map((part) => part.trim()).filter(Boolean)
+      : [];
+    rows.push({ id, kind, host: hostToken ?? "", models, fallback, off: offHint(trimmed, id), usedBy: usedByHint(trimmed), raw: trimmed });
   }
   return rows;
 }

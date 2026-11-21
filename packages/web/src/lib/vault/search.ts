@@ -114,10 +114,20 @@ function snippetAround(text: string, needle?: string): string {
   if (!flat) return "";
   const lower = flat.toLowerCase();
   const at = needle ? lower.indexOf(needle.toLowerCase()) : -1;
-  const start = at > 60 ? at - 40 : 0;
-  let out = flat.slice(start, start + 140);
+  let start = at > 60 ? at - 40 : 0;
+  let end = start + 140;
+  // d.412 回归：按 UTF-16 单位切会在 emoji 中间劈出落单代理；切片两端都往标量边界退让。
+  if (start > 0 && start < flat.length) {
+    const c = flat.charCodeAt(start);
+    if (c >= 0xdc00 && c <= 0xdfff) start -= 1;
+  }
+  if (end > 0 && end < flat.length) {
+    const c = flat.charCodeAt(end - 1);
+    if (c >= 0xd800 && c <= 0xdbff) end -= 1;
+  }
+  let out = flat.slice(start, end);
   if (start > 0) out = `…${out}`;
-  if (start + 140 < flat.length) out = `${out}…`;
+  if (end < flat.length) out = `${out}…`;
   return out;
 }
 
@@ -385,17 +395,21 @@ function clampQuickLimit(limit: unknown): number {
  */
 function subsequenceScore(haystack: string, needle: string): number {
   if (!haystack || !needle) return 0;
+  // d.412 回归：按码点匹配，否则 emoji 的高/低代理会被当成两个字符分别命中，
+  // 让「😀」匹配到只有半个代理的假标题。
+  const hay = [...haystack];
+  const ned = [...needle];
   let index = 0;
   let gap = 0;
   let last = -1;
-  for (let i = 0; i < haystack.length && index < needle.length; i += 1) {
-    if (haystack[i] !== needle[index]) continue;
+  for (let i = 0; i < hay.length && index < ned.length; i += 1) {
+    if (hay[i] !== ned[index]) continue;
     if (last >= 0) gap += i - last - 1;
     last = i;
     index += 1;
   }
-  if (index < needle.length) return 0;
-  return Math.max(1, 120 - gap * 4 - (haystack.length - needle.length));
+  if (index < ned.length) return 0;
+  return Math.max(1, 120 - gap * 4 - (hay.length - ned.length));
 }
 
 /**

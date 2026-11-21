@@ -7,7 +7,9 @@ import { DEFAULT_ROUTE_BUDGET, DEFAULT_ROUTE_TOP_K } from "./types.js";
  */
 
 const ASCII_WORD = /[a-z0-9]+(?:[._#+-][a-z0-9]+)*/g;
-// 中文区间：CJK 扩展 A + 基本区 + 兼容表意文字
+// 中文区间：CJK 扩展 A + 基本区 + 兼容表意文字。
+// BMP-only 是刻意与 lib/memory/tokenize 保持一致的「零依赖」口径：增补平面
+// （Ext B+，U+20000+，代理对编码）不产出 bigram；若将来放开，两处要一起改。
 const CJK_RUN = new RegExp("[㐀-䶿一-鿿豈-﫿]+", "g");
 
 /** 字段权重：name ×3、triggers ×2.5、tags ×1.5、description ×1。 */
@@ -208,6 +210,12 @@ function truncateToFit(
   // withEmpty 已含标题/分割/标题行开销，再留 1 个字符给省略号
   const available = charBudget - withEmpty - 1;
   if (available < MIN_TRUNCATED_INSTRUCTIONS) return null;
-  const instructions = `${match.skill.instructions.trim().slice(0, available)}…`;
+  // slice 按 UTF-16 码元计，切点落在 emoji/生僻字代理对中间会劈出落单代理，
+  // 注进系统提示词就是乱码方块——切完把末尾落单的高代理退掉（与 store.ts 的按码点口径一致）。
+  const trimmed = match.skill.instructions.trim();
+  let end = available;
+  const last = trimmed.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  const instructions = `${trimmed.slice(0, end)}…`;
   return { ...match, skill: { ...match.skill, instructions } };
 }

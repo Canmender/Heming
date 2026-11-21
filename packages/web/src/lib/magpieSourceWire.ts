@@ -82,10 +82,13 @@ export function sourceWireCommand(
   id: string,
   values: Partial<Record<SourceWireKey, string>>,
 ): string[] | null {
-  if (!id.trim()) return null;
+  // 与 sourceProfileCommand / sourceModelsCommands 一致：校验用 trim 后的 id，
+  // 下发也必须用 trim 后的——否则带空白的 id 会原样进 CLI，和兄弟命令对不上。
+  const provider = id.trim();
+  if (!provider) return null;
   const pairs = sourceWirePairs(values);
   if (pairs.length === 0) return null;
-  return ["provider", "set", id, ...pairs];
+  return ["provider", "set", provider, ...pairs];
 }
 
 /**

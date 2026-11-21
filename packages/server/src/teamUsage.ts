@@ -88,8 +88,10 @@ export function buildSelfUsage(
   let unreported = 0;
   for (const row of mine) {
     const tokens = typeof row.tokens === "number" ? row.tokens : null;
-    if (tokens === null) unreported += row.unreported;
-    else total += tokens;
+    if (tokens !== null) total += tokens;
+    // 未上报轮数无条件累加：客户端上报的一行 (日期, 模型) 可能既有已上报 token、又有未上报轮数，
+    // 只统计 tokens===null 的行会漏掉这些，导致 self.unreported 与 byModel/byDay/排行口径不一致。
+    unreported += row.unreported;
 
     const model = byModelMap.get(row.model) ?? {
       model: row.model,

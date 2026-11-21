@@ -137,6 +137,22 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     });
   });
 
+  it("本地技能结果（非插件命令）也投 focus-skill 定位到该技能", async () => {
+    // 痛点 11：面板里直接搜到的内置技能，点了要定位到具体技能详情，
+    // 而不是只跳到技能列表让人自己找。复用与插件命令 target=skill 相同的落点。
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "出行" } });
+    const option = screen.getByRole("option", { name: /出行建议/ });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
+    expect(useUiStore.getState().pageView).toBe("skills");
+    expect(useUiStore.getState().paletteIntent).toMatchObject({
+      kind: "focus-skill",
+      data: { id: "skill-1" },
+    });
+  });
+
   it("skill 查不到 id 时只切技能区、不投意图", async () => {
     commandsStub.current = [cmd({ target: { kind: "skill", name: "不存在的技能" } })];
     render(<CommandPalette onClose={vi.fn()} />);

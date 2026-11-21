@@ -25,6 +25,10 @@ import {
   CreateTeamTaskBodySchema,
   CreateTeamTaskCommentBodySchema,
   UpdateTeamTaskBodySchema,
+  CreateTeamKnowledgeBodySchema,
+  UpdateTeamKnowledgeBodySchema,
+  CreateJoinRequestBodySchema,
+  ReviewJoinRequestBodySchema,
   SYSTEM_AGENT_ID,
   type SharedFileMeta,
   type TeamEvent,
@@ -712,6 +716,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     return Number.isFinite(n) ? n : null;
   };
 
+  /**
+   * 分页/截断量整数参数：空白串（?limit=）视为「未提供」→ 用默认值。
+   * 之前直接 Number(req.query.limit)，而 Number("") === 0、Number(" ") === 0 都是有限数，
+   * 会被 clamp 成 1，于是客户端偶尔带出的空查询参数让时间线/列表只返回 1 条。
+   * 非空白输入沿用旧的 Number + trunc + clamp 语义（如 "1.9" → 1）。
+   */
+  const queryInt = (raw: unknown, fallback: number, min: number, max: number): number => {
+    if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, Math.trunc(n)));
+  };
+
   app.get("/api/team/activities", authOnly, (req, res) => {
     let limit = 50;
     if (req.query.limit !== undefined) {
@@ -1016,6 +1033,16 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     res.status(201).json(store.createWorkspaceTeam(userId(req), parsed.data));
+  });
+
+  // 目录/我的申请必须在 /api/teams/:id 之前注册，否则被 :id 通配吞掉。
+  app.get("/api/teams/discover", authOnly, (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    res.json({ teams: store.listTeamDirectory(q) });
+  });
+
+  app.get("/api/teams/join-requests/mine", authOnly, (req, res) => {
+    res.json({ requests: store.listMyJoinRequests(userId(req)) });
   });
 
   app.get("/api/teams/:id", authOnly, (req, res) => {
@@ -1419,6 +1446,12 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "只有已完成的任务可以验收：先让它把任务标完成，再点验收" });
       return;
     }
+    if (result === "done_locked") {
+      res.status(409).json({
+        error: "已完成的任务不能点状态胶囊退回待认领：本人要继续做可改回「进行中」；要重开请让组长打回重做（会记下原因）",
+      });
+      return;
+    }
     if (result === "not_found") {
       res.status(404).json({ error: "任务不存在" });
       return;
@@ -1499,11 +1532,165 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(404).json({ error: "团队不存在" });
       return;
     }
-    const raw = Number(req.query.limit);
-    const limit = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.trunc(raw))) : 30;
+    const limit = queryInt(req.query.limit, 30, 1, 100);
     // taskId（d.276）：可选，只看某一件活的流水（任务卡片里的「这件活的历史」）。
     const taskId = typeof req.query.taskId === "string" ? req.query.taskId : null;
     res.json({ events: store.listTeamEvents(req.params.id, limit, taskId) });
+  });
+
+  /* ───────────────── 团队知识库 /api/teams/:id/knowledge ─────────────────
+   * 全是 authOnly；成员校验在 Store 内部 visibleTeam()（非成员 → null → 404，
+   * 与团队其余路由一致：不泄露团队是否存在）。智能体无服务端身份，不碰这些路由。
+   */
+  app.get("/api/teams/:id/knowledge", authOnly, (req, res) => {
+    const docs = store.listTeamKnowledge(req.params.id, userId(req));
+    if (!docs) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    res.json({ docs });
+  });
+
+  app.get("/api/teams/:id/knowledge/search", authOnly, (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const docs = store.searchTeamKnowledge(req.params.id, userId(req), q);
+    if (!docs) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    res.json({ docs });
+  });
+
+  app.get("/api/teams/:id/knowledge/:docId", authOnly, (req, res) => {
+    const doc = store.getTeamKnowledge(req.params.id, userId(req), req.params.docId);
+    if (!doc) {
+      res.status(404).json({ error: "文档不存在" });
+      return;
+    }
+    res.json(doc);
+  });
+
+  app.post("/api/teams/:id/knowledge", authOnly, (req, res) => {
+    const parsed = CreateTeamKnowledgeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const doc = store.createTeamKnowledge(req.params.id, userId(req), parsed.data);
+    if (!doc) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    pushTeamEvent(req.params.id, userId(req), "knowledge_added", `发布了文档「${doc.title}」`);
+    res.status(201).json(doc);
+  });
+
+  app.patch("/api/teams/:id/knowledge/:docId", authOnly, (req, res) => {
+    const parsed = UpdateTeamKnowledgeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.updateTeamKnowledge(req.params.id, userId(req), req.params.docId, parsed.data);
+    if (result === null) {
+      res.status(404).json({ error: "文档不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有作者或组长可以修改这篇文档" });
+      return;
+    }
+    pushTeamEvent(req.params.id, userId(req), "knowledge_updated", `更新了文档「${result.title}」`);
+    res.json(result);
+  });
+
+  app.delete("/api/teams/:id/knowledge/:docId", authOnly, (req, res) => {
+    const result = store.deleteTeamKnowledge(req.params.id, userId(req), req.params.docId);
+    if (result === null) {
+      res.status(404).json({ error: "文档不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有作者或组长可以删除这篇文档" });
+      return;
+    }
+    pushTeamEvent(req.params.id, userId(req), "knowledge_removed", "删除了一篇知识库文档");
+    res.status(204).end();
+  });
+
+  /* ───────────────── 团队发现 + 加入申请 /api/teams/discover, /api/teams/:id/join* ─────────────────
+   * 「用户创造即为队长，搜团队申请加入、队长审核」。目录只暴露元数据；
+   * 申请/审批写入 team_join_requests，通过时 Store 原子写成员行 + 这里记动态。
+   */
+  app.post("/api/teams/:id/join-requests", authOnly, (req, res) => {
+    const parsed = CreateJoinRequestBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.createJoinRequest(req.params.id, userId(req), parsed.data.message ?? "");
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "already_member") {
+      res.status(409).json({ error: "你已在这个团队里" });
+      return;
+    }
+    if (result === "already_pending") {
+      res.status(409).json({ error: "你的申请还在等待队长审核" });
+      return;
+    }
+    pushTeamEvent(req.params.id, userId(req), "join_requested", "有人申请加入团队");
+    res.status(201).json(result);
+  });
+
+  app.get("/api/teams/:id/join-requests", authOnly, (req, res) => {
+    const result = store.listJoinRequests(req.params.id, userId(req));
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有队长可以查看加入申请" });
+      return;
+    }
+    res.json({ requests: result });
+  });
+
+  app.post("/api/teams/:id/join-requests/:requestId/review", authOnly, (req, res) => {
+    const parsed = ReviewJoinRequestBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.reviewJoinRequest(
+      req.params.id,
+      req.params.requestId,
+      userId(req),
+      parsed.data.action,
+    );
+    if (result === null) {
+      res.status(404).json({ error: "申请不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有队长可以审核加入申请" });
+      return;
+    }
+    if (result === "already_reviewed") {
+      res.status(409).json({ error: "这条申请已经审核过了" });
+      return;
+    }
+    pushTeamEvent(
+      req.params.id,
+      userId(req),
+      parsed.data.action === "approve" ? "join_approved" : "join_rejected",
+      parsed.data.action === "approve"
+        ? `通过了 ${result.userId} 的加入申请`
+        : `拒绝了 ${result.userId} 的加入申请`,
+    );
+    res.json(result);
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {
@@ -1515,10 +1702,8 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.json(all);
       return;
     }
-    const rawLimit = Number(req.query.limit);
-    const rawOffset = Number(req.query.offset);
-    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.trunc(rawLimit))) : 30;
-    const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
+    const limit = queryInt(req.query.limit, 30, 1, 100);
+    const offset = queryInt(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
     const sorted = [...all].sort((a, b) => {
       const at = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
       const bt = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
@@ -1669,10 +1854,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: `搜索词最多 ${SEARCH_QUERY_MAX} 个字符` });
       return;
     }
-    const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit)
-      ? Math.min(SEARCH_LIMIT_MAX, Math.max(1, Math.trunc(rawLimit)))
-      : SEARCH_LIMIT_DEFAULT;
+    const limit = queryInt(req.query.limit, SEARCH_LIMIT_DEFAULT, 1, SEARCH_LIMIT_MAX);
 
     const conversations = [...store.listConversations(userId(req))]
       .sort((a, b) => {

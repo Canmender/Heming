@@ -55,7 +55,7 @@ export function AssistantPage() {
           <ChatPage />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+        <div className="flex min-h-0 flex-1 items-start justify-center px-6 py-10">
           <EmptyState
             className="max-w-[440px]"
             titleAs="h2"

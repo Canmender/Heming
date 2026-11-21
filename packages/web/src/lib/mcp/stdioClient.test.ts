@@ -144,6 +144,18 @@ describe("stdio 客户端", () => {
     expect(idOf(1)).toBeGreaterThanOrEqual(1_000_000);
   });
 
+  it("多个实例的起始 id 号段互不相同，不靠 Math.random 撞运气（d.412 回归）", () => {
+    const bridge = installBridge();
+    const clients = Array.from({ length: 8 }, () => createStdioMcpClient(SERVER));
+    const starts: number[] = [];
+    for (const c of clients) {
+      bridge.request.mockClear();
+      void c.initialize();
+      starts.push(bridge.request.mock.calls[0][4] as number);
+    }
+    expect(new Set(starts).size).toBe(starts.length);
+  });
+
   it("缺命令直接抛错（不把空命令交给主进程）", () => {
     installBridge();
     expect(() => createStdioMcpClient({ ...SERVER, command: "" })).toThrow(/启动命令/);

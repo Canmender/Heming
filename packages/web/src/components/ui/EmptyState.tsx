@@ -38,8 +38,9 @@ export interface EmptyStateProps {
   /** 单个主操作（与 `actions` 二选一，`actions` 优先）：省掉调用方包一层。 */
   action?: ReactNode;
   /**
-   * 文案对齐，默认 center（整页空态）。
-   * 侧栏/卡片内空态用 `start`：窄容器里居中会读起来像「一段被折断的句子」。
+   * 文案对齐。全站已统一为编辑部式左对齐（.ui-empty 默认 items-start/text-left），
+   * 因此默认不传即可；`start` 会显式补上 items-start/text-left（窄容器里更明确）。
+   * 需要居中的特殊场景由调用方自己加 `items-center text-center` 覆盖。
    */
   align?: "center" | "start";
   /** 紧凑变体：用于卡片内部而非整页空态。 */
@@ -57,14 +58,15 @@ export function EmptyState({
   desc,
   actions,
   action,
-  align = "center",
+  align = "start",
   compact = false,
   framed = false,
   className = "",
 }: EmptyStateProps) {
   const classes = [
     "ui-empty",
-    align === "start" ? "items-start text-left" : "",
+    // 默认左对齐（.ui-empty 已 items-start/text-left）；align=center 才显式居中。
+    align === "center" ? "items-center text-center" : "items-start text-left",
     compact ? "gap-1 py-5" : "",
     framed ? "ui-card py-8" : "",
     className,

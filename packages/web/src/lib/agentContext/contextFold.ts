@@ -60,7 +60,15 @@ function load(): void {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
     for (const [conversationId, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (conversationId && isFold(value)) store.set(conversationId, { foldedCount: value.foldedCount, at: value.at });
+      // manual 也要一起读回：d.397 的文案要分清「你手动压缩的」与「自动折叠的」，
+      // 漏掉它会在重开应用后把手动压缩误显示成自动折叠。
+      if (conversationId && isFold(value)) {
+        store.set(conversationId, {
+          foldedCount: value.foldedCount,
+          at: value.at,
+          ...(value.manual ? { manual: true } : {}),
+        });
+      }
     }
   } catch {
     /* 读失败就当没有 */

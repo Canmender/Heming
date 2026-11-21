@@ -36,12 +36,16 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
+  closeSync,
   cpSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -158,6 +162,54 @@ function run(command, commandArgs, options = {}) {
   if (result.status !== 0) fail(`命令失败（退出码 ${result.status}）`, "看上面的原始输出");
 }
 
+/** 文件 SHA256（流式，避免把 89MB 整块读进内存）。 */
+function sha256(file) {
+  const hash = createHash("sha256");
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1024 * 1024);
+    let bytes;
+    while ((bytes = readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, bytes));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * playwright 与 patchright 各带一份 node.exe（各约 89MB），历史上 SHA256 完全一致。
+ * 两者的 `_impl/_driver.py` 都认 `PLAYWRIGHT_NODEJS_PATH`（见 bundled-runtime.js），
+ * 因此只在确认字节完全相同后删掉 patchright 那份，让运行时统一走 playwright 的
+ * 共享副本——省下约 89MB，而功能、行为、性能完全不变。
+ *
+ * 任何不一致（哈希不同、文件缺失、体积异常）都跳过删除，绝不冒险替换二进制：
+ * 老版本运行时自带 node.exe，行为与从前完全一致。
+ */
+function dedupeDriverNodes() {
+  const shared = join(SITE_PACKAGES, "playwright", "driver", "node.exe");
+  const redundant = join(SITE_PACKAGES, "patchright", "driver", "node.exe");
+  if (!existsSync(shared) || !existsSync(redundant)) {
+    log("node.exe 去重：playwright/patchright 的 driver 不齐全，跳过（保持原样）");
+    return;
+  }
+  const sharedSize = statSync(shared).size;
+  const redundantSize = statSync(redundant).size;
+  if (sharedSize !== redundantSize || sharedSize < 10 * 1024 * 1024) {
+    log("node.exe 去重：两份大小不一致或异常，跳过（不同版本不合并）");
+    return;
+  }
+  const sharedHash = sha256(shared);
+  const redundantHash = sha256(redundant);
+  if (sharedHash !== redundantHash) {
+    log("node.exe 去重：两份 SHA256 不一致，跳过（不同版本不合并）");
+    return;
+  }
+  rmSync(redundant, { force: true });
+  log(`node.exe 去重：删除 patchright 冗余副本（${(sharedSize / 1024 / 1024).toFixed(1)}MB，SHA256 一致）`);
+}
+
 // —— 守门模式：只校验，不动盘 ——
 if (checkOnly) {
   const problems = [];
@@ -232,6 +284,12 @@ if (existsSync(markerFile) && !force) {
     REQUIREMENTS,
   ]);
 }
+
+// —— 2.5 node.exe 去重 ——
+// playwright/patchright 的 driver 各带一份字节相同的 89MB node.exe。装完后删掉
+// patchright 那份，运行时通过 bundledEnv() 注入 PLAYWRIGHT_NODEJS_PATH 复用共享副本。
+// 逐次构建都跑：既处理新装，也处理 --force 重装后重新出现的冗余副本。
+dedupeDriverNodes();
 
 // —— 3. uv 自身（可选）——
 if (withUv) {

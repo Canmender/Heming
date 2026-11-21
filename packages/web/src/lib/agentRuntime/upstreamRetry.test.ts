@@ -61,16 +61,34 @@ describe("上游瞬时错误重试判据（d.203.4.108）", () => {
   });
 
   it("退避：没有提示时 800ms 起、每次翻倍，且有上限", () => {
-    expect(retryDelayMs(httpError(503), 0)).toBe(800);
-    expect(retryDelayMs(httpError(503), 1)).toBe(1600);
-    expect(retryDelayMs(httpError(503), 2)).toBe(3200);
-    expect(retryDelayMs(httpError(503), 20)).toBe(MAX_UPSTREAM_DELAY_MS);
+    const mid = () => 0.5; // 抖动中心：系数恰为 1.0，锁住 800×2^n 基线
+    expect(retryDelayMs(httpError(503), 0, mid)).toBe(800);
+    expect(retryDelayMs(httpError(503), 1, mid)).toBe(1600);
+    expect(retryDelayMs(httpError(503), 2, mid)).toBe(3200);
+    expect(retryDelayMs(httpError(503), 20, mid)).toBe(MAX_UPSTREAM_DELAY_MS);
+  });
+
+  it("退避带 ±10% 抖动打散惊群，且不越过上限（d.412）", () => {
+    const low = () => 0; // 系数 0.9
+    const high = () => 0.999999; // 系数 ≈1.1
+    expect(retryDelayMs(httpError(503), 0, low)).toBe(720); // 800×0.9
+    expect(retryDelayMs(httpError(503), 0, high)).toBe(880); // 800×1.1
+    // 到了上限后，再大的抖动也不能超过 MAX
+    expect(retryDelayMs(httpError(503), 20, high)).toBe(MAX_UPSTREAM_DELAY_MS);
+  });
+
+  it("供应商给了 Retry-After 就不加抖动（明确指示优先，d.412）", () => {
+    const low = () => 0;
+    const high = () => 0.999999;
+    expect(retryDelayMs(httpError(429, 2500), 0, low)).toBe(2500);
+    expect(retryDelayMs(httpError(429, 2500), 0, high)).toBe(2500);
   });
 
   it("供应商给了 Retry-After 就听它的，并夹在上限内", () => {
-    expect(retryDelayMs(httpError(429, 2500), 0)).toBe(2500);
-    expect(retryDelayMs(httpError(429, 60 * 60 * 1000), 0)).toBe(MAX_UPSTREAM_DELAY_MS);
-    expect(retryDelayMs(httpError(429, 0), 0)).toBe(800);
+    const mid = () => 0.5;
+    expect(retryDelayMs(httpError(429, 2500), 0, mid)).toBe(2500);
+    expect(retryDelayMs(httpError(429, 60 * 60 * 1000), 0, mid)).toBe(MAX_UPSTREAM_DELAY_MS);
+    expect(retryDelayMs(httpError(429, 0), 0, mid)).toBe(800);
   });
 
   it("默认最多重试 2 次（一次失败最多再试两次）", () => {

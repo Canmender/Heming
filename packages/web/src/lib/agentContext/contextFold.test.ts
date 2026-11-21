@@ -133,3 +133,17 @@ describe("上下文折叠记录（d.217）", () => {
     recordContextFold("c2", 3, 1_000);
     expect(getContextFold("c2")?.manual).toBeUndefined();
   });
+
+  it("手动标记落盘后重开（重新读模块）仍是手动，不会被误显示成自动折叠", async () => {
+    recordContextFold("c1", 9, 1_000, true);
+    // 先确认确实写进了 localStorage
+    const raw = localStorage.getItem(CONTEXT_FOLD_KEY);
+    expect(raw).toContain("manual");
+
+    // 模拟重开应用：清空模块缓存后重新加载（loaded 归 false，会重新读 localStorage）
+    vi.resetModules();
+    const fresh = await import("./contextFold.js");
+    expect(fresh.getContextFold("c1")).toEqual({ foldedCount: 9, at: 1_000, manual: true });
+    // 老记录（没有 manual 字段）重开后仍按自动处理
+    expect(fresh.getContextFold("c2")?.manual).toBeUndefined();
+  });

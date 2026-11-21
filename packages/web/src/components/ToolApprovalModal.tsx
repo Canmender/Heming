@@ -69,10 +69,20 @@ export function ToolApprovalModal({
   patchPreviewer,
 }: ToolApprovalModalProps) {
   // 默认不勾任何一项：默认动作是「什么都不做」。
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // 用无原型对象：call id 来自工具/模型，可能是 "toString"/"constructor" 之类 Object.prototype
+  // 上的键名；普通 {} 的 `checked[id]` 会读到继承的函数而误判为「已勾选」，绕开默认拒绝。
+  const [checked, setChecked] = useState<Record<string, boolean>>(() => Object.create(null));
   // 「记住」默认关闭：它会把一次决定变成长期规则。
   const [remember, setRemember] = useState(false);
   const denyRef = useRef<HTMLButtonElement>(null);
+
+  // 确认弹窗在排队批次之间被 React 复用（hitl store 同步换 pending、调用方没给 key）：
+  // 新一批请求必须重新开始——上一批勾的选项和「记住」不能带到下一批，否则一次勾的
+  // 「记住」会变成下一批的长期规则。按 requestId 变化重置，局限在本文件内（调用方是脏文件）。
+  useEffect(() => {
+    setChecked(Object.create(null));
+    setRemember(false);
+  }, [requestId]);
 
   /*
    * 「记住本次选择」只对**能归纳出路径前缀**的文件补丁显示：
@@ -93,7 +103,12 @@ export function ToolApprovalModal({
   const hasPathWrite = calls.some((call) => isFileWriteTool(call.name));
 
   const toggle = (id: string) =>
-    setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
+    setChecked((prev) => {
+      // 保持无原型：{...prev} 会落回 Object.prototype， prototype 键名又会误判为已勾选。
+      const next: Record<string, boolean> = Object.assign(Object.create(null), prev);
+      next[id] = !prev[id];
+      return next;
+    });
 
   /** 拒绝全部：逐项给出 deny，闸门据此不执行它们。 */
   const denyAll = () => {

@@ -128,6 +128,18 @@ describe("WikiPanel 三视图", () => {
     await waitFor(() => expect(bridge.files.get("wiki/concepts/新概念.md")).toContain("内容"));
   });
 
+  it("新建页面后 index.md 立即列出新页（d.412 回归）", async () => {
+    const bridge = seeded();
+    render(<WikiPanel bridge={bridge} />);
+    fireEvent.click(await screen.findByRole("button", { name: "新建概念" }));
+    fireEvent.change(await screen.findByLabelText("页面标题"), { target: { value: "全新概念" } });
+    fireEvent.change(screen.getByLabelText("页面正文"), { target: { value: "新内容" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(bridge.files.get("wiki/concepts/全新概念.md")).toContain("新内容"));
+    // 索引此前用保存前的 pages 生成，新建页不在其中 → 漏掉；现在应立即出现。
+    expect(bridge.files.get("index.md")).toContain("[[全新概念]]");
+  });
+
   it("删除页面后从列表消失，并记一条 log", async () => {
     const bridge = seeded();
     render(<WikiPanel bridge={bridge} />);

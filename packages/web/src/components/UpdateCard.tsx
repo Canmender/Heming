@@ -102,8 +102,8 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
   }, [installing, bridge]);
 
   const canAct = useMemo(
-    () => Boolean(bridge) && !installing && state?.status !== "downloading",
-    [bridge, installing, state?.status],
+    () => Boolean(bridge) && !installing && !busy && state?.status !== "downloading",
+    [bridge, installing, busy, state?.status],
   );
 
   // 开发态没有这个桥——整张卡不渲染，而不是显示一个点不动的按钮。

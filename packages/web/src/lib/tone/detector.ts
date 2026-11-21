@@ -243,16 +243,26 @@ export function detectAiTone(text: string): ToneReport {
   {
     const lines = source.split("\n");
     let offset = 0;
-    const numbered: { index: number; len: number }[] = [];
-    for (const line of lines) {
+    const numbered: { index: number; len: number; line: number }[] = [];
+    for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+      const line = lines[lineNo];
       const m = HEADING_ORD_RE.exec(line);
-      if (m) numbered.push({ index: offset, len: m[0].length });
+      if (m) numbered.push({ index: offset, len: m[0].length, line: lineNo });
       offset += line.length + 1;
     }
-    // 连续三个以上（允许中间夹一两个非编号行——通篇编号常在章节间出现）
+    // 连续三个以上（允许中间夹一两个非编号行——通篇编号常在章节间出现）。
+    // 判定「连续」看的是两个编号标题之间的**非空正文行数**：空行是排版，不算内容。
+    // 超过 2 行正文就断开重新计数，否则「一、背景／二、方法／三、结论」各隔一大段
+    // 正文也会被误判成 AI 腔。
     let run = 0;
+    let prevLine = -1;
     for (const n of numbered) {
-      run++;
+      let between = 0;
+      for (let lineNo = prevLine + 1; lineNo < n.line; lineNo += 1) {
+        if (lines[lineNo]?.trim()) between += 1;
+      }
+      run = between <= 2 ? run + 1 : 1;
+      prevLine = n.line;
       if (run >= 3) push(6, n.index, n.len);
     }
   }

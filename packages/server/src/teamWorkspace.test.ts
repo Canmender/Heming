@@ -615,4 +615,212 @@ describe("团队工作台 REST", () => {
     expect(empty.status).toBe(400);
     expect(empty.body.error).toBe("请选择要转让给的成员");
   });
+
+  it("团队知识库 REST：CRUD + 搜索 + 权限（非成员 404、作者/组长可改、队员禁改）", async () => {
+    const team = await createTeam(alice.token);
+    const teamId = team.team.id;
+    // owner 加 bob（队员）成为成员；carol 保持非成员
+    const added = await request(app)
+      .post(`/api/teams/${teamId}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+    expect(added.status).toBe(200);
+
+    // 未登录 401
+    expect((await request(app).get(`/api/teams/${teamId}/knowledge`)).status).toBe(401);
+
+    // 非成员 404（响应体与「团队不存在」一致）
+    const ghost = await request(app).get(`/api/teams/${teamId}/knowledge`).set(auth(carol.token));
+    expect(ghost.status).toBe(404);
+    expect(ghost.body.error).toBe("团队不存在");
+
+    // 建文档（bob 建）
+    const bad = await request(app)
+      .post(`/api/teams/${teamId}/knowledge`)
+      .set(auth(bob.token))
+      .send({ title: "   ", content: "x" });
+    expect(bad.status).toBe(400);
+
+    const created = await request(app)
+      .post(`/api/teams/${teamId}/knowledge`)
+      .set(auth(bob.token))
+      .send({ title: "接口约定", content: "每周一更新排班，注意节假日", tags: ["api"] });
+    expect(created.status).toBe(201);
+    const docId = created.body.id as string;
+    expect(created.body.authorId).toBe(bob.user.id);
+
+    // 列表 / 单读
+    const list = await request(app).get(`/api/teams/${teamId}/knowledge`).set(auth(alice.token));
+    expect(list.status).toBe(200);
+    expect(list.body.docs.map((d: { id: string }) => d.id)).toEqual([docId]);
+    const one = await request(app).get(`/api/teams/${teamId}/knowledge/${docId}`).set(auth(alice.token));
+    expect(one.body.title).toBe("接口约定");
+
+    // 搜索（中文子串，>=3 字符走 FTS/线性一致）
+    const found = await request(app)
+      .get(`/api/teams/${teamId}/knowledge/search`)
+      .query({ q: "节假日" })
+      .set(auth(alice.token));
+    expect(found.status).toBe(200);
+    expect(found.body.docs.map((d: { id: string }) => d.id)).toEqual([docId]);
+
+    // 队员改别人的 → 403；作者改 / 组长改 → 200
+    const carolGuest = await request(app)
+      .post(`/api/teams/${teamId}/knowledge`)
+      .set(auth(alice.token))
+      .send({ title: "组长文档", content: "y" });
+    expect(carolGuest.status).toBe(201);
+    const foreignPatch = await request(app)
+      .patch(`/api/teams/${teamId}/knowledge/${carolGuest.body.id}`)
+      .set(auth(bob.token))
+      .send({ title: "抢" });
+    expect(foreignPatch.status).toBe(403);
+    const ownerPatch = await request(app)
+      .patch(`/api/teams/${teamId}/knowledge/${docId}`)
+      .set(auth(alice.token))
+      .send({ title: "接口约定 v2" });
+    expect(ownerPatch.status).toBe(200);
+    expect(ownerPatch.body.title).toBe("接口约定 v2");
+
+    // 删除 + 非成员删 404
+    const ghostDel = await request(app)
+      .delete(`/api/teams/${teamId}/knowledge/${docId}`)
+      .set(auth(carol.token));
+    expect(ghostDel.status).toBe(404);
+    const del = await request(app)
+      .delete(`/api/teams/${teamId}/knowledge/${docId}`)
+      .set(auth(bob.token));
+    expect(del.status).toBe(204);
+    const after = await request(app).get(`/api/teams/${teamId}/knowledge`).set(auth(alice.token));
+    expect(after.body.docs.map((d: { id: string }) => d.id)).toEqual([carolGuest.body.id]);
+
+    // 删除动作写进团队动态（team_events）
+    const events = await request(app).get(`/api/teams/${teamId}/events`).set(auth(alice.token));
+    expect(events.body.events.some((e: { kind: string }) => e.kind === "knowledge_removed")).toBe(true);
+  });
+
+  it("团队发现 + 加入申请 REST：目录/申请/审批/权限/动态", async () => {
+    const team = await createTeam(alice.token);
+    const teamId = team.team.id;
+
+    // 未登录 401
+    expect((await request(app).get("/api/teams/discover")).status).toBe(401);
+    expect((await request(app).post(`/api/teams/${teamId}/join-requests`).send({})).status).toBe(401);
+
+    // 目录：carol 能搜到团队（只暴露元数据）
+    const dir = await request(app).get("/api/teams/discover").query({ q: "课程" }).set(auth(carol.token));
+    expect(dir.status).toBe(200);
+    const found = dir.body.teams.find((t: { id: string }) => t.id === teamId);
+    expect(found).toMatchObject({ name: "课程组", memberCount: 1 });
+    expect(Object.keys(found).sort()).toEqual(["createdAt", "goal", "id", "memberCount", "name"].sort());
+
+    // carol 申请加入（附言）
+    const applied = await request(app)
+      .post(`/api/teams/${teamId}/join-requests`)
+      .set(auth(carol.token))
+      .send({ message: "我也想加入" });
+    expect(applied.status).toBe(201);
+    expect(applied.body).toMatchObject({ status: "pending", userId: carol.user.id, message: "我也想加入" });
+    const reqId = applied.body.id as string;
+
+    // 重复申请 409；我的申请能查到
+    expect(
+      (await request(app).post(`/api/teams/${teamId}/join-requests`).set(auth(carol.token)).send({})).status,
+    ).toBe(409);
+    const mine = await request(app).get("/api/teams/join-requests/mine").set(auth(carol.token));
+    expect(mine.body.requests.map((r: { id: string }) => r.id)).toContain(reqId);
+
+    // 审批列表：队长 200，非成员 404，队员 403（先加 bob）
+    await request(app).post(`/api/teams/${teamId}/members`).set(auth(alice.token)).send({ username: "bob" });
+    const listOwner = await request(app).get(`/api/teams/${teamId}/join-requests`).set(auth(alice.token));
+    expect(listOwner.body.requests.map((r: { id: string }) => r.id)).toEqual([reqId]);
+    expect((await request(app).get(`/api/teams/${teamId}/join-requests`).set(auth(bob.token))).status).toBe(403);
+    expect((await request(app).get(`/api/teams/${teamId}/join-requests`)).status).toBe(401);
+
+    // 队员不能审；队长通过 → carol 成为成员；重复审 409
+    expect(
+      (await request(app)
+        .post(`/api/teams/${teamId}/join-requests/${reqId}/review`)
+        .set(auth(bob.token))
+        .send({ action: "approve" })).status,
+    ).toBe(403);
+    const approved = await request(app)
+      .post(`/api/teams/${teamId}/join-requests/${reqId}/review`)
+      .set(auth(alice.token))
+      .send({ action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.status).toBe("approved");
+    const carolTeam = await request(app).get(`/api/teams/${teamId}`).set(auth(carol.token));
+    expect(carolTeam.status).toBe(200);
+    expect(
+      (await request(app)
+        .post(`/api/teams/${teamId}/join-requests/${reqId}/review`)
+        .set(auth(alice.token))
+        .send({ action: "reject" })).status,
+    ).toBe(409);
+
+    // 动态：join_requested / join_approved 都进时间线
+    const events = await request(app).get(`/api/teams/${teamId}/events`).set(auth(alice.token));
+    const kinds = events.body.events.map((e: { kind: string }) => e.kind);
+    expect(kinds).toContain("join_requested");
+    expect(kinds).toContain("join_approved");
+  });
+
+  it("状态机收紧：已完成任务不能裸改 status 绕过验收（1.3）", async () => {
+    const team = await createTeam(alice.token);
+    await request(app)
+      .post(`/api/teams/${team.team.id}/members`)
+      .set(auth(alice.token))
+      .send({ username: "bob" });
+    const created = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "写脚本", assigneeId: bob.user.id });
+    const taskId = created.body.id as string;
+
+    // 标完成 + 写结论
+    const done = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(bob.token))
+      .send({ status: "done", result: "写完了" });
+    expect(done.status).toBe(200);
+
+    // 裸改 status 退回 todo（胶囊循环）→ 409 done_locked（负责人与组长都不行）
+    const revert = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(bob.token))
+      .send({ status: "todo" });
+    expect(revert.status).toBe(409);
+    expect(revert.body.error).toContain("不能点状态胶囊退回");
+    const revertByOwner = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(alice.token))
+      .send({ status: "todo" });
+    expect(revertByOwner.status).toBe(409);
+
+    // done→doing（本人重开继续做）仍是正当路径，保留结论。
+    const reopened = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(bob.token))
+      .send({ status: "doing" });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body).toMatchObject({ status: "doing", result: "写完了" });
+    // 再标完成，供下面打回
+    await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(bob.token))
+      .send({ status: "done" });
+
+    // 状态仍是 done
+    const snap = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
+    expect(snap.body.tasks.find((t: { id: string }) => t.id === taskId).status).toBe("done");
+
+    // 正道：组长打回重做 → doing + 原因
+    const sentBack = await request(app)
+      .patch(`/api/teams/${team.team.id}/tasks/${taskId}`)
+      .set(auth(alice.token))
+      .send({ review: "changes", reviewNote: "补一下回滚步骤" });
+    expect(sentBack.status).toBe(200);
+    expect(sentBack.body).toMatchObject({ status: "doing", reviewState: "changes" });
+  });
 });

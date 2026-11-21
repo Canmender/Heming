@@ -64,8 +64,11 @@ export function parseTodoArgs(raw: unknown): ParsedTodos {
     const record = entry as Record<string, unknown>;
     const content = typeof record.content === "string" ? record.content.trim() : "";
     if (!content) return { ok: false, error: `${label}缺 content（内容不能为空）` };
-    if (content.length > TODO_CONTENT_MAX) {
-      return { ok: false, error: `${label}内容 ${content.length} 字，超过 ${TODO_CONTENT_MAX} 字上限` };
+    // 按码点数：emoji 等增补平面字符的 UTF-16 length 是 2，直接比会把 200 个 emoji
+    // 当成 400 字误拒，报错里的字数也不准（d.412 回归）。
+    const contentChars = [...content].length;
+    if (contentChars > TODO_CONTENT_MAX) {
+      return { ok: false, error: `${label}内容 ${contentChars} 字，超过 ${TODO_CONTENT_MAX} 字上限` };
     }
     if (seen.has(content)) return { ok: false, error: `${label}与前面重复：「${content}」` };
     seen.add(content);

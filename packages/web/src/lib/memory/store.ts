@@ -18,7 +18,7 @@ import {
   writeJson,
 } from "./storage.js";
 import { tokenize } from "./tokenize.js";
-import { SUMMARY_MAX, deterministicSummary, extractExplicitMemory, normalizeKey } from "./extract.js";
+import { SUMMARY_MAX, clipCodePoints, deterministicSummary, extractExplicitMemory, normalizeKey } from "./extract.js";
 import type { VaultMemoryPointer } from "../vault/types.js";
 import { VAULT_MEMORY_MAX } from "../vault/types.js";
 import { enqueueMemoryWrite } from "./memoryWriteBack.js";
@@ -171,7 +171,7 @@ function pickEpisodic(raw: unknown, nowMs: number): Record<string, EpisodicEntry
       if (typeof item.id !== "string" || typeof item.agentId !== "string" || typeof item.summary !== "string") {
         continue;
       }
-      const summary = item.summary.slice(0, SUMMARY_MAX);
+      const summary = clipCodePoints(item.summary, SUMMARY_MAX);
       items.push({
         id: item.id,
         agentId: item.agentId,
@@ -220,7 +220,7 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
         // vault 的 key 是 rel（可能含目录与 `.md`，长度远超 24 字）：
         // 不能走 normalizeKey 的 24 字截断，否则不同目录下的同名文件会撞成一个键。
         key: isVault ? String(item.key).slice(0, 300) : normalizeKey(item.key),
-        value: item.value.slice(0, 500),
+        value: clipCodePoints(item.value, 500),
         scope: item.scope === "agent" ? "agent" : "user",
         confidence: typeof item.confidence === "number" && Number.isFinite(item.confidence) ? item.confidence : 0.5,
         pinned: item.pinned === true,
@@ -480,7 +480,12 @@ export class MemoryStore {
       }
       this.pending.set(key, 0);
       this.savePending();
-      const window = this.working(conversationId, agentId).slice(-SEDIMENT_EVERY);
+      // partial（失败/被中断）轮次只进 Working、不沉淀（types.ts:20 契约）。
+      // 不过滤的话，6 轮窗口的首条若是 partial，deterministicSummary 会把
+      // 被打断那轮的用户文本写进长期情景记忆。
+      const window = this.working(conversationId, agentId)
+        .filter((turn) => !turn.partial)
+        .slice(-SEDIMENT_EVERY);
       if (!window.length) return;
       this.addEpisodic({
         agentId,
@@ -514,7 +519,7 @@ export class MemoryStore {
     sourceTurns?: number;
   }): EpisodicEntry {
     const nowMs = this.now();
-    const summary = String(input.summary ?? "").slice(0, SUMMARY_MAX);
+    const summary = clipCodePoints(String(input.summary ?? ""), SUMMARY_MAX);
     const entry: EpisodicEntry = {
       id: newId("e", nowMs),
       agentId: String(input.agentId ?? ""),
@@ -632,7 +637,7 @@ export class MemoryStore {
     const bucket = String(input.bucket ?? GLOBAL_AGENT_ID);
     const ownerId = String(input.agentId ?? "");
     const key = normalizeKey(input.key) || "未命名";
-    const value = String(input.value ?? "").slice(0, 500);
+    const value = clipCodePoints(String(input.value ?? ""), 500);
     const nowIso = new Date(this.now()).toISOString();
     const list = this.data.semantic[bucket] ?? [];
     const existing = list.find((e) => e.key === key);
@@ -730,7 +735,7 @@ export class MemoryStore {
     const list = this.data.semantic[bucket] ?? [];
     const current = list[index];
     const nextKey = patch.key !== undefined ? normalizeKey(patch.key) || current.key : current.key;
-    const nextValue = patch.value !== undefined ? String(patch.value).slice(0, 500) : current.value;
+    const nextValue = patch.value !== undefined ? clipCodePoints(String(patch.value), 500) : current.value;
     // 内容是否真的变了：key/value 任一不同即算内容变更（去掉「传了但值一样」的情况）。
     const contentChanged = nextKey !== current.key || nextValue !== current.value;
     // 元数据是否被动了：patch 里带了 pinned / confidence 即算「被人动过」。
@@ -819,7 +824,7 @@ export class MemoryStore {
         id: prev?.id ?? vaultEntryId(rel),
         agentId: String(input.agentId ?? prev?.agentId ?? GLOBAL_AGENT_ID),
         key: rel.slice(0, 300),
-        value: String(input.value ?? "").slice(0, 500),
+        value: clipCodePoints(String(input.value ?? ""), 500),
         scope: "user",
         confidence: prev?.confidence ?? 0.6,
         pinned: false,

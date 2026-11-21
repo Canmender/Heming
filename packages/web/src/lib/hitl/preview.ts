@@ -49,9 +49,6 @@ export interface ChangePreview {
 /** 预览最多展示的行数：足够判断改了什么，又不至于把弹窗撑爆。 */
 export const PREVIEW_MAX_LINES = 40;
 
-/** 参与 diff 的单侧最大行数，防止对超大文件做前缀/后缀比较拖慢渲染。 */
-const MAX_DIFF_LINES = 400;
-
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -77,7 +74,10 @@ export function diffLines(
   before: string[],
   after: string[],
 ): { lines: PreviewLine[]; added: number; removed: number } {
-  const max = Math.min(before.length, after.length, MAX_DIFF_LINES);
+  // 公共前缀/后缀必须扫到真实边界：按固定上限（旧版 400 行）截断会把中间那段相同的行
+  // 算成「删掉又新增」——大文件改一行，确认卡却显示 +600 −600，甚至无改动也显示 +1 −1。
+  // 线性扫一遍数组很便宜，结果确定，不该为了省这点比较牺牲统计口径。
+  const max = Math.min(before.length, after.length);
   let prefix = 0;
   while (prefix < max && before[prefix] === after[prefix]) prefix += 1;
   let suffix = 0;

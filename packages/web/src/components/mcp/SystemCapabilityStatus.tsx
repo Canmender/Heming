@@ -75,12 +75,17 @@ export function SystemCapabilityStatus({
 
   const stateOf = (server: McpServerConfig): McpConnState => {
     const live = registry.status(server.id);
+    // 本地 conn 只在本组件刚发起连接、还在进行中/失败时优先；一旦成功就
+    // 交还 registry 做权威来源。否则成功后 "ready" 会一直盖住 registry 后续
+    // 记录的服务死亡/重连失败，界面永远显示绿灯。
+    const local = conn[server.id];
+    const localOverride =
+      local === "connecting" || local === "error" ? local : null;
     if (live) {
-      // 本组件刚发起的连接优先于落盘记录（例如刚点完重新连接还在跑）。
-      if (conn[server.id]) return conn[server.id];
+      if (localOverride) return localOverride;
       return live.state === "connected" ? "ready" : live.state;
     }
-    if (conn[server.id]) return conn[server.id];
+    if (localOverride) return localOverride;
     return registry.hasDiscovered(server.id) ? "ready" : "idle";
   };
 

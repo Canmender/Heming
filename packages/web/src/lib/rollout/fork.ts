@@ -172,7 +172,10 @@ export interface ForkPreview {
 
 /** 日志文本是否被记录器截断（截断时会追加省略号并刚好超出上限一位）。 */
 export function looksTruncated(text: string, maxTextChars = MAX_TEXT_CHARS): boolean {
-  return text.length === maxTextChars + 1 && text.endsWith("…");
+  // 与 log.ts 的 clip() 同口径按码点数：emoji（代理对）用 text.length 会把一个字符算两位，
+  // 导致截断文本漏判。省略号另算一位，因此上限是 maxTextChars + 1 个码点。
+  const chars = Array.from(text);
+  return chars.length === maxTextChars + 1 && chars[chars.length - 1] === "…";
 }
 
 /** 预览分叉的代价：复用/丢弃/被截断，判据与 `checkFork` 同源（同一份配对结果）。 */

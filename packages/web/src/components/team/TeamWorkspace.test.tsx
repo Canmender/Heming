@@ -8,6 +8,11 @@ import {
   createTeamTask,
   createTeamTaskComment,
   createWorkspaceTeam,
+  discoverTeams,
+  createJoinRequest,
+  fetchMyJoinRequests,
+  fetchJoinRequests,
+  reviewJoinRequest,
   deleteTeamPlan,
   deleteTeamTask,
   deleteWorkspaceTeam,
@@ -32,6 +37,11 @@ vi.mock("../../lib/api.js", async (importOriginal) => {
     createWorkspaceTeam: vi.fn(),
     fetchWorkspaceTeam: vi.fn(),
     updateWorkspaceTeam: vi.fn(),
+    discoverTeams: vi.fn(),
+    createJoinRequest: vi.fn(),
+    fetchMyJoinRequests: vi.fn(),
+    fetchJoinRequests: vi.fn(),
+    reviewJoinRequest: vi.fn(),
     deleteWorkspaceTeam: vi.fn(),
     addWorkspaceMember: vi.fn(),
     removeWorkspaceMember: vi.fn(),
@@ -112,6 +122,11 @@ beforeEach(() => {
   vi.mocked(fetchWorkspaceTeam).mockReset().mockResolvedValue(snapshot());
   vi.mocked(createWorkspaceTeam).mockReset();
   vi.mocked(updateWorkspaceTeam).mockReset();
+  vi.mocked(discoverTeams).mockReset().mockResolvedValue({ teams: [] });
+  vi.mocked(createJoinRequest).mockReset();
+  vi.mocked(fetchMyJoinRequests).mockReset().mockResolvedValue({ requests: [] });
+  vi.mocked(fetchJoinRequests).mockReset().mockResolvedValue({ requests: [] });
+  vi.mocked(reviewJoinRequest).mockReset();
   vi.mocked(addWorkspaceMember).mockReset();
   vi.mocked(removeWorkspaceMember).mockReset();
   vi.mocked(leaveWorkspaceTeam).mockReset();
@@ -705,6 +720,36 @@ describe("团队工作台（d.92）", () => {
   });
 });
 
+describe("方案进度汇总（痛点 7）", () => {
+  it("方案卡显示挂在其下的任务完成数与逾期数", async () => {
+    const now = Date.now();
+    const t = snapshot().tasks[0]!;
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
+      snapshot({
+        tasks: [
+          { ...t, id: "k-done", planId: "p1", title: "完成的任务", status: "done" },
+          { ...t, id: "k-open", planId: "p1", title: "没完成的", status: "todo" },
+          {
+            ...t,
+            id: "k-late",
+            planId: "p1",
+            title: "逾期的",
+            status: "doing",
+            dueAt: new Date(now - 86_400_000).toISOString(),
+          },
+          { ...t, id: "k-other", planId: null, title: "独立任务" },
+        ],
+      }),
+    );
+    render(<TeamWorkspace />);
+    await screen.findByText("先把周报自动化");
+    const planCard = screen.getByText("先把周报自动化").closest("li") as HTMLElement;
+    expect(within(planCard).getByText("1/3 任务完成")).toBeInTheDocument();
+    expect(within(planCard).getByText("1 个逾期")).toBeInTheDocument();
+    expect(within(planCard).getByLabelText("方案进度 先把周报自动化")).toBeInTheDocument();
+  });
+});
+
 describe("成员自退与队长转让（P1-4）", () => {
   it("普通成员可以自己退出团队，确认后才发请求", async () => {
     vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
@@ -1138,6 +1183,50 @@ describe("催办痕迹（d.265）", () => {
   });
 });
 
+describe("催一下 / 写进展：在任务行里直接推进（1.5）", () => {
+  it("组长点「催一下」→ 发 nudge:true（只记催办不动状态）", async () => {
+    vi.mocked(updateTeamTask).mockResolvedValue(snapshot().tasks[0]);
+    render(<TeamWorkspace />);
+    await screen.findByText("产出本周周报初稿");
+    fireEvent.click(screen.getByRole("button", { name: "催一下 产出本周周报初稿" }));
+    await waitFor(() =>
+      expect(updateTeamTask).toHaveBeenCalledWith("t1", "k1", { nudge: true }),
+    );
+  });
+
+  it("非组长看不到「催一下」按钮", async () => {
+    // owner 换成 bob（不是 me），me 只是普通成员
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue(snapshot({ team: team({ ownerId: bob.id }) }));
+    render(<TeamWorkspace />);
+    await screen.findByText("产出本周周报初稿");
+    expect(screen.queryByRole("button", { name: "催一下 产出本周周报初稿" })).toBeNull();
+  });
+
+  it("点「写进展」→ 填内容 → 保存，发 progress（覆盖式一条）", async () => {
+    vi.mocked(updateTeamTask).mockResolvedValue(snapshot().tasks[0]);
+    render(<TeamWorkspace />);
+    await screen.findByText("产出本周周报初稿");
+    fireEvent.click(screen.getByRole("button", { name: "写进展 产出本周周报初稿" }));
+    const form = await screen.findByTestId("task-progress-form");
+    fireEvent.change(within(form).getByLabelText("进展内容 产出本周周报初稿"), {
+      target: { value: "接口已对齐，正在写 handler" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "保存进展" }));
+    await waitFor(() =>
+      expect(updateTeamTask).toHaveBeenCalledWith("t1", "k1", { progress: "接口已对齐，正在写 handler" }),
+    );
+  });
+
+  it("进展内容为空时不发请求，提示先写一句", async () => {
+    render(<TeamWorkspace />);
+    await screen.findByText("产出本周周报初稿");
+    fireEvent.click(screen.getByRole("button", { name: "写进展 产出本周周报初稿" }));
+    const form = await screen.findByTestId("task-progress-form");
+    fireEvent.click(within(form).getByRole("button", { name: "保存进展" }));
+    expect(updateTeamTask).not.toHaveBeenCalled();
+  });
+});
+
 describe("按关键词找任务（d.266）", () => {
   it("输入关键词只留命中的活，清空恢复", async () => {
     const base = snapshot().tasks[0]!;
@@ -1227,6 +1316,31 @@ describe("周报（d.269）", () => {
     } finally {
       delete (window as unknown as { __heming_exports?: unknown }).__heming_exports;
     }
+  });
+
+  it("切换回看天数会重算成稿（痛点 10：不再固定 7 天）", async () => {
+    render(<TeamWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "生成团队周报" }));
+    const dialog = await screen.findByRole("dialog", { name: "团队周报" });
+    const report = within(dialog).getByTestId("weekly-report");
+    expect(report.textContent).toContain("（7 天）");
+
+    fireEvent.change(within(dialog).getByLabelText("周报回看天数"), {
+      target: { value: "30" },
+    });
+    expect(report.textContent).toContain("（30 天）");
+    expect(report.textContent).not.toContain("（7 天）");
+    expect(within(dialog).getByLabelText("周报回看天数")).toHaveValue("30");
+
+    // 复制的仍是同一份新文本（成稿只算一次、切档后重算）。
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toBe(report.textContent);
   });
 });
 describe("任务讨论（d.271）", () => {
@@ -1335,7 +1449,7 @@ describe("验收（d.272）", () => {
   });
 });
 
-describe("团队动态（d.273）", () => {
+describe("任务流水（d.273，原「团队动态」按方案 1.1 消歧）", () => {
   it("展开动态能拉到时间线：时间、谁、做了什么", async () => {
     vi.mocked(fetchTeamEvents).mockResolvedValue({
       events: [
@@ -1363,7 +1477,7 @@ describe("团队动态（d.273）", () => {
     });
 
     render(<TeamWorkspace />);
-    const panel = await screen.findByRole("region", { name: "团队动态" });
+    const panel = await screen.findByRole("region", { name: "任务流水" });
     fireEvent.click(within(panel).getByRole("button", { name: "看动态" }));
 
     const box = await within(panel).findByTestId("team-events");
@@ -1412,7 +1526,7 @@ describe("团队动态（d.273）", () => {
     });
 
     render(<TeamWorkspace />);
-    const panel = await screen.findByRole("region", { name: "团队动态" });
+    const panel = await screen.findByRole("region", { name: "任务流水" });
     fireEvent.click(within(panel).getByRole("button", { name: "看动态" }));
     const box = await within(panel).findByTestId("team-events");
     expect(within(box).getByText(/新建方案「拉新」/)).toBeInTheDocument();
@@ -1472,9 +1586,77 @@ describe("团队动态（d.273）", () => {
   it("没有动态时说清楚，不显示空列表", async () => {
     vi.mocked(fetchTeamEvents).mockResolvedValue({ events: [] });
     render(<TeamWorkspace />);
-    const panel = await screen.findByRole("region", { name: "团队动态" });
+    const panel = await screen.findByRole("region", { name: "任务流水" });
     fireEvent.click(within(panel).getByRole("button", { name: "看动态" }));
     expect(await within(panel).findByText(/还没有动态/)).toBeInTheDocument();
+  });
+
+  it("动态可搜索：按关键词过滤摘要/人/类型", async () => {
+    vi.mocked(fetchTeamEvents).mockResolvedValue({
+      events: [
+        {
+          id: "e2",
+          teamId: "t1",
+          taskId: "k1",
+          taskTitle: "",
+          actorId: bob.id,
+          kind: "task_updated",
+          summary: "把状态改成已完成",
+          createdAt: iso,
+        },
+        {
+          id: "e1",
+          teamId: "t1",
+          taskId: null,
+          taskTitle: "",
+          actorId: me.id,
+          kind: "plan_added",
+          summary: "新增方案「拉新」",
+          createdAt: iso,
+        },
+      ],
+    });
+    render(<TeamWorkspace />);
+    const panel = await screen.findByRole("region", { name: "任务流水" });
+    fireEvent.click(within(panel).getByRole("button", { name: "看动态" }));
+    const box = await within(panel).findByTestId("team-events");
+    const search = within(box).getByRole("searchbox", { name: "搜索动态" });
+
+    fireEvent.change(search, { target: { value: "拉新" } });
+    expect(within(box).getByText(/新增方案「拉新」/)).toBeInTheDocument();
+    expect(within(box).queryByText(/改成已完成/)).toBeNull();
+
+    fireEvent.change(search, { target: { value: "鲍勃" } });
+    expect(within(box).getByText(/改成已完成/)).toBeInTheDocument();
+    expect(within(box).queryByText(/新增方案「拉新」/)).toBeNull();
+
+    fireEvent.change(search, { target: { value: "不存在的词" } });
+    expect(within(box).getByText(/没有匹配的动态/)).toBeInTheDocument();
+  });
+
+  it("动态可加载更早：逐档提高 limit 再拉一次", async () => {
+    const makeEvents = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `e${i}`,
+        teamId: "t1",
+        taskId: null,
+        taskTitle: "",
+        actorId: me.id,
+        kind: "task_updated" as const,
+        summary: `第 ${i} 条动态`,
+        createdAt: iso,
+      }));
+    vi.mocked(fetchTeamEvents).mockResolvedValueOnce({ events: makeEvents(20) });
+    render(<TeamWorkspace />);
+    const panel = await screen.findByRole("region", { name: "任务流水" });
+    fireEvent.click(within(panel).getByRole("button", { name: "看动态" }));
+    const box = await within(panel).findByTestId("team-events");
+    expect(vi.mocked(fetchTeamEvents)).toHaveBeenLastCalledWith("t1", undefined, 20);
+
+    const more = within(box).getByRole("button", { name: /加载更早/ });
+    vi.mocked(fetchTeamEvents).mockResolvedValueOnce({ events: makeEvents(40) });
+    fireEvent.click(more);
+    await waitFor(() => expect(vi.mocked(fetchTeamEvents)).toHaveBeenLastCalledWith("t1", undefined, 40));
   });
 });
 
@@ -1518,5 +1700,77 @@ describe("单件任务的历史（d.276）", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /任务历史/ }));
     expect(within(panel).queryByTestId("task-history")).toBeNull();
     expect(vi.mocked(fetchTeamEvents)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("团队发现 + 加入申请（社交化加入）", () => {
+  const directoryTeam = {
+    id: "t2",
+    name: "课程组",
+    goal: "一起做课",
+    memberCount: 3,
+    createdAt: iso,
+  };
+
+  it("搜索目录只展示元数据，申请后调用 createJoinRequest", async () => {
+    vi.mocked(discoverTeams).mockResolvedValue({ teams: [directoryTeam] });
+    render(<TeamWorkspace />);
+    await screen.findByRole("heading", { name: "增长小组" });
+
+    fireEvent.click(screen.getByRole("button", { name: "找团队" }));
+    const dialog = await screen.findByRole("dialog", { name: "找团队" });
+    // 打开即自动拉一次目录
+    await waitFor(() => expect(within(dialog).getByText("课程组")).toBeInTheDocument());
+    expect(within(dialog).getByText(/3 名成员/)).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("搜索团队"), { target: { value: "课程" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "搜索" }));
+    await waitFor(() => expect(discoverTeams).toHaveBeenCalledWith("课程"));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "申请加入" }));
+    fireEvent.change(within(dialog).getByLabelText("申请附言"), { target: { value: "想加入" } });
+    vi.mocked(createJoinRequest).mockResolvedValue({
+      id: "jr1", teamId: "t2", userId: me.id, message: "想加入",
+      status: "pending", createdAt: iso, reviewedAt: null,
+    });
+    vi.mocked(fetchMyJoinRequests).mockResolvedValue({
+      requests: [{ id: "jr1", teamId: "t2", userId: me.id, message: "想加入",
+        status: "pending", createdAt: iso, reviewedAt: null }],
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "提交申请" }));
+    await waitFor(() =>
+      expect(createJoinRequest).toHaveBeenCalledWith("t2", "想加入"),
+    );
+    expect(await within(dialog).findByText(/已申请加入「课程组」/)).toBeInTheDocument();
+  });
+
+  it("队长看到待审申请并通过，调用 reviewJoinRequest(approve)", async () => {
+    vi.mocked(fetchJoinRequests).mockResolvedValue({
+      requests: [{ id: "jr2", teamId: "t1", userId: "u3", message: "请通过",
+        status: "pending", createdAt: iso, reviewedAt: null }],
+    });
+    vi.mocked(reviewJoinRequest).mockResolvedValue({
+      id: "jr2", teamId: "t1", userId: "u3", message: "请通过",
+      status: "approved", createdAt: iso, reviewedAt: iso,
+    });
+    render(<TeamWorkspace />);
+    await screen.findByRole("heading", { name: "增长小组" });
+    const pending = await screen.findByText(/待审加入申请（1）/);
+    const box = pending.parentElement!;
+    fireEvent.click(within(box).getByRole("button", { name: "通过" }));
+    await waitFor(() =>
+      expect(reviewJoinRequest).toHaveBeenCalledWith("t1", "jr2", "approve"),
+    );
+  });
+
+  it("非队长看不到待审申请区", async () => {
+    // 快照里 ownerId 改成别人，我作为普通成员
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
+      snapshot({ team: team({ ownerId: bob.id }) }),
+    );
+    render(<TeamWorkspace />);
+    await screen.findByRole("heading", { name: "增长小组" });
+    expect(screen.queryByText(/待审加入申请/)).toBeNull();
+    expect(fetchJoinRequests).not.toHaveBeenCalled();
   });
 });

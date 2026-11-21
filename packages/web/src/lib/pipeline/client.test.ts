@@ -323,6 +323,18 @@ describe("agent-pipeline 客户端", () => {
     expect(calls.some((c) => c.url.endsWith("/approve"))).toBe(false);
   });
 
+  it("调用前就已中止的 signal：直接抛 aborted，不发请求", async () => {
+    const controller = new AbortController();
+    controller.abort(); // 先中止，再发请求
+    const { client, calls } = makeClient([
+      { match: "GET /v1/runs/r1", responses: [RUNNING()] },
+    ]);
+    await expect(client.getRun("r1", { signal: controller.signal })).rejects.toMatchObject({
+      kind: "aborted",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
   it("health 只保留认识的字段", async () => {
     const { client } = makeClient([
       { match: "GET /health", responses: [jsonResponse({ ok: true, tools: ["http_get", 42, "knowledge_search"], running: 2, junk: 1 })] },

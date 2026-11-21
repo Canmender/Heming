@@ -82,6 +82,25 @@ describe("本人明细", () => {
     expect(self.byDay.at(-1)).toMatchObject({ date: "2026-11-02", tokens: 300, unreported: 2 });
   });
 
+  it("一行里既有已上报 token 又有未上报轮数时，self 合计与 byModel/byDay 口径一致", () => {
+    // 客户端上报的 (日期, 模型) 聚合行可能同时带 token 与未上报轮数：
+    // 顶层 self.unreported 必须无条件累加，不能只在 tokens===null 时算，
+    // 否则「未上报 2 次」在明细里看得见、在合计里却消失。
+    const self = buildSelfUsage(
+      [
+        row({ actorId: "u1", date: "2026-11-02", tokens: 300, unreported: 2 }),
+        row({ actorId: "u1", date: "2026-11-02", model: "claude-y", tokens: 50, unreported: 1 }),
+      ],
+      "2026-11-02",
+      "2026-11-02",
+    );
+    expect(self.total).toBe(350);
+    expect(self.unreported).toBe(3);
+    // 合计等于各模型、各天之和（口径一致）。
+    expect(self.unreported).toBe(self.byModel.reduce((sum, m) => sum + m.unreported, 0));
+    expect(self.unreported).toBe(self.byDay.reduce((sum, d) => sum + d.unreported, 0));
+  });
+
   it("连接名去重且最多 5 个", () => {
     const self = buildSelfUsage(
       [

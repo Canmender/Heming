@@ -62,11 +62,20 @@ export function seedUsersFromEnv(
   log: (msg: string) => void = console.log,
 ): void {
   if (!spec || spec.trim() === "") return;
+  // 解析与写库是两类错误：配置非法只警告并忽略，存储层故障（SQLITE_BUSY / 磁盘满 /
+  // 并发抢注）必须另报，不能把一份合法配置误说成「invalid HEMING_SEED_USERS ignored」，
+  // 否则运维会照着错误的方向排查，且部分播种成功的事实被掩盖。
+  let users: SeedUser[];
   try {
-    const users = parseSeedUsers(spec);
+    users = parseSeedUsers(spec);
+  } catch (e) {
+    log(`seed: invalid HEMING_SEED_USERS ignored: ${(e as Error).message}`);
+    return;
+  }
+  try {
     const { created, skipped } = seedUsers(store, users);
     log(`seed: created=${created.join(",") || "-"} skipped=${skipped.join(",") || "-"}`);
   } catch (e) {
-    log(`seed: invalid HEMING_SEED_USERS ignored: ${(e as Error).message}`);
+    log(`seed: 存储层播种失败（配置本身合法）：${(e as Error).message}`);
   }
 }

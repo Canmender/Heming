@@ -125,6 +125,60 @@ test("服务器不认 Range（回 200）时从头重写，不能把文件拼坏"
   }
 });
 
+test("已满长度的 .part 当作无效断点：删掉重下，不发会拿到 416 的 Range（d.412 回归）", async () => {
+  // 真实 HTTP 服务器对 bytes=<full>- 会回 416；这种「下载完没来得及改名」的崩溃现场
+  // 旧代码把它当断点 → 416 → 三次重试全失败。修复后按 0 处理 → 删掉 .part 重下。
+  const { server, baseUrl } = await startServer((req, res) => {
+    const match = /^bytes=(\d+)-/.exec(req.headers.range || "");
+    if (match && Number(match[1]) >= PAYLOAD.length) {
+      res.writeHead(416, { "Content-Range": `bytes */${PAYLOAD.length}` });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": PAYLOAD.length });
+    res.end(PAYLOAD);
+  });
+  const dir = await tempDir();
+  try {
+    const dest = path.join(dir, "inner-setup.exe");
+    await fs.writeFile(`${dest}.part`, PAYLOAD); // 完整但没改名
+    const result = await downloadFile(`${baseUrl}/inner-setup.exe`, dest, {
+      expectedSize: PAYLOAD.length,
+      resume: true,
+    });
+    assert.equal(result.sha512, FULL_SHA);
+    assert.deepEqual(await fs.readFile(dest), PAYLOAD);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("磁盘写满（ENOSPC）保留 no-space 错误码，不降级成 download-failed（d.412 回归）", async () => {
+  const { server, baseUrl } = await startServer((req, res) => {
+    res.writeHead(200, { "Content-Length": PAYLOAD.length });
+    res.end(PAYLOAD);
+  });
+  const dir = await tempDir();
+  const realCreateWriteStream = require("node:fs").createWriteStream;
+  try {
+    // stub createWriteStream 让它发出 ENOSPC，验证错误码不被包装吞掉
+    require("node:fs").createWriteStream = () => {
+      const { Writable } = require("node:stream");
+      const stream = new Writable({ write(_c, _e, cb) { cb(); } });
+      process.nextTick(() => stream.emit("error", Object.assign(new Error("no space"), { code: "ENOSPC" })));
+      return stream;
+    };
+    const dest = path.join(dir, "inner-setup.exe");
+    await assert.rejects(
+      downloadFile(`${baseUrl}/inner-setup.exe`, dest, { expectedSize: PAYLOAD.length, resume: false }),
+      (error) => error.code === "no-space",
+    );
+  } finally {
+    require("node:fs").createWriteStream = realCreateWriteStream;
+    await stopServer(server);
+  }
+});
+
 test("下载失败时保留 .part，下一次尝试可以接着续", async () => {
   const { server, baseUrl } = await startServer((req, res) => {
     res.writeHead(200, { "Content-Length": PAYLOAD.length });

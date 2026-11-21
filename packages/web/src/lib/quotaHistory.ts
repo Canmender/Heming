@@ -186,6 +186,9 @@ export function quotaPace(
   let start = points.length - 1;
   while (start > 0 && points[start - 1].left >= points[start].left) start--;
   const cycle = points.slice(start);
+  // 点数门禁要落在「回升后」这段上：整条数组够 3 点、但回升后只剩 2 点时，
+  // 两点也能解出一条直线，斜率和截距都失真，拿它预报「什么时候用完」纯属臆测。
+  if (cycle.length < 3) return null;
   const last = cycle[cycle.length - 1];
   if (!last || !(last.left > 0)) return null;
   if (last.at - cycle[0].at < 60 * 60 * 1000) return null;

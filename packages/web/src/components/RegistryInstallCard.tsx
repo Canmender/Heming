@@ -49,7 +49,13 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   const hints = preview.headerHints;
-  const missingRequired = hints.some((h) => h.isRequired && !(values[h.name] ?? "").trim());
+  // 头名来自远端清单，可能是 "toString" 之类 Object.prototype 键；用无原型表 + 字符串守卫，
+  // 免得读到继承的函数再 .trim() 抛错、把安全确认弹窗搞崩。
+  const valueOf = (name: string): string => {
+    const raw = Object.prototype.hasOwnProperty.call(values, name) ? values[name] : "";
+    return typeof raw === "string" ? raw : "";
+  };
+  const missingRequired = hints.some((h) => h.isRequired && !valueOf(h.name).trim());
 
   const finish = (decision: InstallDecision) => {
     if (onDecide) {
@@ -131,7 +137,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
                   aria-label={`请求头 ${h.name}`}
                   type={h.isSecret ? "password" : "text"}
                   autoComplete="off"
-                  value={values[h.name] ?? ""}
+                  value={valueOf(h.name)}
                   onChange={(e) => {
                     setValues((v) => ({ ...v, [h.name]: e.target.value }));
                     setError(null);

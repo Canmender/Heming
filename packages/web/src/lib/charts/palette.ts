@@ -102,6 +102,21 @@ export const PALETTES: Record<PaletteName, Palette> = {
   },
 };
 
+/** 把 hex 颜色按 weight 向目标色混合（0=原色，1=目标色），用于暗底提亮类目色。 */
+function lightenToward(hex: string, toward: string, weight: number): string {
+  const parse = (s: string): [number, number, number] | null => {
+    const m = /^#([0-9a-f]{6})$/i.exec(s);
+    if (!m) return null;
+    const n = parseInt(m[1]!, 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+  };
+  const a = parse(hex);
+  const b = parse(toward);
+  if (!a || !b) return hex;
+  const mix = (i: number) => Math.round(a[i] * (1 - weight) + b[i] * weight);
+  return `#${[mix(0), mix(1), mix(2)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /**
  * 暗卡下的配色：底为炭黑，其上"墨"反转为纸色。
  * 暗卡只给必须暗底衬托的形，默认浅卡。
@@ -117,7 +132,9 @@ export function darkPalette(p: Palette): Palette {
     grid: "#2E2D29",
     // 暗卡上灰阶反过来：最重要 = 最亮
     ramp: p.ramp.slice().reverse(),
-    cat: p.cat.map(() => "#F0EFEB"),
+    // 类目色必须彼此可区分：全部压成同一个纸色会让环形/堆叠/散点失去编码含义。
+    // 取原类目色提亮（与纸色混合），保留色相差，在炭黑底上仍能分辨。
+    cat: p.cat.map((hex) => lightenToward(hex, "#F0EFEB", 0.55)),
   };
 }
 

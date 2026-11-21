@@ -137,6 +137,20 @@ test("install：包落盘到 <id>/<version>/，切 current 指针，list 给出 
   assert.equal(store.currentDir("heming.pet"), versionDir);
 });
 
+test("install：安装记录带 packageSha256（引擎启动据此复核盘上字节，漏带就永远起不来）", () => {
+  const store = makeStore();
+  const bytes = packageBytes();
+  const result = store.install({ bytes, expectedSha256: sha256Hex(bytes) });
+  assert.equal(result.ok, true, result.error);
+
+  // 清单里绑定的 files/** 摘要必须原样出现在 list/get 的记录里，
+  // 否则 plugin-engine 的 verifyFilesDigest 拿不到 expected → 带引擎的插件装上也起不来。
+  const [record] = store.list();
+  assert.match(record.packageSha256, /^[0-9a-f]{64}$/);
+  assert.equal(record.packageSha256, store.get("heming.pet").packageSha256);
+  assert.equal(store.get("heming.pet").packageSha256, result.record.packageSha256);
+});
+
 test("命令物化：安装记录带 commands；启动时从 plugin.json 回填旧记录（d.109）", () => {
   const store = makeStore();
   const commands = [

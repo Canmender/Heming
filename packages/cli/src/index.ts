@@ -311,6 +311,12 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     const loaded = await loadCliMemory(memCwd);
+    // JSON 输出（给脚本用）：与 sessions/commands --json 同口径，stdout 只有一个 JSON 值。
+    // 放在成功加载之后、空列表判断之前：空记忆输出 []，而不是给人看的提示文案。
+    if (loaded?.ok && parsed.options.json) {
+      process.stdout.write(`${JSON.stringify(loaded.entries)}\n`);
+      return 0;
+    }
     if (!loaded) {
       writeErr(
         `[heming] 这个工作区还没有记过任何东西（${memPathOf(memCwd)} 还不存在）。` +

@@ -81,13 +81,20 @@ export function isRetryableUpstreamError(error: unknown): boolean {
  *
  * 优先听供应商的 `Retry-After`（转成毫秒、夹在 `[0, MAX_UPSTREAM_DELAY_MS]`），
  * 没有就按 800ms × 2^attempt 退避。`attempt` 从 0 起。
+ *
+ * 兜底退避带 ±10% 抖动（d.412）：纯 2^n 退避会让同一时刻被限流的多个会话/
+ * 客户端在完全相同的时刻重试，第二次又一起撞上限流（惊群）。抖动把重试时刻
+ * 打散。供应商明确给了 `Retry-After` 时不加抖动——那是指示，不是建议。
+ * `rng` 仅用于测试注入以确定随机数；生产走 Math.random。
  */
-export function retryDelayMs(error: unknown, attempt: number): number {
+export function retryDelayMs(error: unknown, attempt: number, rng: () => number = Math.random): number {
   const raw = shapeOf(error).retryAfterMs;
   const hinted = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
   if (hinted > 0) return Math.min(Math.round(hinted), MAX_UPSTREAM_DELAY_MS);
   const step = Math.max(0, Math.floor(attempt));
-  return Math.min(BASE_DELAY_MS * 2 ** step, MAX_UPSTREAM_DELAY_MS);
+  const base = Math.min(BASE_DELAY_MS * 2 ** step, MAX_UPSTREAM_DELAY_MS);
+  const jitter = 0.9 + 0.2 * rng(); // [0.9, 1.1)
+  return Math.min(Math.round(base * jitter), MAX_UPSTREAM_DELAY_MS);
 }
 
 /** 一句话说清这次是什么错（给界面的提示用，不带完整报文）。 */

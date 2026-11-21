@@ -150,6 +150,17 @@ describe("本机搜索 · 记忆", () => {
     expect(readMemoryItems(JSON.stringify({ data: { working: { c1: [null, { noId: true }] } } }))).toEqual([]);
   });
 
+  it("★ 记忆 detail 截断到码点边界，不把 emoji 劈成落单代理", () => {
+    const value = "A".repeat(59) + "😀" + "B".repeat(5);
+    const json = JSON.stringify({ data: { semantic: { __global__: [{ id: "s1", key: "k", value }] } } });
+    const item = readMemoryItems(json)[0];
+    const detail = item.detail;
+    // 按码点计正好 60 个（59 个 A + 1 个完整 emoji），且没有落单代理
+    expect(Array.from(detail).length).toBe(60);
+    expect(detail.endsWith("😀")).toBe(true);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(detail)).toBe(false);
+  });
+
   it("超过上限时截断并保留 total", () => {
     const list = Array.from({ length: 7 }, (_, i) => mem(`m${i}`, `语义 · 偏好 ${i}`, "semantic"));
     const out = searchLocalMemories("偏好", list);

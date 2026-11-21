@@ -89,4 +89,14 @@ describe("quotaRank", () => {
       tone: "muted",
     });
   });
+
+  it("三个以上全部并列时不说「还有 N 个在中间」（没中间组，d.412 回归）", () => {
+    const rows = ["a", "b", "c"].map((label) =>
+      account({ label, windows: [{ ...emptyWindow(), name: "week", used: 60, remaining: 40 }] }),
+    );
+    expect(rankText(rows)).toEqual({
+      text: "3 个账号都差不多，最宽的 Claude a 也只剩 40%",
+      tone: "muted",
+    });
+  });
 });

@@ -201,14 +201,19 @@ export function truncateToolResult(
   if (raw.length <= maxChars) return raw;
   const head = Math.floor(maxChars * TRUNCATE_HEAD_RATIO);
   const tail = maxChars - head;
-  const dropped = raw.length - head - tail;
+  const dropped = [...raw].length - head - tail;
   // d.181：超限不再「丢掉中间那一段」，而是整份留在溢出存储里，只把头尾 + handle 交给模型。
   // 长任务的失败大多发生在中段（一次 build 几千行日志、一次 grep 命中几百条），
   // 丢掉中段等于让模型只能凭头尾猜；有了 handle，它可以用 tool_output_read 精确读回。
   const spilled = options.spill === false ? { id: "（未保存）" } : spillText(raw);
-  return `${raw.slice(0, head)}\n\n…（工具结果过长：共 ${raw.length} 字符，中间省略 ${dropped} 字符；完整内容已保存为 ${
+  // 按码点切头尾：slice 按 UTF-16 单元，边界落在 emoji/扩展汉字的代理对中间会留下
+  // 落单代理，回灌给模型时是乱码方块。先把 raw 折成码点数组再切。
+  const points = [...raw];
+  const headText = points.slice(0, head).join("");
+  const tailText = points.slice(points.length - tail).join("");
+  return `${headText}\n\n…（工具结果过长：共 ${points.length} 字符，中间省略 ${dropped} 字符；完整内容已保存为 ${
     spilled.id
-  }，用 tool_output_read 按 offset/limit 分段读回，比重新调用一次工具更省）…\n\n${raw.slice(-tail)}`;
+  }，用 tool_output_read 按 offset/limit 分段读回，比重新调用一次工具更省）…\n\n${tailText}`;
 }
 
 /** 执行一次工具调用的可选控制项。 */

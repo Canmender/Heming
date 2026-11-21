@@ -234,6 +234,77 @@ describe("信息中枢共享状态", () => {
     });
   });
 
+  it("config.json 关掉 autoSyncOnStart 时不自动采集（localStorage 未设过）", async () => {
+    // 回归：以前只认 localStorage 开关，而界面没有写这个键的地方，导致
+    // config.json 里关掉自动同步完全无效，连接后照样采集。
+    const emptyStatus = {
+      home: HOME,
+      hasDb: false,
+      dbBytes: 0,
+      stats: { conversations: 0, messages: 0, per_source: {} },
+      config: {
+        autoDetect: true,
+        autoSyncOnStart: false, // 用户在 config.json 里关掉了
+        wechat: { enabled: true, dbDir: "D:\\wx", detected: true },
+        qq: {
+          enabled: true,
+          mode: "nt",
+          ntAccount: "123",
+          ntDb: "D:\\qq\\nt_msg.db",
+          exportDir: "",
+          detected: true,
+          exportDetected: false,
+        },
+      },
+    } as unknown as InfohubStatus;
+    const { call } = installBridge();
+    call.mockImplementation(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "agenda") return agenda;
+      return undefined;
+    });
+
+    await useInfohubStore.getState().ensureRunning();
+
+    // 连上了，但没触发 sync
+    expect(useInfohubStore.getState().running).toBe(true);
+    expect(call.mock.calls.filter((c) => c[0] === "sync")).toHaveLength(0);
+    expect(useInfohubStore.getState().autoCollected).toBe(false);
+  });
+
+  it("localStorage 显式开启可覆盖 config.json 的关闭", async () => {
+    localStorage.setItem("heming.infohub.autocollect.v1", "1");
+    const emptyStatus = {
+      home: HOME,
+      hasDb: false,
+      dbBytes: 0,
+      stats: { conversations: 0, messages: 0, per_source: {} },
+      config: {
+        autoDetect: true,
+        autoSyncOnStart: false,
+        wechat: { enabled: true, dbDir: "D:\\wx", detected: true },
+        qq: {
+          enabled: true,
+          mode: "nt",
+          ntAccount: "123",
+          ntDb: "D:\\qq\\nt_msg.db",
+          exportDir: "",
+          detected: true,
+          exportDetected: false,
+        },
+      },
+    } as unknown as InfohubStatus;
+    const { call } = installBridge();
+    call.mockImplementation(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "agenda") return agenda;
+      if (method === "sync") return { reports: [{ source: "qq", added: 1, errors: [] }] };
+      return undefined;
+    });
+    await useInfohubStore.getState().ensureRunning();
+    expect(call.mock.calls.filter((c) => c[0] === "sync").length).toBeGreaterThan(0);
+  });
+
   it("ensureRunning 重复调用：不重复启动、不重复采集", async () => {
     const emptyStatus = {
       home: HOME,

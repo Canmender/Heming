@@ -342,6 +342,34 @@ describe("streamChat", () => {
     expect(c.finishes).toEqual(["length"]);
   });
 
+  it("SSE 收到 [DONE] 即收口：网关不关 TCP（keep-alive）也不误判超时（d.412 回归）", async () => {
+    // 兼容网关在 [DONE] 后不关闭连接；外层若继续读会静默挂住直到空闲超时 408，
+    // 把已经收全的回复整段丢掉。收到 [DONE] 必须立刻结束、回调 onFinish。
+    const encoder = new TextEncoder();
+    const chunk = `data: ${JSON.stringify({
+      choices: [{ delta: { content: "完整回复" }, finish_reason: "stop" }],
+    })}\n\ndata: [DONE]\n\n`;
+    const neverClose = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(chunk));
+        // 故意不 controller.close()：模拟 [DONE] 后保持 TCP 打开的网关
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(neverClose, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ),
+    );
+    const c = capture();
+    const text = await streamChat(openai, msgs, { ...c.opts(), idleTimeoutMs: 120 } as never);
+    expect(text).toBe("完整回复");
+    expect(c.finishes).toEqual(["stop"]);
+  });
+
   it("非流式 json：整段回调；长文本切片 ≤3000", async () => {
     const long = "x".repeat(6500);
     vi.stubGlobal(
@@ -354,6 +382,28 @@ describe("streamChat", () => {
     expect(c.deltas.join("")).toBe(long);
     expect(c.deltas.every((d) => d.length <= 3000)).toBe(true);
     expect(c.usages).toEqual([{ totalTokens: 5 }]);
+  });
+
+  it("非流式长文本切片落在 emoji 中间时不劈出落单代理（每帧合法，d.412 回归）", async () => {
+    const text = "x".repeat(2999) + "😀" + "y";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ choices: [{ message: { content: text } }], usage: { total_tokens: 5 } })),
+    );
+    const c = capture();
+    const full = await streamChat(openai, msgs, c.opts());
+    expect(full).toBe(text);
+    expect(c.deltas.join("")).toBe(text);
+    // 逐帧单独看都不能有落单代理（高位后没跟低位 / 低位前没跟高位）。
+    for (const d of c.deltas) {
+      const units = d.split("").map((ch) => ch.charCodeAt(0));
+      const lone = units.some((code, i) => {
+        if (code >= 0xd800 && code <= 0xdbff) return !(units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff);
+        if (code >= 0xdc00 && code <= 0xdfff) return !(units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff);
+        return false;
+      });
+      expect(lone).toBe(false);
+    }
   });
 
   it("400 时关闭 stream_options 重试一次；其它状态不重试", async () => {

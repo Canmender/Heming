@@ -179,6 +179,29 @@ describe("上下文窗口（withRoom / spentRoom）", () => {
     expect(ask.mock.calls.map((c) => c[0].model)).toEqual(["gpt-4o"]);
   });
 
+  it("带 contentParts 时同一段文本不重复计入窗口预筛（d.412 回归）", async () => {
+    ask.mockImplementation(async () => "好");
+    // 生产者（ChatPage）会把同一段文本同时放进 content 和 text part；线上实际只下发
+    // contentParts。单份 ≈4100 token < 8k 窗口应当留下 moonshot；若双算 ≈8204 就误筛。
+    const text = "字".repeat(4100);
+    const multimodal: ChatMessage = {
+      role: "user",
+      content: text,
+      contentParts: [
+        { type: "text", text },
+        { type: "image", mime: "image/png", data: "aGVsbG8=" },
+      ],
+    };
+
+    await streamChatRouted(
+      routed([{ profileId: "p1", model: "moonshot-v1-8k" }, { profileId: "p2", model: "gpt-4o" }]),
+      [multimodal],
+      { signal: new AbortController().signal, onDelta: vi.fn() },
+    );
+
+    expect(ask.mock.calls.map((c) => c[0].model)).toEqual(["moonshot-v1-8k"]);
+  });
+
   it("全被排除时退回整条链（绝不死路）", async () => {
     let calls = 0;
     ask.mockImplementation(async () => {

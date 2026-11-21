@@ -86,6 +86,14 @@ describe("coerceWidgetSettingValue", () => {
     });
     expect(coerceWidgetSettingValue(agentField, 42).ok).toBe(false);
   });
+
+  it("text 限长按字符（码点）算，500 个 emoji 不该被当成 1000 字拒绝（d.412 回归）", () => {
+    expect(coerceWidgetSettingValue(textField, "😀".repeat(500))).toEqual({
+      ok: true,
+      value: "😀".repeat(500),
+    });
+    expect(coerceWidgetSettingValue(textField, "😀".repeat(501)).ok).toBe(false);
+  });
 });
 
 describe("小工具", () => {

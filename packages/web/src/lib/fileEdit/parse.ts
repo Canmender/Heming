@@ -210,7 +210,11 @@ export function parsePatch(text: string): ParseResult {
           i += 1;
           continue;
         }
-        if (isBlank(line)) {
+        const head = line[0];
+        // 前缀校验先于空白行判断：一个空格 " " 是「空格前缀 + 空文本」的合法上下文行
+        // （文件里的空行就靠它做锚点），不能被 isBlank 当成块间分隔吞掉或误报缺前缀。
+        // 只有真正没有合法前缀的空白行才走下面的「块间分隔」逻辑。
+        if (head !== " " && head !== "+" && head !== "-" && isBlank(line)) {
           // 空行只允许作为块间分隔：下一条必须是标记或新的 @@，否则就是漏了前缀的内容行。
           const next = lines[i + 1] ?? "";
           if (parseMarker(next) || next.startsWith("@@")) {
@@ -230,7 +234,6 @@ export function parsePatch(text: string): ParseResult {
             { path },
           );
         }
-        const head = line[0];
         if (head !== " " && head !== "+" && head !== "-") {
           return fail(
             "invalid-patch",

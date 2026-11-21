@@ -173,7 +173,12 @@ function clamp(text: string): { text: string; truncated: boolean } {
   if (normalized.length <= MAX_DOC_CHARS) {
     return { text: normalized, truncated: false };
   }
-  return { text: normalized.slice(0, MAX_DOC_CHARS), truncated: true };
+  // 按 UTF-16 切可能落在 emoji 的代理对中间——末尾是落单高代理就退一格，
+  // 否则这段文本再加密喂给模型时会出现坏字符。
+  let end = MAX_DOC_CHARS;
+  const last = normalized.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return { text: normalized.slice(0, end), truncated: true };
 }
 
 /**

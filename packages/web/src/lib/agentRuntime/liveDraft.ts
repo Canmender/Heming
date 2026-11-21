@@ -90,6 +90,13 @@ export function clearLiveDraft(conversationId: string, streamId: string): void {
 
 /** 清掉整个会话的草稿（切会话时不需要，只有测试与「清空本地缓存」用得上）。 */
 export function clearLiveDrafts(conversationId: string): void {
-  for (const draft of listLiveDrafts(conversationId)) clearLiveDraft(conversationId, draft.streamId);
+  if (!conversationId) return;
+  // 不能直接遍历 listLiveDrafts()：它带 .slice(-LIVE_DRAFT_CAP) 只给最新 4 条，
+  // 超出上限的旧草稿就永远清不掉。这里按 msgCache 原始条目逐个删，覆盖全量。
+  for (const entry of msgCache.peek(conversationId)) {
+    if (entry.id.startsWith(LIVE_DRAFT_PREFIX)) {
+      msgCache.remove(conversationId, entry.id);
+    }
+  }
 }
 

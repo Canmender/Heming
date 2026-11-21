@@ -94,6 +94,19 @@ describe("parseMarketIndex", () => {
     const { index: parsed } = parseMarketIndex(raw);
     expect(parsed.plugins).toHaveLength(0);
   });
+
+  it("同 id 前一条版本全非法被丢，后一条合法的仍要留下（不因占位而凭空消失）", () => {
+    const raw = index({
+      plugins: [
+        { id: "foo", versions: [version({ engines: { heming: "x" } })] }, // 全非法 → 丢
+        { id: "foo", versions: [version({ version: "2.0.0" })] }, // 合法 → 应保留
+        { id: "bar", versions: [version()] },
+      ],
+    });
+    const { index: parsed } = parseMarketIndex(raw);
+    expect(parsed.plugins.map((plugin) => plugin.id)).toEqual(["foo", "bar"]);
+    expect(parsed.plugins[0].versions.map((v) => v.version)).toEqual(["2.0.0"]);
+  });
 });
 
 describe("版本排序与兼容过滤", () => {
@@ -101,6 +114,21 @@ describe("版本排序与兼容过滤", () => {
     expect(comparePluginVersions("1.10.0", "1.9.0")).toBeGreaterThan(0);
     expect(comparePluginVersions("1.0.0", "1.0.0")).toBe(0);
     expect(comparePluginVersions("1.0.0", "1.0.1")).toBeLessThan(0);
+  });
+
+  it("build 元数据不参与优先级，正式版高于预发布（semver §11）", () => {
+    expect(comparePluginVersions("1.0.0+build.1", "1.0.0")).toBe(0);
+    expect(comparePluginVersions("1.0.0", "1.0.0-beta")).toBeGreaterThan(0);
+    expect(comparePluginVersions("1.0.0-beta.2", "1.0.0-beta.11")).toBeLessThan(0); // 数字按数值比
+    expect(comparePluginVersions("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0); // 前缀更短更小
+    expect(comparePluginVersions("1.0.0-rc.1", "1.0.0-beta")).toBeGreaterThan(0); // 非数字按字典序
+  });
+
+  it("市场推荐与更新判断不会把 beta 当最新（回归：shared 副本此前未同步服务端的 semver 修复）", () => {
+    const beta = { ...version({ version: "1.0.0-beta" }) };
+    const stable = { ...version({ version: "1.0.0" }) };
+    expect(pickInstallVersion({ id: "p", versions: [beta, stable] } as never)?.version).toBe("1.0.0");
+    expect(hasCompatibleUpdate({ id: "p", versions: [beta] } as never, "1.0.0", "d.104.2.42.0")).toBe(false);
   });
 
   it("按宿主版本过滤版本，全不兼容的插件整条移除", () => {

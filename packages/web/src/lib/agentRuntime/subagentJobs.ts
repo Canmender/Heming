@@ -291,7 +291,21 @@ export function enqueueSubagentJob(start: SubagentJobStart, now = Date.now()): S
     error: null,
     delivered: false,
   };
-  jobs = [...jobs, job].slice(-SUBAGENT_JOB_HISTORY_CAP);
+  // 显示史上限只淘汰已结束的任务：jobs 同时是调度器的权威活状态（并发计数、pump 查排队项、
+  // settle 找待结算项都读它）。原先用 slice(-CAP) 连 running/queued 一起裁掉，会让活任务
+  // 从账本里消失——并发上限被冲破、结论结算不到、任务再也取消不了（先学习多代理基准的
+  // 「容量与一致性」教训）。活任务多于上限时宁可临时超一点，正确性优先于显示条数。
+  jobs = [...jobs, job];
+  if (jobs.length > SUBAGENT_JOB_HISTORY_CAP) {
+    let toDrop = jobs.length - SUBAGENT_JOB_HISTORY_CAP;
+    jobs = jobs.filter((item) => {
+      if (toDrop > 0 && !isRunning(item)) {
+        toDrop -= 1;
+        return false;
+      }
+      return true;
+    });
+  }
   persist();
   pending = [...pending, start];
   notify();
@@ -471,7 +485,10 @@ export function resetSubagentJobs(): void {
  */
 export function subagentDeliveryText(job: SubagentJob): string {
   const usage = `${job.rounds} 轮 / ${job.toolCalls} 次工具调用`;
-  const task = job.task.length > 160 ? `${job.task.slice(0, 160)}…` : job.task;
+  // 按码点截断：任务描述里若在第 160 位附近正好有 emoji，UTF-16 slice 会劈出落单代理，
+  // 把坏字符喂给下一轮的提示词（d.412 回归）。
+  const points = [...job.task];
+  const task = points.length > 160 ? `${points.slice(0, 160).join("")}…` : job.task;
   if (job.status === "cancelled") {
     return [
       `【后台子代理已取消】${job.label}（${task}）`,

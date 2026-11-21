@@ -96,7 +96,9 @@ function normalizeScales(raw) {
   for (const value of raw) {
     if (typeof value !== "number" || !Number.isFinite(value)) return null;
     if (value < SCALE_MIN || value > SCALE_MAX) return null;
-    if (Math.round(value * 100) !== value * 100) return null; // 超过两位小数
+    // 二进制浮点里 1.15*100 = 114.99999999999999，直接和 round 结果比会把合法的两位小数误杀。
+    // 用 epsilon 判「到最近整数 cent 的距离」，既挡住三位以上小数又放过 1.15 这种二进制误差。
+    if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-6) return null; // 超过两位小数
     if (scales.length > 0 && value <= scales[scales.length - 1]) return null; // 必须严格递增
     scales.push(value);
   }

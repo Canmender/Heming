@@ -137,6 +137,39 @@ describe("attachImageParts", () => {
     const source = rows(1);
     expect(await attachImageParts(source, [], async () => "aW1n")).toBe(source);
   });
+
+  it("同一行挂多张图：全部保留且按原顺序，占位文字含全部文件名（d.412.4.187）", async () => {
+    const second: VisionFile = { ...png, id: "f2", name: "dog.png", mime: "image/jpeg" };
+    const out = await attachImageParts(
+      [{ role: "user", content: "" }],
+      [
+        { rowIndex: 0, file: png },
+        { rowIndex: 0, file: second },
+      ],
+      async (f) => (f.id === "f1" ? "aaa" : "bbb"),
+    );
+    expect(out[0].contentParts).toEqual([
+      { type: "text", text: "（图片：cat.png、dog.png）" },
+      { type: "image", mime: "image/png", data: "aaa" },
+      { type: "image", mime: "image/jpeg", data: "bbb" },
+    ]);
+    expect(out[0].content).toBe("（图片：cat.png、dog.png）");
+  });
+
+  it("同行多图时部分加载失败只跳过失败那张，其它照常挂上", async () => {
+    const out = await attachImageParts(
+      [{ role: "user", content: "看这两张" }],
+      [
+        { rowIndex: 0, file: png },
+        { rowIndex: 0, file: { ...png, id: "bad" } },
+      ],
+      async (f) => (f.id === "bad" ? null : "aaa"),
+    );
+    expect(out[0].contentParts).toEqual([
+      { type: "text", text: "看这两张" },
+      { type: "image", mime: "image/png", data: "aaa" },
+    ]);
+  });
 });
 
 describe("visionImageDataUrl", () => {
@@ -196,5 +229,24 @@ describe("visionImageDataUrl", () => {
     expect(download).toHaveBeenCalledTimes(VISION_MAX_IMAGES * 2 + 1);
     await visionImageDataUrl({ ...png, id: "f0" }); // 已被挤出缓存 → 重新读
     expect(download).toHaveBeenCalledTimes(VISION_MAX_IMAGES * 2 + 2);
+  });
+
+  it("缓存是真 LRU：重新访问过的图不会因最早插入被挤掉（d.412 回归）", async () => {
+    download.mockResolvedValue(new Blob(["img"]));
+    const cap = VISION_MAX_IMAGES * 2;
+    // 填满到容量
+    for (let i = 0; i < cap; i++) {
+      await visionImageDataUrl({ ...png, id: `f${i}` });
+    }
+    expect(download).toHaveBeenCalledTimes(cap);
+    // 重新访问 f0，把它刷新成最近使用
+    await visionImageDataUrl({ ...png, id: "f0" });
+    expect(download).toHaveBeenCalledTimes(cap);
+    // 再插入一张，触发淘汰：FIFO 会挤掉 f0（错），LRU 应挤掉 f1
+    await visionImageDataUrl({ ...png, id: "new" });
+    await visionImageDataUrl({ ...png, id: "f0" });
+    expect(download).toHaveBeenCalledTimes(cap + 1); // f0 命中缓存，没有重新下载
+    await visionImageDataUrl({ ...png, id: "f1" });
+    expect(download).toHaveBeenCalledTimes(cap + 2); // f1 才是最久没用的，被挤掉后重新下载
   });
 });

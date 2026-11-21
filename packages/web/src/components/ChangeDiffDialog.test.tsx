@@ -124,4 +124,15 @@ describe("只看改动（d.239）", () => {
     );
     expect(screen.queryByRole("button", { name: "只看改动" })).toBeNull();
   });
+
+  it("挂载期间切换文件后，「只看改动」重置为完整上下文（d.412 回归）", () => {
+    const { rerender } = render(<ChangeDiffDialog state={fileWithContext} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "只看改动" }));
+    expect(screen.getByRole("button", { name: "显示上下文" })).toBeInTheDocument();
+
+    rerender(<ChangeDiffDialog state={{ ...fileWithContext, path: "D:/库/src/b.md" }} onClose={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "只看改动" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("diff-row-same").length).toBeGreaterThan(0);
+  });
 });

@@ -192,6 +192,21 @@ describe("后台任务模型（d.125）", () => {
   });
 });
 
+describe("模型目录缓存的健壮性", () => {
+  it("缓存里缺 reasoningLevels 的旧模型不会让模块加载崩溃", async () => {
+    // loadModels 只校验 id/name；旧版/手工写入的条目可能没有 reasoningLevels。
+    // 以前 applyCapabilityOverrides 无保护地读 .length，模块加载即抛错，整个应用起不来。
+    localStorage.setItem(
+      "heming.magpie.models.v1",
+      JSON.stringify([{ id: "legacy/model", name: "旧模型", contextWindow: 8000 }]),
+    );
+    vi.resetModules();
+    const fresh = await import("./llm.js");
+    expect(fresh.useLlmStore.getState().profiles).toHaveLength(1);
+    expect(fresh.useLlmStore.getState().profiles[0].model).toBe("legacy/model");
+  });
+});
+
 describe("旧版供应商配置迁移（产品决定：直接清除）", () => {
   it("首次启动清掉旧连接（含安全存储备份键）、旧绑定、旧候选链与旧冷却", async () => {
     localStorage.setItem("heming.llmConfigs", JSON.stringify({ profiles: [{ id: "p1", apiKey: "sk-x" }] }));

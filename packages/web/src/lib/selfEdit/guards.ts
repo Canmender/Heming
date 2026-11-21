@@ -16,6 +16,12 @@ import type { StorageLike } from "../memory/types.js";
 /** 重导出：本模块对外的 API 都要用到它，调用方不必再去 memory/types 单独 import。 */
 export type { StorageLike };
 
+/** 按码点截断（带省略号），避免按 UTF-16 码元切在 emoji 代理对中间。 */
+function clipCodePoints(text: string, max: number): string {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max).join("")}…`;
+}
+
 /**
  * 敏感信息模式：密钥、口令、令牌、私钥。
  *
@@ -98,9 +104,9 @@ function pickAudit(raw: unknown): AuditEntry[] {
       agentId: r.agentId,
       scope: r.scope as AuditEntry["scope"],
       action: r.action,
-      target: String(r.target ?? "").slice(0, 120),
-      ...(typeof r.reason === "string" ? { reason: r.reason.slice(0, 200) } : {}),
-      ...(typeof r.rejected === "string" ? { rejected: r.rejected.slice(0, 200) } : {}),
+      target: clipCodePoints(String(r.target ?? ""), 120),
+      ...(typeof r.reason === "string" ? { reason: clipCodePoints(r.reason, 200) } : {}),
+      ...(typeof r.rejected === "string" ? { rejected: clipCodePoints(r.rejected, 200) } : {}),
     });
   }
   return out;

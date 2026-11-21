@@ -49,7 +49,15 @@ export function saveDailyConfig(
   if (!storage || !vaultId) return resolved;
   try {
     const raw = storage.getItem(DAILY_CONFIG_KEY);
-    const all = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    // 值合法 JSON 但根不是对象（null / 数字 / 字符串）时，直接 all[vaultId]=
+    // 会抛 TypeError 被下面的 catch 吞掉，配置根本没写进去、下次读回默认值。
+    let all: Record<string, unknown> = {};
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        all = parsed as Record<string, unknown>;
+      }
+    }
     all[vaultId] = resolved;
     storage.setItem(DAILY_CONFIG_KEY, JSON.stringify(all));
   } catch {

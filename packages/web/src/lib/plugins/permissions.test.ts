@@ -33,6 +33,15 @@ describe("hostOfUrl", () => {
     expect(hostOfUrl("http://[::1]:8787/mcp")).toBe("[::1]:8787");
   });
 
+  it("显式 80/443 不看 scheme 一律规范化，和声明侧口径一致", () => {
+    // URL.host 只按 URL 自身 scheme 去默认端口：http://h:443 会留 :443，
+    // 但声明侧无 scheme、80/443 一律去掉。这里必须同样去掉，否则匹配的声明
+    // 被误报「未声明」，合法的 manifest 装不上。
+    expect(hostOfUrl("http://api.example.com:443/mcp")).toBe("api.example.com");
+    expect(hostOfUrl("https://api.example.com:80/mcp")).toBe("api.example.com");
+    expect(hostOfUrl("http://[::1]:443/mcp")).toBe("[::1]");
+  });
+
   it("非法地址返回空串", () => {
     expect(hostOfUrl("不是地址")).toBe("");
     expect(hostOfUrl("")).toBe("");
@@ -168,5 +177,27 @@ describe("normalizeNetworkHost（默认端口规范化，d.77）", () => {
     expect(report.accepted).toBe(true);
     // 展示仍按声明原文，不改写用户写下的值
     expect(report.network).toEqual(["api.acme.com:443"]);
+  });
+
+  it("反向代理：非本 scheme 的默认端口（http:443 / https:80）声明后不再被拒装", () => {
+    // 回归：hostOfUrl 以前按 URL 自身 scheme 去默认端口，normalizeNetworkHost
+    // 无 scheme、80/443 一律去掉——两边口径不一致，声明了实际端口仍被判未声明。
+    // 远端 http 被 manifest 解析器拒绝，故 http 侧用 localhost（parser 允许）。
+    for (const [url, port] of [
+      ["http://localhost:443/mcp", "localhost:443"],
+      ["https://proxy.internal:80/mcp", "proxy.internal:80"],
+    ] as const) {
+      const parsed = parsePluginManifest({
+        schemaVersion: 3,
+        id: "acme.proxy",
+        name: "代理工具",
+        version: "1.0.0",
+        permissions: { network: [port], tools: "read", files: [] },
+        contributions: { mcpServers: [{ key: "p", name: "代理", url }] },
+      });
+      const report = evaluatePluginPermissions(parsed);
+      expect(report.undeclared, url).toEqual([]);
+      expect(report.accepted, url).toBe(true);
+    }
   });
 });

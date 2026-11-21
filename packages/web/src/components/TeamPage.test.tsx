@@ -7,6 +7,8 @@ import {
   fetchTeamActivities,
   fetchTeamUsage,
   fetchWorkspaceTeams,
+  fetchWorkspaceTeam,
+  updateTeamTask,
   uploadTeamActivities,
   uploadTeamUsage,
 } from "../lib/api.js";
@@ -32,6 +34,8 @@ vi.mock("../lib/api.js", async (importOriginal) => {
     clearMyTeamActivities: vi.fn(),
     clearMyTeamUsage: vi.fn(),
     fetchWorkspaceTeams: vi.fn(),
+    fetchWorkspaceTeam: vi.fn(),
+    updateTeamTask: vi.fn(),
   };
 });
 
@@ -139,11 +143,21 @@ beforeEach(() => {
   vi.mocked(uploadTeamUsage).mockResolvedValue({ written: 0, stored: 0 });
   vi.mocked(clearMyTeamUsage).mockResolvedValue({ deleted: 0 });
   vi.mocked(fetchWorkspaceTeams).mockResolvedValue({ teams: workspaceTeams });
+  vi.mocked(fetchWorkspaceTeam).mockResolvedValue({
+    team: workspaceTeams[0],
+    members: [
+      { user: me, role: "owner", joinedAt: nowIso },
+      { user: bob, role: "member", joinedAt: nowIso },
+    ],
+    plans: [],
+    tasks: [],
+  });
   for (const fn of [
     fetchTeam,
     fetchTeamActivities,
     fetchTeamUsage,
     fetchWorkspaceTeams,
+    fetchWorkspaceTeam,
     uploadTeamActivities,
     uploadTeamUsage,
     clearMyTeamUsage,
@@ -407,6 +421,18 @@ describe("团队协作口径（d.153：共享是默认行为）", () => {
     expect(screen.queryByText(/团队目前只有你/)).toBeNull();
   });
 
+  it("名册有「管理成员」入口，一步切到工作台（痛点 9 / 方案 1.1）", async () => {
+    await renderPage();
+    const manage = screen.getByRole("button", { name: "管理成员" });
+    expect(manage).toHaveAttribute("title", "到工作台管理成员、派任务");
+    fireEvent.click(manage);
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "工作台" })).toHaveAttribute("aria-selected", "true"),
+    );
+    // 切到工作台后名册让位，入口随之消失
+    expect(screen.queryByRole("button", { name: "管理成员" })).toBeNull();
+  });
+
   it("没有摘要时，空态说的是「等摘要」而不是「去开启共享」", async () => {
     vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
     await renderPage();
@@ -529,26 +555,40 @@ describe("团队页布局（d.62-B）", () => {
   });
 });
 
-/** d.67 导航合并：原「团队看板」独立页并成团队页的「看板」Tab。 */
-describe("团队页：看板 Tab（d.67 导航合并）", () => {
-  const boardTask = activity({ id: "b1", kind: "task", title: "整理会议纪要", status: "done" });
-  const boardAgenda = activity({ id: "b2", kind: "agenda", actorId: bob.id, title: "周五交材料" });
-
-  it("Tab 栏有看板；切过去渲染两列卡片，页头仍只有一个 h1", async () => {
-    vi.mocked(fetchTeamActivities).mockResolvedValue({
-      activities: [boardTask, boardAgenda],
+/** d.67 导航合并：原「团队看板」独立页并成团队页的「看板」Tab；现已改造为真任务板。 */
+describe("团队页：看板 Tab（真任务板）", () => {
+  it("Tab 栏有看板；切过去读 team_tasks 按状态分列，页头仍只有一个 h1", async () => {
+    vi.mocked(fetchWorkspaceTeam).mockResolvedValue({
+      team: workspaceTeams[0],
+      members: [
+        { user: me, role: "owner", joinedAt: nowIso },
+        { user: bob, role: "member", joinedAt: nowIso },
+      ],
+      plans: [],
+      tasks: [
+        {
+          id: "k1",
+          teamId: "team-1",
+          planId: null,
+          title: "真任务：写周报",
+          detail: "",
+          assigneeId: me.id,
+          status: "doing",
+          createdBy: me.id,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          dueAt: null,
+          attachmentFileId: null,
+        },
+      ],
     });
     await renderPage();
 
-    const activitiesBefore = vi.mocked(fetchTeamActivities).mock.calls.length;
     fireEvent.click(screen.getByRole("tab", { name: "看板" }));
-    expect(await screen.findByText("任务 · 已完成")).toBeInTheDocument();
-    // 提示词派生的历史标题不进看板
-    expect(screen.queryByText("整理会议纪要")).toBeNull();
-    expect(screen.getByText("周五交材料")).toBeInTheDocument();
+    expect(await screen.findByText("真任务：写周报")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "看板" })).toHaveAttribute("aria-selected", "true");
-    // d.109：看板复用宿主已加载的数据，切过去不再产生新的 /api/team/activities 请求
-    expect(vi.mocked(fetchTeamActivities).mock.calls.length).toBe(activitiesBefore);
+    // 看板读真正的 team_tasks（fetchWorkspaceTeam），不是动向摘要
+    expect(fetchWorkspaceTeam).toHaveBeenCalledWith("team-1");
 
     // 嵌入后不再出现第二个页面标题：看板不画自己的「团队看板」页头
     const headings = screen.getAllByRole("heading", { level: 1 });
@@ -557,10 +597,10 @@ describe("团队页：看板 Tab（d.67 导航合并）", () => {
     expect(screen.queryByText("团队看板")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".ui-page-title")).toHaveLength(1);
 
-    // 看板自己的搜索/两列都在；名册给看板让位（看板自带成员筛选）
-    expect(screen.getByLabelText("搜索看板")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "任务" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "日程" })).toBeInTheDocument();
+    // 真看板：状态分列 + 搜索/筛选，名册给看板让位
+    expect(screen.getByLabelText("搜索任务看板")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "进行中" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "待验收" })).toBeInTheDocument();
     expect(screen.queryByLabelText("搜索团队成员")).not.toBeInTheDocument();
   });
 

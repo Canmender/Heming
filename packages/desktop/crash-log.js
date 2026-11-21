@@ -187,7 +187,8 @@ function uniqueLogPath(dir, fsImpl, pid) {
   const base = `crash-${stamp}-${pid ?? process.pid}`;
   let candidate = path.join(dir, `${base}.log`);
   let seq = 2;
-  while (fileExists(fsImpl, candidate) && seq < 1000) {
+  // seq 从 2 起、先判占用再 ++：当 -999 也占着时必须再试 -1000，否则会把最后一份已有日志覆盖掉。
+  while (fileExists(fsImpl, candidate) && seq <= 1000) {
     candidate = path.join(dir, `${base}-${seq}.log`);
     seq += 1;
   }

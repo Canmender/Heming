@@ -9,6 +9,41 @@ import { remarkWikiLinks } from "./remarkWikiLinks.js";
 import { anchorStatusOf, decodeWikiHref, isSafeExternalHref, resolveWikiTarget } from "./wikilinks.js";
 
 /**
+ * 把笔记正文切到指定标题所属的小节：从该标题行起，到下一个同级或更高级标题前止。
+ * 用于 `![[笔记#标题]]` 只嵌入那一节，而不是整篇（d.114 规格的 `#标题` 语义）。
+ * 标题找不到时退回整篇——与「锚点未命中仍算文件已解析」的口径一致，不制造空白块。
+ */
+function sliceToHeading(text: string, heading: string | undefined): string {
+  if (!heading) return text;
+  const wanted = heading.trim().toLowerCase();
+  if (!wanted) return text;
+  const lines = text.split("\n");
+  const atx = /^\s{0,3}(#{1,6})(?:\s+(.*?))?\s*$/;
+  const normalize = (raw: string) => raw.replace(/(?:^|\s)#+\s*$/, "").trim().toLowerCase();
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = atx.exec(lines[i]);
+    if (!m) continue;
+    if (normalize(m[2] ?? "") === wanted) {
+      start = i;
+      level = m[1].length;
+      break;
+    }
+  }
+  if (start < 0) return text;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const m = atx.exec(lines[i]);
+    if (m && m[1].length <= level) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+/**
  * 知识库预览面板：复用仓库既有的 markdown 渲染链
  * （react-markdown + remark-gfm + remark-math + rehype-katex），在此之上把
  * `[[双链]]` 渲染成可点 chip、`![[图片]]` 渲染成图片、`![[笔记]]` 限深嵌入。
@@ -229,7 +264,7 @@ export function PreviewPane({
       </div>
     );
 
-    const embed = (target: string, display: string) => {
+    const embed = (target: string, display: string, heading?: string) => {
       const { rel: targetRel } = resolvedOf(target);
       const chip = (
         <WikiChip
@@ -242,10 +277,17 @@ export function PreviewPane({
       );
       // 限深 1：内层不再继续嵌入，避免 A→B→A 这种环
       if (embedDepth >= 1 || !targetRel) return chip;
+      // `![[笔记#标题]]` 只嵌入该标题所属小节，不整篇（标题未命中退回整篇）。
+      const section = (doc: { rel: string; text: string }) => ({
+        rel: doc.rel,
+        text: sliceToHeading(doc.text, heading),
+      });
       // 先走同步缓存（已打开的文档），没有再异步读一次
       const cached = resolveDoc?.(targetRel) ?? null;
-      if (cached) return renderEmbedded(cached);
-      if (loadDoc) return <AsyncNoteEmbed rel={targetRel} load={loadDoc} render={renderEmbedded} />;
+      if (cached) return renderEmbedded(section(cached));
+      if (loadDoc) {
+        return <AsyncNoteEmbed rel={targetRel} load={loadDoc} render={(doc) => renderEmbedded(section(doc))} />;
+      }
       return chip;
     };
 
@@ -255,7 +297,7 @@ export function PreviewPane({
         if (wiki) {
           const display =
             typeof children === "string" ? children : String(children ?? wiki.target);
-          if (wiki.kind === "embed") return embed(wiki.target, display);
+          if (wiki.kind === "embed") return embed(wiki.target, display, title);
           const { rel: targetRel, ambiguous } = resolvedOf(wiki.target);
           // 锚点未命中：文件解析成功、但 `#标题` 找不到 → 黄色提示（不是断链）
           const anchorMiss = anchorStatusOf(index, targetRel, title) === "miss";

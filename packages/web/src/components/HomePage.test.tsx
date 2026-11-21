@@ -321,6 +321,14 @@ describe("HomePage", () => {
     expect(useUiStore.getState().page).toBe("team");
   });
 
+  it("团队卡的「任务看板」直达团队页看板 Tab", async () => {
+    render(<HomePage />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "任务看板" }));
+    expect(useUiStore.getState().page).toBe("team");
+    expect(useUiStore.getState().pageView).toBe("board");
+  });
+
   it("Token 用量：本月没有记录时折叠成一行；有记录才展开 tab 与热力图", async () => {
     render(<HomePage />);
     await act(async () => {});

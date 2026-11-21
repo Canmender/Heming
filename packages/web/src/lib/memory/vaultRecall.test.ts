@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MemoryStore } from "./store.js";
-import { MEMORY_CHAR_BUDGET, formatMemorySection, summarizeInjection } from "./format.js";
+import { MEMORY_CHAR_BUDGET, formatMemorySection, formatMemorySectionWithTrace, summarizeInjection } from "./format.js";
 import { recallMemory } from "./recall.js";
 import type { StorageLike } from "./types.js";
 import { buildAgentContext } from "../agentRuntime/context.js";
@@ -116,6 +116,36 @@ describe("注入文案与预算", () => {
     expect(text).toContain("来自知识库《notes/长文.md》");
     const line = text.split("\n").find((row) => row.includes("来自知识库")) ?? "";
     expect([...line].length).toBeLessThanOrEqual(400 + "来自知识库《notes/长文.md》：".length + 2);
+  });
+
+  it("知识库摘录截断不劈 emoji：注入提示词的文本无孤立代理项", () => {
+    const store = makeStore();
+    store.upsertVaultEntries([
+      {
+        rel: "notes/emoji.md",
+        vaultId: "v1",
+        mtime: T0,
+        hash: "h",
+        value: "记忆" + "😀".repeat(220),
+      },
+    ]);
+    const recalled = recallMemory(
+      store,
+      { agentId: "a1", conversationId: "c1", query: "" },
+      undefined,
+      { enabled: true, available: true },
+    );
+    const trace = formatMemorySectionWithTrace(recalled);
+    const hasUnpaired = (text: string) => {
+      const cps = Array.from(text);
+      for (const ch of cps) {
+        const code = ch.charCodeAt(0);
+        if (code >= 0xd800 && code <= 0xdfff && ch.length === 1) return true;
+      }
+      return false;
+    };
+    expect(hasUnpaired(trace.text)).toBe(false);
+    for (const injected of trace.injected) expect(hasUnpaired(injected.content)).toBe(false);
   });
 
   it("整轮仍受 1200 字总预算约束（知识库不额外加预算）", () => {

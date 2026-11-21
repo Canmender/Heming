@@ -71,6 +71,45 @@ test("已取消的信号会立即抛 CANCELLED，而不是扫完整棵树", asyn
   await fsp.rm(root, { recursive: true, force: true });
 });
 
+test("枚举过程中取消会抛 CANCELLED，不被枚举 catch 吞掉（d.412 回归）", async () => {
+  const root = await makeTree({
+    "1.txt": "1",
+    "sub/2.txt": "2",
+    "sub/3.txt": "3",
+  });
+  const controller = new AbortController();
+  const realOpendir = fsp.opendir;
+  try {
+    // 第一次 opendir 正常返回；迭代目录项时触发取消，让 line 82 的 throw 走进枚举 catch。
+    fsp.opendir = async (dir) => {
+      const handle = await realOpendir(dir);
+      return {
+        ...handle,
+        async *[Symbol.asyncIterator]() {
+          let first = true;
+          for await (const entry of handle) {
+            if (first) {
+              first = false;
+              controller.abort();
+            }
+            yield entry;
+          }
+        },
+      };
+    };
+    await assert.rejects(
+      () => statTree(root, { signal: controller.signal }),
+      (error) => {
+        assert.equal(error.code, CODES.CANCELLED);
+        return true;
+      },
+    );
+  } finally {
+    fsp.opendir = realOpendir;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("并发上限常量是个小整数（别把线程池排满成队列）", () => {
   assert.ok(Number.isInteger(STAT_CONCURRENCY));
   assert.ok(STAT_CONCURRENCY >= 4);

@@ -62,9 +62,14 @@ export function buildWidgetNotifyEvent(
   if (!title) return null;
   const summary = summaryOf(item);
   const route = NOTIFY_ROUTES[item.kind];
-  const createdAt = typeof item.createdAt === "number" && Number.isFinite(item.createdAt)
-    ? item.createdAt
-    : Date.now();
+  // Number.isFinite 只排除 NaN/Infinity，1e20 这类有限值仍会超出 Date 的合法范围，
+  // new Date(x).toISOString() 直接抛 RangeError 打断整条通知转发链——坏时间戳回退到当前时间。
+  const createdAt =
+    typeof item.createdAt === "number" &&
+    Number.isFinite(item.createdAt) &&
+    Math.abs(item.createdAt) <= 8.64e15
+      ? item.createdAt
+      : Date.now();
   return {
     kind: "notify",
     title,

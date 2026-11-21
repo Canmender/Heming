@@ -25,6 +25,12 @@
 
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
+import {
+  createPromiseCache,
+  HIGHLIGHT_CACHE_BYTES,
+  HIGHLIGHT_CACHE_MAX,
+  makeHighlightKey,
+} from "./highlightCache.js";
 
 /**
  * 浅色主题：与和鸣的极简白底一致。
@@ -33,6 +39,14 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 const THEME_NAME = "github-light";
 
 let highlighterPromise: Promise<HighlighterCore | null> | null = null;
+
+/**
+ * 高亮结果缓存：同一段 (code, lang) 只分词一次。
+ *
+ * 缓存 Promise 而非字符串，使同一帧里的并发调用共享同一次计算；`null` 也缓存，
+ * 避免未知语言 / 加载失败时反复走失败路径。容量有界，按最近使用淘汰。
+ */
+const highlightCache = createPromiseCache<string | null>(HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_BYTES);
 
 /**
  * 取共享的高亮器。失败返回 null（调用方回落纯文本）。
@@ -97,21 +111,27 @@ const ALIASES: Record<string, string> = {
  * @param code 代码正文
  * @param lang 围栏上标注的语言（可能为空、可能是别名、可能是乱写的）
  */
-export async function highlightCode(code: string, lang: string): Promise<string | null> {
-  const highlighter = await getHighlighter();
-  if (!highlighter) return null;
-
+export function highlightCode(code: string, lang: string): Promise<string | null> {
   const normalized = (lang || "").trim().toLowerCase();
+  // 语言别名在 key 里就归一化，避免 `js` 与 `javascript` 算两次。
   const candidate = ALIASES[normalized] ?? normalized;
+  // 短 key（语言 + 长度 + 哈希）+ 原文校验：命中时不再复制整段代码到 key 上，
+  // 极端情况下的哈希碰撞由 validate 比对原文兜住（不符则重算覆盖）。
+  const key = makeHighlightKey(candidate, code);
 
-  // 没标语言按纯文本处理：不猜，猜错会把中文注释染成关键字
-  if (!candidate) return null;
+  return highlightCache.getOrCreate(key, async () => {
+    const highlighter = await getHighlighter();
+    if (!highlighter) return null;
 
-  try {
-    if (!highlighter.getLoadedLanguages().includes(candidate)) return null;
-    return highlighter.codeToHtml(code, { lang: candidate, theme: THEME_NAME });
-  } catch {
-    // 语法定义存在但解析失败（罕见，多见于极端嵌套）——回落纯文本
-    return null;
-  }
+    // 没标语言按纯文本处理：不猜，猜错会把中文注释染成关键字
+    if (!candidate) return null;
+
+    try {
+      if (!highlighter.getLoadedLanguages().includes(candidate)) return null;
+      return highlighter.codeToHtml(code, { lang: candidate, theme: THEME_NAME });
+    } catch {
+      // 语法定义存在但解析失败（罕见，多见于极端嵌套）——回落纯文本
+      return null;
+    }
+  }, code);
 }

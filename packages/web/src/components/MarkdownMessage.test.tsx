@@ -35,6 +35,25 @@ describe("MarkdownMessage", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("正文从空变成非空不抛 hook 数量错误（d.412 回归）", () => {
+    const { rerender } = render(<MarkdownMessage text="" />);
+    // 空→非空切换曾因 useRef 在提前 return 之后而报 "Rendered more hooks than during the previous render"
+    expect(() => rerender(<MarkdownMessage text="hello world" />)).not.toThrow();
+    expect(screen.getByText("hello world")).toBeTruthy();
+  });
+
+  it("回退复制失败时不假装成功（d.412 回归）", async () => {
+    // 剪贴板 API 拒绝 → 走 execCommand 回退；回退返回 false 表示失败，不能显示「已复制」
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("no")) } });
+    // jsdom 没有 execCommand，手动挂一个再 spy
+    Object.assign(document, { execCommand: vi.fn().mockReturnValue(false) });
+    const exec = vi.spyOn(document, "execCommand");
+    render(<MarkdownMessage text={"```js\nconst x = 1;\n```"} />);
+    fireEvent.click(screen.getByLabelText("复制代码"));
+    await waitFor(() => expect(exec).toHaveBeenCalledWith("copy"));
+    expect(screen.queryByText("已复制")).toBeNull();
+  });
+
   it("块级代码：带语言标签与复制按钮，并调用高亮", async () => {
     render(<MarkdownMessage text={"```ts\nconst a = 1;\n```"} />);
     // 语言标签来自围栏标注

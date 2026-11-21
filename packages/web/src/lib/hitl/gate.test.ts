@@ -383,6 +383,26 @@ describe("HITL 闸门：工作区权限规则", () => {
     expect(outcomes[0].kind === "deny" && outcomes[0].reason).toContain("工作区权限规则拒绝");
   });
 
+  it("工作区 ask 规则下，被拒过的同一调用不再重复弹窗（d.412 回归）", async () => {
+    const call = callAt("w1", "fs__write_file", "src/a.ts", "write");
+    const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+      { callId: "w1", decision: "deny", reason: "不放心" },
+    ]);
+    const gate = createHitlGate({
+      policy,
+      ask,
+      workspaceRules: async () => rulesLoad({ ask: [{ tool: "fs__write_file" }] }),
+    });
+
+    const first = await gate.review(batchOf([call]));
+    const second = await gate.review(batchOf([call]));
+
+    expect(first[0].kind).toBe("deny");
+    expect(second[0].kind).toBe("deny");
+    expect(second[0].kind === "deny" && second[0].reason).toBe("本轮已拒绝过相同调用");
+    expect(ask).toHaveBeenCalledTimes(1); // 第二次没再问
+  });
+
   it("工作区 ask 强制询问：策略层本来免问的只读调用也进待确认队列", async () => {
     const read = callAt("r1", "file_read", "src/a.ts", "read");
     const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [

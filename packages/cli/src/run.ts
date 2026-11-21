@@ -315,9 +315,15 @@ function createDeltaWriter(write: ((chunk: string) => void) | undefined) {
   let lastLength = 0;
   return (accumulated: string) => {
     if (!write) return;
-    if (accumulated.length <= lastLength) return;
-    write(accumulated.slice(lastLength));
-    lastLength = accumulated.length;
+    // SSE 的 delta 边界可能正好落在 emoji（代理对）中间：slice 按 UTF-16 码元切，
+    // 若本次增量以高代理结尾就发出去，stdout 会把它单独按 UTF-8 编码成 U+FFFD，
+    // 屏幕上成乱码、与 JSON 里的 finalText 不一致。留着高代理等下一帧补齐。
+    let end = accumulated.length;
+    const last = accumulated.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    if (end <= lastLength) return;
+    write(accumulated.slice(lastLength, end));
+    lastLength = end;
   };
 }
 

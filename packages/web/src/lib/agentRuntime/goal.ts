@@ -67,7 +67,14 @@ function emit(conversationId?: string): void {
 
 let loaded = false;
 
-type StoredGoals = Record<string, { text: string; createdAt: number }>;
+type StoredGoal = {
+  text: string;
+  createdAt: number;
+  /** 跨重启的最近使用序号：与 todo/store.ts 的 seq 同理，persist 改写所有条目的 createdAt，
+   *  单靠它无法分辨谁最近用过；没有这个单调序号，重开后刚用过的那份反而被当成最旧淘汰。 */
+  seq?: number;
+};
+type StoredGoals = Record<string, StoredGoal>;
 
 function readStorage(): StoredGoals {
   try {
@@ -93,7 +100,8 @@ function persist(touched?: string): void {
   const stored = readStorage();
   if (touched && !goals.has(touched)) delete stored[touched];
   for (const [conversationId, goal] of goals) {
-    stored[conversationId] = goal;
+    // 把内存里的单调使用序号一并落盘，重开时才能按真实最近使用恢复淘汰顺序。
+    stored[conversationId] = { ...goal, seq: touchedAt.get(conversationId) ?? 0 };
   }
   const entries = Object.entries(stored)
     .filter(([, value]) => typeof value?.text === "string" && value.text.trim().length > 0)
@@ -113,7 +121,12 @@ function ensureLoaded(): void {
   if (loaded) return;
   loaded = true;
   const stored = readStorage();
-  for (const [conversationId, value] of Object.entries(stored)) {
+  // 按落盘的使用序号升序恢复：序号小的（最久没用）先 tick，序号大的（最近用过）后 tick，
+  // 这样下次 persist 淘汰时才会先删最久没用的那份，而不是刚重开读到的第一条。
+  const ordered = Object.entries(stored).sort(
+    ([, a], [, b]) => (a?.seq ?? 0) - (b?.seq ?? 0),
+  );
+  for (const [conversationId, value] of ordered) {
     if (typeof value?.text !== "string") continue;
     const text = value.text.trim().slice(0, GOAL_TEXT_MAX);
     if (!text) continue;

@@ -53,6 +53,40 @@ describe("comparePluginVersions", () => {
     expect(comparePluginVersions("0.1.0", "0.1.0")).toBe(0);
     expect(comparePluginVersions("1.0.0-beta", "1.0.0-alpha")).toBeGreaterThan(0);
   });
+
+  it("正式版高于预发布版（1.0.0 > 1.0.0-beta），latest 不会选到 beta", () => {
+    expect(comparePluginVersions("1.0.0", "1.0.0-beta")).toBeGreaterThan(0);
+    expect(comparePluginVersions("1.0.0-beta", "1.0.0")).toBeLessThan(0);
+    // 排序后正式版应排在预发布之后（latestEntry 取尾部）
+    const sorted = ["1.0.0-beta", "1.0.0", "0.9.0"].sort(comparePluginVersions);
+    expect(sorted[sorted.length - 1]).toBe("1.0.0");
+  });
+
+  it("构建元数据不参与优先级（1.0.0+build.1 与 1.0.0 相等）", () => {
+    expect(comparePluginVersions("1.0.0+build.1", "1.0.0")).toBe(0);
+    expect(comparePluginVersions("1.0.0", "1.0.0+build.1")).toBe(0);
+    expect(comparePluginVersions("1.0.0-beta+exp.sha.5114f85", "1.0.0-beta")).toBe(0);
+  });
+
+  it("预发布标识符按 semver 逐段比：数字按数值、数字标识符低于非数字、短前缀更小", () => {
+    expect(comparePluginVersions("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0);
+    expect(comparePluginVersions("1.0.0-alpha.1", "1.0.0-alpha.beta")).toBeLessThan(0);
+    expect(comparePluginVersions("1.0.0-beta", "1.0.0-beta.2")).toBeLessThan(0);
+    expect(comparePluginVersions("1.0.0-beta.2", "1.0.0-beta.11")).toBeLessThan(0);
+    expect(comparePluginVersions("1.0.0-rc.1", "1.0.0")).toBeLessThan(0);
+    // semver §11 官方示例整序
+    const official = [
+      "1.0.0-alpha",
+      "1.0.0-alpha.1",
+      "1.0.0-alpha.beta",
+      "1.0.0-beta",
+      "1.0.0-beta.2",
+      "1.0.0-beta.11",
+      "1.0.0-rc.1",
+      "1.0.0",
+    ];
+    expect(official.slice().sort(comparePluginVersions)).toEqual(official);
+  });
 });
 
 describe("createPluginCatalog", () => {

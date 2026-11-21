@@ -74,6 +74,8 @@ function compareVersions(a, b) {
   const length = Math.max(left.numbers.length, right.numbers.length);
   for (let index = 0; index < length; index++) {
     const difference = (left.numbers[index] ?? 0) - (right.numbers[index] ?? 0);
+    // 超长数字段会被 Number() 读成 Infinity；Infinity - Infinity = NaN，此时两段相等，按 0 继续比下一段。
+    if (Number.isNaN(difference)) continue;
     if (difference !== 0) return difference;
   }
 

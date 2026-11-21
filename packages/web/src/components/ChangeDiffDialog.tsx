@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "./ui/Button.js";
 import { Dialog } from "./ui/Dialog.js";
 import type { SessionChange } from "../lib/fileEdit/sessionChanges.js";
@@ -59,6 +59,9 @@ export function ChangeDiffDialog({
   const pickable = list.length > 0 && typeof onPick === "function";
   // d.239：改动往往只占长文件里十来行——给一个「只看改动」，避免用户在上下文里翻找。
   const [onlyChanges, setOnlyChanges] = useState(false);
+  // 会话级入口会在弹窗挂载期间换文件（点左边列表）；换新文件时回到「完整上下文」，
+  // 否则上一个文件勾的「只看改动」会让新文件的上下文行一直藏着。
+  useEffect(() => setOnlyChanges(false), [state.path]);
   const rows = result === null ? [] : onlyChanges ? result.rows.filter((row) => row.kind !== "same") : result.rows;
   const hasContext = result !== null && result.rows.some((row) => row.kind === "same");
 

@@ -1301,6 +1301,19 @@ export function runAgentMentions(
           usageCacheReadRounds = 0;
           usageCacheWriteRounds = 0;
           /**
+           * 溢出重试会重新进 `once()`：这几项是「本次尝试」的归因/证据/重复计数，
+           * 必须在每次尝试开头归零。以前它们声明在 once() 外面，废尝试里的工具错误、
+           * 执行过的命令与「同名同参第 N 次」会漏进最终成功的那次——模型被误告「你在重复」，
+           * 收口证据里出现废尝试的 shell 命令，失败归因也算上了已被丢弃的尝试。
+           * （turnWrites / turnJobs / budgetHit 是「本回合」状态：废尝试真的写过盘、起过作业，
+           * 仍要留给「撤回本轮改动」与作业跟踪，故不在这里清。）
+           */
+          toolFailureCount = 0;
+          deniedCount = 0;
+          maxRoundsHit = false;
+          evidencePairs.length = 0;
+          repeatedCalls.clear();
+          /**
            * 工具目录构建失败不能带走整轮对话。
            *
            * `getTools` 走的是能力注册表：任一提供者的 `build()` 抛错（插件清单坏了、
@@ -1567,6 +1580,20 @@ export function runAgentMentions(
             let upstreamFailure: unknown = null;
             for (let attempt = 0; ; attempt += 1) {
               upstreamFailure = null;
+              /**
+               * 降级提示（工具目录坏、上下文组装失败、附件被丢）在 askUpstream 之前
+               * 就通过 emitDelta 写进了 acc/local——那是给用户看的说明，不是模型输出。
+               * 若拿绝对空串判「这轮没产出」，这类提示会把瞬时错误（429/503）的重试
+               * 机会直接关掉，恰恰在最该恢复的降级场景里失效。改成以「本次请求前」
+               * 的状态为基线：只有请求过程中真的多出正文/工具/思考才算 touched。
+               */
+              const preAsk = {
+                acc,
+                local,
+                chunks: roundChunks.length,
+                calls: calls.length,
+                reasoning,
+              };
               try {
                 await askUpstream();
                 break;
@@ -1575,13 +1602,13 @@ export function runAgentMentions(
                 if (attempt >= MAX_UPSTREAM_RETRIES) break;
                 if (aborted || controller.signal.aborted) break;
                 if (!isRetryableUpstreamError(error)) break;
-                /** 这一轮一个字都还没算：本地累积、工具调用、思考过程都还是空的。 */
+                /** 这一轮模型一个字都还没产出（降级提示不算）：可以安全重试。 */
                 const untouched =
-                  acc === "" &&
-                  local === "" &&
-                  roundChunks.length === 0 &&
-                  calls.length === 0 &&
-                  reasoning === "";
+                  acc === preAsk.acc &&
+                  local === preAsk.local &&
+                  roundChunks.length === preAsk.chunks &&
+                  calls.length === preAsk.calls &&
+                  reasoning === preAsk.reasoning;
                 if (!untouched) break;
                 const delayMs = retryDelayMs(error, attempt);
                 deps.onUpstreamRetry?.({

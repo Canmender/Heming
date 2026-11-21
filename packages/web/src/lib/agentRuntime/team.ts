@@ -718,6 +718,9 @@ export function withTeamTool(bridge: ToolBridge, opts: WithTeamToolOptions): Too
             }),
         },
         {
+          // 每次派遣用独立前缀：同一条消息里并行派两支队伍时，成员 id 会重复（a、b），
+          // 若都用默认 `team-<成员>`，进度面板按 taskId 归并就会把两队的进度互相覆盖。
+          taskIdPrefix: `team-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-`,
           ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
           ...(opts.onStart ? { onStart: opts.onStart } : {}),
           ...(opts.onFinish ? { onFinish: opts.onFinish } : {}),

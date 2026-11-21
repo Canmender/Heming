@@ -165,8 +165,13 @@ async function readJsonFile(file: string): Promise<unknown> {
   }
 }
 
-/** 列出存档：按 `updatedAt` 从新到旧，坏文件跳过，最多 `MAX_SESSIONS` 条。 */
-export async function listSessions(dir: string = sessionDir()): Promise<SessionRecord[]> {
+/**
+ * 列出存档：按 `updatedAt` 从新到旧，坏文件跳过。
+ *
+ * `limit` 缺省 `MAX_SESSIONS`（界面/列表用）；传 `Infinity` 取全部——
+ * 裁剪旧文件时必须看到全量，否则「已返回上限条数」会让它误以为没有超量文件可删。
+ */
+export async function listSessions(dir: string = sessionDir(), limit: number = MAX_SESSIONS): Promise<SessionRecord[]> {
   let names: string[];
   try {
     names = await fs.readdir(dir);
@@ -184,7 +189,7 @@ export async function listSessions(dir: string = sessionDir()): Promise<SessionR
     records.push(record.id === id ? record : { ...record, id });
   }
   records.sort((a, b) => b.updatedAt - a.updatedAt);
-  return records.slice(0, MAX_SESSIONS);
+  return limit === Infinity ? records : records.slice(0, Math.max(0, limit));
 }
 
 /** 摘要（`heming sessions` 用）：只留一眼能认出来的字段。 */
@@ -229,7 +234,9 @@ export async function writeSession(dir: string, record: SessionRecord): Promise<
 
 /** 超出 `MAX_SESSIONS` 时删最旧的；刚写的这份永远保留。 */
 async function pruneSessions(dir: string, keepId: string): Promise<void> {
-  const records = await listSessions(dir);
+  // 必须取全量：用默认的 MAX_SESSIONS 上限时这里永远只有 ≤50 条，
+  // 旧的超量文件根本看不到，裁剪分支从不触发（旧会话会无限堆积）。
+  const records = await listSessions(dir, Infinity);
   if (records.length <= MAX_SESSIONS) return;
   const doomed = records.slice(MAX_SESSIONS).filter((record) => record.id !== keepId);
   for (const record of doomed) {

@@ -916,6 +916,12 @@ export const TeamEventKindSchema = z.enum([
   "member_added",
   "member_removed",
   "owner_transferred",
+  "join_requested",
+  "join_approved",
+  "join_rejected",
+  "knowledge_added",
+  "knowledge_updated",
+  "knowledge_removed",
 ]);
 export type TeamEventKind = z.infer<typeof TeamEventKindSchema>;
 
@@ -932,6 +938,50 @@ export const TeamEventSchema = z.object({
   createdAt: IsoTimeSchema,
 });
 export type TeamEvent = z.infer<typeof TeamEventSchema>;
+
+/**
+ * 团队知识文档（用户显式发布到团队的摘要/文档，按 team_id 硬隔离）。
+ *
+ * 边界：只有人（成员）能发布/读写；智能体无服务端身份，不进这张表。
+ * 正文是用户主动发布的内容，不与 shared_files（全站可见附件）混用，
+ * 也不进 agent-pipeline 的本机 RAG。
+ */
+export const TeamKnowledgeDocSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  /** 发布人（人类用户 id）。 */
+  authorId: z.string().min(1),
+  title: z.string().min(1),
+  /** Markdown 正文（用户显式发布）。 */
+  content: z.string(),
+  /** 来源个人库 id（仅作标签，不自动同步）；null = 直接新建。 */
+  sourceVault: z.string().nullable(),
+  tags: z.array(z.string()),
+  pinned: z.boolean(),
+  createdAt: IsoTimeSchema,
+  updatedAt: IsoTimeSchema,
+});
+export type TeamKnowledgeDoc = z.infer<typeof TeamKnowledgeDocSchema>;
+
+export const CreateTeamKnowledgeBodySchema = z.object({
+  title: z.string().trim().min(1, "请填写文档标题").max(120, "标题最多 120 字"),
+  content: z.string().trim().max(20000, "正文最多 20000 字"),
+  sourceVault: z.string().trim().min(1).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(30)).max(20, "最多 20 个标签").optional(),
+});
+export type CreateTeamKnowledgeBody = z.infer<typeof CreateTeamKnowledgeBodySchema>;
+
+export const UpdateTeamKnowledgeBodySchema = z
+  .object({
+    title: z.string().trim().min(1, "标题不能为空").max(120, "标题最多 120 字").optional(),
+    content: z.string().trim().max(20000, "正文最多 20000 字").optional(),
+    tags: z.array(z.string().trim().min(1).max(30)).max(20, "最多 20 个标签").optional(),
+  })
+  .refine(
+    (v) => v.title !== undefined || v.content !== undefined || v.tags !== undefined,
+    { message: "没有要修改的字段" },
+  );
+export type UpdateTeamKnowledgeBody = z.infer<typeof UpdateTeamKnowledgeBodySchema>;
 
 export const WorkspaceTeamMemberSchema = z.object({
   user: UserSchema,
@@ -1012,6 +1062,52 @@ export const AddTeamMemberBodySchema = z.object({
   username: z.string().trim().min(1, "请填写用户名").max(64, "用户名过长"),
 });
 export type AddTeamMemberBody = z.infer<typeof AddTeamMemberBodySchema>;
+
+/**
+ * 团队目录条目（发现用）：只暴露元数据，不含成员名单/方案/任务/动态/知识文档。
+ * 非成员可搜到团队存在，但任何敏感数据仍按「同队成员」收口。
+ */
+export const TeamDirectoryEntrySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  goal: z.string(),
+  memberCount: z.number().int().min(0),
+  createdAt: IsoTimeSchema,
+});
+export type TeamDirectoryEntry = z.infer<typeof TeamDirectoryEntrySchema>;
+export const TeamDirectorySchema = z.object({ teams: z.array(TeamDirectoryEntrySchema) });
+export type TeamDirectory = z.infer<typeof TeamDirectorySchema>;
+
+/** 加入申请的状态：待审 / 已通过 / 已拒绝。 */
+export const JoinRequestStatusSchema = z.enum(["pending", "approved", "rejected"]);
+export type JoinRequestStatus = z.infer<typeof JoinRequestStatusSchema>;
+
+/** 一条加入申请（对申请人可见自己的；对队长可见本团队的待审列表）。 */
+export const TeamJoinRequestSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  userId: z.string().min(1),
+  /** 申请附言（可选，最多 200 字）。 */
+  message: z.string(),
+  status: JoinRequestStatusSchema,
+  createdAt: IsoTimeSchema,
+  reviewedAt: IsoTimeSchema.nullable(),
+});
+export type TeamJoinRequest = z.infer<typeof TeamJoinRequestSchema>;
+export const TeamJoinRequestListSchema = z.object({ requests: z.array(TeamJoinRequestSchema) });
+export type TeamJoinRequestList = z.infer<typeof TeamJoinRequestListSchema>;
+
+/** 提交加入申请：附言可选。 */
+export const CreateJoinRequestBodySchema = z.object({
+  message: z.string().trim().max(200, "附言最多 200 字").optional(),
+});
+export type CreateJoinRequestBody = z.infer<typeof CreateJoinRequestBodySchema>;
+
+/** 队长审批：approve 通过（写成员）/ reject 拒绝。 */
+export const ReviewJoinRequestBodySchema = z.object({
+  action: z.enum(["approve", "reject"]),
+});
+export type ReviewJoinRequestBody = z.infer<typeof ReviewJoinRequestBodySchema>;
 
 /**
  * 转让队长：目标用户 id（必须是该团队的现有成员）。

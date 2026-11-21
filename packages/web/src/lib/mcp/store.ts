@@ -597,6 +597,9 @@ export class McpRegistry {
     this.serverList = this.serverList.filter((s) => s.id !== id);
     this.serversMutated = true;
     delete this.toolMap[id];
+    // 连接状态也要一起清：否则删掉再建同名服务时，界面会读到上一条的旧状态
+    // （比如残留的 "已连接"），而且 connectStatus 会随删除不断膨胀。
+    this.clearStatus(id);
     for (const key of [...this.enabled]) {
       if (key.startsWith(`${id}::`)) this.enabled.delete(key);
     }

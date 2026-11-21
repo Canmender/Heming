@@ -17,7 +17,7 @@ export const ACCENT_PRESETS: { id: string; name: string; color: string }[] = [
   { id: "indigo", name: "靛蓝", color: "#2f5bd7" },
   { id: "teal", name: "松绿", color: "#1f6f54" },
   { id: "clay", name: "赭红", color: "#a8422f" },
-  { id: "grape", name: "紫", color: "#6b4ea8" },
+  { id: "copper", name: "铜", color: "#9a5a33" },
   { id: "slate", name: "石板", color: "#3f4750" },
 ];
 

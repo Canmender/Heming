@@ -1707,11 +1707,12 @@ app.whenReady().then(() => {
       if (!activePageOwns(payload)) return;
       if (widgetHost) widgetHost.pageSend(payload);
     });
-    secureIpc.handle("widgets:publish", (_event, payload) => {
-      const result = widgetHost.publish(payload);
+    // preload 的 publish 走 ipcRenderer.send（不等返回值），这里必须用 on 注册：
+    // handle(invoke) 与 on(send) 是 Electron 两条独立通道表，用 handle 会导致发布全部丢失。
+    secureIpc.on("widgets:publish", (_event, payload) => {
+      widgetHost.publish(payload);
       // 主题是唯一需要主进程记住的跨窗口状态：widget 窗口可能比主窗先建好
       if (payload && payload.kind === "theme") writeWidgetTheme(widgetThemeFile(), payload.theme);
-      return result;
     });
     secureIpc.handle("widgets:migrateLegacy", (_event, payload) =>
       widgetStore.migrateLegacy(payload && payload.prefs),

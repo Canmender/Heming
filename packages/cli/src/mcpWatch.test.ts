@@ -64,6 +64,8 @@ describe("资源 URI（d.327）", () => {
     expect(relOfResourceUri("file:///tmp/AGENTS.md")).toBeNull();
     expect(relOfResourceUri("heming://workspace/../secrets.md")).toBeNull();
     expect(relOfResourceUri("heming://workspace/.heming\\rules.md")).toBeNull();
+    // 文件名里带两个点是合法文件，不该被 .. 越界判定误杀
+    expect(relOfResourceUri("heming://workspace/docs/a..b.md")).toBe("docs/a..b.md");
   });
 
   it("列出会监听的三个目录（不递归到别处）", () => {

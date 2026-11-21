@@ -179,6 +179,19 @@ describe("后台作业面板数据层（d.203）", () => {
     resetPanelJobs();
   });
 
+  it("★ 预览取尾部时不在 emoji 的低代理上起头", () => {
+    resetPanelJobs();
+    syncPanelJobs([summary({ id: "job-1" })]);
+    // 总长 = 1000 + 2(emoji) + 15999 = 17001；截起点 = 17001 - 16000 = 1001，
+    // 正好是 emoji 的低代理位置（高代理在 1000），旧代码会从这个坏字符起头。
+    const value = "p".repeat(1000) + "😀" + "x".repeat(15999);
+    setPanelJobPreview("job-1", value, false);
+    const preview = listPanelJobs()[0].preview ?? "";
+    expect(/^[\uDC00-\uDFFF]/.test(preview)).toBe(false);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(preview)).toBe(false);
+    resetPanelJobs();
+  });
+
   it("轮询间隔是 2 秒（界面状态最多晚两秒）", () => {
     expect(JOB_PANEL_POLL_MS).toBe(2000);
   });

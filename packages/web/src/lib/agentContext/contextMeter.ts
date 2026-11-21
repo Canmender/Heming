@@ -38,9 +38,11 @@ export function formatTokens(tokens: number): string {
   const value = Math.max(0, Math.round(Number.isFinite(tokens) ? tokens : 0));
   if (value < 1000) return String(value);
   const k = value / 1000;
-  if (k < 100) return `${k.toFixed(1)}K`;
-  const m = value / 1_000_000;
-  return `${m.toFixed(1)}M`;
+  // K→M 的分界在 100 万（与参考项目的紧凑计数一致）。旧代码在 k≥100（10 万）就切 M，
+  // 于是 20 万显示成「0.2M」、紧挨着「25.0K」的预算，两个数字量级看着拧巴。
+  // 用 k.toFixed(1) 判边界：999999 → "1000.0" → 归到 M → "1.0M"，不在 K 档冒出 "1000.0K"。
+  if (Number(k.toFixed(1)) < 1000) return `${k.toFixed(1)}K`;
+  return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
 export function contextMeter(used: number, budget: number): ContextMeterState {

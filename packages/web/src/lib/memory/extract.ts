@@ -32,22 +32,31 @@ const LANGUAGE_HINT = /(?:中文|英文|简体|繁体|语言|English|Chinese)/i;
 /** 句末标点：显式指令只取第一句，避免把后续闲聊卷进记忆。 */
 const SENTENCE_BREAK = /[。！？!?\n\r]/;
 
+/**
+ * 按码点（而非 UTF-16 码元）截断到 max 个字符——避免把 emoji 的代理对劈成
+ * 孤立半截写进 memory.json / 注入提示词（与 vaultMemory.ts:clipText 同款做法）。
+ */
+export function clipCodePoints(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join("");
+}
+
 /** 主题键归一化：压缩空白、去首尾标点、截到 24 字。 */
 export function normalizeKey(key: string): string {
   const collapsed = String(key ?? "").replace(/\s+/g, " ").trim();
-  return collapsed
+  const cleaned = collapsed
     .replace(/^[\s:：,，、;；-]+/, "")
-    .replace(/[\s:：,，、;；-]+$/, "")
-    .slice(0, KEY_MAX);
+    .replace(/[\s:：,，、;；-]+$/, "");
+  return clipCodePoints(cleaned, KEY_MAX);
 }
 
 function cleanValue(value: string): string {
-  return String(value ?? "")
+  const cleaned = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[。．.！!？?~～,，;；]+$/, "")
-    .trim()
-    .slice(0, VALUE_MAX);
+    .trim();
+  return clipCodePoints(cleaned, VALUE_MAX);
 }
 
 /** 取第一句并去掉前导冒号/顿号/空白。 */
@@ -123,8 +132,9 @@ export function deterministicSummary(userText: string, assistantText: string): s
   return clip(parts.join("｜"), SUMMARY_MAX);
 }
 
-/** 截断到 max 字符（截断时以「…」收尾，保证结果长度 ≤ max）。 */
+/** 截断到 max 个字符（截断时以「…」收尾，保证结果按码点计长度 ≤ max，且不劈代理对）。 */
 function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1))}…`;
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }

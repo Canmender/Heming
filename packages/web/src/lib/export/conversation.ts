@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 会话导出：把本机已解密的明文整理成 Markdown / JSON。
  *
  * 边界：
@@ -191,6 +191,8 @@ export function buildConversationJson(input: ConversationExportInput): string {
       text: m.recalled ? "" : m.text,
       ...(m.recalled ? { recalled: true } : {}),
       ...(m.attachment ? { attachment: m.attachment } : {}),
+      // Markdown 已导出过程（思考/工具步），JSON 也要带同一份投影，别让两种格式各说各话。
+      ...(m.process ? { process: m.process } : {}),
     })),
   };
   return `${JSON.stringify(doc, null, 2)}\n`;

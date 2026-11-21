@@ -236,6 +236,9 @@ function createPluginStore(options = {}) {
       settings: resolveSettings(plugin.widget, stored),
       installedAt: plugin.installedAt,
       updatedAt: plugin.updatedAt,
+      // d.124 起 install() 把 files/** 摘要写进记录，引擎启动时据此复核盘上字节；
+      // 这里若漏带，engine 的 verifyFilesDigest 拿不到 expected → 永远校验失败 → 带引擎的插件装不上就起不来。
+      packageSha256: plugin.packageSha256,
       signed: plugin.signed === true,
       // d.109：命令面板用（主窗 `widgets:list` 直接读；停用/损坏记录也带上，由 web 侧决定是否展示）
       commands: Array.isArray(plugin.commands) ? plugin.commands : [],

@@ -100,4 +100,10 @@ describe("searchTools 跨语言（英文目录 + 中文查询）", () => {
   it("纯英文查询仍然按原逻辑工作", () => {
     expect(searchTools(english, "scroll")[0]?.name).toBe("windows-desktop__scroll");
   });
+
+  it("中英混排查询（click截图）里的 ASCII 词不被丢弃（d.412 回归）", () => {
+    const names = searchTools(english, "click截图").map((t) => t.name);
+    expect(names).toContain("windows-desktop__click");
+    expect(names).toContain("windows-desktop__screenshot");
+  });
 });

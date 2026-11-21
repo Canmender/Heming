@@ -180,6 +180,19 @@ export function attachWs(
           });
           return;
         }
+        // d.54：与 agent_finish 同口径——光是成员还不够，agentId 必须是这条会话的助手，
+        // 否则任何成员都能用伪造的 agentId 往别人的助手流里灌 chunk/error。
+        if (store.conversationAgentId(event.conversationId) !== event.agentId) {
+          send(ws, {
+            type: "agent_error",
+            conversationId: event.conversationId,
+            agentId: event.agentId,
+            streamId: event.streamId,
+            code: "forbidden",
+            message: "agent mismatch",
+          });
+          return;
+        }
         if (event.type === "agent_chunk") {
           broadcastToConversation(event.conversationId, {
             type: "agent_chunk",

@@ -74,6 +74,39 @@ describe("parsePluginManifestV5", () => {
     expect(() => parsePluginManifestV5(uncovered)).toThrow(/未覆盖 MCP 服务主机/);
   });
 
+  it("网络主机声明的端口按数值归一：IPv6 默认端口与前导零端口都能匹配 URL 归一化结果", () => {
+    // IPv6 + 显式默认端口：URL 侧 hostOfUrl("http://[::1]/mcp") = "[::1]"，
+    // 声明侧 "[::1]:80" 必须归一成同一个值，否则合法清单被误拒。
+    const ipv6Default = baseManifest({
+      permissions: { network: ["[::1]:80"], tools: "read" },
+      contributions: {
+        skills: [{ name: "周报", instructions: "汇总本周任务" }],
+        mcpServers: [{ key: "srv", name: "服务", url: "http://[::1]/mcp" }],
+      },
+    });
+    expect(parsePluginManifestV5(ipv6Default).manifest.contributions.mcpServers).toHaveLength(1);
+
+    // 前导零端口：WHATWG URL 把 :00443 解析为默认端口并剥掉，声明侧也要按数值归一。
+    const leadingZero = baseManifest({
+      permissions: { network: ["api.acme.com:00443"], tools: "read" },
+      contributions: {
+        skills: [{ name: "周报", instructions: "汇总本周任务" }],
+        mcpServers: [{ key: "srv", name: "服务", url: "https://api.acme.com/mcp" }],
+      },
+    });
+    expect(parsePluginManifestV5(leadingZero).manifest.contributions.mcpServers).toHaveLength(1);
+
+    // IPv6 + 前导零默认端口同样成立。
+    const ipv6LeadingZero = baseManifest({
+      permissions: { network: ["[::1]:00080"], tools: "read" },
+      contributions: {
+        skills: [{ name: "周报", instructions: "汇总本周任务" }],
+        mcpServers: [{ key: "srv", name: "服务", url: "http://[::1]/mcp" }],
+      },
+    });
+    expect(parsePluginManifestV5(ipv6LeadingZero).manifest.contributions.mcpServers).toHaveLength(1);
+  });
+
   it("MCP 只允许 https（本机 http 例外），且禁内嵌账号密码", () => {
     const build = (url: string) =>
       baseManifest({

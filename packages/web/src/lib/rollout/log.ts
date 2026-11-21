@@ -1,4 +1,4 @@
-﻿import { createDefaultStorage, isPlainObject, readJson, writeJson } from "../memory/storage.js";
+import { createDefaultStorage, isPlainObject, readJson, writeJson } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
 import {
   ROLLOUT_ITEM_TYPES,
@@ -78,7 +78,11 @@ export interface RolloutLog {
 
 function clip(text: string, max: number): string {
   const raw = String(text ?? "");
-  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+  // 按码点截断：raw.slice(0,max) 按 UTF-16 单元切，会切在 emoji / CJK 扩展字的代理对中间，
+  // 存进去一个孤立代理——回放面板和导出 JSON 里都显示成 U+FFFD 方块。
+  // 与 rollout/evidence.ts、fork.ts 的口径保持一致（省略号另算一位，looksTruncated 据此判断）。
+  const chars = Array.from(raw);
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : raw;
 }
 
 /** 按类型给各自的文本字段封顶：日志只保留够复盘的信息量。 */

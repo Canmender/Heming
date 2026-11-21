@@ -228,6 +228,25 @@ describe("auth + team API", () => {
     expect(new Set(got)).toEqual(new Set(ids));
   });
 
+  it("空 ?limit=（?limit= / ?limit=%20）走默认分页，不再只返回 1 条", async () => {
+    const a = await register(app, "aliceemptylimit");
+    const auth = { Authorization: `Bearer ${a.token}` };
+    for (let i = 0; i < 5; i += 1) {
+      await request(app)
+        .post("/api/conversations")
+        .set(auth)
+        .send({ agentId: SYSTEM_AGENT_ID, fresh: true, title: `会话 ${i}` });
+    }
+    // 空串／空白串是「没传」而非「limit=0」——应返回默认 30（这里全量 5 条），不是 1 条
+    const blank = await request(app).get("/api/conversations?limit=").set(auth);
+    const space = await request(app).get("/api/conversations?limit=%20").set(auth);
+    expect(blank.body).toHaveLength(5);
+    expect(space.body).toHaveLength(5);
+    // 数字参数语义不变：?limit=2 仍严格返回 2 条
+    const two = await request(app).get("/api/conversations?limit=2").set(auth);
+    expect(two.body).toHaveLength(2);
+  });
+
   it("d.128：DELETE 会话——成员 204、非成员 403、不存在 404", async () => {
     const a = await register(app, "alicethree");
     const auth = { Authorization: `Bearer ${a.token}` };

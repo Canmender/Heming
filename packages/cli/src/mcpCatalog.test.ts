@@ -55,6 +55,12 @@ describe("资源 URI（d.325）", () => {
     expect(relOfResourceUri(MCP_RESOURCE_PREFIX)).toBeNull();
     expect(relOfResourceUri(`${MCP_RESOURCE_PREFIX}/abs.md`)).toBeNull();
     expect(relOfResourceUri(`${MCP_RESOURCE_PREFIX}../secrets.md`)).toBeNull();
+    expect(relOfResourceUri(`${MCP_RESOURCE_PREFIX}a/../../secrets.md`)).toBeNull();
+  });
+
+  it("文件名里带两个点（a..b.md）是合法文件，不被当成 .. 越界误杀", () => {
+    const uri = resourceUriOf("docs/a..b.md");
+    expect(relOfResourceUri(uri)).toBe("docs/a..b.md");
   });
 
   it("按扩展名给 MIME", () => {

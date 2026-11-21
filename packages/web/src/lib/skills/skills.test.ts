@@ -217,6 +217,19 @@ describe("技能池 · CRUD 与绑定", () => {
     expect(pool.bindings("agent-a").pinned).toEqual([]);
     expect(pool.bindings("agent-a").disabled).toEqual([]);
   });
+
+  it("沉淀副本命名按码点截断，不在 emoji 中间劈出落单代理", () => {
+    const { pool } = freshPool();
+    const src = createSkill(pool, "a".repeat(27) + "😀" + "xyz");
+    const distilled = pool.distill(src.id);
+    // room=28 码点：27 个 a + 整颗 emoji（第 28 个码点），emoji 不被劈开。
+    expect(distilled.name).toBe("a".repeat(27) + "😀（沉淀）");
+    const hasLone = [...distilled.name].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return ch.length === 1 && code >= 0xd800 && code <= 0xdfff;
+    });
+    expect(hasLone).toBe(false);
+  });
 });
 
 describe("技能池 · 路由", () => {
@@ -363,6 +376,45 @@ describe("技能池 · 路由", () => {
     expect(matches[0].reason).toBe("用户置顶");
     expect(matches[0].skill.instructions.endsWith("…")).toBe(true);
     expect(formatSkillSection(matches).length).toBeLessThanOrEqual(300);
+  });
+
+  it("pinned 截断正文不在 emoji 代理对中间劈开（d.412 回归）", () => {
+    const { pool } = freshPool();
+    // 全 emoji 正文：每个字符占 2 个 UTF-16 码元，任何奇数切点都会切在代理对中间。
+    const pinned = createSkill(pool, "表情置顶", {
+      instructions: "😀".repeat(100),
+      triggers: ["表情置顶测试"],
+    });
+    pool.assign("agent-a", pinned.id);
+    pool.setBinding("agent-a", { pinned: [pinned.id] });
+    const hasLone = (s: string) => {
+      for (let i = 0; i < s.length; i += 1) {
+        const c = s.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const n = s.charCodeAt(i + 1);
+          if (!(n >= 0xdc00 && n <= 0xdfff)) return true;
+        } else if (c >= 0xdc00 && c <= 0xdfff) {
+          const p = s.charCodeAt(i - 1);
+          if (!(p >= 0xd800 && p <= 0xdbff)) return true;
+        }
+      }
+      return false;
+    };
+    // 扫一串预算：总能覆盖到原本会落在奇数切点、劈出落单代理的那一档。
+    let sawTruncated = false;
+    for (let budget = 80; budget <= 200; budget += 1) {
+      const matches = pool.route({
+        query: "表情置顶测试",
+        agentId: "agent-a",
+        charBudget: budget,
+      });
+      if (matches.length !== 1) continue;
+      const instr = matches[0].skill.instructions;
+      if (instr.endsWith("…")) sawTruncated = true;
+      expect(hasLone(instr)).toBe(false);
+      expect(formatSkillSection(matches).length).toBeLessThanOrEqual(budget);
+    }
+    expect(sawTruncated).toBe(true);
   });
 
   it("formatSkillSection：空匹配不注入标题，非空以 ## 已启用技能 开头", () => {

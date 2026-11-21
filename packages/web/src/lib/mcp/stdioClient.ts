@@ -33,6 +33,17 @@ export function hasStdioBridge(): boolean {
   return typeof stdioBridge() === "object";
 }
 
+/**
+ * 每个 stdio 客户端实例分配一个互不重叠的请求 id 起点（号段间隔 1000 万）。
+ * 模块级原子递增，避免同页两实例各自 Math.random 撞号（主进程会拒绝重复 in-flight id）。
+ */
+let requestIdBase = 1_000_000 + Math.floor(Math.random() * 1_000_000_000);
+function allocateRequestIdBase(): number {
+  const base = requestIdBase;
+  requestIdBase += 10_000_000;
+  return base;
+}
+
 export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
   const bridge = stdioBridge();
   if (!bridge) throw new Error("stdio 传输需要桌面端运行（浏览器不支持拉起本地进程）");
@@ -50,8 +61,11 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
    * 请求 id 由渲染层分配：用户中断时要用同一个 id 通知主进程取消。
    * 起点随机化：页面重载/重连后如果从 1 重新分配，可能和主进程里还没回的在途
    * 请求撞号（主进程会明确拒绝，但这等于白丢一次调用）。
+   *
+   * 起点在模块级原子递增：同页里两个客户端各持一个实例时，若各自随机取起点，
+   * 极小概率撞号；用一个模块计数器把每个实例的号段错开，彻底保证不重叠。
    */
-  let nextRequestId = 1_000_000 + Math.floor(Math.random() * 1_000_000_000);
+  let nextRequestId = allocateRequestIdBase();
 
   const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
     const requestId = nextRequestId++;

@@ -148,6 +148,29 @@ describe("MemoryStore：三层隔离与 Working", () => {
 });
 
 describe("MemoryStore：6 轮沉淀 Episodic", () => {
+  it("沉淀窗口里混进的中断轮次不进长期记忆（d.412 回归）", () => {
+    const store = newStore();
+    // 先塞 5 条中断轮次进 Working（appendTurn 不触发沉淀），再补足成功轮次。
+    // 旧版 slice(-6) 会把第一条 partial 取进窗口，把它的用户文本写进情景摘要。
+    for (let i = 0; i < 5; i++) {
+      store.appendTurn({
+        conversationId: "conv-1",
+        agentId: "agent-1",
+        userText: `PARTIAL-user-${i}`,
+        assistantText: "被打断",
+        partial: true,
+      });
+    }
+    for (let i = 0; i < SEDIMENT_EVERY; i++) {
+      store.recordTurn("agent-1", "conv-1", `OK-user-${i}`, `OK-asst-${i}`);
+    }
+    const epis = store.episodic("agent-1");
+    expect(epis.length).toBeGreaterThan(0);
+    for (const item of epis) {
+      expect(item.summary).not.toContain("PARTIAL-user");
+    }
+  });
+
   it("每 6 轮成功对话沉淀 1 条；12 轮 2 条", () => {
     const store = newStore();
     for (let i = 1; i <= 6; i++) {
@@ -247,6 +270,24 @@ describe("MemoryStore：Semantic 去重与上限", () => {
     expect(list[0].value).toBe("阿禾");
     expect(list[0].confidence).toBe(0.9);
     expect(list[0].source).toBe("explicit");
+  });
+
+  it("语义记忆 value 按码点截断，不在 emoji 代理对中间劈出落单代理（d.412 回归）", () => {
+    const store = newStore();
+    // 499 个普通字 + 1 个 emoji = 500 个码点，但 UTF-16 长度是 501。
+    const value = "a".repeat(499) + "😀";
+    const entry = store.upsertSemantic({ agentId: "agent-1", key: "截断", value, source: "manual" });
+    expect([...entry.value]).toHaveLength(500);
+    expect(entry.value.endsWith("😀")).toBe(true);
+    const units = entry.value.split("").map((u) => u.charCodeAt(0));
+    const lone = units.some((c, i) => {
+      const high = c >= 0xd800 && c <= 0xdbff;
+      const low = c >= 0xdc00 && c <= 0xdfff;
+      if (high) return !(units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff);
+      if (low) return !(units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff);
+      return false;
+    });
+    expect(lone).toBe(false);
   });
 
   it("不同 key 各自成条；同键 upsert 保留 pinned", () => {

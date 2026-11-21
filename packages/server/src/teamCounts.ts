@@ -10,7 +10,7 @@ import type { TeamBriefCounts, TeamTask } from "@heming/shared";
  * - 只统计「未完成」与「已完成」两类，不猜别的状态；
  * - 逾期 = 未完成且截止时间已过（没定截止的不算）；
  * - 待认领 = 未完成且没人认领；
- * - 被前置卡住 = 未完成且前置里还有没做完的（前置被删的情况已在删除时清掉）。
+ * - 被前置卡住 = 未完成且前置里还有没做完的；前置不存在（历史/导入脏数据）不算卡住。
  */
 export function summarizeTeamTasks(
   tasks: readonly TeamTask[],
@@ -38,7 +38,14 @@ export function summarizeTeamTasks(
       const at = Date.parse(task.dueAt);
       if (!Number.isNaN(at) && at < now) overdue += 1;
     }
-    if ((task.blockedBy ?? []).some((id) => byId.get(id)?.status !== "done")) {
+    if (
+      (task.blockedBy ?? []).some((id) => {
+        const blocker = byId.get(id);
+        // 不存在的 blocker（历史/导入的脏数据）不算「被阻塞」：?.status !== "done"
+        // 会把缺失项判成阻塞，和 web 侧 teamSummary 的口径不一致。
+        return blocker !== undefined && blocker.status !== "done";
+      })
+    ) {
       blocked += 1;
     }
   }

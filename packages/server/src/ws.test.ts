@@ -7,7 +7,7 @@ import WebSocket from "ws";
 import type { Store } from "./store.js";
 import { startServer } from "./index.js";
 import { issueToken } from "./auth.js";
-import { publishBroadcast } from "./events.js";
+import { broadcastListenerCount, publishBroadcast } from "./events.js";
 import type { WsServerEvent } from "@heming/shared";
 import { SYSTEM_AGENT_ID } from "@heming/shared";
 
@@ -294,6 +294,27 @@ describe("agent 流式", () => {
     ws.close();
   });
 
+  it("agentId 与会话助手不符时 chunk/error 也被拒（伪造助手流，d.412 回归）", async () => {
+    const ws = await connect(aliceToken);
+    for (const [type, extra] of [
+      ["agent_chunk", { text: "冒名" }],
+      ["agent_error", { code: "provider_error", message: "冒名" }],
+    ] as const) {
+      const ev = nextEvent(ws);
+      ws.send(
+        JSON.stringify({
+          type,
+          conversationId: convId,
+          agentId: "other-agent",
+          streamId: "s-mismatch",
+          ...extra,
+        }),
+      );
+      expect(await ev).toMatchObject({ type: "agent_error", code: "forbidden", message: "agent mismatch" });
+    }
+    ws.close();
+  });
+
   it("非成员 chunk 被拒；空 finish 被拒", async () => {
     const stranger = await connect(bobToken);
     let ev = nextEvent(stranger);
@@ -403,6 +424,41 @@ describe("消息删除的跨端广播（d.298）", () => {
     outsider.close();
     await waitClose(member);
     await waitClose(outsider);
+  });
+});
+
+describe("关服生命周期（热重启/测试反复 start 不泄漏）", () => {
+  it("ctx.close() 退订广播监听器（不再堆积指向旧 store 的订阅）", async () => {
+    const dbDir = mkdtempSync(join(tmpdir(), "heming-ws-close-"));
+    const before = broadcastListenerCount();
+    const local = await startServer(0, undefined, join(dbDir, "t.db"));
+    expect(broadcastListenerCount()).toBe(before + 1);
+    await local.close();
+    // 回归：以前从不 close wss，广播订阅只在 wss 的 "close" 事件退订 → 永久 +1。
+    expect(broadcastListenerCount()).toBe(before);
+    rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("有活动 WS 连接时 ctx.close() 仍能及时完成（不再被吊住）", async () => {
+    const dbDir = mkdtempSync(join(tmpdir(), "heming-ws-hang-"));
+    const local = await startServer(0, undefined, join(dbDir, "t.db"));
+    const ws = new WebSocket(`ws://127.0.0.1:${local.port}/api/ws`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    let closed = false;
+    const closeP = local.close().then(() => {
+      closed = true;
+    });
+    await Promise.race([
+      closeP,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("ctx.close() 被活动 WS 吊住")), 1000)),
+    ]);
+    expect(closed).toBe(true);
+    // close() 里已 terminate 客户端，等它真正关闭即可（不依赖这里，仅清理）。
+    await waitClose(ws);
+    rmSync(dbDir, { recursive: true, force: true });
   });
 });
 

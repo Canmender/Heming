@@ -54,7 +54,9 @@ export interface RejectReason {
 }
 
 function clip(value: string): string {
-  return value.length > 40 ? `${value.slice(0, 40)}…` : value;
+  // 按码点截断，避免把 emoji 的代理对劈成落单字符刷到界面上
+  const chars = Array.from(value);
+  return chars.length > 40 ? `${chars.slice(0, 40).join("")}…` : value;
 }
 
 /**

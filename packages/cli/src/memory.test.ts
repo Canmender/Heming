@@ -19,6 +19,7 @@ import {
   loadCliMemory,
   memoryPath,
   memorySection,
+  normalizeMemoryText,
   parseCliMemory,
   recallCliMemory,
   removeCliMemory,
@@ -107,6 +108,27 @@ describe("parseCliMemory", () => {
     expect(parsed).not.toBeNull();
     expect(parsed!).toHaveLength(CLI_MEMORY_MAX_ENTRIES);
     expect(parsed![parsed!.length - 1]!.text).toBe(`第 ${CLI_MEMORY_MAX_ENTRIES + 4} 条`);
+  });
+});
+
+describe("normalizeMemoryText", () => {
+  it("超长截断不劈开 emoji 的代理对，也不留孤立半截", () => {
+    // 长度压到上限时截断点正好落在 emoji 的高/低代理之间：旧的按码元硬切会留下
+    // 一个孤立高代理（0xd83d），写进 memory.json 再注入提示词就是非法 Unicode。
+    // 修复后退一格、把没截完整的 emoji 整个丢掉。
+    const text = "a".repeat(CLI_MEMORY_MAX_TEXT - 2) + "😀" + "b".repeat(10);
+    const out = normalizeMemoryText(text);
+    expect(out.endsWith("…")).toBe(true);
+    // 省略号之前必须是完整码点：既不是孤立高代理，也不是孤立低代理。
+    const before = out.slice(0, -1).at(-1)!;
+    const cp = before.charCodeAt(0);
+    expect(cp >= 0xd800 && cp <= 0xdfff).toBe(false);
+    expect(out).toBe("a".repeat(CLI_MEMORY_MAX_TEXT - 2) + "…");
+  });
+
+  it("边界恰好落在 emoji 前的普通字符上时正常截断", () => {
+    const out = normalizeMemoryText("a".repeat(CLI_MEMORY_MAX_TEXT + 10));
+    expect(out).toBe("a".repeat(CLI_MEMORY_MAX_TEXT - 1) + "…");
   });
 });
 

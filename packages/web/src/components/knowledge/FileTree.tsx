@@ -208,10 +208,10 @@ export function FileTree({
               openMenu(entry, e.clientX, e.clientY);
             }}
             onKeyDown={(e) => onRowKeyDown(e, entry)}
-            className={`flex min-h-[26px] w-full items-center gap-1.5 rounded-sm py-[3px] pr-1 text-left text-ui-sm transition-colors ${
+            className={`flex min-h-[26px] w-full items-center gap-1.5 rounded-sm py-[3px] pr-1 text-left text-ui-md transition-colors ${
               active ? "bg-subtle-2 font-medium text-ink" : "text-body hover:bg-subtle-3 hover:text-ink"
             }`}
-            style={{ paddingLeft: 6 + depth * 13 }}
+            style={{ paddingLeft: 6 + depth * 15 }}
           >
             {dir ? (
               <ChevronIcon
@@ -220,7 +220,7 @@ export function FileTree({
                 className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
               />
             ) : (
-              <span className="w-[11px] shrink-0" />
+              <span className="w-[13px] shrink-0" />
             )}
             <EntryIcon entry={entry} />
             <span className="truncate">{dir ? entry.name : baseName(entry.rel)}</span>
@@ -266,7 +266,7 @@ export function FileTree({
       disabled={!action}
       title={action ? undefined : disabledHint}
       onClick={action ?? undefined}
-      className={`flex w-full items-center rounded-sm px-2.5 py-1 text-left text-ui-sm ${
+      className={`flex w-full items-center rounded-sm px-2.5 py-1 text-left text-ui-md ${
         action
           ? "text-ink hover:bg-subtle-3"
           : "cursor-not-allowed text-muted disabled:opacity-100"
@@ -279,7 +279,7 @@ export function FileTree({
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 px-2 pb-1">
-        <span className="ui-micro text-muted">文件</span>
+        <span className="ui-body-sm text-muted">文件</span>
         <button
           type="button"
           aria-label="新建笔记（库根）"

@@ -176,6 +176,29 @@ test("同一进程多次崩溃不互相覆盖（各自一份文件）", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("候选序号用尽（1000 个都被占）也绝不返回已占用的文件名", () => {
+  // 用假 fs 把所有候选都判为已占用，避免真造 1000 个文件。
+  // uniqueLogPath 的契约是「永不覆盖已有日志」：全部占用时也要返回最后一个未试过的序号。
+  const seen = [];
+  const fsStub = {
+    mkdirSync() {},
+    existsSync(file) {
+      seen.push(file);
+      return true; // 每个候选都被占
+    },
+    appendFileSync() {},
+  };
+  const file = writeCrashLog("uncaughtException", new Error("boom"), undefined, {
+    fs: fsStub,
+    logDir: "C:\\fake",
+    pid: 4242,
+  });
+  const lastName = path.basename(file);
+  // 最后一个被测试的候选 = 最终返回的，且不能再是已被判占用的 -999。
+  assert.equal(path.basename(seen[seen.length - 1]), lastName);
+  assert.match(lastName, /-1000\.log$/, `序号用尽时应落到 -1000，而不是覆盖 -999：${lastName}`);
+});
+
 test("日志文件名不含冒号（Windows 文件名不允许）", () => {
   const dir = tmpDir("colon");
   const file = writeCrashLog("uncaughtException", new Error("x"), undefined, { logDir: dir });

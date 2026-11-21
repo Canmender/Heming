@@ -9,6 +9,49 @@
 @config "../tailwind.config.js";
 
 /*
+ * ── 自有字体（视觉重构 · Editorial Ink）────────────────────────────────
+ *
+ * 此前全站是纯系统字体栈，没有任何字形识别度——同样的信息量，观感却像「默认模板」。
+ * 这里本地内置一套拉丁展示/正文字体（Instrument Sans，可变字重 400–700）与一套
+ * 等宽字体（DM Mono 400/500），CJK 继续回落到系统字体（字体文件只覆盖拉丁，
+ * 中文字形交给 PingFang / 微软雅黑，避免下载数 MB 的中文字库）。
+ *
+ * 为什么本地自带而不是 Google Fonts CDN：桌面端是 file:// 加载，离线必须可用；
+ * 三个 woff2 合计约 60 KB，纳入构建产物不会拖慢启动。
+ * unicode-range 只圈拉丁，让中文自动走后面的 CJK 栈，不会被拉丁字体的缺字框替换。
+ */
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./assets/fonts/instrument-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "DM Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/dm-mono-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "DM Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/dm-mono-500-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/*
  * ── 字体族 token（d.68 · 工作流 B）────────────────────────────────────
  *
  * 只做「中文桌面字体栈」的收口，不加载任何外部字体（应用离线运行、桌面端是
@@ -192,16 +235,16 @@
   /* 第三个指标（首字）用琥珀：与蓝、蓝绿都不同色相，且不是「告警红」——首字慢是
      体验问题，不是错误。暗色版对应在下方 :root[data-theme="dark"] 里。 */
   --chart-3: #c2761b;
-  /* 第四个指标（花费）用紫：钱的量级和请求数/Token/首字是四件事，颜色也别混。 */
-  --chart-4: #7b5bd6;
+  /* 第四个指标（花费）用铜棕：钱的量级和另外三件事分开；不用紫/粉（AI 套路色）。 */
+  --chart-4: #9a5a33;
   --chart-grid: #e4e7ec;
   /* 图表轴标签：#98a2b3 在白底上只有 2.4:1，读不出具体刻度；压到 #5c6673 ≈ 5.7:1。 */
   --chart-label: #5c6673;
-  --avatar-1: #7c6bd6;
+  --avatar-1: #9a5a33;
   --avatar-2: #2f6feb;
   --avatar-3: #0f9d8a;
-  --avatar-4: #d97706;
-  --avatar-5: #db2777;
+  --avatar-4: #b45309;
+  --avatar-5: #1f6f54;
   --avatar-6: #4b5563;
   --info: #2f6feb;
   --info-soft: #e8f1ff;
@@ -215,6 +258,14 @@
   /* 浮层投影只留一级（d.140 R2）：此前 card / overlay / float / xl / plugin 五套并存，
      页面里叠起来深浅不一。规则改为「卡片靠描边、浮层靠这一层」。 */
   --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.14);
+  /* 细滚动条走 token（暗色有单独一套，见下方 [data-theme="dark"]）。 */
+  --scrollbar-thumb: #d0d0d0;
+  --scrollbar-thumb-hover: #a8a8a8;
+  /* 编辑感层次：铜色竖线 + 极淡的暖底面，给「首页重点区 / 空态」做锚点。
+     独立于用户可选主题色——默认主题色是墨黑，若跟着它走就又退回近单色的灰底。 */
+  --editorial-rule: #9a5a33;
+  --editorial-surface: #fdfbf9;
+  --editorial-on-ink: #d99a6c;
   --warn-soft: #fffaf2;
   --warn-line: #fde6c8;
   --success-soft: #f4fbf6;
@@ -222,14 +273,14 @@
   /* 控制台输出：两套主题都保持深底（终端语义），亮色下也不跟随白底 */
   --console-bg: #111214;
   --console-ink: #e8e8e8;
-  /* 中文字体栈（d.68）：纯系统字体，不加载外部字体；理由见文件顶部 @theme 段。
-     顺序是「拉丁在前、CJK 在后」：Windows 上让 Segoe UI 管英文/数字（字宽、字重更稳），
-     中文回落到 Microsoft YaHei UI。纯 CJK 优先会让英文被中文字体接管，观感明显变差。 */
-  --heming-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui,
-    sans-serif;
-  --heming-font-mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas,
-    "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Courier New", monospace;
+  /* 字体栈（视觉重构 · Editorial Ink）：拉丁用本地自带的 Instrument Sans / DM Mono，
+      CJK 仍走系统字体（PingFang SC / 微软雅黑）——顺序「拉丁在前、CJK 在后」，
+      Instrument Sans 只覆盖拉丁，中文自动落到后面的 CJK 字体，不会出现缺字框。 */
+  --heming-font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC",
+    system-ui, sans-serif;
+  --heming-font-mono: "DM Mono", ui-monospace, "JetBrains Mono", "Cascadia Code", "Cascadia Mono",
+    Consolas, "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Courier New", monospace;
   color-scheme: light;
 }
 
@@ -271,14 +322,14 @@
   --chart-1: #7aa2ff;
   --chart-2: #4fd8c0;
   --chart-3: #e0a75a;
-  --chart-4: #a48bf0;
+  --chart-4: #d99a6c;
   --chart-grid: #303339;
   --chart-label: #9aa0a8;
-  --avatar-1: #9a8cf0;
+  --avatar-1: #d99a6c;
   --avatar-2: #6f9bff;
   --avatar-3: #3fbfa9;
   --avatar-4: #e8a33d;
-  --avatar-5: #ee7ab0;
+  --avatar-5: #4fd8c0;
   --avatar-6: #8b929c;
   --info: #8db4ff;
   /* 暗色语义底是「亮色」的（#ff8a80 / #6bd08a / #f0b24a），白字在上面全是 1.7–2.3:1。
@@ -296,6 +347,11 @@
   --success-line: #24402e;
   --console-bg: #0c0d0f;
   --console-ink: #d8dbe0;
+  --scrollbar-thumb: #4a4d55;
+  --scrollbar-thumb-hover: #5a5e66;
+  --editorial-rule: #d99a6c;
+  --editorial-surface: #1e1b18;
+  --editorial-on-ink: #9a5a33;
   color-scheme: dark;
 }
 
@@ -506,7 +562,7 @@ samp {
  */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #d0d0d0 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -519,7 +575,7 @@ samp {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #d0d0d0;
+  background-color: var(--scrollbar-thumb);
   border-radius: 999px;
   /* 上下各留 2px：滑块不顶到轨道两端，细条看着更利落 */
   border: 2px solid transparent;
@@ -527,7 +583,7 @@ samp {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #a8a8a8;
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 *::-webkit-scrollbar-corner {
@@ -800,9 +856,12 @@ samp {
     @apply min-h-9 gap-2 px-3;
   }
 
-  /* ── 空态 ── */
+  /* ── 空态 ──
+   * 全站统一为「编辑部式」左对齐：标题靠左、说明在下方，靠字号与留白形成层级，
+   * 不再居中堆叠成「大标题 + 小字 + 按钮」的通用模板。
+   * 需要居中的少数场景（如全屏降级页）由 EmptyState 的 align="center" 显式加回。 */
   .ui-empty {
-    @apply flex flex-col items-center justify-center gap-2 px-6 py-10 text-center;
+    @apply flex flex-col items-start justify-center gap-2 px-6 py-10 text-left;
   }
   .ui-empty-title {
     @apply text-[13px] font-semibold leading-5 text-ink;
@@ -998,16 +1057,7 @@ samp {
   background-color: var(--surface);
 }
 
-/* 滚动条：暗色下滑块用中灰，避免浅灰细条在深底上发亮 */
-[data-theme="dark"] * {
-  scrollbar-color: #4a4d55 transparent;
-}
-[data-theme="dark"] *::-webkit-scrollbar-thumb {
-  background-color: #4a4d55;
-}
-[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
-  background-color: #5a5e66;
-}
+/* 滚动条：滑块颜色已由 --scrollbar-thumb 在两套 :root 里分别给出，无需再按主题覆盖。 */
 
 /* 骨架屏：浅灰底在暗色下会「发白」，换成层级灰 */
 [data-theme="dark"] .ui-skeleton {
@@ -1093,10 +1143,68 @@ samp {
   transform: translate(-50%, -50%);
 }
 
+/*
+ * ── 简约 · 大气 · 有层次 ────────────────────────────────────────────────
+ * 层次靠「字号差 + 留白 + 字重」建立，不靠装饰线或色块：
+ *   · .ui-stat-label：统计卡的等宽栏目名，铜色是整屏唯一点睛；
+ *   · .ui-counter：数字入场落位一次（taste 抽到的 counter-roll），reduced-motion 关闭。
+ * .ui-eyebrow / .ui-rule-panel / .ui-eyebrow-inverse 为早期实验的兼容类，现已不再使用。
+ */
+.ui-eyebrow,
+.ui-stat-label {
+  font-family: var(--heming-font-mono);
+  font-size: var(--text-ui-xs);
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+/* 数字上方的栏目名保留一点铜：整屏唯一的强调色，克制地点一下即可。 */
+.ui-stat-label {
+  color: var(--editorial-rule);
+}
+.ui-eyebrow-inverse {
+  color: var(--editorial-on-ink);
+}
+
+/* 面板退成「无框、只留极淡暖底」：去掉原来的 3px 竖线与描边，
+   需要时由内容自身的字号/间距建立层次。 */
+.ui-rule-panel {
+  position: relative;
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.ui-rule-panel::before {
+  content: none;
+}
+
+/* 数字落位：只做一次，位移 + 轻微虚化收住，像里程表拨到位；不改布局盒模型。 */
+.ui-counter {
+  display: inline-block;
+  animation: ui-counter-roll var(--transition-duration-slow) var(--ease-out-soft) both;
+}
+@keyframes ui-counter-roll {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
 /* 说明（d.124）：原来的 `.rta-hit`（列表行 hover 抬升 + 裸阴影）与 `.rta-segment`
  * 已删除——行不必抬升，卡片抬升走 `.ui-card-interactive`，分段控件走 `.ui-segment`，
  * 阴影统一由 token 提供（暗色也有对应值）。保留上面三条纯动效类。 */
 @media (prefers-reduced-motion: reduce) {
+  .ui-counter {
+    animation: none !important;
+  }
   .rta-flow,
   .rta-live-dot,
   .rta-enter {

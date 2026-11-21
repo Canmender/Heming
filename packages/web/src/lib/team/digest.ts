@@ -34,7 +34,10 @@ export interface DigestOptions {
 function oneLine(text: string | undefined | null, max = 60): string {
   const flat = (text ?? "").replace(/\s+/g, " ").trim();
   if (flat === "") return "";
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  // 按码点截断：slice 按 UTF-16 单元切，emoji 这类增补字符会被劈成落单代理，喂给模型就是乱码。
+  // 与同目录 taskResult.ts / assignedTasks.ts / teamBrief.ts 的 clip 口径一致。
+  const chars = [...flat];
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : flat;
 }
 
 function dayText(iso: string | null | undefined): string {

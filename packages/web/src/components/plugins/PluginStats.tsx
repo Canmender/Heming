@@ -1,4 +1,5 @@
 import type { CapabilityStats } from "./viewModel.js";
+import { Stat } from "../ui/Stat.js";
 
 /**
  * 头部能力概览（d.64 · T2；2026-11 审计 F5 重排）。
@@ -58,18 +59,14 @@ export function PluginStats({ stats }: { stats: CapabilityStats }) {
         </p>
       </div>
 
-      <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {CARDS.map((card) => (
-          <li
-            key={card.key}
-            aria-label={`统计 ${card.label}`}
-            className="rounded-lg border border-line-soft bg-surface px-2.5 py-1.5"
-          >
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-num-sm font-semibold ui-numeric">{card.value(stats)}</span>
-              <span className="ui-caption">{card.label}</span>
-            </div>
-            <div className="truncate ui-micro">{card.hint(stats)}</div>
+          <li key={card.key} aria-label={`统计 ${card.label}`} className="min-w-0">
+            <Stat
+              label={card.label}
+              value={card.value(stats)}
+              hint={card.hint(stats)}
+            />
           </li>
         ))}
       </ul>

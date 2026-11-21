@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
-import { isLoopbackAddress, normalizeRoute } from "./obs.js";
+import { createObservability, isLoopbackAddress, normalizeRoute } from "./obs.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -43,6 +43,41 @@ describe("可观测性纯函数", () => {
     expect(isLoopbackAddress("8.8.8.8")).toBe(false);
     expect(isLoopbackAddress("::ffff:8.8.8.8")).toBe(false);
     expect(isLoopbackAddress(undefined)).toBe(false);
+  });
+
+  it("延迟 p50/p95 不会超过 max（分桶上界钳到观测最大值）", () => {
+    // 回归：percentile 以前直接返回桶上界（如 1ms），而 max 是精确观测值；
+    // 单笔耗时远低于桶上界时（0.2ms → max 四舍五入为 0）会报出 p50=1>max=0，
+    // 一个统计上不可能的指标。用可控时钟构造 0.2ms 的请求。
+    let clock = 0n;
+    const hrtimeSpy = vi.spyOn(process.hrtime, "bigint").mockImplementation(() => {
+      clock += 200_000n; // 200_000ns = 0.2ms（start 与 finish 两次调用相差 0.2ms）
+      return clock;
+    });
+    try {
+      const obs = createObservability({ sink: () => {} });
+      const next = vi.fn();
+      for (let i = 0; i < 4; i += 1) {
+        const handlers: Record<string, Array<() => void>> = {};
+        const req = { method: "GET", path: "/api/health", header: () => "" } as never;
+        const res = {
+          statusCode: 200,
+          setHeader: () => {},
+          on: (event: string, cb: () => void) => {
+            (handlers[event] ??= []).push(cb);
+          },
+        } as never;
+        obs.middleware(req, res, next);
+        for (const cb of handlers.finish ?? []) cb();
+      }
+      const snap = obs.snapshot();
+      expect(snap.latencyMs.samples).toBe(4);
+      expect(snap.latencyMs.max).toBe(0); // Math.round(0.2)
+      expect(snap.latencyMs.p50).toBeLessThanOrEqual(snap.latencyMs.max);
+      expect(snap.latencyMs.p95).toBeLessThanOrEqual(snap.latencyMs.max);
+    } finally {
+      hrtimeSpy.mockRestore();
+    }
   });
 });
 

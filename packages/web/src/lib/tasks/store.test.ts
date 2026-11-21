@@ -1,4 +1,4 @@
-﻿import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
 import { useNotificationStore } from "../../store/notifications.js";
 import type { StorageLike } from "../memory/types.js";
@@ -168,6 +168,29 @@ describe("useTaskStore 生命周期", () => {
     expect(task.status).toBe("running");
     expect(task.error).toBeUndefined();
     expect(task.endedAt).toBeUndefined();
+  });
+
+  it("reopen 清掉上一轮的 result/evidence，重试没给结果时不留旧结论", () => {
+    const id = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: "x",
+      now: 1,
+    });
+    useTaskStore.getState().settle(id, {
+      status: "failed",
+      result: "STALE",
+      error: "断线",
+      evidence: { files: ["notes/a.md"], commands: [] },
+      now: 2,
+    });
+    useTaskStore.getState().reopen(id, 3);
+    // 新一轮收尾不带 result —— 不能把上一轮的 "STALE" 当成这一轮的结论。
+    useTaskStore.getState().settle(id, { status: "done", now: 4 });
+    const task = useTaskStore.getState().tasks[0];
+    expect(task.result).toBeUndefined();
+    expect(task.evidence).toBeUndefined();
   });
 
   it("newest first + 删除/清空已结束", () => {

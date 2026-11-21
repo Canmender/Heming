@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
 import type { StorageLike } from "../memory/types.js";
 import { IMAGE_TOKEN_COST, estimateRowTokens, estimateRowsTokens, estimateTokens } from "./tokens.js";
@@ -11,7 +11,9 @@ import {
   normalizeContextSettings,
   saveContextSettings,
 } from "./settings.js";
-import { SUMMARY_CACHE_LIMIT, SummaryCache } from "./store.js";
+import { SUMMARY_CACHE_BYTES, SUMMARY_CACHE_LIMIT, SummaryCache, summaryDataByteLength } from "./store.js";
+import { utf8Length } from "../memory/storage.js";
+import type { SummaryCacheData } from "./types.js";
 import { prepareHistory } from "./history.js";
 
 /**
@@ -78,6 +80,82 @@ describe("estimateTokens：零依赖、CJK 感知", () => {
   it("宁高估：任何非空串至少 1 token", () => {
     expect(estimateTokens(" ")).toBe(1);
     expect(estimateTokens("\n")).toBe(1);
+  });
+
+  // d.412.4.183：estimateTokens 从 for...of 改成下标循环后，用一个独立的参考实现
+  // （就是原来的算法）钉住「口径逐字节不变」——覆盖全 BMP、补充平面边界、孤立代理
+  // 与随机混合串，防止将来再改实现时悄悄改变估算口径（那会让压缩切点漂移）。
+  it("下标循环版与 for...of 参考实现逐字节等价（d.412.4.183）", () => {
+    const isWide = (cp: number): boolean =>
+      (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0x303f) ||
+      (cp >= 0x3041 && cp <= 0x33ff) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) ||
+      (cp >= 0x4e00 && cp <= 0x9fff) ||
+      (cp >= 0xa000 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe30 && cp <= 0xfe4f) ||
+      (cp >= 0xff00 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x20000 && cp <= 0x3ffff);
+    const reference = (text: string): number => {
+      if (!text) return 0;
+      let tokens = 0;
+      let ascii = 0;
+      let other = 0;
+      const flush = () => {
+        tokens += Math.ceil(ascii / 4) + Math.ceil(other / 2);
+        ascii = 0;
+        other = 0;
+      };
+      for (const ch of text) {
+        const cp = ch.codePointAt(0) as number;
+        if (isWide(cp)) {
+          flush();
+          tokens += 1;
+        } else if (cp < 0x80) {
+          ascii += 1;
+        } else {
+          other += 1;
+        }
+      }
+      flush();
+      return tokens;
+    };
+
+    // 全 BMP 逐码点
+    for (let cp = 0; cp < 0x10000; cp += 1) {
+      const s = String.fromCharCode(cp);
+      expect(estimateTokens(s), `BMP U+${cp.toString(16)}`).toBe(reference(s));
+    }
+    // 补充平面边界 + 孤立代理
+    const special = [0x10000, 0x1f600, 0x20000, 0x2ffff, 0x30000, 0x3ffff, 0x40000, 0x10ffff];
+    for (const cp of special) {
+      const s = String.fromCodePoint(cp);
+      expect(estimateTokens(s), `astral U+${cp.toString(16)}`).toBe(reference(s));
+    }
+    for (const s of ["\ud800", "\udc00", "a\ud800b", "\ud800\ud800", "x\udc00y"]) {
+      expect(estimateTokens(s)).toBe(reference(s));
+    }
+    // 随机混合串（固定种子，可复现）
+    let seed = 20261121;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let k = 0; k < 3000; k += 1) {
+      let s = "";
+      const len = 1 + Math.floor(rnd() * 40);
+      for (let j = 0; j < len; j += 1) {
+        const r = rnd();
+        let cp: number;
+        if (r < 0.4) cp = 32 + Math.floor(rnd() * 95);
+        else if (r < 0.7) cp = 0x4e00 + Math.floor(rnd() * 0x100);
+        else if (r < 0.85) cp = 0x3041 + Math.floor(rnd() * 0x100);
+        else if (r < 0.95) cp = 0x1f300 + Math.floor(rnd() * 0x100);
+        else cp = 1 + Math.floor(rnd() * 0x3000);
+        s += String.fromCodePoint(cp);
+      }
+      expect(estimateTokens(s), `random #${k}`).toBe(reference(s));
+    }
   });
 });
 
@@ -217,6 +295,27 @@ describe("planContext：预算切分", () => {
     expect(planContext(rows, { budgetTokens: -100, keepRecentTurns: 8 }).recent).toEqual([]);
     expect(planContext(rows, { budgetTokens: Number.NaN, keepRecentTurns: 8 }).recent).toEqual([]);
   });
+
+  it("切点按整条成本算：正文短但 tool_calls 巨大的消息不能当成便宜行塞进 recent（d.412 回归）", () => {
+    // assistant 正文只有「好的」，但 tool_calls.arguments 4000 字符 ≈ 1000 token。
+    // 旧口径只看 content，把它当 2 token 的便宜行保留 → recent 实际 1000+ token 远超预算。
+    const heavy = msg("assistant", "好的");
+    heavy.tool_calls = [
+      {
+        id: "call_1",
+        type: "function" as const,
+        function: { name: "f", arguments: "x".repeat(4000) },
+      },
+    ];
+    const rows = [msg("user", "问题"), heavy];
+
+    // 预算只够放一条便宜消息；超重的 assistant 行必须进 older（连同它的 user 轮）
+    const result = planContext(rows, { budgetTokens: 20, keepRecentTurns: 8, reservedTokens: 0 });
+    expect(result.recent).toEqual([]);
+    expect(result.older).toEqual(rows);
+    // 与对外报数口径一致：recent 的估算成本真的在预算内
+    expect(estimateRowsTokens(result.recent)).toBeLessThanOrEqual(20);
+  });
 });
 
 describe("planContext：keepRecentTurns 轮数上限", () => {
@@ -341,6 +440,13 @@ describe("deterministicSummary：零成本回落骨架", () => {
     expect(conclusion).toBe("第一句；甲；三");
     expect(out).not.toContain("第二句");
     expect(out).not.toContain("第四条");
+  });
+
+  it("英文句点作句末也能断首句，且不把小数/版本号劈开", () => {
+    const out = deterministicSummary([msg("assistant", "Done. Next step is to deploy.")]);
+    expect(out.split("\n")[2]).toBe("结论：Done");
+    const versioned = deterministicSummary([msg("assistant", "升级到 d.412.4 版本。然后重启。")]);
+    expect(versioned.split("\n")[2]).toBe("结论：升级到 d.412.4 版本");
   });
 
   it("助手回复无句末标点时截 80 字", () => {
@@ -534,6 +640,34 @@ describe("SummaryCache：本机摘要缓存", () => {
     expect(cache.fingerprint("c", a)).not.toBe(cache.fingerprint("c", b));
   });
 
+  it("指纹含工具调用与内容片：正文相同但 tool_calls 不同也不能复用旧摘要（d.412 回归）", () => {
+    const cache = new SummaryCache(new FakeStorage());
+    // 两条正文完全一样，但工具调用一个是读文件、一个是删文件——语义完全不同
+    const tool = (name: string, args: string) => [
+      { id: "call_1", type: "function" as const, function: { name, arguments: args } },
+    ];
+    const readHistory = [msg("user", "帮我看看"), { ...msg("assistant", "好的"), tool_calls: tool("read_file", '{"path":"/etc/passwd"}') }];
+    const deleteHistory = [msg("user", "帮我看看"), { ...msg("assistant", "好的"), tool_calls: tool("delete_file", '{"path":"important.txt"}') }];
+    expect(cache.fingerprint("c", readHistory)).not.toBe(cache.fingerprint("c", deleteHistory));
+    // tool_call_id / name 变化也要区分
+    const withCallId = [msg("user", "帮我看看"), { ...msg("assistant", "好的"), tool_call_id: "tc-1" }];
+    expect(cache.fingerprint("c", [msg("user", "帮我看看"), msg("assistant", "好的")])).not.toBe(cache.fingerprint("c", withCallId));
+    // 图片内容片与纯文本正文的指纹必须不同（同样 1 行、同样正文，只有内容片不同）
+    const textOnly = [{ ...msg("user", "abc") }];
+    const withImage = [{ ...msg("user", "abc"), contentParts: [{ type: "image" as const, mime: "image/png", data: "AAAA" }] }];
+    expect(cache.fingerprint("c", textOnly)).not.toBe(cache.fingerprint("c", withImage));
+  });
+
+  it("指纹含中间消息的 role：正文相同但助手/工具角色不同也不能复用旧摘要（d.412 回归）", () => {
+    const cache = new SummaryCache(new FakeStorage());
+    // 首末都是 user 且正文逐字相同，只有中间一条的 role 不同。
+    // 摘要按角色归类（用户意图/助手结论/工具输出），角色不同摘要就不同，
+    // 指纹必须区分开——否则缓存命中会把另一类角色的摘要套用过来。
+    const withAssistant = [msg("user", "开头"), msg("assistant", "中间正文"), msg("user", "结尾")];
+    const withTool = [msg("user", "开头"), msg("tool", "中间正文"), msg("user", "结尾")];
+    expect(cache.fingerprint("c", withAssistant)).not.toBe(cache.fingerprint("c", withTool));
+  });
+
   it(`每会话上限 ${SUMMARY_CACHE_LIMIT} 条：按 at 最旧先淘汰`, () => {
     const storage = new FakeStorage();
     const clock = makeClock();
@@ -617,6 +751,62 @@ describe("SummaryCache：本机摘要缓存", () => {
     expect(() => cache.set("conv-1", fp, "摘要")).not.toThrow();
     expect(cache.get("conv-1", fp)).toBe("摘要");
     expect(storage.map.size).toBe(0);
+  });
+
+  it("summaryDataByteLength 与 utf8Length(JSON.stringify) 逐字节一致（d.412.4.181 增量记账正确性）", () => {
+    const samples: SummaryCacheData[] = [
+      {},
+      { "conv-1": { fp1: { summary: "摘要", at: 1000 } } },
+      {
+        "会话-甲": {
+          a: { summary: "x".repeat(500), at: 1 },
+          "指纹|带\\引号\"": { summary: "中文😀emoji", at: 1234567890 },
+        },
+        conv2: { b: { summary: "", at: 0 }, c: { summary: "line\nbreak\t|\"{}", at: -5 } },
+      },
+    ];
+    for (const data of samples) {
+      expect(summaryDataByteLength(data)).toBe(utf8Length(JSON.stringify(data)));
+    }
+    // 多桶、多条目、随机长度再交叉验证一次
+    const big: SummaryCacheData = {};
+    for (let c = 0; c < 5; c++) {
+      const bucket: Record<string, { summary: string; at: number }> = {};
+      for (let f = 0; f < 7; f++) {
+        bucket[`fp-${c}-${f}`] = { summary: "字".repeat((c + f) * 3), at: (c * 7 + f) * 1000 };
+      }
+      big[`conv-${c}`] = bucket;
+    }
+    expect(summaryDataByteLength(big)).toBe(utf8Length(JSON.stringify(big)));
+  });
+
+  it("全局淘汰后：实际落盘字节 ≤ 上限，且淘汰的是最旧条目（顺序语义不变）", () => {
+    const storage = new FakeStorage();
+    const clock = makeClock();
+    const cache = new SummaryCache(storage, clock.now);
+    const big = "a".repeat(40_000);
+    const aFps: string[] = [];
+    for (let i = 0; i < SUMMARY_CACHE_LIMIT; i++) {
+      const fp = cache.fingerprint("conv-a", olderOf(i));
+      aFps.push(fp);
+      cache.set("conv-a", fp, `${i}-${big}`);
+      clock.tick();
+    }
+    const bFps: string[] = [];
+    for (let i = 0; i < SUMMARY_CACHE_LIMIT; i++) {
+      const fp = cache.fingerprint("conv-b", olderOf(50 + i));
+      bFps.push(fp);
+      cache.set("conv-b", fp, `b${i}-${big}`);
+      clock.tick();
+    }
+    // 新写入的 conv-b 末尾条目一定在；最旧的 conv-a[0] 已被淘汰
+    expect(cache.get("conv-b", bFps[bFps.length - 1])).toBe(`b${SUMMARY_CACHE_LIMIT - 1}-${big}`);
+    expect(cache.get("conv-a", aFps[0])).toBeUndefined();
+    // 落盘字节不超上限，且增量记账与真实序列化一致
+    const raw = storage.getItem(CONTEXT_KEYS.summaries)!;
+    expect(utf8Length(raw)).toBeLessThanOrEqual(SUMMARY_CACHE_BYTES);
+    const parsed = JSON.parse(raw) as SummaryCacheData;
+    expect(summaryDataByteLength(parsed)).toBe(utf8Length(raw));
   });
 });
 

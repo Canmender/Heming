@@ -28,6 +28,7 @@ import { hasOpenModal } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { Button } from "./components/ui/Button.js";
 import { PAGE_WIDTH_CLASS } from "./components/layout/PageShell.js";
+import { GlobalFocusRing } from "./components/a11y/GlobalFocusRing.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -236,6 +237,9 @@ export function App() {
 
   return (
     <>
+      {/* 焦点环样式常驻注入：旧导航拆掉后这条曾没人挂，键盘焦点在带 outline-hidden 的控件上不可见。
+          组件自身幂等（重复渲染也只注入一次），放在常驻壳里一次即可。 */}
+      <GlobalFocusRing />
       {/* 包一层仅为挂 inert：不加样式，AppShell 根节点自身的 h-screen 决定布局 */}
       <div ref={shellRef}>
         <AppShell

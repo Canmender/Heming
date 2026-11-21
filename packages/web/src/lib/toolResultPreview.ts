@@ -75,9 +75,11 @@ export function previewToolResult(
   const tail = tailLines > 0 ? lines.slice(-tailLines) : [];
   const hiddenLines = lines.length - head.length - tail.length;
   if (hiddenLines <= 0) return { preview: result, hiddenChars: 0, truncated: false };
-  const hiddenChars = lines
-    .slice(head.length, lines.length - tail.length)
-    .reduce((sum, line) => sum + line.length + 1, 0);
+  // 被藏起来的行 join("\n") 后的真实字符数：每行长度相加，行与行之间各有 1 个换行。
+  // 最后一条隐藏行与 tail 之间的换行不属于「被藏起来的内容」（它仍会出现在 preview 里），
+  // 所以行数减 1 个换行——旧实现每行都 +1，多算了一个，展示给用户和 hiddenChars 都偏大。
+  const hiddenRows = lines.slice(head.length, lines.length - tail.length);
+  const hiddenChars = hiddenRows.reduce((sum, line) => sum + line.length, 0) + Math.max(0, hiddenRows.length - 1);
   const middle = `…（中间还有 ${hiddenLines} 行 / ${hiddenChars} 字未显示）…`;
   const preview = [...head, middle, ...tail].join("\n");
   return { preview, hiddenChars, truncated: true };

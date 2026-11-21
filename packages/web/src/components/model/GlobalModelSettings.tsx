@@ -43,11 +43,17 @@ export function GlobalModelSettings({
   const [capValue, setCapValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const run = async (key: string, title: string, args: string[]) => {
+  const run = async (key: string, title: string, args: string[]): Promise<boolean> => {
     setBusy(key);
-    const ok = await onRun(title, args);
-    setBusy(null);
-    return ok;
+    // d.412 回归：onRun 抛错时必须解除 busy，否则所有控件永久禁用。
+    // 同时守住布尔契约：失败返回 false，不让拒绝从 async onClick 逃逸成未处理拒绝。
+    try {
+      return await onRun(title, args);
+    } catch {
+      return false;
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (

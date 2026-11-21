@@ -23,6 +23,9 @@ import type {
   TeamWorkspaceSnapshot,
   TeamBrief,
   WorkspaceTeam,
+  TeamKnowledgeDoc,
+  TeamDirectoryEntry,
+  TeamJoinRequest,
 } from "@heming/shared";
 
 /** 服务端存的一行团队用量（聚合前）：只有白名单维度与数字。 */
@@ -470,6 +473,7 @@ export interface Store {
     | "blocker_cycle"
     | "not_nudgeable"
     | "not_reviewable"
+    | "done_locked"
     | null;
   deleteTeamTask(teamId: string, taskId: string, actorId: string): boolean | "forbidden" | "not_found";
   /**
@@ -513,6 +517,67 @@ export interface Store {
     actorId: string,
     text: string,
   ): TeamTaskComment | "forbidden" | "not_found";
+
+  /* ───────────────── 团队知识库（用户显式发布；按 team_id 硬隔离） ───────────────── */
+
+  /** 列出团队知识文档：置顶优先、更新时间倒序；非成员返回 null（映射 404）。 */
+  listTeamKnowledge(teamId: string, actorId: string): TeamKnowledgeDoc[] | null;
+  /** 新建文档：非成员 null（404）；限制见 schema（Store 只做语义）。 */
+  createTeamKnowledge(
+    teamId: string,
+    actorId: string,
+    body: { title: string; content: string; sourceVault?: string | null; tags?: string[] },
+  ): TeamKnowledgeDoc | null;
+  /** 取单篇：非成员 null（404）。 */
+  getTeamKnowledge(teamId: string, actorId: string, docId: string): TeamKnowledgeDoc | null;
+  /**
+   * 改文档：非成员/文档不存在 null（404）；只有作者或团队 owner 可改，否则 "forbidden"（403）。
+   */
+  updateTeamKnowledge(
+    teamId: string,
+    actorId: string,
+    docId: string,
+    body: { title?: string; content?: string; tags?: string[] },
+  ): TeamKnowledgeDoc | "forbidden" | null;
+  /** 删除：权限口径同 update；成功返回 true。 */
+  deleteTeamKnowledge(teamId: string, actorId: string, docId: string): true | "forbidden" | null;
+  /**
+   * 全文搜索（trigram 子串命中，标题+正文）：非成员 null（404）。
+   * query <3 字符回退线性扫描（与 messages 搜索同口径）。
+   */
+  searchTeamKnowledge(teamId: string, actorId: string, query: string): TeamKnowledgeDoc[] | null;
+
+  /* ───────────────── 团队发现 + 加入申请（社交化加入，去 IM） ───────────────── */
+
+  /**
+   * 团队目录（发现）：只暴露元数据（id/name/goal/memberCount/createdAt），
+   * 不含成员名单/方案/任务/动态/知识文档——非成员可搜到团队存在，敏感数据仍按同队收口。
+   */
+  listTeamDirectory(query: string): TeamDirectoryEntry[];
+  /**
+   * 提交加入申请：团队不存在 null（404）；已是成员 "already_member"（409）；
+   * 已有待审申请 "already_pending"（409）；成功返回申请行。
+   */
+  createJoinRequest(
+    teamId: string,
+    userId: string,
+    message: string,
+  ): TeamJoinRequest | "already_member" | "already_pending" | null;
+  /** 我的申请（按时间倒序）；给「我申请加入的团队」列表用。 */
+  listMyJoinRequests(userId: string): TeamJoinRequest[];
+  /** 团队的申请列表（仅队长可见）；非成员 null（404），成员非队长 "forbidden"（403）。 */
+  listJoinRequests(teamId: string, actorId: string): TeamJoinRequest[] | "forbidden" | null;
+  /**
+   * 队长审批：非成员/申请不存在 null（404），成员非队长 "forbidden"（403），
+   * 申请已审 "already_reviewed"（409）。
+   * approve 时原子写入成员行（幂等：已在团队也算通过）+ 置申请 approved。
+   */
+  reviewJoinRequest(
+    teamId: string,
+    requestId: string,
+    actorId: string,
+    action: "approve" | "reject",
+  ): TeamJoinRequest | "forbidden" | "already_reviewed" | null;
   /** 幂等登记系统预设 agent（新库没有预设群后仍要能开「和小鸣」对话）。 */
   ensureSystemAgents(): void;
 }
@@ -610,6 +675,10 @@ export function createMemoryStore(): Store {
   /** 团队动态（d.273）：键 = teamId，值按时间升序；每团队只留最近 300 条。 */
   const MAX_TEAM_EVENTS = 300;
   const teamEvents = new Map<string, TeamEvent[]>();
+  /** 团队知识库文档：键 = docId（全局唯一 id），按 team_id 过滤隔离。 */
+  const teamKnowledge = new Map<string, TeamKnowledgeDoc>();
+  /** 加入申请：键 = requestId，按 team_id / user_id 过滤；UNIQUE 语义靠显式查重。 */
+  const teamJoinRequests = new Map<string, TeamJoinRequest>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -1195,7 +1264,18 @@ export function createMemoryStore(): Store {
       teams.delete(teamId);
       for (const [key, m] of [...teamMembers.entries()]) if (m.teamId === teamId) teamMembers.delete(key);
       for (const [id, p] of [...teamPlans.entries()]) if (p.teamId === teamId) teamPlans.delete(id);
-      for (const [id, t] of [...teamTasks.entries()]) if (t.teamId === teamId) teamTasks.delete(id);
+      // 先按本团队的 taskId 清讨论，再删任务：不建外键，显式级联（与 sqlite 侧同口径）
+      for (const [taskId, t] of [...teamTasks.entries()]) {
+        if (t.teamId !== teamId) continue;
+        teamTaskComments.delete(taskId);
+        teamTasks.delete(taskId);
+      }
+      // 团队动态：团队没了，事件流水一并清掉，避免留孤儿
+      teamEvents.delete(teamId);
+      // 团队知识库：删团队时级联清文档（不建外键，显式删；与 sqlite 侧同口径）
+      for (const [id, d] of [...teamKnowledge.entries()]) if (d.teamId === teamId) teamKnowledge.delete(id);
+      // 加入申请：团队没了，待审/历史申请一并清掉（不建外键，显式级联）
+      for (const [id, r] of [...teamJoinRequests.entries()]) if (r.teamId === teamId) teamJoinRequests.delete(id);
       return true;
     },
     addWorkspaceMember(teamId, actorId, username) {
@@ -1452,6 +1532,160 @@ export function createMemoryStore(): Store {
     );
   },
 
+  /* ───────────────── 团队知识库（内存实现） ───────────────── */
+
+  listTeamKnowledge(teamId, actorId) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    return [...teamKnowledge.values()]
+      .filter((d) => d.teamId === teamId)
+      .sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        const byTime = b.updatedAt.localeCompare(a.updatedAt);
+        return byTime !== 0 ? byTime : a.id.localeCompare(b.id);
+      })
+      .map((d) => ({ ...d, tags: [...d.tags] }));
+  },
+
+  createTeamKnowledge(teamId, actorId, body) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    const now = new Date().toISOString();
+    const doc: TeamKnowledgeDoc = {
+      id: randomUUID(),
+      teamId,
+      authorId: actorId,
+      title: body.title,
+      content: body.content,
+      sourceVault: body.sourceVault ?? null,
+      tags: (body.tags ?? []).slice(),
+      pinned: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    teamKnowledge.set(doc.id, doc);
+    return { ...doc, tags: [...doc.tags] };
+  },
+
+  getTeamKnowledge(teamId, actorId, docId) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    const doc = teamKnowledge.get(docId);
+    if (!doc || doc.teamId !== teamId) return null;
+    return { ...doc, tags: [...doc.tags] };
+  },
+
+  updateTeamKnowledge(teamId, actorId, docId, body) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    const doc = teamKnowledge.get(docId);
+    if (!doc || doc.teamId !== teamId) return null;
+    // 只有作者或团队 owner 可改
+    if (doc.authorId !== actorId && !isTeamOwner(teamId, actorId)) return "forbidden";
+    const next: TeamKnowledgeDoc = {
+      ...doc,
+      title: body.title ?? doc.title,
+      content: body.content ?? doc.content,
+      tags: body.tags ? body.tags.slice() : doc.tags,
+      updatedAt: new Date().toISOString(),
+    };
+    teamKnowledge.set(docId, next);
+    return { ...next, tags: [...next.tags] };
+  },
+
+  deleteTeamKnowledge(teamId, actorId, docId) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    const doc = teamKnowledge.get(docId);
+    if (!doc || doc.teamId !== teamId) return null;
+    if (doc.authorId !== actorId && !isTeamOwner(teamId, actorId)) return "forbidden";
+    teamKnowledge.delete(docId);
+    return true;
+  },
+
+  searchTeamKnowledge(teamId, actorId, query) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    const q = query.trim().toLowerCase();
+    if (q.length < 3) {
+      // 与 messages 搜索同口径：短查询回退线性扫描（前缀命中）
+      return [...teamKnowledge.values()]
+        .filter((d) => d.teamId === teamId)
+        .filter((d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map((d) => ({ ...d, tags: [...d.tags] }));
+    }
+    return [...teamKnowledge.values()]
+      .filter((d) => d.teamId === teamId)
+      .filter(
+        (d) =>
+          d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q) ||
+          d.tags.some((t) => t.toLowerCase().includes(q)),
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((d) => ({ ...d, tags: [...d.tags] }));
+  },
+
+  listTeamDirectory(query) {
+    const q = query.trim().toLowerCase();
+    return [...teams.values()]
+      .filter((t) => !q || t.name.toLowerCase().includes(q) || t.goal.toLowerCase().includes(q))
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        goal: t.goal,
+        memberCount: [...teamMembers.values()].filter((m) => m.teamId === t.id).length,
+        createdAt: t.createdAt,
+      }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+  createJoinRequest(teamId, userId, message) {
+    if (!teams.has(teamId)) return null;
+    if (teamMembers.has(teamMemberKey(teamId, userId))) return "already_member";
+    // 已有待审申请：不允许重复提交（已审的可重新申请）
+    for (const r of teamJoinRequests.values()) {
+      if (r.teamId === teamId && r.userId === userId && r.status === "pending") return "already_pending";
+    }
+    const req: TeamJoinRequest = {
+      id: randomUUID(),
+      teamId,
+      userId,
+      message,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      reviewedAt: null,
+    };
+    teamJoinRequests.set(req.id, req);
+    return { ...req };
+  },
+  listMyJoinRequests(userId) {
+    return [...teamJoinRequests.values()]
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => ({ ...r }));
+  },
+  listJoinRequests(teamId, actorId) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    if (!isTeamOwner(teamId, actorId)) return "forbidden";
+    return [...teamJoinRequests.values()]
+      .filter((r) => r.teamId === teamId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((r) => ({ ...r }));
+  },
+  reviewJoinRequest(teamId, requestId, actorId, action) {
+    if (!visibleTeam(teamId, actorId)) return null;
+    if (!isTeamOwner(teamId, actorId)) return "forbidden";
+    const req = teamJoinRequests.get(requestId);
+    if (!req || req.teamId !== teamId) return null;
+    if (req.status !== "pending") return "already_reviewed";
+    const at = new Date().toISOString();
+    if (action === "approve") {
+      // 审批通过：幂等写成员行（申请期间可能已被 owner 手动拉进来）
+      const key = teamMemberKey(teamId, req.userId);
+      if (!teamMembers.has(key)) {
+        teamMembers.set(key, { teamId, userId: req.userId, role: "member", joinedAt: at });
+        touchTeam(teamId);
+      }
+    }
+    const next: TeamJoinRequest = { ...req, status: action === "approve" ? "approved" : "rejected", reviewedAt: at };
+    teamJoinRequests.set(requestId, next);
+    return { ...next };
+  },
+
   listTeamEvents(teamId, limit = 50, taskId) {
     // taskId（d.276）：只回某一件活的流水，用于任务卡片的「这件活的历史」。
     const all = (teamEvents.get(teamId) ?? []).filter(
@@ -1515,6 +1749,13 @@ export function createMemoryStore(): Store {
       if (reviewed) {
         if (!isTeamOwner(teamId, actorId)) return "forbidden";
         if (task.status !== "done") return "not_reviewable";
+      }
+      // 状态机收紧（1.3）：已完成任务的胶囊循环是 done→todo（直接回到待认领），
+      // 一键就把完成/验收痕迹抹成新任务，绕过验收且不理由。这里堵住这条裸改路径。
+      // 注意：done→doing（本人重开继续做、保留结论，见 d.252 测试）是正当代开，仍允许；
+      // 组长打回 review:"changes"（带原因、回到 doing）也不受此限。
+      if (!reviewed && task.status === "done" && body.status === "todo") {
+        return "done_locked";
       }
       const returned = body.assigneeId === null && task.assigneeId !== null;
       const reclaimed = body.assigneeId !== undefined && body.assigneeId !== null;
@@ -1591,6 +1832,8 @@ export function createMemoryStore(): Store {
         task.assigneeId === actorId || (task.assigneeId === null && task.createdBy === actorId);
       if (!isTeamOwner(teamId, actorId) && !ownsTask) return "forbidden";
       teamTasks.delete(taskId);
+      // 任务讨论是一等公民数据（d.271）：删任务时一并清掉留言，不留孤儿。
+      teamTaskComments.delete(taskId);
       // d.255：删掉的任务不能再当别人的前置，否则任务板上会挂着「等一个不存在的任务」。
       // 不碰 updatedAt：清依赖不是这条任务自己的进度，不该把「多久没动」重置。
       for (const [otherId, other] of teamTasks) {

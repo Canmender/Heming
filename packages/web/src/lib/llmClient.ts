@@ -618,8 +618,11 @@ export async function streamChat(
     const reasoning = json.choices?.[0]?.message?.reasoning_content ?? json.choices?.[0]?.message?.reasoning;
     if (reasoning) opts.onReasoning?.(reasoning);
     if (text) {
-      // 整段可能远超单帧上限：按 ≤3000 字符切片回调，保证每帧合法
-      for (let i = 0; i < text.length; i += 3000) opts.onDelta(text.slice(i, i + 3000));
+      // 整段可能远超单帧上限：按 ≤3000 字符切片回调，保证每帧合法。
+      // 用码点推进而不是 UTF-16 下标 +3：切片落在 emoji 的代理对中间会劈出
+      // 落单代理（前半帧结尾高位、后半帧开头低位），每一帧单独看都不是合法文本。
+      const points = [...text];
+      for (let i = 0; i < points.length; i += 3000) opts.onDelta(points.slice(i, i + 3000).join(""));
     }
     mergeUsage(json.usage);
     emitUsage();
@@ -632,10 +635,17 @@ export async function streamChat(
   /** 流式路径的读：与上面同一份实现（d.213 抽出来给非流式分支复用）。 */
   const readWithIdle = () => readChunkWithIdle(reader);
   let acc = "";
+  /** SSE 约定：`data: [DONE]` 就是本次流结束。不少兼容网关/反代在 [DONE] 后
+   *  不关 TCP（keep-alive），若继续 readWithIdle 会静默挂住直到空闲超时（408），
+   *  把已经收齐的回复整段丢掉、onFinish 也不回调。收到即停，按已收内容收口。 */
+  let sawDone = false;
   const handleLine = (line: string) => {
     if (!line.startsWith("data:")) return;
     const data = line.slice(5).trim();
-    if (data === "[DONE]") return;
+    if (data === "[DONE]") {
+      sawDone = true;
+      return;
+    }
     let delta = "";
     let carried: LlmHttpError | null = null;
     try {
@@ -681,8 +691,9 @@ export async function streamChat(
         if (line.trim() === "") continue;
         handleLine(line);
       }
+      if (sawDone) break;
     }
-    if (buffer.trim()) handleLine(buffer.trim());
+    if (!sawDone && buffer.trim()) handleLine(buffer.trim());
     flushToolCalls();
     if (finishReason) opts.onFinish?.(finishReason);
     emitUsage();

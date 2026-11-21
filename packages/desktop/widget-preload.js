@@ -77,6 +77,21 @@ function unsupportedInvoke(name) {
 }
 
 /**
+ * `setScale()` 参数非法时的错误：明确 reject，不静默当成「放大一档」或回落默认档。
+ *
+ * 合法形状只有 `1` / `-1` / `{ dir: 1 | -1 }`（与 shared `WidgetScaleDirection` 一致）。
+ * 旧实现把 `{}`/null/0/2/"1"/undefined 全塞给主进程，要么静默缩小到默认档，
+ * 要么悄悄放大一档——JS 调用方写错参数完全没有反馈。这里把「静默走错」变成「明确失败」。
+ */
+function invalidScaleArg(dir) {
+  const error = new TypeError(
+    `setScale 只接受 1（放大一档）、-1（缩小一档）或 { dir: 1 | -1 }，收到：${String(dir)}`,
+  );
+  error.code = "ERR_WIDGET_INVALID_SCALE";
+  return error;
+}
+
+/**
  * 窗口动作（只有 widget 窗口有意义）。
  *
  * 后台页里整组退化为 unsupported：`state()` 返回 null（只读 unsupported），
@@ -95,15 +110,21 @@ contextBridge.exposeInMainWorld("__heming_widget", {
   hide: BACKGROUND_MODE ? unsupportedSync("hide") : () => ipcRenderer.send("widget:hide"),
   toggle: BACKGROUND_MODE ? unsupportedSync("toggle") : () => ipcRenderer.send("widget:toggle"),
   /**
-   * 缩放：两种语义
+   * 缩放：两种合法形状（其余一律 reject，不静默走错）
    *   setScale(1) / setScale(-1)   相对切一档
-   *   setScale({ dir: 1 })         同上（兼容旧形状）
+   *   setScale({ dir: 1 | -1 })    同上（兼容旧形状）
    * 绝对档位由宿主托盘/主窗设置决定，插件不自选（避免和用户偏好打架）。
    */
   setScale: BACKGROUND_MODE
     ? unsupportedInvoke("setScale")
-    : (dir) =>
-        ipcRenderer.invoke("widget:set-scale", typeof dir === "object" ? dir : { dir: dir === -1 ? -1 : 1 }),
+    : (dir) => {
+        // 把 { dir: 1 } 归一成裸方向；非 1/-1 的值（含 {} / null / 0 / 2 / "1"）直接拒绝。
+        // 以前 typeof dir === "object" 就把 {} 也放行，主进程 normalizeScale 回落到默认档；
+        // 而 dir === -1 ? -1 : 1 又把任何非 -1 的值当放大——两种静默走错都在这里拦掉。
+        const value = dir && typeof dir === "object" ? dir.dir : dir;
+        if (value !== 1 && value !== -1) return Promise.reject(invalidScaleArg(dir));
+        return ipcRenderer.invoke("widget:set-scale", { dir: value });
+      },
   /** 鼠标穿透开关；只有清单 clickThrough:"auto" 的 widget 生效。 */
   setClickThrough: BACKGROUND_MODE
     ? unsupportedInvoke("setClickThrough")

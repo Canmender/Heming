@@ -57,13 +57,24 @@ export function previewReasoning(
 function clipByChars(text: string, maxChars: number, mode: "head" | "tail"): string {
   if (text.length <= maxChars) return text;
   if (mode === "tail") {
-    // 从末尾取，且不切断代理对（高代理 0xD800–0xDBFF 不能是起点）。
+    // 从末尾取，且不切断代理对。边界落点分两种：
+    //   · 落在一个**低**代理（0xDC00–0xDFFF）上：它前面的高代理没被包含进来，
+    //     这个 emoji 已经被劈成一半 → 起点前进 1，把落单的低代理丢掉。
+    //   · 落在一个**高**代理（0xD800–0xDBFF）上：紧随其后的低代理会被一起 slice 进来，
+    //     代理对是完整的 → 绝不能跳过，跳过反而会把完整 emoji 劈开。
+    // 旧实现把这两种情况判反了：只在落点是高代理时 start += 1，结果要么漏过落单的低代理，
+    // 要么把本来完整的 emoji 劈成两半。
     let start = text.length - maxChars;
     const first = text.charCodeAt(start);
-    if (first >= 0xd800 && first <= 0xdbff) start += 1;
+    if (first >= 0xdc00 && first <= 0xdfff) start += 1;
     return text.slice(start);
   }
-  return text.slice(0, maxChars);
+  // 从开头取：结尾若正好是高代理，说明第 maxChars 个字符只是某个 emoji 的前半，
+  // 退回一格把它留给下一次渲染，避免输出落单的高代理。
+  let end = maxChars;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return text.slice(0, end);
 }
 
 function clipByLines(text: string, maxLines: number, mode: "head" | "tail"): string {

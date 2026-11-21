@@ -12,6 +12,13 @@ describe("上下文用量指示（d.187）", () => {
     expect(formatTokens(0)).toBe("0");
     expect(formatTokens(850)).toBe("850");
     expect(formatTokens(12345)).toBe("12.3K");
+    expect(formatTokens(99_999)).toBe("100.0K");
+    // K→M 的分界在 100 万，不是 10 万：20 万该显示 200.0K，不能拧成 0.2M（d.412 回归）
+    expect(formatTokens(100_000)).toBe("100.0K");
+    expect(formatTokens(200_000)).toBe("200.0K");
+    expect(formatTokens(456_789)).toBe("456.8K");
+    expect(formatTokens(999_999)).toBe("1.0M");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
     expect(formatTokens(2_400_000)).toBe("2.4M");
     // 负数/NaN 不该出现，但出现了也不能崩或显示 "-3"
     expect(formatTokens(-5)).toBe("0");

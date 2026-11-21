@@ -196,6 +196,23 @@ describe("semanticChars", () => {
     expect(semanticChars(store, "a1")).toBe(6);
     expect(deps).toBeTruthy();
   });
+
+  it("知识库指针不计入复盘的事实层配额（d.412 回归）", () => {
+    const { store } = makeDeps({ callModel: async () => "{}" });
+    // 5 篇知识库笔记，摘要各 500 字：光指针就 2500+ 字，远超事实层上限，
+    // 但它们走 VAULT_MEMORY_MAX 另一套配额，不能把复盘写入挤掉。
+    store.upsertVaultEntries(
+      Array.from({ length: 5 }, (_, i) => ({
+        rel: `notes/note-${i}.md`,
+        vaultId: "v1",
+        mtime: new Date(T0).toISOString(),
+        hash: `h${i}`,
+        value: "摘".repeat(500),
+      })),
+    );
+    // 没有任何真实语义条目；修正前这里会把知识库指针算进来 → 误报"已满"
+    expect(semanticChars(store, "a1")).toBe(0);
+  });
 });
 
 describe("runReview", () => {

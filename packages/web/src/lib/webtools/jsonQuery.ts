@@ -94,7 +94,10 @@ export function queryJson(rawJson: string, rawPath = "$"): JsonQueryOutcome {
       return { ok: false, error: `路径里的「${step.key}」取不到：当前值不是对象` };
     }
     const record = current as Record<string, unknown>;
-    if (!(step.key in record)) {
+    // 只认自有字段：`in` 会沿原型链命中 Object.prototype（toString/constructor/
+    // __proto__/valueOf…），把「没有这个字段」误报成查到了一个函数，给模型假答案。
+    // JSON.parse 产出的对象继承 Object.prototype，所以这里必须用 hasOwnProperty。
+    if (!Object.prototype.hasOwnProperty.call(record, step.key)) {
       const keys = Object.keys(record).slice(0, 20);
       return {
         ok: false,

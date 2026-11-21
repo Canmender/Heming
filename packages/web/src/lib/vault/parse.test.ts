@@ -280,6 +280,12 @@ describe("extractInlineTags", () => {
   it("空文本返回空数组", () => {
     expect(extractInlineTags("")).toEqual([]);
   });
+
+  it("维链里的结构性 # 不是标签，链接外的才是（d.412 回归）", () => {
+    expect(extractInlineTags("[[#目标标题]]")).toEqual([]);
+    expect(extractInlineTags("[[foo|#别名]]")).toEqual([]);
+    expect(extractInlineTags("[[foo#锚点]] 与 #正文标签")).toEqual([{ tag: "正文标签", line: 1 }]);
+  });
 });
 
 describe("extractHeadings", () => {

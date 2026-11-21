@@ -17,6 +17,7 @@ const {
   formatSpaceShortfall,
   fromSemver,
   isInstalledOnly,
+  pickInstallerFile,
   requiredUpdateSpace,
   selectUpdate,
   toSemver,
@@ -158,6 +159,16 @@ test("isInstalledOnly：开发态为 false，打包态为 true", () => {
   assert.equal(isInstalledOnly(fakeAutoUpdater({ packaged: true }), { isPackaged: true }), true);
   // 没有 isPackaged 时退回 app.isPackaged
   assert.equal(isInstalledOnly({}, { isPackaged: false }), false);
+});
+
+test("pickInstallerFile：只认 .exe，挑不到返回 null 让调用方回退内置安装", () => {
+  assert.equal(pickInstallerFile(["Heming.Setup.exe", "latest.yml"]), "Heming.Setup.exe");
+  assert.equal(pickInstallerFile(["x.EXE", "a.blockmap"]), "x.EXE");
+  // 关键回归：没有 .exe 时不能再把 .blockmap / latest.yml 当安装包交给助手执行
+  assert.equal(pickInstallerFile(["Heming.Setup.exe.blockmap", "latest.yml"]), null);
+  assert.equal(pickInstallerFile(["latest.yml"]), null);
+  assert.equal(pickInstallerFile([]), null);
+  assert.equal(pickInstallerFile(null), null);
 });
 
 test("检查更新：已是最新", async () => {

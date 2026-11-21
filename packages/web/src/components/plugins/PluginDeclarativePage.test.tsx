@@ -4,7 +4,7 @@ import type { InstalledPlugin, PluginManifest } from "../../lib/plugins/index.js
 import { PluginStore } from "../../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../../lib/skills/index.js";
 import { useUiStore } from "../../store/ui.js";
-import { PluginDeclarativePage } from "./PluginDeclarativePage.js";
+import { PluginDeclarativePage, normalizePageBlock } from "./PluginDeclarativePage.js";
 
 /**
  * 声明式插件页面（d.124 A 路径）用例。
@@ -192,6 +192,15 @@ describe("PluginDeclarativePage · 块渲染", () => {
 
     const servers = screen.getByLabelText("MCP 服务（贡献）");
     expect(within(servers).getByText("这个插件还没有声明该类贡献")).toBeInTheDocument();
+  });
+
+  it("contributions 的 kind 只认自有白名单键：原型链键（toString/__proto__）不当合法块（d.412 回归）", () => {
+    // 合法白名单键仍能过。
+    expect(normalizePageBlock({ type: "contributions", kind: "skills" })).not.toBeNull();
+    // 未知键与 Object.prototype 继承键都必须被拒，否则渲染时把函数/原型对象当子节点 → 白屏。
+    for (const bad of ["notARealKind", "toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      expect(normalizePageBlock({ type: "contributions", kind: bad })).toBeNull();
+    }
   });
 
   it("坏块只丢自己：未知 type / 空指标块跳过，其余块照常渲染", () => {

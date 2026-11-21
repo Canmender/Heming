@@ -131,8 +131,13 @@ async function readServerFailure(response: Response): Promise<ServerFailure> {
     }
   }
   if (retryAfter === null) {
-    const header = Number(response.headers.get("retry-after"));
-    if (Number.isFinite(header) && header >= 0) retryAfter = header;
+    // headers.get() 缺头时返回 null，Number(null)===0 会把「没有 retry-after」
+    // 误判成「0 秒后重试」。先判非空再转数字。
+    const raw = response.headers.get("retry-after");
+    if (raw !== null) {
+      const header = Number(raw);
+      if (Number.isFinite(header) && header >= 0) retryAfter = header;
+    }
   }
   return { message, retryAfter: retryAfter !== null && retryAfter >= 0 ? retryAfter : null };
 }

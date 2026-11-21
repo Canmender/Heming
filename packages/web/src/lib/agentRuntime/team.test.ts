@@ -528,4 +528,28 @@ describe("teamSpec / withTeamTool（d.347）", () => {
     expect(good.text).toContain("团队任务");
     expect(good.text).toContain("以上是团队各成员的结论");
   });
+
+  it("并行派两支同成员队伍时，进度事件的 taskId 各自独立、不互相覆盖（d.412 回归）", async () => {
+    const seen: string[] = [];
+    const mk = () =>
+      withTeamTool(makeBridge(), {
+        agentId: "system",
+        conversationId: "c1",
+        chat: async () => "结论",
+        onProgress: (event) => {
+          if (event.phase === "start") seen.push(event.taskId);
+        },
+      });
+    const args = JSON.stringify({
+      goal: "g",
+      members: [
+        { id: "a", task: "x" },
+        { id: "b", task: "y" },
+      ],
+    });
+    await Promise.all([mk().execute({ name: TEAM_TOOL, arguments: args }), mk().execute({ name: TEAM_TOOL, arguments: args })]);
+    // 2 队 × 2 成员 = 4 个 start 事件，taskId 必须两两不同
+    expect(seen).toHaveLength(4);
+    expect(new Set(seen).size).toBe(4);
+  });
 });

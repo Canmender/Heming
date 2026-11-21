@@ -88,12 +88,34 @@ export interface PluginCatalog {
 }
 
 /**
- * 版本比较：`1.10.0` > `1.9.0`（数字段按数值比），非数字段按字符串比；
- * 无法解析的一律退回字符串比较，保证排序确定性。
+ * 版本比较（对齐 semver 优先级，semver.org §11）：
+ * - `1.10.0` > `1.9.0`：核心数字段按数值比；
+ * - 预发布版本**低于**对应正式版：`1.0.0` > `1.0.0-beta`；
+ * - 两边都带预发布时逐标识符比：数字按数值、数字标识符低于非数字、串短者更小
+ *   （`1.0.0-alpha` < `1.0.0-alpha.1` < `1.0.0-beta` < `1.0.0-rc.1`）；
+ * - 构建元数据（`+...`）**不参与**优先级：`1.0.0+build.1` 与 `1.0.0` 相等。
+ *
+ * 之前把 `+` / `-` 混在最后一段里按字符串比，导致正式版排在预发布之后、
+ * 带 build 的版本压过干净版本——`latestEntry()` 取排序尾部，于是客户端会被
+ * 推荐去装 beta。字符集由 `PLUGIN_CATALOG_VERSION_RE` 约束，解析确定。
  */
 export function comparePluginVersions(a: string, b: string): number {
-  const pa = a.split(".");
-  const pb = b.split(".");
+  // 构建元数据整段忽略（semver：build 不影响 precedence）
+  const coreA = a.split("+", 1)[0] ?? a;
+  const coreB = b.split("+", 1)[0] ?? b;
+  if (coreA === coreB) return 0;
+
+  // 第一个 "-" 之后是预发布；之前是核心 X.Y.Z
+  const dashA = coreA.indexOf("-");
+  const dashB = coreB.indexOf("-");
+  const mainA = dashA < 0 ? coreA : coreA.slice(0, dashA);
+  const mainB = dashB < 0 ? coreB : coreB.slice(0, dashB);
+  const preA = dashA < 0 ? "" : coreA.slice(dashA + 1);
+  const preB = dashB < 0 ? "" : coreB.slice(dashB + 1);
+
+  // 核心段按数值比，缺段当空串（保持排序确定性）
+  const pa = mainA.split(".");
+  const pb = mainB.split(".");
   const len = Math.max(pa.length, pb.length);
   for (let i = 0; i < len; i += 1) {
     const sa = pa[i] ?? "";
@@ -103,6 +125,28 @@ export function comparePluginVersions(a: string, b: string): number {
     const nb = /^\d+$/.test(sb) ? Number(sb) : null;
     if (na !== null && nb !== null) return na - nb;
     return sa < sb ? -1 : 1;
+  }
+
+  // 核心相同：有预发布的低于无预发布的（低于 = 排前面）
+  if (!preA && !preB) return 0;
+  if (!preA) return 1;
+  if (!preB) return -1;
+
+  // 两边都有预发布：逐标识符比，规则同 semver §11
+  const idsA = preA.split(".");
+  const idsB = preB.split(".");
+  const idLen = Math.max(idsA.length, idsB.length);
+  for (let i = 0; i < idLen; i += 1) {
+    const ia = idsA[i];
+    const ib = idsB[i];
+    if (ia === undefined) return -1; // 前缀更短 → 更小
+    if (ib === undefined) return 1;
+    if (ia === ib) continue;
+    const numA = /^\d+$/.test(ia);
+    const numB = /^\d+$/.test(ib);
+    if (numA && numB) return Number(ia) - Number(ib);
+    if (numA !== numB) return numA ? -1 : 1; // 数字标识符 < 非数字标识符
+    return ia < ib ? -1 : 1;
   }
   return 0;
 }

@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace, TranscriptStep } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
@@ -62,6 +62,9 @@ export function AgentStreamBubble({
   attempts,
 }: AgentStreamBubbleProps) {
   const streaming = status === "streaming";
+  // d.4xx：steps 里带了 answer 段时，正文已被按真实时间夹进时间线，
+  // 不能再在底部整段重画一遍（否则回答出现两次）。底部仍保留错误与重试。
+  const hasAnswerStep = steps?.some((s) => s.kind === "answer") ?? false;
   return (
     <div className="mb-5 flex items-start gap-2">
       {/*
@@ -97,12 +100,15 @@ export function AgentStreamBubble({
         {streaming ? (
           // 光标拼进正文末尾而不是另起一行：markdown 渲染后块级元素会把尾随的
           // 独立 span 挤到下一行，看起来像"光标本该在那却掉下去了"。
-          <div className="mt-1 break-words">
-            <MarkdownMessage text={text ? `${text}▌` : "▌"} streaming />
-          </div>
+          // d.4xx：正文已切进 answer 步骤时不再整段重画（光标已落在最后一个 answer 段）。
+          hasAnswerStep ? null : (
+            <div className="mt-1 break-words">
+              <MarkdownMessage text={text ? `${text}▌` : "▌"} streaming />
+            </div>
+          )
         ) : (
           <>
-            {text ? (
+            {text && !hasAnswerStep ? (
               <div className="mt-1 break-words">
                 <MarkdownMessage text={text} />
               </div>
@@ -153,6 +159,16 @@ export function MessageSteps({
           // 一次调用一行：失败/被拒的仍用同一套状态点与错误头，不并排折叠，
           // 否则「哪一步出的错」在分步视图里反而看不清。
           return <ToolTraceList key={`tool:${tool.id}`} tools={[tool]} />;
+        }
+        if (step.kind === "answer") {
+          // 回答段（d.4xx）：按真实时间夹在思考与工具之间。最后一段还在流式时长出光标。
+          if (!step.text?.trim()) return null;
+          const tail = streaming && index === steps.length - 1;
+          return (
+            <div key={`answer:${index}`} className="mt-1 break-words">
+              <MarkdownMessage text={tail ? `${step.text}▌` : step.text} streaming={tail} />
+            </div>
+          );
         }
         if (!step.text?.trim()) return null;
         return (

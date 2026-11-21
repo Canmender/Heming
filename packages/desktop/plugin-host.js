@@ -119,7 +119,11 @@ function text(value, max) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+  // 按码点截断：slice(0, max) 按 UTF-16 单元切，边界落在 emoji 代理对中间会留下落单代理，
+  // 通知标题/摘要里显示成乱码方块。notify-bridge.js 的 cleanText 也是同一口径。
+  const wellformed = typeof trimmed.toWellFormed === "function" ? trimmed.toWellFormed() : trimmed;
+  const points = [...wellformed];
+  return points.length > max ? `${points.slice(0, max).join("")}…` : trimmed;
 }
 
 /** 归一化跨进程事件（主窗 publish 与内部 push 共用；畸形一律丢弃）。 */

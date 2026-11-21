@@ -112,7 +112,12 @@ export function pruneNotifications(
   items: AppNotification[],
   limit = NOTIFICATIONS_BYTE_LIMIT,
 ): AppNotification[] {
+  // 先剔除「单条就超限」的坏条目：key/id/各 id 字段没做长度裁剪，一条超大
+  // 脏数据（或调用方塞进来的长 id）会让下面的 pop Tail 怎么删都降不到 limit，
+  // 最后落到 `return []` 把所有正常通知一起清掉。
+  const perItemLimit = Math.max(1, limit - 2);
   const next = [...items]
+    .filter((item) => utf8Length(JSON.stringify(item)) <= perItemLimit)
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, MAX_NOTIFICATIONS);
   let bytes = utf8Length(JSON.stringify(next));

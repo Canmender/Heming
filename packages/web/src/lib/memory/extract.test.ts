@@ -63,6 +63,32 @@ describe("extractExplicitMemory：显式指令识别", () => {
     expect(normalizeKey("  偏好-语言  ")).toBe("偏好-语言");
     expect(normalizeKey(":称呼，")).toBe("称呼");
   });
+
+  it("截断按码点计，不在 emoji 代理对中间劈开（键/值/摘要都不写入孤立代理）", () => {
+    // 辅助：Array.from 按码点切——合法代理对被合成一个 2 单元字符串；
+    // 孤立代理项会成为单个落在 D800–DFFF 的单元，据此判定。
+    const hasLoneSurrogate = (s: string): boolean =>
+      Array.from(s).some((ch) => {
+        if (ch.length !== 1) return false;
+        const c = ch.charCodeAt(0);
+        return c >= 0xd800 && c <= 0xdfff;
+      });
+
+    // 键：第 24 个码点刚好落在 emoji 上，旧逻辑按 UTF-16 切会留下半个代理对。
+    const key = normalizeKey("偏好".repeat(11) + "🙂后续内容");
+    expect(Array.from(key).length).toBeLessThanOrEqual(24);
+    expect(hasLoneSurrogate(key)).toBe(false);
+
+    // 值：第 500 个码点落在 emoji 上。
+    const hit = extractExplicitMemory(`记住：我的名字是${"字".repeat(498)}🙂后文`);
+    expect(hit).not.toBeNull();
+    expect(Array.from(hit!.value).length).toBeLessThanOrEqual(500);
+    expect(hasLoneSurrogate(hit!.value)).toBe(false);
+
+    // 摘要：助手回答截到 160 字的边界处放 emoji。
+    const summary = deterministicSummary("问题", "答".repeat(158) + "🙂尾巴");
+    expect(hasLoneSurrogate(summary)).toBe(false);
+  });
 });
 
 describe("deterministicSummary：确定性摘要（无 LLM）", () => {

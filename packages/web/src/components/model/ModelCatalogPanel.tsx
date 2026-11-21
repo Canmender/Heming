@@ -134,6 +134,9 @@ export function ModelCatalogPanel({
   const [testingAs, setTestingAs] = useState<string | null>(null);
   const [bulkAsking, setBulkAsking] = useState(false);
   const [bulk, setBulk] = useState<{ done: number; total: number; passed: number } | null>(null);
+  // d.412 回归：bulk 保留「测试完…」结果行，按钮是否可再点另用 running 标记，
+  // 否则跑完一次后 bulk 非 null 会让「测试全部模型」永久禁用。
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [priceError, setPriceError] = useState("");
   const [confirm, setConfirm] = useState<ConfirmNeed | null>(null);
@@ -253,19 +256,31 @@ export function ModelCatalogPanel({
     const testable = rows.filter((row) => canTestModel(row.id));
     if (!testable.length) return;
     let passed = 0;
+    setBulkRunning(true);
     setBulk({ done: 0, total: testable.length, passed: 0 });
-    for (const [index, row] of testable.entries()) {
-      const providerId = row.id.split("/")[0]!;
-      const result = await onRun("测试全部模型", ["provider", "test", providerId, modelShortId(row.id)], {
-        refresh: false,
-      });
-      if (result.ok) passed += 1;
-      setBulk({ done: index + 1, total: testable.length, passed });
+    try {
+      for (const [index, row] of testable.entries()) {
+        const providerId = row.id.split("/")[0]!;
+        const result = await onRun("测试全部模型", ["provider", "test", providerId, modelShortId(row.id)], {
+          refresh: false,
+        });
+        if (result.ok) passed += 1;
+        setBulk({ done: index + 1, total: testable.length, passed });
+      }
+    } finally {
+      setBulkRunning(false);
     }
   };
 
-  const copyId = async (row: ModelRow) => {    try {
-      await navigator.clipboard?.writeText(row.id);
+  const copyId = async (row: ModelRow) => {
+    // d.412 回归：可选链在剪贴板缺失时返回 undefined，await 不会抛错，
+    // 旧写法会误报「已复制」。先显式判定，不可用就直接放弃。
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setCopied(null);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(row.id);
       setCopied(row.id);
       window.setTimeout(() => setCopied((current) => (current === row.id ? null : current)), 1500);
     } catch {
@@ -302,7 +317,7 @@ export function ModelCatalogPanel({
             <button
               type="button"
               className="ui-btn ui-btn-ghost"
-              disabled={!cliReady || bulk !== null}
+              disabled={!cliReady || bulkRunning}
               onClick={() => setBulkAsking(true)}
             >
               测试全部模型

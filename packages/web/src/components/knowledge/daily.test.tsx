@@ -34,6 +34,14 @@ describe("日记设置（界面侧只存配置，路径交给引擎）", () => {
     );
   });
 
+  it("存储里是合法 JSON 但根不是对象时，仍能写入新配置（d.412 回归）", () => {
+    for (const bad of ["null", "5", "true", '"a string"', "[1,2]"]) {
+      const storage = fakeStorage({ [DAILY_CONFIG_KEY]: bad });
+      saveDailyConfig("v1", { folder: "journal" }, storage);
+      expect(readDailyConfig("v1", storage)).toEqual({ folder: "journal", format: "YYYY-MM-DD" });
+    }
+  });
+
   it("非法文件夹/格式交给引擎回退，不写非法值", () => {
     const storage = fakeStorage();
     const saved = saveDailyConfig("v1", { folder: "..", format: "not-a-format" }, storage);

@@ -56,7 +56,11 @@ function emit(): void {
 function clipText(value: string): string {
   // 面板不是日志查看器：单条预览留 16KB 上限，和桌面端 preview 的上限对齐。
   if (value.length <= 16000) return value;
-  return `${value.slice(value.length - 16000)}`;
+  let start = value.length - 16000;
+  // 取尾部时若开头落在 emoji 的低代理上，往前挪一格从完整码点开始，避免展示坏字符。
+  const first = value.charCodeAt(start);
+  if (first >= 0xdc00 && first <= 0xdfff) start += 1;
+  return value.slice(start);
 }
 
 function fromSummary(summary: ShellJobSummary): PanelJob {

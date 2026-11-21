@@ -170,9 +170,10 @@ function selectUpdate(currentVersion, info) {
 function pickInstallerFile(files) {
   if (!Array.isArray(files)) return null;
   const exe = files.find((item) => typeof item === "string" && /\.exe$/i.test(item));
-  if (exe) return exe;
-  const first = files.find((item) => typeof item === "string" && item.trim());
-  return first || null;
+  // 只认 .exe：拿不到安装包时返回 null，让调用方回退到 electron-updater 自带流程。
+  // 之前会退而返回第一个字符串，结果把 .blockmap / latest.yml 当安装包交给助手执行，
+  // 恰好在本该安全回退的场景下让安装失败。
+  return exe ?? null;
 }
 
 /**

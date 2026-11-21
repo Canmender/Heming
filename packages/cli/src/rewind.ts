@@ -165,6 +165,15 @@ function relOf(cwd: string, absolute: string): string | null {
   return rel.replace(/\\/g, "/");
 }
 
+/**
+ * 日志里的路径必须留在工作区内：只看「路径段」，不挡文件名里带两个点的合法文件（如 docs/a..b.md）。
+ * `includes("..")` 会把这类文件误杀（d.336 遗留），按段判断才既挡越界又不误伤。
+ */
+function isSafeRelativePath(value: string): boolean {
+  if (path.isAbsolute(value)) return false;
+  return !value.split(/[\\/]/).includes("..");
+}
+
 /** 解析一轮的存档；形状不对返回 null（坏文件跳过，不让它毁掉整份列表）。 */
 export function parseRewindRun(value: unknown): RewindRun | null {
   if (!value || typeof value !== "object") return null;
@@ -178,7 +187,7 @@ export function parseRewindRun(value: unknown): RewindRun | null {
     if (!item || typeof item !== "object") continue;
     const file = item as Record<string, unknown>;
     if (typeof file.path !== "string" || !file.path) continue;
-    if (file.path.includes("..") || path.isAbsolute(file.path)) continue;
+    if (!isSafeRelativePath(file.path)) continue;
     const before = file.before;
     if (before !== null && typeof before !== "string") continue;
     const skipped =
@@ -204,7 +213,7 @@ function parseCommandChanges(value: unknown): CommandChanges | null {
     const out: string[] = [];
     for (const item of list) {
       if (typeof item !== "string" || !item) continue;
-      if (item.includes("..") || path.isAbsolute(item)) continue;
+      if (!isSafeRelativePath(item)) continue;
       out.push(item.replace(/\\/g, "/"));
     }
     return out.slice(0, CLI_REWIND_MAX_COMMAND_FILES);

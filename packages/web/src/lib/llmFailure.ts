@@ -314,10 +314,15 @@ export function humanizeProviderError(raw: string): string {
   if (http) {
     const status = Number(http[1]);
     const body = text.slice(http[0].length).trim();
-    // 状态码能直接定位的，先用状态码：语义比词表更确定
+    // 与路由/冷却共用一套判据：403/401 未必是 Key 错——「模型不供/账号受限/要验证」
+    // 也都走 403，若一律先说「检查 API Key」会把用户往错的方向带。只有纯鉴权（kind=auth）
+    // 才直接用状态码文案；其余落到下面的 hint 表给准确建议（d.412 回归）。
+    const kind = classifyFailure({ status, body, retryAfterMs: 0 }).kind;
     const direct =
       status === 401 || status === 403
-        ? "模型服务鉴权失败：请到左侧「模型」页检查 API Key 是否正确、是否有权限。"
+        ? kind === "auth"
+          ? "模型服务鉴权失败：请到左侧「模型」页检查 API Key 是否正确、是否有权限。"
+          : ""
         : status === 404
           ? "接口地址找不到：请检查 Base URL（通常以 /v1 结尾）。"
           : status === 408
@@ -327,7 +332,7 @@ export function humanizeProviderError(raw: string): string {
 
     // 其余交给已有的失败分类（与路由/冷却共用一套判据）——否则「上下文太长」「余额不足」
     // 这类真实高频错误会被统一翻成「模型名或参数不支持」，给错建议。
-    const kind = classifyFailure({ status, body, retryAfterMs: 0 }).kind;
+    // kind 已在上面算好，直接用。
     const hint: Partial<Record<FailureKind, string>> = {
       overflow: "这轮对话太长了，超出模型能读的长度：请缩短上下文或新建对话。",
       credit: "模型服务余额不足：请先到服务商充值后再试。",

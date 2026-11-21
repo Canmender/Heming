@@ -25,7 +25,9 @@ const DISTILL_SUFFIX = "（沉淀）";
 /** 沉淀副本命名：加「（沉淀）」后缀并按 32 字截断原名，避免与原件并排时混淆。 */
 function distilledName(name: string): string {
   const room = MAX_SKILL_NAME - DISTILL_SUFFIX.length;
-  return `${name.length > room ? name.slice(0, room) : name}${DISTILL_SUFFIX}`;
+  // 按码点截断：slice(0, room) 走 UTF-16 码元，emoji 边界会留下落单代理。
+  const chars = Array.from(name);
+  return `${chars.length > room ? chars.slice(0, room).join("") : name}${DISTILL_SUFFIX}`;
 }
 
 /**

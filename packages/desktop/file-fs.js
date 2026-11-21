@@ -1078,7 +1078,9 @@ async function createBackup(dir, absPath, bytes) {
     const index = await readBackupIndex(dir);
     const key = backupKey(absPath);
     const at = new Date().toISOString();
-    const file = `${Date.now().toString(36)}-${crypto.createHash("sha1").update(key).digest("hex").slice(0, 12)}.bak`;
+    // 同一毫秒内对同一路径做两次写，会把第一份备份静默覆盖掉 —— 撤销就回不到上一个版本了。
+    // 与 writeBackupIndex 的临时文件名一样，拼一段随机后缀，保证每份备份各自占一个不可变文件。
+    const file = `${Date.now().toString(36)}-${crypto.createHash("sha1").update(key).digest("hex").slice(0, 12)}-${crypto.randomBytes(4).toString("hex")}.bak`;
     await fsp.writeFile(path.join(dir, file), bytes);
     const entries = Array.isArray(index[key]) ? index[key] : [];
     entries.push({ file, at, bytes: bytes.length, path: absPath });

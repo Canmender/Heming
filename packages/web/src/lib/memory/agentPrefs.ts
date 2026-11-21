@@ -31,9 +31,10 @@ export function resolveAgentMemoryPrefs(raw: unknown): Record<string, AgentMemor
   if (!isPlainObject(raw)) return {};
   const out: Record<string, AgentMemoryPrefs> = {};
   for (const [agentId, value] of Object.entries(raw)) {
-    const id = agentId.trim();
-    if (!id || !isPlainObject(value)) continue;
-    out[id] = {
+    // 只用 trim 判空，不拿 trim 后的值当 key：否则 " a " 与 "a" 这两条不同的落盘键会
+    // 收敛成同一个，后者把前者悄悄覆盖（d.412 回归）。
+    if (!agentId.trim() || !isPlainObject(value)) continue;
+    out[agentId] = {
       shortTerm: typeof value.shortTerm === "boolean" ? value.shortTerm : DEFAULT_AGENT_PREFS.shortTerm,
       longTerm: typeof value.longTerm === "boolean" ? value.longTerm : DEFAULT_AGENT_PREFS.longTerm,
       personalDb: typeof value.personalDb === "boolean" ? value.personalDb : DEFAULT_AGENT_PREFS.personalDb,

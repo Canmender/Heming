@@ -184,6 +184,12 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
          *    不是「在策略基础上再多问一层」；策略本来会免问的调用也必须停下来。
          */
         if (ws?.verdict === "ask") {
+          // 去重检查要走在强制询问之前：否则同一调用被拒一次后，重试又被 ask 分支
+          // 直接塞进 pending，回到「拒过还反复弹窗」的老问题。
+          if (denied.has(fp)) {
+            outcomes[index] = { kind: "deny", call, reason: "本轮已拒绝过相同调用", cause: "user" };
+            return;
+          }
           pending.push({ index, call });
           return;
         }
@@ -194,6 +200,11 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
          */
         if (ws?.verdict === "allow") {
           if (!allowActive) {
+            // 未信任工作区的 allow 回落为 ask，同样要先过去重：拒过的调用不再重复弹窗。
+            if (denied.has(fp)) {
+              outcomes[index] = { kind: "deny", call, reason: "本轮已拒绝过相同调用", cause: "user" };
+              return;
+            }
             pending.push({ index, call });
             return;
           }

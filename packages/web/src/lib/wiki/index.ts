@@ -68,7 +68,9 @@ export function slugify(title: string): string {
     .replace(/\s+/g, "-") // 空格转连字符
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  return cleaned.slice(0, 60) || "未命名";
+  // 按码点截断：标题里的 emoji 若被切成半个代理对，作为文件名写盘会变成 U+FFFD。
+  const clipped = Array.from(cleaned).slice(0, 60).join("");
+  return clipped || "未命名";
 }
 
 /**
@@ -197,7 +199,9 @@ export function buildGraph(pages: WikiPage[]): WikiGraph {
   const byTitle = new Map<string, string>();
   for (const page of pages) {
     const info = parsePagePath(page.path);
-    if (info) byTitle.set(page.title, page.path);
+    // 同名页面：先出现的那个胜出，后出现的重复标题不覆盖——
+    // 与「同名页面时链接解析到先出现的那一个」的约定一致，稳定且与顺序无关地偏好首个。
+    if (info && !byTitle.has(page.title)) byTitle.set(page.title, page.path);
   }
   const byPath = new Map(pages.map((p) => [p.path, p]));
   const degree = new Map<string, number>();
@@ -252,7 +256,8 @@ export function renderIndex(pages: WikiPage[]): string {
           .split(/\r?\n/)
           .map((l) => l.trim())
           .find((l) => l && !l.startsWith("#") && !l.startsWith("---") && !l.startsWith("|")) ?? "";
-      const short = summary.length > 60 ? `${summary.slice(0, 60)}…` : summary;
+      const chars = Array.from(summary);
+      const short = chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : summary;
       lines.push(`- [[${page.title}]]${short ? ` —— ${short}` : ""}`);
     }
     lines.push("");

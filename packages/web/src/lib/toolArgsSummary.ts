@@ -32,7 +32,10 @@ function clip(text: string, max: number): string {
 function shortPath(value: unknown): string {
   const raw = oneLine(value).replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/\/$/, "");
   if (!raw) return "";
-  return clip(raw, MAX_PATH);
+  // 路径长时保留末尾：深层目录层层相似、截掉没有信息损失，文件名才是用户关心的。
+  // 按码点切，避免把代理对（emoji）切一半——与 clip() 同一口径。
+  const chars = Array.from(raw);
+  return chars.length > MAX_PATH ? `…${chars.slice(-(MAX_PATH - 1)).join("")}` : raw;
 }
 
 /** 行数：只数换行，末尾没有换行也算一行（与编辑器行号口径一致）。 */

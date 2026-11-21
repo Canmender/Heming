@@ -140,17 +140,36 @@ export async function prepareHistory(
     const manual = conversationId ? takeManualSummary(conversationId) : "";
     let summary = manual || (cache ? cache.get(conversationId, fingerprint) : "") || "";
 
+    // 只有 LLM 现给的摘要才写缓存；缓存/手动的摘要本来就已入库，不重复写。
+    let llmCandidate = "";
     if (!summary && effective.llmSummary && deps.summarize) {
       try {
         const text = await deps.summarize(buildSummaryPrompt(plan.older));
         if (typeof text === "string" && text.trim()) {
-          summary = text.trim();
-          cache?.set(conversationId, fingerprint, summary);
+          llmCandidate = text.trim();
+          summary = llmCandidate;
         }
-      } catch {
-        /* LLM 摘要失败 → 走确定性回落（不阻断生成） */
+      } catch (err) {
+        // 先学习（对照 claude-code autoCompact 对连续失败的观测）：摘要供应商失败不阻断生成，
+        // 但必须留一条可观测线索——否则用户只看到「压缩突然变成确定性摘要」却无从排查。
+        // 每轮最多一次（historyCache 让同一段历史在工具轮之间不重复摘要），不会刷屏。
+        console.warn("[上下文压缩] LLM 摘要失败，改用确定性摘要（不影响本轮生成）", err);
       }
     }
+
+    /**
+     * 收缩校验（对照 deepseek-harness `region.ts:418-423`）：摘要必须比它折掉的内容短，
+     * 否则「压缩」反而把请求撑大。啰嗦模型可能回吐一段比原文还长的「摘要」
+     * （实测 132 token 的历史被折成 719 token），撞 400 后按 aggressive 收紧还是同一套口径，
+     * 越收越大。这种摘要一律不采用、也不写缓存，回落确定性摘要（零成本且有界）。
+     */
+    if (summary) {
+      const framed: ChatMessage[] = [
+        { role: "system", content: [SUMMARY_HEADER, bodyOf(summary), `> ${SUMMARY_NOTICE}`].join("\n") },
+      ];
+      if (estimateRowsTokens(framed) >= estimateRowsTokens(plan.older)) summary = "";
+    }
+    if (summary && llmCandidate) cache?.set(conversationId, fingerprint, summary);
     if (!summary) summary = deterministicSummary(plan.older);
     if (!summary) return plan.recent;
 

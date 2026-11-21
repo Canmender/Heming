@@ -11,19 +11,65 @@ export type CalcOutcome = { ok: true; value: number; text: string } | { ok: fals
 const MAX_EXPRESSION_LENGTH = 400;
 const MAX_DEPTH = 32;
 
+/**
+ * 阶乘：只对非负整数有定义；170! 是双精度有限数的上限，再大必然溢出成 Infinity。
+ * 抛 CalcError（而非让乘积静默溢出），好让 evaluateExpression 给一句中文错误。
+ */
+function factorial(n: number): number {
+  if (!Number.isInteger(n) || n < 0) throw new CalcError("阶乘只接受非负整数");
+  if (n > 170) throw new CalcError("阶乘太大：n 最大 170（再大就超出浮点数范围）");
+  let result = 1;
+  for (let i = 2; i <= n; i += 1) result *= i;
+  return result;
+}
+
+/** 最大公约数 / 最小公倍数：先取整取绝对值，欧几里得算法。 */
+function gcd(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x;
+}
+
+function lcm(a: number, b: number): number {
+  const g = gcd(a, b);
+  return g === 0 ? 0 : Math.abs(Math.trunc(a) * Math.trunc(b)) / g;
+}
+
 /** 可用函数：名字 → 最少/最多参数个数 + 实现。 */
 const FUNCTIONS: Record<string, { min: number; max: number; run: (args: number[]) => number }> = {
   sqrt: { min: 1, max: 1, run: ([x]) => Math.sqrt(x) },
+  cbrt: { min: 1, max: 1, run: ([x]) => Math.cbrt(x) },
   abs: { min: 1, max: 1, run: ([x]) => Math.abs(x) },
   round: { min: 1, max: 1, run: ([x]) => Math.round(x) },
   floor: { min: 1, max: 1, run: ([x]) => Math.floor(x) },
   ceil: { min: 1, max: 1, run: ([x]) => Math.ceil(x) },
+  trunc: { min: 1, max: 1, run: ([x]) => Math.trunc(x) },
+  sign: { min: 1, max: 1, run: ([x]) => Math.sign(x) },
   exp: { min: 1, max: 1, run: ([x]) => Math.exp(x) },
   ln: { min: 1, max: 1, run: ([x]) => Math.log(x) },
   log: { min: 1, max: 2, run: ([x, base]) => (base === undefined ? Math.log10(x) : Math.log(x) / Math.log(base)) },
+  log2: { min: 1, max: 1, run: ([x]) => Math.log2(x) },
   pow: { min: 2, max: 2, run: ([x, y]) => x ** y },
+  hypot: { min: 1, max: Number.MAX_SAFE_INTEGER, run: (args) => Math.hypot(...args) },
+  sin: { min: 1, max: 1, run: ([x]) => Math.sin(x) },
+  cos: { min: 1, max: 1, run: ([x]) => Math.cos(x) },
+  tan: { min: 1, max: 1, run: ([x]) => Math.tan(x) },
+  asin: { min: 1, max: 1, run: ([x]) => Math.asin(x) },
+  acos: { min: 1, max: 1, run: ([x]) => Math.acos(x) },
+  atan: { min: 1, max: 1, run: ([x]) => Math.atan(x) },
+  atan2: { min: 2, max: 2, run: ([y, x]) => Math.atan2(y, x) },
   min: { min: 1, max: Number.MAX_SAFE_INTEGER, run: (args) => Math.min(...args) },
   max: { min: 1, max: Number.MAX_SAFE_INTEGER, run: (args) => Math.max(...args) },
+  clamp: { min: 3, max: 3, run: ([x, lo, hi]) => Math.min(Math.max(x, lo), hi) },
+  fact: { min: 1, max: 1, run: ([n]) => factorial(n) },
+  factorial: { min: 1, max: 1, run: ([n]) => factorial(n) },
+  gcd: { min: 2, max: 2, run: ([a, b]) => gcd(a, b) },
+  lcm: { min: 2, max: 2, run: ([a, b]) => lcm(a, b) },
 };
 
 const CONSTANTS: Record<string, number> = {
@@ -224,7 +270,7 @@ class Parser {
           if (!close || close.kind !== "rparen") throw new CalcError(`函数 ${name}( ) 括号没有闭合`);
           this.index += 1;
           const fn = FUNCTIONS[name];
-          if (!fn) throw new CalcError(`不支持的函数：${name}（可用 sqrt/abs/round/floor/ceil/exp/ln/log/pow/min/max）`);
+          if (!fn) throw new CalcError(`不支持的函数：${name}（可用 ${Object.keys(FUNCTIONS).join("/")}）`);
           if (args.length < fn.min || args.length > fn.max) {
             throw new CalcError(`函数 ${name} 的参数个数不对（收到 ${args.length} 个）`);
           }

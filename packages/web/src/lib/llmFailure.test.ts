@@ -222,6 +222,26 @@ describe("humanizeProviderError：供应商原文翻成人话（展示层用）"
     expect(humanizeProviderError("provider_error: HTTP 400 nope")).toContain("请求被服务商拒绝");
   });
 
+  it("403 按错误体给准确建议，不一律叫人检查 API Key（d.412 回归）", () => {
+    const modelGone = humanizeProviderError(
+      'provider_error: HTTP 403 {"message":"model is not available in the current token plan"}',
+    );
+    expect(modelGone).toContain("换一个模型");
+    expect(modelGone).not.toContain("API Key");
+    const restricted = humanizeProviderError(
+      'provider_error: HTTP 403 {"message":"your account is restricted, please appeal"}',
+    );
+    expect(restricted).toContain("申诉");
+    expect(restricted).not.toContain("API Key");
+    const verify = humanizeProviderError(
+      'provider_error: HTTP 403 {"message":"verification is required for this account"}',
+    );
+    expect(verify).toContain("验证");
+    expect(verify).not.toContain("API Key");
+    // 纯 401 鉴权仍走 Key 提示
+    expect(humanizeProviderError("provider_error: HTTP 401 bad key")).toContain("API Key");
+  });
+
   it("上下文太长 / 余额不足分别给对应建议（不统一翻成「参数不支持」）", () => {
     expect(
       humanizeProviderError(

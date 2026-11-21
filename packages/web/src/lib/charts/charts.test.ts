@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { renderChart, CHART_W } from "./renderer.js";
 import { ChartSpecSchema, extractCharts, parseChartSpec, stripChartFences } from "./spec.js";
 import { suggestChartTypes, findChartType, ALIASES } from "./catalog.js";
-import { fmtNum, esc } from "./tokens.js";
+import { fmtNum, esc, sectPath } from "./tokens.js";
 import { pickPalette, PALETTES } from "./palette.js";
 
 /** 造一份合法的规范（补齐默认值，省得每处都写全）。 */
@@ -173,6 +173,46 @@ describe("渲染器", () => {
     expect(new Set(fills).size).toBeGreaterThan(1);
   });
 
+  it("柱状图 F1：负值画在零轴下方，与正值形状不同（d.412 回归）", () => {
+    const { svg } = renderChart(
+      spec({
+        type: "F1",
+        points: [
+          { label: "涨", value: 40 },
+          { label: "跌", value: -25 },
+        ],
+      }),
+    );
+    // 两根柱子的 path 必须不同：旧版一律 Math.abs 向上画，正负几何完全相同
+    const paths = [...svg.matchAll(/<path d="(M[^"]+)" fill="[^"]+"/g)].map((m) => m[1]);
+    expect(paths.length).toBe(2);
+    expect(paths[0]).not.toBe(paths[1]);
+    // 负值柱用了 data2 明度（与正值 data 不同）
+    const fills = [...svg.matchAll(/<path d="M[^"]+" fill="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(fills).size).toBeGreaterThan(1);
+  });
+
+  it("桑基图 G22：流带带宽与节点共用比例尺，流量不再被误读（d.412 回归）", () => {
+    // 左 A/B 总量各 100 vs 右端节点各 25 —— 旧版左节点按 lMax=100、右节点按 rMax=25、流带按 lMax，
+    // 导致右节点高度是喂给它的流带的 4 倍，读图会把小流量看成大流量。
+    const { svg } = renderChart(
+      spec({
+        type: "G22",
+        title: "桑基",
+        stacks: [
+          [{ label: "A", value: 100 }, { label: "X", value: 25 }, { label: "Y", value: 25 }],
+          [{ label: "B", value: 100 }, { label: "Z", value: 25 }, { label: "W", value: 25 }],
+        ],
+      }),
+    );
+    // 所有节点矩形高度都应由同一个 flowMax=100 缩放：≤ lH(=180)、且右节点不被画成满高
+    const rects = [...svg.matchAll(/<rect[^>]*x="(90|538)"[^>]*height="([\d.]+)"/g)].map((m) => Number(m[2]));
+    expect(rects.length).toBeGreaterThan(0);
+    // lH = chartH - 60 = 180；最大节点 100/100*180 = 180，其余 25/100*180 = 45 —— 右节点不应被拉满到 180
+    const rightRects = [...svg.matchAll(/<rect[^>]*x="538"[^>]*height="([\d.]+)"/g)].map((m) => Number(m[1]));
+    expect(rightRects.every((h) => h <= 46)).toBe(true);
+  });
+
   it("漏斗：各阶段宽度递减", () => {
     const { svg } = renderChart(
       spec({
@@ -208,6 +248,25 @@ describe("渲染器", () => {
     expect(svg).toContain("a");
   });
 
+  it("L19/L20 别名用目录真源：直方图走分箱、散点走圆点（渲染器不再自带漂移副本）", () => {
+    // L19 → F14 直方图：应画 histogram 分箱，而不是把 points 当柱状图。
+    const hist = renderChart(
+      spec({
+        type: "L19",
+        points: [{ label: "不该出现的柱", value: 9 }],
+        histogram: [{ label: "分箱甲", count: 3 }],
+      }),
+    );
+    expect(ALIASES.L19).toBe("F14");
+    expect(hist.svg).toContain("分箱甲");
+    expect(hist.svg).not.toContain("不该出现的柱");
+
+    // L20 → F8 散点：应画 <circle>，而不是柱状 path。
+    const scatter = renderChart(spec({ type: "L20", points: [{ label: "散点甲", value: 2, x: 1 }] }));
+    expect(ALIASES.L20).toBe("F8");
+    expect(scatter.svg).toContain("<circle");
+  });
+
   it("所有图型分支都能渲染出内容（防止新增图型漏实现）", () => {
     const types = ["F1", "F2", "F3", "F4", "F5", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "L13", "G21", "G22", "L1", "L5", "L17"];
     for (const t of types) {
@@ -230,6 +289,23 @@ describe("渲染器", () => {
       expect(svg.length, `图型 ${t} 未产出内容`).toBeGreaterThan(50);
       expect(height).toBeGreaterThan(50);
     }
+  });
+
+  it("排名带 G21：名次很大时画布随之增高，条目不落到画布外（d.412 回归）", () => {
+    const { svg, height } = renderChart(
+      spec({
+        type: "G21",
+        title: "排名",
+        ranks: [
+          { time: "t1", entries: [{ label: "甲", rank: 3 }, { label: "乙", rank: 15 }] },
+        ],
+      }),
+    );
+    // viewBox 高度要盖住第 15 名：PAD.top(14)+15*22+PAD.bottom(34)+标题/留白
+    const vb = svg.match(/viewBox="0 0 \d+ (\d+)"/);
+    expect(vb).not.toBeNull();
+    expect(Number(vb?.[1])).toBeGreaterThan(14 + 15 * 22);
+    expect(height).toBeGreaterThan(14 + 15 * 22);
   });
 
   it("viewBox 宽度固定为 640", () => {
@@ -290,6 +366,25 @@ describe("配色", () => {
     for (const p of Object.values(PALETTES)) {
       expect(p.ramp.length).toBeGreaterThan(2);
       expect(p.cat.length).toBeGreaterThan(2);
+    }
+  });
+
+  it("整圈 360° 扇形画成两段 180° 弧，不因零长度弧整块消失（d.412 回归）", () => {
+    const d = sectPath(320, 32, 56, 92, 0, 360);
+    // 外环两段 + 内环两段 = 4 段 arc；每段跨越 180°（large-arc-flag=1）。
+    expect((d.match(/A92 92 0 1 1/g) ?? []).length).toBe(2);
+    expect((d.match(/A56 56 0 1 0/g) ?? []).length).toBe(2);
+    expect(d.startsWith("M")).toBe(true);
+    expect(d.endsWith("Z")).toBe(true);
+  });
+
+  it("暗卡下类目色仍彼此可区分，不塌成同一纸色（d.412 回归）", () => {
+    for (const name of Object.keys(PALETTES) as Array<keyof typeof PALETTES>) {
+      const dark = pickPalette(name, 3, true);
+      const cats = dark.cat.slice(0, 3);
+      expect(new Set(cats).size, `${name} 暗卡类目色应互不相同`).toBe(cats.length);
+      // 不能全部等于纸色（原 bug：cat.map(() => "#F0EFEB")）
+      expect(cats.every((c) => c === "#F0EFEB"), `${name} 类目色不应全塌成纸色`).toBe(false);
     }
   });
 });

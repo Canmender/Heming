@@ -59,7 +59,9 @@ interface WatchTarget {
 export function relOfResourceUri(uri: string): string | null {
   if (!uri.startsWith(RESOURCE_PREFIX)) return null;
   const rel = uri.slice(RESOURCE_PREFIX.length);
-  if (!rel || rel.includes("..") || rel.startsWith("/") || rel.includes("\\")) return null;
+  // 只挡 `..` 路径段（含反斜杠形式），文件名里带两个点（a..b.md）仍可用。
+  // 与 mcpCatalog.relOfResourceUri 保持同一口径，否则资源读得到却订不上变更。
+  if (!rel || rel.split(/[\\/]/).includes("..") || rel.startsWith("/") || rel.includes("\\")) return null;
   return rel;
 }
 

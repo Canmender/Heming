@@ -133,4 +133,61 @@ describe("evidenceFromTranscript", () => {
     ] as unknown as ChatMessage[];
     expect(evidenceFromTranscript(messages)).toBeUndefined();
   });
+
+  it("失败的结果文本不算证据：FAILED/拒绝文案不能被当成「完成即证据」", () => {
+    const failedResults = [
+      "FAILED: EACCES permission denied, no write occurred",
+      "锚点匹配失败（match-failed）：整份补丁未写入任何文件。",
+      "用户拒绝了本次工具调用：写文件\n【该操作未执行，文件与系统状态未被修改】",
+    ];
+    for (const text of failedResults) {
+      const messages = [
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "t1", type: "function", function: { name: "file_write", arguments: JSON.stringify({ path: "notes/a.md" }) } },
+          ],
+        },
+        { role: "tool", name: "file_write", content: text, tool_call_id: "t1" },
+      ] as unknown as ChatMessage[];
+      expect(evidenceFromTranscript(messages), text).toBeUndefined();
+    }
+  });
+
+  it("稳定错误码（哪怕不含 failed/error 字样）也不算证据：safety-reject/path-escape/no-write-root", () => {
+    const failedResults = [
+      "写入被拒绝（safety-reject）：目标位于只读根，不允许写入。",
+      "越界（path-escape）：路径不在允许的工作区内。",
+      "没有可写根（no-write-root）：请先选择工作区。",
+      "未知工具（unknown-tool）：没有这个工具。",
+    ];
+    for (const text of failedResults) {
+      const messages = [
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "t1", type: "function", function: { name: "file_write", arguments: JSON.stringify({ path: "notes/a.md" }) } },
+          ],
+        },
+        { role: "tool", name: "file_write", content: text, tool_call_id: "t1" },
+      ] as unknown as ChatMessage[];
+      expect(evidenceFromTranscript(messages), text).toBeUndefined();
+    }
+  });
+
+  it("成功的结果仍正常计入证据（失败推断不误伤）", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "t1", type: "function", function: { name: "file_write", arguments: JSON.stringify({ path: "notes/a.md" }) } },
+        ],
+      },
+      { role: "tool", name: "file_write", content: "已写入磁盘：notes/a.md", tool_call_id: "t1" },
+    ] as unknown as ChatMessage[];
+    expect(evidenceFromTranscript(messages)?.files).toEqual(["notes/a.md"]);
+  });
 });

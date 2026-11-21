@@ -136,6 +136,55 @@ describe("周报里的完成与进行中（d.269）", () => {
     expect(text).toContain("（已逾期 2 天）");
   });
 
+  it("刚过截止几小时也标逾期，不因 Math.ceil(-1h) === -0 误写成今天到期", () => {
+    const now = Date.parse("2026-11-18T12:00:00.000Z");
+    const text = report(
+      {
+        tasks: [
+          task({ id: "k1", title: "刚过期的活", dueAt: "2026-11-18T11:00:00.000Z" }),
+        ],
+      },
+      now,
+    );
+    expect(text).toContain("刚过期的活");
+    expect(text).toContain("（已逾期 1 天）");
+    expect(text).not.toContain("（今天到期）");
+  });
+
+  it("逾期天数按日历日算：傍晚生成、前两天早上到期就是 2 天，不按滚动 24 小时算成 3 天", () => {
+    const now = Date.parse("2026-11-18T12:00:00.000Z");
+    const text = report(
+      {
+        tasks: [
+          task({ id: "k1", title: "两天前到期的活", dueAt: "2026-11-16T09:00:00.000Z" }),
+        ],
+      },
+      now,
+    );
+    expect(text).toContain("（已逾期 2 天）");
+    expect(text).not.toContain("（已逾期 3 天）");
+  });
+
+  it("今天晚些时候到期写「今天到期」，不是「还剩 1 天」（d.412.4.185）", () => {
+    // 用本地时间构造，保证 any 时区下两者都在 11-18 这个本地日历日。
+    // 旧实现 Math.ceil(12h/24h)=1 → 误报「还剩 1 天」，「今天到期」分支永不可达。
+    const now = new Date(2026, 10, 18, 8, 0, 0).getTime();
+    const due = new Date(2026, 10, 18, 20, 0, 0).toISOString();
+    const text = report({ tasks: [task({ id: "k1", title: "今天要交的活", dueAt: due })] }, now);
+    expect(text).toContain("今天要交的活");
+    expect(text).toContain("（今天到期）");
+    expect(text).not.toContain("（还剩 1 天）");
+  });
+
+  it("未过期天数按日历日算：跨本地零点不因滚动 24 小时多报一天（d.412.4.185）", () => {
+    // now=11-18 08:00 本地，due=11-19 23:00 本地 → 绝对差 39h（旧实现 ceil=2），但日历只差 1 天。
+    const now = new Date(2026, 10, 18, 8, 0, 0).getTime();
+    const due = new Date(2026, 10, 19, 23, 0, 0).toISOString();
+    const text = report({ tasks: [task({ id: "k1", title: "明晚到期的活", dueAt: due })] }, now);
+    expect(text).toContain("（还剩 1 天）");
+    expect(text).not.toContain("（还剩 2 天）");
+  });
+
   it("进行中超过 8 条时收口提示，不把台账全抄进来", () => {
     const tasks = Array.from({ length: 12 }, (_, i) =>
       task({ id: `k${i}`, title: `任务${i + 1}` }),

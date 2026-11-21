@@ -56,8 +56,12 @@ function keywordsOf(command: WidgetCommand): string[] {
   for (const item of command.keywords) {
     if (typeof item !== "string") continue;
     const trimmed = item.trim();
-    if (!trimmed || out.includes(trimmed)) continue;
-    out.push(trimmed.slice(0, 32));
+    if (!trimmed) continue;
+    // 去重要按真正存进去的截断值判：两个只在第 33 字之后不同的关键词，
+    // 截断后会变成同一条，按未截断值去重就会漏判、写出重复项。
+    const value = trimmed.slice(0, 32);
+    if (out.includes(value)) continue;
+    out.push(value);
     if (out.length >= MAX_KEYWORDS) break;
   }
   return out;

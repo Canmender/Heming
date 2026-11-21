@@ -121,7 +121,7 @@ export function searchAllDetailed(keyword: string, members: TeamMember[]): Searc
       kind: "skill" as const,
       id: s.id,
       name: s.name,
-      detail: s.description ? s.description.slice(0, 40) : "技能",
+      detail: s.description ? Array.from(s.description).slice(0, 40).join("") : "技能",
     }));
 
   const results = [...memberMatches.slice(0, MEMBER_LIMIT), ...skillMatches.slice(0, SKILL_LIMIT)];
@@ -321,7 +321,7 @@ export function skillItem(s: ReturnType<typeof skillPool.list>[number]): Palette
     kind: "skill",
     id: `skill:${s.id}`,
     name: s.name,
-    detail: s.description ? s.description.slice(0, 40) : "技能",
+    detail: s.description ? Array.from(s.description).slice(0, 40).join("") : "技能",
   };
 }
 

@@ -139,6 +139,23 @@ describe("writeBackMemory（单条写回）", () => {
     expect(source.files.get("inbox/memory-称呼-20261108.md")).toContain("已有一版");
   });
 
+  it("短 key 不会误命中长 key 的文件（偏好 vs 偏好-语言，d.412 回归）", async () => {
+    // 只有「偏好-语言」的笔记；写「偏好」时必须新建自己的文件，不往别人的笔记里追加
+    const existing = "inbox/memory-偏好-语言-20261101.md";
+    const source = fakeSource({ [existing]: "---\nsource: heming-memory\n---\n\n语言偏好\n" });
+    const result = await writeBackMemory(
+      source,
+      request({ key: "偏好", value: "用户偏好简洁回复" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.appended).toBe(false);
+    expect(result.rel).toBe("inbox/memory-偏好-20261108.md");
+    expect(source.files.get(existing)).toContain("语言偏好");
+    expect(source.files.get(existing)).not.toContain("用户偏好简洁回复");
+    expect(source.files.get(result.rel)).toContain("用户偏好简洁回复");
+  });
+
   it("只写 inbox/：可写目录为空 → 失败并说明（不是笼统失败）", async () => {
     const source = fakeSource({}, []);
     const result = await writeBackMemory(source, request());

@@ -46,6 +46,13 @@ describe("读回来源现状", () => {
     ]);
   });
 
+  it("header 值自带连续空格不被双空格截断（d.412 回归）", () => {
+    // 内核 show 这一行不像 free/refresh 那样挂灰字说明，值里的双空格是数据本身。
+    expect(parseSourceShow("  header     X-Agent: foo  bar  baz\n").headers).toEqual([
+      { name: "X-Agent", value: "foo  bar  baz" },
+    ]);
+  });
+
   it("搜索、压缩、User-Agent 这三行也读得出来", () => {
     const flags = parseSourceShow(
       [

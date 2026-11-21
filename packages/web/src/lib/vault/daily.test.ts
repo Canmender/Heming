@@ -97,6 +97,17 @@ describe("isValidDailyFormat", () => {
     // 带时间但不含日 → 不能反解日期
     expect(isValidDailyFormat("YYYY-MM HH:mm")).toBe(false);
   });
+
+  it("拒绝超长 token：YYYYY 之类旧正则只匹配前 4 个、会生成无法反解的路径", () => {
+    // 「YYYYY」曾因未锚定的 /Y{1,4}/ 匹配前 4 个而通过校验，
+    // 落盘成 "20262026-01-02" 后 parseDailyPath 永远反解不出来，日记永久不可见。
+    for (const format of ["YYYYY-MM-DD", "YYYY-MMM-DD", "YYYY-MM-DD hh:mm:sss"]) {
+      expect(isValidDailyFormat(format)).toBe(false);
+    }
+    // 合法格式（注意冒号是路径非法字符，时间只能用 HHmmss 这类写法）。
+    expect(isValidDailyFormat("YYYY-MM-DD")).toBe(true);
+    expect(isValidDailyFormat("YYYYMMDD")).toBe(true);
+  });
 });
 
 describe("dailyNotePath", () => {
@@ -146,6 +157,16 @@ describe("parseDailyPath", () => {
     const date = parseDailyPath({ folder: "" }, "2026-11-08.md");
     expect(date).not.toBeNull();
     expect(parts(date!)).toEqual([2026, 11, 8, 0, 0, 0]);
+  });
+
+  it("YY 两位年份格式可往返：26 年写出的路径反解回 2026 而非 1926（d.412.4.186）", () => {
+    const config = { folder: "daily", format: "YY-MM-DD" };
+    const rel = dailyNotePath(config, DAY); // 2026-11-08 → daily/26-11-08.md
+    expect(rel).toBe("daily/26-11-08.md");
+    expect(parts(parseDailyPath(config, rel)!)).toEqual([2026, 11, 8, 0, 0, 0]);
+    // 世纪分界：00-49 → 2000 段，50-99 → 1900 段
+    expect(parts(parseDailyPath(config, "daily/87-11-08.md")!)).toEqual([1987, 11, 8, 0, 0, 0]);
+    expect(parts(parseDailyPath(config, "daily/00-11-08.md")!)).toEqual([2000, 11, 8, 0, 0, 0]);
   });
 
   it("规范化反斜杠与前导 ./", () => {

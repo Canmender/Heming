@@ -62,7 +62,7 @@ export class MarketIndexCorruptError extends Error {
   }
 }
 
-export type MarketWriteError = "too_large" | "invalid_json" | "invalid_object" | "invalid_index";
+export type MarketWriteError = "too_large" | "invalid_json" | "invalid_object" | "invalid_index" | "write_failed";
 
 export type MarketWriteResult =
   | { ok: true; size: number; warnings: string[] }
@@ -123,7 +123,12 @@ function parseIndexBytes(bytes: Buffer): { index: MarketIndex; warnings: string[
 export function createPluginMarketService(opts: { dir: string }): PluginMarketService {
   const dir = opts.dir;
   const indexPath = join(dir, "market.json");
-  /** 缓存键 = mtimeMs + size：替换索引（rename）或原地改写都会变。 */
+  /**
+   * 缓存键 = mtimeMs + ctimeMs + size：
+   * - mtime/size 覆盖正常情况下的替换与改写；
+   * - ctime（inode 变更时间）覆盖「外部工具原地等长改写后又把 mtime 改回原值」的情况——
+   *   mtime 能被 utimes 伪造，ctime 不能，内容一改它就变，避免把旧索引一直发给客户端。
+   */
   let cache: { key: string; snapshot: MarketIndexSnapshot } | null = null;
 
   function readVersionFile(id: string, version: string, file: string): { bytes: Buffer; size: number } | null {
@@ -154,7 +159,7 @@ export function createPluginMarketService(opts: { dir: string }): PluginMarketSe
       cache = null;
       return null;
     }
-    const key = `${stat.mtimeMs}:${stat.size}`;
+    const key = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
     if (cache && cache.key === key) return cache.snapshot;
     const bytes = readFileSync(indexPath);
     const parsed = parseIndexBytes(bytes);
@@ -202,7 +207,9 @@ export function createPluginMarketService(opts: { dir: string }): PluginMarketSe
       if (!contentType) return null;
       const found = readVersionFile(id, version, file);
       if (!found) return null;
-      if (found.size === 0 || found.size > MAX_ASSET_BYTES) return "too_large";
+      // 0 字节是合法资源（如空占位图）；「文件不存在」上面已经用 !found 拦掉，
+      // 这里只挡真正超限的，别把一个存在的空文件误报成 413 too_large。
+      if (found.size > MAX_ASSET_BYTES) return "too_large";
       return { bytes: found.bytes, contentType };
     },
     writeIndex(bytes) {
@@ -238,9 +245,11 @@ export function createPluginMarketService(opts: { dir: string }): PluginMarketSe
         writeFileSync(tmp, bytes);
         renameSync(tmp, indexPath);
       } catch (error) {
+        // 落盘失败是服务端磁盘故障，不是客户端提交的索引内容有问题：
+        // 用独立错误码让路由回 500，别再误报成 400 invalid_index。
         return {
           ok: false,
-          error: "invalid_index",
+          error: "write_failed",
           message: `索引写入失败：${error instanceof Error ? error.message : String(error)}`,
         };
       }
@@ -361,7 +370,8 @@ export function createPluginMarketRouter(opts: { dir: string; publishKey: string
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       const result = market.writeIndex(bytes);
       if (!result.ok) {
-        const status = result.error === "too_large" ? 413 : 400;
+        // too_large=413、write_failed=磁盘故障 500、其余是客户端内容问题 400。
+        const status = result.error === "too_large" ? 413 : result.error === "write_failed" ? 500 : 400;
         res.status(status).json({ error: result.message });
         return;
       }

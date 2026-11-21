@@ -308,6 +308,9 @@ export function CanvasPane({
     setSelectedId(node.id);
     if (readOnly) return;
     if (node.type === "text") {
+      // d.412 回归：Escape 取消后 cancelEditingRef 可能残留 true（卸载 textarea 不触发
+      // onBlur），新一次编辑开始前必须清掉，否则这次的正常失焦会被当成取消而丢弃。
+      cancelEditingRef.current = false;
       setEditing({ id: node.id, draft: node.text ?? "" });
       return;
     }
@@ -326,8 +329,10 @@ export function CanvasPane({
     event.stopPropagation();
     setSelectedId(node.id);
     if (readOnly) return;
-    if (node.type === "text") setEditing({ id: node.id, draft: node.text ?? "" });
-    else if (node.type === "file" && node.file && onOpenLink) onOpenLink(node.file);
+    if (node.type === "text") {
+      cancelEditingRef.current = false; // d.412 回归：同上，新编辑开始前清掉取消标志
+      setEditing({ id: node.id, draft: node.text ?? "" });
+    } else if (node.type === "file" && node.file && onOpenLink) onOpenLink(node.file);
     else if (node.type === "link" && isHttpUrl(node.url)) {
       window.open(node.url, "_blank", "noopener,noreferrer");
     }

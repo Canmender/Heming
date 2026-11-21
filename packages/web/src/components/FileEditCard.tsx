@@ -59,7 +59,10 @@ export function FileEditCard({
   // 数据源优先级：显式 prop（测试/调用方）→ 聊天页当前会话 → roots 模块记下的活动工作区。
   // 第三级是必要的：设置页会清空 activeConversationId（store/ui 的 setPage），只看会话列表
   // 会把「工作区自动可写」显示成「没有工作区」，和闸门实际口径对不上。
-  const autoWorkspace = (workspace ?? conversationWorkspace ?? activeWorkspace() ?? "").trim();
+  // d.412 回归：conversationWorkspace 是字符串（没会话时为 ""），用 ?? 不会往下走，
+  // 会把第三级 activeWorkspace() 短路掉 —— 设置页清了 activeConversationId 就误报「没有工作区」。
+  // 这里要用 ||，把空串也当作「没有」继续降级。
+  const autoWorkspace = (workspace || conversationWorkspace || activeWorkspace() || "").trim();
   // 未分组会话的兜底写根（桌面端 preload 同步下发的「文档\和鸣」；老安装包没有 → null）。
   const defaultRoot = getDefaultRootPath();
 

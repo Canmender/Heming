@@ -135,6 +135,17 @@ describe("foldToolResults · 同名工具合并（P2-T10）", () => {
     expect(summary.length).toBeLessThan(200);
   });
 
+  it("摘要首行截断按码点切，不在 emoji 代理对中间劈出落单代理", () => {
+    const emoji = "\u{1F600}";
+    // emoji 恰好骑在第 80 个码点的截断边界上。
+    const firstLine = "A".repeat(79) + emoji + "tail";
+    const summary = summarizeToolResult(namedToolRow("file_read", "a", firstLine + "\n正文"));
+    // 移除合法代理对后，剩下的字符串里不该还有任何落单代理。
+    const withoutPairs = summary.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "");
+    expect(/[\uD800-\uDFFF]/.test(withoutPairs)).toBe(false);
+    expect(summary).toContain(emoji);
+  });
+
   it("默认只留最近 1 条同名工具全文（公开常量）", () => {
     expect(KEEP_RECENT_SAME_TOOL).toBe(1);
   });

@@ -638,3 +638,14 @@ export class HitlPolicyStore {
     return [ruleResource(call.argsJson)];
   }
 }
+
+/**
+ * 闸门与设置卡共用的会话策略单例（d.412 回归）。
+ *
+ * 会话授权只存在内存的 Map 里、不入盘，所以「授权」与「清空本会话授权」必须作用在
+ * **同一份实例**上：此前 ChatPage 的闸门持有一个模块级实例，设置卡没传 policyStore 时
+ * 又 `new` 了一份临时实例，结果用户点「清空本会话授权」清的是空的临时表，闸门里
+ * 的授权纹丝不动。两边统一改用这个共享单例，revokeAll 才会真正撤掉闸门的授权。
+ * 显式注入 policyStore 的用例（单测）仍优先，不受影响。
+ */
+export const sharedHitlPolicy = new HitlPolicyStore();

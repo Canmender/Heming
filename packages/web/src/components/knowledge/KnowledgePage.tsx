@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SearchHit, VaultBridge, VaultStoreApi } from "../../lib/vault/types.js";
 import { useVaultStore } from "../../lib/vault/store.js";
+import { useTeamKnowledgeStore } from "../../lib/team/teamKnowledgeStore.js";
+import { createTeamKnowledge } from "../../lib/api.js";
 import { runSearch } from "../../lib/vault/search.js";
 import { applyTemplate } from "../../lib/vault/template.js";
 import { resolveVaultBridge, describeVaultError } from "../../lib/vault/bridge.js";
@@ -23,6 +25,7 @@ import { FileTree } from "./FileTree.js";
 import { GraphPane } from "./GraphPane.js";
 import { NewNoteDialog } from "./NewNoteDialog.js";
 import { PreviewPane } from "./PreviewPane.js";
+import { TeamKnowledgeView } from "./TeamKnowledgeView.js";
 import { QuickOpen } from "./QuickOpen.js";
 import { SearchPanel } from "./SearchPanel.js";
 import { StandardCheckDialog } from "./StandardCheckDialog.js";
@@ -130,12 +133,44 @@ function KnowledgePageShell({
   bridge?: VaultBridge;
 }) {
   const [leftTab, setLeftTab] = useState<LeftTab>("files");
+  /**
+   * 知识库来源：默认个人库（本地 vault）。选到某团队时切到团队库视图。
+   * 复用团队页会话级选择（lib/team/selection.ts）的键，切队一次全局生效。
+   */
+  const [sourceKind, setSourceKind] = useState<"personal" | "team">("personal");
+  const [sourceTeamId, setSourceTeamId] = useState("");
+  const knowledgeTeams = useTeamKnowledgeStore((s) => s.teams);
+  const loadKnowledgeTeams = useTeamKnowledgeStore((s) => s.loadTeams);
+  const resetKnowledge = useTeamKnowledgeStore((s) => s.reset);
+  // 进页拉一次团队列表（供下拉 optgroup；失败静默，个人库不受影响）。
+  useEffect(() => {
+    void loadKnowledgeTeams();
+  }, [loadKnowledgeTeams]);
+  /** 选源：个人库走 store 既有语义，团队库走团队 store；切回个人库时清团队内存。 */
+  const selectSource = useCallback(
+    (value: string) => {
+      if (value.startsWith("team:")) {
+        setSourceTeamId(value.slice(5));
+        setSourceKind("team");
+      } else {
+        setSourceKind("personal");
+        setSourceTeamId("");
+        resetKnowledge();
+        if (value) void store.setActiveVault(value);
+      }
+    },
+    [store, resetKnowledge],
+  );
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [graphOpen, setGraphOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState(false);
+  // 发布到团队：个人库笔记 → 团队知识库（人显式确认，不自动同步）。
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTeamId, setPublishTeamId] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [revealLine, setRevealLine] = useState<number | null>(null);
   // 第二轮：快速切换 / 新建笔记（带模板） / 知识库设置（日记与模板）
@@ -179,6 +214,44 @@ function KnowledgePageShell({
     },
     [],
   );
+
+  /** 打开发布弹窗：记住当前团队（默认第一个），正文在提交时现读，避免读到旧缓存。 */
+  const openPublish = useCallback(() => {
+    setPublishTeamId((prev) => prev || knowledgeTeams[0]?.id || "");
+    setPublishOpen(true);
+  }, [knowledgeTeams]);
+
+  /**
+   * 确认发布到团队：读当前笔记正文（含未保存修改则先提示保存），
+   * 然后 POST 到团队知识库；成功由服务端记 team_event 摘要。
+   */
+  const confirmPublish = useCallback(async () => {
+    if (!activeRel || !publishTeamId) return;
+    if (activeDirty) {
+      showNotice("请先保存当前笔记，再发布到团队。");
+      return;
+    }
+    const text = store.readText ? await store.readText(activeRel) : (store.docs.get(activeRel)?.text ?? null);
+    if (text == null) {
+      showNotice("读取笔记正文失败，发布已取消。");
+      return;
+    }
+    setPublishing(true);
+    try {
+      const title = stripMdExt(baseName(activeRel)) || activeRel;
+      await createTeamKnowledge(publishTeamId, {
+        title,
+        content: text.slice(0, 20000),
+        sourceVault: store.activeVaultId ?? undefined,
+      });
+      setPublishOpen(false);
+      showNotice(`已发布「${title}」到团队知识库。`);
+    } catch (err) {
+      showNotice(`发布失败：${err instanceof Error ? err.message : "请稍后重试"}`);
+    } finally {
+      setPublishing(false);
+    }
+  }, [activeRel, activeDirty, publishTeamId, store, showNotice]);
 
   // 首次进入且还没加载过库：补一次（bootVault 失败或从导航直达时兜底）
   useEffect(() => {
@@ -592,6 +665,45 @@ function KnowledgePageShell({
   const showLibraryEmpty = store.vaults.length === 0;
   const dirtyCount = store.dirty.size;
 
+  /* ── 团队库视图：选到团队时整页换成团队文档列表 + 只读预览 ──
+     放在空库态之前：即便本机一个本地库都没有，团队库仍可用。 */
+  if (sourceKind === "team" && sourceTeamId) {
+    const teamName = knowledgeTeams.find((t) => t.id === sourceTeamId)?.name ?? "团队";
+    return (
+      <PageShell
+        title="知识库"
+        subtitle={`团队知识库 · ${teamName}（只读，成员显式发布）`}
+        width="full"
+        scroll={false}
+        actions={
+          <select
+            aria-label="切换知识库"
+            className="ui-input w-[168px]"
+            value={`team:${sourceTeamId}`}
+            onChange={(e) => selectSource(e.target.value)}
+          >
+            <optgroup label="个人知识库">
+              {store.vaults.map((vault) => (
+                <option key={vault.id} value={vault.id}>
+                  {vault.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="团队知识库">
+              {knowledgeTeams.map((team) => (
+                <option key={team.id} value={`team:${team.id}`}>
+                  {team.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        }
+      >
+        <TeamKnowledgeView teamId={sourceTeamId} teamName={teamName} />
+      </PageShell>
+    );
+  }
+
   /* ── 空库态：整页只留一个明确的开始动作与隐私说明 ── */
   if (showLibraryEmpty) {
     return (
@@ -600,38 +712,44 @@ function KnowledgePageShell({
         title="知识库"
         width="readable"
         scroll={false}
-        bodyClassName="items-center justify-center gap-3 px-6 text-center"
+        bodyClassName="items-center justify-center gap-3 px-6"
       >
-        <p className="ui-body max-w-[440px] text-muted">
-          笔记就是普通的 .md 文件。
-          <span className="mt-1 block font-medium text-ink">文件留在你的设备上，不会上传。</span>
-        </p>
-        <div className="mt-1 flex items-center gap-2">
-          <Button
-            type="button"
-            size="md" variant="primary"
-            onClick={() => void store.pickVault()}
-          >
-            打开本地库
-          </Button>
-          <Button
-            type="button"
-            size="md" variant="ghost"
-            onClick={() => void store.loadVaults()}
-          >
-            重新读取库列表
-          </Button>
+        {/* 简约 · 大气：空库态左对齐，留白建立层次；文案原样保留（用例按「不会上传」查找）。 */}
+        <div className="w-full max-w-[480px] py-10">
+          <p className="text-ui-lg font-semibold leading-8 text-ink">
+            从你的本地文件开始
+          </p>
+          <p className="ui-body mt-4 max-w-[440px] text-muted">
+            笔记就是普通的 .md 文件。
+            <span className="mt-1 block font-medium text-ink">文件留在你的设备上，不会上传。</span>
+          </p>
+          <div className="mt-6 flex items-center gap-2">
+            <Button
+              type="button"
+              size="md" variant="primary"
+              onClick={() => void store.pickVault()}
+            >
+              打开本地库
+            </Button>
+            <Button
+              type="button"
+              size="md" variant="ghost"
+              onClick={() => void store.loadVaults()}
+            >
+              重新读取库列表
+            </Button>
+          </div>
+          {store.ephemeral ? (
+            <p className="ui-caption mt-3 max-w-[440px] text-muted">
+              当前是浏览器临时模式：没有桌面文件桥，打开的库只存在内存里，刷新即丢。
+            </p>
+          ) : null}
+          {store.error ? (
+            <p role="alert" className="ui-alert ui-alert-danger mt-3">
+              {store.error}
+            </p>
+          ) : null}
         </div>
-        {store.ephemeral ? (
-          <p className="ui-caption mt-2 max-w-[440px] text-muted">
-            当前是浏览器临时模式：没有桌面文件桥，打开的库只存在内存里，刷新即丢。
-          </p>
-        ) : null}
-        {store.error ? (
-          <p role="alert" className="ui-alert ui-alert-danger mt-2">
-            {store.error}
-          </p>
-        ) : null}
       </PageShell>
     );
   }
@@ -653,14 +771,25 @@ function KnowledgePageShell({
           <select
             aria-label="切换知识库"
             className="ui-input w-[168px]"
-            value={store.activeVaultId ?? ""}
-            onChange={(e) => void store.setActiveVault(e.target.value)}
+            value={sourceKind === "team" ? `team:${sourceTeamId}` : (store.activeVaultId ?? "")}
+            onChange={(e) => selectSource(e.target.value)}
           >
-            {store.vaults.map((vault) => (
-              <option key={vault.id} value={vault.id}>
-                {vault.name}
-              </option>
-            ))}
+            <optgroup label="个人知识库">
+              {store.vaults.map((vault) => (
+                <option key={vault.id} value={vault.id}>
+                  {vault.name}
+                </option>
+              ))}
+            </optgroup>
+            {knowledgeTeams.length > 0 ? (
+              <optgroup label="团队知识库">
+                {knowledgeTeams.map((team) => (
+                  <option key={team.id} value={`team:${team.id}`}>
+                    {team.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
           <Button
             type="button"
@@ -670,6 +799,16 @@ function KnowledgePageShell({
             <PlusIcon width={14} height={14} />
             新建笔记
           </Button>
+          {sourceKind === "personal" && activeRel && knowledgeTeams.length > 0 ? (
+            <Button
+              type="button"
+              size="sm" variant="ghost"
+              aria-label="发布当前笔记到团队"
+              onClick={openPublish}
+            >
+              发布到团队
+            </Button>
+          ) : null}
           <span className="flex items-center gap-0.5">
             <IconButton
               label="打开今天的日记"
@@ -791,7 +930,7 @@ function KnowledgePageShell({
                 type="button"
                 aria-pressed={leftTab === tab}
                 onClick={() => setLeftTab(tab)}
-                className={`ui-hit flex-1 rounded-sm px-1.5 py-1 text-ui-sm transition-colors ${
+                className={`ui-hit flex-1 rounded-sm px-1.5 py-1 text-ui-md transition-colors ${
                   leftTab === tab
                     ? "bg-subtle-3 font-medium text-ink"
                     : "text-muted hover:bg-subtle-2 hover:text-ink"
@@ -806,7 +945,7 @@ function KnowledgePageShell({
             {leftTab === "files" ? (
               tagFilteredRels ? (
                 <div className="flex h-full flex-col">
-                  <p className="ui-caption flex items-center justify-between px-2 py-1">
+                  <p className="ui-body-sm flex items-center justify-between px-2 py-1">
                     <span>标签 #{activeTag}</span>
                     <button
                       type="button"
@@ -818,7 +957,7 @@ function KnowledgePageShell({
                   </p>
                   <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
                     {tagFilteredRels.length === 0 ? (
-                      <p className="px-2 py-3 text-ui-sm text-muted">这个标签下还没有笔记。</p>
+                      <p className="px-2 py-3 text-ui-md text-muted">这个标签下还没有笔记。</p>
                     ) : (
                       tagFilteredRels.map((rel) => (
                         <button
@@ -826,7 +965,7 @@ function KnowledgePageShell({
                           type="button"
                           aria-current={rel === activeRel ? "page" : undefined}
                           onClick={() => requestOpen(rel)}
-                          className={`block w-full truncate rounded-sm px-2 py-[3px] text-left text-ui-sm ${
+                          className={`block w-full truncate rounded-sm px-2 py-[3px] text-left text-ui-md ${
                             rel === activeRel
                               ? "bg-subtle-2 font-medium text-ink"
                               : "text-body hover:bg-subtle-3 hover:text-ink"
@@ -1052,7 +1191,7 @@ function KnowledgePageShell({
               </div>
             </>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+            <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-2 px-6 text-left py-10">
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
                 写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
@@ -1202,6 +1341,54 @@ function KnowledgePageShell({
             只从和鸣的库列表里移除，<span className="font-medium">不会删除磁盘上的任何文件</span>。
           </p>
           <p className="ui-caption mt-1">之后仍可以用「打开本地库」重新加回来。</p>
+        </ConfirmDialog>
+      ) : null}
+
+      {/* 发布到团队：人显式确认，声明不自动同步；智能体无服务端身份，不能代发。 */}
+      {publishOpen ? (
+        <ConfirmDialog
+          title="发布当前笔记到团队知识库"
+          onCancel={() => setPublishOpen(false)}
+          footer={
+            <>
+              <Button
+                type="button"
+                size="md" variant="ghost"
+                onClick={() => setPublishOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                size="md" variant="primary"
+                disabled={publishing || !publishTeamId}
+                onClick={() => void confirmPublish()}
+              >
+                {publishing ? "发布中…" : "确认发布"}
+              </Button>
+            </>
+          }
+        >
+          <p className="ui-body-sm">
+            将当前笔记<span className="font-medium">复制一份</span>发布到所选团队，
+            团队成员可见。
+          </p>
+          <label className="ui-body-sm mt-2 block">
+            目标团队：
+            <select
+              className="ui-input mt-1 w-full"
+              aria-label="选择发布到的团队"
+              value={publishTeamId}
+              onChange={(e) => setPublishTeamId(e.target.value)}
+            >
+              {knowledgeTeams.map((team) => (
+                <option key={team.id} value={team.id}>{team.name}</option>
+              ))}
+            </select>
+          </label>
+          <p className="ui-caption mt-2 text-muted">
+            只发布这一次快照，之后本地改动不会自动同步；智能体不能代替你发布。
+          </p>
         </ConfirmDialog>
       ) : null}
 

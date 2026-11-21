@@ -257,6 +257,37 @@ describe("预览面板 · 锚点未命中与异步嵌入（d.114）", () => {
     expect(screen.getByText("嵌入：notes/target.md")).toBeInTheDocument();
   });
 
+  it("![[笔记#标题]] 只嵌入该标题小节，不把整篇都塞进来（d.412 回归）", () => {
+    const body = "# 小节\n只属于小节的正文\n# 另一节\n不该出现的正文";
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"![[target#小节]]"}
+        index={indexWithHeadings}
+        resolveDoc={(rel) => ({ rel, text: body })}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("只属于小节的正文")).toBeInTheDocument();
+    expect(screen.queryByText("不该出现的正文")).not.toBeInTheDocument();
+  });
+
+  it("![[笔记#不存在的标题]] 锚点未命中时退回整篇，不给空白块", () => {
+    const body = "# 小节\n小节正文\n# 另一节\n其他正文";
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"![[target#查无此节]]"}
+        index={indexWithHeadings}
+        resolveDoc={(rel) => ({ rel, text: body })}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    // 退回整篇：两节正文都在（不制造空白）
+    expect(screen.getByText("小节正文")).toBeInTheDocument();
+    expect(screen.getByText("其他正文")).toBeInTheDocument();
+  });
+
   it("loadDoc 读不到：给可读提示，不显示空白块", async () => {
     render(
       <PreviewPane

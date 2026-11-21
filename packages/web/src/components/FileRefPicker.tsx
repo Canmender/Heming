@@ -47,6 +47,8 @@ export function FileRefPicker({
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string[]>(() => selected.map((p) => toPosixPath(p)));
   const mounted = useRef(true);
+  // 请求序号：roots/bridge 变化会重新 glob，慢的旧请求不能覆盖已到位的新结果。
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -56,6 +58,8 @@ export function FileRefPicker({
   }, []);
 
   const load = useCallback(async () => {
+    const id = ++requestIdRef.current;
+    const current = () => mounted.current && id === requestIdRef.current;
     if (!bridge?.glob || roots.length === 0) {
       setFiles([]);
       setError(null);
@@ -65,7 +69,7 @@ export function FileRefPicker({
     setError(null);
     try {
       const res = await bridge.glob({ roots: [...roots], pattern: "**/*" });
-      if (!mounted.current) return;
+      if (!current()) return;
       if (res.ok) {
         // glob 回的是绝对路径；这里按第一个能匹配的根折成相对路径展示。
         setFiles(res.paths.map((abs) => toPosixPath(abs)));
@@ -74,12 +78,12 @@ export function FileRefPicker({
         setError(res.error || "列目录失败，无法读取工作区文件。");
       }
     } catch {
-      if (mounted.current) {
+      if (current()) {
         setFiles([]);
         setError("列目录失败，无法读取工作区文件。");
       }
     } finally {
-      if (mounted.current) setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [bridge, roots]);
 

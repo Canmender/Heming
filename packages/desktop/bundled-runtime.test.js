@@ -24,6 +24,7 @@ const path = require("node:path");
 const {
   bundledDepsReady,
   bundledEnv,
+  bundledNodeExecutable,
   bundledPython,
   bundledUv,
   builtinKind,
@@ -235,6 +236,40 @@ test("bundledEnv 处理小写 path 键", () => {
   const key = Object.keys(merged).find((k) => k.toLowerCase() === "path");
   assert.ok(key, "小写 path 也应被识别");
   assert.equal(merged[key].split(path.delimiter)[0], "C:\\x", "原有 PATH 必须保持在最前");
+});
+
+test("bundledNodeExecutable：仅在去重确实发生时返回共享 node.exe", () => {
+  const node = bundledNodeExecutable();
+  const site = path.join(__dirname, "runtime", "python", "Lib", "site-packages");
+  const patchrightNode = path.join(site, "patchright", "driver", "node.exe");
+  const sharedNode = path.join(site, "playwright", "driver", "node.exe");
+
+  if (node === null) {
+    // 两种情况都保持兼容、不注入：patchright 还有自己的 node.exe（未去重 / 老运行时），
+    // 或共享副本根本不存在（运行时未构建）
+    assert.ok(
+      fs.existsSync(patchrightNode) || !fs.existsSync(sharedNode),
+      "返回 null 只应因为「未去重」或「共享副本不存在」",
+    );
+    assert.equal(bundledEnv({ PATH: "x" }).PLAYWRIGHT_NODEJS_PATH, undefined, "不该注入时保持环境不变");
+  } else {
+    assert.ok(fs.existsSync(node), `返回了就必须真实存在：${node}`);
+    assert.equal(node, sharedNode, "应指向 playwright 那份共享副本");
+    assert.equal(fs.existsSync(patchrightNode), false, "只有 patchright 副本已删才返回值");
+    assert.equal(bundledEnv({ PATH: "x" }).PLAYWRIGHT_NODEJS_PATH, node, "注入的值必须指向共享二进制");
+  }
+});
+
+test("bundledEnv 不覆盖外界显式指定的 PLAYWRIGHT_NODEJS_PATH", () => {
+  const node = bundledNodeExecutable();
+  if (node) {
+    const merged = bundledEnv({ PATH: "x", PLAYWRIGHT_NODEJS_PATH: "C:\\custom\\node.exe" });
+    assert.equal(
+      merged.PLAYWRIGHT_NODEJS_PATH,
+      "C:\\custom\\node.exe",
+      "外界显式指定时不能被内部覆盖，保留用户自由度",
+    );
+  }
 });
 
 test("runtimeStatus：bundled === (python && depsReady)，note 按三种状态给不同说明", () => {

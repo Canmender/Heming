@@ -14,6 +14,11 @@ export interface WsHandlers {
    * 也不要假装都发成功了。
    */
   onSendError?: (reason: string) => void;
+  /**
+   * 重连退避的抖动随机数（测试注入确定性值；默认 Math.random）。
+   * 不加抖动时，服务端一重启所有客户端会在 1s/2s/4s 同一瞬间一起重连（惊群）。
+   */
+  rng?: () => number;
 }
 
 export interface WsHandle {
@@ -80,10 +85,12 @@ export function connectWs(handlers: WsHandlers): WsHandle {
     if (dropped > 0) reportSendError(`离线队列已满，已丢弃 ${dropped} 帧未发送`);
   };
 
-  /** 安排一次退避重试（与断线重连同一条路径：1s → 2s → 4s … 上限 30s）。 */
+  /** 安排一次退避重试（1s → 2s → 4s … 上限 30s，带 ±10% 抖动打散惊群）。 */
   const scheduleRetry = () => {
     if (closed) return;
-    const delay = Math.min(1000 * 2 ** attempt, 30_000);
+    const base = Math.min(1000 * 2 ** attempt, 30_000);
+    const jitter = 0.9 + 0.2 * (handlers.rng?.() ?? Math.random());
+    const delay = Math.min(Math.round(base * jitter), 30_000);
     attempt += 1;
     timer = setTimeout(open, delay);
   };

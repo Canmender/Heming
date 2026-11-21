@@ -2,10 +2,11 @@ import { WindowBar } from "./WindowBar.js";
 import { engineText } from "../../lib/engineText.js";
 import {
   cardSummary,
+  cardTone,
   quotaKindLabel,
   type QuotaCard,
 } from "../../lib/magpieQuotaCards.js";
-import { formatReadAt, resetsText, windowLeftPercent, windowTone } from "../../lib/magpieQuota.js";
+import { formatReadAt, resetsText } from "../../lib/magpieQuota.js";
 
 /**
  * 订阅以外的额度（模型页 → 来源 → 其余来源）：按量付费的 Key、套餐、钱包余额。
@@ -20,15 +21,11 @@ export interface QuotaCardsProps {
   now: number;
 }
 
-/** 这张卡最紧的那个窗口决定色调：余额/套餐花完时整行先红起来。 */
-function cardTone(card: QuotaCard): "ok" | "warn" | "danger" {
-  if (card.error) return "danger";
-  if (card.windows.length === 0) return "ok";
-  const tightest = card.windows.reduce((worst, window) =>
-    windowLeftPercent(window) < windowLeftPercent(worst) ? window : worst,
-  );
-  return windowTone(tightest);
-}
+/**
+ * 色调直接用 lib/magpieQuotaCards 的唯一真源（d.412 回归）：
+ * 之前这里另写了一份、漏了「忽略 unlimited/text 窗口」的过滤，
+ * 于是文字窗口（"还剩 3000 积分"）被误判红色、remaining:0 的不限量窗口让整行假绿。
+ */
 
 const DOT_TONE: Record<"ok" | "warn" | "danger", string> = {
   ok: "bg-muted",

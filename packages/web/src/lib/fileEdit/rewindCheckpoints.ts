@@ -52,6 +52,18 @@ export const REWIND_MAX_COMMANDS = 10;
 /** 单条命令描述最多留多少字（多行命令压成一行）。 */
 export const REWIND_MAX_COMMAND_CHARS = 200;
 
+/** 按字符数截断但不劈开 emoji 代理对（d.412 回归）。 */
+function clipAtCharBoundary(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = max;
+  const at = text.charCodeAt(cut - 1);
+  if (at >= 0xd800 && at <= 0xdbff) {
+    const next = text.charCodeAt(cut);
+    if (next >= 0xdc00 && next <= 0xdfff) cut -= 1;
+  }
+  return text.slice(0, cut);
+}
+
 /** 抓不到 / 不能安全还原的原因。 */
 export type RewindSkipReason = "too-large" | "binary" | "encoding" | "unreadable";
 
@@ -169,7 +181,7 @@ function isTurnCheckpoint(value: unknown): value is TurnCheckpoint {
 function normalizeCommandText(raw: string): string {
   const oneLine = raw.replace(/\s+/g, " ").trim();
   if (!oneLine) return "";
-  return oneLine.length > REWIND_MAX_COMMAND_CHARS ? `${oneLine.slice(0, REWIND_MAX_COMMAND_CHARS)}…` : oneLine;
+  return oneLine.length > REWIND_MAX_COMMAND_CHARS ? `${clipAtCharBoundary(oneLine, REWIND_MAX_COMMAND_CHARS)}…` : oneLine;
 }
 
 /** 去重、保序、限量：同一轮跑两次同样的命令只记一条。 */
@@ -464,7 +476,7 @@ export function beginRewindTurn(
     buffer.afterMessageId = afterMessageId;
   }
   const trimmedPrompt = prompt?.trim();
-  if (trimmedPrompt && !buffer.prompt) buffer.prompt = trimmedPrompt.slice(0, REWIND_MAX_PROMPT_CHARS);
+  if (trimmedPrompt && !buffer.prompt) buffer.prompt = clipAtCharBoundary(trimmedPrompt, REWIND_MAX_PROMPT_CHARS);
 }
 
 /** 记一个文件（同路径只留最早那份；超预算直接丢，返回是否记下）。 */

@@ -274,9 +274,10 @@ export function describePlatform(userAgent: string | undefined | null): string {
   if (!ua) return "";
   if (/Windows NT 10/.test(ua)) return "Windows 10/11";
   if (/Windows/.test(ua)) return "Windows";
-  if (/Mac OS X|Macintosh/.test(ua)) return "macOS";
+  // iOS Safari 的 UA 里也带 "like Mac OS X"，必须先于 macOS 判定，否则 iPhone/iPad 全被认成桌面 macOS。
+  if (/iPhone|iPad|iPod|iOS/.test(ua)) return "iOS";
   if (/Android/.test(ua)) return "Android";
-  if (/iPhone|iPad|iOS/.test(ua)) return "iOS";
+  if (/Mac OS X|Macintosh/.test(ua)) return "macOS";
   if (/Linux/.test(ua)) return "Linux";
   return "未知系统";
 }
@@ -284,29 +285,33 @@ export function describePlatform(userAgent: string | undefined | null): string {
 /** `YYYY-MM-DD HH:mm`，按给定时区渲染；时区非法/不传则用本地时区。 */
 export function formatLocalTime(now: Date, timeZone?: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  let hh = now.getHours();
-  let mm = now.getMinutes();
   if (timeZone) {
     try {
+      // 年月日必须和时分秒取自同一时区的同一次格式化：只把时分换成目标时区、
+      // 日期还用运行时本地 getFullYear/getDate，跨午夜时就会出现"04:00 却是昨天的日期"。
       const parts = new Intl.DateTimeFormat("en-GB", {
         timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
       }).formatToParts(now);
       const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+      const y = Number(pick("year"));
+      const mo = Number(pick("month"));
+      const d = Number(pick("day"));
       const h = Number(pick("hour"));
       const m = Number(pick("minute"));
-      if (Number.isFinite(h) && Number.isFinite(m)) {
-        hh = h % 24;
-        mm = m;
+      if ([y, mo, d, m].every(Number.isFinite) && Number.isFinite(h)) {
+        return `${y}-${pad(mo)}-${pad(d)} ${pad(h % 24)}:${pad(m)}`;
       }
     } catch {
       // 时区名非法（老浏览器/异常输入）：用本地时间，别为了时区把整段弄崩。
     }
   }
-  return `${date} ${pad(hh)}:${pad(mm)}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 function toolLine(tool: RuntimeToolInfo): string {

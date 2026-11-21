@@ -329,23 +329,26 @@ export function createRegistryStore(deps: RegistryStoreDeps = {}): RegistryStore
       if (get().installingKey) return { ok: false, error: "正在安装另一个服务，请稍候" };
       if (get().isInstalled(entry.key)) return { ok: false, error: "该服务已安装" };
 
-      // ★ 前置判定放在确认**之前**：跑不起来的包不该让用户填一遍表再告诉他失败。
-      // 本地包必须先知道本机有没有 Node/uv（页面挂载时已探过一次，这里兜底——
-      // 用户可能直接从别的入口调 install，或探测当时还没回来）。
-      if (runtimeRequirementFor(option) && !get().runtimeProbed) await get().probeRuntime();
-      const blocked = blockedReason(option, get().runtime);
-      if (blocked) return { ok: false, error: blocked };
-
-      const preview = buildInstallPreview(entry, option);
+      // 锁必须在任何 await 之前同步获取：检查 installingKey 与设置它要在同一 tick 内
+      // 原子完成。否则本地包的 probeRuntime() 会先让出执行，快速双击的第二次调用
+      // 在锁设置前就通过检查，两次都走到 mcp().add()，往磁盘写两条重复配置。
       set({ installingKey: entry.key });
       try {
+        // ★ 前置判定放在确认**之前**：跑不起来的包不该让用户填一遍表再告诉他失败。
+        // 本地包必须先知道本机有没有 Node/uv（页面挂载时已探过一次，这里兜底——
+        // 用户可能直接从别的入口调 install，或探测当时还没回来）。
+        if (runtimeRequirementFor(option) && !get().runtimeProbed) await get().probeRuntime();
+        const blocked = blockedReason(option, get().runtime);
+        if (blocked) return { ok: false, error: blocked };
+
+        const preview = buildInstallPreview(entry, option);
         const decision = await confirm(preview);
         if (!decision?.approved) return { ok: false, canceled: true };
 
         const sanitized = sanitizeHeaders(preview.headerHints, decision.headers ?? {});
         if (sanitized.error) return { ok: false, error: sanitized.error };
 
-        // 确认期间可能已被另一次安装写入：再查一次，避免同一服务两条配置。
+        // 确认期间可能已被别处（如接口区直连新增）写入：再查一次，避免同一服务两条配置。
         if (get().isInstalled(entry.key)) return { ok: false, error: "该服务已安装" };
 
         const config = toServerConfig(entry, option, () => new Date(now()).toISOString(), sanitized.headers);

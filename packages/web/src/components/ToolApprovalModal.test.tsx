@@ -264,3 +264,32 @@ describe("ToolApprovalModal · 勾选语义说清楚", () => {
     expect(screen.queryByText("fs__write_file")).not.toBeInTheDocument();
   });
 });
+
+describe("ToolApprovalModal · 默认拒绝不被原型链与批次复用绕过（d.412 回归）", () => {
+  it("id 名为原型链键（toString/constructor）时默认不勾、主按钮禁用", () => {
+    const onDecide = vi.fn();
+    const protoCalls = [
+      makeCall("toString", "srv__a", "write", "原型键一"),
+      makeCall("constructor", "srv__b", "write", "原型键二"),
+    ];
+    render(<ToolApprovalModal requestId="req-1" calls={protoCalls} onDecide={onDecide} />);
+
+    expect(screen.getByLabelText("允许 原型键一")).not.toBeChecked();
+    expect(screen.getByLabelText("允许 原型键二")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /允许选中/ })).toBeDisabled();
+  });
+
+  it("换一批请求（新 requestId）时清空勾选与记住，不把上一批的授权带到下一批", () => {
+    const { rerender } = render(
+      <ToolApprovalModal requestId="batch-1" calls={[writeCall]} onDecide={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByLabelText("允许 写文件"));
+    fireEvent.click(screen.getByLabelText("记住本次选择"));
+    expect(screen.getByLabelText("允许 写文件")).toBeChecked();
+
+    rerender(<ToolApprovalModal requestId="batch-2" calls={[dangerCall]} onDecide={vi.fn()} />);
+
+    expect(screen.getByLabelText("记住本次选择")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /允许选中/ })).toBeDisabled();
+  });
+});

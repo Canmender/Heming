@@ -443,10 +443,16 @@ function orderCandidates(chain: Candidate[], ctx: OrderContext): Candidate[] {
 function estimatePromptTokens(messages: ChatMessage[]): number {
   let n = 0;
   for (const m of messages) {
-    n += estimateTokens(m.content ?? "") + ROW_TOKEN_OVERHEAD;
-    if (m.contentParts) {
+    // content 与 contentParts 互斥：有 contentParts 时线上实际下发的是它（llmClient 会
+    // 用 toOpenAiContent(contentParts) 替换 content），且生产者把同一段文本同时放进了
+    // content 与 text part——两边都算会把这段文字翻倍，可能误筛掉装得下的候选。
+    // 与 agentContext/tokens.ts 的 estimateRowTokens 保持同一口径。
+    if (Array.isArray(m.contentParts) && m.contentParts.length > 0) {
       for (const part of m.contentParts) if (part.type === "text") n += estimateTokens(part.text);
+    } else {
+      n += estimateTokens(m.content ?? "");
     }
+    n += ROW_TOKEN_OVERHEAD;
     if (m.tool_calls) for (const c of m.tool_calls) n += estimateTokens(c.function.arguments ?? "");
   }
   return n;

@@ -198,6 +198,35 @@ describe("e2eSession 会话层", () => {
     expect(newPlain).toEqual({ kind: "text", text: "轮换之后" });
   });
 
+  it("①d 老链补检查点后轮换：落在旧链上的自己消息仍能自解（seedN 跨轮换保留，d.412 回归）", async () => {
+    const sent: WsClientEvent[] = [];
+    const clock = { t: 1_000 };
+    const deps = makeDeps(sent, clock);
+    const snapA = await bootstrap("alice-legacy");
+    const conv = { id: "t-legacy-conv", members: ["alice-legacy"] };
+
+    // 注入 d.346 之前的链：n=5、无 seed；initSession 会以 (ck, n=5) 当检查点。
+    const ck = toB64(new Uint8Array(32).fill(7));
+    localStorage.setItem(
+      "heming.e2e.chains." + conv.id,
+      JSON.stringify({ send: { kid: "legacy-kid", ck, n: 5, createdAt: 1_000, distFor: [] }, recv: {} }),
+    );
+    await asParty(snapA, () => initSession(conv.id, deps));
+
+    const first = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "text", text: "老链中段发的" }, deps),
+    )) as SendEvent;
+    clock.t += 25 * 60 * 60 * 1000; // 超过 24h：下一条触发轮换
+    await asParty(snapA, () => sealMessage(conv, { kind: "text", text: "轮换后" }, deps));
+
+    for (const row of msgCache.list(conv.id)) msgCache.remove(conv.id, row.id);
+
+    const oldPlain = await asParty(snapA, () =>
+      openOwnMessage(conv.id, toEnv(first, "t-legacy-m1", "alice-legacy")),
+    );
+    expect(oldPlain).toEqual({ kind: "text", text: "老链中段发的" });
+  });
+
   it("② 缺链与超窗 n → open 返回 defer（不写明文缓存）", async () => {
     const sent: WsClientEvent[] = [];
     const deps = makeDeps(sent);

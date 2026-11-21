@@ -205,6 +205,22 @@ describe("normalizeTools / textOfContent", () => {
     expect(normalizeTools("x")).toEqual([]);
   });
 
+  it("上限按去重后的工具数算：重名不占名额，后面的不同工具不会被挤掉", async () => {
+    const { MAX_MCP_TOOLS_PER_SERVER } = await import("./mcpClient.js");
+    const dupCount = Math.floor(MAX_MCP_TOOLS_PER_SERVER / 2);
+    const raw: Array<{ name: string }> = [];
+    for (let i = 0; i < dupCount; i += 1) {
+      raw.push({ name: `dup${i}` }, { name: `dup${i}` }); // 每个名字重复两次
+    }
+    for (let i = 0; i < 6; i += 1) raw.push({ name: `uniq${i}` });
+    const tools = normalizeTools(raw);
+    // 若去重发生在截断之后：原始数组前 MAX 项全是 dup（dupCount×2 == MAX），
+    // 去重后只剩 dupCount 个，6 个 uniq 全被丢掉。去重前置则全部保留。
+    expect(tools).toHaveLength(dupCount + 6);
+    expect(tools.filter((tool) => tool.name.startsWith("dup"))).toHaveLength(dupCount);
+    expect(tools.filter((tool) => tool.name.startsWith("uniq"))).toHaveLength(6);
+  });
+
   it("content 只取 text，图片与其它类型点名但不假装看懂", () => {
     expect(textOfContent([{ type: "text", text: "第一行" }, { type: "text", text: "第二行" }])).toBe("第一行\n第二行");
     expect(textOfContent([{ type: "image", data: "…" }])).toContain("图片");

@@ -231,6 +231,9 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
   }
 
   async function requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
+    // 已经发出的 abort 不会再触发 addEventListener 的回调（事件只在状态翻转的那一刻派发），
+    // 所以这里必须显式检查一次，否则「先点停止再发请求」会照常把请求打出去。
+    if (signal?.aborted) throw abortError();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     const onOuterAbort = () => controller.abort();

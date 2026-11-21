@@ -82,6 +82,30 @@ test("widget 窗口：窗口动作照常经 widget: 通道下发", async () => {
   assert.doesNotThrow(() => bridge.resetPosition());
 });
 
+test("setScale：合法形状下发 { dir }，非法参数明确 reject（不静默放大一档/回落默认档）", async () => {
+  const { bridge, invoked } = loadWidgetBridge();
+
+  // 合法：裸值 1 / -1 与旧形状 { dir }
+  await bridge.setScale(1);
+  assert.deepEqual(invoked.at(-1), ["widget:set-scale", { dir: 1 }]);
+  await bridge.setScale({ dir: -1 });
+  assert.deepEqual(invoked.at(-1), ["widget:set-scale", { dir: -1 }]);
+
+  const before = invoked.length;
+  // 非法：空对象、错方向、裸 0/2、字符串、null、undefined —— 一个都不该下发通道
+  for (const bad of [{}, { dir: 0 }, { dir: 2 }, { dir: "1" }, 0, 2, "1", null, undefined]) {
+    await assert.rejects(bridge.setScale(bad), /setScale 只接受/, `应拒绝 ${String(bad)}`);
+  }
+  assert.equal(invoked.length, before, "非法参数不应产生任何 widget:set-scale 通道调用");
+});
+
+test("setScale 非法参数带可读错误码，便于插件作者定位", async () => {
+  const { bridge } = loadWidgetBridge();
+  const error = await bridge.setScale({}).catch((e) => e);
+  assert.ok(error instanceof TypeError);
+  assert.equal(error.code, "ERR_WIDGET_INVALID_SCALE");
+});
+
 test("页面视图模式已删除：--heming-page-view 不再被识别（页面改走 widget-frame-bridge.js）", () => {
   const src = fs.readFileSync(preloadPath, "utf8");
   assert.ok(!src.includes(`"${REMOVED_PAGE_VIEW_FLAG}"`), "widget-preload 不再声明页面视图标记");

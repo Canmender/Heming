@@ -76,4 +76,48 @@ describe("引用工作区文件对话框（d.175）", () => {
     renderPicker({ bridge: null });
     expect(await screen.findByText("这个工作区里没有可引用的文件。")).toBeInTheDocument();
   });
+
+  it("慢的旧 glob 结果不覆盖已到的新结果（d.412 回归）", async () => {
+    let call = 0;
+    const resolvers: Array<(paths: string[]) => void> = [];
+    const deferredBridge: FileFsBridge = {
+      ...fakeBridge([]),
+      glob: async () => {
+        call++;
+        return new Promise((resolve) => {
+          resolvers.push((paths) =>
+            resolve({ ok: true as const, root: "工作区", paths, truncated: false }),
+          );
+        });
+      },
+    };
+    const rootB: FileRoot = { name: "B", path: "D:/B", mode: "write" };
+    const { rerender } = render(
+      <FileRefPicker
+        bridge={deferredBridge}
+        roots={[{ name: "A", path: "D:/A", mode: "write" }]}
+        selected={[]}
+        onConfirm={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(call).toBe(1);
+    rerender(
+      <FileRefPicker
+        bridge={deferredBridge}
+        roots={[rootB]}
+        selected={[]}
+        onConfirm={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(call).toBe(2);
+    // 新请求(#2)先返回
+    resolvers[1](["D:/B/new.md"]);
+    expect(await screen.findByText("new.md")).toBeInTheDocument();
+    // 旧请求(#1)迟到，不能把新结果冲掉
+    resolvers[0](["D:/A/old.md"]);
+    await waitFor(() => expect(screen.queryByText("old.md")).toBeNull());
+    expect(screen.getByText("new.md")).toBeInTheDocument();
+  });
 });

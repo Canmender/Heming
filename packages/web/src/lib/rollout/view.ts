@@ -36,8 +36,11 @@ export function relativeLabel(startAt: string, at: string): string {
   if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
   const seconds = abs / 1000;
   if (seconds < 60) return `${sign}${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${sign}${minutes}m${pad2(Math.round(seconds % 60))}s`;
+  // 先把总秒数四舍五入再拆分钟：old 版 Math.round(seconds % 60) 会把 59.6s 舍成 60s，
+  // 出现 "+1m60s" 这种不合法的时间；进位应当在秒级先做完。
+  const totalSeconds = Math.round(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  if (minutes < 60) return `${sign}${minutes}m${pad2(totalSeconds % 60)}s`;
   const hours = Math.floor(minutes / 60);
   return `${sign}${hours}h${pad2(minutes % 60)}m`;
 }

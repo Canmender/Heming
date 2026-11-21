@@ -191,6 +191,8 @@ interface SendChain extends ChainState {
 interface RetiredSendChain {
   kid: string;
   seed: string;
+  /** 起始键对应的消息序号：老数据补检查点时可能从链中间起步（n>0），轮换时必须一起带走。 */
+  seedN: number;
   createdAt: number;
 }
 
@@ -992,7 +994,7 @@ async function doSealMessage(
     // 不然明文缓存一淘汰，历史就只剩「本机解不开」。只留键，不留明文。
     if (send.seed) {
       chains.retiredSend = [
-        { kid: send.kid, seed: send.seed, createdAt: send.createdAt },
+        { kid: send.kid, seed: send.seed, seedN: send.seedN ?? 0, createdAt: send.createdAt },
         ...(chains.retiredSend ?? []),
       ].slice(0, RECENT_SEND_CHAINS);
     }
@@ -1282,8 +1284,9 @@ export async function openOwnMessage(
     const own =
       chains.send?.kid === ownKid ? chains.send : chains.retiredSend?.find((c) => c.kid === ownKid);
     if (!own?.seed) return null;
-    // 轮换下来的旧链一定从 n=0 开始；只有「老数据补检查点」的当前链可能从中间起步。
-    const startN = chains.send?.kid === ownKid ? (chains.send.seedN ?? 0) : 0;
+    // 旧链不一定从 n=0 起步：老数据补检查点时 seed 记在链中间（seedN>0），
+    // 轮换时已把 seedN 一并带到 retiredSend，这里统一按各自的起点推，别再对旧链硬编码 0。
+    const startN = own.seedN ?? 0;
     if (target < startN || target - startN > MAX_SELF_DERIVE) return null;
 
     const outer = parseOuter(env.cipher);

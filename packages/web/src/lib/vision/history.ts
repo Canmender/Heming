@@ -91,16 +91,25 @@ export async function attachImageParts(
     })),
   );
   const out = rows.map((r) => ({ ...r }));
-  for (const item of loaded) {
-    if (!item.data) continue;
-    const row = out[item.rowIndex];
+  // 加载失败的先剔掉，同时把 data 收窄成 string（后面按行组装时不再判空）。
+  const loadedOk = loaded.filter((item): item is typeof item & { data: string } => Boolean(item.data));
+  // 按行分组：一行可能挂多张图（VISION_MAX_IMAGES 本就为此存在）。
+  // 逐张重建 parts 会让同一行前一张被静默覆盖，只剩最后一张——按行一次性组装。
+  const byRow = new Map<number, typeof loadedOk>();
+  for (const item of loadedOk) {
+    const group = byRow.get(item.rowIndex);
+    if (group) group.push(item);
+    else byRow.set(item.rowIndex, [item]);
+  }
+  for (const [rowIndex, items] of byRow) {
+    const row = out[rowIndex];
     const text = row.content;
-    const parts: ContentPart[] = [
-      { type: "text", text: text || `（图片：${item.file.name}）` },
-      { type: "image", mime: item.file.mime, data: item.data },
-    ];
-    row.content = text || `（图片：${item.file.name}）`;
-    row.contentParts = parts;
+    // 无正文时用该行全部图名拼占位；单图时文案与旧版逐字一致。
+    const label = text || `（图片：${items.map((item) => item.file.name).join("、")}）`;
+    const parts: ContentPart[] = [{ type: "text", text: label }];
+    for (const item of items) parts.push({ type: "image", mime: item.file.mime, data: item.data });
+    row.content = label;
+    row.contentParts = parts; // d.412.4.187：同排多图不再互相覆盖
   }
   return out;
 }
@@ -111,7 +120,13 @@ const imageCache = new Map<string, Promise<string | null>>();
 /** 取图片 base64（带缓存）；失败返回 null（下次轮次重试）。 */
 export function visionImageDataUrl(file: VisionFile): Promise<string | null> {
   const hit = imageCache.get(file.id);
-  if (hit) return hit;
+  if (hit) {
+    // Map.get 不刷新插入顺序，直接返回会让命中过的图仍按最早插入被淘汰（实际是 FIFO）。
+    // 命中即 delete+set 移到末尾，才是注释承诺的「按最近使用封顶」LRU。
+    imageCache.delete(file.id);
+    imageCache.set(file.id, hit);
+    return hit;
+  }
   const task = (async () => {
     let blob: Blob;
     if (file.key) {

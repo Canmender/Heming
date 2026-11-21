@@ -175,6 +175,28 @@ describe("runSearch", () => {
     expect(hits[0].snippet).toContain("预算与风险");
   });
 
+  it("命中片段截断不在 emoji 代理对中间劈开（d.412 回归）", () => {
+    // emoji 的代理对正好跨在片段起点（at=100，start=60=低位代理）。
+    const text = `${"x".repeat(59)}😀${"z".repeat(39)}TARGET`;
+    const index = buildVaultIndex([{ rel: "片段.md", text: `# 标题\n${text}\n`, mtime: "2026-11-08T00:00:00.000Z" }]);
+    const hits = runSearch(index, '"TARGET"', {});
+    expect(hits.length).toBeGreaterThan(0);
+    const snippet = hits[0].snippet ?? "";
+    // 逐 UTF-16 单位扫，确保没有落单代理。
+    let lone = false;
+    for (let i = 0; i < snippet.length; i += 1) {
+      const c = snippet.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const n = snippet.charCodeAt(i + 1);
+        if (!(n >= 0xdc00 && n <= 0xdfff)) { lone = true; break; }
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const p = snippet.charCodeAt(i - 1);
+        if (!(p >= 0xd800 && p <= 0xdbff)) { lone = true; break; }
+      }
+    }
+    expect(lone).toBe(false);
+  });
+
   it("排除词命中即整页丢弃", () => {
     expect(search("预算 -tag:项目").map((hit) => hit.rel)).toEqual(["分开.md"]);
     expect(search('预算 -"本季度"').map((hit) => hit.rel)).not.toContain("项目/预算.md");
@@ -274,5 +296,19 @@ describe("rankQuickOpen（快速切换）", () => {
     expect(rankQuickOpen(QUICK_INDEX, "部署")).toEqual(rankQuickOpen(QUICK_INDEX, "部署"));
     // 默认上限 8
     expect(QUICK_OPEN_DEFAULT_LIMIT).toBe(8);
+  });
+
+  it("子序列匹配按码点走：emoji 代理对被拆开的假标题不该命中（d.412 回归）", () => {
+    const index = buildVaultIndex([
+      { rel: "假.md", text: "# 进度\n", mtime: "2026-11-08T00:00:00.000Z" },
+    ]);
+    // 直接把标题设成「只有 emoji 的高、低代理各一半」——没有真正的 😀 字符。
+    [...index.pages.values()][0].title = "a\ud83dzzz\ude00b";
+    expect(rankQuickOpen(index, "😀").map((hit) => hit.rel)).not.toContain("假.md");
+    // 对照：真含 emoji 的标题仍能命中（emoji 放在文件名里，标题即取自文件名）。
+    const real = buildVaultIndex([
+      { rel: "进度😀已完成.md", text: "# 进度\n", mtime: "2026-11-08T00:00:00.000Z" },
+    ]);
+    expect(rankQuickOpen(real, "😀").map((hit) => hit.rel)).toContain("进度😀已完成.md");
   });
 });

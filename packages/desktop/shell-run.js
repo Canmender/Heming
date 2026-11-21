@@ -196,7 +196,14 @@ function cancelRun(runId) {
     return { ok: true };
   }
   // 还没开始（在队列里或在校验目录）：记下来，等它真正要 spawn 时立刻放弃。
-  if (pendingCancel.size < MAX_PENDING_CANCEL) pendingCancel.add(id);
+  // 上限满了淘汰最早的一条，而不是拒绝记录后还谎报 ok:true——否则一旦攒够
+  // 一批永不落地的陈旧取消（重复点停、结束后才取消、目录校验失败早退），
+  // 后续真正「spawn 前取消」会被静默丢弃，HITL 中止保证就没了。
+  if (pendingCancel.size >= MAX_PENDING_CANCEL) {
+    const oldest = pendingCancel.values().next().value;
+    if (oldest !== undefined) pendingCancel.delete(oldest);
+  }
+  pendingCancel.add(id);
   return { ok: true };
 }
 
@@ -341,7 +348,12 @@ async function runCommand(params, spawnImpl = spawn) {
       : DEFAULT_TIMEOUT_MS;
 
   const dir = await resolveWorkingDir(roots, params && params.cwd);
-  if (!dir.ok) return dir;
+  if (!dir.ok) {
+    // 这条命令永远不会 spawn；它没有消费掉的预取消要清掉，
+    // 否则会变成永久占位、挤占 MAX_PENDING_CANCEL（d.412 回归）。
+    pendingCancel.delete(runId);
+    return dir;
+  }
 
   // 校验目录期间用户可能已经点了停止：排队中的取消请求在这里消费掉。
   if (pendingCancel.delete(runId)) {
@@ -636,7 +648,11 @@ async function startBackground(params, spawnImpl = spawn) {
   const runId = deriveRunId(params);
 
   const dir = await resolveWorkingDir(roots, params && params.cwd);
-  if (!dir.ok) return dir;
+  if (!dir.ok) {
+    // 同前台：命令不会 spawn，清掉未消费的预取消，避免永久占位（d.412 回归）。
+    pendingCancel.delete(runId);
+    return dir;
+  }
 
   if (pendingCancel.delete(runId)) return fail("aborted", "命令在执行前被取消");
 

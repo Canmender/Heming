@@ -289,6 +289,38 @@ describe("runWorkflow（d.203.4.109）", () => {
     expect(downstream.length).toBeLessThan(WORKFLOW_UPSTREAM_CONTEXT_MAX * 2);
   });
 
+  it("上游结论截断落在 emoji 中间时不劈出落单代理（d.412 回归）", async () => {
+    const seen: { task: string; messages: ChatMessage[] }[] = [];
+    // 1199 个 ASCII + 一个 emoji（占 2 个 UTF-16 单元）→ 第 1200 个单元正好是 emoji 的高代理。
+    // 旧的 body.slice(0,1200) 会停在高代理上，把半截 emoji 喂给下游提示。
+    const conclusion = "a".repeat(WORKFLOW_UPSTREAM_CONTEXT_MAX - 1) + "😀" + "bcdef";
+    const deps = makeDeps({ seen, conclusions: () => conclusion });
+    await runWorkflow(
+      plan([
+        { id: "a", task: "第一件", needs: [] },
+        { id: "b", task: "第二件", needs: ["a"] },
+      ]),
+      deps,
+    );
+    const downstream = seen.find((item) => item.task.includes("第二件"))?.task ?? "";
+    expect(downstream).toContain("已截断");
+    // 逐个 UTF-16 单元扫：高代理后面必须跟低代理，低代理前面必须是高代理。
+    // 注意要用 split("")（按码元），不能用 Array.from（按码点，emoji 只剩高代理一个元素）。
+    const units = downstream.split("").map((ch) => ch.charCodeAt(0));
+    let wellFormed = true;
+    for (let i = 0; i < units.length; i++) {
+      const c = units[i]!;
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = units[i + 1];
+        if (next === undefined || next < 0xdc00 || next > 0xdfff) wellFormed = false;
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const prev = units[i - 1];
+        if (prev === undefined || prev < 0xd800 || prev > 0xdbff) wellFormed = false;
+      }
+    }
+    expect(wellFormed).toBe(true);
+  });
+
   it("某一步没跑完时如实标出，并提示按原因决定重试还是说明", async () => {
     const deps = makeDeps({ conclusions: () => "结论" });
     // 第一步正常、第二步在对话阶段抛错（子代理内部会把它变成 ok:false）。

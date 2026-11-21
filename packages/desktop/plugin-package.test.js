@@ -150,6 +150,15 @@ test("路径穿越：写与读都拒绝（safeRelativePath 是唯一口径）", 
   assert.throws(() => readTar(zlib.gunzipSync(evil)), /非法路径/);
 });
 
+test("路径长度按 UTF-8 字节算：多字节名字写入会被截断的必须拒绝（否则路径碰撞覆盖）", () => {
+  // writeHeader 只有 100 字节的 name 段。100 个 é / 50 个汉字按 JS 字符数 ≤100 会通过旧校验，
+  // 但 write(name,0,100,'utf8') 会截断到 100 字节 → 两个不同路径变同一个（后者覆盖前者）。
+  assert.equal(safeRelativePath("é".repeat(100)), null);
+  assert.equal(safeRelativePath("汉".repeat(50)), null);
+  assert.equal(safeRelativePath("a".repeat(100)), "a".repeat(100)); // 纯 ASCII 100 字节仍允许
+  assert.throws(() => writeTar([{ path: "汉".repeat(50), data: "x" }]), /非法路径/);
+});
+
 test("符号链接 / 硬链接条目一律拒绝（安装不允许指向包外）", () => {
   const symlink = gzipTar([tarEntry({ name: "files/link", typeflag: "2", linkname: "/etc/passwd" })]);
   assert.throws(() => readTar(zlib.gunzipSync(symlink)), /不允许的条目类型/);

@@ -132,8 +132,14 @@ export function dedupeItems(items: RegistryItem[]): RegistryItem[] {
   }
 
   // isLatest 必须胜出（它是 Registry 的权威标记，不能被版本比较覆盖）。
+  // 多个 isLatest 并存时取版本号最大的那个——不能用 find 拿第一个，
+  // 否则会覆盖掉上面循环已经按版本排好的结果，且结果随输入顺序变化。
   for (const name of hasLatest) {
-    const winner = items.find((i) => i.server?.name === name && isLatest(i) === true);
+    const latestItems = items.filter((i) => i.server?.name === name && isLatest(i) === true);
+    const winner = latestItems.reduce(
+      (top, cur) => (compareVersions(versionOf(cur), versionOf(top)) > 0 ? cur : top),
+      latestItems[0],
+    );
     if (winner) best.set(name, winner);
   }
   return [...best.values()];

@@ -21,7 +21,8 @@ import type { ChartSpec } from "../lib/charts/spec.js";
 export function ChatChart({ spec }: { spec: ChartSpec }) {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [fileName] = useState(() => chartFileName(spec));
+  // 文件名必须跟着 spec 走：spec 变了要开的是新图的文件，不能停在首次渲染的名字上
+  const fileName = useMemo(() => chartFileName(spec), [spec]);
 
   // 渲染失败不该让整条消息崩掉：退回一句提示
   const rendered = useMemo(() => {

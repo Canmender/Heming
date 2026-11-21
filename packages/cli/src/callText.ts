@@ -12,7 +12,13 @@
 /** 一行化 + 截断（只给人看，不承载完整参数）。 */
 export function oneLine(text: string, max = 80): string {
   const flat = String(text).replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  if (flat.length <= max) return flat;
+  // slice 按 UTF-16 码元切，正好落在 emoji/生僻字的代理对中间会留下孤立半截；
+  // 与 memory.ts 的截断保持一致：末位是高位代理就回退一格。
+  let end = max - 1;
+  const last = flat.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${flat.slice(0, end)}…`;
 }
 
 /**

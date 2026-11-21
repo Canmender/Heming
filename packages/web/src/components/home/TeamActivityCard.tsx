@@ -49,6 +49,8 @@ export interface TeamActivityCardProps {
   lastTeamLoadAt: number | null;
   onRefresh: () => void;
   onOpenTeam: () => void;
+  /** 直达真任务看板（团队页 board Tab）——看板是任务主视图，值得一个独立入口。 */
+  onOpenBoard: () => void;
 }
 
 export function TeamActivityCard({
@@ -60,6 +62,7 @@ export function TeamActivityCard({
   lastTeamLoadAt,
   onRefresh,
   onOpenTeam,
+  onOpenBoard,
 }: TeamActivityCardProps) {
   const recentActivities = activities.slice(0, 3);
 
@@ -86,6 +89,13 @@ export function TeamActivityCard({
             onClick={onRefresh}
           >
             刷新
+          </button>
+          <button
+            type="button"
+            className="ui-link ui-hit"
+            onClick={onOpenBoard}
+          >
+            任务看板
           </button>
           <button
             type="button"

@@ -148,7 +148,7 @@ export function rollbackSnapshot(
     switch (patch.kind) {
       case "memory-upsert": {
         if (patch.prior) {
-          targets.memory.upsertSemantic({
+          const restored = targets.memory.upsertSemantic({
             agentId: patch.prior.agentId,
             key: patch.prior.key,
             value: patch.prior.value,
@@ -156,13 +156,18 @@ export function rollbackSnapshot(
             confidence: patch.prior.confidence,
             scope: patch.prior.scope,
           });
+          // upsert 的入参没有 pinned，新建分支写死 false。条目若在中途被删，
+          // 回滚会走新建分支。按文件头承诺补回置顶状态（只刷 metaUpdatedAt，不动 recency）。
+          if (patch.prior.pinned && !restored.pinned) {
+            targets.memory.updateSemantic(restored.agentId, restored.id, { pinned: true });
+          }
         } else {
           targets.memory.removeSemantic("", patch.createdId);
         }
         break;
       }
       case "memory-remove": {
-        targets.memory.upsertSemantic({
+        const restored = targets.memory.upsertSemantic({
           agentId: patch.entry.agentId,
           key: patch.entry.key,
           value: patch.entry.value,
@@ -170,6 +175,12 @@ export function rollbackSnapshot(
           confidence: patch.entry.confidence,
           scope: patch.entry.scope,
         });
+        // 删除后回滚必然走 upsert 的新建分支，pinned 被打回 false。
+        // 文件头承诺「置顶状态照旧」，且 recall 会无条件带出 pinned 条目——
+        // 不补回的话用户会感到「必带记忆」在回滚后失效（d.412.4.184）。
+        if (patch.entry.pinned && !restored.pinned) {
+          targets.memory.updateSemantic(restored.agentId, restored.id, { pinned: true });
+        }
         break;
       }
       case "skill-create": {
@@ -211,6 +222,8 @@ export function rollbackSnapshot(
         break;
       }
       case "mcp-remove-server": {
+        // add() 是字段白名单：registryType/registryVersion 不显式带过就会丢，
+        // Registry 装的服务回滚后退化成「手填」，界面再也判不出「已安装」（d.412.4.184）。
         targets.mcp.add({
           id: patch.prior.id,
           name: patch.prior.name,
@@ -219,9 +232,12 @@ export function rollbackSnapshot(
           command: patch.prior.command,
           args: patch.prior.args,
           headers: patch.prior.headers,
+          timeoutMs: patch.prior.timeoutMs,
           enabled: patch.prior.enabled,
           origin: patch.prior.origin,
           registryName: patch.prior.registryName,
+          registryType: patch.prior.registryType,
+          registryVersion: patch.prior.registryVersion,
         });
         break;
       }

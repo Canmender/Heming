@@ -142,7 +142,7 @@ export function parseSubagentArgs(raw: string | undefined): SubagentParseResult 
   }
   const unique: string[] = [];
   for (const task of tasks) {
-    const clipped = task.slice(0, SUBAGENT_TASK_MAX_CHARS);
+    const clipped = clipByCodePoints(task, SUBAGENT_TASK_MAX_CHARS);
     if (!unique.includes(clipped)) unique.push(clipped);
   }
   let maxRounds = SUBAGENT_MAX_ROUNDS_DEFAULT;
@@ -175,11 +175,18 @@ export interface SubagentRunnerDeps {
   execute: (call: { name: string; arguments: string }) => Promise<{ text: string; ok: boolean }>;
 }
 
+/** 按码点截断，绝不在 emoji/增补字符的 UTF-16 代理对中间切开（切出无效 Unicode 会污染模型输入）。 */
+function clipByCodePoints(text: string, max: number): string {
+  const chars = Array.from(text ?? "");
+  return chars.length <= max ? text : chars.slice(0, max).join("");
+}
+
 /** 把长文本截断成「还能看懂」的短文本。 */
 function clip(text: string, max: number): string {
   const value = text ?? "";
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}\n…（后面还有 ${value.length - max} 字，没有全部带回来）`;
+  const kept = clipByCodePoints(value, max);
+  if (kept === value) return value;
+  return `${kept}\n…（后面还有 ${Array.from(value).length - Array.from(kept).length} 字，没有全部带回来）`;
 }
 
 /**

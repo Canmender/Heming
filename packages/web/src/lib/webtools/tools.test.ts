@@ -142,6 +142,15 @@ describe("web_read", () => {
     expect(result.text).not.toContain("<script");
   });
 
+  it("网页正文里的大写十六进制实体 &#X...; 也能解码", async () => {
+    const html = `<html><head><title>T</title></head><body><p>大写 &#X41; 与 &#X1F600;，小写 &#x42;</p></body></html>`;
+    const bridge = bridgeWith(async () => ok(html));
+    const result = await run(bridge, WEB_READ_TOOL, { url: "https://example.com/ent" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("大写 A 与 😀，小写 B");
+    expect(result.text).not.toContain("&#X41;");
+  });
+
   it("状态码非 2xx：说明拿不到正文", async () => {
     const bridge = bridgeWith(async () => ok("not found", 404));
     const result = await run(bridge, WEB_READ_TOOL, { url: "https://example.com/missing" });

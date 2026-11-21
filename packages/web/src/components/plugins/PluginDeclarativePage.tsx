@@ -217,7 +217,9 @@ export function normalizePageBlock(raw: unknown): PluginPageBlockV5 | null {
     }
     case "contributions": {
       const kind = asText(record.kind);
-      if (!kind || !(kind in CONTRIBUTION_LABELS)) return null;
+      // d.412 回归：用 in 会走 Object.prototype 链，让 toString / __proto__ 之类的
+      // 键混过白名单，渲染时把函数或原型对象当 React 子节点 → 整页白屏。只认自有键。
+      if (!kind || !Object.prototype.hasOwnProperty.call(CONTRIBUTION_LABELS, kind)) return null;
       return { type, kind: kind as ContributionKind, ...titlePart } as PluginPageBlockV5;
     }
     default:

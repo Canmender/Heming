@@ -24,6 +24,25 @@ describe("HITL 变更预览", () => {
     ]);
   });
 
+  it("大文件改一行：增删数按真实差异算，不把相同的中间段算成删了又加", () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => `L${i}`);
+    const changed = [...lines];
+    changed[10] = "CHANGED";
+    const preview = buildChangePreview(
+      "fs__edit_file",
+      args({ path: "big.md", old_string: lines.join("\n"), new_string: changed.join("\n") }),
+    );
+
+    expect(preview).toMatchObject({ kind: "edit", added: 1, removed: 1 });
+
+    // 完全一样的大文件不应产生任何幻影增删
+    const noop = buildChangePreview(
+      "fs__edit_file",
+      args({ path: "big.md", old_string: lines.join("\n"), new_string: lines.join("\n") }),
+    );
+    expect(noop).toMatchObject({ kind: "edit", added: 0, removed: 0 });
+  });
+
   it("写入：内容按新增行展示，空文件也给出路径", () => {
     const preview = buildChangePreview(
       "fs__write_file",

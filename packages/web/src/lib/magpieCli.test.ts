@@ -54,6 +54,21 @@ describe("parseProviders", () => {
     expect(rows[1]).toMatchObject({ id: "deepseek", models: 6 });
   });
 
+  it("「N of M models」取已暴露的 N，不因「of」而丢掉模型数（d.412 回归）", () => {
+    const [row] = parseProviders(
+      "  deepseek preset  deepseek  api.deepseek.com  ● •••••••  6 of 10 models · fetched 2 hours ago  ← Claude Code",
+    );
+    expect(row.models).toBe(6);
+  });
+
+  it("备用链拼在来源同一行时也能读出（内核就是内联的，d.412 回归）", () => {
+    const [row] = parseProviders(
+      "  deepseek preset  deepseek  api.deepseek.com  ● •••••••  6 models  ← Claude Code  ⤷ openrouter/x → moonshot/y",
+    );
+    expect(row.fallback).toEqual(["openrouter/x", "moonshot/y"]);
+    expect(row.usedBy).toEqual(["Claude Code"]);
+  });
+
   it("空输出/无供应商文案返回空数组（页面显示引导）", () => {
     expect(parseProviders("")).toEqual([]);
     expect(parseProviders("no providers yet")).toEqual([]);

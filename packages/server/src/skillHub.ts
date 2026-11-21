@@ -110,15 +110,26 @@ function routeParam(req: Request, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * 按码点截断到 max——不能用 String.slice（UTF-16 码元），
+ * 否则会在 emoji/生僻字的代理对中间切开，产出包含孤立代理的脏字符串
+ * （JSON 响应里变成 \ud83d 这种转义，UI 显示成乱码方块）。
+ * 与 normalizeRegisterName 的「按码点计长度」口径一致。
+ */
+function clipByCodePoints(value: string, max: number): string {
+  const chars = Array.from(value);
+  return chars.length <= max ? value : chars.slice(0, max).join("");
+}
+
 function text(value: unknown, max: number): string {
-  return typeof value === "string" ? value.slice(0, max) : "";
+  return typeof value === "string" ? clipByCodePoints(value, max) : "";
 }
 
 function textList(value: unknown, maxItems: number, maxLength: number): string[] {
   const list = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   return list
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    .map((item) => item.trim().slice(0, maxLength))
+    .map((item) => clipByCodePoints(item.trim(), maxLength))
     .slice(0, maxItems);
 }
 
@@ -136,7 +147,7 @@ function flag(value: unknown): boolean {
 function messageOf(body: unknown): string | null {
   if (!isObject(body)) return null;
   const message = typeof body.error === "string" ? body.error.trim() : "";
-  return message ? message.slice(0, 300) : null;
+  return message ? clipByCodePoints(message, 300) : null;
 }
 
 function sha256(buffer: Buffer): string {
@@ -202,7 +213,7 @@ function nameFromSkillMd(markdown: string): string | null {
   const match = /^name:[ \t]*(.+)$/m.exec(frontmatter[1]);
   if (!match) return null;
   const value = match[1].trim().replace(/^["']|["']$/g, "");
-  return value ? value.slice(0, 128) : null;
+  return value ? clipByCodePoints(value, 128) : null;
 }
 
 /** 选 SKILL.md：优先根目录，其次最浅的 `skill.md`（大小写不敏感）。 */
@@ -460,7 +471,7 @@ function createTtlCache<T>(options: { ttlMs: number; max: number; now: () => num
 }
 
 function queryText(value: unknown, max: number): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
+  return typeof value === "string" ? clipByCodePoints(value.trim(), max) : "";
 }
 
 /**
@@ -916,7 +927,7 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       fail(res, 502, "虾评返回的 Key 格式不正确");
       return;
     }
-    const upstreamName = typeof user.name === "string" ? user.name.trim().slice(0, 128) : "";
+    const upstreamName = typeof user.name === "string" ? clipByCodePoints(user.name.trim(), 128) : "";
     const result: SkillHubRegisterResult = {
       apiKey,
       ...(upstreamName ? { name: upstreamName } : {}),

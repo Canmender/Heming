@@ -46,6 +46,17 @@ test("网关密钥与会话命令放行", () => {
   assert.equal(validateCliArgs(["sessions", "--limit", "5"]).ok, true);
 });
 
+test("来源页命令放行：plugin 装插件、quota 读/刷额度", () => {
+  // 国产智能体接入路径：plugin list/add → accounts add（终端）→ quota refresh。
+  assert.equal(validateCliArgs(["plugin", "list", "--json"]).ok, true);
+  assert.equal(validateCliArgs(["plugin", "add", "workbuddy"]).ok, true);
+  assert.equal(validateCliArgs(["quota", "--json"]).ok, true);
+  assert.equal(validateCliArgs(["quota", "history", "--days", "7", "--json"]).ok, true);
+  assert.equal(validateCliArgs(["quota", "refresh", "mimo-app"]).ok, true);
+  // 白名单只放 argv[0]，子命令形态仍由内核校验；危险头依旧拒绝。
+  assert.equal(validateCliArgs(["plugin-uninstall"]).ok, false);
+});
+
 test("交互式命令走真终端（账号登录/备份口令）", () => {
   assert.equal(needsTerminal(["accounts", "add", "claude"]), true);
   assert.equal(needsTerminal(["accounts"]), false);

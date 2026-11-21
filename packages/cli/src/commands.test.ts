@@ -134,6 +134,16 @@ describe("parseCliCommandInvocation", () => {
     const long = "x".repeat(CLI_COMMAND_ARGS_MAX + 50);
     expect(parseCliCommandInvocation(`/review ${long}`)?.args.length).toBe(CLI_COMMAND_ARGS_MAX);
   });
+
+  it("截断说明时不劈开 emoji 的代理对", () => {
+    // 一个 emoji 正好落在 2000 的边界上：按 UTF-16 slice 会留下孤立高位代理
+    const args = "a".repeat(CLI_COMMAND_ARGS_MAX - 1) + "😀tail";
+    const parsed = parseCliCommandInvocation(`/review ${args}`);
+    // 按码点计正好 2000 个（1999 个 a + 1 个 emoji），不是按 UTF-16 单元
+    expect(Array.from(parsed?.args ?? "").length).toBe(CLI_COMMAND_ARGS_MAX);
+    // 边界上的 emoji 完整保留，没有劈成孤立代理
+    expect(parsed?.args.endsWith("😀")).toBe(true);
+  });
 });
 
 describe("expandCliCommand / resolveCliCommand", () => {

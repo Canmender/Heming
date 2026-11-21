@@ -43,6 +43,18 @@ describe("parseDocument：文本类文件", () => {
     expect(doc.chars).toBeLessThanOrEqual(MAX_DOC_CHARS);
   });
 
+  it("★ 文档截断落在码点边界，不把 emoji 劈成落单代理", async () => {
+    // emoji 的高代理正好落在最后一个槽位（MAX_DOC_CHARS-1）：
+    // 旧代码 slice 后末位是落单高代理，坏字符会被加密喂给模型。
+    const long = "a".repeat(MAX_DOC_CHARS - 1) + "😀" + "b".repeat(100);
+    const doc = await parseDocument(blobOf(long), "long.txt");
+    expect(doc.ok).toBe(true);
+    expect(doc.truncated).toBe(true);
+    // 落单高代理被退掉：文本长度少一格，且整段没有孤立代理
+    expect(doc.text.length).toBe(MAX_DOC_CHARS - 1);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(doc.text)).toBe(false);
+  });
+
   it("折掉行尾空白与连续空行（PDF 转出的文本常有大量空白）", async () => {
     const doc = await parseDocument(blobOf("第一行   \n\n\n\n第二行  "), "x.txt");
     expect(doc.text).toBe("第一行\n\n第二行");

@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { createWidgetHost } = require("./plugin-host");
+const { createWidgetHost, normalizeEvent } = require("./plugin-host");
 const { normalizeWidgetSpec, widgetWindowSize, defaultWidgetPosition } = require("./plugin-window");
 // data API 的 key 规则/上限与真 store 同源：假 store 复用同一份校验，避免测试替身放宽口径。
 const { assertDataKey, DATA_MAX_BYTES } = require("./plugin-store");
@@ -1833,5 +1833,22 @@ test("notify：把插件身份与正文一起交给注入的 notifyPlugin，返�
     body: "3 条待办",
     level: "warn",
   });
+});
+
+test("通知标题截断按码点切，不劈 emoji 代理对（d.412 回归）", () => {
+  const max = 80; // NOTIFY_TITLE_MAX
+  // emoji 恰好骑在截断边界上：第 80 个码点是 emoji 的高代理时会把代理对劈开。
+  const title = "A".repeat(max - 1) + "😀" + "尾巴";
+  const event = normalizeEvent({ kind: "notify", title });
+  assert.ok(event, "事件应有效");
+  // 截断后每个码点都必须是完整字符，不能出现落单高/低代理。
+  const points = [...event.title];
+  const hasLoneSurrogate = points.some((ch) => {
+    const cp = ch.codePointAt(0);
+    return cp >= 0xd800 && cp <= 0xdfff;
+  });
+  assert.equal(hasLoneSurrogate, false, "标题里不该有落单代理（乱码方块）");
+  assert.equal(points.length, max + 1, "按码点截断后应保留 max 个码点 + 省略号");
+  assert.ok(event.title.endsWith("…"));
 });
 

@@ -151,6 +151,39 @@ describe("复盘摘要（d.267）", () => {
     expect(text).not.toContain("早就做完的（");
   });
 
+  it("截断任务结论时不在 emoji 中间劈出落单代理（喂给模型的是干净文本）", () => {
+    // 69 个 ASCII + 一个 emoji（2 个 UTF-16 单元）正好跨过 70 的截断边界。
+    const resultText = "A".repeat(69) + "😀" + "B".repeat(10);
+    const withEmoji = [
+      task({
+        id: "emoji",
+        title: "带表情的活",
+        status: "done",
+        assigneeId: "u2",
+        completedBy: "u2",
+        completedAt: new Date(NOW - DAY).toISOString(),
+        result: resultText,
+      }),
+    ];
+    const text = buildTeamDigest(snap(withEmoji), { now: NOW, memberName: name });
+    // 只挑「落单」代理：合法的 emoji 是 高+低 成对出现，不能一刀切判成坏字符。
+    // 遍历 UTF-16 单元：高代理后必须紧跟低代理，低代理前必须是高代理，否则就是被劈开的乱码。
+    function hasLoneSurrogate(s: string): boolean {
+      for (let i = 0; i < s.length; i++) {
+        const code = s.charCodeAt(i);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = s.charCodeAt(i + 1);
+          if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+          i++; // 跳过配对的低代理
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          return true; // 落单低代理
+        }
+      }
+      return false;
+    }
+    expect(hasLoneSurrogate(text)).toBe(false);
+  });
+
   it("按人看：完成数、手上未完成与在做/未开始", () => {
     const text = buildTeamDigest(snap(tasks), { now: NOW, memberName: name });
     expect(text).toContain("林晓（@linxiao）：这 7 天完成 1，手上未完成 1 件（1 件逾期），其中在做 1");

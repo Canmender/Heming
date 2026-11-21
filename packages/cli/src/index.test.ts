@@ -174,6 +174,17 @@ describe.skipIf(tsx === null)("heming memory 子命令", () => {
     expect(listed.stderr).toContain("还没有记过");
   }, 30_000);
 
+  it("memory --json：stdout 只有一个 JSON 数组，能直接 JSON.parse", async () => {
+    const dir = tmpDir();
+    await runCli(["memory", "add", "记住这句", "--cwd", dir]);
+    const listed = await runCli(["memory", "--json", "--cwd", dir]);
+    expect(listed.code).toBe(0);
+    const parsed = JSON.parse(listed.stdout) as { text: string }[];
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.some((entry) => entry.text === "记住这句")).toBe(true);
+    expect(listed.stdout).not.toContain("工作区记忆");
+  }, 30_000);
+
   it("记忆文件坏了：明确报错（exit 1），不静默当成空表", async () => {
     const dir = tmpDir();
     mkdirSync(path.join(dir, ".heming"), { recursive: true });

@@ -39,7 +39,9 @@ export interface InstallVerdict {
 export function hostOf(url: string): string {
   const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(url.trim());
   if (!m) return "";
-  const host = m[1];
+  // 先剥掉 userinfo（user:pass@）——否则 hostOf("https://user@github.com") 会得到 "user@github.com"
+  const raw = m[1];
+  const host = raw.slice(raw.lastIndexOf("@") + 1);
   // 带端口就剥掉（IPv6 的 [::1]:8080 也覆盖）
   const cut = host.startsWith("[")
     ? host.indexOf("]") >= 0 ? host.slice(0, host.indexOf("]") + 1) : host

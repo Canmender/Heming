@@ -524,7 +524,14 @@ export function buildFileToolBridge(deps: FileToolDeps): ToolBridge {
     let body = slice.join("\n");
     let clipped = false;
     if (body.length > READ_MAX_CHARS) {
-      body = body.slice(0, READ_MAX_CHARS);
+      let cut = READ_MAX_CHARS;
+      // 不在 emoji 代理对中间切开：切点落在一对高+低代理之间时回退一格（d.412 回归）。
+      const at = body.charCodeAt(cut - 1);
+      if (at >= 0xd800 && at <= 0xdbff) {
+        const next = body.charCodeAt(cut);
+        if (next >= 0xdc00 && next <= 0xdfff) cut -= 1;
+      }
+      body = body.slice(0, cut);
       clipped = true;
     }
     const end = offset - 1 + slice.length;

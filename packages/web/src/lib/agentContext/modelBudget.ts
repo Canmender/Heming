@@ -86,14 +86,21 @@ export function compactSpec(
   if (messageBudgetTokens <= 0) return null;
   const pressureBudgetTokens = messageBudgetTokens - headroom;
   if (pressureBudgetTokens <= 0) {
-    // 窗口比余量还小（小模型）：没有「摘要余量」可留，就按窗口 80% 压。
-    const thresholdTokens = Math.floor(contextWindow * thresholdRatio);
+    // 窗口比余量还小（小模型）：根本没有「摘要余量」可留。参考项目把这种配置当硬错误拒绝，
+    // 这里没有硬错误的余地（设置卡要给小模型也显示一档），就诚实地降级：余量记 0，
+    // 阈值夹到消息预算内（不能比窗口能装下的正文还大），保留量始终小于阈值。
+    // 旧代码把「摘要余量」伪造成整个消息预算（4096），设置卡于是显示「摘要余量 4.1K」，
+    // 可实际一分余量都没有——用户按这个数字判断要不要压缩会被误导。
+    const thresholdTokens = Math.min(
+      Math.floor(contextWindow * thresholdRatio),
+      messageBudgetTokens,
+    );
     return {
       contextWindow,
       messageBudgetTokens,
-      pressureBudgetTokens: messageBudgetTokens,
+      pressureBudgetTokens: 0,
       thresholdTokens,
-      retainTokens: Math.floor(messageBudgetTokens * retainRatio),
+      retainTokens: Math.min(Math.floor(messageBudgetTokens * retainRatio), thresholdTokens - 1),
     };
   }
   const thresholdTokens = Math.floor(

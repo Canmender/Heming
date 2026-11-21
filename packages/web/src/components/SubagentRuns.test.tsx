@@ -93,6 +93,25 @@ describe("SubagentRuns（d.200）", () => {
     expect(item.textContent?.length ?? 0).toBeLessThan(long.length);
   });
 
+  it("任务书截断落在 emoji 中间时不劈出落单代理（d.412 回归）", () => {
+    const task = "a".repeat(47) + "😀" + "XYZ";
+    render(<SubagentRuns runs={[run({ task })]} onStop={vi.fn()} />);
+    const item = screen.getByTitle(task);
+    const text = item.textContent ?? "";
+    let lone = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const n = text.charCodeAt(i + 1);
+        if (!(n >= 0xdc00 && n <= 0xdfff)) { lone = true; break; }
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const p = text.charCodeAt(i - 1);
+        if (!(p >= 0xd800 && p <= 0xdbff)) { lone = true; break; }
+      }
+    }
+    expect(lone).toBe(false);
+  });
+
   it("团队任务显示成员角色，而不只是「第 2 个」（d.347）", () => {
     render(
       <SubagentRuns

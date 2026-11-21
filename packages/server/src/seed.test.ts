@@ -101,4 +101,24 @@ describe("seedUsersFromEnv", () => {
     expect(row && verifyPassword("admin", row.passwordHash)).toBe(true);
     expect(logs.join("\n")).not.toContain("warning");
   });
+
+  it("存储层播种失败不误报为配置非法（d.412 回归）", () => {
+    let call = 0;
+    const broken: Store = {
+      ...store,
+      createUser: (...args) => {
+        call += 1;
+        if (call === 2) throw new Error("SQLITE_BUSY: database is locked");
+        return store.createUser(...args);
+      },
+    } as Store;
+    expect(() =>
+      seedUsersFromEnv(broken, "alice:pass123,bob:pass456", log),
+    ).not.toThrow();
+    const joined = logs.join("\n");
+    expect(joined).toContain("存储层播种失败");
+    expect(joined).not.toContain("invalid HEMING_SEED_USERS");
+    // 第一个用户确已建成：部分播种的事实不再被「配置非法」掩盖。
+    expect(store.findUserByUsername("alice")).not.toBeNull();
+  });
 });

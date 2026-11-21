@@ -23,6 +23,10 @@ import type {
   TeamWorkspaceSnapshot,
   TeamBrief,
   WorkspaceTeam,
+  TeamKnowledgeDoc,
+  TeamDirectoryEntry,
+  TeamJoinRequest,
+  JoinRequestStatus,
 } from "@heming/shared";
 import type {
   MessageSearchHit,
@@ -34,6 +38,7 @@ import type {
 import { summarizeTeamTasks } from "./teamCounts.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
+import { withStatementCache } from "./statementCache.js";
 
 export type SqliteStore = Store & { close(): void };
 
@@ -87,8 +92,67 @@ interface TeamTaskCommentRow {
   created_at: string;
 }
 
+interface TeamKnowledgeRow {
+  id: string;
+  team_id: string;
+  author_id: string;
+  title: string;
+  content: string;
+  source_vault: string | null;
+  tags: string;
+  pinned: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TeamJoinRequestRow {
+  id: string;
+  team_id: string;
+  user_id: string;
+  message: string;
+  status: string;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+function rowToJoinRequest(r: TeamJoinRequestRow): TeamJoinRequest {
+  return {
+    id: r.id,
+    teamId: r.team_id,
+    userId: r.user_id,
+    message: r.message,
+    status: r.status as JoinRequestStatus,
+    createdAt: r.created_at,
+    reviewedAt: r.reviewed_at,
+  };
+}
+
+function rowToKnowledge(r: TeamKnowledgeRow): TeamKnowledgeDoc {
+  let tags: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(r.tags);
+    if (Array.isArray(parsed)) tags = parsed.filter((t): t is string => typeof t === "string");
+  } catch {
+    // 坏数据不炸列表：按无标签处理（与 tags 默认 '[]' 对齐）
+  }
+  return {
+    id: r.id,
+    teamId: r.team_id,
+    authorId: r.author_id,
+    title: r.title,
+    content: r.content,
+    sourceVault: r.source_vault,
+    tags,
+    pinned: r.pinned === 1,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
 export function createSqliteStore(dbPath: string): SqliteStore {
-  const db: DatabaseSync = openDb(dbPath);
+  // d.412.4.182：node:sqlite 每次 prepare 都重新编译；高频列表/搜索路径套一层
+  // 有界 LRU 语句缓存，命中即复用编译好的 StatementSync（见 statementCache.ts）。
+  const db: DatabaseSync = withStatementCache(openDb(dbPath));
 
   /**
    * 显式事务：node:sqlite 没有 transaction 助手（同 deleteConversation 的写法）。
@@ -182,6 +246,46 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.prepare("DELETE FROM messages_fts WHERE conv_id = ?").run(conversationId);
     } catch (err) {
       disableFts(err);
+    }
+  }
+
+  /* ───────────────── 团队知识库全文索引（FTS5 trigram，应用层同步） ─────────────────
+   * 与 messages_fts 独立探测：一张表建失败不影响另一张。写/删文档时显式同步；
+   * 搜索用 MATCH，query <3 字符或索引不可用时回退 LIKE 线性扫描。
+   */
+  const kbFtsReady: boolean = (() => {
+    try {
+      return !!db
+        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'team_knowledge_fts'")
+        .get();
+    } catch {
+      return false;
+    }
+  })();
+
+  function indexKnowledgeDoc(doc: TeamKnowledgeDoc): void {
+    if (!kbFtsReady) return;
+    try {
+      const rowid = (db.prepare("SELECT rowid FROM team_knowledge_docs WHERE id = ?").get(doc.id) as
+        | { rowid: number | bigint }
+        | undefined)?.rowid;
+      if (rowid === undefined) return;
+      db.prepare(
+        "INSERT OR REPLACE INTO team_knowledge_fts(rowid, doc_id, team_id, title, content) VALUES (?, ?, ?, ?, ?)",
+      ).run(rowid, doc.id, doc.teamId, doc.title, doc.content);
+    } catch (err) {
+      // 单条索引失败不阻断文档写入；下次写会 INSERT OR REPLACE 重试
+      console.warn("[fts] 团队知识文档索引失败：", (err as Error).message);
+    }
+  }
+
+  function unindexKnowledgeDoc(id: string): void {
+    if (!kbFtsReady) return;
+    try {
+      // doc_id 是 UNINDEXED 列，直接按它删（无需先查 rowid）
+      db.prepare("DELETE FROM team_knowledge_fts WHERE doc_id = ?").run(id);
+    } catch (err) {
+      console.warn("[fts] 团队知识文档移除索引失败：", (err as Error).message);
     }
   }
 
@@ -327,6 +431,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     detail: string;
     assignee_id: string | null;
     status: string;
+    priority?: string | null;
     created_by: string;
     created_at: string;
     updated_at: string;
@@ -376,6 +481,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     detail: r.detail,
     assigneeId: r.assignee_id ?? null,
     status: r.status as TeamItemStatus,
+    // d.268：老库没有 priority 列时按 normal 读（与内存库同口径）。
+    priority: (r.priority as TeamTask["priority"]) ?? "normal",
     createdBy: r.created_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -849,41 +956,54 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       return out;
     },
     listConversations(userId) {
-      const convs = db
+      // d.412.4.181：原来每条会话各查一次最近消息时间 + 一次 agent（N 条 = 1+2N 次 prepare/查询）。
+      // 合成单条语句：LEFT JOIN 语义靠子查询收敛到每会话一个 agent，INNER JOIN agents 保留
+      // 「agent 已删则不出此会话」的口径；最近消息时间用相关子查询。ORDER BY c.rowid 对齐
+      // 原来无 ORDER BY 时的 conversations 扫描顺序（行 = 建表插入序）。
+      const rows = db
         .prepare(
-          `SELECT c.id, c.title, c.workspace FROM conversations c
+          `SELECT c.id, c.title, c.workspace,
+                  (SELECT created_at FROM messages WHERE conv_id = c.id
+                   ORDER BY created_at DESC LIMIT 1) AS last_message_at,
+                  a.id AS a_id, a.owner_id AS a_owner_id, a.name AS a_name,
+                  a.avatar AS a_avatar, a.description AS a_description
+           FROM conversations c
            JOIN conversation_members m ON m.conv_id = c.id
-           WHERE m.member_id = ? AND c.kind = 'agent'`,
+           JOIN (SELECT conv_id, MIN(agent_id) AS agent_id FROM conversation_agents GROUP BY conv_id) ca
+             ON ca.conv_id = c.id
+           JOIN agents a ON a.id = ca.agent_id
+           WHERE m.member_id = ? AND c.kind = 'agent'
+           ORDER BY c.rowid`,
         )
-        .all(userId) as { id: string; title: string | null; workspace: string | null }[];
-      const lastMessageAtOf = (convId: string): string | null => {
-        const row = db
-          .prepare("SELECT created_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1")
-          .get(convId) as { created_at: string } | undefined;
-        return row?.created_at ?? null;
-      };
+        .all(userId) as {
+        id: string;
+        title: string | null;
+        workspace: string | null;
+        last_message_at: string | null;
+        a_id: string;
+        a_owner_id: string | null;
+        a_name: string;
+        a_avatar: string | null;
+        a_description: string;
+      }[];
       const out: Conversation[] = [];
-      for (const c of convs) {
-        // 智能体一对一：对方是名册 agent，复用 conversation_agents 关联行存对方 id。
-        // INNER JOIN agents——agent 已删则不出这条会话（宁可不显示，也不给半截对象）。
-        const agent = db
-          .prepare(
-            `SELECT a.id, a.owner_id, a.name, a.avatar, a.description
-             FROM conversation_agents ca JOIN agents a ON a.id = ca.agent_id
-             WHERE ca.conv_id = ? LIMIT 1`,
-          )
-          .get(c.id) as AgentRow | undefined;
-        if (agent)
-          out.push({
-            id: c.id,
-            type: "agent",
-            agent: rowToAgent(agent),
-            ...(c.title ? { title: c.title } : {}),
-            ...(c.workspace ? { workspace: c.workspace } : {}),
-            // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
-            unreadCount: 0,
-            lastMessageAt: lastMessageAtOf(c.id),
-          });
+      for (const r of rows) {
+        out.push({
+          id: r.id,
+          type: "agent",
+          agent: rowToAgent({
+            id: r.a_id,
+            owner_id: r.a_owner_id,
+            name: r.a_name,
+            avatar: r.a_avatar,
+            description: r.a_description,
+          }),
+          ...(r.title ? { title: r.title } : {}),
+          ...(r.workspace ? { workspace: r.workspace } : {}),
+          // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
+          unreadCount: 0,
+          lastMessageAt: r.last_message_at,
+        });
       }
       return out;
     },
@@ -1398,6 +1518,19 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       // 显式级联：建表时没加外键（内存实现也无法表达），四个删除口要一起清干净。
       // 必须在事务里：断在删 teams 之前就会留下「有 team 行、没成员行」的孤儿团队。
       return runTx(() => {
+        // 团队知识库：索引与文档一起清（doc_id 是 FTS 的 UNINDEXED 列，按 team_id 扫一遍）
+        if (kbFtsReady) {
+          const docs = db
+            .prepare("SELECT id FROM team_knowledge_docs WHERE team_id = ?")
+            .all(teamId) as Array<{ id: string }>;
+          for (const d of docs) unindexKnowledgeDoc(d.id);
+        }
+        db.prepare("DELETE FROM team_knowledge_docs WHERE team_id = ?").run(teamId);
+        // 加入申请：团队没了，待审/历史申请一并清掉（显式级联）
+        db.prepare("DELETE FROM team_join_requests WHERE team_id = ?").run(teamId);
+        // 任务讨论/动态：建表时没外键，按团队显式级联清掉，不留孤儿（与内存实现同口径）
+        db.prepare("DELETE FROM team_task_comments WHERE team_id = ?").run(teamId);
+        db.prepare("DELETE FROM team_events WHERE team_id = ?").run(teamId);
         db.prepare("DELETE FROM team_tasks WHERE team_id = ?").run(teamId);
         db.prepare("DELETE FROM team_plans WHERE team_id = ?").run(teamId);
         db.prepare("DELETE FROM team_members WHERE team_id = ?").run(teamId);
@@ -1634,8 +1767,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const at = new Date().toISOString();
       db.prepare(
         `INSERT INTO team_tasks
-         (id, team_id, plan_id, title, detail, assignee_id, status, created_by, created_at, updated_at, due_at, attachment_file_id, result, completed_at, completed_by, blocked_by, return_note, returned_at, returned_by, progress, progress_at, progress_by, nudged_at, nudged_by, nudge_count, review_state, review_note, reviewed_at, reviewed_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, team_id, plan_id, title, detail, assignee_id, status, priority, created_by, created_at, updated_at, due_at, attachment_file_id, result, completed_at, completed_by, blocked_by, return_note, returned_at, returned_by, progress, progress_at, progress_by, nudged_at, nudged_by, nudge_count, review_state, review_note, reviewed_at, reviewed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         teamId,
@@ -1644,6 +1777,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         body.detail ?? "",
         body.assigneeId ?? null,
         "todo",
+        body.priority ?? "normal",
         actorId,
         at,
         at,
@@ -1750,6 +1884,225 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }));
     },
 
+    /* ───────────────── 团队知识库（SQLite 实现） ───────────────── */
+
+    listTeamKnowledge(teamId, actorId) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const rows = db
+        .prepare(
+          "SELECT * FROM team_knowledge_docs WHERE team_id = ? ORDER BY pinned DESC, updated_at DESC, id ASC",
+        )
+        .all(teamId) as unknown as TeamKnowledgeRow[];
+      return rows.map(rowToKnowledge);
+    },
+
+    createTeamKnowledge(teamId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const now = new Date().toISOString();
+      const doc: TeamKnowledgeDoc = {
+        id: randomUUID(),
+        teamId,
+        authorId: actorId,
+        title: body.title,
+        content: body.content,
+        sourceVault: body.sourceVault ?? null,
+        tags: (body.tags ?? []).slice(),
+        pinned: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.prepare(
+        `INSERT INTO team_knowledge_docs
+          (id, team_id, author_id, title, content, source_vault, tags, pinned, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        doc.id, doc.teamId, doc.authorId, doc.title, doc.content, doc.sourceVault,
+        JSON.stringify(doc.tags), 0, doc.createdAt, doc.updatedAt,
+      );
+      indexKnowledgeDoc(doc);
+      return { ...doc, tags: [...doc.tags] };
+    },
+
+    getTeamKnowledge(teamId, actorId, docId) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const row = db
+        .prepare("SELECT * FROM team_knowledge_docs WHERE id = ? AND team_id = ?")
+        .get(docId, teamId) as unknown as TeamKnowledgeRow | undefined;
+      return row ? rowToKnowledge(row) : null;
+    },
+
+    updateTeamKnowledge(teamId, actorId, docId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const row = db
+        .prepare("SELECT * FROM team_knowledge_docs WHERE id = ? AND team_id = ?")
+        .get(docId, teamId) as unknown as TeamKnowledgeRow | undefined;
+      if (!row) return null;
+      if (row.author_id !== actorId && !isTeamOwner(teamId, actorId)) return "forbidden";
+      const prev = rowToKnowledge(row);
+      const next: TeamKnowledgeDoc = {
+        ...prev,
+        title: body.title ?? prev.title,
+        content: body.content ?? prev.content,
+        tags: body.tags ? body.tags.slice() : prev.tags,
+        updatedAt: new Date().toISOString(),
+      };
+      db.prepare(
+        "UPDATE team_knowledge_docs SET title = ?, content = ?, tags = ?, updated_at = ? WHERE id = ?",
+      ).run(next.title, next.content, JSON.stringify(next.tags), next.updatedAt, docId);
+      indexKnowledgeDoc(next);
+      return { ...next, tags: [...next.tags] };
+    },
+
+    deleteTeamKnowledge(teamId, actorId, docId) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const row = db
+        .prepare("SELECT author_id FROM team_knowledge_docs WHERE id = ? AND team_id = ?")
+        .get(docId, teamId) as unknown as { author_id: string } | undefined;
+      if (!row) return null;
+      if (row.author_id !== actorId && !isTeamOwner(teamId, actorId)) return "forbidden";
+      db.prepare("DELETE FROM team_knowledge_docs WHERE id = ?").run(docId);
+      unindexKnowledgeDoc(docId);
+      return true;
+    },
+
+    searchTeamKnowledge(teamId, actorId, query) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const q = query.trim();
+      if (q.length < 3 || !kbFtsReady) {
+        // 短查询 / 索引不可用：LIKE 线性扫描（与内存实现同口径）
+        const like = `%${q.toLowerCase()}%`;
+        const rows = db
+          .prepare(
+            `SELECT * FROM team_knowledge_docs
+             WHERE team_id = ? AND (lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags) LIKE ?)
+             ORDER BY updated_at DESC`,
+          )
+          .all(teamId, like, like, like) as unknown as TeamKnowledgeRow[];
+        return rows.map(rowToKnowledge);
+      }
+      try {
+        // FTS MATCH 只定位 doc_id（UNINDEXED 列，可 SELECT），再回表取完整行并严格按 team_id 过滤
+        // （防跨团队串数据）。用子查询而非 JOIN+别名，避免 MATCH 与表别名绑定的坑。
+        const hits = db
+          .prepare(
+            `SELECT * FROM team_knowledge_docs
+             WHERE team_id = ? AND id IN (
+               SELECT doc_id FROM team_knowledge_fts WHERE team_knowledge_fts MATCH ?
+             )
+             ORDER BY updated_at DESC`,
+          )
+          .all(teamId, ftsPhrase(q)) as unknown as TeamKnowledgeRow[];
+        return hits.map(rowToKnowledge);
+      } catch (err) {
+        // MATCH 语法异常等：回退线性扫描，不让搜索报错（与 messages 的降级策略一致）
+        console.warn("[fts] 团队知识库 MATCH 失败，回退扫描：", (err as Error).message);
+        const like = `%${q.toLowerCase()}%`;
+        const rows = db
+          .prepare(
+            `SELECT * FROM team_knowledge_docs
+             WHERE team_id = ? AND (lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags) LIKE ?)
+             ORDER BY updated_at DESC`,
+          )
+          .all(teamId, like, like, like) as unknown as TeamKnowledgeRow[];
+        return rows.map(rowToKnowledge);
+      }
+    },
+
+    listTeamDirectory(query) {
+      const q = query.trim().toLowerCase();
+      const like = `%${q}%`;
+      // 只暴露元数据；成员数按 team_id 聚合，敏感数据一律不查。
+      const rows = db
+        .prepare(
+          `SELECT t.id, t.name, t.goal, t.created_at,
+                  (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+           FROM teams t
+           WHERE ? = '' OR lower(t.name) LIKE ? OR lower(t.goal) LIKE ?
+           ORDER BY t.created_at DESC`,
+        )
+        .all(q, like, like) as unknown as Array<{
+        id: string;
+        name: string;
+        goal: string;
+        created_at: string;
+        member_count: number;
+      }>;
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        goal: r.goal,
+        memberCount: Number(r.member_count),
+        createdAt: r.created_at,
+      }));
+    },
+    createJoinRequest(teamId, userId, message) {
+      if (!db.prepare("SELECT 1 FROM teams WHERE id = ?").get(teamId)) return null;
+      if (db.prepare("SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?").get(teamId, userId)) {
+        return "already_member";
+      }
+      if (
+        db
+          .prepare("SELECT 1 FROM team_join_requests WHERE team_id = ? AND user_id = ? AND status = 'pending'")
+          .get(teamId, userId)
+      ) {
+        return "already_pending";
+      }
+      const req: TeamJoinRequest = {
+        id: randomUUID(),
+        teamId,
+        userId,
+        message,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        reviewedAt: null,
+      };
+      db.prepare(
+        `INSERT INTO team_join_requests (id, team_id, user_id, message, status, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(req.id, req.teamId, req.userId, req.message, req.status, req.createdAt, req.reviewedAt);
+      return { ...req };
+    },
+    listMyJoinRequests(userId) {
+      const rows = db
+        .prepare("SELECT * FROM team_join_requests WHERE user_id = ? ORDER BY created_at DESC")
+        .all(userId) as unknown as TeamJoinRequestRow[];
+      return rows.map(rowToJoinRequest);
+    },
+    listJoinRequests(teamId, actorId) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      if (!isTeamOwner(teamId, actorId)) return "forbidden";
+      const rows = db
+        .prepare("SELECT * FROM team_join_requests WHERE team_id = ? ORDER BY created_at ASC")
+        .all(teamId) as unknown as TeamJoinRequestRow[];
+      return rows.map(rowToJoinRequest);
+    },
+    reviewJoinRequest(teamId, requestId, actorId, action) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      if (!isTeamOwner(teamId, actorId)) return "forbidden";
+      const row = db.prepare("SELECT * FROM team_join_requests WHERE id = ?").get(requestId) as
+        | TeamJoinRequestRow
+        | undefined;
+      if (!row || row.team_id !== teamId) return null;
+      if (row.status !== "pending") return "already_reviewed";
+      const at = new Date().toISOString();
+      // approve 时原子写成员行（幂等：可能已被 owner 手动拉进来）+ 置状态，同一事务。
+      return runTx(() => {
+        if (action === "approve") {
+          db.prepare(
+            `INSERT OR IGNORE INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)`,
+          ).run(teamId, row.user_id, at);
+        }
+        db.prepare("UPDATE team_join_requests SET status = ?, reviewed_at = ? WHERE id = ?").run(
+          action === "approve" ? "approved" : "rejected",
+          at,
+          requestId,
+        );
+        const next = db.prepare("SELECT * FROM team_join_requests WHERE id = ?").get(requestId) as unknown as
+          TeamJoinRequestRow;
+        return rowToJoinRequest(next);
+      });
+    },
+
     updateTeamTask(teamId, taskId, actorId, body) {
       if (!visibleTeam(teamId, actorId)) return null;
       const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(taskId) as
@@ -1809,6 +2162,13 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         if (!isTeamOwner(teamId, actorId)) return "forbidden";
         if (row.status !== "done") return "not_reviewable";
       }
+      // 状态机收紧（1.3）：已完成任务的胶囊循环是 done→todo（直接回到待认领），
+      // 一键就把完成/验收痕迹抹成新任务，绕过验收且不理由。这里堵住这条裸改路径。
+      // 注意：done→doing（本人重开继续做、保留结论，见 d.252 测试）是正当代开，仍允许；
+      // 组长打回 review:"changes"（带原因、回到 doing）也不受此限。
+      if (!reviewed && row.status === "done" && body.status === "todo") {
+        return "done_locked";
+      }
       const returned = body.assigneeId === null && row.assignee_id !== null;
       const reclaimed = body.assigneeId !== undefined && body.assigneeId !== null;
       const next: TeamTask = {
@@ -1818,6 +2178,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         ...(body.planId !== undefined ? { planId: body.planId } : {}),
         ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.priority !== undefined ? { priority: body.priority } : {}),
         ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
         ...(body.attachmentFileId !== undefined
           ? { attachmentFileId: body.attachmentFileId }
@@ -1867,7 +2228,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         updatedAt: at,
       };
       db.prepare(
-        `UPDATE team_tasks SET plan_id = ?, title = ?, detail = ?, assignee_id = ?, status = ?,
+        `UPDATE team_tasks SET plan_id = ?, title = ?, detail = ?, assignee_id = ?, status = ?, priority = ?,
            due_at = ?, attachment_file_id = ?, result = ?, completed_at = ?, completed_by = ?,
            blocked_by = ?, return_note = ?, returned_at = ?, returned_by = ?,
            progress = ?, progress_at = ?, progress_by = ?,
@@ -1880,6 +2241,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         next.detail,
         next.assigneeId,
         next.status,
+        next.priority ?? "normal",
         next.dueAt,
         next.attachmentFileId,
         next.result ?? "",
@@ -1917,6 +2279,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         (row.assignee_id === null && row.created_by === actorId);
       if (!isTeamOwner(teamId, actorId) && !ownsTask) return "forbidden";
       db.prepare("DELETE FROM team_tasks WHERE id = ?").run(taskId);
+      // 任务讨论（d.271）：删任务时清掉留言，不留孤儿（与内存实现同口径）。
+      db.prepare("DELETE FROM team_task_comments WHERE task_id = ?").run(taskId);
       // d.255：删掉的任务不能再当别人的前置。只改 blocked_by，不碰 updated_at
       //（清依赖不是那条任务自己的进度，不该把「多久没动」重置）。
       const dependents = db

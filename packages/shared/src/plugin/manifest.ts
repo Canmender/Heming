@@ -119,15 +119,22 @@ export function normalizeDeclaredHost(raw: unknown): string | null {
   if (ipv6) {
     const port = ipv6[2];
     if (port && (Number(port) < 1 || Number(port) > 65_535)) return null;
-    return port ? `[${ipv6[1]}]:${port}` : `[${ipv6[1]}]`;
+    // 端口按数值归一，再和 hostOfUrl 的口径对齐：WHATWG URL 会把前导零
+    // (:00443 → 443、:00080 → 80) 解析成数字并剥掉默认端口，声明侧也要照做，
+    // 否则「[::1]:80」这种合法写法永远匹配不上 URL 归一化后的「[::1]」。
+    const canonical = port ? String(Number(port)) : "";
+    if (canonical === "443" || canonical === "80") return `[${ipv6[1]}]`;
+    return canonical ? `[${ipv6[1]}]:${canonical}` : `[${ipv6[1]}]`;
   }
   const match = /^([a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)(?::([0-9]{1,5}))?$/.exec(text);
   if (!match) return null;
   const port = match[2];
   if (port && (Number(port) < 1 || Number(port) > 65_535)) return null;
-  // 去掉 http/https 默认端口，与 hostOfUrl 的归一化保持可比较。
-  if (port === "443" || port === "80") return match[1];
-  return port ? `${match[1]}:${port}` : match[1];
+  // 数值归一后去掉 http/https 默认端口，与 hostOfUrl 的归一化保持可比较
+  // （前导零端口也要能等价于默认端口）。
+  const canonical = port ? String(Number(port)) : "";
+  if (canonical === "443" || canonical === "80") return match[1];
+  return canonical ? `${match[1]}:${canonical}` : match[1];
 }
 
 /** MCP 服务 URL：只 https；http 仅本机回环；禁内嵌账号密码。 */

@@ -119,7 +119,7 @@ const PALETTE_VIEWS: PaletteViewEntry[] = [
     page: "team",
     tab: "feed",
     label: "团队 › 动向",
-    description: "最近的团队动态流",
+    description: "同队成员共享的任务与日程摘要流",
     keywords: ["团队", "动向", "动态", "feed", "activity"],
   },
   {
@@ -486,10 +486,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       case "member":
         if (item.userId) focusTeamMember(item.userId);
         break;
-      case "skill":
-        // 技能没有详情路由，跳到技能区即可——到了列表里一眼能认出来
+      case "skill": {
+        // 技能区已并入插件区。本地技能结果带 skill id（item.id = "skill:<id>"），
+        // 投 focus-skill 意图让技能区定位并打开该技能详情——与插件命令 target=skill
+        // 复用同一落点（runPluginCommandTarget），不再只跳到列表页让人自己找。
+        const skillId = item.id.startsWith("skill:") ? item.id.slice("skill:".length) : null;
+        if (skillId) setPaletteIntent("focus-skill", { id: skillId });
         setPage("skills");
         break;
+      }
       case "vault":
         // 知识库笔记：切到知识库页并投递「打开这篇」意图，由页面消费后 openFile。
         if (item.vaultRel) openVault({ kind: "open", rel: item.vaultRel });

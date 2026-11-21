@@ -45,7 +45,7 @@ import {
 import { fmtTokens } from "../lib/format/tokens.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
-import { TeamBoardView } from "./TeamBoardPage.js";
+import { TeamTaskBoard } from "./team/TeamTaskBoard.js";
 import { TeamWorkspace } from "./team/TeamWorkspace.js";
 import { Button } from "../components/ui/Button.js";
 
@@ -687,7 +687,7 @@ export function TeamPage() {
                 aria-label="搜索团队成员"
                 className={`ui-input ${FOCUS_RING}`}
               />
-              <div className="mt-2 flex items-center justify-between ui-micro">
+              <div className="mt-2 flex items-center justify-between gap-2 ui-micro">
                 <label className="flex items-center gap-1 text-muted">
                   <input
                     type="checkbox"
@@ -697,15 +697,27 @@ export function TeamPage() {
                   />
                   仅看在线
                 </label>
-                {selectedId && (
+                <div className="flex items-center gap-2">
+                  {selectedId && (
+                    <button
+                      type="button"
+                      className={`-my-1 inline-flex h-8 items-center rounded-md px-1.5 text-muted hover:text-ink ${FOCUS_RING}`}
+                      onClick={() => setSelectedId(null)}
+                    >
+                      查看全部动向
+                    </button>
+                  )}
+                  {/* 痛点 9 / 方案 1.1：名册是只读摘要，真正的加人/派活在工作台。
+                      这里给一步入口，避免用户对着名册找不到「怎么加人」。 */}
                   <button
                     type="button"
-                    className={`-my-1 inline-flex h-8 items-center rounded-md px-1.5 text-muted hover:text-ink ${FOCUS_RING}`}
-                    onClick={() => setSelectedId(null)}
+                    className={`ui-link ui-hit ${FOCUS_RING}`}
+                    title="到工作台管理成员、派任务"
+                    onClick={() => setTab("workspace")}
                   >
-                    查看全部动向
+                    管理成员
                   </button>
-                )}
+                </div>
               </div>
             </div>
 
@@ -861,18 +873,16 @@ export function TeamPage() {
             />
           )}
 
-          {/* 看板：d.67 从独立页并进来的视图；d.109 起改为受控视图——数据、名册、
-              选中成员都由本页提供，不再自己取数/轮询，两套成员筛选天然互通。 */}
+          {/* 看板：改造为真正的任务板（团队协作完善 1.2）——读 team_tasks（与工作台同源），
+              按状态分列、可拖拽流转，复用收紧后的状态机（done_locked）。旧 TeamBoardView
+              读 team_activities 摘要、只能看不能动，已不再使用。 */}
           {tab === "board" && (
-            <TeamBoardView
+            <TeamTaskBoard
+              teamId={activeTeamId}
               members={members}
-              onlineCount={onlineCount}
-              activities={humanActivities}
-              selectedId={selectedId}
-              onSelectMember={setSelectedId}
-              ready={feedReady}
-              error={feedError}
-              onRetry={() => void loadFeed(true)}
+              currentUserId={me?.id ?? null}
+              ownerId={teams.find((t) => t.id === activeTeamId)?.ownerId ?? null}
+              onOpenWorkbench={() => setTab("workspace")}
             />
           )}
 

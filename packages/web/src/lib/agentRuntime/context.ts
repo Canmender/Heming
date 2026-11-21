@@ -173,11 +173,13 @@ function recallQuery(memory: MemoryStore, input: BuildContextInput): string {
 function vaultOptionsOf(input: BuildContextInput, memory: MemoryStore): VaultRecallOptions {
   const bridge = input.vaultMemory;
   // 个人数据库关掉 → 知识库这一层整体不参与（与「读侧按偏好收口」同一口径）。
+  // 偏好优先级最高：personalDb=false 时即使桥/设置说可用也必须关掉，
+  // 否则用户关了个人库、私有笔记仍被塞进 system prompt（诊断还说"已跳过"，自相矛盾）。
   let enabled = input.agentPrefs?.personalDb ?? true;
   let available = false;
   let entries: SemanticEntry[] | undefined;
   try {
-    enabled = bridge?.enabled ?? memory.getSettings().vaultMemory !== false;
+    enabled = enabled && (bridge?.enabled ?? memory.getSettings().vaultMemory !== false);
     available = bridge?.available ?? (bridge?.entries ? true : isVaultSourceAvailable());
     if (bridge?.entries) entries = bridge.entries();
   } catch {

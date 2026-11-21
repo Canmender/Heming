@@ -95,4 +95,14 @@ describe("widgetCommands · 映射与来源", () => {
     expect(commands.map((item) => item.pluginId)).toEqual(["a.plugin", "b.plugin"]);
     expect(commands[0].keywords).toEqual(["甲", "乙"]);
   });
+
+  it("keywords 截断后再去重：只在第 33 字之后不同的关键词不会写成两条", () => {
+    const prefix = "x".repeat(32);
+    const commands = widgetCommands([
+      record({ commands: [
+        { id: "x", title: "X", description: "", keywords: [prefix + "alpha", prefix + "beta"], target: { kind: "plugin" } },
+      ] }),
+    ]);
+    expect(commands[0].keywords).toEqual([prefix]);
+  });
 });

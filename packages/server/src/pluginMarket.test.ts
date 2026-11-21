@@ -226,6 +226,16 @@ describe("GET /api/plugin-market/assets/:id/:version/:file", () => {
     const res = await request(makeApp()).get("/api/plugin-market/assets/acme.pet/1.0.0/shot.png");
     expect(res.status).toBe(413);
   });
+
+  it("0 字节的合法资源正常返回，不再误报 413（d.412 回归）", async () => {
+    const dir = join(root, "acme.pet", "1.0.0");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "empty.png"), Buffer.alloc(0));
+    const res = await request(makeApp()).get("/api/plugin-market/assets/acme.pet/1.0.0/empty.png");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/png");
+    expect(res.body.length ?? 0).toBe(0);
+  });
 });
 
 describe("pluginMarketService（纯函数/越界守卫）", () => {
@@ -259,6 +269,28 @@ describe("pluginMarketService（纯函数/越界守卫）", () => {
     const future = new Date(Date.now() + 5_000);
     utimesSync(path, future, future);
     expect(statSync(path).mtimeMs).toBeGreaterThan(0);
+    expect(service.readIndex()?.index.plugins[0]?.id).toBe("acme.b");
+  });
+
+  it("等长原地改写且 mtime 被改回原值也能识别（ctime 进缓存键，d.412 回归）", () => {
+    // 造两份等长、仅标题不同的索引（AAAA↔BBBB 补齐到同样字节数）。
+    const bodyA = JSON.stringify(market([plugin("acme.a", [version("1.0.0")])], { title: "AAAAAAAA" }));
+    const bodyB = JSON.stringify(market([plugin("acme.b", [version("1.0.0")])], { title: "BBBBBBBB" }));
+    expect(Buffer.byteLength(bodyA)).toBe(Buffer.byteLength(bodyB));
+    const path = join(root, "market.json");
+    writeFileSync(path, bodyA, "utf8");
+    // 固定一个整秒 mtime，避免 utimes 的亚毫秒取整让断言抖动。
+    const fixed = new Date("2026-11-08T00:00:00.000Z");
+    utimesSync(path, fixed, fixed);
+    const service = createPluginMarketService({ dir: root });
+    expect(service.readIndex()?.index.plugins[0]?.id).toBe("acme.a");
+
+    // 等长改写，再把 mtime 拨回原值，模拟「尺寸和 mtime 都没变」的外部覆盖。
+    writeFileSync(path, bodyB, "utf8");
+    utimesSync(path, fixed, fixed);
+    expect(statSync(path).size).toBe(Buffer.byteLength(bodyA));
+    expect(statSync(path).mtimeMs).toBe(fixed.getTime());
+    // ctime 不随 utimes 回退 → 缓存键变化 → 读到新内容。
     expect(service.readIndex()?.index.plugins[0]?.id).toBe("acme.b");
   });
 });
@@ -302,6 +334,14 @@ describe("PUT /api/plugin-market", () => {
     expect(Buffer.byteLength(huge)).toBeGreaterThan(MAX_MARKET_INDEX_BYTES);
     const res = await putIndex(app, huge);
     expect(res.status).toBe(413);
+  });
+
+  it("落盘失败回 500（磁盘故障不误报成 400 invalid_index，d.412 回归）", async () => {
+    // 把 market.json 占成一个目录，writeFileSync 临时文件能成功、renameSync 覆盖目录会失败。
+    mkdirSync(join(root, "market.json"), { recursive: true });
+    const res = await putIndex(makeApp(), JSON.stringify(market([])));
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/写入失败/);
   });
 
   it("坏条目只丢该条并回 warnings（不让整份索引失效）", async () => {

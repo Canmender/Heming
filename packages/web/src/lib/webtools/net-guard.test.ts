@@ -35,6 +35,16 @@ describe("isPrivateHostname", () => {
     }
   });
 
+  it("内网后缀带结尾点（绝对 FQDN）也不能绕过拦截", () => {
+    // foo.local. 与 foo.local 解析到同一主机，后缀判必须按去点的裸主机名算。
+    for (const host of ["foo.local.", "foo.localhost.", "foo.internal.", "x.lan.", "printer.local."]) {
+      expect(isPrivateHostname(host), host).toBe(true);
+    }
+    for (const raw of ["http://foo.local./", "http://foo.internal./"]) {
+      expect(checkPublicHttpUrl(raw).ok, raw).toBe(false);
+    }
+  });
+
   it("十进制/十六进制单段 IP 视为私有（浏览器会把它解析成 IPv4）", () => {
     expect(isPrivateHostname("2130706433")).toBe(true);
     expect(isPrivateHostname("0x7f000001")).toBe(true);

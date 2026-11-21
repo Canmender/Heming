@@ -69,6 +69,34 @@ describe("我的任务面板", () => {
     expect(empty.textContent).toContain("现在没有派到你名下的任务");
   });
 
+  it("刷新后旧响应迟到不覆盖新任务（d.412 回归）", async () => {
+    let resolveFirst!: (v: unknown) => void;
+    let resolveSecond!: (v: unknown) => void;
+    const first = new Promise((r) => { resolveFirst = r; });
+    const second = new Promise((r) => { resolveSecond = r; });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => first as Promise<Response>)
+      .mockImplementationOnce(() => second as Promise<Response>);
+
+    const stale: AssignedTeamTask = { ...task, task: { ...task.task, id: "stale", title: "STALE-任务" } };
+    const fresh: AssignedTeamTask = { ...task, task: { ...task.task, id: "fresh", title: "FRESH-任务" } };
+
+    render(<MyTasksDialog onClose={() => {}} onPick={() => {}} />);
+    // 第二次请求（刷新）
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // 后发先至：FRESH 先解析并上屏
+    resolveSecond({ ok: true, json: () => Promise.resolve({ tasks: [fresh] }) });
+    await waitFor(() => expect(screen.getByText("FRESH-任务")).toBeTruthy());
+    // 旧响应迟到：不该把 FRESH 冲掉
+    resolveFirst({ ok: true, json: () => Promise.resolve({ tasks: [stale] }) });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText("FRESH-任务")).toBeTruthy();
+    expect(screen.queryByText("STALE-任务")).toBeNull();
+  });
+
   it("读失败与「没有任务」分开说", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response),

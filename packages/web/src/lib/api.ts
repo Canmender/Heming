@@ -23,12 +23,18 @@ import type {
   TeamTask,
   TeamTaskComment,
   TeamBrief,
+  TeamKnowledgeDoc,
   CreateWorkspaceTeamBody,
   UpdateWorkspaceTeamBody,
   CreateTeamPlanBody,
   UpdateTeamPlanBody,
   CreateTeamTaskBody,
   UpdateTeamTaskBody,
+  CreateTeamKnowledgeBody,
+  UpdateTeamKnowledgeBody,
+  TeamDirectory,
+  TeamJoinRequest,
+  TeamJoinRequestList,
 } from "@heming/shared";
 import type { AssignedTeamTask } from "./team/assignedTasks.js";
 import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
@@ -52,6 +58,11 @@ export function parseApiBase(base: string): URL {
     throw new Error(INVALID_API_BASE_ERROR);
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(INVALID_API_BASE_ERROR);
+  }
+  // 末尾斜杠会让 `${base}${path}` 拼出 "//api/..."，服务端 404、整站像坏了一样；
+  // 错误文案本就声明「不含末尾斜杠」，这里显式拒绝，别静默拼出坏 URL。
+  if (base.replace(/\/+$/, "") !== base) {
     throw new Error(INVALID_API_BASE_ERROR);
   }
   return u;
@@ -427,6 +438,44 @@ export const fetchMyTeamTasks = (request?: ApiRequestOptions) =>
 export const createWorkspaceTeam = (body: CreateWorkspaceTeamBody, request?: ApiRequestOptions) =>
   api<TeamWorkspaceSnapshot>("/api/teams", { method: "POST", body: JSON.stringify(body) }, request);
 
+/* ── 团队发现 + 加入申请（社交化加入，去 IM） ── */
+/** 搜索团队目录：只返回元数据（成员数/名字/目标），不含成员名单/方案/任务。 */
+export const discoverTeams = (q: string, request?: ApiRequestOptions) =>
+  api<TeamDirectory>(`/api/teams/discover?q=${encodeURIComponent(q)}`, {}, request);
+
+/** 我提交的加入申请（看进度：待审/通过/拒绝）。 */
+export const fetchMyJoinRequests = (request?: ApiRequestOptions) =>
+  api<TeamJoinRequestList>("/api/teams/join-requests/mine", {}, request);
+
+/** 提交加入申请（附言可选）。 */
+export const createJoinRequest = (
+  teamId: string,
+  message: string,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamJoinRequest>(
+    `/api/teams/${teamId}/join-requests`,
+    { method: "POST", body: JSON.stringify({ message }) },
+    request,
+  );
+
+/** 队长看本团队的加入申请列表。 */
+export const fetchJoinRequests = (teamId: string, request?: ApiRequestOptions) =>
+  api<TeamJoinRequestList>(`/api/teams/${teamId}/join-requests`, {}, request);
+
+/** 队长审批：approve 通过（写成员）/ reject 拒绝。 */
+export const reviewJoinRequest = (
+  teamId: string,
+  requestId: string,
+  action: "approve" | "reject",
+  request?: ApiRequestOptions,
+) =>
+  api<TeamJoinRequest>(
+    `/api/teams/${teamId}/join-requests/${requestId}/review`,
+    { method: "POST", body: JSON.stringify({ action }) },
+    request,
+  );
+
 /** 单个团队的完整工作台快照（team + members + plans + tasks）。 */
 /** 我所在团队的简报（成员名单 + 我的角色）：智能体派活前用它认人（d.253）。 */
 export const fetchMyTeamBriefs = (request?: ApiRequestOptions) =>
@@ -607,6 +656,60 @@ export const fetchTeamEvents = (
 /** 删任务。 */
 export const deleteTeamTask = (teamId: string, taskId: string, request?: ApiRequestOptions) =>
   api<void>(`/api/teams/${teamId}/tasks/${taskId}`, { method: "DELETE" }, request);
+
+/* ───────────────── 团队知识库 REST（用户显式发布，智能体不参与） ───────────────── */
+
+/** 列出团队知识文档（置顶优先、更新时间倒序）。 */
+export const fetchTeamKnowledge = (teamId: string, request?: ApiRequestOptions) =>
+  api<{ docs: TeamKnowledgeDoc[] }>(`/api/teams/${teamId}/knowledge`, {}, request);
+
+/** 全文搜索团队知识文档（中文 trigram 子串；query <3 字符回退线性）。 */
+export const searchTeamKnowledge = (teamId: string, q: string, request?: ApiRequestOptions) =>
+  api<{ docs: TeamKnowledgeDoc[] }>(
+    `/api/teams/${teamId}/knowledge/search?q=${encodeURIComponent(q)}`,
+    {},
+    request,
+  );
+
+/** 取单篇团队知识文档。 */
+export const fetchTeamKnowledgeDoc = (
+  teamId: string,
+  docId: string,
+  request?: ApiRequestOptions,
+) => api<TeamKnowledgeDoc>(`/api/teams/${teamId}/knowledge/${docId}`, {}, request);
+
+/** 发布文档到团队（只有人类成员能调；智能体无服务端身份）。 */
+export const createTeamKnowledge = (
+  teamId: string,
+  body: CreateTeamKnowledgeBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamKnowledgeDoc>(
+    `/api/teams/${teamId}/knowledge`,
+    { method: "POST", body: JSON.stringify(body) },
+    request,
+  );
+
+/** 改团队知识文档（作者或组长）。 */
+export const updateTeamKnowledge = (
+  teamId: string,
+  docId: string,
+  body: UpdateTeamKnowledgeBody,
+  request?: ApiRequestOptions,
+) =>
+  api<TeamKnowledgeDoc>(
+    `/api/teams/${teamId}/knowledge/${docId}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+    request,
+  );
+
+/** 删团队知识文档（作者或组长）。 */
+export const deleteTeamKnowledge = (
+  teamId: string,
+  docId: string,
+  request?: ApiRequestOptions,
+) =>
+  api<void>(`/api/teams/${teamId}/knowledge/${docId}`, { method: "DELETE" }, request);
 
 /**
  * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：

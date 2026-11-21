@@ -331,7 +331,9 @@ export function resolveUnit(
     unit,
     effective,
     activeKinds,
-    reason: blocking ?? (diagnostics[0] as UnitBlockReason | undefined),
+    // reason 是「第一条阻断原因」：生效时没有阻断，贡献级停用只留在 diagnostics
+    // 里给详情页看——否则列表行会一边写「生效」一边挂个「技能已单独关闭」的警告。
+    reason: effective ? undefined : (blocking ?? (diagnostics[0] as UnitBlockReason | undefined)),
     diagnostics,
   };
 }

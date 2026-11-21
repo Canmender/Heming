@@ -98,4 +98,16 @@ describe("KeyStorageCard · 键名点名", () => {
 
     expect(cardText()).toContain("heming.unknownKey.v1");
   });
+
+  it("键名是 toString 等原型链键时按原始键名显示，不漏出原生函数源码（d.412 回归）", () => {
+    installBridge({ available: false });
+    localStorage.setItem("toString", "x");
+    secureGetItem("toString");
+
+    render(<KeyStorageCard />);
+
+    const text = cardText();
+    expect(text).not.toContain("function toString");
+    expect(text).toContain("toString");
+  });
 });

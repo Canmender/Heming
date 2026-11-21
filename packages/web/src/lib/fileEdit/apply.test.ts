@@ -312,6 +312,19 @@ describe("干跑 · 文件状态与上限", () => {
     expect(result.error.code).toBe("too-many-files");
   });
 
+  it(`第 ${MAX_FILES_PER_PATCH} 条 op 是改名（占 2 个文件位）也判 too-many-files（d.412 回归）`, async () => {
+    const lines = ["*** Begin Patch"];
+    // 19 条新增 = 19 个变更；第 20 条改名 = 删旧 + 增新 = 21，越过上限。
+    for (let i = 0; i < MAX_FILES_PER_PATCH - 1; i += 1) {
+      lines.push(`*** Add File: f${i}.md`, `+x${i}`);
+    }
+    lines.push("*** Update File: src.md", "*** Move to: dest.md", "@@", "-a", "+b", "*** End Patch");
+    const { result } = await run(lines.join("\n"), { "D:/Obsidian/学院事务/src.md": "a" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("too-many-files");
+  });
+
   it("补丁总量超过上限 → patch-too-large", async () => {
     const text = `*** Begin Patch\n*** Add File: a.md\n+${"x".repeat(MAX_PATCH_BYTES + 1)}\n*** End Patch`;
     const io: PatchIo = { read: async () => ({ ok: false, code: "not-found", error: "ENOENT" }) };

@@ -87,8 +87,12 @@ function emit(conversationId?: string): void {
 /** 是否已从 localStorage 装载过（第一次访问才读，避免模块加载时依赖存储可用）。 */
 let loaded = false;
 
-/** localStorage 里存的形状：会话 id → { items, updatedAt }。 */
-type StoredLists = Record<string, { items: TodoItem[]; updatedAt: number }>;
+/**
+ * localStorage 里存的形状：会话 id → { items, updatedAt, seq }。
+ * `seq` 是落盘时的 touchedAt 单调序号——它是跨重启还原「最近更新」次序的唯一凭据：
+ * `updatedAt` 在每次 persist 里被整批写成同一个毫秒，无法区分谁更近用过。
+ */
+type StoredLists = Record<string, { items: TodoItem[]; updatedAt: number; seq?: number }>;
 
 /** 存储不可用（隐私模式/配额满）时静默降级成纯内存——清单丢了也不该让对话失败。 */
 function readStorage(): StoredLists {
@@ -125,7 +129,7 @@ function persist(touched?: string): void {
       delete stored[conversationId];
       continue;
     }
-    stored[conversationId] = { items, updatedAt: Date.now() };
+    stored[conversationId] = { items, updatedAt: Date.now(), seq: touchedAt.get(conversationId) ?? 0 };
   }
   const entries = Object.entries(stored)
     .filter(([, value]) => Array.isArray(value?.items) && value.items.length > 0)
@@ -146,8 +150,16 @@ function persist(touched?: string): void {
 function ensureLoaded(): void {
   if (loaded) return;
   loaded = true;
-  const stored = readStorage();
-  for (const [conversationId, value] of Object.entries(stored)) {
+  const stored = Object.entries(readStorage())
+    // 按落盘序号 seq 从旧到新：旧的先 tick（序号小）、新的后 tick（序号大），
+    // 这样重开应用后「最近更新」的次序与关掉前一致，超限淘汰的才是最久没用的那份。
+    //
+    // 不能按 Object.entries 的遍历序直接 tick——persist() 写盘时是 MRU 在前的，
+    // 照遍历序递增会让最常用那份拿到最小序号、下一次超限先被淘汰的恰恰是它
+    // （静默丢数据）。也不能依赖对象键顺序：数字样式的会话 id 会被 JS 重排。
+    // 旧版本条目没有 seq：退回 updatedAt；再没有就当最旧（0）。
+    .sort((a, b) => (a[1]?.seq ?? a[1]?.updatedAt ?? 0) - (b[1]?.seq ?? b[1]?.updatedAt ?? 0));
+  for (const [conversationId, value] of stored) {
     if (!Array.isArray(value?.items)) continue;
     // 存储里的条目可能是旧版本写的：逐条过一遍校验，坏的直接丢，不整份作废。
     const items = value.items.filter(

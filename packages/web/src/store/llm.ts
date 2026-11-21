@@ -209,7 +209,12 @@ function applyCapabilityOverrides(models: GatewayModel[]): void {
     if (model.contextWindow) patch.contextWindow = model.contextWindow;
     if (model.maxOutputTokens) patch.maxOutput = model.maxOutputTokens;
     if (model.vision) patch.supportsVision = true;
-    if (model.reasoningLevels.length > 0) patch.supportsReasoning = true;
+    // 本地缓存只校验了 id/name：旧版/手工写入的条目可能没有 reasoningLevels。
+    // 这里必须容忍缺失，否则模块加载时（applyCapabilityOverrides 在 import 时执行）
+    // 抛 TypeError，整个 web 应用都起不来。
+    if (Array.isArray(model.reasoningLevels) && model.reasoningLevels.length > 0) {
+      patch.supportsReasoning = true;
+    }
     if (Object.keys(patch).length > 0) setOverride("openai", model.id, patch);
   }
 }

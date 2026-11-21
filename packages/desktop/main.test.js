@@ -558,6 +558,22 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
 });
 
 // ── d.141：界面插件页面改为渲染层 <iframe> 内嵌 widget://（主进程只登记 + 授权）──
+test("main.js：preload 用 send 发的通道，主进程必须用 on 收（send/invoke 是两条独立通道表）", () => {
+  const preloadSrc = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
+  // preload 里所有 ipcRenderer.send(...) 的通道名
+  const sentChannels = channelsIn(preloadSrc, /ipcRenderer\.send\(\s*["']([^"']+)["']/g);
+  // 主进程用 secureIpc.handle / ipcMain.handle 注册的通道名（invoke 侧）
+  const handleChannels = channelsIn(mainCode, /(?:ipcMain|secureIpc)\.handle\(\s*["']([^"']+)["']/g);
+  for (const ch of sentChannels) {
+    assert.ok(
+      !handleChannels.includes(ch),
+      `preload 用 ipcRenderer.send 发 ${ch}，主进程却用 handle 注册：send 只投递到 on，handler 永远不会触发（widget 发布会全部丢失）`,
+    );
+  }
+  // 具体回归：widgets:publish 必须是 on（fire-and-forget，web 侧不等返回值）
+  assert.ok(/secureIpc\.on\("widgets:publish"/.test(mainCode), "widgets:publish 必须走 secureIpc.on（preload 用 send）");
+});
+
 test("main.js：页面通道经 secureIpc 注册且只认主窗口（widgets:page-* 进受信清单）", () => {
   const trusted = mainCode.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
   assert.ok(trusted, "必须有 TRUSTED_CHANNELS 清单");

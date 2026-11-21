@@ -110,7 +110,9 @@ export function providerTestVerdict(
     .replace(/\u001b\[[0-9;]*m/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  const tail = detail.length > 140 ? `${detail.slice(0, 140)}…` : detail;
+  // 按码点截断：slice(0,140) 落在 emoji 的代理对中间会留下坏字符。
+  const chars = Array.from(detail);
+  const tail = chars.length > 140 ? `${chars.slice(0, 140).join("")}…` : detail;
   if (ok) return tail ? `连通正常：${tail}` : "连通正常，模型已读入。";
   return tail ? `连不上：${tail}` : "连不上：没有输出，检查地址与 Key 是否匹配。";
 }

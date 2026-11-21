@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BackupPanel } from "./BackupPanel.js";
 
@@ -81,6 +82,41 @@ describe("BackupPanel", () => {
     expect(args[1]).toMatch(/D:[\\/]backups[\\/]model-.+\.backup/);
     // 刷新由关闭面板触发：列表重新读一次
     await waitFor(() => expect(info.mock.calls.length).toBeGreaterThanOrEqual(before));
+  });
+
+  it("同一时刻连点两次备份用不同文件名，不互相覆盖（d.412 回归）", async () => {
+    const { begin } = installBridge();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-21T06:39:53.000Z"));
+    try {
+      render(<BackupPanel />);
+      await vi.waitFor(() => expect(screen.queryByText("model-20261108.backup")).not.toBeNull());
+      fireEvent.click(screen.getByRole("button", { name: "新建备份" }));
+      await vi.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
+      const first = begin.mock.calls[0]![0][1] as string;
+      // 关闭面板再开：同一分钟同一秒，文件名也必须不同
+      fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+      // 时间不变
+      fireEvent.click(screen.getByRole("button", { name: "新建备份" }));
+      await vi.waitFor(() => expect(begin).toHaveBeenCalledTimes(2));
+      const second = begin.mock.calls[1]![0][1] as string;
+      expect(second).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("完成后刷新列表只触发一次：副作用不在 setState updater 里（d.412 回归）", async () => {
+    const { info, emit } = installBridge();
+    render(<StrictMode><BackupPanel /></StrictMode>);
+    await screen.findByText("model-20261108.backup");
+    fireEvent.click(screen.getByRole("button", { name: "新建备份" }));
+    await waitFor(() => expect(info.mock.calls.length).toBeGreaterThan(0));
+    const before = info.mock.calls.length;
+    // begin 返回 runId cli-9；自己的 exit 触发 onDone → 应只 load 一次
+    emit({ runId: "cli-9", type: "exit", ok: true });
+    await waitFor(() => expect(info.mock.calls.length).toBeGreaterThan(before));
+    expect(info.mock.calls.length).toBe(before + 1);
   });
 
   it("没有命令桥时按钮禁用并给出桌面端提示", async () => {

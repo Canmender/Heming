@@ -42,6 +42,9 @@ export default {
         accent: "var(--heming-accent)",
         "accent-on": "var(--heming-on-accent)",
         scrim: "var(--scrim)",
+        // 视觉重构：编辑部铜色锚点（栏目小标 / 竖线 / 强调描边），独立于用户主题色。
+        "editorial-rule": "var(--editorial-rule)",
+        "editorial-surface": "var(--editorial-surface)",
         "chart-1": "var(--chart-1)",
         "chart-2": "var(--chart-2)",
         "chart-grid": "var(--chart-grid)",

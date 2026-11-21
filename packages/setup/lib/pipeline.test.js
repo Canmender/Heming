@@ -279,6 +279,25 @@ test("安装阶段拒绝取消，busy 期间拒绝重复启动，装完仍然成
   assert.equal(installed, true);
 });
 
+test("安装器 spawn 失败时轮询立刻停，不泄漏 phantom progress（d.412 回归）", async () => {
+  const { SetupError, CODES } = require("./errors");
+  const h = harness({
+    existing: [PAYLOAD_PATH],
+    installResult: {
+      child: { pid: 9 },
+      done: Promise.reject(new SetupError(CODES.INSTALL_SPAWN_FAILED, "启动安装器失败", "spawn ENOENT")),
+    },
+  });
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, CODES.INSTALL_SPAWN_FAILED);
+  const countAtReturn = h.calls.statTree;
+  // 轮询循环必须在 start 返回前停住：再等几个定时器周期也不该新增 statTree 调用。
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(h.calls.statTree, countAtReturn, "错误页出现后不该继续发安装进度事件");
+});
+
 test("预取：窗口一打开就在后台下好安装包，开始安装时不再重复下载", async () => {
   const h = harness({
     existing: [EXE_PATH],

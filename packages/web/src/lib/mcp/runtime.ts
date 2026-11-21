@@ -190,8 +190,11 @@ export interface BuildToolBridgeOptions {
  * 而进程退出/超时/连不上说明这台服务已经不可用，界面还显示「已连接」就会一直骗人，
  * 下一轮也不会自动重连（`mcpNeedsConnect` 看的是连接状态）。这类错误要落状态。
  */
+// "连不上这个 MCP 地址" 是 httpClient.post 把浏览器 TypeError("Failed to fetch") 翻成的
+// 给用户看的文案（含 CORS 提示）。不认它的话，服务根本连不上时状态仍是"已连接"、
+// 也不会触发重连——正是本注释开头要防的情况。
 const TRANSPORT_FAILURE_RE =
-  /MCP 进程已退出|MCP 进程启动失败|MCP 服务超时|MCP 服务返回 HTTP 5\d\d|fetch failed|ECONNREFUSED|ECONNRESET|EPIPE|请求 id 冲突/;
+  /MCP 进程已退出|MCP 进程启动失败|MCP 服务超时|MCP 服务返回 HTTP 5\d\d|连不上这个 MCP 地址|fetch failed|ECONNREFUSED|ECONNRESET|EPIPE|请求 id 冲突/;
 
 export function isTransportFailure(message: string): boolean {
   return TRANSPORT_FAILURE_RE.test(String(message ?? ""));

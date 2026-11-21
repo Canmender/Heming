@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   useTokenUsageStore,
   monthKeyOf,
@@ -20,6 +20,25 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
   beforeEach(() => {
     localStorage.removeItem("heming.tokenUsage");
     useTokenUsageStore.getState().reset();
+  });
+
+  it("本地存储写不进去（quota 满）时记账不抛、内存中仍记下", () => {
+    // 回归：save() 以前不设防，隐私模式/quota 满时 localStorage.setItem 抛
+    // QuotaExceededError，且 save 在 set 之前调用 → 内存记录也丢了。
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+    try {
+      expect(() =>
+        useTokenUsageStore.getState().record("gpt-4", 1234, "2026-11-20T00:00:00.000Z"),
+      ).not.toThrow();
+      expect(useTokenUsageStore.getState().records).toHaveLength(1);
+      expect(useTokenUsageStore.getState().records[0].tokens).toBe(1234);
+      expect(() => useTokenUsageStore.getState().reset()).not.toThrow();
+      expect(useTokenUsageStore.getState().records).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("record 只追加原始记录，不存 total 字段", () => {

@@ -1,5 +1,5 @@
 import type { ChatMessage } from "./types.js";
-import { ROW_TOKEN_OVERHEAD, estimateRowsTokens, estimateTokens } from "./tokens.js";
+import { estimateRowTokens, estimateRowsTokens } from "./tokens.js";
 
 /**
  * 预算与切分（设计 §3.2）：从最新往回累计 recent，超预算的更早消息进 older。
@@ -32,7 +32,12 @@ function safeInt(value: unknown, min: number): number {
 }
 
 function rowCost(row: ChatMessage): number {
-  return estimateTokens(String(row?.content ?? "")) + ROW_TOKEN_OVERHEAD;
+  // d.412 回归：切点口径必须与 estimateRowsTokens（对外报数/真实预估）一致。
+  // 以前只算 content，assistant 行上几万字符的 tool_calls.arguments、图片 contentParts
+  // 全被当成「便宜」，于是带工具的对话按预算切开时把超重的行塞进 recent——
+  // 实际请求早就超窗口，撞 400 后按 aggressive 收紧切的还是同一套错口径，收不回来。
+  // estimateRowTokens 把工具参数/图片/结构开销一并算上，宁可高估不低估。
+  return estimateRowTokens(row);
 }
 
 /**

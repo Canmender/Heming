@@ -35,12 +35,21 @@ export interface PluginPermissionReport {
  * 从 URL 取「实际会访问的主机」：`host`（含非默认端口），小写。
  *
  * 为什么用 `host` 而不是 `hostname`：`http://localhost:3000` 与
- * `http://localhost:4000` 是两台不同的服务，权限白名单必须能区分；
- * 默认端口（https 的 443）会被 URL 规范化掉，不会造成多余配置。
+ * `http://localhost:4000` 是两台不同的服务，权限白名单必须能区分。
+ *
+ * 默认端口一律去掉（80 / 443，不看 scheme）：`URL.host` 只按 URL 自身 scheme
+ * 去掉默认端口——`https://h:443` 会变 `h`，但 `http://h:443` 会留成 `h:443`。
+ * 声明侧的 `normalizeNetworkHost` 没有 scheme 信息，80/443 一律去掉；若这里
+ * 按 scheme 留端口，`http://h:443` 就永远对不上声明 `h:443`（被误报未声明，
+ * 连合法的 v3 manifest 都被拒装）。两侧统一「显式 80/443 都算默认端口」。
+ * 非默认端口（:8787 / :8443）照旧保留。
  */
 export function hostOfUrl(url: string): string {
   try {
-    return new URL(String(url ?? "")).host.toLowerCase();
+    const host = new URL(String(url ?? "")).host.toLowerCase();
+    if (host.endsWith(":80")) return host.slice(0, -3);
+    if (host.endsWith(":443")) return host.slice(0, -4);
+    return host;
   } catch {
     return "";
   }

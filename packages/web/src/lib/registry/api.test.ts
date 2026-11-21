@@ -116,6 +116,17 @@ describe("dedupeItems", () => {
     expect(dedupeItems(items)[0].server.version).toBe("1.0.0");
   });
 
+  it("★ 多个 isLatest 并存时取版本号最大的那个（且与输入顺序无关）", () => {
+    const mk = (v: string, latest: boolean): RegistryItem => ({
+      server: { name: "a/b", version: v },
+      _meta: { "io.modelcontextprotocol.registry/official": { status: "active", isLatest: latest } },
+    });
+    const items = [mk("1.0.0", true), mk("2.0.0", true), mk("3.0.0", false)];
+    expect(dedupeItems(items)[0].server.version).toBe("2.0.0");
+    // 顺序颠倒后仍是 2.0.0（旧代码用 find 拿第一个，会随顺序变化）
+    expect(dedupeItems([...items].reverse())[0].server.version).toBe("2.0.0");
+  });
+
   it("★ 没有 isLatest 时按版本号最大（1.10.0 > 1.9.0，不是字符串比较）", () => {
     const items: RegistryItem[] = [
       { server: { name: "a/b", version: "1.9.0" }, _meta: { "io.modelcontextprotocol.registry/official": { status: "active" } } },

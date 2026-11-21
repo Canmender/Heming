@@ -33,8 +33,11 @@ export interface StatProps {
 export function Stat({ label, value, hint, onOpen, actionLabel, className = "" }: StatProps) {
   const body = (
     <>
-      <div className="ui-caption text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-num-md font-semibold leading-none">{value}</div>
+      {/* 视觉重构：统计卡的栏目名改走等宽铜色小标（.ui-stat-label），
+          和下方的大数字形成「编辑部数据栏」的层级，不再是一排同样的灰字。
+          节点顺序与文本不变——HomePage 测试按 firstElementChild.textContent 找卡片。 */}
+      <div className="ui-stat-label">{label}</div>
+      <div className="ui-numeric ui-counter mt-1.5 text-num-md font-semibold leading-none">{value}</div>
       {hint ? <div className="mt-1.5 ui-caption">{hint}</div> : null}
     </>
   );

@@ -73,4 +73,14 @@ describe("providerTestVerdict", () => {
     expect(providerTestVerdict(false, "HTTP 401 bad key")).toBe("连不上：HTTP 401 bad key");
     expect(providerTestVerdict(false, null)).toMatch(/没有输出/);
   });
+
+  it("长输出截断按码点，不在 emoji 中间劈出乱码", () => {
+    const verdict = providerTestVerdict(true, "a".repeat(139) + "😀" + "tail");
+    expect(verdict.endsWith("…")).toBe(true);
+    const hasLone = [...verdict].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return ch.length === 1 && code >= 0xd800 && code <= 0xdfff;
+    });
+    expect(hasLone).toBe(false);
+  });
 });

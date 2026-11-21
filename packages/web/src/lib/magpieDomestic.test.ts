@@ -11,6 +11,7 @@ import {
   checkinSummary,
   checkinSwitchArgs,
   checkinSwitchState,
+  checkinSwitchText,
   checkinVendorName,
   parseCheckin,
   parsePluginProviders,
@@ -253,6 +254,12 @@ describe("每天自动签到（settings 的四个厂商开关）", () => {
     expect(checkinSwitchState(new Map())).toBe("off");
     expect(checkinSwitchState(new Map([["workbuddyCheckin", true]]))).toBe("mixed");
     expect(checkinSwitchState(new Map([["workbuddyCheckin", "on"]]))).toBe("off");
+  });
+
+  it("三种状态的人话各不相同：off 不能说成 on（d.412 回归）", () => {
+    expect(checkinSwitchText("on")).toBe("每天自动签到");
+    expect(checkinSwitchText("mixed")).toBe("部分自动签到");
+    expect(checkinSwitchText("off")).toBe("不自动签到");
   });
 
   it("改写：一条命令一扇开关，开或关同一个形状", () => {

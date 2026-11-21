@@ -25,6 +25,13 @@ describe("来源的画像四项", () => {
     expect(parseTokensInput("很多")).toBeNull();
   });
 
+  it("与内核一致：小数截断不四舍五入，超大数（内核 MaxInt 会拒）在这里就挡下（d.412 回归）", () => {
+    expect(parseTokensInput("1.5")).toBe(1); // 内核 int(1.5)=1，不是 2
+    expect(parseTokensInput("1.9k")).toBe(1900);
+    expect(parseTokensInput("9223372036854775808")).toBeNull(); // 溢出内核 MaxInt
+    expect(sourceProfileRejected({ context: "9223372036854775808" })).toContain("上下文带宽");
+  });
+
   it("算钱与原文照发各发一条，顺序固定", () => {
     expect(sourceProfilePairs({ free: "yes" })).toEqual(["free=yes"]);
     expect(sourceProfilePairs({ unmasked: "yes" })).toEqual(["unmasked=yes"]);

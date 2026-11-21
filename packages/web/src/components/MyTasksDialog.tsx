@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssignedTeamTask } from "../lib/team/assignedTasks.js";
 import { fetchMyTeamTasks } from "../lib/api.js";
 import {
@@ -36,33 +36,41 @@ export function MyTasksDialog({ onClose, onPick }: MyTasksDialogProps) {
   const [claimable, setClaimable] = useState<AssignedTeamTask[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // d.412 回归：刷新按钮直接调 load() 会丢掉它返回的 cleanup，旧请求仍 alive，
+  // 谁后到谁覆盖——旧响应可能把刚刷出的新任务冲掉。用递增请求号代替 alive 闭包，
+  // 只有最新一次请求才允许落状态。
+  const latestRequestRef = useRef(0);
 
   const load = useCallback(() => {
+    const requestId = ++latestRequestRef.current;
+    const isLatest = () => requestId === latestRequestRef.current;
     setLoading(true);
     setError(null);
-    let alive = true;
     fetchMyTeamTasks()
       .then((res) => {
-        if (!alive) return;
+        if (!isLatest()) return;
         setTasks(res.tasks);
         setClaimable(res.claimable ?? []);
       })
       .catch(() => {
-        if (!alive) return;
+        if (!isLatest()) return;
         // 读失败 ≠ 没有任务：分开说，别让用户以为没人给他派活。
         setTasks(null);
         setClaimable([]);
         setError("没读到团队任务：可能是网络或服务端暂时不可用。");
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (isLatest()) setLoading(false);
       });
-    return () => {
-      alive = false;
-    };
   }, []);
 
-  useEffect(() => load(), [load]);
+  useEffect(() => {
+    load();
+    return () => {
+      // 卸载时把请求号推进一步，任何在途响应都不再落状态。
+      latestRequestRef.current += 1;
+    };
+  }, [load]);
 
   const empty = tasks !== null && tasks.length === 0 && claimable.length === 0;
 

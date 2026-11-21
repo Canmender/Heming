@@ -46,6 +46,9 @@ describe("去 AI 味检测器", () => {
     expect(hasRule(three, 6)).toBe(true);
     const two = "## 一、先写\n\n正文\n\n## 二、再写";
     expect(hasRule(two, 6)).toBe(false);
+    // 三个编号标题被大段正文隔开，不算「连续」，不该报。
+    const far = "## 一、背景\n\n正文一\n\n正文二\n\n正文三\n\n## 二、方法\n\n正文四\n\n正文五\n\n正文六\n\n## 三、结论";
+    expect(hasRule(far, 6)).toBe(false);
   });
 
   it("规则 7：拟人化喻体要报，具体的人当喻体不报", () => {

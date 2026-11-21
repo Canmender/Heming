@@ -205,6 +205,10 @@ async function downloadFile(url, dest, options = {}) {
         reject(new SetupError(CODES.CANCELLED, "已取消下载", null));
       } else if (error && error.message === "idle") {
         reject(new SetupError(CODES.DOWNLOAD_STALLED, "下载卡住了（长时间没有数据）", url));
+      } else if (error instanceof SetupError) {
+        // 保留调用方已经定好的错误码（如 NO_SPACE），别降级成笼统的 DOWNLOAD_FAILED——
+        // code 是界面决定提示与按钮的稳定接口，见 errors.js。
+        reject(error);
       } else {
         reject(new SetupError(CODES.DOWNLOAD_FAILED, "下载安装包时出错", error));
       }
@@ -284,7 +288,9 @@ async function partSize(partPath, expectedSize) {
   try {
     const stats = await fsp.stat(partPath);
     if (!stats.isFile() || stats.size <= 0) return 0;
-    if (expectedSize !== null && stats.size > expectedSize) return 0;
+    // 已满长度的 .part（下载完但没来得及改名的崩溃现场）不能当作断点：续传会发
+    // bytes=<full>- 拿到 416，三次重试全失败且永远卡住。按 0 处理 → 删掉重下。
+    if (expectedSize !== null && stats.size >= expectedSize) return 0;
     return stats.size;
   } catch {
     return 0;

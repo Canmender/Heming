@@ -62,6 +62,17 @@ describe("行级 diff（d.207.4.110）", () => {
     expect(omitted?.omitted).toBeGreaterThan(20);
   });
 
+  it("折叠标记之后的行号按真实行继续，不因省略而偏小（d.412 回归）", () => {
+    // 折叠掉开头 26 行后，紧随其后的「line 27」必须是第 27 行，而不是第 2 行。
+    const before = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    const after = [...before.slice(0, 28), "line 29 changed", ...before.slice(28)];
+    const result = diffLines(`${before.join("\n")}\n`, `${after.join("\n")}\n`, { context: 2 });
+    const line27 = result.rows.find((row) => "text" in row && row.text === "line 27");
+    const changed = result.rows.find((row) => "text" in row && row.text === "line 29 changed");
+    expect(line27).toMatchObject({ kind: "same", oldNo: 27, newNo: 27 });
+    expect(changed).toMatchObject({ kind: "add", newNo: 29 });
+  });
+
   it("超过行数上限时截断并标记 truncated，不假装完整", () => {
     const before = Array.from({ length: 40 }, (_, i) => `a${i}`);
     const after = Array.from({ length: 40 }, (_, i) => `b${i}`);

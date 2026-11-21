@@ -178,10 +178,14 @@ export function diffLines(
   for (const op of ops) {
     if (op.kind === "same") {
       const row: DiffRow = { kind: "same", text: op.text, oldNo, newNo };
-      if (typeof (op as { omitted?: number }).omitted === "number") row.omitted = (op as { omitted?: number }).omitted;
+      const omitted = (op as { omitted?: number }).omitted;
+      if (typeof omitted === "number") row.omitted = omitted;
       rows.push(row);
-      oldNo += 1;
-      newNo += 1;
+      // 折叠标记代表被隐藏的 N 行：它标注省略起点的行号，后续真实行必须跳过这 N 行，
+      // 否则改动行及之后每一行的行号都会偏小（省略 26 行后「line 27」会被标成第 2 行）。
+      const advance = typeof omitted === "number" ? omitted : 1;
+      oldNo += advance;
+      newNo += advance;
     } else if (op.kind === "add") {
       rows.push({ kind: "add", text: op.text, newNo });
       newNo += 1;

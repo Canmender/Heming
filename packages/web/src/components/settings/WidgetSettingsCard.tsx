@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SYSTEM_AGENT } from "@heming/shared";
 import type { WidgetRecord, WidgetSettingField, WidgetState } from "../../types/widgets.js";
 import { useUiStore } from "../../store/ui.js";
@@ -422,14 +422,27 @@ function DraftRow({
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  // d.412 回归：blur() 会同步触发 onBlur→commit，而 setState 是异步批处理的——
+  // 若 commit 读的是 draft 闭包，Esc 时会拿到「已放弃的旧值」写盘、回车时又会写两遍。
+  // 用 ref 同步保存当前草稿与「已提交值」：commit 只读 ref，且同一值只提交一次。
+  const draftRef = useRef(draft);
+  const committedRef = useRef(initial);
   useEffect(() => {
+    draftRef.current = initial;
+    committedRef.current = initial;
     setDraft(initial);
   }, [initial]);
 
+  const update = (value: string): void => {
+    draftRef.current = value;
+    setDraft(value);
+  };
   const commit = (): void => {
-    if (draft === initial) return;
-    if (numeric && draft.trim() !== "" && !Number.isFinite(Number(draft))) return;
-    onCommit(draft.trim() === "" && !numeric ? "" : draft);
+    const current = draftRef.current;
+    if (current === committedRef.current) return;
+    if (numeric && current.trim() !== "" && !Number.isFinite(Number(current))) return;
+    committedRef.current = current;
+    onCommit(current.trim() === "" && !numeric ? "" : current);
   };
 
   return (
@@ -440,7 +453,7 @@ function DraftRow({
         value={draft}
         disabled={disabled}
         aria-label={label}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => update(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
@@ -448,7 +461,9 @@ function DraftRow({
             commit();
             (event.target as HTMLInputElement).blur();
           } else if (event.key === "Escape") {
-            setDraft(initial);
+            // 放弃编辑：同步把 ref 拉回已提交值，blur 触发的 commit 便不会再写盘。
+            draftRef.current = committedRef.current;
+            setDraft(committedRef.current);
             (event.target as HTMLInputElement).blur();
           }
         }}

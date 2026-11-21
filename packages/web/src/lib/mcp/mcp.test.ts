@@ -82,6 +82,13 @@ describe("JSON-RPC 基础件", () => {
     expect(pickResponse(msgs, 99)).toBeNull();
   });
 
+  it("SSE：一条消息被拆成多行 data: 时按规范用 \\n 拼回再解析", () => {
+    const text = 'data: {"jsonrpc":"2.0",\r\ndata: "id":7,"result":{}}\r\n\r\n';
+    const msgs = parseSseMessages(text);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].id).toBe(7);
+  });
+
   it("错误格式化带上 code", () => {
     expect(formatRpcError({ code: -32601, message: "Method not found" })).toContain("-32601");
     expect(formatRpcError(undefined)).toContain("空错误");

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { runAgentMentions, newStreamId, classifyTurnFailure, MAX_PARALLEL_READS, TOOL_CALL_TIMEOUT_MS } from "./agentStream.js";
 import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage, StreamChatOpts } from "./llmClient.js";
@@ -2310,6 +2310,123 @@ describe("assistant_final.evidence（P3-T15：完成即证据）", () => {
     const final = items.find((it) => it.type === "assistant_final");
     expect(final?.evidence).toBeUndefined();
   });
+
+  it("溢出重试：废尝试里的证据不漏进最终成功轮（attempt 作用域重置）", async () => {
+    // 回归：evidencePairs 曾声明在 once() 外，attempt0 里成功执行的 shell 命令
+    // 会残留到 aggressive=1 的成功尝试，被误报成「这次回答的证据」。
+    const items: { type: string; evidence?: { commands: string[]; outputDigest?: string } }[] = [];
+    const prepareHistory = vi.fn(async (rows: ChatMessage[]) => rows);
+    const overflow = () =>
+      new Error(
+        'provider_error: HTTP 400 {"error":{"message":"This model\'s maximum context length is 8192 tokens."}}',
+      );
+    let n = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        n += 1;
+        if (n === 1) {
+          // attempt0 round0：执行一次写/读调用（会被记进 evidencePairs）
+          o.onToolCalls?.([
+            { id: "c0", type: "function", function: { name: "shell_exec", arguments: '{"cmd":"ls"}' } },
+          ]);
+          return "";
+        }
+        if (n === 2) {
+          // attempt0 round1：抛上下文超限，触发重试；本尝试被丢弃
+          throw overflow();
+        }
+        // attempt1（aggressive=1）：纯问答收口，不应带上一尝试的证据
+        o.onDelta("好了");
+        return "好了";
+      },
+    );
+    const { deps } = makeDeps({
+      prepareHistory,
+      streamChat: streamChat as never,
+      onRollout: (item) => items.push(item as never),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "shell_exec" } } as never],
+        execute: async () => ({ text: "done", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 确实发生了重试
+    expect(streamChat).toHaveBeenCalledTimes(3);
+    const final = items.find((it) => it.type === "assistant_final");
+    expect(final).toBeTruthy();
+    expect(final?.evidence).toBeUndefined();
+  });
+
+  it("溢出重试：废尝试的同名同参调用不漏进最终尝试的重复计数", async () => {
+    // 回归：repeatedCalls 曾声明在 once() 外，attempt0 的两次相同 grep
+    // 让 attempt1 的第一次 grep 被误告「本轮第 2 次完全相同」。
+    const prepareHistory = vi.fn(async (rows: ChatMessage[]) => rows);
+    const overflow = () =>
+      new Error(
+        'provider_error: HTTP 400 {"error":{"message":"This model\'s maximum context length is 8192 tokens."}}',
+      );
+    let n = 0;
+    const seenToolTexts: string[] = [];
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        n += 1;
+        if (n === 1) {
+          // attempt0 round0：两次同名同参 grep（不同 id）
+          o.onToolCalls?.([
+            { id: "a1", type: "function", function: { name: "grep", arguments: '{"q":"foo"}' } },
+            { id: "a2", type: "function", function: { name: "grep", arguments: '{"q":"foo"}' } },
+          ]);
+          return "";
+        }
+        if (n === 2) throw overflow();
+        if (n === 3) {
+          // attempt1 round0：同样两次 grep，但计数应从头开始
+          o.onToolCalls?.([
+            { id: "b1", type: "function", function: { name: "grep", arguments: '{"q":"foo"}' } },
+            { id: "b2", type: "function", function: { name: "grep", arguments: '{"q":"foo"}' } },
+          ]);
+          return "";
+        }
+        o.onDelta("好了");
+        return "好了";
+      },
+    );
+    const { deps } = makeDeps({
+      prepareHistory,
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "grep" } } as never],
+        execute: async (call: { arguments: string }) => {
+          // 回灌给模型的工具消息文本会带重复提醒；这里只记录 attempt1 的
+          // 第一发（b1）——它不该带「第 2 次」的旧计数。
+          seenToolTexts.push(call.arguments);
+          return { text: "hit", ok: true };
+        },
+      }),
+    });
+    // 工具结果（含重复提醒）在下一轮才回灌给模型：attempt1 round0 是 n=3，
+    // 它产生的 tool 消息出现在 n=4 的 messages 里。
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const attempt1Msgs = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[3][1] as {
+      role: string;
+      content: string;
+    }[];
+    const toolTexts = attempt1Msgs
+      .filter((m) => m.role === "tool" && String(m.content).includes("完全相同"))
+      .map((m) => m.content);
+    // attempt1 里的第一次 grep（b1）不该有重复提醒，只有第二次（b2）才有「第 1 次」
+    expect(toolTexts.filter((t) => t.includes("第 2 次"))).toHaveLength(0);
+    expect(toolTexts.filter((t) => t.includes("第 1 次"))).toHaveLength(1);
+  });
 });
 
 describe("只读工具并行上限（P4/T19）", () => {
@@ -2515,6 +2632,35 @@ describe("上游瞬时错误自动重试（d.203.4.108）", () => {
     expect(onUpstreamRetry.mock.calls[0][0]).toMatchObject({ attempt: 1, max: 2 });
     expect(frames(send, "agent_error")).toHaveLength(0);
     expect(frames(send, "agent_finish")[0]).toMatchObject({ text: "好" });
+  });
+
+  it("降级提示先写进了输出也不挡重试：工具目录坏 + 首次 503 仍要退避重试（d.412 回归）", async () => {
+    let n = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: { onDelta: (t: string) => void }) => {
+      n += 1;
+      if (n === 1) throw new LlmHttpError(503, "Service Unavailable", 1);
+      o.onDelta("恢复后的回答");
+      return "恢复后的回答";
+    });
+    const onUpstreamRetry = vi.fn();
+    // 工具目录构建失败会在 askUpstream 之前 emitDelta 一条降级提示进 acc/local。
+    // 旧版用 acc==="" 判「没产出」，把这条提示当成已吐字 → 瞬时错误不再重试。
+    const { send, deps } = makeDeps({
+      streamChat,
+      onUpstreamRetry,
+      getTools: () => {
+        throw new Error("MCP 目录读取失败：EACCES");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(onUpstreamRetry).toHaveBeenCalledTimes(1);
+    expect(frames(send, "agent_error")).toHaveLength(0);
+    // 收口文本含降级说明前缀 + 重试拿到的正文；关键是恢复后的回答在里面。
+    const finish = frames(send, "agent_finish")[0] as { type: string; text?: string } | undefined;
+    expect(String(finish?.text ?? "")).toContain("恢复后的回答");
   });
 
   it("连续三次都失败：按上限重试两次后放弃，错误照旧上报", async () => {

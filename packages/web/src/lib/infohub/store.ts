@@ -215,8 +215,12 @@ export const useInfohubStore = create<InfohubState>((set, get) => ({
   autoCollectIfNeeded: async () => {
     const state = get();
     if (!state.running || !state.status || state.autoCollected) return;
-    // 用户显式关过「自动采集」就尊重它；没设过则默认采集。
-    if (readAutoCollectPreference() === false) return;
+    // 用户显式关过「自动采集」就尊重它（localStorage 优先）；没设过则回落
+    // config.json 的 autoSyncOnStart（client.ts:293-294 的约定）。以前只读
+    // localStorage，而界面没有写这个键的地方，导致 config.json 里关掉自动同步
+    // 完全无效，连接后照样采集一遍。
+    const pref = readAutoCollectPreference();
+    if (pref === false || (pref === null && state.status.config?.autoSyncOnStart === false)) return;
     // 已有归档数据 = 不是首次：自动采集只负责把空库填起来。
     if (state.status.hasDb && Number(state.status.stats?.messages ?? 0) > 0) return;
     const sources = detectedSyncSources(detectedSourcesFromSummary(state.status.config));

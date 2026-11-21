@@ -60,23 +60,33 @@ function fullDateText(time: number): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
-/** 距截止还有几天（负数=已逾期），坏时间返回 null。 */
-function daysUntil(iso: string | null | undefined, now: number): number | null {
-  if (!iso) return null;
-  const time = Date.parse(iso);
-  if (Number.isNaN(time)) return null;
-  return Math.ceil((time - now) / 86_400_000);
+const DAY_MS = 86_400_000;
+
+/** 当天 0 点（本地时区）：与 schedule 同口径，按日历日而不是满 24 小时。 */
+function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 function dueText(task: TeamTask, now: number): string {
-  const left = daysUntil(task.dueAt, now);
-  if (left === null) return "";
-  if (left < 0) {
-    // 逾期天数按日历日向上取整：16 号到期、18 号生成 → 逾期 2 天，与人读日历一致。
-    const late = Math.max(1, Math.ceil((now - Date.parse(task.dueAt as string)) / 86_400_000));
-    return `（已逾期 ${late} 天）`;
+  if (!task.dueAt) return "";
+  const time = Date.parse(task.dueAt);
+  if (Number.isNaN(time)) return "";
+  // 是否已过期用原始时间戳判断：Math.ceil(-1h/24h) === -0，而 -0 < 0 为 false，
+  // 旧实现会把「几小时前刚过截止」误标成「今天到期」，与 isOverdue 口径矛盾。
+  if (time <= now) {
+    // 逾期天数按日历日算（与 schedule.bucketOf 一致）：16 号到期、18 号生成 → 2 天。
+    // 不再用滚动 24 小时向上取整（那样 51 小时会被算成 3 天，和 digest 对不上）。
+    const days = Math.round((startOfDay(now) - startOfDay(time)) / DAY_MS);
+    return `（已逾期 ${Math.max(1, days)} 天）`;
   }
-  if (left === 0) return "（今天到期）";
+  // 未过期也按日历日算（与上面的逾期口径一致）：今天晚些时候到期就是「今天到期」。
+  // 旧写法 Math.ceil((time-now)/DAY_MS) 对正数恒 ≥1，「今天到期」是永不可达的死分支；
+  // 且滚动 24 小时会跨本地零点多报一天（明天 09:00 到期、今天 08:00 生成 → 3 天）。
+  // Math.round 让 DST 的 23/25 小时日仍落回整数天。
+  const left = Math.round((startOfDay(time) - startOfDay(now)) / DAY_MS);
+  if (left <= 0) return "（今天到期）";
   return `（还剩 ${left} 天）`;
 }
 

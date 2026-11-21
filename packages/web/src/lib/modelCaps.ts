@@ -450,7 +450,10 @@ export function lookupCapability(
 
 /** 内置表查找（精确 → 前缀 → 家族）。 */
 function baseCapability(id: string): ModelCapability | null {
-  const exact = EXACT[id];
+  // 只认自有键：EXACT 是普通对象，id 为 "__proto__"/"toString"/"constructor"
+  // 时直接索引会拿到原型链上的东西（函数/对象），冒充成一张能力表——
+  // 上下文窗口就成了 undefined，预筛会把候选错杀。查不到必须返回 null。
+  const exact = Object.prototype.hasOwnProperty.call(EXACT, id) ? EXACT[id] : undefined;
   if (exact) return exact;
   const lower = id.toLowerCase();
   for (const { prefix, caps } of PREFIX) {

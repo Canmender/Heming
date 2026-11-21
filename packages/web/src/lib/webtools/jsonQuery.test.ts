@@ -79,6 +79,36 @@ describe("queryJson", () => {
     if (!broken.ok) expect(broken.error).toContain("不是合法 JSON");
   });
 
+  it("原型链上的键不算字段（d.412.4.183）：toString/constructor/__proto__/valueOf 一律报没有字段", () => {
+    // JSON.parse 产出的对象继承 Object.prototype；旧实现用 `in` 会把这些原型成员
+    // 当成「字段存在」，返回 `function toString(){[native code]}` 这种假答案。
+    const source = JSON.stringify(DATA); // {"code":0,"data":{...}}
+    for (const key of ["toString", "constructor", "__proto__", "valueOf", "hasOwnProperty"]) {
+      const outcome = queryJson(source, `data.${key}`);
+      expect(outcome.ok, key).toBe(false);
+      if (!outcome.ok) expect(outcome.error, key).toContain("没有字段");
+    }
+    // 顶层也一样
+    const top = queryJson(source, "toString");
+    expect(top.ok).toBe(false);
+    if (!top.ok) expect(top.error).toContain("没有字段");
+  });
+
+  it("自有字段照常取值，包括 JSON 里真写出来的 constructor/__proto__ 键（d.412.4.183）", () => {
+    // JSON.parse 用 DefineOwnProperty，所以下面两个键是真正的自有字段，必须能取到。
+    const source = '{"constructor":"自有值","__proto__":7,"a":1}';
+    const ctor = queryJson(source, "constructor");
+    expect(ctor.ok).toBe(true);
+    if (ctor.ok) expect(ctor.text).toContain("自有值");
+    const proto = queryJson(source, "__proto__");
+    expect(proto.ok).toBe(true);
+    if (proto.ok) expect(proto.text).toContain("7");
+    // 普通字段与嵌套路径不受影响
+    const a = queryJson(source, "a");
+    expect(a.ok).toBe(true);
+    if (a.ok) expect(a.text).toContain("1");
+  });
+
   it("根路径返回顶层概览而不是整段文档", () => {
     const outcome = queryJson(JSON.stringify(DATA), "$");
     expect(outcome.ok).toBe(true);

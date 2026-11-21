@@ -298,10 +298,11 @@ export function describeMcpLine(mcp: McpStatusSnapshot): string {
   return `${head}；${detail.join("；")}。${hint}`;
 }
 
-/** 运行时给的失败原因可能很长，自检行只留前一段。 */
+/** 运行时给的失败原因可能很长，自检行只留前一段（按码点切，不在 emoji 中间劈出落单代理）。 */
 function clipFailureReason(reason: string): string {
   const flat = reason.replace(/\s+/g, " ").trim();
-  return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat;
+  const chars = [...flat];
+  return chars.length > 40 ? `${chars.slice(0, 40).join("")}…` : flat;
 }
 
 /**

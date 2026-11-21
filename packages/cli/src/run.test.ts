@@ -99,6 +99,35 @@ describe("startAgentRun", () => {
     expect(outcomeExitCode(outcome)).toBe(0);
   });
 
+  it("流式输出跨代理对分帧时不在屏幕上劈出乱码（stdout 与 JSON 一致）", async () => {
+    const dir = await makeSandbox();
+    // 模拟 SSE delta 正好切在 emoji 代理对中间：第一帧以高代理结尾。
+    const chat: StreamChatFn = async (_profile, _messages, opts) => {
+      opts.onDelta("A\ud83d");
+      opts.onDelta("\ude00B");
+      opts.onUsage?.({ inputTokens: 10, outputTokens: 4, totalTokens: 14 });
+      opts.onFinish?.("stop");
+      return "A😀B";
+    };
+
+    const chunks: string[] = [];
+    const outcome = await startAgentRun({
+      prompt: "say hi",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      onStdout: (chunk) => chunks.push(chunk),
+    }).done;
+
+    // stdout 是逐块写出的字节流：每块单独按 UTF-8 编码。若某块以落单高代理结尾，
+    // 它会变成 U+FFFD，屏幕就成了 A??B，与 JSON 里的 A😀B 不一致。
+    const onScreen = Buffer.concat(chunks.map((c) => Buffer.from(c, "utf8"))).toString("utf8");
+    expect(onScreen).toBe("A😀B");
+    expect(outcome.json.text).toBe("A😀B");
+    expect(onScreen).toBe(outcome.json.text);
+  });
+
   it("未给 --allow-danger 时 run_command 返回「未执行」，且命令真的没有跑", async () => {
     const dir = await makeSandbox();
     const marker = path.join(dir, "marker.txt");
@@ -127,6 +156,36 @@ describe("startAgentRun", () => {
     expect(outcome.json.ok).toBe(true);
     expect(outcome.json.writes).toEqual([]);
     expect(outcomeExitCode(outcome)).toBe(0);
+  });
+
+  it("run_command 未授权被拒时，stderr 进度行与 JSON 事件口径一致都报「已拒绝」", async () => {
+    const dir = await makeSandbox();
+    const chat = createScriptedChat([
+      { tool_calls: [{ name: "run_command", arguments: { command: "echo nope" } }] },
+      { text: "命令未获授权，我没有执行。" },
+    ]);
+
+    const progressLines: string[] = [];
+    const events: CliEvent[] = [];
+    await startAgentRun({
+      prompt: "跑一条命令",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+      onProgress: (line) => progressLines.push(line),
+      onEvent: (event) => events.push(event),
+    }).done;
+
+    // JSON 事件与工具记录都按「未授权 = 策略拒绝」口径记。
+    const end = events.find((event) => event.type === "tool_end");
+    expect(end).toMatchObject({ type: "tool_end", name: "run_command", denied: true, ok: false });
+
+    // stderr 上那行进度也应该说「已拒绝」而不是「失败」——否则看 stderr 的人
+    // 以为命令真的执行后出错了，而 stream-json 的消费者却看到 denied:true，两边对不上。
+    const endLine = progressLines.find((line) => line.startsWith("工具 run_command"));
+    expect(endLine).toContain("已拒绝");
+    expect(endLine).not.toContain("失败");
   });
 
   it("onEvent 会按顺序报出 round / tool_start / tool_end（stream-json 的数据源）", async () => {

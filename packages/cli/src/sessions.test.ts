@@ -139,6 +139,12 @@ describe("writeSession / readSession", () => {
     expect(records.some((record) => record.id === fresh)).toBe(true);
     // 最旧那条（updatedAt=0）应该已经被清掉。
     expect(records.some((record) => record.id === "20260101-000000-aaaa")).toBe(false);
+    // 关键：listSessions 默认只返回 50 条，光看它会被「已经裁到 50」骗过去。
+    // 必须数磁盘上的文件——旧的裁剪实现用带上限的 listSessions 判断，
+    // 结果 51 个 .json 全留在盘上，只是列表里看不到最旧那份而已。
+    const onDisk = (await readdir(dir)).filter((name) => name.endsWith(".json"));
+    expect(onDisk).toHaveLength(MAX_SESSIONS);
+    expect(onDisk).not.toContain("20260101-000000-aaaa.json");
   });
 });
 

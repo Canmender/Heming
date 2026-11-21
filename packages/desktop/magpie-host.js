@@ -178,7 +178,10 @@ function createMagpieHost(opts) {
           log(`[magpie] 就绪${version ? `（${version}）` : ""}`);
           return { port, version };
         }
-        if (!running() && !starting) break;
+        // 这里 `starting` 还指向外层正在执行的 promise，恒为真，`&& !starting` 永远不成立：
+        // 进程一启动就崩时不会提前退出，白等满 30s 才报「没有在规定时间内就绪」。
+        // 子进程 exit 处理里已把 child 置空，running() 变 false 就足以判定失败。
+        if (!running()) break;
         await sleep(500);
       }
       const tail = stderrTail.length ? `；输出：${stderrTail[stderrTail.length - 1]}` : "";

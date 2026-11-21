@@ -258,6 +258,21 @@ describe("补丁协议解析 · 失败语义", () => {
     expect(error.message).toContain("空格");
   });
 
+  it("单个空格是合法空上下文行，不当成缺前缀的空行（d.412 回归）", () => {
+    // 文件里的空行作锚点要写成「空格前缀 + 空文本」，即恰好一个空格。
+    const plan = ok(
+      ["*** Begin Patch", "*** Update File: a.md", "@@", " 标题", " ", "-旧", "+新", "*** End Patch"].join("\n"),
+    );
+    const op = plan.ops[0];
+    if (op.kind !== "update") throw new Error("类型收窄失败");
+    expect(op.hunks[0].lines).toEqual([
+      { kind: "context", text: "标题" },
+      { kind: "context", text: "" },
+      { kind: "del", text: "旧" },
+      { kind: "add", text: "新" },
+    ]);
+  });
+
   it("错误里的行号指向真实行（便于模型自纠）", () => {
     const error = err(["*** Begin Patch", "*** Add File: a.md", "+x", "*** Bogus", "*** End Patch"].join("\n"));
     expect(error.message).toContain("第 4 行");

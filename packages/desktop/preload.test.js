@@ -570,6 +570,17 @@ test("preload 暴露 __heming_notify（系统通知桥）并可取消订阅", ()
   assert.equal(listeners.get("notify:open").size, 0, "取消订阅应移除 notify:open 监听");
 });
 
+test("__heming_update.subscribe 收到非函数回调时安全忽略（d.412 回归）", () => {
+  const listeners = new Map();
+  const bridge = loadExposed({}, { listeners }).__heming_update;
+  assert.doesNotThrow(() => {
+    const off = bridge.subscribe(null);
+    assert.equal(typeof off, "function");
+    off();
+  });
+  assert.equal((listeners.get("update:state") || new Set()).size, 0, "非函数回调不应注册监听");
+});
+
 test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
   const listeners = new Map();
   const bridge = loadExposed({}, { listeners }).__heming_notify;

@@ -78,7 +78,10 @@ export function latestTeamRun(conversationId?: string): TeamRunRecord | null {
   return pool.length ? (pool[pool.length - 1] ?? null) : null;
 }
 
-/** 正在跑的那次（同会话只允许一个：团队是串行派遣的）。 */
+/** 正在跑的那次（最后一条）。
+ *  注意：`agent_team` 是只读风险工具，同一条消息里可能被并行派遣两次，
+ *  此时会同时存在多条 running 记录——进度/收口归位请用下面的 `runForMemberIds`，
+ *  不要一律拿最后一条（会把两队的事件串到同一队头上）。 */
 export function activeTeamRun(conversationId?: string): TeamRunRecord | null {
   const pool =
     conversationId === undefined ? runs : runs.filter((run) => run.conversationId === conversationId);
@@ -87,6 +90,31 @@ export function activeTeamRun(conversationId?: string): TeamRunRecord | null {
     if (run && run.status === "running") return run;
   }
   return null;
+}
+
+/**
+ * 按成员 id 把一条进度/收口事件归位到正确的那次派遣。
+ *
+ * 并行派遣时有多条 running 记录，事件里没有 runId（接口就带 memberId），
+ * 于是用「谁包含的成员 id 最多」来认领：命中最多的那次就是它。
+ * 没有一条命中（成员 id 全不认识、或空结果）时回落到最后一条 running，
+ * 保持单队派遣与既有行为不变。
+ */
+function runForMemberIds(memberIds: readonly string[]): TeamRunRecord | null {
+  if (!memberIds.length) return activeTeamRun();
+  const want = new Set(memberIds);
+  let best: TeamRunRecord | null = null;
+  let bestScore = 0;
+  for (const run of runs) {
+    if (run.status !== "running") continue;
+    let score = 0;
+    for (const member of run.members) if (want.has(member.id)) score += 1;
+    if (score > bestScore) {
+      best = run;
+      bestScore = score;
+    }
+  }
+  return best ?? activeTeamRun();
 }
 
 function storage(): Storage | null {
@@ -203,7 +231,7 @@ export function beginTeamRun(input: {
 
 /** 把一条团队进度落到当前这次派遣上（按 memberId 认人，重复事件幂等）。 */
 export function applyTeamProgress(event: TeamProgressEvent, now = Date.now()): void {
-  const run = activeTeamRun();
+  const run = runForMemberIds([event.memberId]);
   if (!run) return;
   const index = run.members.findIndex((member) => member.id === event.memberId);
   if (index < 0) return;
@@ -229,7 +257,7 @@ export function finishTeamRun(
   result: Pick<TeamResult, "ok" | "members">,
   now = Date.now(),
 ): void {
-  const run = activeTeamRun();
+  const run = runForMemberIds(result.members.map((member) => member.id));
   if (!run) return;
   const byId = new Map(result.members.map((member) => [member.id, member]));
   const members = run.members.map((member) => {

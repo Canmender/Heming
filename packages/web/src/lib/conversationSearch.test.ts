@@ -29,6 +29,9 @@ describe("conversationSearch（d.197 左栏内容搜索的纯逻辑）", () => {
     expect(shouldSearchContent("a")).toBe(false);
     expect(shouldSearchContent(" ab ")).toBe(true);
     expect(shouldSearchContent("全部通过")).toBe(true);
+    // 单个 emoji 看着是一个字符，UTF-16 length 却是 2 —— 按码点算才是 1，不该发请求。
+    expect(shouldSearchContent("😀")).toBe(false);
+    expect(shouldSearchContent("😀a")).toBe(true);
   });
 
   it("命中按会话收口：同一会话多条只留第一条", () => {

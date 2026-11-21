@@ -41,6 +41,21 @@ describe("团队任务说人话（d.248）", () => {
     expect(describeDue(new Date(NOW - 2 * 24 * 3600_000).toISOString(), NOW)).toBe("已过期 2 天");
   });
 
+  it("截止按日历日算，不按满 24 小时（今早刚过 1 分钟不算逾期 1 天）", () => {
+    // 用本地时间构造，避免不同时区下 ISO 串跨日导致断言漂移。
+    const localNoon = (y: number, m: number, d: number, h: number, min: number) =>
+      new Date(y, m - 1, d, h, min).getTime();
+    const now = localNoon(2026, 11, 17, 22, 0);
+    // 同一天早上 8 点的截止：已经过了 14 小时，但仍是「今天」，不是「已过期 1 天」。
+    expect(describeDue(new Date(localNoon(2026, 11, 17, 8, 0)).toISOString(), now)).toBe("今天截止");
+    // 明天早上 8 点：现在 22 点，只差 10 小时，但跨了日历日 → 明天截止。
+    expect(describeDue(new Date(localNoon(2026, 11, 18, 8, 0)).toISOString(), now)).toBe("明天截止");
+    // 大后天早上：差不到 72 小时，但跨了 2 个日历日 → 2 天后截止。
+    expect(describeDue(new Date(localNoon(2026, 11, 19, 8, 0)).toISOString(), now)).toBe("2 天后截止");
+    // 1 分钟前刚过（同一天）：不算逾期 1 天。
+    expect(describeDue(new Date(now - 60_000).toISOString(), now)).toBe("今天截止");
+  });
+
   it("一行：团队 · 标题（状态，截止）", () => {
     expect(formatAssignedTask(item(), NOW)).toBe("研发组 · 整理接口文档（未开始）");
     expect(

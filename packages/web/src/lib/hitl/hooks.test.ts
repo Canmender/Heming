@@ -119,6 +119,13 @@ describe("matchHooks / 路径 glob", () => {
     expect(matchPathGlob("SRC/**", "src/a.ts")).toBe(true); // Windows 路径大小写不敏感
   });
 
+  it("path：裸 ** 匹配一切相对路径，守卫钩子不会静默失效（d.412 回归）", () => {
+    expect(matchPathGlob("**", "a.ts")).toBe(true);
+    expect(matchPathGlob("**", "src/a.ts")).toBe(true);
+    expect(matchPathGlob("**", "src/a/b.ts")).toBe(true);
+    expect(matchPathGlob("**", "src")).toBe(true);
+  });
+
   it("Windows 反斜杠与绝对路径都归一化到工作区相对路径", () => {
     expect(workspaceRelativePath("src\\a\\b.ts", WS)).toBe("src/a/b.ts");
     expect(workspaceRelativePath("D:\\工作区\\heming\\src\\a.ts", WS)).toBe("src/a.ts");

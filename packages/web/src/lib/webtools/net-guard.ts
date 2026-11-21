@@ -94,7 +94,9 @@ export function isPrivateHostname(rawHostname: string): boolean {
   if (!hostname) return true;
   const bare = hostname.replace(/\.$/, "");
   if (PRIVATE_HOSTNAMES.has(bare) || PRIVATE_HOSTNAMES.has(hostname)) return true;
-  if (PRIVATE_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) return true;
+  // 后缀也要按去掉结尾点的裸主机名判：绝对 FQDN（`foo.local.`）与 `foo.local`
+  // 解析到同一主机，若只查 hostname 就会放行 `http://foo.local.` 绕过内网拦截。
+  if (PRIVATE_SUFFIXES.some((suffix) => bare.endsWith(suffix))) return true;
 
   // 单段数字 / 0x 十六进制：浏览器会把它当 IPv4 解析，直接拒绝
   if (/^\d+$/.test(bare)) return true;

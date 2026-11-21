@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createScriptedApprover } from "./approvals.js";
 import { createCliGate, createCliTooling, relativizeToolArgs } from "./tooling.js";
 import { listCliRewinds, rewindDir } from "./rewind.js";
+import { mcpToolName, type McpConnection } from "./mcpClient.js";
 
 const CWD = path.resolve("D:/work/proj").replace(/\\\\/g, "/");
 
@@ -539,6 +540,46 @@ describe("命令改动的范围（d.337）", () => {
  * 写文件也先问（`--ask-writes`，d.340）：
  * 「改了什么」在审批框里要看得见，且人的点头不能把越界写变成合法。
  */
+describe("MCP 工具按全名精确派发（d.412）", () => {
+  /** 造一个假连接：记录被叫到的工具与参数，返回固定文本。 */
+  function connection(
+    server: string,
+    tools: string[],
+    seen: { tool: string; args: unknown }[],
+  ): McpConnection {
+    return {
+      server,
+      tools: tools.map((name) => ({ name, description: "", inputSchema: undefined })),
+      async callTool(tool, args) {
+        seen.push({ tool, args });
+        return { text: `${server}/${tool} 调用了`, isError: false };
+      },
+      close() {},
+    };
+  }
+
+  it("服务名含 __ 时工具仍能正确派发（不再靠反解名字猜边界）", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-mcp-dispatch-"));
+    tmpDirs.push(cwd);
+    const seen: { tool: string; args: unknown }[] = [];
+    const conn = connection("my__server", ["read", "write"], seen);
+    const name = mcpToolName("my__server", "write");
+    expect(name).toBe("mcp__my__server__write"); // 格式本身不变
+
+    const tooling = createCliTooling({ cwd, allowDanger: true, conversationId: "mcp-dispatch", mcp: [conn] });
+    // 工具清单里挂的是全名；meta 也应识别它（danger）。
+    const names = (tooling.toolBridge.tools as { function: { name: string } }[]).map((spec) => spec.function.name);
+    expect(names).toContain(name);
+    expect(tooling.toolBridge.meta?.(name)?.risk).toBe("danger");
+
+    const result = await tooling.toolBridge.execute({ name, arguments: '{"path":"a.ts"}' });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("my__server/write 调用了");
+    // 关键：旧的 parseMcpToolName 会把它当成 server=my、tool=server__write 派给 my（不存在）。
+    expect(seen).toEqual([{ tool: "write", args: { path: "a.ts" } }]);
+  });
+});
+
 describe("逐笔确认写入（d.340）", () => {
   function toolingWithWrites(answers: Parameters<typeof createScriptedApprover>[0]) {
     const cwd = mkdtempSync(path.join(tmpdir(), "heming-ask-writes-"));

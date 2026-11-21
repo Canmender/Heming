@@ -549,11 +549,18 @@ async function connectHttpMcpServer(
 export function normalizeTools(value: unknown): McpToolInfo[] {
   if (!Array.isArray(value)) return [];
   const tools: McpToolInfo[] = [];
+  // 同一服务内重复名字取第一个（跨服务的同名工具由前缀区分）。
+  // 去重必须放在计数之前：若先按原始条目数截断到 MAX，再去掉重名，
+  // 一个返回重复名字的服务会把名额耗在重复项上，后面真正不同的工具全被丢掉——
+  // 上限应数「可用工具数」，不是「原始数组前 N 项」。
+  const seen = new Set<string>();
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
     const name = record.name;
     if (typeof name !== "string" || !name.trim()) continue;
+    if (seen.has(name)) continue; // 重名取第一个
+    seen.add(name);
     const tool: McpToolInfo = { name };
     if (typeof record.description === "string" && record.description.trim()) {
       tool.description = record.description.trim();
@@ -564,13 +571,7 @@ export function normalizeTools(value: unknown): McpToolInfo[] {
     tools.push(tool);
     if (tools.length >= MAX_MCP_TOOLS_PER_SERVER) break;
   }
-  // 同一服务内重复名字取第一个（跨服务的同名工具由前缀区分）。
-  const seen = new Set<string>();
-  return tools.filter((tool) => {
-    if (seen.has(tool.name)) return false;
-    seen.add(tool.name);
-    return true;
-  });
+  return tools;
 }
 
 /** MCP 的 `content` 数组 → 纯文本（只取 text 块，其它类型点名而不假装看懂）。 */

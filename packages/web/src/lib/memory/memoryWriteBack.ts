@@ -238,7 +238,13 @@ function findExistingRel(
 ): { rel: string; vaultId: string } | null {
   const prefix = `${MEMORY_INBOX_DIR}/${MEMORY_WRITE_PREFIX}${fileKey}-`;
   const matches = docs
-    .filter((doc) => doc.rel.startsWith(prefix) && doc.rel.endsWith(".md"))
+    .filter((doc) => {
+      if (!doc.rel.startsWith(prefix) || !doc.rel.endsWith(".md")) return false;
+      // 只认「key-YYYYMMDD.md」：fileKey 可能是另一个 key 的连字符前缀
+      // （偏好 / 偏好-语言），裸 startsWith 会把长 key 的文件当成短 key 的，
+      // 于是把更新追加到别人的笔记里、自己的笔记反而丢了。
+      return /^\d{8}\.md$/.test(doc.rel.slice(prefix.length));
+    })
     .sort((a, b) => (a.rel < b.rel ? 1 : a.rel > b.rel ? -1 : 0));
   return matches[0] ?? null;
 }

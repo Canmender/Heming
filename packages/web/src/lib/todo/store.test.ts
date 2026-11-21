@@ -106,6 +106,26 @@ describe("会话级任务清单", () => {
     expect(getTodos(`c${MAX_STORED_LISTS + 4}`)).toHaveLength(1);
   });
 
+  it(`重开应用后淘汰的仍是最久没用的会话（LRU 序号跨重启还原，不把刚用的那份删掉）`, () => {
+    // 造满 MAX_STORED_LISTS 个会话：c0 最早写、c49 最近写。
+    for (let i = 0; i < MAX_STORED_LISTS; i += 1) {
+      setTodos(`c${i}`, [{ content: `任务${i}`, status: "pending" }]);
+    }
+    // 再把 c49 碰一下，确保它是全场 MRU；c0 保持 LRU。
+    setTodos("c49", [{ content: "c49-更新", status: "pending" }]);
+    // 模拟「关掉应用再打开」：内存序号清零，只能靠落盘的 seq 还原次序。
+    resetTodoStore();
+    expect(getTodos("c49")).toEqual([{ content: "c49-更新", status: "pending" }]);
+
+    // 第 51 个会话写入触发淘汰：应删最旧的 c0，留最近用过的 c49。
+    setTodos("cNew", [{ content: "新任务", status: "pending" }]);
+    expect(getTodos("c0")).toEqual([]); // 最久没用 → 被淘汰
+    expect(getTodos("c49")).toEqual([{ content: "c49-更新", status: "pending" }]); // 刚用过 → 保留
+    expect(getTodos("cNew")).toHaveLength(1);
+    const stored = JSON.parse(localStorage.getItem(TODOS_KEY) ?? "{}") as Record<string, unknown>;
+    expect(Object.keys(stored)).toHaveLength(MAX_STORED_LISTS);
+  });
+
   it("计数口径：pending / in_progress / completed 各自算清楚", () => {
     expect(
       countTodos([

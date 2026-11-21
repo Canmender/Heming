@@ -281,6 +281,9 @@ export function globToRegExp(pattern: string): RegExp {
     .replace(/^\.\//, "")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
+  // 裸 `**` = 匹配所有路径。走下面的通用分支会生成 `^(?:/.*)?$`（只匹配空串或以 / 开头），
+  // 于是这条"匹配一切"的守卫规则在所有相对路径上都不触发——安全钩子被静默绕过。
+  if (p === "**") return new RegExp("^.*$", "i");
   let re = "";
   for (let i = 0; i < p.length; i += 1) {
     const ch = p[i];

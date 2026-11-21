@@ -369,10 +369,15 @@ function createStdioBridge({
       if (text) log(`[mcp:${serverId}] ${text.slice(0, 500)}`);
     });
     child.on("exit", (code, signal) => {
+      // stop()/回收是同步删旧 entry、异步收尾子进程；旧子进程的 exit 可能在
+      // 新请求已经用同一 serverId 拉起替代进程之后才到。没有身份守卫会误删新 entry，
+      // 让替代进程变成孤儿（无法 cancel/stop、反复重启、running()/idle() 失真）。
+      if (servers.get(serverId) !== entry) return;
       servers.delete(serverId);
       rejectAll(entry, `MCP 进程已退出（code=${code ?? "null"} signal=${signal ?? "null"}）`);
     });
     child.on("error", (err) => {
+      if (servers.get(serverId) !== entry) return;
       servers.delete(serverId);
       rejectAll(entry, `MCP 进程启动失败：${err.message}`);
     });

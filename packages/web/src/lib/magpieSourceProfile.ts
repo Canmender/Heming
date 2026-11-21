@@ -62,7 +62,13 @@ export function parseTokensInput(raw: string): number | null {
   const factor = value.endsWith("k") ? 1_000 : value.endsWith("m") ? 1_000_000 : 1;
   const number = Number.parseFloat(factor === 1 ? value : value.slice(0, -1));
   if (!Number.isFinite(number) || number < 0) return null;
-  return Math.round(number * factor);
+  const total = number * factor;
+  // 与内核 ParseTokens 同口径：内核用 int(n) 截断（不是四舍五入），且 n >= MaxInt
+  // 直接报错。这里用 Math.trunc 对齐截断；超大数（>= 安全整数上限）直接拒，免得
+  // "验证通过"的数字到内核那边因溢出被拒，白白让用户填了又保存失败。
+  // 注意不能用 isSafeInteger 判：1.5 这类小数内核是接受的（截断成 1）。
+  if (!Number.isFinite(total) || total >= Number.MAX_SAFE_INTEGER) return null;
+  return Math.trunc(total);
 }
 
 /** 填了但看不懂的那几格（页面点名用）；留空不算。 */

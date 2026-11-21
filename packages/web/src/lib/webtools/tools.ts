@@ -112,7 +112,7 @@ export const BUILTIN_WEB_TOOLS: WebToolSpec[] = [
   {
     name: CALCULATOR_TOOL,
     description:
-      "精确计算一个算术表达式（四则、取余 %、乘方 ^、括号，以及 sqrt/abs/round/floor/ceil/exp/ln/log/pow/min/max 与 pi/e）。" +
+      "精确计算一个算术表达式（四则、取余 %、乘方 ^、括号；函数 sqrt/cbrt/abs/round/floor/ceil/trunc/sign/exp/ln/log/log2/pow/hypot/sin/cos/tan/asin/acos/atan/atan2/min/max/clamp/fact/factorial/gcd/lcm；常量 pi/e）。" +
       "凡是要给出数字结果的计算都先用它，不要心算。",
     parameters: {
       type: "object",
@@ -249,7 +249,8 @@ function extractReadableHtml(html: string): { title: string; text: string; gbk: 
 
 /** 与搜索解析共用的实体解码（只覆盖正文里常见的那些）。 */
 function decodeEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
+  // HTML 允许大写 `&#X...;` 与小写 `&#x...;`，两者都要认。
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) return codePoint(Number.parseInt(body.slice(2), 16), whole);
     if (body.startsWith("#")) return codePoint(Number.parseInt(body.slice(1), 10), whole);
     const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };

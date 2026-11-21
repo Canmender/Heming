@@ -209,8 +209,18 @@ function parseArgs(raw: unknown): ParsedArgs {
 /** 把输出截到上限，并说清「截了」。 */
 function clip(text: string, budget: number): { text: string; truncated: boolean } {
   if (text.length <= budget) return { text, truncated: false };
-  const head = text.slice(0, Math.floor(budget * 0.7));
-  const tail = text.slice(-Math.floor(budget * 0.3));
+  // 给「…（中间省略 N 字符）…」提示预留位置，保证拼完不超 budget。
+  const body = Math.max(0, budget - 32);
+  const headCount = Math.floor(body * 0.7);
+  const tailCount = Math.floor(body * 0.3);
+  let head = headCount > 0 ? text.slice(0, headCount) : "";
+  let tail = tailCount > 0 ? text.slice(-tailCount) : "";
+  // 按 UTF-16 切可能落在 emoji 的代理对中间：head 末尾落单高代理就退一格，
+  // tail 开头落单低代理就丢一格，避免把坏字符串喂给模型。
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  const first = tail.charCodeAt(0);
+  if (first >= 0xdc00 && first <= 0xdfff) tail = tail.slice(1);
   return {
     text: `${head}\n…（中间省略 ${text.length - head.length - tail.length} 字符）…\n${tail}`,
     truncated: true,
@@ -386,9 +396,17 @@ function formatJobOutput(res: ShellJobOutputResponse): { text: string; ok: boole
     : res.exitCode === null
       ? "已停止（退出码 未知）"
       : `已结束（退出码 ${res.exitCode}）`;
-  const stdout = res.stdout.trim() ? res.stdout.replace(/\s+$/, "") : "（无新增输出）";
-  const stderr = res.stderr.trim() ? res.stderr.replace(/\s+$/, "") : "（无新增输出）";
+  // 后台读回的增量输出同样要过上限：d.350 起工具结果不再在下游折叠，
+  // 这里不截就会把整段输出原样灌进模型（主进程只在写盘时按 512KB 截，远不够）。
+  const stdoutClipped = clip(res.stdout, SHELL_MAX_OUTPUT_CHARS);
+  const stderrBudget = Math.max(1000, SHELL_MAX_OUTPUT_CHARS - stdoutClipped.text.length);
+  const stderrClipped = clip(res.stderr, stderrBudget);
+  const stdout = stdoutClipped.text.trim() ? stdoutClipped.text.replace(/\s+$/, "") : "（无新增输出）";
+  const stderr = stderrClipped.text.trim() ? stderrClipped.text.replace(/\s+$/, "") : "（无新增输出）";
   const lines: string[] = [`作业 ${res.jobId}：${status}`, "--- stdout ---", stdout, "--- stderr ---", stderr];
+  if (stdoutClipped.truncated || stderrClipped.truncated) {
+    lines.push("（本次读回输出过长已截断；要看完整内容请缩小范围或加 grep 过滤。）");
+  }
   if (res.truncated) {
     lines.push(`（输出超过 ${Math.round(SHELL_JOB_MAX_CAPTURE_BYTES / 1024)}KB 上限，早期内容已被丢弃）`);
   }
@@ -496,15 +514,23 @@ export function buildShellToolBridge(deps: ShellToolDeps): ToolBridge {
       let cwdAbs = root.path;
       let cwdLabel = `${root.name}（${"."}）`;
       if (parsed.cwd) {
-        const resolved = resolveInsideRoot(root.path, parsed.cwd);
-        if (!resolved) {
-          return failureResult("工作目录越界（path-escape）", `「${parsed.cwd}」不是根「${root.name}」内的相对路径。`, {
-            error_code: "path-escape",
-            hint: "cwd 要写相对路径（如 src 或 .），不能写绝对路径、不能用 ..",
-          });
+        // "." / "./" 就是树根本身（工具说明和报错提示都推荐这么写），但 resolveInsideRoot
+        // 会过滤掉 "." 段得到空路径从而返回 null —— 这里显式认成根，别误报 path-escape。
+        const cwdText = parsed.cwd.replace(/\/+$/, "");
+        if (cwdText === "." || cwdText === "") {
+          cwdAbs = root.path;
+          cwdLabel = `${root.name}（.）`;
+        } else {
+          const resolved = resolveInsideRoot(root.path, parsed.cwd);
+          if (!resolved) {
+            return failureResult("工作目录越界（path-escape）", `「${parsed.cwd}」不是根「${root.name}」内的相对路径。`, {
+              error_code: "path-escape",
+              hint: "cwd 要写相对路径（如 src 或 .），不能写绝对路径、不能用 ..",
+            });
+          }
+          cwdAbs = resolved;
+          cwdLabel = `${root.name}（${relFromRoot(root.path, resolved) || "."}）`;
         }
-        cwdAbs = resolved;
-        cwdLabel = `${root.name}（${relFromRoot(root.path, resolved) || "."}）`;
       }
 
       if (opts?.signal?.aborted) {

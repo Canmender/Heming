@@ -40,7 +40,10 @@ export async function startServer(
   }
   const app = createApp(store);
   const server = createServer(app);
-  attachWs(server, store);
+  // 持有 wss：关服时必须先关它——否则 (1) ws.ts 里的广播订阅只在 wss 的 "close"
+  // 事件退订，从不 close 就永久泄漏（热重启/测试反复 start 会堆积指向旧 store 的监听器）；
+  // (2) 活动 WS 连接会吊住 http server.close()，ctx.close() 永远不 resolve。
+  const wss = attachWs(server, store);
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
@@ -50,13 +53,20 @@ export async function startServer(
     port: actualPort,
     close: () =>
       new Promise((resolve, reject) => {
-        server.close((err) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          store.close();
-          resolve();
+        // 先终止所有 WS 客户端再关 wss：ws 的 noServer 模式下 wss.close() 只等现有客户端
+        // 自己断开才会发 "close"（从而触发 ws.ts 的退订）。逐个 terminate() 让这一步即时完成，
+        // 不再吊住随后的 http server.close()。terminate 走的是底层 socket 强关，客户端
+        // 会收到异常关闭——关服阶段这是可接受的（正常关闭请用客户端主动 close）。
+        for (const client of wss.clients) client.terminate();
+        wss.close(() => {
+          server.close((err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            store.close();
+            resolve();
+          });
         });
       }),
   };

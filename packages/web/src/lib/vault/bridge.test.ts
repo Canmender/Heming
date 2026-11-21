@@ -114,6 +114,14 @@ describe("路径守卫", () => {
     expect(isInsideWriteDirs("notes/a.md", ["inbox"])).toBe(false);
     expect(isInsideWriteDirs("notes/a.md", [])).toBe(false);
   });
+
+  it("writeDirs：未归一化的 .. / . 段一律不算在内（d.412 回归）", () => {
+    expect(isInsideWriteDirs("inbox/../secrets.md", ["inbox"])).toBe(false);
+    expect(isInsideWriteDirs("inbox/../../secrets.md", ["inbox"])).toBe(false);
+    expect(isInsideWriteDirs("inbox/./a.md", ["inbox"])).toBe(false);
+    // 名字里带点的正常文件不受影响。
+    expect(isInsideWriteDirs("inbox/版本-v1..2.md", ["inbox"])).toBe(true);
+  });
 });
 
 describe("内存桥", () => {

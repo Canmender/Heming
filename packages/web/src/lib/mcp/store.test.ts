@@ -108,6 +108,15 @@ describe("系统能力：常驻且只读", () => {
     expect(registry.get(added.id)).toBeUndefined();
   });
 
+  it("删除服务时连连接状态一起清（不留旧「已连接」幻影，d.412 回归）", () => {
+    const registry = new McpRegistry(memStorage(), FIXED_NOW);
+    const added = registry.add({ name: "临时", transport: "http", url: "https://x/mcp" });
+    registry.setStatus(added.id, { state: "connected", tools: 3 });
+    expect(registry.status(added.id)?.state).toBe("connected");
+    registry.remove(added.id);
+    expect(registry.status(added.id)).toBeUndefined();
+  });
+
   it("旧恢复 API 只是兼容壳：removedPresetIds 恒空、restorePresets 恒 0、restorePreset 只读现有项", () => {
     const registry = new McpRegistry(memStorage(), FIXED_NOW);
     expect(registry.removedPresetIds()).toEqual([]);

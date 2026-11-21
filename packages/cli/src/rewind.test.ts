@@ -79,6 +79,26 @@ describe("路径与 id", () => {
     expect(parsed?.files[2]?.skipped).toBe("binary");
   });
 
+  it("文件名里带两个点是合法的，不被 .. 越界判定误杀", () => {
+    const parsed = parseRewindRun({
+      version: 1,
+      id: "x",
+      at: "2026-11-18T10:00:00.000Z",
+      files: [
+        { path: "docs/a..b.md", before: "x" },
+        { path: "../escape.ts", before: "nope" },
+        { path: "src/ok.md", before: "y" },
+      ],
+      commandChanges: {
+        created: ["docs/a..b.md", "../escape.ts"],
+        modified: [],
+        deleted: [],
+      },
+    });
+    expect(parsed?.files.map((file) => file.path)).toEqual(["docs/a..b.md", "src/ok.md"]);
+    expect(parsed?.commandChanges?.created).toEqual(["docs/a..b.md"]);
+  });
+
   it("版本不对整份作废", () => {
     expect(parseRewindRun({ version: 2, id: "x", at: "t", files: [] })).toBeNull();
     expect(parseRewindRun({ version: 1, id: "", at: "t", files: [] })).toBeNull();

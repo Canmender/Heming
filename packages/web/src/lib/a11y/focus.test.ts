@@ -33,6 +33,18 @@ describe("焦点环工具", () => {
     expect(hasFocusRing("focus-visible:outline-2")).toBe(true);
   });
 
+  it("★ 带 focus-visible 前缀的抹除类也不算焦点环（否则 withFocusRing 被它骗过）", () => {
+    expect(hasFocusRing("focus-visible:outline-hidden")).toBe(false);
+    expect(hasFocusRing("focus-visible:outline-none")).toBe(false);
+    // withFocusRing 遇到抹除类必须补上真正的可见环
+    const ringed = withFocusRing("outline-hidden focus-visible:outline-hidden");
+    expect(hasFocusRing(ringed)).toBe(true);
+    expect(ringed).toContain(FOCUS_RING);
+    // 既有的可见环仍不重复追加
+    const withRing = "focus-visible:outline-2 focus-visible:outline-ink";
+    expect(withFocusRing(withRing)).toBe(withRing);
+  });
+
   /** 去掉注释再扫：注释里写「不要用 outline-none」不算违规。 */
   const stripComments = (src: string) =>
     src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*?$/gm, "$1");

@@ -42,6 +42,11 @@ const ALLOWED_COMMANDS = new Set([
   "ls",
   "sessions",
   "gateway-key",
+  // 来源页用这两个读/装插件、读/刷额度：国产智能体接入必须先跑 `plugin add`，
+  // 登录后又要用 `quota refresh <accountId>` 立刻拿额度。之前漏了它们，
+  // 桌面桥在启动内核前就拒绝，页面报「不允许的命令：plugin」（d.412）。
+  "plugin",
+  "quota",
 ]);
 
 /**

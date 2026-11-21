@@ -496,6 +496,16 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
         try {
           const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(raw) : null;
           if (!cipher) return;
+          // 迟到的迁移不能盖掉更新的写：加密在途期间用户可能改了同一个键
+          // （secureSetItem 已排队新值），磁盘 raw 不再等于读入的明文就放弃这笔迁移，
+          // 否则旧值会在新值落盘后最后写入，把配置静默回退（d.412 回归）。
+          let current: string | null;
+          try {
+            current = base.getItem(key);
+          } catch {
+            return;
+          }
+          if (current !== raw) return;
           base.setItem(key, envelopeOf(cipher));
           b.cacheSet?.(key, raw);
           plaintextKeys.delete(key);

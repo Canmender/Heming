@@ -50,6 +50,42 @@ interface RpcEnvelope<T> {
 }
 
 /**
+ * 逐块读 SSE 响应，拿到第一条带 id 的 JSON-RPC 响应就立刻返回。
+ *
+ * SSE 流允许在发完响应后继续打开（心跳/通知），因此绝不能读到 EOF。累计缓冲整段重解析
+ * （parseSseMessages 只解析完整 data: 行、忽略残行），一旦出现带 id 的 result/error 就
+ * cancel 读流收手；服务端真的关流则用读到的内容收尾。abort 时 read() 抛 AbortError，
+ * 由调用方的 catch 统一翻译成"中断/超时"文案。
+ */
+async function readSseResponse(res: Response): Promise<JsonRpcResponse[]> {
+  const body = res.body;
+  if (!body || typeof body.getReader !== "function") {
+    // 兜底：没有流式 body（老环境/某些 mock）才读全文。
+    return parseSseMessages(await res.text());
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const messages = parseSseMessages(buffer);
+      if (messages.some((m) => m.id !== undefined && m.id !== null && ("result" in m || "error" in m))) {
+        // 响应已到：取消底层流释放连接，不再等它关闭。
+        await reader.cancel().catch(() => undefined);
+        return messages;
+      }
+    }
+    return parseSseMessages(buffer + decoder.decode());
+  } finally {
+    // 正常到达响应时已 cancel；这里处理异常/中断路径，避免读流句柄泄漏。
+    reader.releaseLock?.();
+  }
+}
+
+/**
  * 创建一个 HTTP 传输的 MCP 客户端。
  *
  * 协议细节：
@@ -106,8 +142,10 @@ export function createHttpMcpClient(
       }
       const ctype = res.headers.get("content-type") ?? "";
       if (ctype.includes("text/event-stream")) {
-        const text = await res.text();
-        return { messages: parseSseMessages(text) };
+        // 不能 await res.text() 读到 EOF：MCP Streamable-HTTP 允许服务端发完 JSON-RPC
+        // 响应后仍保持 SSE 流打开（发心跳/通知）。读到关闭才会永远挂着直到超时。
+        // 逐块喂给 parseSseMessages，一旦拿到带 id 的响应就立刻收手并 cancel 流。
+        return { messages: await readSseResponse(res) };
       }
       const json = (await res.json()) as JsonRpcResponse | JsonRpcResponse[];
       return { messages: Array.isArray(json) ? json : [json] };

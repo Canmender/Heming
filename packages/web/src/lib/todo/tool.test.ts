@@ -56,6 +56,16 @@ describe("parseTodoArgs（校验口径）", () => {
     if (!parsed.ok) expect(parsed.error).toContain(String(TODO_CONTENT_MAX));
   });
 
+  it("字数按码点算：200 个 emoji 是 200 字、不被误拒（d.412 回归）", () => {
+    const ok = parseTodoArgs([{ content: "😀".repeat(TODO_CONTENT_MAX), status: "pending" }]);
+    expect(ok.ok).toBe(true);
+    const over = parseTodoArgs([
+      { content: "😀".repeat(TODO_CONTENT_MAX + 1), status: "pending" },
+    ]);
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.error).toContain(String(TODO_CONTENT_MAX + 1));
+  });
+
   it("重复内容 → 指到重复的那一条", () => {
     const parsed = parseTodoArgs([
       { content: "同一件事", status: "pending" },

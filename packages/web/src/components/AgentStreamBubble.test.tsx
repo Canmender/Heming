@@ -1,6 +1,6 @@
-﻿import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { AgentStreamBubble, MessageProcess, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
+import { AgentStreamBubble, MessageProcess, MessageSteps, ReasoningBlock, ToolTraceGroup, ToolTraceList } from "./AgentStreamBubble.js";
 import type { ToolTrace } from "../store/chat.js";
 
 describe("AgentStreamBubble", () => {
@@ -537,6 +537,59 @@ describe("工具行折叠（d.243：长任务不再把正文挤没）", () => {
     // 名字不再占视觉空间：读屏文案（sr-only）里仍有，但界面文本里没有。
     expect(screen.queryByText(longName)).toBeNull();
     expect(screen.queryByText("生成中…")).toBeNull();
+  });
+});
+
+describe("回答与工具按真实时间交错（d.4xx）", () => {
+  const tool = (id: string): ToolTrace => ({
+    id,
+    name: "file_read",
+    args: "{}",
+    status: "ok",
+    result: "内容",
+    startedAt: 1,
+    endedAt: 2,
+  });
+
+  it("answer 步骤夹在工具之间，顺序与发生顺序一致（先回答→工具→再回答）", () => {
+    render(
+      <MessageSteps
+        steps={[
+          { kind: "answer", text: "我先看一下文件" },
+          { kind: "tool", toolId: "t1" },
+          { kind: "answer", text: "看完了，内容是……" },
+        ]}
+        tools={[tool("t1")]}
+        streaming={false}
+      />,
+    );
+    const stepsEl = screen.getByTestId("agent-steps");
+    // 文本节点在 DOM 里的先后顺序：第一句回答 < 工具行 < 第二句回答
+    const text = stepsEl.textContent!;
+    const early = text.indexOf("我先看一下文件");
+    const toolPos = text.indexOf("file_read");
+    const late = text.indexOf("看完了，内容是");
+    expect(early).toBeGreaterThanOrEqual(0);
+    expect(toolPos).toBeGreaterThan(early);
+    expect(late).toBeGreaterThan(toolPos);
+  });
+
+  it("流水中最后的 answer 段长出光标，前面的 answer 不带光标", () => {
+    render(
+      <MessageSteps
+        steps={[
+          { kind: "answer", text: "第一句" },
+          { kind: "tool", toolId: "t1" },
+          { kind: "answer", text: "第二句" },
+        ]}
+        tools={[tool("t1")]}
+        streaming
+      />,
+    );
+    const stepsEl = screen.getByTestId("agent-steps");
+    expect(stepsEl.textContent).toContain("第一句");
+    expect(stepsEl.textContent).toContain("第二句▌");
+    expect(stepsEl.textContent).not.toContain("第一句▌");
   });
 });
 

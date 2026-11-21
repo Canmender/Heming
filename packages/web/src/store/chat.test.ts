@@ -174,6 +174,28 @@ describe("chat store", () => {
     expect(s.messages.c1?.map((m) => m.id)).toEqual(["m1"]);
   });
 
+  it("转录落盘带 steps：历史回放读回交错时间线，且写第二条不抹掉第一条的 steps", async () => {
+    const steps = [
+      { kind: "think" as const, text: "先想" },
+      { kind: "tool" as const, toolId: "t1" },
+      { kind: "think" as const, text: "再做" },
+    ];
+    const tools = [
+      { id: "t1", name: "read", args: "{}", status: "ok" as const, startedAt: 1, result: "done" },
+    ];
+    useChatStore.getState().recordTranscript("c1", "m1", { thinking: "思考", tools, steps });
+
+    // 读盘读回的条目必须含 steps（之前漏传，交错时间线塌成「思考在上、工具在下」）
+    vi.mocked(fetchMessages).mockResolvedValue([msg("m1", "一")]);
+    const list = await useChatStore.getState().loadMessages("c1");
+    expect((list[0] as { steps?: typeof steps }).steps).toEqual(steps);
+
+    // 写第二条时 read→write 合并，不能把第一条的 steps 抹掉
+    useChatStore.getState().recordTranscript("c1", "m2", { thinking: "第二条" });
+    const raw = JSON.parse(localStorage.getItem("heming.transcript.c1") ?? "[]");
+    expect(raw.find((x: { id: string }) => x.id === "m1").steps).toEqual(steps);
+  });
+
   // —— d.300：断线重连后的对齐（resyncMessages）——
 
   describe("resyncMessages：断线回来对一次齐（d.300）", () => {
@@ -900,6 +922,37 @@ describe("chat store · 会话标题（d.128）", () => {
   it("renameConversation：接口失败时抛错、本地标题不变", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
     await expect(useChatStore.getState().renameConversation("c1", "x")).rejects.toThrow();
+    expect(useChatStore.getState().conversations[0].title).toBeUndefined();
+  });
+
+  it("renameConversation：空串清除标题，本地旧标题跟着抹掉（服务端响应无 title 字段）", async () => {
+    // 先放一个带标题的本地会话
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          title: "旧标题",
+          lastMessageAt: null,
+        },
+      ] as never,
+    });
+    // 服务端清除后响应里没有 title 字段（store.ts: else delete conv.title）
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "c1",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await useChatStore.getState().renameConversation("c1", "");
     expect(useChatStore.getState().conversations[0].title).toBeUndefined();
   });
 });

@@ -102,7 +102,18 @@ export function sectPath(
   a0: number,
   a1: number,
 ): string {
-  const big = a1 - a0 > 180 ? 1 : 0;
+  const span = a1 - a0;
+  // 整圈（单类目 100% 环形图）：起点与终点重合，单条 arc 是零长度弧会被 SVG 丢弃 →
+  // 整块不画。拆成两段 180°：外环顺时钟、内环逆时钟，拼成完整圆环。
+  if (span >= 359.999) {
+    const mid = a0 + 180;
+    const [oa, oay] = pol(cx, cy, r1, a0);
+    const [om, omy] = pol(cx, cy, r1, mid);
+    const [ia, iay] = pol(cx, cy, r0, a0);
+    const [im, imy] = pol(cx, cy, r0, mid);
+    return `M${oa} ${oay} A${r1} ${r1} 0 1 1 ${om} ${omy} A${r1} ${r1} 0 1 1 ${oa} ${oay} L${ia} ${iay} A${r0} ${r0} 0 1 0 ${im} ${imy} A${r0} ${r0} 0 1 0 ${ia} ${iay} Z`;
+  }
+  const big = span > 180 ? 1 : 0;
   const [xa, ya] = pol(cx, cy, r1, a0);
   const [xb, yb] = pol(cx, cy, r1, a1);
   const [xc, yc] = pol(cx, cy, r0, a1);

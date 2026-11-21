@@ -68,7 +68,8 @@ export function rankText(rows: readonly AccountRow[]): RankText | null {
   const head = sameSpot
     ? `${ranked.length} 个账号都差不多，最宽的 ${nameOf(roomy)} 也只剩 ${percent(roomy.left)}`
     : `最宽裕的是 ${nameOf(roomy)}（剩 ${percent(roomy.left)}）；最紧的是 ${nameOf(tight)}（剩 ${percent(tight.left)}）`;
-  const middle = ranked.length - 2;
+  // 全部并列时所有账号都是「同一档」，根本没有"中间"这一组，别自相矛盾。
+  const middle = sameSpot ? 0 : ranked.length - 2;
   const tail = middle > 0 ? `；还有 ${middle} 个在中间` : "";
   const tone = sameSpot
     ? roomy.left <= 10

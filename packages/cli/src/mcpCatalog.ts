@@ -109,7 +109,10 @@ export function relOfResourceUri(uri: string): string | null {
   const trimmed = uri.trim();
   if (!trimmed.startsWith(MCP_RESOURCE_PREFIX)) return null;
   const rel = trimmed.slice(MCP_RESOURCE_PREFIX.length);
-  if (!rel || rel.startsWith("/") || rel.includes("..")) return null;
+  // 只挡真正的 `..` 路径段，不挡文件名里恰巧带两个点的（如 docs/a..b.md）——
+  // 后者是合法文件，`rel.includes("..")` 会把它连同越界访问一起误杀，
+  // 结果资源模板读不到、订阅也订不上。
+  if (!rel || rel.startsWith("/") || rel.split(/[\\/]/).includes("..")) return null;
   return rel;
 }
 

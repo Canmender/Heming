@@ -381,7 +381,14 @@ export async function runEdit(deps: FileOpsDeps, args: Record<string, unknown>):
 function clipBody(parts: string[]): { body: string; clipped: boolean } {
   const joined = parts.join("\n");
   if (joined.length <= READ_MAX_CHARS) return { body: joined, clipped: false };
-  return { body: joined.slice(0, READ_MAX_CHARS), clipped: true };
+  let cut = READ_MAX_CHARS;
+  // 不在 emoji 代理对中间切开（d.412 回归）。
+  const at = joined.charCodeAt(cut - 1);
+  if (at >= 0xd800 && at <= 0xdbff) {
+    const next = joined.charCodeAt(cut);
+    if (next >= 0xdc00 && next <= 0xdfff) cut -= 1;
+  }
+  return { body: joined.slice(0, cut), clipped: true };
 }
 
 /** `file_glob`：按通配符找文件（只列文件、不列目录）。 */

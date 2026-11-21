@@ -151,11 +151,11 @@ const STYLES = `
   .boot-wave-skip-hint {
     position: absolute; left: 0; right: 0; bottom: 24px;
     text-align: center;
-    font-size: 12px; line-height: 18px;
+    font-size: var(--text-ui-sm); line-height: 1.5;
     color: var(--muted);
     pointer-events: none;
     opacity: var(--skip-hint-opacity, 0);
-    transition: opacity 280ms ease-out;
+    transition: opacity var(--transition-duration-slow) var(--ease-out-soft);
   }
 `;
 

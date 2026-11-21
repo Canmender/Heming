@@ -20,12 +20,13 @@ export function MergedQuotaStrip({ groups, now }: MergedQuotaStripProps) {
         <li key={group.agent} className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-ui-sm font-medium">{group.label}</span>
           <span className="ui-caption">{group.accounts} 个账号</span>
-          {group.windows.map((window) => {
+          {group.windows.map((window, windowIndex) => {
             const resets = window.resetsAt ? formatResetIn(new Date(window.resetsAt).toISOString(), now) : "";
             const title = resets ? `${window.detail} · 最早 ${resets}` : window.detail;
             return (
               <span
-                key={`${group.agent}-${window.name}`}
+                // d.412 回归：不同 pool/口径的合并窗口可能同名，单靠 name 会撞 key。
+                key={`${group.agent}-${window.name}-${windowIndex}`}
                 className={`ui-chip ${QUOTA_BADGE[window.tone]}`}
                 title={title}
               >

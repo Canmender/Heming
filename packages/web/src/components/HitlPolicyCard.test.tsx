@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
-import { HitlPolicyStore, FLOORS, HITL_KEY } from "../lib/hitl/policy.js";
+import { HitlPolicyStore, FLOORS, HITL_KEY, sharedHitlPolicy } from "../lib/hitl/policy.js";
 import { appendAudit, type StorageLike } from "../lib/selfEdit/guards.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
@@ -25,6 +25,22 @@ describe("HitlPolicyCard", () => {
   beforeEach(() => {
     storage = new FakeStorage();
     store = new HitlPolicyStore(storage);
+  });
+
+  it("没传 policyStore 时用与闸门共享的单例：「清空本会话授权」真的清掉闸门授权（d.412 回归）", async () => {
+    // 模拟闸门（ChatPage）用共享单例授予的一条本会话授权。
+    sharedHitlPolicy.revokeAll();
+    sharedHitlPolicy.grant("a1", "fs__write_file", "global");
+    expect(sharedHitlPolicy.granted("a1", "fs__write_file", "global")).toBe(true);
+
+    // 生产路径：SettingsPage 渲染 <HitlPolicyCard />，不传 policyStore。
+    render(<HitlPolicyCard />);
+    fireEvent.click(screen.getByRole("button", { name: /清空本会话授权/ }));
+    // 二次确认对话框
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /清空授权/ }));
+
+    expect(sharedHitlPolicy.granted("a1", "fs__write_file", "global")).toBe(false);
   });
 
   it("展示档位选项，默认受控（guarded）", () => {

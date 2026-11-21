@@ -93,8 +93,17 @@ describe("工具参数的人话摘要（d.216）", () => {
   it("超长路径按码点截断，不会把代理对切一半", () => {
     const path = `${"深".repeat(80)}.md`;
     const summary = summarizeToolArgs("file_read", json({ path }));
-    expect(summary.endsWith("…")).toBe(true);
+    expect(summary.startsWith("…")).toBe(true);
+    expect(summary.endsWith(".md")).toBe(true);
     expect(summary.includes("\uFFFD")).toBe(false);
+  });
+
+  it("超长路径保留末尾的文件名，而不是丢掉文件名只留目录头", () => {
+    const path = "/very/deep/directory/structure/that/keeps/going/and/going/for/a/very/long/while/important-file.ts";
+    const summary = summarizeToolArgs("file_read", json({ path }));
+    expect(summary).toContain("important-file.ts");
+    expect(summary.startsWith("…")).toBe(true);
+    expect(Array.from(summary).length).toBeLessThanOrEqual(64);
   });
 });
 

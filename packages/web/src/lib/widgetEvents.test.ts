@@ -111,6 +111,14 @@ describe("buildWidgetNotifyEvent（脱敏口径）", () => {
     const bad = buildWidgetNotifyEvent(notification({ createdAt: Number.NaN }));
     expect(Number.isNaN(Date.parse(bad?.at ?? ""))).toBe(false);
   });
+
+  it("超出 Date 合法范围的有限时间戳不抛 RangeError，回退到当前时间（d.412 回归）", () => {
+    for (const createdAt of [1e20, -1e20, 8640000000000001, -8640000000000001]) {
+      const event = buildWidgetNotifyEvent(notification({ createdAt }));
+      expect(event).not.toBeNull();
+      expect(Number.isNaN(Date.parse(event?.at ?? ""))).toBe(false);
+    }
+  });
 });
 
 describe("createWidgetEvents", () => {

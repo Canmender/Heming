@@ -78,21 +78,26 @@ export function resolveWikiTarget(
   const exact = pages.filter((page) => normalizePathKey(page.rel) === wantedKey);
   if (exact.length === 1) return { rel: exact[0].rel, ambiguous: false };
 
-  // ② 文件名（title）或别名匹配：取目标末段，不带目录时就是目标本身
+  // ② 文件名（title）是第一选择键，别名只是第二选择键：先只看 title 命中，
+  //    绝不把别名混进来按距离挑——否则近处的别名会把远处同名的正文页顶掉。
   const base = stripMdSuffix(lastSegment(target)).toLowerCase();
-  const byName = pages.filter(
-    (page) =>
-      page.title.toLowerCase() === base ||
-      page.aliases.some((alias) => stripMdSuffix(alias).toLowerCase() === base),
-  );
+  const byTitle = pages.filter((page) => page.title.toLowerCase() === base);
 
-  // ③ 带目录但 title 没对上（例如 [[dir/foo]] 与 title 不同名）：按 rel 后缀兜底
+  // ③ title 没命中才退而求其次找别名；仍没有则按 rel 后缀兜底
+  const byAlias =
+    byTitle.length > 0
+      ? []
+      : pages.filter((page) =>
+          page.aliases.some((alias) => stripMdSuffix(alias).toLowerCase() === base),
+        );
   const pool =
-    byName.length > 0
-      ? byName
-      : target.includes("/")
-        ? pages.filter((page) => normalizePathKey(page.rel).endsWith(`/${wantedKey}`))
-        : [];
+    byTitle.length > 0
+      ? byTitle
+      : byAlias.length > 0
+        ? byAlias
+        : target.includes("/")
+          ? pages.filter((page) => normalizePathKey(page.rel).endsWith(`/${wantedKey}`))
+          : [];
 
   if (pool.length === 0) return { rel: null, ambiguous: false };
   if (pool.length === 1) return { rel: pool[0].rel, ambiguous: false };

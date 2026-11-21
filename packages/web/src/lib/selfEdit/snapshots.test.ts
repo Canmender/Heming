@@ -151,6 +151,47 @@ describe("self.* 快照与回滚：记忆", () => {
     expect((await call("self_rollback", { id })).ok).toBe(true);
     expect(memory.semanticGlobal()[0].value).toBe("要保留");
   });
+
+  it("回滚置顶记忆：删除/覆盖再回滚后 pinned 照旧（d.412.4.184）", async () => {
+    const { call, memory } = setup();
+    // 先建一条并置顶
+    await call("self_memory_write", { key: "称呼", value: "叫我阿和" });
+    const created = memory.semanticGlobal()[0];
+    memory.updateSemantic("", created.id, { pinned: true });
+    expect(memory.semanticGlobal()[0].pinned).toBe(true);
+
+    // 删除 → 回滚：pinned 不能丢（id/时间戳按文件头约定会变，不在此断言）
+    await call("self_memory_remove", { key: "称呼" });
+    expect(memory.semanticGlobal()).toHaveLength(0);
+    let list = await call("self_snapshot_list");
+    let id = list.text.match(/\[(snap-[^\]]+)\]/)![1];
+    expect((await call("self_rollback", { id })).ok).toBe(true);
+    let restored = memory.semanticGlobal()[0];
+    expect(restored.value).toBe("叫我阿和");
+    expect(restored.pinned).toBe(true);
+    // 回滚是新建分支（id 会变），但补 pinned 只应刷 metaUpdatedAt、不该动 recency 用的 updatedAt
+    expect(restored.updatedAt).toBe(restored.createdAt);
+
+    // 覆盖（更新）后再回滚：同样要保住 pinned
+    memory.updateSemantic("", restored.id, { pinned: true });
+    await call("self_memory_write", { key: "称呼", value: "改成阿禾" });
+    list = await call("self_snapshot_list");
+    id = list.text.match(/\[(snap-[^\]]+)\]/)![1];
+    expect((await call("self_rollback", { id })).ok).toBe(true);
+    restored = memory.semanticGlobal()[0];
+    expect(restored.value).toBe("叫我阿和");
+    expect(restored.pinned).toBe(true);
+  });
+
+  it("没置顶的记忆回滚后仍是普通条目（不误置顶）", async () => {
+    const { call, memory } = setup();
+    await call("self_memory_write", { key: "k", value: "v" });
+    await call("self_memory_remove", { key: "k" });
+    const list = await call("self_snapshot_list");
+    const id = list.text.match(/\[(snap-[^\]]+)\]/)![1];
+    expect((await call("self_rollback", { id })).ok).toBe(true);
+    expect(memory.semanticGlobal()[0].pinned).toBe(false);
+  });
 });
 
 describe("self.* 快照与回滚：技能", () => {
@@ -240,6 +281,31 @@ describe("self.* 快照与回滚：MCP", () => {
     const id = list.text.match(/\[(snap-[^\]]+)\]/)![1];
     expect((await call("self_rollback", { id })).ok).toBe(true);
     expect(mcp.get(server.id)?.name).toBe("要留着");
+  });
+
+  it("删除 Registry 服务回滚后保留台账字段（d.412.4.184）", async () => {
+    const { call, mcp } = setup();
+    const server = mcp.add({
+      name: "registry 工具",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@scope/tool@1.2.3"],
+      timeoutMs: 45000,
+      origin: "registry",
+      registryName: "io.scope.tool",
+      registryType: "npm",
+      registryVersion: "1.2.3",
+    });
+    await call("self_mcp_remove_server", { id: server.id });
+    const list = await call("self_snapshot_list");
+    const id = list.text.match(/\[(snap-[^\]]+)\]/)![1];
+    expect((await call("self_rollback", { id })).ok).toBe(true);
+    const restored = mcp.get(server.id);
+    expect(restored?.origin).toBe("registry");
+    expect(restored?.registryName).toBe("io.scope.tool");
+    expect(restored?.registryType).toBe("npm");
+    expect(restored?.registryVersion).toBe("1.2.3");
+    expect(restored?.timeoutMs).toBe(45000);
   });
 });
 

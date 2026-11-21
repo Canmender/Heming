@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "../lib/hitl/policy.js";
+import { FLOORS, HITL_KEY, HitlPolicyStore, sharedHitlPolicy, type HitlPolicy } from "../lib/hitl/policy.js";
 import type { HitlMode, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -55,7 +55,9 @@ export function HitlPolicyCard({
   policyStore?: HitlPolicyStore;
   storage?: StorageLike;
 }) {
-  const store = policyStore ?? new HitlPolicyStore(storage);
+  // d.412 回归：没显式注入时用与闸门共享的单例，否则「清空本会话授权」清的是
+  // 一份临时空表，闸门里的授权纹丝不动。 HitlPolicyStore 仍保留给显式注入的用例。
+  const store = policyStore ?? sharedHitlPolicy;
   const [policy, setPolicy] = useState<HitlPolicy>(() => store.get());
   // 留痕与策略都存在外部存储里，没有订阅机制——改动时手动 bump 触发重渲染。
   const [tick, setTick] = useState(0);

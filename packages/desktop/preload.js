@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld("__heming_update", {
    * 回调签名与主进程推送的一致，便于设置区与启动提示条共用同一份渲染逻辑。
    */
   subscribe: (callback) => {
+    // 与同文件其它订阅助手一致：回调不是函数就直接给个空 unsub，不注册监听也不抛错。
+    // 少这一句的话 subscribe(null) 会挂上一个坏 listener，推送时抛 "callback is not a function"。
+    if (typeof callback !== "function") return () => {};
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("update:state", listener);
     // 主进程在注册时会推一次当前状态；这里补一次初值，

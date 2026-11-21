@@ -9,7 +9,9 @@ import {
 /** 任务描述压成一行：面板只有一条，长的任务书会把「第几轮 / 在调什么」挤掉。 */
 function shortTask(task: string, max = 48): string {
   const flat = task.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  // d.412 回归：按码点截断，避免把 emoji 代理对劈成落单代理。
+  const points = [...flat];
+  return points.length > max ? `${points.slice(0, max).join("")}…` : flat;
 }
 
 function statusLine(run: SubagentRun): string {

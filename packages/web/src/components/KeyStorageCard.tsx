@@ -41,7 +41,8 @@ function labelOf(key: string): string {
 
 /** 没有备份后缀的键名 → 中文名。 */
 function labelOfKey(key: string): string {
-  const exact = KEY_LABELS[key];
+  // 键名来自存储内容，可能是 "toString" 等 Object.prototype 键；普通查表会拿到继承的函数。
+  const exact = Object.prototype.hasOwnProperty.call(KEY_LABELS, key) ? KEY_LABELS[key] : undefined;
   if (exact) return exact;
   if (key === MSG_CACHE_LRU_KEY) return "消息缓存会话账本";
   if (key.startsWith(CHAINS_PREFIX)) return `会话加密链（会话 ${key.slice(CHAINS_PREFIX.length)}）`;

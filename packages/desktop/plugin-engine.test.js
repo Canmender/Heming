@@ -166,6 +166,47 @@ test("启动：校验摘要、用内置解释器拉起、ping 握手后才算就
   }
 });
 
+test("摘要缓存：文件名同字节被篡改后再次启动必须重新校验（不复用旧通过结论）", async () => {
+  const { dir, sha } = makePluginDir();
+  const { engine } = makeEngine({ pluginDirFor: () => dir });
+  const record = recordOf(dir, sha);
+  try {
+    await engine.start(record);
+    assert.equal(engine.status(record.id, record).running, true);
+    await engine.stop(record.id);
+    // 两次启动之间盘上文件被外部改写，sha 记录不变：旧实现会复用缓存的「通过」直接放行。
+    writeFileSync(path.join(dir, ENTRY), "print('tampered')\n");
+    await assert.rejects(() => engine.start(record), /文件校验不通过/);
+    assert.equal(engine.status(record.id, record).running, false);
+  } finally {
+    await engine.stopAll();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("摘要缓存按目录隔离：同 id/版本/sha 的另一个目录被篡改也不能复用通过", async () => {
+  const clean = makePluginDir();
+  const bad = makePluginDir();
+  // 两个目录声明的 sha 相同（都来自 makePluginDir 的原始内容），但 bad 的盘上文件被改写。
+  writeFileSync(path.join(bad.dir, ENTRY), "print('tampered')\n");
+  const { engine } = makeEngine({
+    pluginDirFor: (id) => (id === "plugin.clean" ? clean.dir : id === "plugin.bad" ? bad.dir : null),
+  });
+  const cleanRec = recordOf(clean.dir, clean.sha, { id: "plugin.clean" });
+  const badRec = recordOf(bad.dir, clean.sha, { id: "plugin.bad" });
+  try {
+    await engine.start(cleanRec);
+    assert.equal(engine.status(cleanRec.id, cleanRec).running, true);
+    // 旧缓存 key 不含 pluginDir → bad 目录复用 clean 的「通过」→ 篡改代码被拉起。
+    await assert.rejects(() => engine.start(badRec), /文件校验不通过/);
+    assert.equal(engine.status(badRec.id, badRec).running, false);
+  } finally {
+    await engine.stopAll();
+    rmSync(clean.dir, { recursive: true, force: true });
+    rmSync(bad.dir, { recursive: true, force: true });
+  }
+});
+
 test("权限环境：chat/kb 只在声明后下发，未声明不出现", async () => {
   const { dir, sha } = makePluginDir();
   const plain = makeEngine({ pluginDirFor: () => dir });

@@ -142,7 +142,8 @@ export function parseMarketIndex(raw: unknown): MarketParseResult {
       warnings.push(`插件 ${plugin.id} 重复出现，已忽略后一条`);
       continue;
     }
-    seen.add(plugin.id);
+    // seen 必须等确认「有可用版本」后才记：否则同一 id 的前一条（版本全非法）被丢，
+    // 却把 id 占住，导致后面那条合法的同名插件被当成重复略过 → 整个插件凭空消失。
     // 版本去重：同 version 只留第一条（发布不可变，重复本身就是数据问题）。
     const versions: MarketVersion[] = [];
     const versionSeen = new Set<string>();
@@ -166,6 +167,7 @@ export function parseMarketIndex(raw: unknown): MarketParseResult {
       warnings.push(`插件 ${plugin.id} 没有可用版本，已忽略`);
       continue;
     }
+    seen.add(plugin.id); // 只在确认可用后才占位（见上方注释）
     plugins.push({ ...plugin, versions });
   }
 
@@ -175,21 +177,63 @@ export function parseMarketIndex(raw: unknown): MarketParseResult {
   };
 }
 
-/** 插件版本比较：数字点分优先，非数字段退化为字典序（与既有服务端目录排序一致）。 */
+/**
+ * 插件版本比较（semver §11 口径，与 `packages/server/src/pluginCatalog.ts` 的同名实现一致）。
+ *
+ * 旧实现把 `+`（构建元数据）和 `-`（预发布）当成普通分隔段逐位比：
+ * `1.0.0+build.1` 会压过 `1.0.0`、正式版 `1.0.0` 反而排在 `1.0.0-beta` 之前不成立，
+ * 于是市场把 beta / 带 build 的版本推荐成「最新」，还会误报「有更新」。
+ * 这里按 semver 重做：build 整段忽略、预发布低于正式版、预发布标识符逐位比（数字 < 非数字）。
+ * 两份实现必须同步改——服务端目录与本端市场若用不同口径，两边推荐的版本会打架。
+ */
 export function comparePluginVersions(a: string, b: string): number {
-  const split = (value: string): Array<string | number> =>
-    value.split(/[.+-]/).map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()));
-  const left = split(a);
-  const right = split(b);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const x = left[index];
-    const y = right[index];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    if (x === y) continue;
-    if (typeof x === "number" && typeof y === "number") return x < y ? -1 : 1;
-    return String(x) < String(y) ? -1 : 1;
+  // 构建元数据整段忽略（semver：build 不影响 precedence）
+  const coreA = a.split("+", 1)[0] ?? a;
+  const coreB = b.split("+", 1)[0] ?? b;
+  if (coreA === coreB) return 0;
+
+  // 第一个 "-" 之后是预发布；之前是核心 X.Y.Z
+  const dashA = coreA.indexOf("-");
+  const dashB = coreB.indexOf("-");
+  const mainA = dashA < 0 ? coreA : coreA.slice(0, dashA);
+  const mainB = dashB < 0 ? coreB : coreB.slice(0, dashB);
+  const preA = dashA < 0 ? "" : coreA.slice(dashA + 1);
+  const preB = dashB < 0 ? "" : coreB.slice(dashB + 1);
+
+  // 核心段按数值比，缺段当空串（保持排序确定性）
+  const pa = mainA.split(".");
+  const pb = mainB.split(".");
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const sa = pa[i] ?? "";
+    const sb = pb[i] ?? "";
+    if (sa === sb) continue;
+    const na = /^\d+$/.test(sa) ? Number(sa) : null;
+    const nb = /^\d+$/.test(sb) ? Number(sb) : null;
+    if (na !== null && nb !== null) return na - nb;
+    return sa < sb ? -1 : 1;
+  }
+
+  // 核心相同：有预发布的低于无预发布的
+  if (!preA && !preB) return 0;
+  if (!preA) return 1;
+  if (!preB) return -1;
+
+  // 两边都有预发布：逐标识符比（数字标识符 < 非数字标识符）
+  const idsA = preA.split(".");
+  const idsB = preB.split(".");
+  const idLen = Math.max(idsA.length, idsB.length);
+  for (let i = 0; i < idLen; i += 1) {
+    const ia = idsA[i];
+    const ib = idsB[i];
+    if (ia === undefined) return -1; // 前缀更短 → 更小
+    if (ib === undefined) return 1;
+    if (ia === ib) continue;
+    const numA = /^\d+$/.test(ia);
+    const numB = /^\d+$/.test(ib);
+    if (numA && numB) return Number(ia) - Number(ib);
+    if (numA !== numB) return numA ? -1 : 1;
+    return ia < ib ? -1 : 1;
   }
   return 0;
 }

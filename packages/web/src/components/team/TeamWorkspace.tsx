@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TeamWorkspaceSnapshot, WorkspaceTeam, WorkspaceTeamMember } from "@heming/shared";
+import type {
+  TeamWorkspaceSnapshot,
+  WorkspaceTeam,
+  WorkspaceTeamMember,
+  TeamDirectoryEntry,
+  TeamJoinRequest,
+} from "@heming/shared";
 import {
   addWorkspaceMember,
   createWorkspaceTeam,
   deleteWorkspaceTeam,
+  discoverTeams,
+  createJoinRequest,
+  fetchMyJoinRequests,
+  fetchJoinRequests,
+  reviewJoinRequest,
   fetchWorkspaceTeam,
   fetchWorkspaceTeams,
   leaveWorkspaceTeam,
@@ -24,7 +35,11 @@ import { FOCUS_RING } from "../../lib/a11y/focus.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { Button } from "../../components/ui/Button.js";
 import { Dialog } from "../ui/Dialog.js";
-import { weeklyReportFileName, weeklyReportMarkdown } from "../../lib/team/weeklyReport.js";
+import {
+  REPORT_DEFAULT_DAYS,
+  weeklyReportFileName,
+  weeklyReportMarkdown,
+} from "../../lib/team/weeklyReport.js";
 import { saveExportFile } from "../../lib/export/file.js";
 
 /**
@@ -108,6 +123,8 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
   const [reportText, setReportText] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
+  /** 周报回看天数（痛点 10：不再固定 7 天，可在 1–30 天内切换）。 */
+  const [reportDays, setReportDays] = useState(REPORT_DEFAULT_DAYS);
 
   // 新建团队表单
   const [createOpen, setCreateOpen] = useState(false);
@@ -118,6 +135,23 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
   const [goalDraft, setGoalDraft] = useState("");
   // 团队成员
   const [memberName, setMemberName] = useState("");
+
+  /* ── 找团队 / 加入申请（社交化加入，去 IM） ── */
+  /** 发现弹窗开关。 */
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  /** 搜索词与结果（只含元数据，不含成员名单/任务）。 */
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverResults, setDiscoverResults] = useState<TeamDirectoryEntry[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  /** 正在给哪个团队写申请（附言输入）。 */
+  const [applyTeam, setApplyTeam] = useState<TeamDirectoryEntry | null>(null);
+  const [applyMessage, setApplyMessage] = useState("");
+  /** 我的申请进度（看待审/通过/拒绝）。 */
+  const [myRequests, setMyRequests] = useState<TeamJoinRequest[]>([]);
+  /** 队长看到的本团队待审申请。 */
+  const [joinRequests, setJoinRequests] = useState<TeamJoinRequest[]>([]);
+  /** 发现弹窗内的提示（成功/失败），与全局 error 分开，关窗即清。 */
+  const [discoverNotice, setDiscoverNotice] = useState("");
 
   /**
    * 一次性提示统一走这里：3s 自动消失。
@@ -366,18 +400,32 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
   /** 只有普通成员能自退：owner 走「转让队长」或「删除团队」。 */
   const canLeave = Boolean(mine) && !isOwner;
 
-  /** 打开周报弹窗：用当前快照算一份成稿（不额外发请求）。 */
-  const openWeeklyReport = () => {
+  /** 用当前快照和给定天数算一份成稿（不额外发请求）。 */
+  const buildWeeklyReport = (days: number) => {
     if (!snapshot) return;
     setReportText(
       weeklyReportMarkdown(snapshot, {
+        days,
         memberName: (userId) => {
           const member = snapshot.members.find((m) => m.user.id === userId);
           return member ? `${member.user.displayName}（@${member.user.username}）` : userId;
         },
       }),
     );
+  };
+
+  /** 打开周报弹窗：用当前快照算一份成稿（不额外发请求）。 */
+  const openWeeklyReport = () => {
+    if (!snapshot) return;
+    setReportDays(REPORT_DEFAULT_DAYS);
+    buildWeeklyReport(REPORT_DEFAULT_DAYS);
     setReportOpen(true);
+  };
+
+  /** 切换回看天数：重算成稿，复制/导出跟着变成同一份新文本。 */
+  const changeReportDays = (days: number) => {
+    setReportDays(days);
+    buildWeeklyReport(days);
   };
 
   /** 复制成稿：剪贴板不可用（非安全上下文）时退回临时 textarea。 */
@@ -442,12 +490,99 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
     }
   };
 
+  /** 搜索团队目录（只暴露元数据）。空词也允许，列出全部。 */
+  const searchDirectory = async () => {
+    setDiscoverLoading(true);
+    setDiscoverNotice("");
+    try {
+      const data = await discoverTeams(discoverQuery.trim());
+      setDiscoverResults(data.teams);
+    } catch (err) {
+      setDiscoverNotice(err instanceof Error && err.message ? err.message : "搜索失败");
+    } finally {
+      setDiscoverLoading(false);
+    }
+  };
+
+  /** 打开发现弹窗：拉一次目录与我的申请进度。 */
+  const openDiscover = () => {
+    setDiscoverOpen(true);
+    setDiscoverNotice("");
+    setApplyTeam(null);
+    setApplyMessage("");
+    void searchDirectory();
+    void fetchMyJoinRequests()
+      .then((data) => setMyRequests(data.requests))
+      .catch(() => setMyRequests([]));
+  };
+
+  /** 提交加入申请。 */
+  const submitJoinRequest = async () => {
+    if (!applyTeam || busy) return;
+    setBusy(true);
+    setDiscoverNotice("");
+    try {
+      await createJoinRequest(applyTeam.id, applyMessage.trim());
+      setApplyTeam(null);
+      setApplyMessage("");
+      setDiscoverNotice(`已申请加入「${applyTeam.name}」，等队长审核`);
+      const data = await fetchMyJoinRequests();
+      setMyRequests(data.requests);
+    } catch (err) {
+      setDiscoverNotice(err instanceof Error && err.message ? err.message : "申请失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 队长拉本团队待审申请列表。 */
+  const loadJoinRequests = useCallback(async () => {
+    const id = snapshot?.team.id;
+    if (!id || !isOwner) return;
+    try {
+      const data = await fetchJoinRequests(id);
+      setJoinRequests(data.requests);
+    } catch {
+      setJoinRequests([]);
+    }
+  }, [snapshot?.team.id, isOwner]);
+
+  useEffect(() => {
+    void loadJoinRequests();
+  }, [loadJoinRequests]);
+
+  /** 队长审批通过/拒绝。 */
+  const review = async (requestId: string, action: "approve" | "reject") => {
+    const id = snapshot?.team.id;
+    if (!id || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await reviewJoinRequest(id, requestId, action);
+      flash(action === "approve" ? "已通过加入申请" : "已拒绝加入申请");
+      await loadJoinRequests();
+      await loadTeam(id);
+      await refreshTeams();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "审批失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-[240px] shrink-0 flex-col border-r border-line-soft">
         <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2.5">
           <span className="ui-section-title">我的团队</span>
           <span className="ui-micro">{teams.length}</span>
+          <button
+            type="button"
+            className="ui-link"
+            onClick={openDiscover}
+          >
+            找团队
+          </button>
           <button
             type="button"
             className="ui-link ml-auto"
@@ -736,6 +871,41 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
                     </Button>
                   </form>
                 )}
+                {isOwner && joinRequests.filter((r) => r.status === "pending").length > 0 && (
+                  <div className="mt-3 border-t border-line-soft pt-2">
+                    <p className="ui-caption mb-1.5">
+                      待审加入申请（{joinRequests.filter((r) => r.status === "pending").length}）
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {joinRequests
+                        .filter((r) => r.status === "pending")
+                        .map((r) => (
+                          <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-subtle px-2 py-1.5">
+                            <span className="min-w-0 flex-1 ui-body-sm">
+                              用户 {r.userId}
+                              {r.message && <span className="ui-caption"> · {r.message}</span>}
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm" variant="primary"
+                              disabled={busy}
+                              onClick={() => void review(r.id, "approve")}
+                            >
+                              通过
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm" variant="ghost"
+                              disabled={busy}
+                              onClick={() => void review(r.id, "reject")}
+                            >
+                              拒绝
+                            </Button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
                 {canLeave && (
                   <div className="mt-2">
                     <Button
@@ -755,6 +925,7 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
             <TeamPlanPanel
               teamId={snapshot.team.id}
               plans={snapshot.plans}
+              tasks={snapshot.tasks}
               busy={busy}
               onChanged={(next) => setSnapshot(next)}
             />
@@ -914,7 +1085,7 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
         <Dialog
           ariaLabel="团队周报"
           title="团队周报"
-          description="按最近 7 天的事实生成；可以直接复制，或导出成 .md 存下来。"
+          description="按所选时间窗内的真实事实生成；可以直接复制，或导出成 .md 存下来。"
           size="lg"
           onClose={() => setReportOpen(false)}
           footer={
@@ -937,12 +1108,146 @@ export function TeamWorkspace({ teamId, onTeamChange, onTeamsLoaded }: TeamWorks
             </>
           }
         >
+          <div className="mb-3 flex items-center gap-2 ui-caption">
+            <label htmlFor="weekly-report-days">回看天数</label>
+            <select
+              id="weekly-report-days"
+              aria-label="周报回看天数"
+              value={reportDays}
+              onChange={(e) => changeReportDays(Number(e.target.value))}
+              className="rounded-md border border-line-strong bg-surface px-2 py-1 ui-caption"
+            >
+              {[7, 14, 30].map((d) => (
+                <option key={d} value={d}>
+                  最近 {d} 天
+                </option>
+              ))}
+            </select>
+            <span className="text-muted">按所选时间窗生成，切档后重算（复制/导出用同一份）</span>
+          </div>
           <pre
             data-testid="weekly-report"
             className="max-h-[56vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-subtle px-3 py-2 text-ui-sm leading-6"
           >
             {reportText}
           </pre>
+        </Dialog>
+      ) : null}
+
+      {/* 找团队 / 申请加入：目录只暴露元数据，加入走「申请 → 队长审核」。 */}
+      {discoverOpen ? (
+        <Dialog
+          ariaLabel="找团队"
+          title="找团队"
+          description="搜索团队目录，提交加入申请；队长审核通过后你即为成员。团队对成员以外不可见。"
+          size="lg"
+          onClose={() => {
+            setDiscoverOpen(false);
+            setDiscoverNotice("");
+          }}
+        >
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void searchDirectory();
+            }}
+          >
+            <input
+              aria-label="搜索团队"
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="按团队名或目标搜索"
+              className="ui-input flex-1"
+            />
+            <Button type="submit" size="md" variant="primary" disabled={discoverLoading}>
+              搜索
+            </Button>
+          </form>
+
+          {discoverNotice && (
+            <p role="status" className="mt-2 rounded-lg bg-subtle px-2 py-1.5 ui-caption">
+              {discoverNotice}
+            </p>
+          )}
+
+          {applyTeam ? (
+            <div className="mt-3 rounded-lg border border-line-soft p-3">
+              <p className="ui-body-sm font-medium">申请加入「{applyTeam.name}」</p>
+              <textarea
+                aria-label="申请附言"
+                value={applyMessage}
+                onChange={(e) => setApplyMessage(e.target.value)}
+                placeholder="附言（可选，最多 200 字）"
+                rows={2}
+                className="ui-input mt-2 w-full resize-y"
+              />
+              <div className="mt-2 flex gap-2">
+                <Button type="button" size="sm" variant="primary" disabled={busy} onClick={() => void submitJoinRequest()}>
+                  提交申请
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setApplyTeam(null); setApplyMessage(""); }}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto">
+              {discoverLoading ? (
+                <p className="ui-caption">正在搜索…</p>
+              ) : discoverResults.length === 0 ? (
+                <p className="ui-caption">没有找到匹配的团队，换个词试试。</p>
+              ) : (
+                discoverResults.map((t) => {
+                  const myApps = myRequests.filter((r) => r.teamId === t.id);
+                  const pending = myApps.some((r) => r.status === "pending");
+                  const approved = myApps.some((r) => r.status === "approved");
+                  const joined = teams.some((x) => x.id === t.id);
+                  return (
+                    <div key={t.id} className="flex items-center gap-2 rounded-lg border border-line-soft px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate ui-body-sm font-medium">{t.name}</p>
+                        <p className="truncate ui-caption">
+                          {t.memberCount} 名成员{t.goal ? ` · ${t.goal}` : ""}
+                        </p>
+                      </div>
+                      {joined ? (
+                        <span className="ui-caption text-muted">已加入</span>
+                      ) : approved ? (
+                        <span className="ui-caption text-muted">已通过</span>
+                      ) : pending ? (
+                        <span className="ui-caption text-muted">待审核</span>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm" variant="ghost"
+                          onClick={() => { setApplyTeam(t); setApplyMessage(""); setDiscoverNotice(""); }}
+                        >
+                          申请加入
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {myRequests.length > 0 && (
+            <div className="mt-3 border-t border-line-soft pt-2">
+              <p className="ui-caption mb-1">我的申请</p>
+              <div className="flex max-h-[20vh] flex-col gap-1 overflow-y-auto">
+                {myRequests.map((r) => {
+                  const teamName = discoverResults.find((t) => t.id === r.teamId)?.name ?? r.teamId;
+                  return (
+                    <p key={r.id} className="ui-caption">
+                      「{teamName}」· {r.status === "pending" ? "待审核" : r.status === "approved" ? "已通过" : "已拒绝"}
+                    </p>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Dialog>
       ) : null}
     </div>

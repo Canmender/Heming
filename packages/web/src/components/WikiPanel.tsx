@@ -123,8 +123,21 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
     try {
       const path = pagePath(draft.kind, slugify(draft.title));
       await bridge.write(path, renderPage(draft));
-      // index.md：内容目录，每次写入都要跟着更新
-      await bridge.write("index.md", renderIndex(pages));
+      // index.md：内容目录，每次写入都要跟着更新。
+      // d.412 回归：这里原先用保存前的 pages，新建/改名的页不在其中，索引会漏；
+      // 用保存后的页面清单重建——替换同路径的旧条目，新页自然加入。
+      const saved: WikiPage = {
+        path,
+        title: draft.title,
+        kind: draft.kind,
+        tags: [],
+        body: draft.body,
+        updatedAt: new Date().toISOString(),
+      };
+      const nextPages = [...pages.filter((p) => p.path !== path), saved].sort((a, b) =>
+        a.title.localeCompare(b.title),
+      );
+      await bridge.write("index.md", renderIndex(nextPages));
       // log.md：时间流水，追加一条便于 grep
       await bridge.log("edit", draft.title);
       await reload();

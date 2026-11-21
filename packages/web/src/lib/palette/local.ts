@@ -129,7 +129,7 @@ export function readMemoryItems(exportedJson: string): LocalMemoryItem[] {
         kind: "memory",
         id,
         name: memoryName("working", Array.from(user || assistant).slice(0, 24).join("")),
-        detail: text.replace(/\s+/g, " ").slice(0, 60),
+        detail: Array.from(text.replace(/\s+/g, " ")).slice(0, 60).join(""),
         layer: "working",
       });
     }
@@ -145,7 +145,7 @@ export function readMemoryItems(exportedJson: string): LocalMemoryItem[] {
         kind: "memory",
         id,
         name: memoryName("episodic", Array.from(summary).slice(0, 24).join("")),
-        detail: summary.replace(/\s+/g, " ").slice(0, 60),
+        detail: Array.from(summary.replace(/\s+/g, " ")).slice(0, 60).join(""),
         layer: "episodic",
       });
     }
@@ -162,7 +162,7 @@ export function readMemoryItems(exportedJson: string): LocalMemoryItem[] {
         kind: "memory",
         id,
         name: memoryName("semantic", key || Array.from(value).slice(0, 24).join("")),
-        detail: value.replace(/\s+/g, " ").slice(0, 60),
+        detail: Array.from(value.replace(/\s+/g, " ")).slice(0, 60).join(""),
         layer: "semantic",
       });
     }

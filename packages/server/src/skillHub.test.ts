@@ -251,6 +251,37 @@ describe("GET /api/skill-hub/skills（列表）", () => {
     expect(upstreamUrl.searchParams.get("limit")).toBe("20");
   });
 
+  it("上游字段按码点截断：name 到 128 边界不劈 emoji 代理对（不写孤立代理进 JSON）", async () => {
+    // name = 127 个 emoji 前的 63 个 + 一个普通字符 + 一个 emoji：
+    // 旧 slice(0,128) 落在最后一个 emoji 的高位代理上，产出 \ud83d。
+    const longName = "😀".repeat(63) + "X" + "😀"; // 129 UTF-16 码元 / 65 码点
+    const { fetchImpl } = makeFetch(() => ({
+      body: {
+        skills: [rawSkill({ name: longName, description: "😀".repeat(1001), trigger: ["😀".repeat(33)] })],
+        total: 1,
+      },
+    }));
+    const res = await request(makeApp(fetchImpl)).get("/api/skill-hub/skills");
+    expect(res.status).toBe(200);
+    expect(res.body.skills).toHaveLength(1);
+    const skill = res.body.skills[0];
+
+    const hasLoneSurrogate = (s: string): boolean =>
+      Array.from(s).some((ch) => {
+        if (ch.length !== 1) return false;
+        const c = ch.charCodeAt(0);
+        return c >= 0xd800 && c <= 0xdfff;
+      });
+
+    // 名字按码点截到 128（远没到，65 码点全留），且不出现孤立代理。
+    expect(Array.from(skill.name).length).toBeLessThanOrEqual(128);
+    expect(hasLoneSurrogate(skill.name)).toBe(false);
+    expect(hasLoneSurrogate(skill.description)).toBe(false);
+    expect(Array.from(skill.description).length).toBeLessThanOrEqual(2000);
+    expect(hasLoneSurrogate(skill.triggers[0])).toBe(false);
+    expect(Array.from(skill.triggers[0]).length).toBeLessThanOrEqual(64);
+  });
+
   it("上游 500 / 网络错误 → 502 + 中文错误", async () => {
     const bad = makeFetch(() => ({ status: 500, body: { success: false } }));
     const res1 = await request(makeApp(bad.fetchImpl)).get("/api/skill-hub/skills");

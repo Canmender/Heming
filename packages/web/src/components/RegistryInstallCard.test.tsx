@@ -76,4 +76,17 @@ describe("RegistryInstallDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消安装" }));
     expect(onDecide).toHaveBeenCalledWith({ approved: false });
   });
+
+  it("头名叫 toString 等原型链键也不崩，按未填的必填项处理（d.412 回归）", () => {
+    const preview = buildInstallPreview(entry(), {
+      ...remote,
+      headerHints: [{ name: "toString", isRequired: true }],
+    });
+    expect(() =>
+      render(<RegistryInstallDialog requestId="r1" preview={preview} onDecide={() => {}} />),
+    ).not.toThrow();
+    // 必填未填 → 确认禁用；输入框是空字符串，不是原型链上的函数源码
+    expect(screen.getByRole("button", { name: "确认安装" })).toBeDisabled();
+    expect(screen.getByLabelText("请求头 toString")).toHaveValue("");
+  });
 });

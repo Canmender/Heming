@@ -78,7 +78,8 @@ export function initSchema(db: DatabaseSyncType): void {
       spk_pub TEXT NOT NULL, spk_sig TEXT NOT NULL, spk_created_at INTEGER NOT NULL,
       PRIMARY KEY (user_id, ik_ecdh)
     );
-    CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at);
+    -- d.412.4.181：旧的 idx_messages_conv 与上面的 idx_messages_conversation 完全重复，
+    -- 已删除建表语句，并在下方迁移里 DROP 老库残留（SQLite 查询不按索引名引用，安全）。
     -- d.54 团队系统：动向摘要（不是消息，不含正文/提示词/工具参数）。
     -- source_id 是客户端确定性幂等键，(actor_id, source_id) 唯一。
     CREATE TABLE IF NOT EXISTS team_activities (
@@ -144,6 +145,27 @@ export function initSchema(db: DatabaseSyncType): void {
     );
   }
   /*
+   * 团队知识库全文索引：与 messages_fts 同款 trigram（中文子串命中）。
+   * 同步走应用层（写/删文档时显式 INSERT/DELETE），不建触发器，与既有风格一致。
+   * rowid 与 team_knowledge_docs.rowid 一一对应；建表失败只记日志、查询回退线性扫描。
+   */
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS team_knowledge_fts USING fts5(
+        doc_id UNINDEXED,
+        team_id UNINDEXED,
+        title,
+        content,
+        tokenize = 'trigram'
+      );
+    `);
+  } catch (err) {
+    console.warn(
+      "[db] FTS5 全文索引不可用，团队知识库搜索回退线性扫描：",
+      (err as Error).message,
+    );
+  }
+  /*
    * d.92 团队工作台：用户自建团队 / 方案 / 任务（与上面的「全站单团队」两层东西）。
    *
    * 不建外键：级联删除在 Store 里显式做（四个删除口都要在事务里清干净），
@@ -185,6 +207,7 @@ export function initSchema(db: DatabaseSyncType): void {
       detail TEXT NOT NULL DEFAULT '',
       assignee_id TEXT,
       status TEXT NOT NULL,
+      priority TEXT NOT NULL DEFAULT 'normal',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -229,6 +252,36 @@ export function initSchema(db: DatabaseSyncType): void {
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_team_events_team ON team_events(team_id, created_at);
+
+  /* 团队知识库文档：用户显式发布的摘要/文档，按 team_id 硬隔离，不建外键。 */
+  CREATE TABLE IF NOT EXISTS team_knowledge_docs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    source_vault TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_team_knowledge_team ON team_knowledge_docs(team_id, pinned DESC, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_team_knowledge_author ON team_knowledge_docs(author_id);
+    /* 加入申请：用户搜索团队后申请加入，队长审批。
+   * 不建 UNIQUE：被拒/撤回后允许重新申请（新 id）；重复 pending 由 Store 显式查重拦截，
+   * 与内存实现同口径。索引覆盖「队的申请列表」与「我的申请」。 */
+  CREATE TABLE IF NOT EXISTS team_join_requests (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_team_join_requests_team ON team_join_requests(team_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_team_join_requests_user ON team_join_requests(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id, team_id);
     CREATE INDEX IF NOT EXISTS idx_teams_updated ON teams(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_team_plans_team ON team_plans(team_id, order_index, created_at);
@@ -237,6 +290,8 @@ export function initSchema(db: DatabaseSyncType): void {
   `);
   // 幂等列迁移：生产库已有无 recalled_at 列的 messages 表（CREATE IF NOT EXISTS 不会补列）；
   // E2E Task 2 同模式补 enc/cipher/chain_kid/n（enc 带非空默认值，SQLite ALTER 允许常量默认）。
+  // d.412.4.181：DROP 老库里与 idx_messages_conversation 重复的 idx_messages_conv（迁移幂等）。
+  db.exec("DROP INDEX IF EXISTS idx_messages_conv");
   const cols = db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
   if (!cols.some((c) => c.name === "recalled_at")) {
     db.exec("ALTER TABLE messages ADD COLUMN recalled_at TEXT");
@@ -290,6 +345,10 @@ export function initSchema(db: DatabaseSyncType): void {
 
   // d.252：任务交付结论与完成留痕。旧库没有这三列 → 幂等补上（读侧另有 ?? 兜底）。
   const taskCols = db.prepare("PRAGMA table_info(team_tasks)").all() as Array<{ name: string }>;
+  // d.268：任务优先级。旧库补列，缺省 normal（内存库同口径）。
+  if (!taskCols.some((c) => c.name === "priority")) {
+    db.exec("ALTER TABLE team_tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal'");
+  }
   if (!taskCols.some((c) => c.name === "result")) {
     db.exec("ALTER TABLE team_tasks ADD COLUMN result TEXT NOT NULL DEFAULT ''");
   }

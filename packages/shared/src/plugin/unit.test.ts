@@ -77,6 +77,15 @@ describe("resolveUnit", () => {
     expect(blockReasonText({ kind: "kindDisabled", contribution: "skills" })).toBe("技能已单独关闭");
   });
 
+  it("仍然生效时 reason 为空：贡献级停用只留 diagnostics，不给列表行挂矛盾警告", () => {
+    const target = unit();
+    const status = resolveUnit({ ...target, disabledKinds: ["skills"] }, new Map());
+    expect(status.effective).toBe(true);
+    expect(status.activeKinds).toEqual(["mcpServers"]);
+    expect(status.diagnostics).toContainEqual({ kind: "kindDisabled", contribution: "skills" });
+    expect(status.reason).toBeUndefined();
+  });
+
   it("依赖未生效 → missingRequirement，且开关保留（effective=false）", () => {
     const automation = unit({
       source: "builtin",

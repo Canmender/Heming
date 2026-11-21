@@ -35,6 +35,12 @@ describe("hostOf", () => {
     expect(hostOf("https://A.Example/mcp")).toBe("a.example");
   });
 
+  it("★ URL 带 userinfo 时取真实主机，不把 user:pass@ 当成主机", () => {
+    expect(hostOf("https://user:pass@github.com/foo")).toBe("github.com");
+    expect(hostOf("https://user@github.com/x")).toBe("github.com");
+    expect(repoLooksMismatched("io.github.foo/x", "https://user:pass@github.com/foo/bar")).toBe(false);
+  });
+
   it("非法输入返回空串（不抛）", () => {
     for (const s of ["", "not a url", "a.example/mcp"]) expect(hostOf(s)).toBe("");
   });

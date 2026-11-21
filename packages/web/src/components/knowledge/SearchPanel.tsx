@@ -96,7 +96,7 @@ export function SearchPanel({
     <div className="flex min-h-0 flex-col">
       <div className="flex items-center gap-1.5 px-2 pb-1.5">
         <input
-          className="ui-input h-7 text-ui-sm"
+          className="ui-input h-7 text-ui-md"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onFocus={() => setFocusedHint(true)}
@@ -148,15 +148,15 @@ export function SearchPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2" aria-live="polite">
         {disabled ? (
-          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">索引还在建，稍等一下就能搜。</p>
+          <p className="px-2 py-3 text-ui-md leading-5 text-muted">索引还在建，稍等一下就能搜。</p>
         ) : !trimmed ? (
-          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">
+          <p className="px-2 py-3 text-ui-md leading-5 text-muted">
             搜索全部在本机完成，不会上传。
           </p>
         ) : busy ? (
-          <p className="px-2 py-3 text-ui-sm text-muted">正在搜索…</p>
+          <p className="px-2 py-3 text-ui-md text-muted">正在搜索…</p>
         ) : hits.length === 0 ? (
-          <p className="px-2 py-3 text-ui-sm leading-5 text-muted">
+          <p className="px-2 py-3 text-ui-md leading-5 text-muted">
             {searched ? "没有匹配的笔记。试试减少关键词，或换个 tag:/path: 条件。" : "回车开始搜索。"}
           </p>
         ) : (
@@ -173,10 +173,10 @@ export function SearchPanel({
                 className="mb-0.5 flex w-full flex-col rounded-sm px-2 py-1 text-left transition-colors hover:bg-subtle-3"
               >
                 <span className="flex items-baseline gap-1.5">
-                  <span className="truncate text-ui-sm font-medium text-ink">{hit.rel}</span>
-                  <span className="shrink-0 text-ui-xs tabular-nums text-muted">第 {hit.line} 行</span>
+                  <span className="truncate text-ui-md font-medium text-ink">{hit.rel}</span>
+                  <span className="shrink-0 text-ui-sm tabular-nums text-muted">第 {hit.line} 行</span>
                 </span>
-                <span className="line-clamp-2 text-ui-xs leading-snug text-muted">
+                <span className="line-clamp-2 text-ui-sm leading-snug text-muted">
                   {splitHighlight(hit.snippet, terms).map((part, partIndex) =>
                     part.hit ? (
                       <mark

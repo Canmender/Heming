@@ -123,6 +123,33 @@ describe("变更留痕", () => {
     storage.setItem("heming.selfAudit.v1", "{不是 JSON");
     expect(readAudit(storage)).toEqual([]);
   });
+
+  it("留痕字段超长时不劈 emoji 代理对", () => {
+    // 回归：pickAudit 以前用 slice(0,120) 按码元切，target/reason 第 120 位
+    // 落在 emoji 中间就存下落单代理，读出来是乱码方块。
+    const lone = (s: string): boolean =>
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+    storage.setItem(
+      "heming.selfAudit.v1",
+      JSON.stringify([
+        {
+          at: "2026-10-20T10:00:00.000Z",
+          agentId: "a1",
+          scope: "memory",
+          action: "write",
+          target: "x".repeat(119) + "😀" + "tail",
+          reason: "y".repeat(199) + "😀" + "tail",
+          rejected: "z".repeat(199) + "😀" + "tail",
+        },
+      ]),
+    );
+    const [entry] = readAudit(storage);
+    expect(lone(entry.target)).toBe(false);
+    expect(lone(entry.reason!)).toBe(false);
+    expect(lone(entry.rejected!)).toBe(false);
+    // clipCodePoints 截到 120 个码点后再补一个省略号，故最多 121 个码点
+    expect([...entry.target].length).toBeLessThanOrEqual(121);
+  });
 });
 
 describe("单轮变更预算", () => {

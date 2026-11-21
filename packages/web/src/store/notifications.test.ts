@@ -76,6 +76,16 @@ describe("normalizeNotification / pruneNotifications / readNotifications", () =>
     expect(pruned.some((n) => n.createdAt === 1_000)).toBe(false);
   });
 
+  it("单条超大脏数据只丢它自己，不把整张通知表清空", () => {
+    // 回归：key/id 等字段没做长度裁剪，一条 >64KB 的脏条目让字节淘汰循环
+    // 到最后只剩它自己、bytes 仍超限 → 返回 []，所有正常通知一起消失。
+    const big = makeItem({ id: "big", key: "k".repeat(70 * 1024), title: "Big", createdAt: 200 });
+    const s1 = makeItem({ id: "s1", key: "task:1", title: "Small one", createdAt: 100 });
+    const s2 = makeItem({ id: "s2", key: "task:2", title: "Small two", createdAt: 90 });
+    const pruned = pruneNotifications([big, s1, s2]);
+    expect(pruned.map((n) => n.id)).toEqual(["s1", "s2"]);
+  });
+
   it("缺键 / 坏 JSON / 坏条目都回退空或只丢坏条目", () => {
     expect(readNotifications(storage)).toEqual([]);
     storage.setItem(NOTIFICATIONS_KEY, "{oops");

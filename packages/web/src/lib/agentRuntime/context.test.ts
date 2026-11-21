@@ -411,6 +411,36 @@ describe("buildAgentContext：注入旁路（可观测性）", () => {
     ]);
   });
 
+  it("个人数据库关掉：知识库笔记不进提示词，诊断也不再说「已跳过」却仍注入（d.412 回归）", () => {
+    const memory = makeMemory();
+    const stamp = new Date(NOW).toISOString();
+    const vaultEntry = {
+      id: "v1",
+      agentId: "a1",
+      key: "notes/私密.md",
+      value: "私密发布计划：不该在关闭个人库后出现",
+      scope: "user" as const,
+      confidence: 0.6,
+      pinned: false,
+      source: "vault" as const,
+      createdAt: stamp,
+      updatedAt: stamp,
+    };
+    const out = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "发布计划",
+      basePrompt: BASE,
+      memory,
+      vaultMemory: { available: true, entries: () => [vaultEntry] },
+      agentPrefs: { shortTerm: true, longTerm: true, personalDb: false },
+    });
+    // 关掉个人库 → 笔记一个字都不进提示词，且旁路明确标为禁用
+    expect(out.systemPrompt).toBe(BASE);
+    expect(out.recallTrace.vault?.enabled).toBe(false);
+    expect(out.systemPrompt).not.toContain("私密发布计划");
+  });
+
   it("召回 ≠ 注入：被预算裁掉的候选进 dropped，绝不进 injected", () => {
     const memory = makeMemory();
     // 6 条 200 字的长事实，语义层额度（约 460 字）吃不下

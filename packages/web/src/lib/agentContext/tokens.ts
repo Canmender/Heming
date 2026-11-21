@@ -31,30 +31,43 @@ function isWideCodePoint(cp: number): boolean {
   );
 }
 
-/** 估算单段文本的 token 数（空串 0，非空至少 1）。 */
+/**
+ * 估算单段文本的 token 数（空串 0，非空至少 1）。
+ *
+ * d.412.4.183：原来是 `for...of` + `ch.codePointAt(0)` + 闭包 `flush()`，
+ * 每个字符都新建迭代器记录、每次 flush 都走闭包调用——而这是压缩链、用量校准、
+ * 工具折叠里调用最密的纯函数（每条消息、每个工具参数都要过）。改成按 charCodeAt
+ * 的下标循环（手动合并 UTF-16 代理对还原码点），把 flush 展开成内联表达式，
+ * 语义逐字节不变（全 BMP + 补充平面 + 孤立代理 + 随机混合串交叉验证一致），
+ * ASCII 长串约 2×、混合中文约 2×。
+ */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
   let tokens = 0;
   let ascii = 0;
   let other = 0;
-  const flush = () => {
-    tokens += Math.ceil(ascii / 4) + Math.ceil(other / 2);
-    ascii = 0;
-    other = 0;
-  };
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) as number;
+  const len = text.length;
+  for (let i = 0; i < len; i += 1) {
+    let cp = text.charCodeAt(i);
+    // 合并高低代理对为真实码点，对齐 for...of 的按码点迭代（补充平面 CJK 才能命中 isWide）。
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < len) {
+      const lo = text.charCodeAt(i + 1);
+      if (lo >= 0xdc00 && lo <= 0xdfff) {
+        cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
+        i += 1;
+      }
+    }
     if (isWideCodePoint(cp)) {
-      flush();
-      tokens += 1;
+      tokens += Math.ceil(ascii / 4) + Math.ceil(other / 2) + 1;
+      ascii = 0;
+      other = 0;
     } else if (cp < 0x80) {
       ascii += 1;
     } else {
       other += 1;
     }
   }
-  flush();
-  return tokens;
+  return tokens + Math.ceil(ascii / 4) + Math.ceil(other / 2);
 }
 
 /**

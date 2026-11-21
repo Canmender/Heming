@@ -10,6 +10,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  flushSecureWrites,
   readSecureValueAsync,
   resetSecureStorageState,
   secureDecryptManyAsync,
@@ -127,6 +128,45 @@ describe("异步写（默认路径）", () => {
     secureSetItem(KEY, '{"e":5}');
     expect(localStorage.getItem(KEY)).toBe('{"e":5}');
     expect(secureStorageStatus().plaintextKeys).toContain(KEY);
+  });
+
+  it("明文懒迁移与新写入竞态：迟到的迁移不能把新值盖回旧值（d.412 回归）", async () => {
+    // 可控的异步桥：encryptAsync 由测试手动 resolve，精确制造「新值先落盘、旧迁移后完成」。
+    const resolvers: Array<(v: string | null) => void> = [];
+    const cached = new Map<string, string | null>();
+    const bridge = {
+      available: false,
+      mode: "async" as const,
+      asyncAvailable: true,
+      encrypt: () => null,
+      decrypt: () => null,
+      encryptAsync: (plain: string) =>
+        new Promise<string | null>((resolve) => resolvers.push((v) => resolve(v === null ? null : `enc:${v}`))),
+      decryptAsync: async (cipher: string) => (cipher.startsWith("enc:") ? cipher.slice(4) : null),
+      encryptManyAsync: async (plains: string[]) => plains.map((p) => `enc:${p}`),
+      decryptManyAsync: async (ciphers: string[]) => ciphers.map((c) => c.slice(4)),
+      cachedRead: (key: string) => (cached.has(key) ? cached.get(key) : undefined),
+      cacheSet: (key: string, plain: string) => void cached.set(key, plain),
+      cacheDelete: (key: string) => void cached.delete(key),
+    };
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = bridge;
+
+    // 磁盘先放明文旧值；secureGetItem 触发懒迁移（第 1 个 encryptAsync）。
+    localStorage.setItem(KEY, "OLD-VALUE");
+    expect(secureGetItem(KEY)).toBe("OLD-VALUE");
+    // 用户随即写入新值（第 2 个 encryptAsync，带 pendingPlain/stillLatest 保护）。
+    secureSetItem(KEY, "NEW-VALUE");
+    expect(resolvers.length).toBe(2);
+
+    // 新值先解密自校验并落盘（decryptAsync 由桥直接按 "enc:" 前缀还原，自校验通过）。
+    resolvers[1]("NEW-VALUE");
+    await vi.waitFor(() => expect(localStorage.getItem(KEY)).toBe(envelopeOf("enc:NEW-VALUE")));
+    // 迟到的旧迁移最后完成：不能把磁盘/缓存盖回旧值。
+    resolvers[0]("OLD-VALUE");
+    await flushSecureWrites();
+
+    expect(localStorage.getItem(KEY)).toBe(envelopeOf("enc:NEW-VALUE"));
+    expect(secureGetItem(KEY)).toBe("NEW-VALUE");
   });
 });
 

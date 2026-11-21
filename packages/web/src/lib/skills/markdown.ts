@@ -24,20 +24,54 @@ export interface ParsedSkill {
 const FRONTMATTER_OPEN = /^---[ \t]*\n/;
 const FRONTMATTER_BLOCK = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
 
-/** 数组值：`[a, b]` 或逗号串（兼容中文逗号与顿号）；空值 → []。 */
+/**
+ * 数组值：`[a, b]` 或逗号串（兼容中文逗号与顿号）；空值 → []。
+ *
+ * 分隔符只在引号外生效：导出时含逗号的条目会被引号包起来（`parseList` 的逆操作），
+ * 若在这里无条件 split，含 `,`/`，`/`、` 的触发词、标签导出再导入就被切成两段（d.412 修复）。
+ */
 function parseList(raw: string): string[] {
   let body = raw.trim();
   if (body.startsWith("[") && body.endsWith("]")) body = body.slice(1, -1);
-  return body
-    .split(/[,，、]/)
+  return splitOutsideQuotes(body)
     .map((item) => unquote(item.trim()))
     .filter((item) => item.length > 0);
+}
+
+/** 按分隔符切段，但忽略引号内与转义的分隔符。 */
+function splitOutsideQuotes(body: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+  let escaped = false;
+  for (const ch of body) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+    } else if (ch === "\\" && quote) {
+      current += ch;
+      escaped = true;
+    } else if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (ch === "," || ch === "，" || ch === "、") {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
 }
 
 function unquote(raw: string): string {
   const text = raw.trim();
   if (text.length >= 2 && (text.startsWith('"') || text.startsWith("'")) && text.endsWith(text[0])) {
-    return text.slice(1, -1).trim();
+    return text.slice(1, -1).replace(/\\(["'\\])/g, "$1").trim();
   }
   return text;
 }
@@ -79,7 +113,11 @@ export function parseSkillMarkdown(text: string): ParsedSkill {
 
 /** 生成 SKILL.md：frontmatter 固定 5 键，正文即 instructions（与设计 §5.3 一致）。 */
 export function skillToMarkdown(skill: SkillDefinition): string {
-  const list = (items: string[]): string => `[${items.filter(Boolean).join(", ")}]`;
+  // 含分隔符（,，、）或引号的条目必须加引号并转义，否则导出再导入会被 parseList 切开。
+  const quoteItem = (item: string): string =>
+    /[,，、"']/.test(item) ? `"${item.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : item;
+  const list = (items: string[]): string =>
+    `[${items.filter(Boolean).map(quoteItem).join(", ")}]`;
   const frontmatter = [
     "---",
     `name: ${skill.name}`,

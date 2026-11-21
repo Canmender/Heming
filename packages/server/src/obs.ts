@@ -117,10 +117,14 @@ export function createObservability(opts: ObservabilityOptions = {}): Observabil
     for (let i = 0; i < buckets.length; i += 1) {
       seen += buckets[i];
       if (seen < target) continue;
-      // 溢出桶没有上界，用实际观察到的最慢请求兜底。
-      return i < LATENCY_BUCKETS_MS.length
-        ? LATENCY_BUCKETS_MS[i]
-        : Math.max(maxMs, LATENCY_BUCKETS_MS[LATENCY_BUCKETS_MS.length - 1]);
+      // 桶上界只是「落在此桶的请求最大不超过它」的估计值；若样本都远低于桶上界，
+      // 直接回报上界会让 p50/p95 超过快照里的 max（统计上不可能）。统一钳到观测到的
+      // 最大值（与 snapshot 里 max 的 Math.round 口径一致）。
+      const upper =
+        i < LATENCY_BUCKETS_MS.length
+          ? LATENCY_BUCKETS_MS[i]
+          : Math.max(maxMs, LATENCY_BUCKETS_MS[LATENCY_BUCKETS_MS.length - 1]);
+      return Math.min(upper, Math.round(maxMs));
     }
     return Math.max(maxMs, LATENCY_BUCKETS_MS[LATENCY_BUCKETS_MS.length - 1]);
   }

@@ -47,8 +47,18 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 30 * 60_000;
 /** 启动失败时留给用户看的 stderr 尾巴长度。 */
 const MAX_STDERR_TAIL = 4_000;
-/** 摘要缓存：`<id>@<version>:<packageSha256>` → Promise<boolean>。 */
+/**
+ * 摘要缓存：`{pluginDir}|<id>@<version>:<packageSha256>` → Promise<boolean>。
+ *
+ * key 必须带 pluginDir：同一 id/version/sha 的两个安装目录（多开/迁移/测试）若共用一条缓存，
+ * 干净目录验过一次后，被篡改的目录会直接复用「通过」结论。缓存只用于同一次启动窗口内去重，
+ * 每次真正要拉起新进程前都会删掉对应条目重算（见 start 里的 invalidate），确保盘上字节被复核。
+ */
 const digestChecks = new Map();
+
+function digestKey(pluginDir, record) {
+  return `${path.resolve(pluginDir)}|${record.id}@${record.version}:${record.packageSha256 || ""}`;
+}
 
 /** 只保留「能安全放进环境变量」的 JSON：undefined 不出现，字符串长度受限。 */
 function jsonEnv(value) {
@@ -108,7 +118,7 @@ function listFiles(filesDir) {
  * 返回 Promise<boolean>；同一版本只算一次（失败也缓存，避免每次调用都扫 35MB）。
  */
 function verifyFilesDigest(pluginDir, record) {
-  const key = `${record.id}@${record.version}:${record.packageSha256 || ""}`;
+  const key = digestKey(pluginDir, record);
   if (digestChecks.has(key)) return digestChecks.get(key);
   const expected = typeof record.packageSha256 === "string" ? record.packageSha256 : "";
   const filesDir = path.join(pluginDir, "files");
@@ -368,6 +378,9 @@ function createPluginEngine(deps = {}) {
       if (!bundledPythonPath) {
         throw new Error("引擎启动失败：应用内置 Python 运行时不可用，请重新安装和鸣");
       }
+      // 真正要拉起新进程前，先作废该目录的旧摘要：插件在两次启动之间可能被外部改写，
+      // 复用旧缓存会让被篡改的代码通过校验直接运行。重算一次（同启动窗口内的并发调用仍去重）。
+      digestChecks.delete(digestKey(target.dir, record));
       const integrityOk = await verifyFilesDigest(target.dir, record);
       if (!integrityOk) {
         throw new Error("引擎启动失败：插件文件校验不通过（可能被外部修改），请重新安装该插件");

@@ -111,10 +111,17 @@ export function bumpReviewCounter(
  */
 export { containsSensitive } from "../selfEdit/guards.js";
 
-/** 语义记忆当前字符占用（与召回拼装口径一致：key + value）。 */
+/**
+ * 语义记忆当前字符占用（与召回拼装口径一致：key + value）。
+ *
+ * 知识库指针（source:"vault"）不算在内：它们的配额是另一套 VAULT_MEMORY_MAX
+ * （见 store.ts 的 SEMANTIC_LIMIT 口径），而且存在 GLOBAL 桶里会被并进每个 agent。
+ * 若把它们算进来，同步过知识库的用户会让每个 agent 的复盘记忆写入都被误判"已满"。
+ */
 export function semanticChars(store: MemoryStore, agentId: string): number {
   return store
     .semantic(agentId)
+    .filter((e) => e.source !== "vault")
     .reduce((n, e) => n + e.key.length + e.value.length, 0);
 }
 

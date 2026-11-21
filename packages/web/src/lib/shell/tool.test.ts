@@ -10,7 +10,7 @@ import type {
   ShellJobSummary,
   ShellRunResponse,
 } from "./bridge.js";
-import { SHELL_MAX_COMMAND_CHARS } from "./limits.js";
+import { SHELL_MAX_COMMAND_CHARS, SHELL_MAX_OUTPUT_CHARS } from "./limits.js";
 import type { FileRoot } from "../fileEdit/paths.js";
 
 const ROOT: FileRoot = { name: "工作区", path: "/库/项目", mode: "write" };
@@ -79,6 +79,17 @@ describe("run_command 工具（d.164）", () => {
     expect(bridge.calls).toHaveLength(1);
   });
 
+  it("cwd 写 '.' 或 './'（工具自己推荐的写法）按树根执行，不误报越界（d.412 回归）", async () => {
+    const bridge = bridgeOf(ok());
+    const dot = await run(bridge, { command: "ls", cwd: "." });
+    expect(dot.ok).toBe(true);
+    expect(dot.text).toContain("工作目录：工作区（.）");
+    expect((bridge.calls[0] as { cwd?: string }).cwd).toBe("/库/项目");
+    const dotSlash = await run(bridge, { command: "ls", cwd: "./" });
+    expect(dotSlash.ok).toBe(true);
+    expect((bridge.calls[1] as { cwd?: string }).cwd).toBe("/库/项目");
+  });
+
   it("非零退出码算「执行完成但失败」：带回输出并明确要求读错误", async () => {
     const bridge = bridgeOf({ ...ok("", {}), exitCode: 1, stderr: "TS2304: 找不到名称" } as ShellRunResponse);
     const res = await run(bridge, { command: "tsc --noEmit" });
@@ -137,6 +148,20 @@ describe("run_command 工具（d.164）", () => {
     const res = await run(bridgeOf(ok(long)), { command: "cat big" });
     expect(res.ok).toBe(true);
     expect(res.text).toContain("输出过长已截断");
+  });
+
+  it("★ 前台截断不超预算，也不把 emoji 的代理对劈开", async () => {
+    // emoji 正好落在 70% 的 head 切点上：按 UTF-16 slice 会劈出落单高代理
+    const headLen = Math.floor((SHELL_MAX_OUTPUT_CHARS - 32) * 0.7);
+    const stdout = "a".repeat(headLen - 1) + "😀" + "b".repeat(10_000);
+    const res = await run(bridgeOf(ok(stdout)), { command: "cat big" });
+    expect(res.ok).toBe(true);
+    expect(res.text).toContain("输出过长已截断");
+    // 整段输出块里没有落单代理（emoji 完整或整段被切掉）
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(res.text)).toBe(false);
+    // 实际吐给模型的内容（head+tail 的 x）不超预算——提示壳另算
+    const payloadChars = (res.text.match(/x/g) ?? []).length;
+    expect(payloadChars).toBeLessThanOrEqual(SHELL_MAX_OUTPUT_CHARS);
   });
 
   it("timeout_ms 被夹到 [1000, 120000]", async () => {
@@ -430,6 +455,25 @@ describe("后台作业（d.180）", () => {
     const res = await callTool(bridge, "command_output", { job_id: "job-1" });
     expect(res.text).toContain("（输出超过 512KB 上限，早期内容已被丢弃）");
     expect(res.text).toContain("（已丢弃 12345 字节早期输出）");
+  });
+
+  it("★ command_output 的整段回灌也过输出上限（d.350 后下游不再截断）", async () => {
+    const { bridge } = jobBridgeOf({
+      jobOutput: async () => ({
+        ok: true,
+        jobId: "job-1",
+        running: false,
+        exitCode: 0,
+        stdout: "x".repeat(100_000),
+        stderr: "y".repeat(100_000),
+        truncated: false,
+        droppedBytes: 0,
+      }),
+    });
+    const res = await callTool(bridge, "command_output", { job_id: "job-1" });
+    // stdout + stderr 各过一遍上限后，总长应远小于原始 20 万字符
+    expect(res.text.length).toBeLessThan(SHELL_MAX_OUTPUT_CHARS * 2 + 500);
+    expect(res.text).toContain("本次读回输出过长已截断");
   });
 
   it("command_list：空列表与有作业两种文案", async () => {

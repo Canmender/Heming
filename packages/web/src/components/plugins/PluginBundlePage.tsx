@@ -276,7 +276,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 降级：浏览器 / 旧版桌面端没有 pageOpen（规格 §1） ──
   if (!canMount) {
     return (
-      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
+      <section aria-label="插件页面" className="flex h-full items-start justify-center p-6 pt-16">
         <EmptyState
           framed
           className="w-full max-w-[520px]"
@@ -291,7 +291,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 列表还没读到：先别急着打开页面（记录是前提） ──
   if (!loaded) {
     return (
-      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
+      <section aria-label="插件页面" className="flex h-full items-start justify-center p-6 pt-16">
         <p className="ui-caption">正在读取插件…</p>
       </section>
     );
@@ -305,7 +305,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         ? `「${record.name}」已被停用，启用后才会显示它的页面。`
         : `「${record.name}」的清单里没有声明页面（contributions.page）。`;
     return (
-      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
+      <section aria-label="插件页面" className="flex h-full items-start justify-center p-6 pt-16">
         <EmptyState
           framed
           className="w-full max-w-[520px]"

@@ -86,6 +86,23 @@ for (const f of factories) {
       expect(store.updateConversationTitle("nope", a.id, "x")).toBe(false);
     });
 
+    it("listConversations：多条会话各自取自己的最近消息时间，互不串台、按建立序（d.412.4.181）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const c1 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { title: "第一段" });
+      const c2 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true, title: "第二段" });
+      // 给两段会话各写不同时间的消息（insert 序即 createdAt 序）。
+      const c1Early = store.addMessage(c1.id, "user", a.id, { text: "早" });
+      const c2Late = store.addMessage(c2.id, "user", a.id, { text: "晚" });
+      const c1Late = store.addMessage(c1.id, "user", a.id, { text: "更早会话的新消息" });
+
+      const list = store.listConversations(a.id);
+      expect(list.map((c) => c.id)).toEqual([c1.id, c2.id]);
+      expect(list.find((c) => c.id === c1.id)?.lastMessageAt).toBe(c1Late.createdAt);
+      expect(list.find((c) => c.id === c2.id)?.lastMessageAt).toBe(c2Late.createdAt);
+      // 早于各自最新消息的时间不应被当成结果。
+      expect(c1Early.createdAt).not.toBe(list.find((c) => c.id === c1.id)?.lastMessageAt);
+    });
+
     it("deleteConversation：成员可删（消息一起删）、非成员 forbidden、不存在 not found", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
@@ -526,6 +543,25 @@ for (const f of factories) {
       expect(snap.team.updatedAt >= snap.team.createdAt).toBe(true);
     });
 
+    it("任务优先级（d.268）：新建/更新/读回都持久化，缺省 normal（两种 store 同口径）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const teamId = store.createWorkspaceTeam(a.id, { name: "组" }).team.id;
+
+      const high = store.createTeamTask(teamId, a.id, { title: "急件", priority: "high" });
+      expect(high).toMatchObject({ title: "急件", priority: "high" });
+      const normal = store.createTeamTask(teamId, a.id, { title: "常规" });
+      expect(normal).toMatchObject({ title: "常规", priority: "normal" });
+      const low = store.updateTeamTask(teamId, (normal as { id: string }).id, a.id, {
+        priority: "low",
+      });
+      expect(low).toMatchObject({ priority: "low" });
+
+      // 读回快照，确认真的落库而不是只在返回值上带了一眼。
+      const snap = store.getWorkspaceTeam(teamId, a.id)!;
+      expect(snap.tasks.find((t) => t.id === (high as { id: string }).id)?.priority).toBe("high");
+      expect(snap.tasks.find((t) => t.id === (normal as { id: string }).id)?.priority).toBe("low");
+    });
+
     it("团队工作台：owner-only 动作与不可移除创建者", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
@@ -762,6 +798,37 @@ for (const f of factories) {
       expect(list[0]!.taskId).toBe(task.id);
     });
 
+    it("删任务/删团队不留孤儿：讨论与动态一并清掉（痛点 16）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const team = store.createWorkspaceTeam(a.id, { name: "清理测试" });
+      const t1 = store.createTeamTask(team.team.id, a.id, { title: "会被删的活" });
+      if (typeof t1 === "string" || t1 === null) throw new Error("任务没建成");
+      const t2 = store.createTeamTask(team.team.id, a.id, { title: "留着的活" });
+      if (typeof t2 === "string" || t2 === null) throw new Error("任务没建成");
+      store.addTeamTaskComment(team.team.id, t1.id, a.id, "第一条讨论");
+      store.addTeamEvent({
+        id: "ev1",
+        teamId: team.team.id,
+        taskId: t1.id,
+        taskTitle: "会被删的活",
+        actorId: a.id,
+        kind: "task",
+        summary: "动了一下",
+        createdAt: new Date().toISOString(),
+      });
+
+      // 删单个任务：它的讨论没了，另一条任务的讨论不受影响
+      expect(store.deleteTeamTask(team.team.id, t1.id, a.id)).toBe(true);
+      expect(store.listTeamTaskComments(team.team.id, t1.id)).toEqual([]);
+      store.addTeamTaskComment(team.team.id, t2.id, a.id, "第二条讨论");
+      expect(store.listTeamTaskComments(team.team.id, t2.id)).toHaveLength(1);
+
+      // 删团队：剩下的讨论、动态都清干净
+      expect(store.deleteWorkspaceTeam(team.team.id, a.id)).toBe(true);
+      expect(store.listTeamTaskComments(team.team.id, t2.id)).toEqual([]);
+      expect(store.listTeamEvents(team.team.id)).toEqual([]);
+    });
+
     it("不是团队成员不能留言；任务不属于这个团队也拒绝", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const outsider = store.createUser("eve", "h", "伊芙");
@@ -849,6 +916,51 @@ for (const f of factories) {
 
       expect(store.updateTeamTask(team.team.id, task.id, b.id, { review: "approve" })).toBe("forbidden");
       expect(store.updateTeamTask(team.team.id, task.id, a.id, { review: "approve" })).toBe("not_reviewable");
+    });
+
+    it("已完成的任务不能靠裸改 status 退回 todo 绕过验收（1.3 状态机收紧）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const team = store.createWorkspaceTeam(a.id, { name: "验收组" });
+      expect(store.addWorkspaceMember(team.team.id, a.id, "bob")).not.toBeNull();
+      const task = store.createTeamTask(team.team.id, a.id, { title: "写脚本", assigneeId: b.id });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+      const done = store.updateTeamTask(team.team.id, task.id, b.id, {
+        status: "done",
+        result: "写完了",
+      });
+      if (done === null || typeof done === "string") throw new Error("标完成失败");
+
+      // 胶囊循环的 done→todo 被堵住：负责人本人和组长都不能裸改回待认领（含已验收的）。
+      expect(store.updateTeamTask(team.team.id, task.id, b.id, { status: "todo" })).toBe("done_locked");
+      expect(store.updateTeamTask(team.team.id, task.id, a.id, { status: "todo" })).toBe("done_locked");
+
+      const approved = store.updateTeamTask(team.team.id, task.id, a.id, {
+        review: "approve",
+      });
+      if (approved === null || typeof approved === "string") throw new Error("验收失败");
+      expect(store.updateTeamTask(team.team.id, task.id, a.id, { status: "todo" })).toBe("done_locked");
+
+      // 状态没被偷改：仍是已完成、已验收。
+      const after = store.getWorkspaceTeam(team.team.id, a.id)?.tasks.find((t) => t.id === task.id);
+      expect(after?.status).toBe("done");
+      expect(after?.reviewState).toBe("approved");
+
+      // done→doing（本人重开继续做，保留结论）是正当路径，仍允许。
+      const reopened = store.updateTeamTask(team.team.id, task.id, b.id, { status: "doing" });
+      if (reopened === null || typeof reopened === "string") throw new Error("重开继续做失败");
+      expect(reopened.status).toBe("doing");
+      expect(reopened.result).toBe("写完了");
+
+      // 再标完成，组长打回重做，回到进行中并留原因。
+      store.updateTeamTask(team.team.id, task.id, b.id, { status: "done" });
+      const sentBack = store.updateTeamTask(team.team.id, task.id, a.id, {
+        review: "changes",
+        reviewNote: "补一下回滚步骤",
+      });
+      if (sentBack === null || typeof sentBack === "string") throw new Error("打回失败");
+      expect(sentBack.status).toBe("doing");
+      expect(sentBack.reviewNote).toBe("补一下回滚步骤");
     });
   });
 }
@@ -1070,6 +1182,197 @@ for (const f of factories) {
         expect(ids).toContain(kept.id);
       }
       expect(store.listMessages(conv.id).map((m) => m.id)).toEqual([kept.id]);
+    });
+  });
+
+  describe(`Store 团队知识库: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    function seedTeam() {
+      const owner = store.createUser("owner", "h", "组长");
+      const mate = store.createUser("mate", "h", "队员");
+      const outsider = store.createUser("outsider", "h", "外人");
+      const team = store.createWorkspaceTeam(owner.id, { name: "知识组" });
+      store.addWorkspaceMember(team.team.id, owner.id, mate.username);
+      return { owner, mate, outsider, teamId: team.team.id };
+    }
+
+    it("建/读/改/删：作者与组长可改，队员不可改别人的；非成员全 404", () => {
+      const { owner, mate, outsider, teamId } = seedTeam();
+      expect(store.listTeamKnowledge(teamId, outsider.id)).toBeNull();
+      expect(store.createTeamKnowledge(teamId, outsider.id, { title: "偷", content: "x" })).toBeNull();
+
+      const doc = store.createTeamKnowledge(teamId, mate.id, {
+        title: "接口约定",
+        content: "POST /v1/foo",
+        tags: ["api", "后端"],
+        sourceVault: "my-vault",
+      });
+      if (!doc) throw new Error("建文档失败");
+      expect(doc.authorId).toBe(mate.id);
+      expect(doc.tags).toEqual(["api", "后端"]);
+      expect(doc.sourceVault).toBe("my-vault");
+      expect(doc.pinned).toBe(false);
+
+      // 读：成员可读，外人 null
+      expect(store.getTeamKnowledge(teamId, owner.id, doc.id)?.title).toBe("接口约定");
+      expect(store.getTeamKnowledge(teamId, outsider.id, doc.id)).toBeNull();
+      expect(store.listTeamKnowledge(teamId, owner.id)).toHaveLength(1);
+
+      // 改：作者本人可改；组长可改；普通队员改别人的 → forbidden
+      expect(store.updateTeamKnowledge(teamId, mate.id, doc.id, { title: "接口约定 v2" })).toMatchObject({
+        title: "接口约定 v2",
+      });
+      expect(store.updateTeamKnowledge(teamId, owner.id, doc.id, { content: "改过的正文" })).toMatchObject({
+        content: "改过的正文",
+      });
+      const third = store.createUser("third", "h", "第三人");
+      store.addWorkspaceMember(teamId, owner.id, third.username);
+      expect(store.updateTeamKnowledge(teamId, third.id, doc.id, { title: "抢" })).toBe("forbidden");
+      expect(store.deleteTeamKnowledge(teamId, third.id, doc.id)).toBe("forbidden");
+
+      // 删：本人删掉后，列表空
+      expect(store.deleteTeamKnowledge(teamId, mate.id, doc.id)).toBe(true);
+      expect(store.listTeamKnowledge(teamId, owner.id)).toHaveLength(0);
+      expect(store.getTeamKnowledge(teamId, owner.id, doc.id)).toBeNull();
+    });
+
+    it("按团队硬隔离：别的团队看不到、也取不到跨队文档", () => {
+      const { owner, teamId } = seedTeam();
+      const otherTeam = store.createWorkspaceTeam(owner.id, { name: "另一队" });
+      const doc = store.createTeamKnowledge(teamId, owner.id, { title: "秘密", content: "只在 A 队" });
+      if (!doc) throw new Error("建文档失败");
+
+      expect(store.listTeamKnowledge(otherTeam.team.id, owner.id)).toEqual([]);
+      expect(store.getTeamKnowledge(otherTeam.team.id, owner.id, doc.id)).toBeNull();
+      expect(store.searchTeamKnowledge(otherTeam.team.id, owner.id, "秘密")).toEqual([]);
+    });
+
+    it("搜索：中文子串命中标题/正文/标签，短查询回退线性扫描", () => {
+      const { owner, teamId } = seedTeam();
+      store.createTeamKnowledge(teamId, owner.id, {
+        title: "排班表",
+        content: "每周一更新排班，注意节假日",
+        tags: ["运营"],
+      });
+      store.createTeamKnowledge(teamId, owner.id, { title: " unrelated ", content: "nothing here" });
+
+      // 长查询（>=3 字符）：中文子串
+      expect(store.searchTeamKnowledge(teamId, owner.id, "排班")?.map((d) => d.title)).toEqual(["排班表"]);
+      // 正文里的词
+      expect(store.searchTeamKnowledge(teamId, owner.id, "节假日")?.map((d) => d.title)).toEqual(["排班表"]);
+      // 短查询（<3 字符）回退线性扫描，仍能命中
+      expect(store.searchTeamKnowledge(teamId, owner.id, "排")?.map((d) => d.title)).toEqual(["排班表"]);
+      // 无命中
+      expect(store.searchTeamKnowledge(teamId, owner.id, "不存在")).toEqual([]);
+    });
+
+    it("删团队级联清文档", () => {
+      const { owner, teamId } = seedTeam();
+      const doc = store.createTeamKnowledge(teamId, owner.id, { title: "会删掉", content: "x" });
+      if (!doc) throw new Error("建文档失败");
+      // owner 建的第二队留着，确认级联只清目标队
+      const keepTeam = store.createWorkspaceTeam(owner.id, { name: "保留队" });
+      const keepDoc = store.createTeamKnowledge(keepTeam.team.id, owner.id, { title: "保留", content: "y" });
+      if (!keepDoc) throw new Error("建保留文档失败");
+
+      expect(store.deleteWorkspaceTeam(teamId, owner.id)).toBe(true);
+      // 团队没了，任何人查都是 null（团队不存在）
+      expect(store.listTeamKnowledge(teamId, owner.id)).toBeNull();
+      // 另一队的文档还在
+      expect(store.listTeamKnowledge(keepTeam.team.id, owner.id)?.map((d) => d.id)).toContain(keepDoc.id);
+    });
+  });
+
+  describe(`Store 团队发现 + 加入申请: ${f.name}`, () => {
+    let store: Store & { close?: () => void };
+    beforeEach(() => {
+      store = f.create();
+      store.ensureSystemAgents();
+    });
+    afterEach(() => {
+      store.close?.();
+    });
+
+    function seedTeam() {
+      const owner = store.createUser("owner", "h", "组长");
+      const mate = store.createUser("mate", "h", "队员");
+      const applicant = store.createUser("applicant", "h", "申请人");
+      const outsider = store.createUser("outsider", "h", "外人");
+      const team = store.createWorkspaceTeam(owner.id, { name: "增长小组", goal: "拉新" });
+      store.addWorkspaceMember(team.team.id, owner.id, mate.username);
+      return { owner, mate, applicant, outsider, teamId: team.team.id };
+    }
+
+    it("目录只暴露元数据、按名字/目标搜索，不含成员名单", () => {
+      const { teamId } = seedTeam();
+      const all = store.listTeamDirectory("");
+      expect(all.some((t) => t.id === teamId && t.name === "增长小组")).toBe(true);
+      expect(all.find((t) => t.id === teamId)?.memberCount).toBe(2);
+      // 只返回约定字段，不泄露方案/任务/成员等敏感数据
+      expect(Object.keys(all.find((t) => t.id === teamId)!).sort()).toEqual(
+        ["createdAt", "goal", "id", "memberCount", "name"].sort(),
+      );
+      expect(store.listTeamDirectory("拉新").map((t) => t.id)).toContain(teamId);
+      expect(store.listTeamDirectory("不存在")).toEqual([]);
+    });
+
+    it("申请→队长审批通过：写入成员行、可复看状态；重复申请/重复审拦截", () => {
+      const { owner, mate, applicant, teamId } = seedTeam();
+      const req = store.createJoinRequest(teamId, applicant.id, "想加入");
+      if (!req || typeof req === "string") throw new Error("申请失败");
+      expect(req.status).toBe("pending");
+      expect(req.message).toBe("想加入");
+
+      // 重复提交被拦
+      expect(store.createJoinRequest(teamId, applicant.id, "再申")).toBe("already_pending");
+      // 我的申请能查到；队长能查到待审列表
+      expect(store.listMyJoinRequests(applicant.id).map((r) => r.id)).toContain(req.id);
+      expect(store.listJoinRequests(teamId, owner.id)?.map((r) => r.id)).toContain(req.id);
+
+      // 队员/外人不能看申请列表
+      expect(store.listJoinRequests(teamId, mate.id)).toBe("forbidden");
+      expect(store.listJoinRequests(teamId, "no-such-user")).toBeNull();
+
+      // 通过：申请人成为成员，申请状态 approved
+      const reviewed = store.reviewJoinRequest(teamId, req.id, owner.id, "approve");
+      expect(reviewed).toMatchObject({ status: "approved" });
+      expect(reviewed?.reviewedAt).toBeTruthy();
+      expect(store.getWorkspaceTeam(teamId, applicant.id)?.members.some((m) => m.user.id === applicant.id)).toBe(
+        true,
+      );
+      // 已是成员再申请 → already_member
+      expect(store.createJoinRequest(teamId, applicant.id, "")).toBe("already_member");
+      // 重复审 → already_reviewed
+      expect(store.reviewJoinRequest(teamId, req.id, owner.id, "reject")).toBe("already_reviewed");
+    });
+
+    it("拒绝：不写成员行；非队长/非成员审批被拦；删团队级联清申请", () => {
+      const { owner, applicant, mate, teamId } = seedTeam();
+      const req = store.createJoinRequest(teamId, applicant.id, "");
+      if (!req || typeof req === "string") throw new Error("申请失败");
+
+      // 队员不能审，外人不能审
+      expect(store.reviewJoinRequest(teamId, req.id, mate.id, "approve")).toBe("forbidden");
+      expect(store.reviewJoinRequest(teamId, req.id, "no-such-user", "approve")).toBeNull();
+
+      // 拒绝：不成为成员
+      expect(store.reviewJoinRequest(teamId, req.id, owner.id, "reject")).toMatchObject({ status: "rejected" });
+      expect(store.getWorkspaceTeam(teamId, applicant.id)).toBeNull();
+      // 被拒后可重新申请（状态已审，不是 pending）
+      expect(store.createJoinRequest(teamId, applicant.id, "再试")).not.toBe("already_pending");
+
+      // 删团队级联清申请
+      expect(store.deleteWorkspaceTeam(teamId, owner.id)).toBe(true);
+      expect(store.listMyJoinRequests(applicant.id)).toEqual([]);
     });
   });
 }

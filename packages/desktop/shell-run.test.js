@@ -327,6 +327,30 @@ test("shell-run：命令开始前就取消，则根本不会 spawn（排队中�
   }
 });
 
+test("shell-run：攒够陈旧取消后，真正的「执行前取消」仍被 honored（d.412 回归）", async () => {
+  const root = makeRoot();
+  try {
+    // 灌满上限（50）个永不落地的陈旧取消：它们对应的命令永远不会 spawn。
+    for (let i = 0; i < 60; i += 1) cancelRun(`stale-${i}`);
+
+    // 即使集合已被陈旧项占满，这条「执行前取消」也必须被记录下来并生效。
+    assert.equal(cancelRun("genuine-before").ok, true);
+    let spawned = 0;
+    const res = await runCommand(
+      { roots: [root], cwd: root.path, command: "echo hi", runId: "genuine-before" },
+      () => {
+        spawned += 1;
+        return fakeChild({ code: 0, stdout: "X" });
+      },
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "aborted");
+    assert.equal(spawned, 0, "集合被陈旧项占满后，真正的执行前取消仍必须生效");
+  } finally {
+    fs.rmSync(root.path, { recursive: true, force: true });
+  }
+});
+
 test("shell-run：取消不存在的 runId 不会误杀别的命令，也不抛", async () => {
   const root = makeRoot();
   try {

@@ -22,13 +22,22 @@ export const FOCUS_RING = "focus-visible:outline-2 focus-visible:outline-offset-
 /** 紧凑焦点环（不偏移）：密集列表/工具条里用，避免环被容器裁掉。 */
 export const FOCUS_RING_TIGHT = "focus-visible:outline-2 focus-visible:outline-ink";
 
+/**
+ * 是否带「可见」的 focus-visible 焦点环类名。
+ * `outline-hidden` / `outline-none` 是**抹掉**焦点环的（见文件头 v4 语义提醒），
+ * 不能算作已有焦点环——否则 withFocusRing 会被它骗过去，静默不给按钮补环。
+ */
+function hasVisibleOutline(className: string): boolean {
+  return /(^|\s)focus-visible:outline-(?!hidden(?:\s|$)|none(?:\s|$))/.test(className);
+}
+
 /** 在既有 className 后追加焦点环（去重：已经带过的原样返回）。 */
 export function withFocusRing(base: string, ring: string = FOCUS_RING): string {
-  if (base.includes("focus-visible:outline")) return base;
+  if (hasVisibleOutline(base)) return base;
   return `${base} ${ring}`.trim();
 }
 
 /** 本仓焦点环的判定（给测试与代码扫描用）。 */
 export function hasFocusRing(className: string): boolean {
-  return /focus-visible:outline-/.test(className);
+  return hasVisibleOutline(className);
 }

@@ -100,7 +100,16 @@ interface FormatPattern {
   regex: RegExp;
   /** 捕获组顺序（每个字母只捕获第一次出现）。 */
   order: string[];
+  /** 年份用两位（`YY`）写出：反解时需把 0–99 扩成完整年份。 */
+  shortYear: boolean;
 }
+
+/**
+ * 两位年份的世纪分界：`YY` 只写下 `year % 100`（2026→"26"、1987→"87"），
+ * 反解无法从两位数字唯一确定世纪，只能取一个固定分界（纯函数，不读时钟）。
+ * 00–49 归 2000–2049，50–99 归 1950–1999：覆盖个人日记库实际可能出现的年代。
+ */
+const TWO_DIGIT_YEAR_PIVOT = 49;
 
 /**
  * 把日期格式编译成正则：每个 Y/M/D/H/m/s 字母转成数字捕获组，其余字符按字面量。
@@ -109,6 +118,7 @@ interface FormatPattern {
 function buildFormatPattern(format: string): FormatPattern | null {
   if (!format) return null;
   const order: string[] = [];
+  let shortYear = false;
   let source = "^";
   let index = 0;
   while (index < format.length) {
@@ -116,6 +126,7 @@ function buildFormatPattern(format: string): FormatPattern | null {
     if ("YMDHms".includes(char)) {
       let run = 0;
       while (index + run < format.length && format[index + run] === char) run += 1;
+      if (char === "Y" && run === 2) shortYear = true;
       let digitPattern: string;
       if (char === "Y") digitPattern = run >= 3 ? "\\d{4}" : run === 2 ? "\\d{2}" : "\\d{1,4}";
       else digitPattern = run >= 2 ? "\\d{2}" : "\\d{1,2}";
@@ -132,7 +143,7 @@ function buildFormatPattern(format: string): FormatPattern | null {
   }
   source += "$";
   try {
-    return { regex: new RegExp(source), order };
+    return { regex: new RegExp(source), order, shortYear };
   } catch {
     return null;
   }
@@ -147,7 +158,22 @@ export function isValidDailyFormat(format: unknown): boolean {
   const text = format.trim();
   if (!text || text.length > 80) return false;
   if (ILLEGAL_PATH_CHARS.test(text)) return false;
-  if (!/Y{1,4}/.test(text) || !/M{1,2}/.test(text) || !/D{1,2}/.test(text)) return false;
+  // 逐个 token 检查重复次数上限：Y ≤ 4，其余 ≤ 2。
+  // 不能用 /Y{1,4}/ 这种未锚定的正则——它会匹配 5 个 Y 里的前 4 个，
+  // 让 YYYYY 这类格式通过校验，但 formatDateTokens 会把 5 个 Y 渲成两段年份、
+  // buildFormatPattern 只按 4 位解析，写出来的路径再也解析不回来（日记从此消失）。
+  const runs = text.match(/Y+|M+|D+|H+|m+|s+/g) ?? [];
+  let hasY = false;
+  let hasM = false;
+  let hasD = false;
+  for (const run of runs) {
+    const max = run[0] === "Y" ? 4 : 2;
+    if (run.length > max) return false;
+    if (run[0] === "Y") hasY = true;
+    else if (run[0] === "M") hasM = true;
+    else if (run[0] === "D") hasD = true;
+  }
+  if (!hasY || !hasM || !hasD) return false;
   return buildFormatPattern(text) !== null;
 }
 
@@ -230,8 +256,13 @@ export function parseDailyPath(
   pattern.order.forEach((letter, position) => {
     values.set(letter, Number(match[position + 1]));
   });
-  const year = values.get("Y");
+  let year = values.get("Y");
   if (year === undefined || !Number.isFinite(year)) return null;
+  // JS 的 new Date(0..99, …) 会把年份映射到 1900+（26→1926），
+  // 而 `YY` 格式写出的是 year%100，不还原就会让这类日记永远反解不出来。
+  if (pattern.shortYear && year >= 0 && year <= 99) {
+    year += year <= TWO_DIGIT_YEAR_PIVOT ? 2000 : 1900;
+  }
   const month = values.get("M") ?? 1;
   const day = values.get("D") ?? 1;
   if (!Number.isFinite(month) || !Number.isFinite(day)) return null;

@@ -280,6 +280,27 @@ describe("参数摘要", () => {
     expect(summarizeArgs('{"password":"hunter2000"}')).toBe("***");
   });
 
+  it("早返回分支里的密钥也不能漏：task/command/job_id 命中敏感特征整条退化为 ***", () => {
+    // 回归：以前敏感扫描只在函数末尾的兜底路径做，task/command/job_id 早返回
+    // 直接回显原始取值——Bearer token / sk-… 原样漏到确认卡与审计日志。
+    expect(summarizeArgs(JSON.stringify({ task: "use sk-abcdefghijklmnop to login" }))).toBe("***");
+    expect(
+      summarizeArgs(JSON.stringify({ command: "curl -H 'Authorization: Bearer abcdefghijklmnopqrst' https://x" })),
+    ).toBe("***");
+    expect(summarizeArgs(JSON.stringify({ job_id: "sk-abcdefghijklmnop" }), "command_output")).toBe("***");
+    // 旁边带一个 api_key 字段时同样整条退化（早返回不能绕过敏感扫描）
+    expect(summarizeArgs(JSON.stringify({ task: "查一下", api_key: "sk-abcdefghijklmnop" }))).toBe("***");
+    // 正常的早返回不受影响
+    expect(summarizeArgs('{"job_id":"job-1"}', "command_output")).toBe("读作业 job-1 的输出");
+  });
+
+  it("命令/任务摘要截断不劈 emoji 代理对", () => {
+    const lone = (s: string): boolean =>
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+    expect(lone(summarizeArgs(JSON.stringify({ command: "x".repeat(69) + "😀" + "yz" })))).toBe(false);
+    expect(lone(summarizeArgs(JSON.stringify({ task: "x".repeat(59) + "😀" + "yz" })))).toBe(false);
+  });
+
   it("无已知字段时给截断 JSON", () => {
     const summary = summarizeArgs('{"foo":1,"bar":2}');
     expect(summary).toContain("foo");

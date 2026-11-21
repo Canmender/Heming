@@ -214,7 +214,7 @@ describe("设计刻度：语义色只走命名类", () => {
       "console-bg", "console-ink", "mark-bg", "mark-ink",
       "chart-1", "chart-2", "chart-grid", "chart-label",
       "avatar-1", "avatar-2", "avatar-3", "avatar-4", "avatar-5", "avatar-6",
-      "heming-accent", "heming-on-accent",
+      "heming-accent", "heming-on-accent", "editorial-rule", "editorial-surface",
     ];
     const utility = "(?:bg|text|border|ring|ring-offset|outline|fill|stroke|divide|from|via|to)";
     const re = new RegExp(`${utility}-\\[var\\(--(?:${tokens.join("|")})\\)\\]`, "g");

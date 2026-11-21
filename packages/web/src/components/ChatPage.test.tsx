@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { SYSTEM_AGENT_ID, type Message, type User, type WsClientEvent } from "@heming/shared";
-import { ChatPage, clampComposerHeight } from "./ChatPage.js";
+import { ChatPage, clampComposerHeight, historyToolText } from "./ChatPage.js";
 import { UNBOUND_ADD_SOURCE_LABEL } from "./ux/UnboundModelNotice.js";
 import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
 import { useUiStore } from "../store/ui.js";
@@ -4822,6 +4822,33 @@ describe("输入栏高度（clampComposerHeight）", () => {
     expect(clampComposerHeight(10)).toBe(96);
     expect(clampComposerHeight(999)).toBe(480);
     expect(clampComposerHeight(150.6)).toBe(151);
+  });
+});
+
+
+describe("历史工具结果文本（historyToolText）", () => {
+  it("超长结果按码点截断，不在 emoji 代理对中间劈出落单代理（d.412 回归）", () => {
+    const base = { id: "t1", name: "file_read", args: "{}", startedAt: 1 };
+    // 让第 1200 个 UTF-16 单位正好是一个 emoji 的高代理（前 1199 是 ASCII）。
+    const result = "a".repeat(1199) + "😀" + "tail";
+    const text = historyToolText({ ...base, status: "ok", result });
+    // 逐 UTF-16 单位扫，确保没有落单代理。
+    let lone = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const n = text.charCodeAt(i + 1);
+        if (!(n >= 0xdc00 && n <= 0xdfff)) { lone = true; break; }
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        // 前一个是高代理则合法
+        const p = text.charCodeAt(i - 1);
+        if (!(p >= 0xd800 && p <= 0xdbff)) { lone = true; break; }
+      }
+    }
+    expect(lone).toBe(false);
+    // emoji 应当被整体丢弃（因其高代理正落在切点），截断后不含完整 😀。
+    expect(text).not.toContain("😀");
+    expect(text).toContain("结果过长，已截断");
   });
 });
 

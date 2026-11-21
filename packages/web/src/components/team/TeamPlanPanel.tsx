@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { TeamItemStatus, TeamPlanItem, TeamWorkspaceSnapshot } from "@heming/shared";
+import type { TeamItemStatus, TeamPlanItem, TeamTask, TeamWorkspaceSnapshot } from "@heming/shared";
 import {
   createTeamPlan,
   deleteTeamPlan,
@@ -41,12 +41,15 @@ const STATUS_STYLE: Record<TeamItemStatus, string> = {
 export function TeamPlanPanel({
   teamId,
   plans,
+  tasks = [],
   busy,
   onChanged,
   onError,
 }: {
   teamId: string;
   plans: TeamPlanItem[];
+  /** 挂在方案下的任务（痛点 7：方案→任务进度汇总），用 planId 关联。 */
+  tasks?: TeamTask[];
   busy: boolean;
   onChanged: (snapshot: TeamWorkspaceSnapshot) => void;
   /** 面板内的失败同时上报给页级错误条（上一轮 TeamWorkspace 已在传，这里补上类型与调用）。 */
@@ -76,6 +79,17 @@ export function TeamPlanPanel({
   /** 点击时取最新 props 里的方案，避免用闭包里的旧状态算下一档。 */
   const plansRef = useRef(plans);
   plansRef.current = plans;
+
+  /** 每个方案挂了多少任务、完成多少、是否逾期（痛点 7：一眼看到方案进度）。 */
+  const planProgress = (planId: string) => {
+    const linked = tasks.filter((t) => t.planId === planId);
+    const done = linked.filter((t) => t.status === "done").length;
+    const now = Date.now();
+    const overdue = linked.filter(
+      (t) => t.status !== "done" && t.dueAt && new Date(t.dueAt).getTime() < now,
+    ).length;
+    return { total: linked.length, done, overdue };
+  };
 
   const isPending = (id: string) => pendingIds.includes(id);
 
@@ -260,6 +274,24 @@ export function TeamPlanPanel({
                     {plan.detail}
                   </p>
                 )}
+                {(() => {
+                  const p = planProgress(plan.id);
+                  if (p.total === 0) return null;
+                  const pct = Math.round((p.done / p.total) * 100);
+                  return (
+                    <div className="mt-1" aria-label={`方案进度 ${plan.title}`}>
+                      <div className="flex items-center gap-2 text-ui-xs text-muted">
+                        <span>
+                          {p.done}/{p.total} 任务完成
+                        </span>
+                        {p.overdue > 0 ? <span className="text-danger">{p.overdue} 个逾期</span> : null}
+                      </div>
+                      <div className="mt-0.5 h-1 w-full rounded-full bg-subtle-2">
+                        <div className="h-1 rounded-full bg-success" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <button
                 type="button"

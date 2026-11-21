@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   FORK_PREFIX_NOTICE,
   FORK_TRUNCATED_NOTICE,
@@ -185,6 +185,8 @@ describe("previewFork 代价预览（P3）", () => {
     ];
     expect(looksTruncated(`${"字".repeat(MAX_TEXT_CHARS)}…`)).toBe(true);
     expect(looksTruncated("短结果")).toBe(false);
+    // 含 emoji 的截断串按码点数：emoji 只占一位，否则会被漏判
+    expect(looksTruncated("😀" + "字".repeat(MAX_TEXT_CHARS - 1) + "…")).toBe(true);
     expect(previewFork(items, 2).truncatedResults).toBe(1);
   });
 });

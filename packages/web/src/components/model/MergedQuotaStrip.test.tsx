@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MergedAgent } from "../../lib/mergedQuota.js";
 import { MergedQuotaStrip } from "./MergedQuotaStrip.js";
 
@@ -50,5 +50,21 @@ describe("MergedQuotaStrip", () => {
     });
     render(<MergedQuotaStrip groups={[tight]} now={now} />);
     expect(screen.getByText("5 小时 平均剩 6%").className).toContain("bg-danger-soft");
+  });
+
+  it("同名合并窗口用下标区分 key，不撞 React duplicate key（d.412 回归）", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sameName = group({
+      windows: [
+        { ...group().windows[0], text: "第一份 剩 10%" },
+        { ...group().windows[0], text: "第二份 剩 90%" },
+      ],
+    });
+    render(<MergedQuotaStrip groups={[sameName]} now={now} />);
+    expect(screen.getByText("5 小时 第一份 剩 10%")).toBeInTheDocument();
+    expect(screen.getByText("5 小时 第二份 剩 90%")).toBeInTheDocument();
+    const keyWarnings = spy.mock.calls.filter((call) => String(call[0]).includes("same key"));
+    expect(keyWarnings).toHaveLength(0);
+    spy.mockRestore();
   });
 });

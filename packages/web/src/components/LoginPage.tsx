@@ -57,16 +57,17 @@ export function LoginPage() {
      * 请勿删除——删掉就退回「卡片和字样全挤在左边」的状态（已有回归用例守护）。
      */
     <div className="flex h-full w-full min-w-0 flex-col bg-subtle min-[900px]:flex-row">
-      {/* 左：登录卡片垂直居中 */}
-      <div className="flex flex-1 items-center justify-center p-6">
+      {/* 左：登录表单。简约 · 大气：去掉居中卡片与装饰线，改成左对齐的大标题
+          + 充足留白，靠字号与间距建立层次。外层仍 flex-1 / items-center / justify-center
+          （回归用例钉住这两个类，也保证窄屏单栏时表单不偏）。 */}
+      <div className="flex flex-1 items-center justify-center p-8 sm:p-14">
         <form
           onSubmit={submit}
-          className="w-[min(340px,100%)] ui-card p-7"
+          className="w-[min(400px,100%)]"
         >
-          {/* d.63：页面标题/副标题走全站排版档（18/600 + 12/muted），表单与按钮走控件基元 */}
-          <h1 className="ui-page-title mb-1">和鸣</h1>
-          <p className="ui-page-sub mb-5">登录你的账号</p>
-          <div className="flex flex-col gap-3">
+          <h1 className="text-ui-xl font-semibold leading-10 tracking-tight text-ink">和鸣</h1>
+          <p className="mt-1 text-ui-base text-muted">登录你的账号</p>
+          <div className="mt-9 flex flex-col gap-4">
             {/*
              * d.141：可见 label。此前是裸输入框 + placeholder，placeholder 一敲字就消失，
              * 密码框还叠加大写锁定提示，填错了根本看不出哪个框是用户名。可访问名仍由
@@ -136,14 +137,20 @@ export function LoginPage() {
               {status === "pending" ? "请稍候…" : "登录"}
             </Button>
             {/* 登录页没有注册入口（服务端默认关闭公开注册）：说清去哪儿要账号，别让新用户干瞪眼 */}
-            <p className="ui-caption text-center">账号由团队管理员开通。</p>
+            <p className="ui-caption">账号由团队管理员开通。</p>
           </div>
         </form>
       </div>
 
-      {/* 右：品牌手写字样（窄屏隐藏）。宽度随视口收敛，避免小窗口里溢出版心 */}
-      <div className="hidden flex-1 items-center justify-center p-6 min-[900px]:flex">
-        <Wordmark className="h-auto w-[min(280px,20vw)] text-ink" />
+      {/* 右：品牌区（窄屏隐藏）。简约 · 大气：深色版面 + 手写字样 + 一句大标语，
+          与左侧浅色表单形成「明 / 暗」的层次对比；Wordmark 的 svg[aria-label="Heming"]
+          与品牌栏的 hidden/min-[900px]:flex/items-center/justify-center
+          都被回归用例钉住，原样保留。 */}
+      <div className="hidden flex-1 flex-col items-center justify-center overflow-hidden bg-ink p-6 min-[900px]:flex">
+        <Wordmark className="h-auto w-[min(360px,26vw)] text-surface" />
+        <p className="mt-10 max-w-[min(360px,26vw)] text-center text-ui-lg leading-relaxed text-surface">
+          让智能体接手重复的事，把判断留给你。
+        </p>
       </div>
     </div>
   );

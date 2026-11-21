@@ -96,6 +96,50 @@ describe("团队任务记录（d.347）", () => {
     expect(listTeamRuns().map((run) => run.goal)).toEqual(["第一支队伍", "第二支队伍"]);
   });
 
+  it("并行派遣两支队伍时，进度与收口各归各的、成功不被记成失败（d.412 回归）", () => {
+    // agent_team 是只读工具，同一条消息里可能并行派遣两次 → 同时存在两条 running。
+    // 事件不带 runId，只能按成员 id 归位；旧版 activeTeamRun() 取最后一条，
+    // 把两队的进度/收口都记到 B 上，A、B 两支队都被标成「没有执行（被中断）」。
+    beginTeamRun({
+      conversationId: "c1",
+      goal: "TEAM-A",
+      members: [{ id: "aScan", role: "通用成员", task: "扫描 A" }],
+    });
+    beginTeamRun({
+      conversationId: "c1",
+      goal: "TEAM-B",
+      members: [{ id: "bDig", role: "通用成员", task: "挖掘 B" }],
+    });
+
+    // 两队各自的进度：应落到各自的记录
+    applyTeamProgress({ taskId: "t", memberId: "aScan", task: "扫描 A", phase: "start", round: 0, role: "通用成员" }, 2_000);
+    applyTeamProgress({ taskId: "t", memberId: "bDig", task: "挖掘 B", phase: "start", round: 0, role: "通用成员" }, 2_000);
+
+    // 两队都成功收口
+    finishTeamRun(
+      { ok: true, members: [{ id: "aScan", role: "通用成员", task: "扫描 A", ok: true, rounds: 2, toolCalls: 1, text: "done" }] },
+      3_000,
+    );
+    finishTeamRun(
+      { ok: true, members: [{ id: "bDig", role: "通用成员", task: "挖掘 B", ok: true, rounds: 2, toolCalls: 1, text: "done" }] },
+      3_000,
+    );
+
+    const persisted = JSON.parse(localStorage.getItem(TEAM_RUNS_KEY) ?? "[]") as {
+      goal: string;
+      status: string;
+      members: { id: string; status: string; note: string | null }[];
+    }[];
+    const a = persisted.find((run) => run.goal === "TEAM-A");
+    const b = persisted.find((run) => run.goal === "TEAM-B");
+    expect(a?.status).toBe("done");
+    expect(a?.members[0]?.status).toBe("done");
+    expect(b?.status).toBe("done");
+    expect(b?.members[0]?.status).toBe("done");
+    expect(a?.members[0]?.note).not.toBe("没有执行（被中断）");
+    expect(b?.members[0]?.note).not.toBe("没有执行（被中断）");
+  });
+
   it("按会话取最近一次：别的会话的团队不串台", () => {
     begin("A 会话的任务", "c1");
     finishTeamRun({ ok: true, members: [] }, 2_000);

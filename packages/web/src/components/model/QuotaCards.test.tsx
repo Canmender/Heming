@@ -70,6 +70,24 @@ describe("其余来源的额度卡", () => {
     expect(screen.getByText("剩 7,000 点")).toBeInTheDocument();
   });
 
+  it("文字窗口/不限量窗口不误判色调（d.412 回归）", () => {
+    const { container } = render(
+      <QuotaCards
+        cards={cards({
+          provider: "wb",
+          name: "WorkBuddy",
+          kind: "plan",
+          windows: [{ name: "积分余额", text: true, display: "还剩 3000 积分", used: 95, remaining: 5 }],
+        })}
+        now={now}
+      />,
+    );
+    // 文字窗口没有份额可比，圆点必须是中性（bg-muted），不能因为 remaining=5 变红。
+    const dot = container.querySelector("span.rounded-full");
+    expect(dot?.className).toContain("bg-muted");
+    expect(dot?.className).not.toContain("bg-danger");
+  });
+
   it("读不到的卡说清原因，而不是显示 0", () => {
     render(
       <QuotaCards

@@ -220,8 +220,14 @@ export function assertSafeRel(rel: unknown): string {
 /** 是否在允许写入的目录内（`dir` 本身或其子路径）。 */
 export function isInsideWriteDirs(rel: string, writeDirs: string[]): boolean {
   const target = rel.replace(/\\/g, "/");
+  // 含 .. / . 这类未归一化的段时绝不算「在目录内」：字符串前缀会被 inbox/../secret 绕过。
+  // 只匹配整段，不误伤「版本-v1..2.md」这种名字里带点的正常文件（d.412 回归）。
+  const targetSegs = target.split("/");
+  if (targetSegs.includes("..") || targetSegs.includes(".")) return false;
   return writeDirs.some((dir) => {
     const normalized = dir.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const dirSegs = normalized.split("/").filter(Boolean);
+    if (dirSegs.includes("..") || dirSegs.includes(".")) return false;
     return normalized === "" || target === normalized || target.startsWith(`${normalized}/`);
   });
 }

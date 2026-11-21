@@ -109,6 +109,19 @@ describe("SystemCapabilityStatus：状态条", () => {
     expect(refreshServerTools).toHaveBeenCalledWith("mcp-windows-desktop", registry);
   });
 
+  it("重连成功后 registry 再变 stale，状态条跟着变，不永久显示绿灯（d.412 回归）", async () => {
+    const registry = freshRegistry();
+    const { rerender } = render(<SystemCapabilityStatus registry={registry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "重新连接 Windows 桌面控制" }));
+    expect(await screen.findByText("已连接")).toBeInTheDocument();
+
+    // 之后别处记录服务死亡：本地 "ready" 不能再盖住 registry 的真实状态
+    registry.setStatus("mcp-windows-desktop", { state: "stale", error: "进程已退出" } as never);
+    rerender(<SystemCapabilityStatus registry={registry} />);
+    expect(await screen.findByText("已断开（清单过期）")).toBeInTheDocument();
+  });
+
   it("重新连接失败时显示错误文案，不假装已连接", async () => {
     vi.mocked(refreshServerTools).mockRejectedValueOnce(new Error("拉起进程失败"));
     const registry = freshRegistry();

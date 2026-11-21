@@ -71,7 +71,29 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
   }
   const earliest = Math.max(0, buffer.length - EOCD_MIN_SIZE - 0xffff);
   for (let offset = buffer.length - EOCD_MIN_SIZE; offset >= earliest; offset -= 1) {
-    if (buffer.readUInt32LE(offset) === EOCD_SIGNATURE) return offset;
+    if (buffer.readUInt32LE(offset) !== EOCD_SIGNATURE) continue;
+    // 签名 50 4B 05 06 也可能出现在 zip 注释里（甚至被刻意拼成一个尾部伪造的
+    // EOCD）。若只认签名就返回，一个 totalEntries=0 的假 EOCD 会让整包被读成
+    // 空、合法条目静默消失。真正的 EOCD 必须同时满足两条：
+    // ① 注释长度正好填满到文件末尾；② 中央目录紧跟在 EOCD 之前
+    // （centralOffset + centralSize == 本 EOCD 偏移）。两条都过才认。
+    const commentLength = buffer.readUInt16LE(offset + 20);
+    if (offset + EOCD_MIN_SIZE + commentLength !== buffer.length) continue;
+    const centralSize = buffer.readUInt32LE(offset + 12);
+    const centralOffset = buffer.readUInt32LE(offset + 16);
+    // 中央目录必须紧跟在本 EOCD 之前（centralOffset + centralSize == EOCD 偏移）。
+    // 伪造的尾部 EOCD（centralOffset=centralSize=0，且不在文件开头）通不过这里；
+    // 真正的空 zip（整包就是 22 字节 EOCD，偏移=0）则天然满足。有条目时再校验
+    // 中央目录起点确实是中央目录头，双重防伪。
+    if (centralOffset + centralSize !== offset) continue;
+    if (
+      centralSize > 0 &&
+      (centralOffset + 4 > buffer.length ||
+        buffer.readUInt32LE(centralOffset) !== CENTRAL_SIGNATURE)
+    ) {
+      continue;
+    }
+    return offset;
   }
   throw new ZipError("不是合法的 ZIP（找不到中央目录）", "invalid_zip");
 }

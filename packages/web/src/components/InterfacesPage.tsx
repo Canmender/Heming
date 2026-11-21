@@ -19,6 +19,7 @@ import { PageShell } from "./layout/PageShell.js";
 import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
 import { Button } from "../components/ui/Button.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 /**
  * 从 `plugin:<插件 id>:<服务 key>` 形态的服务 id 里取出插件 id。
@@ -684,8 +685,8 @@ export function InterfacesView({
           <span className="ui-caption">手动添加，或从 Registry 安装</span>
         </div>
         {userServers.length === 0 ? (
-          <div className="mt-3 rounded-xl border border-dashed border-line bg-surface p-6 text-center text-ui-sm text-muted">
-            还没有私有 MCP 服务
+          <div className="mt-3 ui-card p-4">
+            <EmptyState compact title="还没有私有 MCP 服务" />
           </div>
         ) : (
           <div className="mt-3 flex flex-col gap-3">

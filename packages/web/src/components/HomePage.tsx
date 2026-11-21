@@ -366,6 +366,7 @@ export function HomePage() {
           lastTeamLoadAt={lastTeamLoadAt}
           onRefresh={loadTeam}
           onOpenTeam={() => setPage("team")}
+          onOpenBoard={() => setPage("team", "board")}
         />
       </section>
 

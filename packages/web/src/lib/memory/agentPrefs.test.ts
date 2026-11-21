@@ -51,6 +51,18 @@ describe("resolveAgentMemoryPrefs", () => {
       a3: { shortTerm: true, longTerm: true, personalDb: false },
     });
   });
+
+  it("只靠 trim 判空、不拿 trim 后的值当 key：两条不同的落盘键不互相覆盖（d.412 回归）", () => {
+    expect(
+      resolveAgentMemoryPrefs({
+        " a ": { personalDb: true },
+        a: { personalDb: false },
+      }),
+    ).toEqual({
+      " a ": { shortTerm: true, longTerm: true, personalDb: true },
+      a: { shortTerm: true, longTerm: true, personalDb: false },
+    });
+  });
 });
 
 describe("AgentPrefsStore", () => {

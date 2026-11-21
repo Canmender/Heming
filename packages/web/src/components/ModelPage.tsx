@@ -48,7 +48,6 @@ import {
   type AutoResetLevel,
 } from "../lib/autoReset.js";
 import { capArgs, parseAccountCaps } from "../lib/accountCap.js";
-import { WarmupCard } from "./model/WarmupCard.js";
 import { QuotaCards } from "./model/QuotaCards.js";
 import { QuotaTrendCard } from "./model/QuotaTrendCard.js";
 import { drawableRows, parseQuotaHistory, type QuotaHistoryRow } from "../lib/quotaHistory.js";
@@ -116,7 +115,6 @@ import {
   resetReminderText,
   usageAlertText,
 } from "../lib/magpieReminder.js";
-import { warmupArgs, warmupTimesArgs, type WarmupLevel } from "../lib/warmup.js";
 import { parseHeaderLines } from "../lib/magpieSourceHeaders.js";
 import {
   describeShowFlags,
@@ -244,7 +242,7 @@ const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
  * id 由下面各块的容器提供（`run-trace` / `run-agents` / …），改 id 时两边一起改。
  */
 /**
- * 来源页顶上那排「跳到哪一块」：这一页比运行页还长（两排卡片 + 两张清单 + 模型清单 + 两个折叠）。
+ * 来源页顶上那排「跳到哪一块」：这一页比运行页还长（工具条 + 四张卡 + 模型清单）。
  * 标签刻意用短词（订阅 / 国产端 / 已添加 / 模型清单）：全称与页内标题同字，
  * getByText 会撞成「Found multiple elements」，既有用例会挂。
  */
@@ -1616,49 +1614,6 @@ export function ModelPage() {
   };
 
   /**
-   * 预热档位：内核只认 ""/"week"/"all"，空值是「重置回默认」，
-   * 所以「不预热」发的是 reset，不是 set 空串。
-   */
-  const setWarmupLevel = async (levelKey: string, level: WarmupLevel) => {
-    if (!cli) return;
-    setAccountBusy(`warmup:${levelKey}`);
-    try {
-      const result = await cli.cli(warmupArgs(levelKey, level));
-      if (!result.ok) {
-        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
-        setNotice(`没能改预热：${why}`, true);
-        return;
-      }
-      await loadSettings();
-      setNotice(level === "off" ? "已关掉这家厂商的预热。" : "已打开预热：窗口一重置就先替你开一次。");
-    } catch (err) {
-      setNotice(`没能改预热：${err instanceof Error ? err.message : String(err)}`, true);
-    } finally {
-      setAccountBusy(null);
-    }
-  };
-
-  /** 每天固定开 5 小时窗口的时间点：一条都没有时把这一项重置回空列表。 */
-  const setWarmupTimes = async (timesKey: string, times: string[]) => {
-    if (!cli) return;
-    setAccountBusy(`warmup:${timesKey}`);
-    try {
-      const result = await cli.cli(warmupTimesArgs(timesKey, times));
-      if (!result.ok) {
-        const why = tailText(stripAnsi((result.stderr || result.stdout || result.error || "").trim()));
-        setNotice(`没能改时间：${why}`, true);
-        return;
-      }
-      await loadSettings();
-      setNotice(times.length > 0 ? `已记下：每天 ${times.join("、")} 各开一次。` : "已清掉固定时间。");
-    } catch (err) {
-      setNotice(`没能改时间：${err instanceof Error ? err.message : String(err)}`, true);
-    } finally {
-      setAccountBusy(null);
-    }
-  };
-
-  /**
    * 国内端的两步走：先装社区插件，再登录。
    *
    * 内核自己的登录流只认 Claude/ChatGPT/Copilot/Gemini/Antigravity（国内端是
@@ -2147,35 +2102,38 @@ export function ModelPage() {
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
           <section aria-label="来源" className="space-y-4">
-            {/* 找预设：服务商与国产端都是「一排卡片挑一个」，多了以后扫一遍很费眼。 */}
-            <div className="ui-card p-3">
-              <TextField
-                label="找服务商"
-                hint="只筛「API Key 服务商」与「国产智能体」这两排卡片；已经添加的来源不受影响。"
-                placeholder="qwen / 通义 / 智谱 / trae"
-                value={sourceFilter}
-                onChange={(event) => setSourceFilter(event.target.value)}
-              />
-            </div>
-            {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
+            {/* 顶部工具条：搜索与「跳到哪一块」放在一起——先看清这一页有哪几块，再往下找。 */}
             <div className="ui-card p-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <TextField
+                  label="找服务商"
+                  hint="只筛「API Key 服务商」与「国产智能体」这两排卡片；已经添加的来源不受影响。"
+                  placeholder="qwen / 通义 / 智谱 / trae"
+                  className="min-w-[220px] flex-1"
+                  value={sourceFilter}
+                  onChange={(event) => setSourceFilter(event.target.value)}
+                />
                 <nav aria-label="跳到来源页的某一块" className="flex flex-wrap items-center gap-2">
-            {SOURCE_ANCHORS.map((anchor) => (
-              <Button
-                key={anchor.id}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="transition-colors"
-                onClick={() => jumpTo(anchor.id)}
-              >
-                {anchor.label}
-              </Button>
-            ))}
-          </nav>
+                  {SOURCE_ANCHORS.map((anchor) => (
+                    <Button
+                      key={anchor.id}
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="transition-colors"
+                      onClick={() => jumpTo(anchor.id)}
+                    >
+                      {anchor.label}
+                    </Button>
+                  ))}
+                </nav>
+              </div>
+            </div>
 
-          <h2 id="source-presets" className="ui-section-title">API Key 服务商</h2>
+            {/* ① API Key 服务商：选厂商 → 地址类型（普通 / Coding Plan）→ 填一个 Key。 */}
+            <section id="source-presets" aria-label="API Key 服务商" className="ui-card p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="ui-section-title">API Key 服务商</h2>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
               </div>
               {!cli && (
@@ -2311,13 +2269,14 @@ export function ModelPage() {
                   )}
                 </div>
               )}
-            </div>
+            </section>
 
             {cli && (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              <div className="ui-card p-4">
+            <>
+            {/* ② 订阅账号 + 国产智能体 + 已添加来源：都是「登录/添加账号」这条线，放一张卡里连续看。 */}
+            <section id="source-subs" aria-label="订阅账号" className="ui-card p-4 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 id="source-subs" className="ui-section-title">订阅账号</h2>
+                  <h2 className="ui-section-title">订阅账号</h2>
                   <div className="flex items-center gap-2">
                     <span className={`ui-caption ${readErrors.accounts ? "text-danger" : ""}`}>
                       {readErrors.accounts
@@ -2528,7 +2487,7 @@ export function ModelPage() {
                 </div>
                 <div className="mt-4 border-t border-line pt-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 id="source-added" className="ui-section-title">已添加的来源（{providers.length}）</h2>
+                    <h3 id="source-added" className="ui-section-title">已添加的来源（{providers.length}）</h3>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
@@ -2698,7 +2657,7 @@ export function ModelPage() {
                                   </span>
                                 )}
                                 {quota && (
-                                  // 额度就写在这一行：测试、换 Key、删除都在这儿，不用去另一张卡里对。
+                                  // 额度就写在这一行：测试、换 Key、删除都在这儿，一眼看全。
                                   <span
                                     className={`shrink-0 rounded-full px-2 py-0.5 text-ui-xs ${QUOTA_BADGE[cardTone(quota)]}`}
                                     title={`${quotaKindLabel(quota.kind)}${quota.plan ? ` · ${quota.plan}` : ""}${
@@ -3381,7 +3340,7 @@ export function ModelPage() {
                             </button>
                           </span>
                         ) : cli ? (
-                          "还没有来源。点上面「API Key 服务商」里的一个服务商，或点「加一个其他地址」填服务地址和 Key。"
+                          "还没有来源。在「API Key 服务商」里选一个服务商，或点「加一个其他地址」填服务地址和 Key。"
                         ) : (
                           "还没有来源。添加来源需要桌面版（浏览器里没有文件/密钥桥）。"
                         )}
@@ -3390,7 +3349,7 @@ export function ModelPage() {
                   </ul>
 
                     </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
                   <span className="ui-caption">{discoveryText(discovery)}</span>
                   <button
                     type="button"
@@ -3410,10 +3369,11 @@ export function ModelPage() {
                     onLeadChange={(minutes) => void changeResetLead(minutes)}
                   />
                 )}
-              </div>
+            </section>
 
-              {(orphanQuotas.length > 0 || readErrors.quotas) && (
-                <div className="ui-card p-4">
+            {/* ③ 其余来源的额度：没有对应来源行的 Key / 套餐 / 钱包余额，单独一张卡，别混进账号列表。 */}
+            {(orphanQuotas.length > 0 || readErrors.quotas) && (
+              <section aria-label="其余额" className="ui-card p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h2 className="ui-section-title">其余来源的额度</h2>
                     <span className="ui-caption">没有对应来源行的 Key、套餐与钱包余额</span>
@@ -3435,9 +3395,10 @@ export function ModelPage() {
                       </button>
                     </div>
                   )}
-                </div>
+              </section>
               )}
 
+              {/* ④ 额度走向：收起时只占一行，想看曲线再展开，单独一张卡。 */}
               {history.length > 0 && (
                 <QuotaTrendCard
                   rows={history}
@@ -3447,14 +3408,7 @@ export function ModelPage() {
                 />
               )}
 
-              <WarmupCard
-                values={settingValues}
-                busy={!cli || busy !== null || accountBusy !== null}
-                onLevel={(levelKey, level) => void setWarmupLevel(levelKey, level)}
-                onTimes={(timesKey, times) => void setWarmupTimes(timesKey, times)}
-              />
-
-            </div>
+            </>
             )}
 
             <section id="source-models" aria-label="可用模型" className="space-y-4">
@@ -3475,7 +3429,7 @@ export function ModelPage() {
                   <EmptyState
                     icon={<ModelIcon width={20} height={20} />}
                     title="还没有可用的模型"
-                    desc="在上面「API Key 服务商」「订阅账号」或「国产智能体」里加一个，它的模型会自动出现在这里。"
+                    desc="在「API Key 服务商」「订阅账号」或「国产智能体」里加一个，它的模型会自动出现在这里。"
                     framed
                   />
                 </>

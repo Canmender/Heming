@@ -97,11 +97,35 @@ export function excerptAround(
   const flat = text.replace(/\s+/g, " ").trim();
   if (!flat) return "";
   const query = needle.trim();
-  const found = query ? flat.toLowerCase().indexOf(query.toLowerCase()) : 0;
+  // 在原串上做不区分大小写的查找：不能用 flat.toLowerCase().indexOf(...)，
+  // 因为某些字符小写化会变长（如 İ → i̇，1 码元变 2），拿到的下标再去切原串
+  // 就会错位，把关键词本身切掉。正则在原文上匹配，下标天然对得上原串。
+  // 查询串里的正则元字符要转义，避免把 '.', '(', '[' 等当语法。
+  let found = 0;
+  if (query) {
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    try {
+      found = flat.search(new RegExp(escaped, "i"));
+    } catch {
+      found = flat.indexOf(query); // 极端查询串正则构造失败时退回朴素查找
+    }
+  }
   const at = found >= 0 ? found : 0;
   const safePad = Math.max(0, pad);
-  const start = Math.max(0, at - safePad);
-  const end = Math.min(flat.length, at + Math.max(0, query.length) + safePad);
+  let start = Math.max(0, at - safePad);
+  let end = Math.min(flat.length, at + Math.max(0, query.length) + safePad);
+  // 起止点都按码点边界收口：落在代理对中间就挪开，别把 emoji 劈成落单代理。
+  // start 落在低代理（前一个正好是高代理）→ 整体让掉这个字；
+  // end 落在高代理（后一个是低代理）→ 退一格把这个字让给右侧。
+  if (start > 0) {
+    const c = flat.charCodeAt(start);
+    const prev = flat.charCodeAt(start - 1);
+    if (c >= 0xdc00 && c <= 0xdfff && prev >= 0xd800 && prev <= 0xdbff) start += 1;
+  }
+  if (end < flat.length && end > 0) {
+    const c = flat.charCodeAt(end - 1);
+    if (c >= 0xd800 && c <= 0xdbff) end -= 1;
+  }
   const head = start > 0 ? "…" : "";
   const tail = end < flat.length ? "…" : "";
   return `${head}${flat.slice(start, end)}${tail}`;

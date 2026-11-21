@@ -76,11 +76,14 @@ describe("connectWs", () => {
     FakeWebSocket.instances = [];
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeWebSocket);
+    // 抖动中心：系数恰为 1.0，让「1s→2s→4s」这些既有精确断言继续成立。
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     setToken("t1");
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     setToken(null);
   });
@@ -149,6 +152,30 @@ describe("connectWs", () => {
     // 成功 open 后断线，退避回到 1s
     FakeWebSocket.instances[FakeWebSocket.instances.length - 1].open();
     expectDelay(1000);
+  });
+
+  it("重连退避带 ±10% 抖动打散惊群（d.412）", () => {
+    // low 端：1s×0.9=900ms；high 端：1s×1.1=1100ms，都不越过 30s 上限
+    const low = connectWs({ onEvent: () => {}, rng: () => 0 });
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].drop();
+    vi.advanceTimersByTime(899);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    low.close();
+
+    const beforeHigh = FakeWebSocket.instances.length; // 2（low 的重连已建）
+    const high = connectWs({ onEvent: () => {}, rng: () => 0.999999 });
+    expect(FakeWebSocket.instances).toHaveLength(beforeHigh + 1); // 新建一条，索引 beforeHigh
+    const highSocket = FakeWebSocket.instances[beforeHigh];
+    highSocket.open();
+    highSocket.drop();
+    vi.advanceTimersByTime(1099);
+    expect(FakeWebSocket.instances).toHaveLength(beforeHigh + 1);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(beforeHigh + 2);
+    high.close();
   });
 
   it("close() 停止重连并触发 onClose", () => {

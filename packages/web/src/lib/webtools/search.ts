@@ -77,7 +77,8 @@ const NAMED_ENTITIES: Record<string, string> = {
 
 /** 解码 HTML 实体（命名 + 十进制 + 十六进制；认不出的原样保留）。 */
 export function decodeHtmlEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
+  // HTML 允许 `&#X41;`（大写 X）与 `&#x41;`，两者都要认。
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
       const code = Number.parseInt(body.slice(2), 16);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? safeFromCodePoint(code, whole) : whole;
@@ -114,16 +115,9 @@ function titleText(html: string): string {
 }
 
 function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
-}
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  return `${chars.slice(0, max - 1).join("")}…`;
 }
 
 /**
@@ -144,7 +138,10 @@ export function unwrapDuckDuckGoLink(href: string): string {
   }
   const target = url.searchParams.get("uddg");
   if (target) {
-    const decoded = safeDecodeURIComponent(target).trim();
+    // URLSearchParams.get() 已经解过一层 percent-encoding（uddg 的值本身就是
+    // 编码过的目标地址）。再 decodeURIComponent 一次会把 URL 里的 %20/%25
+    // 解成裸空格/裸 %，把目标地址改坏。这里直接用解码后的值。
+    const decoded = target.trim();
     return /^https?:\/\//i.test(decoded) ? decoded : "";
   }
   // 仍是 duckduckgo.com 的（含 /y.js 广告跳转）不是目标页

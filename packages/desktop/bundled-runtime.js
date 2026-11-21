@@ -110,6 +110,29 @@ function bundledDepsReady() {
 }
 
 /**
+ * 去重后共享的 Node 驱动路径（playwright 与 patchright 共用同一份 node.exe）。
+ *
+ * 这两个包各带一份 89.2MB 的 node.exe，SHA256 完全一致；构建期在**校验两者字节
+ * 相同之后**删掉 patchright 那份，只留 playwright 的。两者的 `_impl/_driver.py`
+ * 都读 `PLAYWRIGHT_NODEJS_PATH` 来决定用哪个 node.exe 启动 driver，所以把这个路径
+ * 注入子进程环境后，patchright 会改用 playwright 那份字节相同的二进制——功能、
+ * 行为、性能完全不变，只是磁盘上不再存两份相同的 89MB 文件。
+ *
+ * 只在「patchright 自己的 node.exe 已不存在、而 playwright 那份还在」时才返回
+ * 路径——也就是去重**确实发生过**时才注入。这样：
+ * - 已去重的运行时：patchright 被重定向到共享副本，正常工作；
+ * - 未去重的老运行时：patchright 有自己的 node.exe，返回 null、不注入，行为
+ *   与从前一字不差（即便将来两个包的 node.exe 版本不同也不会被错误替换）。
+ */
+function bundledNodeExecutable() {
+  const site = path.join(runtimeDir(), "python", "Lib", "site-packages");
+  const shared = path.join(site, "playwright", "driver", "node.exe");
+  const patchrightNode = path.join(site, "patchright", "driver", "node.exe");
+  // 去重确实发生过（patchright 副本已删）且共享副本存在，才需要重定向
+  return !exists(patchrightNode) && exists(shared) ? shared : null;
+}
+
+/**
  * 把配置里的 id / 命令归一，判断它是不是我们的内置系统能力。
  *
  * 为什么不能只看 id：渲染层存下来的 id 是 `mcp-windows-desktop`、
@@ -203,6 +226,12 @@ function bundledEnv(base = process.env) {
   const env = { ...base, [pathKey]: merged.join(path.delimiter), HEMING_RUNTIME: runtimeDir() };
   delete env.PYTHONHOME;
   delete env.VIRTUAL_ENV;
+
+  // 让 patchright 复用 playwright 那份 node.exe（两者字节相同，构建期已删掉
+  // patchright 的副本）。两个包的 _driver.py 都认这个变量；只在共享文件存在时
+  // 注入，老版本运行时没去重时保持原样，行为完全兼容。
+  const node = bundledNodeExecutable();
+  if (node && !env.PLAYWRIGHT_NODEJS_PATH) env.PLAYWRIGHT_NODEJS_PATH = node;
   return env;
 }
 
@@ -231,6 +260,7 @@ module.exports = {
   RUNTIME_DIR,
   bundledDepsReady,
   bundledEnv,
+  bundledNodeExecutable,
   bundledPython,
   bundledUv,
   builtinKind,

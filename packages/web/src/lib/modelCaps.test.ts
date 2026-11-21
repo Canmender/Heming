@@ -43,6 +43,14 @@ describe("模型能力表", () => {
     expect(lookupCapability("openai", "", storage)).toBeNull();
   });
 
+  it("原型链上的键名不当成模型命中：__proto__/toString 等都返回 null（d.412 回归）", () => {
+    // EXACT 是普通对象，直接 EXACT[id] 会把 Object.prototype 上的东西
+    // 当成一张能力表返回（contextWindow 成 undefined → 预筛错杀候选）。
+    for (const id of ["__proto__", "toString", "constructor", "hasOwnProperty", "valueOf"]) {
+      expect(lookupCapability("openai", id, storage)).toBeNull();
+    }
+  });
+
   it("前缀匹配：deepseek-reasoner 命中 deepseek 家族且支持思考", () => {
     const caps = lookupCapability("openai", "deepseek-reasoner", storage);
     expect(caps).not.toBeNull();

@@ -11,6 +11,7 @@
  * 3. 去重保序：同一文件改两次只记一条，顺序按首次出现。
  */
 import type { ChatMessage } from "../llmClient.js";
+import { failureCode } from "../toolFailure.js";
 import type { RolloutEvidence } from "./types.js";
 
 
@@ -28,6 +29,22 @@ const COMMAND_TOOL_RE = /shell|exec|command|terminal|bash|pwsh|run_|spawn/i;
 
 /** 内部动作：它们不碰外部世界，不能当证据。 */
 const INTERNAL_TOOLS = new Set(["tool_search"]);
+
+/**
+ * 从转录重建证据时，工具消息没有 `ok` 字段（ChatMessage 契约里工具结果只有文本）。
+ * 一段明确宣称「没执行/失败」的结果文本不能被当成成功证据——否则「只自称完成」
+ * 也能混进证据面板。这里只认**强失败标记**（拒绝文案的状态声明、失败码、系统错误），
+ * 宁可漏判也不把成功写成失败：正常成功文案不会出现这些词。
+ */
+const FAILURE_TEXT_RE =
+  /该操作未执行|用户拒绝了本次工具调用|本次工具调用未执行|拒绝规则匹配|不存在部分写入或中间状态|FAILED[:：]|\bEACCES\b|permission denied|no write occurred|（[a-z-]*(?:failed|denied|error|rejected)[a-z-]*）/i;
+
+function resultLooksFailed(text: string): boolean {
+  // 文字标记兜底 + 契约里的稳定错误码（safety-reject / path-escape / unknown-tool…
+  // 这些码不含 failed/denied/error/rejected，单靠上面的正则会漏判，把失败当成成功证据）。
+  // failureCode 只认首行「标题（kebab-code）：说明」头，成功文案没有这种头，不会误伤。
+  return FAILURE_TEXT_RE.test(text) || failureCode(text) !== null;
+}
 
 /** 单条证据文本上限（证据是摘要，不是第二份日志）。 */
 const MAX_COMMAND_CHARS = 160;
@@ -102,7 +119,8 @@ export function buildTurnEvidence(
       seenFiles.add(path);
       files.push(path);
     }
-    const summary = oneLine(call.arguments).slice(0, MAX_COMMAND_CHARS);
+    // 按码点截，避免参数里的 emoji 在 MAX_COMMAND_CHARS 边界被切出落单代理。
+    const summary = clip(oneLine(call.arguments), MAX_COMMAND_CHARS);
     if (COMMAND_TOOL_RE.test(name)) {
       const command = clip(`${name}${summary ? `: ${summary}` : ""}`, MAX_COMMAND_CHARS);
       if (!seenCommands.has(command)) {
@@ -152,12 +170,14 @@ export function evidenceFromTranscript(messages: readonly ChatMessage[]): Rollou
     .filter((m) => m.role === "tool" && typeof m.name === "string")
     .map((m) => {
       const known = typeof m.tool_call_id === "string" ? argsById.get(m.tool_call_id) : undefined;
-      // 工具消息的 result 由工具自己产生，ok 记为 true：失败的结果文本里不含成功标记，
-      // 而 buildTurnEvidence 的写/命令识别依赖参数，不会因此凭空多出证据。
+      const text = typeof m.content === "string" ? m.content : "";
+      // ChatMessage 没有 ok 字段，只能从结果文本推断：明确宣称「未执行/失败」的
+      // 结果不能当成功证据。以前这里硬编码 ok: true，失败的写（FAILED/EACCES/
+      // 拒绝文案）会被 buildTurnEvidence 收成「完成即证据」，与模块红线相悖。
       return {
         call: { name: known?.name || (m.name as string), arguments: known?.arguments ?? "" },
-        text: typeof m.content === "string" ? m.content : "",
-        ok: true,
+        text,
+        ok: !resultLooksFailed(text),
       };
     });
   return buildTurnEvidence(pairs);

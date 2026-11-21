@@ -174,6 +174,23 @@ describe("CanvasPane 编辑交互", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("Esc 取消后再次编辑，正常失焦仍能回写（d.412 回归）", () => {
+    const onChange = vi.fn();
+    const { container } = render(<CanvasPane text={DEMO_TEXT} onChange={onChange} />);
+    // 第一次编辑：Esc 取消
+    fireEvent.doubleClick(getNode(container, "a"));
+    fireEvent.change(screen.getByLabelText("编辑文本节点"), { target: { value: "临时改动" } });
+    fireEvent.keyDown(screen.getByLabelText("编辑文本节点"), { key: "Escape" });
+    expect(onChange).not.toHaveBeenCalled();
+    // 第二次编辑：正常失焦必须回写，不能被上一次残留的取消标志吞掉
+    fireEvent.doubleClick(getNode(container, "a"));
+    fireEvent.change(screen.getByLabelText("编辑文本节点"), { target: { value: "正式改动" } });
+    fireEvent.blur(screen.getByLabelText("编辑文本节点"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = parseOk(onChange.mock.calls[0][0] as string);
+    expect(findNode(next, "a")?.text).toBe("正式改动");
+  });
+
   it("键盘 Enter 打开编辑（键盘可达）", () => {
     const { container } = render(<CanvasPane text={DEMO_TEXT} onChange={vi.fn()} />);
     fireEvent.keyDown(getNode(container, "b"), { key: "Enter" });

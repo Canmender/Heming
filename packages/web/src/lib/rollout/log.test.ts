@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
 import { MAX_ITEMS_PER_STREAM, createRolloutLog } from "./log.js";
@@ -36,6 +36,20 @@ describe("rollout 记录器", () => {
     const text = log.read("s1")[0];
     expect(text?.type).toBe("tool_result");
     expect(String((text as { text: string }).text).length).toBeLessThanOrEqual(11);
+  });
+
+  it("截断按码点算，不把 emoji 代理对劈开（回放面板不出现乱码方块）", () => {
+    const { log } = makeLog({ maxTextChars: 10 });
+    // 第 10 个码点正好是 emoji，旧实现 slice(0,10) 会切在代理对中间，留下孤立高位代理
+    log.append({ type: "tool_result", streamId: "s1", id: "t1", name: "x", ok: true, text: "字".repeat(9) + "😀" + "尾" });
+    const item = log.read("s1")[0] as { text: string };
+    expect(item.text.endsWith("…")).toBe(true);
+    // 码点迭代器下，完整 emoji 是单个 length===2 的字符；孤立代理是 length===1 且落在 D800–DFFF
+    const lone = Array.from(item.text).some(
+      (ch) => ch.length === 1 && (ch.charCodeAt(0) & 0xfc00) === 0xd800,
+    );
+    expect(lone).toBe(false);
+    expect(item.text).toContain("😀"); // emoji 完整保留
   });
 
   it("单回合条目数有上限，超出丢最旧的（保留最近的现场）", () => {

@@ -58,11 +58,14 @@ export function BackupPanel() {
 
   const startBackup = () => {
     if (!bridge || !dir) return;
+    // 精确到秒 + 随机后缀：同一分钟内连点两次备份不能落到同一个文件名
+    // （原来只到分钟，第二次会静默覆盖第一次）。
     const stamp = new Date()
       .toISOString()
       .replace(/[-:T]/g, "")
-      .slice(0, 12);
-    const path = `${dir}\\model-${stamp}.backup`;
+      .slice(0, 14);
+    const unique = Math.random().toString(36).slice(2, 6);
+    const path = `${dir}\\model-${stamp}-${unique}.backup`;
     setPending({
       title: "新建备份",
       args: backupArgs(path, backupParts),
@@ -234,11 +237,10 @@ export function BackupPanel() {
             setPending(null);
             void load();
           }}
+          // 副作用不能放进 setState 的 updater：StrictMode 会双调 updater，
+          // 导致 backupInfo 被调用两次。onDone 时 pending 必然还在，直接 load 即可。
           onDone={() => {
-            setPending((current) => {
-              if (current) void load();
-              return current;
-            });
+            void load();
           }}
         />
       )}

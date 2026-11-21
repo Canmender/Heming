@@ -42,6 +42,21 @@ const PROFILE: LlmProfile = {
 
 const TMP: string[] = [];
 
+/** 字符串是否为合法 Unicode（无落单代理）。tsconfig 的 lib 未含 es2024，不能用 String.isWellFormed。 */
+function isWellFormedText(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function tmpDir(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), "heming-cli-subagent-"));
   TMP.push(dir);
@@ -107,6 +122,17 @@ describe("parseSubagentArgs", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.args.tasks[0]!.length).toBe(SUBAGENT_TASK_MAX_CHARS);
+  });
+
+  it("任务截断按码点：emoji 落在边界上不留落单代理", () => {
+    const parsed = parseSubagentArgs(
+      JSON.stringify({ task: "a".repeat(SUBAGENT_TASK_MAX_CHARS - 1) + "😀" + "tail" }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const task = parsed.args.tasks[0]!;
+    expect(isWellFormedText(task)).toBe(true);
+    expect([...task]).toHaveLength(SUBAGENT_TASK_MAX_CHARS);
   });
 
   it("max_rounds 越界夹到 1–6，小数取整", () => {
@@ -242,6 +268,16 @@ describe("createSubagentRunner", () => {
     const result = await run("说一大堆", 4);
     expect(result.text.length).toBeLessThan(SUBAGENT_RESULT_MAX + 200);
     expect(result.text).toContain("后面还有");
+  });
+
+  it("结论截断按码点：emoji 落在 4000 字边界不留落单代理", async () => {
+    const { chat } = scriptedChat([{ text: "a".repeat(SUBAGENT_RESULT_MAX - 1) + "😀" + "b".repeat(50) }]);
+    const run = createSubagentRunner({ chat, profile: PROFILE, tools: [], execute: vi.fn() });
+    const result = await run("说一大堆", 4);
+    // 按码点保留 4000 个：3999 个 a + 整颗 emoji（占 2 个 UTF-16 单元）。
+    // 整体必须是合法 Unicode；不能再按 UTF-16 下标 slice(0,4000) 去验，那本身就会劈开 emoji。
+    expect(isWellFormedText(result.text)).toBe(true);
+    expect([...result.text.split("\n")[0]!]).toHaveLength(SUBAGENT_RESULT_MAX);
   });
 
   it("把中断信号传下去：取消后不再继续", async () => {

@@ -171,6 +171,29 @@ test("就绪超时：回收进程并带出 stderr 尾巴", async () => {
   assert.match(host.status().stderrTail.join("\n"), /address already in use/);
 });
 
+test("子进程启动后立即崩溃：提前判失败，不空等满 30s 就绪窗口", async () => {
+  let probes = 0;
+  const child = fakeChild();
+  const { host } = hostWith({
+    child,
+    // 采用检查失败 → spawn；spawn 一返回子进程就崩（exit 处理里把 child 置空）
+    spawn: () => {
+      queueMicrotask(() => child.emit("exit", 1, null));
+      return child;
+    },
+    fetchImpl: async () => {
+      probes += 1;
+      return { ok: false, json: async () => ({}) };
+    },
+    readyTimeoutMs: 30_000,
+  });
+  await assert.rejects(() => host.start(), /没有在规定时间内就绪/);
+  // 崩溃后 readyTimeoutMs 还有 30s，若 bug 复现（`&& !starting` 恒假）会在循环里空转 ~60 次；
+  // 正确行为是 running() 一变 false 就 break，探活次数远小于此。
+  assert.ok(probes < 10, `崩溃后仍空转了 ${probes} 次探活，没有提前判失败`);
+  assert.equal(host.status().running, false);
+});
+
 test("/api/hello 不是 magpie：不认作就绪（防连到别的本机服务）", async () => {
   const { host } = hostWith({
     fetchImpl: async () => ({ ok: true, json: async () => ({ name: "other-service", version: "1" }) }),

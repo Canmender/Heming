@@ -250,6 +250,38 @@ describe("Registry store：本地包安装的运行时门槛", () => {
 
   const ready = { platform: "win32", npm: true, pypi: true, note: "齐备" };
 
+  it("★ 快速双击只写一条配置：锁在 probeRuntime 的 await 之前同步获取", async () => {
+    // 回归：以前 installingKey 在 probeRuntime() 之后才设置，两次并发安装会
+    // 双双通过检查、各自 mcp().add()，往磁盘写两条重复配置。
+    const mcp = emptyMcp();
+    // 明确断言已赋值：Promise 执行器同步运行，resolve 一定会写入。
+    // 用 `| null` 会让 TS 的控制流把这里窄化成 never（看不到执行器已同步执行）。
+    let releaseProbe!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const addSpy = vi.spyOn(mcp, "add");
+    const { store } = make({
+      mcp,
+      probeRuntime: async () => {
+        await gate;
+        return ready;
+      },
+      confirmInstall: async () => ({ approved: true }),
+    });
+    const local = localEntry("npm");
+
+    const p1 = store.getState().install(local, local.options[0]);
+    const p2 = store.getState().install(local, local.options[0]);
+    releaseProbe();
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect([r1.ok, r2.ok].filter(Boolean)).toHaveLength(1);
+    expect([r1.error, r2.error].filter((e) => e?.includes("正在安装"))).toHaveLength(1);
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    expect(mcp.servers().filter((s) => s.registryName === local.key)).toHaveLength(1);
+  });
+
   // 本地包要在本机拉起进程：没有 stdio 桥就是浏览器，装不了是确定事实。
   // 这一组测的是「装了运行时能不能跑」，所以先把桌面环境假出来。
   beforeEach(() => {

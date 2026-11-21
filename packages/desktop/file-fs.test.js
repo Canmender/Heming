@@ -1241,6 +1241,26 @@ test("每个文件只留最近 MAX_BACKUPS_PER_PATH 份备份（超出丢最旧�
     }
   }));
 
+test("同一毫秒两次备份各占一个文件，不互相覆盖（撤销能回各自版本）", () =>
+  withWorkspace(async (ws) => {
+    const bak = makeBackupDir();
+    const realNow = Date.now;
+    try {
+      // 固定时钟重现碰撞窗口：文件名只依赖路径+时间时，两次备份会落到同一个 .bak。
+      Date.now = () => 1700000000000;
+      const target = path.join(ws.writeRoot, "collision.md");
+      const first = await createBackup(bak.dir, target, Buffer.from("VERSION-ONE"));
+      const second = await createBackup(bak.dir, target, Buffer.from("VERSION-TWO"));
+      assert.ok(first && second, "两次备份都要成功");
+      assert.notEqual(first.file, second.file, "同一毫秒的两次备份不能共用一个文件名");
+      assert.equal(fs.readFileSync(path.join(bak.dir, first.file), "utf8"), "VERSION-ONE", "第一份备份不能被第二份静默覆盖");
+      assert.equal(fs.readFileSync(path.join(bak.dir, second.file), "utf8"), "VERSION-TWO");
+    } finally {
+      Date.now = realNow;
+      bak.cleanup();
+    }
+  }));
+
 test("备份目录不可写时：写入照常成功，只是没有备份（安全网不能挡住主功能）", () =>
   withWorkspace(async (ws) => {
     const bogus = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "heming-broken-")), "not-a-dir");

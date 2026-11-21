@@ -1,7 +1,7 @@
-﻿import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { FileEditCard } from "./FileEditCard.js";
-import { FILE_ROOTS_KEY, FileRootsStore } from "../lib/fileEdit/roots.js";
+import { FILE_ROOTS_KEY, FileRootsStore, setActiveWorkspace } from "../lib/fileEdit/roots.js";
 import type { FileFsBridge } from "../lib/fileEdit/bridge.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import type { StorageLike } from "../lib/memory/types.js";
@@ -83,6 +83,19 @@ describe("设置区 · 文件编辑卡", () => {
     useUiStore.setState({ activeConversationId: "c1" });
     setup();
     expect(screen.getByText("D:/项目/另一个")).toBeTruthy();
+  });
+
+  it("无活动会话时回退到 activeWorkspace()，不误报「没有工作区」（d.412 回归）", () => {
+    // 设置页清空了 activeConversationId：conversationWorkspace 是空串，
+    // 旧写法用 ?? 不会继续降级到 activeWorkspace()，会把工作区显示成「没有」。
+    setActiveWorkspace("D:/来自活动工作区");
+    act(() => {
+      useChatStore.setState({ conversations: [] });
+      useUiStore.setState({ activeConversationId: null });
+    });
+    setup();
+    expect(screen.getByText("D:/来自活动工作区")).toBeTruthy();
+    setActiveWorkspace(undefined);
   });
 
   it("未配置额外根时说明工作区已可读写，并指出这里管的是工作区之外", () => {

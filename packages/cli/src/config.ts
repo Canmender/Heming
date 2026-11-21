@@ -62,11 +62,25 @@ export function resolveModelConfig(
   }
 
   const baseUrl = pick(overrides.baseUrl, env.HEMING_BASE_URL, env.OPENAI_BASE_URL) ?? DEFAULT_BASE_URL;
-  if (!/^https?:\/\//i.test(baseUrl)) {
+  /**
+   * 先去掉末尾斜杠再校验：既要挡住「没有 scheme」的地址，也要挡住「只有 scheme 没有主机」的
+   * 残址（如 `http://` / `https://`）。后者用正则 `^https?://` 也能过，但 `.replace(/\/+$/, "")`
+   * 会把它压成 `http:`，拼上 `/chat/completions` 后被 URL 解析成 host=chat 的荒唐目的地——
+   * 带 Key 的请求就发错地方了。这里统一用 `new URL()` 要求协议合法且有非空 hostname。
+   */
+  const normalizedBase = baseUrl.replace(/\/+$/, "");
+  let baseOk = false;
+  try {
+    const parsed = new URL(normalizedBase);
+    baseOk = (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.hostname);
+  } catch {
+    baseOk = false;
+  }
+  if (!baseOk) {
     return {
       ok: false,
-      error: `base URL 必须以 http:// 或 https:// 开头，收到「${baseUrl}」。` +
-        "缺 scheme 的地址会让带 Key 的请求发错地方，所以这里直接拒绝。",
+      error: `base URL 必须是带主机的 http:// 或 https:// 地址，收到「${baseUrl}」。` +
+        "缺 scheme 或缺主机的地址会让带 Key 的请求发错地方，所以这里直接拒绝。",
     };
   }
 
@@ -74,6 +88,6 @@ export function resolveModelConfig(
 
   return {
     ok: true,
-    config: { apiKey, baseUrl: baseUrl.replace(/\/+$/, ""), model },
+    config: { apiKey, baseUrl: normalizedBase, model },
   };
 }

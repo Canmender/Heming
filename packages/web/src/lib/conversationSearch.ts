@@ -20,7 +20,9 @@ export const CONTENT_SEARCH_LIMIT = 20;
 
 /** 是否值得为这个查询发内容搜索请求。 */
 export function shouldSearchContent(query: string): boolean {
-  return query.trim().length >= CONTENT_SEARCH_MIN_CHARS;
+  // 与服务端 sqliteStore 的 Array.from(query).length 一致按码点计数：
+  // 单个 emoji 的 UTF-16 length 是 2，不该当成「两个字符」触发请求。
+  return [...query.trim()].length >= CONTENT_SEARCH_MIN_CHARS;
 }
 
 /** 把命中按会话收口成 Map：同一个会话只留第一条（服务端本来就只回最新一条）。 */

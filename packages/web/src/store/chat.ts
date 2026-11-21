@@ -148,9 +148,17 @@ export interface MessageTranscript {
   steps?: TranscriptStep[];
 }
 
-/** 一条分步记录：思考段（自带文字）或工具调用（指向 `tools` 里的 id）。 */
+/**
+ * 一条分步记录：思考段（自带文字）、工具调用（指向 `tools` 里的 id）或回答段。
+ *
+ * `answer` 只用于**流式展示**（d.4xx 修复「回答之后的调用/思考要排在回答下方」）：
+ * 模型在工具轮里边说边做，正文与工具在时间上交错，但 `text` 是单一累加字符串，
+ * 旧版式把它整体摆在步骤下方，于是「全部思考/工具在上、全部回答在下」。
+ * 把回答按工具分界切成 `answer` 步骤插进时间线，就能按真实先后铺开。
+ * 落盘的 `transcript.steps` 沿用 think/tool（收口时不产 answer），历史消息不受影响。
+ */
 export interface TranscriptStep {
-  kind: "think" | "tool";
+  kind: "think" | "tool" | "answer";
   text?: string;
   toolId?: string;
 }
@@ -324,6 +332,9 @@ function readPersistedTranscriptItems(convId: string): PersistedTranscriptItem[]
     const clean = truncateTranscript({
       thinking: typeof r.thinking === "string" ? r.thinking : undefined,
       tools: Array.isArray(r.tools) ? (r.tools as ToolTrace[]) : undefined,
+      // d.350 分步叙述必须跟着读回来：漏传会让交错时间线（think→tool→think）
+      // 在重载后塌回「思考在上、工具在下」；写盘时又会顺手把旧条目的 steps 抹掉。
+      steps: Array.isArray(r.steps) ? (r.steps as TranscriptStep[]) : undefined,
     });
     if (clean) out.push({ id: r.id, ...clean });
   }
@@ -785,7 +796,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     const updated = await updateConversationTitle(convId, title);
     // 服务端口径为准（trim/截断在服务端做），本地只替换这一条，避免整表刷新打断正在看的会话。
     set({
-      conversations: get().conversations.map((c) => (c.id === convId ? { ...c, ...(updated.title ? { title: updated.title } : {}) } : c)),
+      // 空串 = 清除：服务端删掉 title 字段后响应里就没有 title，
+      // 这里必须显式写 undefined 才能抹掉本地旧标题（与 moveConversation 的 workspace 同口径）。
+      conversations: get().conversations.map((c) =>
+        c.id === convId ? { ...c, ...(updated.title ? { title: updated.title } : { title: undefined }) } : c,
+      ),
     });
   },
   async deleteConversation(convId) {

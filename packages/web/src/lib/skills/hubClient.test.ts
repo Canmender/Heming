@@ -278,6 +278,18 @@ describe("错误透传与超时/取消（d.113 P1-3 / P1-8）", () => {
     expect((error as Error).message).toContain("上游限流，请约 5 秒后重试");
   });
 
+  it("429 无 retry-after 头：回落到通用文案，不误报「0 秒后重试」", async () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify({ error: "too many requests" }), {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      });
+    const error = await fetchHubStatus({ fetchImpl }).catch((err: unknown) => err);
+    expect((error as SkillHubError).status).toBe(429);
+    expect((error as Error).message).toContain("上游限流，请稍后重试");
+    expect((error as Error).message).not.toContain("0 秒");
+  });
+
   it("402：透出服务端中文 error；坏 JSON 错误体回落 HTTP 状态", async () => {
     const fetchImpl = async () => jsonResponse({ error: "余额不足，请充值后再下载" }, 402);
     const error = await fetchHubStatus({ fetchImpl }).catch((err: unknown) => err);

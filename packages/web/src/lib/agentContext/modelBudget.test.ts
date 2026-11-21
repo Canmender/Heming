@@ -50,11 +50,14 @@ describe("modelBudget 按 DSH 规则算上下文预算", () => {
     expect(spec!.thresholdTokens).toBe(Math.floor(64_000 * 0.8));
   });
 
-  it("小窗口（比余量还小）：按窗口 80% 压，不返回负数预算", () => {
+  it("小窗口（比余量还小）：余量记 0，阈值夹到消息预算内、不超过窗口能装的正文", () => {
     const spec = compactSpec({ contextWindow: 8_192, maxOutput: 4_096 });
-    expect(spec!.thresholdTokens).toBe(Math.floor(8_192 * 0.8));
-    expect(spec!.pressureBudgetTokens).toBeGreaterThan(0);
-    expect(windowBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(6_553);
+    // 没有摘要余量可留就诚实记 0，不伪造整个消息预算（d.412 回归）
+    expect(spec!.pressureBudgetTokens).toBe(0);
+    // 阈值不能超过消息预算 4096（旧代码给 6553 > 4096，越窗硬塞必换 400）
+    expect(spec!.thresholdTokens).toBe(4_096);
+    expect(spec!.retainTokens).toBeLessThan(spec!.thresholdTokens);
+    expect(windowBudgetTokens({ contextWindow: 8_192, maxOutput: 4_096 })).toBe(4_096);
   });
 
   it("窗口未知：compactSpec 返回 null，预算回落到保守默认", () => {

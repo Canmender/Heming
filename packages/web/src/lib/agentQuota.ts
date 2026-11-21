@@ -1,4 +1,4 @@
-﻿import type { AccountRow } from "./magpieCli.js";
+import type { AccountRow } from "./magpieCli.js";
 import {
   formatResetIn,
   windowLeftPercent,
@@ -52,7 +52,10 @@ export function agentQuota(rows: readonly AccountRow[], agentId: string | null, 
     };
   }
 
-  const measured = windows.filter((window) => !window.unlimited);
+  // text 窗口的 display 是一句话（如 "In use"），used/remaining 只是占位数字，
+  // 不能当百分比参与"最紧"比较——否则一句话会把徽标染成红/绿。与 quotaRank /
+  // swapAccount / accountFilter 的口径一致：只看真正可量化的窗口。
+  const measured = windows.filter((window) => !window.unlimited && !window.text);
   if (measured.length === 0) {
     return {
       accounts: readable.length,

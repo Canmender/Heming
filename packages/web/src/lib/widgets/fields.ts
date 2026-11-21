@@ -107,7 +107,8 @@ export function coerceWidgetSettingValue(
     case "text":
     default: {
       if (typeof raw !== "string") return { ok: false, error: "请输入文本" };
-      if (raw.length > 500) return { ok: false, error: "最多 500 字" };
+      // 「500 字」按用户看到的字符算：emoji/扩展汉字是代理对，raw.length 会把它们算成 2。
+      if ([...raw].length > 500) return { ok: false, error: "最多 500 字" };
       return { ok: true, value: raw };
     }
   }

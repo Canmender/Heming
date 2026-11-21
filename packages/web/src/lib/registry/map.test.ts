@@ -74,6 +74,16 @@ describe("validatePackage · 白名单", () => {
     expect(r!.value.length).toBeLessThanOrEqual(41); // 40 + 省略号
   });
 
+  it("★ 超长值截断到码点边界，不劈开 emoji", () => {
+    // emoji 正好落在第 40 个码点边界上：按 UTF-16 slice 会劈出落单高代理
+    const id = "a".repeat(39) + "😀" + "b".repeat(300);
+    const r = validatePackage(pkg({ identifier: id }));
+    expect(r?.reason).toContain("过长");
+    // 展示值末位是完整 emoji（40 个码点 + 省略号），没有落单代理
+    expect(Array.from(r!.value).slice(0, 40).join("").endsWith("😀")).toBe(true);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(r!.value)).toBe(false);
+  });
+
   it("校验版本号字符集", () => {
     expect(validatePackage(pkg({ version: "1.0.0-beta.1" }))).toBeNull();
     expect(validatePackage(pkg({ version: "1.0.0+build.1" }))).toBeNull();

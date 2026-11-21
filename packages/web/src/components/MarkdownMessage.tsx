@@ -82,7 +82,8 @@ function CodeBlock({
       document.body.appendChild(area);
       area.select();
       try {
-        document.execCommand("copy");
+        // execCommand 失败时返回 false 而不一定抛错，不能当成成功
+        if (!document.execCommand("copy")) return;
       } catch {
         return; // 两条路都失败就不装作成功
       } finally {
@@ -291,15 +292,16 @@ export const MarkdownMessage = memo(function MarkdownMessage({
     [streaming],
   );
 
-  // 空正文不渲染空行：调用方常在无内容时也挂载本组件
-  if (!text) return null;
-
   // d.368：记住上一帧冻结到哪了，下一帧只切新长出来的那一段（长回答不再每帧重扫全文）。
+  // 所有 hook 都必须无条件调用——空→非空切换时若提前 return，hook 数量会变，React 会抛错。
   const memoRef = useRef<MarkdownBlocksMemo | null>(null);
   const parts: { stable: string; tail: string; memo?: MarkdownBlocksMemo } = streaming
     ? splitMarkdownBlocksFrom(text, memoRef.current)
     : { stable: "", tail: text };
   memoRef.current = streaming ? (parts.memo ?? null) : null;
+
+  // 空正文不渲染空行：调用方常在无内容时也挂载本组件（放在所有 hook 之后）。
+  if (!text) return null;
 
   return (
     <div className="markdown-body break-words">

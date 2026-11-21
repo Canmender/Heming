@@ -538,9 +538,34 @@ function isNumericTag(tag: string): boolean {
  *
  * 大小写保留原文，去重交给索引层（比较时用 lower）。
  */
+/** 把 `[[...]]` 维链整体盖成等长空格，避免链接里的结构性 `#`（如 `[[#标题]]`、`[[foo|#别名]]`）被当成行内标签。 */
+function maskWikiLinks(text: string): string {
+  const out = text.split("");
+  let depth = 0;
+  for (let i = 0; i < text.length; ) {
+    if (text.startsWith("[[", i)) {
+      depth = 1;
+      out[i] = " ";
+      out[i + 1] = " ";
+      i += 2;
+      continue;
+    }
+    if (depth > 0 && text.startsWith("]]", i)) {
+      depth = 0;
+      out[i] = " ";
+      out[i + 1] = " ";
+      i += 2;
+      continue;
+    }
+    if (depth > 0) out[i] = " ";
+    i += 1;
+  }
+  return out.join("");
+}
+
 export function extractInlineTags(text: string, opts: LineOptions = {}): ParsedTag[] {
   const source = String(text ?? "");
-  const masked = maskCode(source);
+  const masked = maskWikiLinks(maskCode(source));
   const offset = opts.lineOffset ?? 0;
   const out: ParsedTag[] = [];
   const re = /(^|[^\p{L}\p{N}_&/#\\.-])#([\p{L}\p{N}_/-]+)/gu;

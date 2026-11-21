@@ -63,6 +63,12 @@ describe("resolveUrl（API base 直连注入）", () => {
     );
   });
 
+  it("base 带末尾斜杠 → 拒绝，避免拼出 //api 让整站 404（d.412 回归）", () => {
+    expect(() => resolveUrl("/api/me", "http://host/", "x")).toThrow(/VITE_API_BASE 配置无效/);
+    expect(() => resolveUrl("/api/me", "http://host///", "x")).toThrow(/VITE_API_BASE 配置无效/);
+    expect(resolveUrl("/api/me", "http://host", "x")).toBe("http://host/api/me");
+  });
+
   it("模块常量 API_BASE 读取 VITE_API_BASE（stubEnv + 重载模块）", async () => {
     vi.stubEnv("VITE_API_BASE", "http://x");
     vi.resetModules();

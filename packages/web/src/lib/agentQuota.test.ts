@@ -45,6 +45,29 @@ describe("智能体的额度徽标", () => {
     expect(quota?.detail).toContain("每周 剩 10%");
   });
 
+  it("纯文字窗口（厂商原话）不参与最紧比较，不让它在徽标上说红说绿（d.412 回归）", () => {
+    const row = account({
+      agent: "codex",
+      label: "工作号",
+      windows: [
+        win({ name: "credits", unit: "credits", text: true, display: "In use", used: 95, remaining: 5 }),
+        win({ name: "Week", used: 20, remaining: 80 }),
+      ],
+    });
+    const quota = agentQuota([row], "codex", NOW);
+    // 文字窗口被跳过，真正可量化的"每周 剩 80%"才决定徽标；detail 里仍保留原话。
+    expect(quota?.label).toBe("剩 80%");
+    expect(quota?.tone).toBe("ok");
+    expect(quota?.detail).toContain("In use");
+
+    const onlyText = account({
+      agent: "codex",
+      label: "工作号",
+      windows: [win({ name: "credits", unit: "credits", text: true, display: "In use" })],
+    });
+    expect(agentQuota([onlyText], "codex", NOW)).toMatchObject({ label: "不限量", tone: "ok" });
+  });
+
   it("点数窗口按点数说，用完就说用完", () => {
     const partial = account({
       agent: "workbuddy",

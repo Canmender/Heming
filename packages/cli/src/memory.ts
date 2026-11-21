@@ -62,7 +62,13 @@ export function memoryPath(cwd: string): string {
 export function normalizeMemoryText(raw: string): string {
   const oneLine = raw.replace(/\s+/g, " ").trim();
   if (oneLine.length <= CLI_MEMORY_MAX_TEXT) return oneLine;
-  return `${oneLine.slice(0, CLI_MEMORY_MAX_TEXT - 1)}…`;
+  // 按 UTF-16 码元硬切会把 emoji / 扩展汉字（代理对）劈成孤立的半截，
+  // 写进 memory.json 后注入系统提示词就是非法 Unicode。截断点若落在高代理上，
+  // 退一格再拼省略号，保证结果仍是完整码点串。
+  let end = CLI_MEMORY_MAX_TEXT - 1;
+  const last = oneLine.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${oneLine.slice(0, end)}…`;
 }
 
 function isEntry(value: unknown): value is CliMemoryEntry {

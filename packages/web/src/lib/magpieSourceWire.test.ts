@@ -43,6 +43,10 @@ describe("来源的端专用开关（搜索 / 压缩 / User-Agent）", () => {
     ).toEqual(["provider", "set", "mock", "user-agent=magpie", "search=yes", "compaction=native"]);
     expect(sourceWireCommand("mock", {})).toBeNull();
     expect(sourceWireCommand("  ", { search: "yes" })).toBeNull();
+    // 带首尾空白的 id 要 trim 后再下发，与兄弟命令一致（d.412 回归）。
+    expect(sourceWireCommand("  mock  ", { search: "yes" })).toEqual([
+      "provider", "set", "mock", "search=yes",
+    ]);
   });
 
   it("现状那一句：UA 总要说，另外两个只在设过时说", () => {

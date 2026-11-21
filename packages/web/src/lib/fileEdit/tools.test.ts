@@ -286,6 +286,26 @@ describe("file_read 执行", () => {
     expect(result.text).not.toContain("一");
   });
 
+  it("正文超长截断时不在 emoji 代理对中间劈开（d.412 回归）", async () => {
+    // 让代理对的低代理正好落在第 20000 位之后：高代理是第 19999 个字符（0 基 19999）。
+    const content = "a".repeat(19999) + "😀" + "TAIL";
+    const fake = fakeBridge({ "D:/库/a.md": content });
+    const bridge = buildFileToolBridge({ bridge: fake, roots: () => [ROOT] });
+    const result = await run(bridge, "file_read", { path: "a.md" });
+    expect(result.ok).toBe(true);
+    // 逐 UTF-16 单元走一遍：任何高代理后面必须跟低代理，反之亦然。
+    for (let i = 0; i < result.text.length; i += 1) {
+      const c = result.text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = result.text.charCodeAt(i + 1);
+        expect(next >= 0xdc00 && next <= 0xdfff).toBe(true);
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const prev = result.text.charCodeAt(i - 1);
+        expect(prev >= 0xd800 && prev <= 0xdbff).toBe(true);
+      }
+    }
+  });
+
   it("只读根可读", async () => {
     const fake = fakeBridge({ "D:/参考/a.md": "参考内容\n" });
     const bridge = buildFileToolBridge({ bridge: fake, roots: () => [ROOT, READ_ROOT] });

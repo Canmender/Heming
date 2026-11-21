@@ -39,11 +39,12 @@ export function rpcNotification(method: string, params?: unknown): string {
  */
 export function parseSseMessages(text: string): JsonRpcResponse[] {
   const out: JsonRpcResponse[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
+  // SSE 规范：一个事件可以有多个 data: 行，取值时用 \n 连接。JSON-RPC 消息可能被
+  // 拆到多行 data:，逐行 JSON.parse 会全部失败。这里按空行（事件边界）聚合连续的
+  // data: 行，join("\n") 后一次解析。
+  const parsePayload = (payload: string) => {
+    const data = payload.trim();
+    if (!data || data === "[DONE]") return;
     try {
       const parsed = JSON.parse(data) as JsonRpcResponse;
       // 响应与通知都收（通知用于日志/调试），调用方按 id 取自己那条
@@ -53,7 +54,32 @@ export function parseSseMessages(text: string): JsonRpcResponse[] {
     } catch {
       /* 心跳/非 JSON 行忽略 */
     }
+  };
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length) {
+      // 先试整体（一条消息被拆成多行 data:）；失败再逐行（一个事件里多条独立消息，
+      // 现实中的 MCP 服务端两种都发）。两种都不成立的行各自被 parsePayload 忽略。
+      const joined = pending.join("\n");
+      try {
+        JSON.parse(joined);
+        parsePayload(joined);
+      } catch {
+        for (const line of pending) parsePayload(line);
+      }
+    }
+    pending = [];
+  };
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("data:")) {
+      pending.push(line.slice(5).trim());
+    } else if (line === "") {
+      flush(); // 空行 = 事件结束
+    }
+    // 其它字段（event:/id:/注释）忽略；不打断连续的 data: 组。
   }
+  flush(); // 流未以空行收尾时也处理末尾那组
   return out;
 }
 

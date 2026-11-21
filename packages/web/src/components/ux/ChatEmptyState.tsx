@@ -19,23 +19,27 @@ export interface ChatEmptyStateProps {
 
 export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
   return (
-    <div className="flex min-h-[420px] w-full flex-col items-center justify-center px-6 py-10">
-      <div className="w-full max-w-[560px] text-center">
-        <p className="text-ui-xl font-semibold leading-8 text-ink">有什么可以帮你的？</p>
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-ui-sm text-muted">
+    <div className="flex min-h-[420px] w-full items-start justify-center px-6 py-10">
+      {/*
+       * 简约 · 大气 · 有层次：左对齐的大标题 + 一行说明 + 示例，
+       * 靠字号差与留白建立层次，不用装饰线。文案与 aria-label 全部原样保留。
+       */}
+      <div className="w-full max-w-[600px] py-10 sm:py-14">
+        <h2 className="text-ui-xl font-semibold leading-9 text-ink">有什么可以帮你的？</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-md text-muted">
           <span>还没有消息</span>
           <span aria-hidden="true">·</span>
           <span>发送第一条消息，开始这段对话。</span>
         </div>
 
-        <p className="mt-6 text-ui-xs text-muted">点一条填进输入框，改完再发送。</p>
-        <ul className="mt-2 flex flex-wrap justify-center gap-2" aria-label="对话示例">
+        <p className="mt-10 text-ui-sm text-muted">点一条填进输入框，改完再发送。</p>
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="对话示例">
           {examples.map((example) => (
             <li key={example.id}>
               <button
                 type="button"
                 onClick={() => onPick(example.text)}
-                className={`rounded-full border border-line bg-surface px-3.5 py-1.5 text-ui-sm leading-5 text-body transition-colors hover:border-line-strong hover:bg-subtle-2 ${FOCUS_RING_TIGHT}`}
+                className={`rounded-full border border-line bg-surface px-3.5 py-1.5 text-ui-sm leading-5 text-body transition-colors hover:border-ink hover:text-ink ${FOCUS_RING_TIGHT}`}
               >
                 {example.text}
               </button>
