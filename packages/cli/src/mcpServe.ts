@@ -71,6 +71,8 @@ export async function startMcpServe(options: McpOptions, io: McpServeIO): Promis
     ...(hookRunner ? { hooks: hookRunner } : {}),
     ...(postHookRunner ? { postHooks: postHookRunner } : {}),
     readOnly: options.readOnly === true,
+    // --no-rewind 终于能生效：长驻的 mcp serve 里回退日志只抓不落盘，显式关掉可省去反复读盘。
+    rewind: options.rewind,
   });
   const ctx: McpContext = {
     tools: tooling.toolBridge,

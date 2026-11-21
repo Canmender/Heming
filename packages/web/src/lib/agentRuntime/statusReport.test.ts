@@ -88,6 +88,9 @@ describe("环境自检 `/status`（d.193）", () => {
       expect(text).toContain(item.title);
     }
     expect(text).toContain("不会发给模型");
+    // `/help` 把含 `/init` 的全部命令都列出来，而 /init 会发模型请求并写 AGENTS.md；
+    // 帮助文本必须点明这个例外，否则「不会发给模型」的承诺与清单自相矛盾（d.412.4.215）。
+    expect(text).toContain("会把任务发给模型");
   });
 });
 

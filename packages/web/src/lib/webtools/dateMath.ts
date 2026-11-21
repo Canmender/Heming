@@ -68,12 +68,16 @@ export function parseDateInput(raw: string | undefined, now: Date): DateParseOut
   if (!text || /^(now|today|现在|今天|此刻)$/i.test(text)) return { ok: true, date: new Date(now.getTime()) };
 
   let normalized = text.replace(/\//g, "-").replace(/年|月/g, "-").replace(/日/g, "").trim();
-  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(normalized)) normalized = `${normalized} 00:00:00`;
-  if (/^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}$/.test(normalized)) normalized = `${normalized}:00`;
-  if (/^\d{4}-\d{1,2}-\d{1,2}[ T]\d{1,2}:\d{1,2}(:\d{1,2})?$/.test(normalized)) normalized = normalized.replace(" ", "T");
-  else if (!/[T ]\d{1,2}:\d{1,2}/.test(normalized)) {
-    // 纯日期以外没有任何时间信息时，一次 new Date(YYYY-MM-DD) 也按 UTC 解析，这里补本地零点
-    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(normalized)) normalized = `${normalized}T00:00:00`;
+
+  // 宽松输入（\d{1,2}）拼成 ISO 前必须把每个分量补零到两位：ISO 8601 要求两位，
+  // 单位数（如 2026-1-5T9:3:0）在 V8 里是 Invalid Date，合法的宽松写法会被误拒（d.412.4.202）。
+  const loose = normalized.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/,
+  );
+  if (loose) {
+    const [, y, mo, d, h = "0", mi = "0", s = "0"] = loose;
+    const pad = (v: string) => v.padStart(2, "0");
+    normalized = `${y}-${pad(mo!)}-${pad(d!)}T${pad(h!)}:${pad(mi!)}:${pad(s!)}`;
   }
 
   const date = new Date(normalized);

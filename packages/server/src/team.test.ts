@@ -431,6 +431,35 @@ describe("团队动向", () => {
     expect(after.status).toBe(201);
   });
 
+  it("批量上报不突破每人 500 条上限：最后一批只补满空位、其余计入 skipped（d.412.4.196）", async () => {
+    const batch = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => activity({ sourceId: `bulk:${from + i}` }));
+    // 先填到 490 条（10 批 × 49），留 10 个空位。
+    for (let round = 0; round < 10; round += 1) {
+      const res = await request(app)
+        .post("/api/team/activities")
+        .set(auth(token))
+        .send({ items: batch(round * 49, 49) });
+      expect(res.status).toBe(201);
+    }
+    // 一次提交 20 条全新 sourceId：旧实现入口只查一次 count（490<500 放行），
+    // 循环里不管剩余额度全插 → 530 条突破上限；正确行为是只补 10 条到 500。
+    const over = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: batch(490, 20) });
+    expect(over.status).toBe(201);
+    expect(over.body.inserted).toBe(10);
+    expect(over.body.skipped).toBe(10);
+
+    // 现在确实满了，再写一条应 429。
+    const full = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({ items: [activity({ sourceId: "bulk:overflow" })] });
+    expect(full.status).toBe(429);
+  });
+
   it("items 为空或字段越界返回 400", async () => {
     const empty = await request(app)
       .post("/api/team/activities")
@@ -817,6 +846,28 @@ describe("动向时间口径（d.113）", () => {
       .query({ limit: 2, before: last.occurredAt, beforeId: last.id })
       .set(auth(token));
     expect(page2.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual(["t:0"]);
+  });
+
+  it("非规范格式的 before 游标先归一化再比较，不重条也不漏条（d.412.4.195）", async () => {
+    // 库内 occurredAt 是写侧归一化的 "2026-11-02T08:00:00.000Z"。
+    expect((await post([activity({ sourceId: "t:cut", occurredAt: "2026-11-02T08:00:00.000Z" })])).status).toBe(201);
+    expect((await post([activity({ sourceId: "t:old", occurredAt: "2026-11-01T08:00:00.000Z" })])).status).toBe(201);
+
+    // 无毫秒写法：字典序下 ".000Z" < "Z"，旧实现会把 t:cut 误判为「早于 before」而重复返回。
+    const noMs = await request(app)
+      .get("/api/team/activities")
+      .query({ before: "2026-11-02T08:00:00Z" })
+      .set(auth(token));
+    expect(noMs.status).toBe(200);
+    expect(noMs.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual(["t:old"]);
+
+    // 带时区偏移写法：+08:00 归一化后是 00:00Z，旧实现按字符串比较会错位 8 小时。
+    const offset = await request(app)
+      .get("/api/team/activities")
+      .query({ before: "2026-11-02T16:00:00+08:00" })
+      .set(auth(token));
+    expect(offset.status).toBe(200);
+    expect(offset.body.activities.map((a: { sourceId: string }) => a.sourceId)).toEqual(["t:old"]);
   });
 });
 

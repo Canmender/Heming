@@ -82,11 +82,14 @@ export function conversationFileName(title: string, exportedAt: number, ext: "md
     : `${d.getFullYear()}${PAD(d.getMonth() + 1)}${PAD(d.getDate())}-${PAD(d.getHours())}${PAD(
         d.getMinutes(),
       )}`;
-  const safe = title
+  // d.412.4.198：按码点截断，不能按 UTF-16 码元 slice——后者会把标题末尾的 emoji
+  // 劈成落单代理写进文件名（下载文件名里出现半截代理，落盘后是乱码/问号）。
+  const clean = title
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 60);
+    .trim();
+  const chars = Array.from(clean);
+  const safe = chars.length <= 60 ? clean : chars.slice(0, 60).join("");
   return `和鸣-${safe || "会话"}-${stamp}.${ext}`;
 }
 

@@ -118,6 +118,23 @@ describe("SQLite FTS5 会话搜索（d.236）", () => {
     ]);
   });
 
+  it("单会话命中垄断扫描窗口时，其他会话的命中不被挤掉（d.412.4.193）", () => {
+    // 旧会话先写 1 条命中（rowid 更小）；新会话写 10 条（rowid 更大 → 排序更靠前）。
+    const convB = store.createAgentConversation(userId, SYSTEM_AGENT_ID, { fresh: true }).id;
+    store.addMessage(convB, "user", userId, { text: "旧会话也提到全部通过" });
+    for (let i = 0; i < 10; i++) {
+      store.addMessage(conv, "user", userId, { text: `第 ${i} 次提到全部通过` });
+    }
+    // maxScanned=3：新会话的近期命中占满窗口，旧会话那条必须仍然可见。
+    const res = store.searchMessages("全部通过", {
+      conversationIds: [conv, convB],
+      limit: 10,
+      maxScanned: 3,
+    });
+    expect(res).not.toBeNull();
+    expect(res!.hits.map((h) => h.conversationId).sort()).toEqual([conv, convB].sort());
+  });
+
   it("只搜自己所在的会话（FTS 结果按成员关系收口）", async () => {
     store.addMessage(conv, "user", userId, { text: "只有 alice 能看到全部通过" });
     const bob = store.createUser("bob", "h", "鲍勃");

@@ -10,6 +10,21 @@ function lines(count: number, prefix = "line"): string {
   return Array.from({ length: count }, (_, i) => `${prefix}-${i + 1}`).join("\n");
 }
 
+/** 检测字符串里是否有落单代理（高位后面不是低位，或低位前面不是高位）。 */
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      const prev = s.charCodeAt(i - 1);
+      if (!(prev >= 0xd800 && prev <= 0xdbff)) return true;
+    }
+  }
+  return false;
+}
+
 describe("工具结果预览（d.234）", () => {
   it("短结果原样返回，不做任何改变", () => {
     const short = "读了 12 行，没有发现明显问题。";
@@ -45,6 +60,20 @@ describe("工具结果预览（d.234）", () => {
     expect(out.hiddenChars).toBeGreaterThan(0);
     expect(out.preview.length).toBeLessThan(text.length);
     expect(out.preview).toMatch(/中间还有 \d+ 字未显示/);
+  });
+
+  it("单行极长时按字符截，切点不会把 emoji 代理对劈成落单代理（d.412.4.197）", () => {
+    // keep = floor(20/2) = 10；"a"×9 后紧跟 emoji，head 的 slice(0,10) 正落在代理对中间。
+    const headText = "a".repeat(9) + "😀".repeat(30);
+    const headOut = previewToolResult(headText, { minChars: 20 });
+    expect(headOut.truncated).toBe(true);
+    expect(hasLoneSurrogate(headOut.preview)).toBe(false);
+
+    // "😀"×30 + "y"：tail 的 slice(-10) 从某个 emoji 的低位代理开始。
+    const tailText = "😀".repeat(30) + "y";
+    const tailOut = previewToolResult(tailText, { minChars: 20 });
+    expect(tailOut.truncated).toBe(true);
+    expect(hasLoneSurrogate(tailOut.preview)).toBe(false);
   });
 
   it("刚超过阈值一点点也要截（边界不留缝），且隐藏字数为正", () => {

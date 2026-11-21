@@ -108,6 +108,18 @@ describe("isValidDailyFormat", () => {
     expect(isValidDailyFormat("YYYY-MM-DD")).toBe(true);
     expect(isValidDailyFormat("YYYYMMDD")).toBe(true);
   });
+
+  it("拒绝相邻变长 token 的无分隔符格式：YYYYMD 写出的日期无法唯一反解（d.412 回归）", () => {
+    // YYYYMD 把 2026-01-18 写成 "2026118"，parseDailyPath 贪心解成 2026-11-08，
+    // 日记被归到错误日期且再也找不回来——与超长 token 同一类「不可反解」缺陷。
+    for (const format of ["YYYYMD", "YYYYMDD", "YYYYMMD", "YYYY-MD", "YYYYMDHHmm"]) {
+      expect(isValidDailyFormat(format)).toBe(false);
+    }
+    // 定长 token 相邻仍可唯一切分，继续合法。
+    for (const format of ["YYYYMMDD", "YYMMDD", "YYYY-MM-DD", "YYYY年MM月DD日"]) {
+      expect(isValidDailyFormat(format)).toBe(true);
+    }
+  });
 });
 
 describe("dailyNotePath", () => {

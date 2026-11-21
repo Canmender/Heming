@@ -181,6 +181,10 @@ export function createCliGate(input: {
           const choice = input.ask
             ? await input.ask({
                 tool: name,
+                // 标成 rule 并带上规则标识：审批包装据此把「本次运行都允许」限定在这条规则，
+                // 不写 danger 的 sessionAllowed 总闸（d.412.4.210）。
+                kind: "rule",
+                ruleKey: verdict.reason ?? `ask:${name}`,
                 ...(ruleDisplay ? { displayName: ruleDisplay } : {}),
                 ...(ruleDetail ? { detail: ruleDetail } : {}),
                 reason: `工作区权限规则要求先确认（${verdict.reason ?? "命中 ask 规则"}）`,
@@ -388,15 +392,21 @@ export function relativizeToolArgs(argsJson: string, cwd: string): string {
     }
   }
   // glob 模式：`D:/proj/**/*.ts` → `**/*.ts`（只剥「正好以 cwd 开头」这一种前缀）。
+  // Windows 下路径大小写不敏感：path 分支用 path.relative 天然不敏感，这里手写比较必须
+  // 同样折成小写再比，否则 `d:/project/**` 对 `D:/Project` 剥不掉、绝对 glob 被当越界拒绝。
+  // POSIX 保持大小写敏感（折叠函数退化为恒等）。剥前缀仍用原串 slice，保留后缀原样大小写。
+  const foldCase = process.platform === "win32" ? (s: string) => s.toLowerCase() : (s: string) => s;
   for (const key of ["pattern", "glob"]) {
     const value = out[key];
     if (typeof value === "string" && ABSOLUTE.test(value)) {
       const prefix = root.replace(/\\/g, "/");
       const normalized = value.replace(/\\/g, "/");
-      if (normalized === prefix) {
+      const foldedPrefix = foldCase(prefix);
+      const foldedValue = foldCase(normalized);
+      if (foldedValue === foldedPrefix) {
         out[key] = "**/*";
         changed = true;
-      } else if (normalized.startsWith(`${prefix}/`)) {
+      } else if (foldedValue.startsWith(`${foldedPrefix}/`)) {
         out[key] = normalized.slice(prefix.length + 1);
         changed = true;
       }
@@ -527,8 +537,33 @@ export function createCliTooling(options: {
    * 后面的写不再挨个问；但这不等于放行命令（两件事的风险完全不同）。
    */
   let writesAllowed = false;
+  /*
+   * 工作区规则问询答「本次运行都允许」的记录（d.412.4.210）。
+   *
+   * 与 danger 的 allow-session 严格分开：规则说「这条命令在这仓库可以先问一下」，
+   * 人答「本次运行都允许」只该放行**这条规则**，绝不能写 `sessionAllowed` 打开
+   * 整次运行的 danger 总闸——否则随后任何不命中规则的危险命令都被静默放行，
+   * 等于用一次仓库规则问询绕过了逐次审批。
+   */
+  const ruleSessionAllowed = new Set<string>();
   const askWrites = options.askWrites === true && options.ask !== null && options.ask !== undefined;
   const dangerAllowed = (): boolean => sessionAllowed || permits > 0;
+  /**
+   * 工作区 allow 规则是否放行了这一次危险调用（d.412.4.191）。
+   *
+   * 与闸门 `createCliGate` 的 `relaxedByRule` 严格同口径：都要求 `allowActive`
+   * （即 --trust-workspace）、都用 `toHitlCall` + `matchWorkspaceRules` 判定，
+   * 连传进去的 roots 也是同一份。否则会出现「闸门放行、桥二次拒绝」的假授权：
+   * 规则在闸门层明明生效，`describeCliWorkspaceRules` 也报告「allow 已生效」，
+   * 命令却永远不执行。编排层只把闸门放行的调用交给桥，所以这里补的是同一份判定，
+   * 不是另开一道更宽的口子——未信任（allowActive=false）时永远返回 false。
+   */
+  const allowedByTrustedRule = (call: { name: string; arguments: string }): boolean => {
+    const rules = options.rules;
+    if (!rules?.allowActive) return false;
+    const hitlCall = toHitlCall({ id: "", function: { name: call.name, arguments: call.arguments } });
+    return matchWorkspaceRules(rules.config, hitlCall, { roots }).verdict === "allow";
+  };
   const consumePermit = (): void => {
     if (!sessionAllowed && permits > 0) permits -= 1;
   };
@@ -594,7 +629,7 @@ export function createCliTooling(options: {
     async execute(call, execOpts) {
       // 没挂命令工具时，模型仍可能「凭印象」调用它：回一条明确的未执行文案，
       // 而不是让 mergeToolBridges 回「未知工具」——后者会让模型以为是参数写错、反复重试。
-      if (call.name === SHELL_TOOL && !dangerAllowed()) {
+      if (call.name === SHELL_TOOL && !dangerAllowed() && !allowedByTrustedRule(call)) {
         return { text: shellDeniedText(), ok: false };
       }
 
@@ -664,7 +699,7 @@ export function createCliTooling(options: {
       const mcpTarget = mcpTargets.get(call.name);
       if (mcpTarget) {
         const { connection, tool: mcpTool } = mcpTarget;
-        if (!dangerAllowed()) {
+        if (!dangerAllowed() && !allowedByTrustedRule(call)) {
           return {
             text: [
               `未执行：MCP 工具 ${call.name} 需要 --allow-danger（MCP 工具一律按危险工具处理）。`,
@@ -751,12 +786,25 @@ export function createCliTooling(options: {
          * 每个都弹一次的结果是人开始闭眼按 y——那比不问更危险。
          */
         if (request.kind === "write" && writesAllowed) return "allow-session";
+        /*
+         * 规则问询已经对这条规则答过「本次运行都允许」：不再问人，但仍发一张一次性许可，
+         * 让桥的 danger 二次检查通过。绝不写 sessionAllowed 总闸（d.412.4.210）。
+         */
+        if (request.kind === "rule" && request.ruleKey && ruleSessionAllowed.has(request.ruleKey)) {
+          permits += 1;
+          return "allow-session";
+        }
         const choice = await options.ask!(request);
         if (choice === "allow-session") {
           if (request.kind === "write") writesAllowed = true;
-          else sessionAllowed = true;
+          else if (request.kind === "rule") {
+            // 只放行这条规则；一次性许可够当前这次过桥，后续同规则命中由上面的短路处理。
+            if (request.ruleKey) ruleSessionAllowed.add(request.ruleKey);
+            permits += 1;
+          } else sessionAllowed = true;
         } else if (choice === "allow-once") {
           // 写不需要一次性许可：闸门放行后桥立刻执行，中间没有第二个门。
+          // 规则问询靠一次性许可过桥，但绝不记入 sessionAllowed。
           if (request.kind !== "write") permits += 1;
         } else if (choice === "deny-all") stopped = true;
         return choice;

@@ -24,6 +24,21 @@ import {
 
 const sandboxes: string[] = [];
 
+/** 检测字符串里是否有孤立代理对（高位后面不是低位，或低位前面不是高位）。 */
+function hasLoneSurrogate(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      const prev = value.charCodeAt(i - 1);
+      if (!(prev >= 0xd800 && prev <= 0xdbff)) return true;
+    }
+  }
+  return false;
+}
+
 async function makeDir(): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "heming-sessions-"));
   sandboxes.push(dir);
@@ -110,6 +125,18 @@ describe("writeSession / readSession", () => {
     const parsed = JSON.parse(raw) as SessionRecord;
     expect(parsed.turns[0]!.text.length).toBeLessThan(long.length);
     expect(parsed.turns[0]!.text).toContain("存档只留前面这些");
+  });
+
+  it("超长文本截断不劈开 emoji 代理对（d.412.4.212）", async () => {
+    const dir = await makeDir();
+    // 让第 MAX_STORED_MESSAGE_CHARS 个码元恰好是 emoji 的高位代理：slice 会把它劈成孤立代理。
+    const before = "字".repeat(MAX_STORED_MESSAGE_CHARS - 1);
+    const text = `${before}😀后面还有一大段内容`;
+    await writeSession(dir, recordOf("20261118-144230-ab1f", {
+      turns: [{ role: "assistant", text, at: 1 }],
+    }));
+    const back = await readSession(dir, "20261118-144230-ab1f");
+    expect(hasLoneSurrogate(back!.turns[0]!.text)).toBe(false);
   });
 
   it("轮次超过上限只留最后这些（早期的让位）", async () => {

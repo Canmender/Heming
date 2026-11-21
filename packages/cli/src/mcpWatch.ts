@@ -7,9 +7,11 @@
  * 用户在编辑器里改了约定，得重启才生效。
  *
  * 两个刻意的取舍：
- * - **只监听这几个目录，不递归**（工作区、`.heming`、`.heming/commands`）。工作区里可能有
- *   `node_modules` 这种几十万文件的目录，递归监听既慢又容易被系统文件句柄上限打回来。
- * - **按需建 watcher**：只有一个订阅都没有时，一个 watcher 都不建。
+ * - **不递归**：基础只监听工作区、`.heming`、`.heming/commands` 三个目录（工作区里可能有
+ *   `node_modules` 这种几十万文件的目录，递归监听既慢又容易被系统文件句柄上限打回来）。
+ *   但订阅的文件可以落在任意子目录（资源模板 `heming://workspace/{path}` 可读即可订），
+ *   所以订阅时会为该文件所在目录**按需补挂**一个非递归 watcher——订了才挂，不是全树递归。
+ * - **按需建 watcher**：一个订阅都没有时，一个 watcher 都不建；订阅清空后按需挂载的目录也回收。
  */
 
 import { existsSync, watch } from "node:fs";
@@ -83,11 +85,13 @@ export function createMcpCatalogWatcher(options: McpCatalogWatcherOptions): McpC
   let listTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
-  const targets: WatchTarget[] = [
+  /** 基础监听目录（相对工作区固定的三个）；订阅子目录时会在后面按需追加。 */
+  const baseTargets: WatchTarget[] = [
     { dir: cwd, prefix: "" },
     { dir: `${cwd}/.heming`, prefix: ".heming/" },
     { dir: `${cwd}/.heming/commands`, prefix: ".heming/commands/" },
   ];
+  const targets: WatchTarget[] = [...baseTargets];
 
   const flush = (uri: string): void => {
     timers.delete(uri);
@@ -133,9 +137,11 @@ export function createMcpCatalogWatcher(options: McpCatalogWatcherOptions): McpC
   };
 
   const ensureWatchers = (): void => {
-    if (closed || watchers.size > 0) return;
+    if (closed) return;
     for (const target of targets) {
-      if (!exists(target.dir)) continue;
+      // 逐个补挂：基础三个目录在首次订阅时挂上，之后订阅子目录会追加新 target，
+      // 这里要给未监听的目录也挂上，不能用 `watchers.size > 0` 提前整体返回。
+      if (watchers.has(target.dir) || !exists(target.dir)) continue;
       try {
         const handle = watchDir(target.dir);
         watchers.set(target.dir, handle);
@@ -156,6 +162,22 @@ export function createMcpCatalogWatcher(options: McpCatalogWatcherOptions): McpC
     }
   };
 
+  /**
+   * 为订阅文件所在的子目录补一个监听目标（已覆盖则返回）。
+   *
+   * 非递归 watcher 只报自己目录的直接子项，所以要监听 `src/a.ts` 必须在 `src/` 上挂
+   * watcher（不是在有几十万文件的工作区根上递归）。基础三个目录已覆盖的就不再追加。
+   */
+  const ensureTargetFor = (rel: string): void => {
+    const dir = resourceDirOfRel(rel);
+    const prefix = dir === "" ? "" : `${dir}/`;
+    // 已有同前缀的 target 就跳过：根 ""、".heming/"、".heming/commands/" 都由 baseTargets 覆盖。
+    if (targets.some((target) => target.prefix === prefix)) return;
+    const targetDir = `${cwd}/${dir}`.replace(/\/+/g, "/");
+    if (!exists(targetDir)) return; // 目录还不存在就不挂，订阅仍在 uris 里，下次可再试
+    targets.push({ dir: targetDir, prefix });
+  };
+
   const releaseIfIdle = (): void => {
     if (uris.size > 0) return;
     for (const handle of watchers.values()) {
@@ -166,14 +188,18 @@ export function createMcpCatalogWatcher(options: McpCatalogWatcherOptions): McpC
       }
     }
     watchers.clear();
+    // 订阅清空后回收按需追加的子目录 target，只留基础三个，避免目录越订越多常驻。
+    targets.length = baseTargets.length;
   };
 
   return {
     subscribe(uri: string): void {
       if (closed) return;
-      if (relOfResourceUri(uri) === null) return;
+      const rel = relOfResourceUri(uri);
+      if (rel === null) return;
       if (uris.size >= MCP_WATCH_MAX_URIS && !uris.has(uri)) return;
       uris.add(uri);
+      ensureTargetFor(rel); // 子目录订阅：先补挂该文件所在目录的 watcher
       ensureWatchers();
     },
     unsubscribe(uri: string): void {

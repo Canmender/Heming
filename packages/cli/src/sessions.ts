@@ -116,7 +116,12 @@ export function sessionFile(dir: string, id: string): string | null {
 function clipText(text: string): string {
   const value = String(text);
   if (value.length <= MAX_STORED_MESSAGE_CHARS) return value;
-  return `${value.slice(0, MAX_STORED_MESSAGE_CHARS)}\n…（超过 ${MAX_STORED_MESSAGE_CHARS} 字，存档只留前面这些）`;
+  // 按码元截会劈开恰落在边界上的 emoji 代理对，孤立代理写进存档再喂回模型就是损坏文本。
+  // 末尾若是落单高位代理就退一格（与 shell/tool.ts 的 clip 同口径）。
+  let cut = MAX_STORED_MESSAGE_CHARS;
+  const boundary = value.charCodeAt(cut - 1);
+  if (boundary >= 0xd800 && boundary <= 0xdbff) cut -= 1;
+  return `${value.slice(0, cut)}\n…（超过 ${MAX_STORED_MESSAGE_CHARS} 字，存档只留前面这些）`;
 }
 
 /** 只留最后 `MAX_STORED_TURNS` 条：会话越长，越早期的内容越该让位。 */

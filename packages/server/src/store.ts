@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SYSTEM_AGENT, SYSTEM_AGENT_ID } from "@heming/shared";
-import { summarizeTeamTasks } from "./teamCounts.js";
+import { sortTeamBriefMembers, summarizeTeamTasks } from "./teamCounts.js";
 import type {
   User,
   Message,
@@ -980,7 +980,11 @@ export function createMemoryStore(): Store {
       return files.get(id) ?? null;
     },
     listFiles() {
-      return [...files.values()].map((f) => f.meta).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+      // updatedAt 降序；同一毫秒上传的文件按 id 升序兜底，保证顺序确定、与 SQLite ORDER BY 对齐。
+      // 原比较器相等时返回 -1（违反反对称性），会让同时间戳文件顺序随插入序漂移（d.412.4.207）。
+      return [...files.values()]
+        .map((f) => f.meta)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
     },
     deleteFile(id) {
       return files.delete(id);
@@ -1193,24 +1197,19 @@ export function createMemoryStore(): Store {
           const summary = summarizeTeamTasks(
             [...teamTasks.values()].filter((task) => task.teamId === team.id),
           );
-          const members = [...teamMembers.values()]
-            .filter((member) => member.teamId === team.id)
-            .map((member) => {
-              const found = users.get(member.userId);
-              return {
-                id: member.userId,
-                displayName: found === undefined ? member.userId : found.user.displayName,
-                role: member.role,
-                open: summary.perMember.get(member.userId) ?? 0,
-              };
-            })
-            .sort((a, b) =>
-              a.role === b.role
-                ? a.displayName.localeCompare(b.displayName, "zh-Hans-CN")
-                : a.role === "owner"
-                  ? -1
-                  : 1,
-            );
+          const members = sortTeamBriefMembers(
+            [...teamMembers.values()]
+              .filter((member) => member.teamId === team.id)
+              .map((member) => {
+                const found = users.get(member.userId);
+                return {
+                  id: member.userId,
+                  displayName: found === undefined ? member.userId : found.user.displayName,
+                  role: member.role,
+                  open: summary.perMember.get(member.userId) ?? 0,
+                };
+              }),
+          );
           return {
             id: team.id,
             name: team.name,
@@ -1503,8 +1502,13 @@ export function createMemoryStore(): Store {
       return { ...task };
     },
     listTeamTaskComments(teamId, taskId) {
-    return [...(teamTaskComments.get(taskId) ?? [])];
-  },
+      // 与 SQLite 版同口径：必须按 teamId 收口，不能只按 taskId 从 Map 取——
+      // 否则调用方传了 stale/错队的 teamId 时会读到别队任务的讨论（跨队数据泄漏面）。
+      // 写入按 taskId 存数组、插入序≈createdAt 序；显式按 createdAt,id 升序兜底对齐 SQLite。
+      return [...(teamTaskComments.get(taskId) ?? [])]
+        .filter((c) => c.teamId === teamId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    },
 
   addTeamTaskComment(teamId, taskId, actorId, text) {
     if (!visibleTeam(teamId, actorId)) return "forbidden";
@@ -1601,21 +1605,16 @@ export function createMemoryStore(): Store {
   searchTeamKnowledge(teamId, actorId, query) {
     if (!visibleTeam(teamId, actorId)) return null;
     const q = query.trim().toLowerCase();
-    if (q.length < 3) {
-      // 与 messages 搜索同口径：短查询回退线性扫描（前缀命中）
-      return [...teamKnowledge.values()]
-        .filter((d) => d.teamId === teamId)
-        .filter((d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q))
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .map((d) => ({ ...d, tags: [...d.tags] }));
-    }
+    // 标签在任意查询长度都参与搜索（d.412.4.190）：此前短查询分支漏了 tags，
+    // 与 SQLite 版长查询（FTS 索引无 tags）恰好相反，同一检索两后端结果不同。
+    // 两实现统一为「标题/正文/标签」三处都搜，只在实现路径（线性 vs FTS）上有别。
+    const matches = (d: TeamKnowledgeDoc) =>
+      d.title.toLowerCase().includes(q) ||
+      d.content.toLowerCase().includes(q) ||
+      d.tags.some((t) => t.toLowerCase().includes(q));
     return [...teamKnowledge.values()]
       .filter((d) => d.teamId === teamId)
-      .filter(
-        (d) =>
-          d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q) ||
-          d.tags.some((t) => t.toLowerCase().includes(q)),
-      )
+      .filter(matches)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((d) => ({ ...d, tags: [...d.tags] }));
   },

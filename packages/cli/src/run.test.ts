@@ -786,4 +786,46 @@ describe("子代理（d.331）", () => {
     expect(record?.ok).toBe(false);
     expect(record?.text).toContain("没有开子代理");
   });
+
+  it("子代理的模型调用用量计入 exec --json（帮助承诺 rounds 与用量都算，d.412.4.213）", async () => {
+    const dir = await makeSandbox();
+    let n = 0;
+    // 调用序：主代理第 1 轮派子代理 → 子代理 1 轮出结论 → 主代理第 2 轮给最终答案。
+    const chat: StreamChatFn = async (_profile, _messages, opts) => {
+      n += 1;
+      if (n === 1) {
+        opts.onToolCalls?.([
+          { id: "c_task", type: "function", function: { name: "agent_task", arguments: JSON.stringify({ task: "查一下" }) } },
+        ]);
+        opts.onUsage?.({ inputTokens: 100, outputTokens: 10, totalTokens: 110 });
+        opts.onFinish?.("tool_calls");
+        return "";
+      }
+      if (n === 2) {
+        // 这一轮是子代理直接 await deps.chat 发起的：用量必须也记进本回合的账。
+        opts.onDelta("子代理结论");
+        opts.onUsage?.({ inputTokens: 777, outputTokens: 77, totalTokens: 854 });
+        opts.onFinish?.("stop");
+        return "子代理结论";
+      }
+      opts.onDelta("最终答案");
+      opts.onUsage?.({ inputTokens: 200, outputTokens: 20, totalTokens: 220 });
+      opts.onFinish?.("stop");
+      return "最终答案";
+    };
+
+    const outcome = await startAgentRun({
+      prompt: "派个子代理查一下",
+      cwd: dir,
+      profile,
+      allowDanger: false,
+      streamChat: chat,
+    }).done;
+
+    expect(outcome.json.ok).toBe(true);
+    expect(n).toBe(3);
+    // 主代理 100+200、子代理 777 都要进账；修复前子代理那 777 会丢（只剩 300）。
+    expect(outcome.json.usage.input).toBe(1077);
+    expect(outcome.json.usage.output).toBe(107);
+  });
 });

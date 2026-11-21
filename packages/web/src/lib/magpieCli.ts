@@ -294,5 +294,14 @@ export function stripAnsi(text: string): string {
 
 /** 截断超长输出（页面只需要最近一段），保留尾部。 */
 export function tailText(text: string, max = 20_000): string {
-  return text.length <= max ? text : `…（前 ${text.length - max} 字符已省略）\n${text.slice(-max)}`;
+  if (text.length <= max) return text;
+  let tail = text.slice(-max);
+  // tail.slice(-max) 按 UTF-16 码元切，起点可能正好落在 emoji/扩展汉字的低位代理上，
+  // 劈出落单代理渲染成乱码方块。与 shell/tool.ts 的 clip 同口径：起点落单低位就丢一格。
+  const first = tail.charCodeAt(0);
+  if (first >= 0xdc00 && first <= 0xdfff) {
+    const prev = text.charCodeAt(text.length - max - 1);
+    if (prev >= 0xd800 && prev <= 0xdbff) tail = tail.slice(1);
+  }
+  return `…（前 ${text.length - tail.length} 字符已省略）\n${tail}`;
 }

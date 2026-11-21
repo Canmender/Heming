@@ -187,6 +187,33 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("偏好-语言");
     expect(prompt).toContain("读 git log");
   });
+
+  it("对话原文截断落在 emoji 中间时不劈出落单代理（d.412 回归，d.412.4.200）", () => {
+    // 本轮 user 截断点 600：599 ASCII + emoji（占 2 个 UTF-16 单元）→ 第 600 单元是高代理。
+    // recentTurns 的 user 截断点 400：399 ASCII + emoji → 第 400 单元是高代理。
+    const emojiAt600 = "a".repeat(599) + "😀" + "tail";
+    const emojiAt400 = "b".repeat(399) + "😀" + "tail";
+    const prompt = buildReviewPrompt({
+      userText: emojiAt600,
+      assistantText: "短",
+      recentTurns: [{ userText: emojiAt400, assistantText: "短" }],
+      knownKeys: [],
+    });
+    // 逐个 UTF-16 单元扫：高代理后必须跟低代理，低代理前必须是高代理。
+    const units = prompt.split("").map((ch) => ch.charCodeAt(0));
+    let wellFormed = true;
+    for (let i = 0; i < units.length; i++) {
+      const c = units[i]!;
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = units[i + 1];
+        if (next === undefined || next < 0xdc00 || next > 0xdfff) wellFormed = false;
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const prev = units[i - 1];
+        if (prev === undefined || prev < 0xd800 || prev > 0xdbff) wellFormed = false;
+      }
+    }
+    expect(wellFormed).toBe(true);
+  });
 });
 
 describe("semanticChars", () => {

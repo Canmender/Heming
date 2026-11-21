@@ -37,6 +37,28 @@ describe("parseDateInput", () => {
     if (outcome.ok) expect(outcome.date.getFullYear()).toBe(2026);
   });
 
+  it("单位数月/日/时/分/秒按本地时间正常解析（不因 ISO 补零缺失变 Invalid Date，d.412.4.202）", () => {
+    // 正则允许 \d{1,2}，但 ISO 8601 要求两位；旧版直接拼单位数导致 new Date 返回 Invalid。
+    const cases: { raw: string; y: number; mo: number; d: number; h: number; mi: number }[] = [
+      { raw: "2026-1-5 9:30", y: 2026, mo: 0, d: 5, h: 9, mi: 30 },
+      { raw: "2026-1-5", y: 2026, mo: 0, d: 5, h: 0, mi: 0 },
+      { raw: "2026-11-15 9:3:7", y: 2026, mo: 10, d: 15, h: 9, mi: 3 },
+      { raw: "2026年1月5日 9:30", y: 2026, mo: 0, d: 5, h: 9, mi: 30 },
+      { raw: "2026/1/5 9:30", y: 2026, mo: 0, d: 5, h: 9, mi: 30 },
+    ];
+    for (const c of cases) {
+      const outcome = parseDateInput(c.raw, NOW);
+      expect(outcome.ok, c.raw).toBe(true);
+      if (outcome.ok) {
+        expect(outcome.date.getFullYear(), c.raw).toBe(c.y);
+        expect(outcome.date.getMonth(), c.raw).toBe(c.mo);
+        expect(outcome.date.getDate(), c.raw).toBe(c.d);
+        expect(outcome.date.getHours(), c.raw).toBe(c.h);
+        expect(outcome.date.getMinutes(), c.raw).toBe(c.mi);
+      }
+    }
+  });
+
   it("看不懂的时间返回中文错误", () => {
     const outcome = parseDateInput("不是时间", NOW);
     expect(outcome.ok).toBe(false);

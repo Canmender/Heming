@@ -94,6 +94,44 @@ describe("订阅后的变更推送（d.327）", () => {
     }
   });
 
+  it("订阅子目录里的资源：改了它也能推（模板 URI 不是假订阅，d.412.4.214）", async () => {
+    const cwd = tmpWorkspace();
+    mkdirSync(path.join(cwd, "src"), { recursive: true });
+    const file = path.join(cwd, "src", "a.ts");
+    writeFileSync(file, "export const a = 1;", "utf8");
+    const { watcher, updated } = watcherOf(cwd);
+    watcher.subscribe("heming://workspace/src/a.ts");
+    try {
+      writeFileSync(file, "export const a = 2;", "utf8");
+      await waitFor(() => updated.includes("heming://workspace/src/a.ts"));
+      expect(updated).toContain("heming://workspace/src/a.ts");
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it("深层子目录也能推；取消订阅后重新订阅仍工作（d.412.4.214）", async () => {
+    const cwd = tmpWorkspace();
+    mkdirSync(path.join(cwd, "docs", "api"), { recursive: true });
+    const file = path.join(cwd, "docs", "api", "a.md");
+    writeFileSync(file, "一", "utf8");
+    const { watcher, updated } = watcherOf(cwd);
+    const uri = "heming://workspace/docs/api/a.md";
+    watcher.subscribe(uri);
+    try {
+      writeFileSync(file, "二", "utf8");
+      await waitFor(() => updated.includes(uri));
+      // 取消订阅 → 动态 target 回收 → 重新订阅，仍应能收到通知（回收不能破坏再次订阅）。
+      watcher.unsubscribe(uri);
+      expect(watcher.subscribed()).toEqual([]);
+      watcher.subscribe(uri);
+      writeFileSync(file, "三", "utf8");
+      await waitFor(() => updated.filter((u) => u === uri).length >= 2);
+    } finally {
+      watcher.close();
+    }
+  });
+
   it("订阅了 .heming/rules.md：改它同样能推", async () => {
     const cwd = tmpWorkspace();
     mkdirSync(path.join(cwd, ".heming"), { recursive: true });

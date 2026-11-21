@@ -451,7 +451,7 @@ export function buildStatusReport(input: StatusInput): string {
 
 /** `/help`：把命令面板里已有命令原样列出来，避免面板与清单两处漂移。 */
 export function buildSlashHelp(): string {
-  const lines = ["本地命令（都在输入框里直接打，不会发给模型）："];
+  const lines = ["本地命令（都在输入框里直接打；除 /init 会把任务发给模型并写 AGENTS.md 外，其余不会发给模型）："];
   for (const item of SLASH_COMMANDS) {
     lines.push(`${item.command} — ${item.title}：${item.hint}`);
   }

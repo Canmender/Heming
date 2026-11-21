@@ -93,6 +93,12 @@ export interface PromptOptions {
   subagent: boolean;
   /** 回退日志（d.336）：默认开；`--no-rewind` 关掉（关掉只是不抓原文）。 */
   rewind: boolean;
+  /**
+   * 把最后一条助手回答写进这个文件（`--output-last-message <FILE>` / `-o`，借鉴 codex）。
+   * CI 里拿来接结果：stdout 继续照常用（人读或 JSON），这份文件恰好是最终答案正文，
+   * 失败或被中断时不写——不让半截/错误结果冒充成功产物。
+   */
+  lastMessageFile?: string;
 }
 
 /** `heming sessions` 的选项：只列存档，不调模型。 */
@@ -143,6 +149,11 @@ export interface McpOptions {
   trustWorkspace: boolean;
   /** 同 run：信任工作区的 `.heming/hooks.json` 并真的执行那些脚本（`--trust-hooks`）。 */
   trustHooks: boolean;
+  /**
+   * 回退日志开关（d.412.4.192）：默认开；`--no-rewind` 关掉。
+   * mcp serve 暴露写工具、会抓原文进回退日志，且它是长驻进程不落盘——用户显式关掉就该生效。
+   */
+  rewind: boolean;
 }
 
 export type ParsedArgs =
@@ -191,6 +202,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let memory = true;
   let subagent = true;
   let keepRewind = true;
+  let lastMessageFile: string | undefined;
   const promptParts: string[] = [];
   let flagsEnded = false;
 
@@ -309,6 +321,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
           continueSession = true;
           break;
         }
+        case "output-last-message": {
+          const taken = takeValue(argv, i, inline);
+          i = taken.next;
+          if (taken.value === undefined || taken.value.trim() === "") {
+            return { ok: false, error: "--output-last-message 需要一个文件路径（例如 --output-last-message answer.txt）" };
+          }
+          lastMessageFile = taken.value;
+          break;
+        }
         case "resume":
         case "session-dir": {
           const taken = takeValue(argv, i, inline);
@@ -353,6 +374,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
         default:
           return { ok: false, error: `未知选项 --${name}（用 --help 查看用法）` };
       }
+      continue;
+    }
+
+    // `-o` 是 `--output-last-message` 的短写（借鉴 codex），取值规则与长写一致。
+    if (!flagsEnded && arg === "-o") {
+      const taken = takeValue(argv, i, undefined);
+      i = taken.next;
+      if (taken.value === undefined || taken.value.trim() === "") {
+        return { ok: false, error: "-o 需要一个文件路径（例如 -o answer.txt）" };
+      }
+      lastMessageFile = taken.value;
       continue;
     }
 
@@ -413,6 +445,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!compact) notForSessions.push("--no-compact");
     if (mcp) notForSessions.push("--mcp");
     if (resume !== undefined) notForSessions.push("--resume");
+    if (lastMessageFile !== undefined) notForSessions.push("--output-last-message");
     if (notForSessions.length > 0) {
       return {
         ok: false,
@@ -460,6 +493,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!memory) notForMemory.push("--no-memory");
   if (!subagent) notForMemory.push("--no-subagent");
   if (!keepRewind) notForMemory.push("--no-rewind");
+    if (lastMessageFile !== undefined) notForMemory.push("--output-last-message");
     if (notForMemory.length > 0) {
       return {
         ok: false,
@@ -516,6 +550,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!memory) notForRewind.push("--no-memory");
     if (!subagent) notForRewind.push("--no-subagent");
     if (!keepRewind) notForRewind.push("--no-rewind");
+    if (lastMessageFile !== undefined) notForRewind.push("--output-last-message");
     if (notForRewind.length > 0) {
       return {
         ok: false,
@@ -571,6 +606,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!memory) notForCommands.push("--no-memory");
     if (!subagent) notForCommands.push("--no-subagent");
     if (!keepRewind) notForCommands.push("--no-rewind");
+    if (lastMessageFile !== undefined) notForCommands.push("--output-last-message");
     if (notForCommands.length > 0) {
       return {
         ok: false,
@@ -609,6 +645,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!compact) notForMcp.push("--no-compact");
     if (!memory) notForMcp.push("--no-memory");
   if (!subagent) notForMcp.push("--no-subagent");
+    if (lastMessageFile !== undefined) notForMcp.push("--output-last-message");
     if (notForMcp.length > 0) {
       return {
         ok: false,
@@ -618,7 +655,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return {
       ok: true,
       action: "mcp",
-      options: { allowDanger, readOnly, trustWorkspace, trustHooks, ...(cwd !== undefined ? { cwd } : {}) },
+      options: {
+        allowDanger,
+        readOnly,
+        trustWorkspace,
+        trustHooks,
+        rewind: keepRewind,
+        ...(cwd !== undefined ? { cwd } : {}),
+      },
     };
   }
 
@@ -678,6 +722,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(resume !== undefined ? { resume } : {}),
       ...(sessionDir !== undefined ? { sessionDir } : {}),
+      ...(lastMessageFile !== undefined ? { lastMessageFile } : {}),
     },
   };
 }

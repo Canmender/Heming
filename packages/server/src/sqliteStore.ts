@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { SYSTEM_AGENT_ID } from "@heming/shared";
 import type {
   User,
@@ -35,7 +35,7 @@ import type {
   Store,
   TeamUsageRow,
 } from "./store.js";
-import { summarizeTeamTasks } from "./teamCounts.js";
+import { sortTeamBriefMembers, summarizeTeamTasks } from "./teamCounts.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
 import { withStatementCache } from "./statementCache.js";
@@ -342,6 +342,15 @@ export function createSqliteStore(dbPath: string): SqliteStore {
    */
   function ftsPhrase(query: string): string {
     return `"${query.replace(/"/g, '""')}"`;
+  }
+
+  /**
+   * 把查询词转成 LIKE 子串模式，转义 LIKE 通配符（% / _ / \），
+   * 让 `LIKE ? ESCAPE '\'` 的语义对齐内存实现的字面量 includes。
+   */
+  function likeContains(query: string): string {
+    const escaped = query.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
+    return `%${escaped}%`;
   }
 
   /** messages 行 → Message（listMessages 与 reencrypt 回读共用，防映射口径漂移）。 */
@@ -879,13 +888,25 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }>;
       try {
         // 只碰用户所在的会话（IN 收口），多取一条用于判断是否因扫描上限被截断。
+        // d.412.4.193：把「每会话只取最新一条命中」下沉到 SQL 层（ROW_NUMBER 分区）。
+        // 旧实现是「全局按时间倒序 LIMIT maxScanned+1 → slice → JS 再按会话去重」，
+        // 若某会话的大量近期命中占满窗口，其他会话的命中会被 slice 挤掉、静默丢失。
+        // 现在内层先按会话取一条，LIMIT 作用于去重后的会话列表（上限 200），不再串台。
         rows = db
           .prepare(
-            `SELECT messages_fts.message_id AS message_id, messages_fts.conv_id AS conv_id,
-                    messages_fts.text AS text, m.sender_type AS sender_type, m.created_at AS created_at
-             FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid
-             WHERE messages_fts MATCH ? AND messages_fts.conv_id IN (${placeholders})
-             ORDER BY m.created_at DESC, m.rowid DESC
+            `SELECT message_id, conv_id, text, sender_type, created_at FROM (
+               SELECT messages_fts.message_id AS message_id, messages_fts.conv_id AS conv_id,
+                      messages_fts.text AS text, m.sender_type AS sender_type,
+                      m.created_at AS created_at, m.rowid AS rid,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY messages_fts.conv_id
+                        ORDER BY m.created_at DESC, m.rowid DESC
+                      ) AS rn
+               FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid
+               WHERE messages_fts MATCH ? AND messages_fts.conv_id IN (${placeholders})
+             )
+             WHERE rn = 1
+             ORDER BY created_at DESC, rid DESC
              LIMIT ?`,
           )
           .all(ftsPhrase(query), ...conversationIds, maxScanned + 1) as typeof rows;
@@ -1152,7 +1173,8 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     },
     listFiles() {
       const rows = db
-        .prepare("SELECT id, owner, name, mime, size, updated_at FROM shared_files ORDER BY updated_at DESC")
+        // updatedAt 相同时按 id 兜底，避免同毫秒上传的文件顺序随 rowid 漂移（与内存版同口径，d.412.4.207）。
+        .prepare("SELECT id, owner, name, mime, size, updated_at FROM shared_files ORDER BY updated_at DESC, id ASC")
         .all() as Array<{ id: string; owner: string; name: string; mime: string; size: number; updated_at: string }>;
       return rows.map((row) => ({ id: row.id, owner: row.owner, name: row.name, mime: row.mime, size: row.size, updatedAt: row.updated_at }));
     },
@@ -1249,18 +1271,22 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       if (res.changes === 0 && input.kind === "agenda") {
         // 日程档位随时间的推移会变（今天到期 → 已逾期），sourceId 稳定但展示字段要跟着刷新，
         // 否则 INSERT OR IGNORE 会把这一行永远冻结在首次上报时的档位（W2-01，内存 Store 同语义）。
+        // detail/status 与内存版一致按「省略即保留」处理：老客户端重传省略这两字段时不能被清成 null
+        // （null 会让 listTeamActivities 丢弃整键，造成档位/说明静默丢失）。列名硬编码、值走绑定。
+        const sets = ["title = ?", "occurred_at = ?"];
+        const vals: SQLInputValue[] = [input.title, input.occurredAt];
+        if (input.detail !== undefined) {
+          sets.push("detail = ?");
+          vals.push(input.detail);
+        }
+        if (input.status !== undefined) {
+          sets.push("status = ?");
+          vals.push(input.status);
+        }
+        vals.push(actorId, input.sourceId);
         db.prepare(
-          `UPDATE team_activities
-              SET title = ?, detail = ?, status = ?, occurred_at = ?
-            WHERE actor_id = ? AND source_id = ?`,
-        ).run(
-          input.title,
-          input.detail ?? null,
-          input.status ?? null,
-          input.occurredAt,
-          actorId,
-          input.sourceId,
-        );
+          `UPDATE team_activities SET ${sets.join(", ")} WHERE actor_id = ? AND source_id = ?`,
+        ).run(...vals);
       }
       return res.changes > 0;
     },
@@ -1429,6 +1455,9 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       return rows.map(rowToTeam);
     },
     listTeamBriefs(userId) {
+      // 成员顺序在 JS 侧用 sortTeamBriefMembers 统一（d.412.4.189）：
+      // 这里只按团队排序；若把成员塞进 SQL 的 ORDER BY，BINARY 下 'member' < 'owner'
+      // 会让组长垫底，与内存实现相反。两实现必须共用同一套成员口径。
       const rows = db
         .prepare(
           `SELECT t.id AS team_id, t.name AS team_name, t.goal AS team_goal, t.owner_id,
@@ -1437,7 +1466,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
            JOIN team_members me ON me.team_id = t.id AND me.user_id = ?
            JOIN team_members m ON m.team_id = t.id
            JOIN users u ON u.id = m.user_id
-           ORDER BY t.updated_at DESC, t.id ASC, m.role ASC, u.display_name ASC`,
+           ORDER BY t.updated_at DESC, t.id ASC`,
         )
         .all(userId) as {
         team_id: string;
@@ -1477,6 +1506,10 @@ export function createSqliteStore(dbPath: string): SqliteStore {
           .all(brief.id) as TaskRow[];
         const summary = summarizeTeamTasks(taskRows.map(rowToTask));
         brief.counts = summary.counts;
+        // 与内存实现同口径：组长在前、同类按中文名排序（d.412.4.189）。
+        // 不能靠 SQL 的 `ORDER BY role ASC`——BINARY 下 'member' < 'owner' 会让组长垫底，
+        // 组长被 web/teamBrief.ts 的 slice(0,10) 截掉后模型就看不到「谁是组长」。
+        brief.members = sortTeamBriefMembers(brief.members);
         for (const member of brief.members) {
           member.open = summary.perMember.get(member.id) ?? 0;
         }
@@ -1970,37 +2003,39 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const q = query.trim();
       if (q.length < 3 || !kbFtsReady) {
         // 短查询 / 索引不可用：LIKE 线性扫描（与内存实现同口径）
-        const like = `%${q.toLowerCase()}%`;
+        const like = likeContains(q);
         const rows = db
           .prepare(
             `SELECT * FROM team_knowledge_docs
-             WHERE team_id = ? AND (lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags) LIKE ?)
+             WHERE team_id = ? AND (lower(title) LIKE ? ESCAPE '\\' OR lower(content) LIKE ? ESCAPE '\\' OR lower(tags) LIKE ? ESCAPE '\\')
              ORDER BY updated_at DESC`,
           )
           .all(teamId, like, like, like) as unknown as TeamKnowledgeRow[];
         return rows.map(rowToKnowledge);
       }
       try {
-        // FTS MATCH 只定位 doc_id（UNINDEXED 列，可 SELECT），再回表取完整行并严格按 team_id 过滤
-        // （防跨团队串数据）。用子查询而非 JOIN+别名，避免 MATCH 与表别名绑定的坑。
+        // FTS MATCH 只覆盖 title/content（索引无 tags 列），标签命中得靠 tags 列 LIKE 补齐（d.412.4.190）。
+        // 两条路用 OR 合并在一条 SQL 里：id 天然唯一，不会重复；仍严格按 team_id 过滤防跨队串数据。
+        // 标签存的是 JSON 字符串，LIKE 子串匹配等价于内存版 tags.some(t => t.includes(q))。
         const hits = db
           .prepare(
             `SELECT * FROM team_knowledge_docs
-             WHERE team_id = ? AND id IN (
-               SELECT doc_id FROM team_knowledge_fts WHERE team_knowledge_fts MATCH ?
+             WHERE team_id = ? AND (
+               id IN (SELECT doc_id FROM team_knowledge_fts WHERE team_knowledge_fts MATCH ?)
+               OR lower(tags) LIKE ? ESCAPE '\\'
              )
              ORDER BY updated_at DESC`,
           )
-          .all(teamId, ftsPhrase(q)) as unknown as TeamKnowledgeRow[];
+          .all(teamId, ftsPhrase(q), likeContains(q)) as unknown as TeamKnowledgeRow[];
         return hits.map(rowToKnowledge);
       } catch (err) {
         // MATCH 语法异常等：回退线性扫描，不让搜索报错（与 messages 的降级策略一致）
         console.warn("[fts] 团队知识库 MATCH 失败，回退扫描：", (err as Error).message);
-        const like = `%${q.toLowerCase()}%`;
+        const like = likeContains(q);
         const rows = db
           .prepare(
             `SELECT * FROM team_knowledge_docs
-             WHERE team_id = ? AND (lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags) LIKE ?)
+             WHERE team_id = ? AND (lower(title) LIKE ? ESCAPE '\\' OR lower(content) LIKE ? ESCAPE '\\' OR lower(tags) LIKE ? ESCAPE '\\')
              ORDER BY updated_at DESC`,
           )
           .all(teamId, like, like, like) as unknown as TeamKnowledgeRow[];
@@ -2010,14 +2045,16 @@ export function createSqliteStore(dbPath: string): SqliteStore {
 
     listTeamDirectory(query) {
       const q = query.trim().toLowerCase();
-      const like = `%${q}%`;
+      // 与内存版字面量 includes 同口径：用 likeContains 转义 %/_/\，
+      // 否则用户输入里的通配符会放大搜索结果（d.412 同类漂移修复）。
+      const like = likeContains(q);
       // 只暴露元数据；成员数按 team_id 聚合，敏感数据一律不查。
       const rows = db
         .prepare(
           `SELECT t.id, t.name, t.goal, t.created_at,
                   (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
            FROM teams t
-           WHERE ? = '' OR lower(t.name) LIKE ? OR lower(t.goal) LIKE ?
+           WHERE ? = '' OR lower(t.name) LIKE ? ESCAPE '\\' OR lower(t.goal) LIKE ? ESCAPE '\\'
            ORDER BY t.created_at DESC`,
         )
         .all(q, like, like) as unknown as Array<{
@@ -2088,9 +2125,14 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       // approve 时原子写成员行（幂等：可能已被 owner 手动拉进来）+ 置状态，同一事务。
       return runTx(() => {
         if (action === "approve") {
-          db.prepare(
-            `INSERT OR IGNORE INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)`,
-          ).run(teamId, row.user_id, at);
+          const added = db
+            .prepare(
+              `INSERT OR IGNORE INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)`,
+            )
+            .run(teamId, row.user_id, at);
+          // 审批通过=成员变更，真插了新成员行时刷新团队 updatedAt（与内存版 !has(key) 同口径；
+          // 申请人已被 owner 手动拉进来时 INSERT OR IGNORE 不改行、也不该刷新）。
+          if (added.changes > 0) touchTeam(teamId);
         }
         db.prepare("UPDATE team_join_requests SET status = ?, reviewed_at = ? WHERE id = ?").run(
           action === "approve" ? "approved" : "rejected",

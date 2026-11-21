@@ -418,18 +418,46 @@ describe("files API", () => {
     expect(up.body.size).toBe(2);
   });
 
-  it("GET /api/files/:id/content 返回原始字节与 mime", async () => {
+  // 读原始字节时不依赖 Content-Type（修复后固定 octet-stream，superagent 不再填 text）。
+  const getFileRaw = (path: string, token: string) =>
+    request(app)
+      .get(path)
+      .set("Authorization", `Bearer ${token}`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(Buffer.from(c)));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+
+  it("GET /api/files/:id/content 返回原始字节，响应头固定为不可执行的下载类型（d.412.4.194）", async () => {
     const a = await register(app, "filec");
     const up = await request(app)
       .post("/api/files")
       .set("Authorization", `Bearer ${a.token}`)
       .send({ name: "t.txt", mime: "text/plain", contentBase64: Buffer.from("hello").toString("base64") });
-    const got = await request(app)
-      .get(`/api/files/${up.body.id}/content`)
-      .set("Authorization", `Bearer ${a.token}`);
+    const got = await getFileRaw(`/api/files/${up.body.id}/content`, a.token);
     expect(got.status).toBe(200);
-    expect(got.headers["content-type"]).toContain("text/plain");
-    expect(got.text).toBe("hello");
+    expect(String(got.headers["content-type"])).toContain("application/octet-stream");
+    expect(String(got.body)).toBe("hello");
+  });
+
+  it("GET /api/files/:id/content 不回显用户提交的危险 mime（nosniff + attachment，d.412.4.194）", async () => {
+    const a = await register(app, "filecxss");
+    const html = '<script>alert(1)</script>';
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "evil.html", mime: "text/html", contentBase64: Buffer.from(html).toString("base64") });
+    expect(up.status).toBe(201);
+    const got = await getFileRaw(`/api/files/${up.body.id}/content`, a.token);
+    expect(got.status).toBe(200);
+    expect(String(got.headers["content-type"])).not.toContain("text/html");
+    expect(String(got.headers["content-type"])).toContain("application/octet-stream");
+    expect(String(got.headers["x-content-type-options"])).toBe("nosniff");
+    expect(String(got.headers["content-disposition"])).toContain("attachment");
+    // 字节原样返回：前端用 fetch + blob 解密/预览，不依赖响应头，不能被吞
+    expect(String(got.body)).toBe(html);
   });
 
   it("GET /api/files/:id/content 不存在 404", async () => {
@@ -542,9 +570,34 @@ describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", ()
       .set("Access-Control-Request-Headers", "Content-Type");
     expect(res.status).toBe(204);
     expect(res.headers["access-control-allow-origin"]).toBe("*");
-    expect(res.headers["access-control-allow-methods"]).toBe("GET,POST,PUT,DELETE,OPTIONS");
-    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type,x-heming-client");
+    // 必须列全实际使用的 method/header，否则跨域部署下这些请求会被浏览器预检拦下（d.412.4.209）
+    expect(res.headers["access-control-allow-methods"]).toBe("GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    expect(res.headers["access-control-allow-headers"]).toBe(
+      "Authorization,Content-Type,x-heming-client,x-skill-hub-key",
+    );
     expect(res.body).toEqual({});
+  });
+
+  it("PATCH 预检通过：跨域改会话/团队是官方支持场景（d.412.4.209）", async () => {
+    const res = await request(app)
+      .options("/api/teams/some-id")
+      .set("Origin", "http://47.92.39.184")
+      .set("Access-Control-Request-Method", "PATCH")
+      .set("Access-Control-Request-Headers", "Authorization,Content-Type");
+    expect(res.status).toBe(204);
+    const methods = String(res.headers["access-control-allow-methods"]).split(",");
+    expect(methods).toContain("PATCH");
+  });
+
+  it("技能社区下载头 x-skill-hub-key 在预检白名单里（d.412.4.209）", async () => {
+    const res = await request(app)
+      .options("/api/skill-hub/skills/abc/download")
+      .set("Origin", "http://47.92.39.184")
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-skill-hub-key");
+    expect(res.status).toBe(204);
+    const headers = String(res.headers["access-control-allow-headers"]).split(",").map((h) => h.trim());
+    expect(headers).toContain("x-skill-hub-key");
   });
 
   it("简单请求（GET /api/health）响应带 Allow-Origin: *", async () => {
@@ -561,7 +614,9 @@ describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", ()
       .set("Origin", "http://elsewhere.example");
     expect(res.status).toBe(401);
     expect(res.headers["access-control-allow-origin"]).toBe("*");
-    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type,x-heming-client");
+    expect(res.headers["access-control-allow-headers"]).toBe(
+      "Authorization,Content-Type,x-heming-client,x-skill-hub-key",
+    );
   });
 });
 

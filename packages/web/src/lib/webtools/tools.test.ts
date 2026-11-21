@@ -151,6 +151,24 @@ describe("web_read", () => {
     expect(result.text).not.toContain("&#X41;");
   });
 
+  it("网页正文里代理区数字实体不解出落单代理（会回灌给模型，d.412 回归）", async () => {
+    const html = `<html><head><title>T</title></head><body><p>半截代理 &#xD83D; 与 &#55296;，正常 😀 照解</p></body></html>`;
+    const bridge = bridgeWith(async () => ok(html));
+    const result = await run(bridge, WEB_READ_TOOL, { url: "https://example.com/surrogate" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("正常 😀 照解");
+    // 逐 UTF-16 单元扫描，不出现落单代理
+    const units = result.text.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+  });
+
   it("状态码非 2xx：说明拿不到正文", async () => {
     const bridge = bridgeWith(async () => ok("not found", 404));
     const result = await run(bridge, WEB_READ_TOOL, { url: "https://example.com/missing" });

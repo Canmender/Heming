@@ -259,7 +259,9 @@ function decodeEntities(text: string): string {
 }
 
 function codePoint(code: number, fallback: string): string {
-  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return fallback;
+  // 代理区 U+D800–U+DFFF 不是合法码点：String.fromCodePoint 对它不抛错，
+  // 而是返回落单代理，会跟着正文回灌给模型（d.412 回归）。原样保留。
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return fallback;
   try {
     return String.fromCodePoint(code);
   } catch {

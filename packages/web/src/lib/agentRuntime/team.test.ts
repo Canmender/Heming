@@ -12,6 +12,7 @@ import {
   TEAM_MAX_MEMBERS,
   TEAM_MAX_ROUNDS_LIMIT,
   TEAM_MEMBER_TASK_MAX_CHARS,
+  TEAM_UPSTREAM_CONTEXT_MAX,
   TEAM_TOOL,
   parseTeamArgs,
   planTeamWaves,
@@ -347,6 +348,41 @@ describe("runTeam（d.347）", () => {
     expect(seen[1]?.task).toContain("读实现");
     expect(result.text).toContain("团队任务");
     expect(result.text).toContain("目标：把登录链路摸清并给出改造方案");
+  });
+
+  it("上游结论截断落在 emoji 中间时不劈出落单代理（d.412 回归，d.412.4.199）", async () => {
+    const seen: string[] = [];
+    // 1199 个 ASCII + 一个 emoji（占 2 个 UTF-16 单元）→ 第 1200 个单元正好是 emoji 的高代理。
+    // 旧的 body.slice(0,1200) 会停在高代理上，把半截 emoji 喂给下游成员提示。
+    const conclusion = "a".repeat(TEAM_UPSTREAM_CONTEXT_MAX - 1) + "😀" + "bcdef";
+    const result = await runTeam(
+      plan([member("scan"), member("dig", { needs: ["scan"] })]),
+      makeDeps({
+        chat: async (messages) => {
+          const task = lastUserText(messages);
+          seen.push(task);
+          return task.includes("任务 dig") ? "下游结论" : conclusion;
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    const downstream = seen.find((task) => task.includes("只作背景参考")) ?? "";
+    expect(downstream).toContain("已截断");
+    // 逐个 UTF-16 单元扫：高代理后必须跟低代理，低代理前必须是高代理。
+    // 用 split("")（按码元），不能用 Array.from（按码点会把 emoji 折成一个元素）。
+    const units = downstream.split("").map((ch) => ch.charCodeAt(0));
+    let wellFormed = true;
+    for (let i = 0; i < units.length; i++) {
+      const c = units[i]!;
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = units[i + 1];
+        if (next === undefined || next < 0xdc00 || next > 0xdfff) wellFormed = false;
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        const prev = units[i - 1];
+        if (prev === undefined || prev < 0xd800 || prev > 0xdbff) wellFormed = false;
+      }
+    }
+    expect(wellFormed).toBe(true);
   });
 
   it("同批并行但不超过并发上限", async () => {

@@ -95,6 +95,21 @@ describe("relativizeToolArgs（d.288）", () => {
     const original = '{"path":  "src/a.ts",   "content":"x"}';
     expect(relativizeToolArgs(original, CWD)).toBe(original);
   });
+
+  it("glob 前缀在 Windows 下大小写不敏感，与 path 分支同口径（d.412.4.205）", () => {
+    // CWD 全大写后仍是同一个 Windows 路径（盘符/目录大小写不敏感）。
+    const folded = CWD.toUpperCase();
+    const out = JSON.parse(relativizeToolArgs(JSON.stringify({ pattern: `${folded}/**/*.ts` }), CWD));
+    const rootOnly = JSON.parse(relativizeToolArgs(JSON.stringify({ glob: folded }), CWD));
+    if (process.platform === "win32") {
+      // path 分支用 path.relative（大小写不敏感）；glob 分支此前手写 startsWith 会剥不掉。
+      expect(out.pattern).toBe("**/*.ts");
+      expect(rootOnly.glob).toBe("**/*");
+    } else {
+      // POSIX 路径大小写敏感：不同的大小写不是同一个工作区，保持原样。
+      expect(out.pattern).toBe(`${folded}/**/*.ts`);
+    }
+  });
 });
 /** 只读模式测试用的唯一可写根（与 CLI 装配时的形状一致）。 */
 const ROOTS = [{ path: CWD, mode: "write" as const, name: "work" }];
@@ -367,6 +382,47 @@ describe("交互式审批的许可消费（d.322）", () => {
     expect(result.text).toContain("未执行");
   });
 
+  it("工作区 ask 规则内答「本次运行都允许」不会误开整次运行的 danger 总闸（d.412.4.210）", async () => {
+    // 场景：仓库 permissions.json 只让 `git status` 这条命令「先问一下」。人在这条规则问询上
+    // 答「本次运行都允许」，语义只是「git status 在这个仓库可以跑」，不该顺带放行别的危险
+    // 命令。此前 rule-ask 分支调 input.ask 没标 kind，审批包装把它当 danger 询问处理，
+    // allow-session 直接置 sessionAllowed=true——随后任何不命中规则的 run_command 都被静默放行。
+    const dir = mkdtempSync(path.join(tmpdir(), "heming-ruleask-"));
+    tmpDirs.push(dir);
+    const approver = createScriptedApprover(["allow-session"]);
+    const tooling = createCliTooling({
+      cwd: dir,
+      allowDanger: false,
+      conversationId: "ruleask-test",
+      ask: approver,
+      rules: {
+        source: ".heming/permissions.json",
+        trusted: false,
+        allowActive: false,
+        config: { allow: [], deny: [], ask: [{ tool: "run_command", command: "*hi*" }] },
+      } as never,
+    });
+
+    // 第一条：命中 ask 规则（命令输出含 hi），问一次（allow-session）后放行。
+    expect((await tooling.confirm([{ id: "c1", function: shellCall }]))[0]?.kind).toBe("allow");
+    expect((await tooling.toolBridge.execute(shellCall)).ok).toBe(true);
+    expect(approver.requests).toHaveLength(1);
+
+    // 第二条：不命中规则（输出 bye）。正确行为是「危险工具仍要单独问」——队列空则 deny；
+    // 若 rule-ask 的 allow-session 误开了总闸，这条会被静默 allow、且不会再问人。
+    const unmatched = {
+      name: "run_command",
+      arguments: JSON.stringify({ command: `"${process.execPath}" -e "process.stdout.write('bye')"` }),
+    };
+    expect((await tooling.confirm([{ id: "c2", function: unmatched }]))[0]?.kind).toBe("deny");
+    expect(approver.requests).toHaveLength(2);
+
+    // 正面语义没丢：同一条规则后续命中仍放行、且不再问人（仍需一次性许可过桥）。
+    expect((await tooling.confirm([{ id: "c3", function: shellCall }]))[0]?.kind).toBe("allow");
+    expect((await tooling.toolBridge.execute(shellCall)).ok).toBe(true);
+    expect(approver.requests).toHaveLength(2);
+  });
+
   it("没有 --ask 也没有 --allow-danger 时命令工具根本不挂（老行为）", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "heming-noask-"));
     tmpDirs.push(dir);
@@ -577,6 +633,94 @@ describe("MCP 工具按全名精确派发（d.412）", () => {
     expect(result.text).toContain("my__server/write 调用了");
     // 关键：旧的 parseMcpToolName 会把它当成 server=my、tool=server__write 派给 my（不存在）。
     expect(seen).toEqual([{ tool: "write", args: { path: "a.ts" } }]);
+  });
+});
+
+/**
+ * 工作区 allow 规则必须贯穿到执行层（d.412.4.191）。
+ *
+ * 闸门（createCliGate）在受信任（--trust-workspace）的 allow 规则下会放行 danger 工具，
+ * 但桥（toolBridge.execute）此前只认 --allow-danger / 交互许可，于是出现
+ * 「闸门说可以、桥说不行」的假授权——规则形同虚设。这里把两端口径钉在一起。
+ */
+describe("受信任的 allow 规则贯穿到执行层（d.412.4.191）", () => {
+  const ECHO = `"${process.execPath}" -e "process.stdout.write('hi')"`;
+
+  function ruleSet(allowActive: boolean, tool: string): never {
+    return {
+      source: ".heming/permissions.json",
+      trusted: allowActive,
+      allowActive,
+      config: { allow: [{ tool, allowDanger: true }], deny: [], ask: [] },
+    } as never;
+  }
+
+  function pingConnection(seen: { tool: string; args: unknown }[]): McpConnection {
+    return {
+      server: "srv",
+      tools: [{ name: "ping", description: "", inputSchema: undefined }],
+      async callTool(tool, args) {
+        seen.push({ tool, args });
+        return { text: "srv/ping 调用了", isError: false };
+      },
+      close() {},
+    };
+  }
+
+  it("受信任的 allow 规则放行 MCP：闸门 allow 后桥也真的执行", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-allow-mcp-"));
+    tmpDirs.push(cwd);
+    const seen: { tool: string; args: unknown }[] = [];
+    const name = mcpToolName("srv", "ping");
+    const tooling = createCliTooling({
+      cwd,
+      allowDanger: false,
+      conversationId: "allow-mcp",
+      mcp: [pingConnection(seen)],
+      rules: ruleSet(true, "*"),
+    });
+    const gateCall = { id: "c1", function: { name, arguments: "{}" } };
+    expect((await tooling.confirm([gateCall]))[0]?.kind).toBe("allow");
+
+    const result = await tooling.toolBridge.execute({ name, arguments: "{}" });
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual([{ tool: "ping", args: {} }]);
+  });
+
+  it("未受信任的规则（allowActive:false）不例外：桥仍拒绝", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-allow-off-"));
+    tmpDirs.push(cwd);
+    const name = mcpToolName("srv", "ping");
+    const tooling = createCliTooling({
+      cwd,
+      allowDanger: false,
+      conversationId: "allow-off",
+      mcp: [pingConnection([])],
+      rules: ruleSet(false, "*"),
+    });
+    const result = await tooling.toolBridge.execute({ name, arguments: "{}" });
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("未执行");
+  });
+
+  it("受信任的 allow 规则放行命令工具：闸门不提问、桥也执行", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "heming-allow-shell-"));
+    tmpDirs.push(cwd);
+    const approver = createScriptedApprover([]);
+    const tooling = createCliTooling({
+      cwd,
+      allowDanger: false,
+      conversationId: "allow-shell",
+      ask: approver,
+      rules: ruleSet(true, "run_command"),
+    });
+    const call = { name: "run_command", arguments: JSON.stringify({ command: ECHO }) };
+    expect((await tooling.confirm([{ id: "c1", function: call }]))[0]?.kind).toBe("allow");
+    expect(approver.requests).toHaveLength(0);
+
+    const result = await tooling.toolBridge.execute(call);
+    expect(result.ok).toBe(true);
+    expect(approver.requests).toHaveLength(0);
   });
 });
 

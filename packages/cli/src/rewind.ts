@@ -8,9 +8,9 @@
  * - 存哪儿：`.heming/rewind/<运行 id>.json`，一次运行一份。与 `.heming/memory.json` 同一个理由
  *   （仓库就是配置：跟 git 走、能 review、能手删）；一份放一个文件是为了让 git diff 只看这一轮，
  *   而不是每次都重写一个包含 20 轮原文的大 JSON。
- * - 抓什么：只抓**写工具**（`file_write` / `file_edit` / `file_patch`）在动手之前的原文。
- *   `run_command` 抓不到（命令要走哪条路径、改哪些文件，事后才知道）——这类改动退不回去，
- *   回执里必须说清楚，不能让「我跑过 rewind 了」变成虚假的安全感。
+ * - 抓什么：写工具（`file_write` / `file_edit` / `file_patch`）在动手之前的原文照抓；
+ *   `run_command` 走扫盘比对，新建的文件能一并退掉（删掉就对了），但命令改过内容或删掉的
+ *   文件没有原文、退不回去——回执里必须说清楚，不能让「我跑过 rewind 了」变成虚假的安全感。
  * - 抓不到原文的怎么办：单文件超过 200k 字符、二进制、读失败，记一条 `skipped`，回退时跳过并点名。
  *   宁可少退，也不要把一份残缺内容盖回去。
  * - 上限：20 轮 / 单轮 1MB / 单轮 200 个文件。超了丢最旧的轮次，与桌面端同一加权思路。
@@ -439,7 +439,7 @@ export function describeCliRewinds(load: CliRewindsLoad, cwd: string, now: Date 
   if (load === null) {
     return [
       `这个工作区还没有任何回退记录（${dir} 还不存在）。`,
-      "hemin run 每次改文件都会在动手前留一份原文；跑过一次就会出现在这里。",
+      "heming run 每次改文件都会在动手前留一份原文；跑过一次就会出现在这里。",
     ].join("\n");
   }
   if (!load.ok) {

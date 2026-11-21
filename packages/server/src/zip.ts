@@ -174,7 +174,14 @@ function readEntryData(
   } else if (method === 8) {
     try {
       data = inflateRawSync(compressed, { maxOutputLength: MAX_ZIP_ENTRY_BYTES + 1 });
-    } catch {
+    } catch (error) {
+      // 中央目录的 uncompressedSize 可被伪造成 ≤1MB 绕过 :258 的预检，但 deflate 流
+      // 真实解压量仍受 maxOutputLength 兜底；超限时 node 抛 ERR_BUFFER_TOO_LARGE。
+      // 这与 STORE 超限、central 声明超限是同一类「单条目 >1MB」，应同样归类 too_large，
+      // 让调用方（skillHub 映射 HTTP 413）能区分「包太大」与「包损坏」——不能吞成 invalid_zip。
+      if ((error as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") {
+        throw new ZipError(`ZIP 条目超过单文件上限（1MB）：${path}`, "too_large");
+      }
       throw new ZipError(`ZIP 条目解压失败：${path}`, "invalid_zip");
     }
     if (data.length > MAX_ZIP_ENTRY_BYTES || uncompressedSize > MAX_ZIP_ENTRY_BYTES) {

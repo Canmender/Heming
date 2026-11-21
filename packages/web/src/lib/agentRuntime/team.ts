@@ -59,6 +59,7 @@ export const TEAM_MEMBER_TASK_MAX_CHARS = 600;
 /** 上游结论注入下游时的截断：不能靠它把原文一路搬下去。 */
 export const TEAM_UPSTREAM_CONTEXT_MAX = 1200;
 
+
 /** 成员 id 的形状：要进 `needs`，也要进界面，只允许短标识。 */
 const MEMBER_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,23}$/;
 
@@ -359,9 +360,13 @@ function upstreamContext(
     const result = byId.get(need);
     if (!result) continue;
     const body = result.text.trim();
+    // 上游结论会拼进下游成员的任务提示：按码点截断，不能在 emoji 的代理对中间
+    // 劈出落单代理（那会把无效标量值喂给模型，也是 d.412 一系列截断修复的同款问题；
+    // 与 workflow.ts 的 upstreamContext 保持同口径）。
+    const chars = Array.from(body);
     const clipped =
-      body.length > TEAM_UPSTREAM_CONTEXT_MAX
-        ? `${body.slice(0, TEAM_UPSTREAM_CONTEXT_MAX)}…（已截断）`
+      chars.length > TEAM_UPSTREAM_CONTEXT_MAX
+        ? `${chars.slice(0, TEAM_UPSTREAM_CONTEXT_MAX).join("")}…（已截断）`
         : body;
     parts.push(`- 成员 ${need}（${roles.get(need) ?? "成员"}）的结论：\n${clipped}`);
   }

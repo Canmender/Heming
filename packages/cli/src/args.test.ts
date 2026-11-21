@@ -49,6 +49,25 @@ describe("parseArgs", () => {
     expect(inline.apiKey).toBe("sk-test");
   });
 
+  it("--output-last-message / -o：把最终回答写到文件（三种写法 + 拒绝空值）", () => {
+    // 借鉴 codex -o：CI 里拿来接结果，stdout 契约不变。
+    expect(expectRun(["exec", "--output-last-message", "answer.txt", "hi"]).lastMessageFile).toBe("answer.txt");
+    expect(expectRun(["exec", "-o", "answer.txt", "hi"]).lastMessageFile).toBe("answer.txt");
+    expect(expectRun(["run", "--output-last-message=answer.txt", "hi"]).lastMessageFile).toBe("answer.txt");
+    // 缺值 / 值又是另一个选项：当场报错，不猜、不吞。
+    expect(parseArgs(["exec", "--output-last-message", "hi"]).ok).toBe(false);
+    expect(parseArgs(["exec", "-o", "--json", "hi"]).ok).toBe(false);
+    expect(parseArgs(["exec", "--output-last-message=", "hi"]).ok).toBe(false);
+  });
+
+  it("--output-last-message 对不跑模型的命令一律拒绝（不静默忽略）", () => {
+    expect(parseArgs(["sessions", "-o", "x.txt"]).ok).toBe(false);
+    expect(parseArgs(["memory", "--output-last-message", "x.txt"]).ok).toBe(false);
+    expect(parseArgs(["commands", "-o", "x.txt"]).ok).toBe(false);
+    expect(parseArgs(["rewind", "-o", "x.txt"]).ok).toBe(false);
+    expect(parseArgs(["mcp", "serve", "-o", "x.txt"]).ok).toBe(false);
+  });
+
   it("--allow-danger 是布尔开关，不接受取值", () => {
     expect(expectRun(["run", "--allow-danger", "hi"]).allowDanger).toBe(true);
     const parsed = parseArgs(["run", "--allow-danger=yes", "hi"]);
@@ -164,6 +183,18 @@ function expectMcp(argv: string[]) {
 }
 
 describe("parseArgs：mcp serve（d.288）", () => {
+  it("mcp serve 认 --no-rewind：透传给回退日志开关，默认开（d.412.4.192）", () => {
+    // mcp serve 暴露写工具，写文件时会抓原文进回退日志；它是长驻进程且不落盘，
+    // 用户显式关掉就该生效——不能像以前那样静默接受却毫无作用。
+    const on = expectMcp(["mcp", "serve"]);
+    expect(on.rewind).toBe(true);
+    const off = expectMcp(["mcp", "serve", "--no-rewind"]);
+    expect(off.rewind).toBe(false);
+    const inline = parseArgs(["mcp", "serve", "--no-rewind=1"]);
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error).toContain("不接受取值");
+  });
+
   it("mcp serve 不需要 prompt，能带 --cwd / --allow-danger", () => {
     const bare = expectMcp(["mcp", "serve"]);
     expect(bare.cwd).toBeUndefined();

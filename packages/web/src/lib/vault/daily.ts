@@ -162,7 +162,8 @@ export function isValidDailyFormat(format: unknown): boolean {
   // 不能用 /Y{1,4}/ 这种未锚定的正则——它会匹配 5 个 Y 里的前 4 个，
   // 让 YYYYY 这类格式通过校验，但 formatDateTokens 会把 5 个 Y 渲成两段年份、
   // buildFormatPattern 只按 4 位解析，写出来的路径再也解析不回来（日记从此消失）。
-  const runs = text.match(/Y+|M+|D+|H+|m+|s+/g) ?? [];
+  const tokenRe = /Y+|M+|D+|H+|m+|s+/g;
+  const runs = text.match(tokenRe) ?? [];
   let hasY = false;
   let hasM = false;
   let hasD = false;
@@ -174,6 +175,19 @@ export function isValidDailyFormat(format: unknown): boolean {
     else if (run[0] === "D") hasD = true;
   }
   if (!hasY || !hasM || !hasD) return false;
+  // 两个数字 token 直接相邻、又没有字面分隔符时，若其中一个是变长的
+  // （单个 M/D/H/m/s 是 \d{1,2}，单个 Y 是 \d{1,4}），写出来的路径就无法
+  // 唯一反解：如 YYYYMD 把 2026-01-18 写成 "2026118"，反解成 2026-11-08，
+  // 日记被归到错误日期且再也找不回来。这类格式一律判非法、回退默认格式。
+  // 定长 token（YY/YYYY/MM/DD/HH/mm/ss）相邻仍可唯一切分，不受影响。
+  let previous: { end: number; variable: number } | null = null;
+  for (let match = tokenRe.exec(text); match !== null; match = tokenRe.exec(text)) {
+    const start = match.index;
+    const run = match[0];
+    const variable = (run[0] === "Y" && run.length === 1) || (run[0] !== "Y" && run.length === 1) ? 1 : 0;
+    if (previous && previous.end === start && (previous.variable || variable)) return false;
+    previous = { end: start + run.length, variable };
+  }
   return buildFormatPattern(text) !== null;
 }
 

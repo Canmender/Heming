@@ -20,6 +20,8 @@ interface ZipInput {
   crcOverride?: number;
   /** 只改 local header 的 CRC（模拟 central/local 不一致）。 */
   localCrcOverride?: number;
+  /** 故意把中央目录声明的解压后大小写成小值（模拟伪造声明，绕过预检）。 */
+  uncompressedSizeOverride?: number;
 }
 
 /** 测试侧独立实现 CRC32，避免「拿被测实现造测试数据」。 */
@@ -76,7 +78,7 @@ function makeZip(entries: ZipInput[]): Buffer {
     central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(compressed.length, 20);
-    central.writeUInt32LE(data.length, 24);
+    central.writeUInt32LE(entry.uncompressedSizeOverride ?? data.length, 24);
     central.writeUInt16LE(name.length, 28);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, name);
@@ -143,6 +145,22 @@ describe("readZipEntries", () => {
     const big = Buffer.alloc(1024 * 1024 + 1, 0x61);
     const error = captureZipError(() => readZipEntries(makeZip([{ name: "big.txt", data: big }])));
     expect(error.code).toBe("too_large");
+  });
+
+  it("DEFLATE 条目伪造声明大小绕过预检但解压超限 → too_large（不是 invalid_zip，d.412.4.211）", () => {
+    // 中央目录把 uncompressedSize 伪造成 10（绕过 :258 的预检），实际 deflate 流
+    // 解压出 >1MB。inflateRawSync 会抛 ERR_BUFFER_TOO_LARGE，应归类为 too_large，
+    // 与 STORE 超限与 central 声明超限两条同类路径一致（调用方据此映射 HTTP 413）。
+    const big = Buffer.alloc(1024 * 1024 + 10, 0x61);
+    const error = captureZipError(() =>
+      readZipEntries(
+        makeZip([
+          { name: "big.txt", data: big, method: 8, uncompressedSizeOverride: 10 },
+        ]),
+      ),
+    );
+    expect(error.code).toBe("too_large");
+    expect(error.message).toContain("超过单文件上限");
   });
 
   it(`条目数超过 ${MAX_ZIP_ENTRIES} → 拒绝`, () => {

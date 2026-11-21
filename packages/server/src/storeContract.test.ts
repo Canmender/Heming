@@ -86,13 +86,15 @@ for (const f of factories) {
       expect(store.updateConversationTitle("nope", a.id, "x")).toBe(false);
     });
 
-    it("listConversations：多条会话各自取自己的最近消息时间，互不串台、按建立序（d.412.4.181）", () => {
+    it("listConversations：多条会话各自取自己的最近消息时间，互不串台、按建立序（d.412.4.181）", async () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const c1 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { title: "第一段" });
       const c2 = store.createAgentConversation(a.id, SYSTEM_AGENT_ID, { fresh: true, title: "第二段" });
-      // 给两段会话各写不同时间的消息（insert 序即 createdAt 序）。
+      // 消息时间戳是毫秒级 ISO：留 5ms 间隔，确保 c1Early ≠ c1Late（否则断言偶发假失败）。
       const c1Early = store.addMessage(c1.id, "user", a.id, { text: "早" });
+      await new Promise((r) => setTimeout(r, 5));
       const c2Late = store.addMessage(c2.id, "user", a.id, { text: "晚" });
+      await new Promise((r) => setTimeout(r, 5));
       const c1Late = store.addMessage(c1.id, "user", a.id, { text: "更早会话的新消息" });
 
       const list = store.listConversations(a.id);
@@ -207,6 +209,19 @@ for (const f of factories) {
       expect(store.deleteFile("f1")).toBe(false);
     });
 
+    it("共享文件同 updatedAt 时按 id 确定性排序，两实现一致（d.412.4.207）", () => {
+      store.createUser("alice", "h", "爱丽丝");
+      const at = "2026-11-02T00:00:00.000Z";
+      // 故意乱序插入，三个文件 updatedAt 全相同：必须回以确定的 id 升序，与 SQLite ORDER BY 一致。
+      for (const id of ["z", "a", "m"]) {
+        store.addFile(
+          { id, owner: "alice", name: id, mime: "text/plain", size: 1, updatedAt: at },
+          "aGk=",
+        );
+      }
+      expect(store.listFiles().map((f) => f.id)).toEqual(["a", "m", "z"]);
+    });
+
     it("团队名册：touchUser 刷新最近活跃，未活跃为 null", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       store.createUser("bob", "h", "鲍勃");
@@ -311,6 +326,38 @@ for (const f of factories) {
         sourceId: "agenda:7",
         detail: "日程 · 已逾期",
         status: "overdue",
+        occurredAt: "2026-11-03T12:00:00.000Z",
+      });
+    });
+
+    it("日程刷新省略 detail/status 时保留原值，不清空（两实现同口径，d.412.4.204）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      expect(
+        store.addTeamActivity(a.id, {
+          kind: "agenda",
+          title: "项目周会",
+          detail: "日程 · 今天到期",
+          status: "today",
+          sourceId: "agenda:keep",
+          occurredAt: "2026-11-03T08:00:00.000Z",
+        }),
+      ).toBe(true);
+      // 老客户端/第三方重传同一 sourceId，只更新 title/occurredAt，省略 detail/status。
+      // 幂等刷新必须保留原有的 detail/status，不能被写成 null 导致整键被丢弃。
+      expect(
+        store.addTeamActivity(a.id, {
+          kind: "agenda",
+          title: "项目周会（改期）",
+          sourceId: "agenda:keep",
+          occurredAt: "2026-11-03T12:00:00.000Z",
+        }),
+      ).toBe(false);
+      const rows = store.listTeamActivities();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        title: "项目周会（改期）",
+        detail: "日程 · 今天到期",
+        status: "today",
         occurredAt: "2026-11-03T12:00:00.000Z",
       });
     });
@@ -643,6 +690,27 @@ for (const f of factories) {
       store.createTeamPlan(t1, a.id, { title: "动一下" });
       expect(store.listWorkspaceTeams(a.id).map((t) => t.id)).toEqual([t1, t2]);
     });
+
+    it("listTeamBriefs：成员名单组长在前、同类按中文名排序（两实现同口径，d.412.4.189）", () => {
+      // 组长被 slice(0,10) 截断就看不到「组长」标识（web/teamBrief.ts），
+      // 所以名单必须组长优先——两实现要一致，不能内存版组长在前、SQLite 版按 BINARY 排到后面。
+      const owner = store.createUser("owner", "h", "组长");
+      const bob = store.createUser("bob", "h", "鲍勃");
+      const alice = store.createUser("alice", "h", "爱丽丝");
+      const team = store.createWorkspaceTeam(owner.id, { name: "排序组" });
+      // 注意按 username 加：两个成员的 displayName 故意一个拼音靠前、一个靠后，
+      // 确保「组长在前」不是靠名字巧合，而是靠角色优先。
+      store.addWorkspaceMember(team.team.id, owner.id, "bob");
+      store.addWorkspaceMember(team.team.id, owner.id, "alice");
+      const briefs = store.listTeamBriefs(owner.id);
+      const brief = briefs.find((b) => b.id === team.team.id);
+      expect(brief).toBeDefined();
+      expect(brief!.members.map((m) => m.role)).toEqual(["owner", "member", "member"]);
+      // 组长恒为第一个（即便「组长」两字的排序并不最小）；同类成员按中文名 localeCompare 排序。
+      expect(brief!.members[0].id).toBe(owner.id);
+      const memberNames = brief!.members.slice(1).map((m) => m.displayName);
+      expect(memberNames).toEqual([...memberNames].sort((x, y) => x.localeCompare(y, "zh-Hans-CN")));
+    });
   });
 }
 
@@ -796,6 +864,22 @@ for (const f of factories) {
       expect(list[1]!.authorId).toBe(b.id);
       expect(list[0]!.teamId).toBe(team.team.id);
       expect(list[0]!.taskId).toBe(task.id);
+    });
+
+    it("读取讨论必须按 teamId 收口：错队的 id 查不到别队任务的留言（两实现同口径，d.412.4.206）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const teamA = store.createWorkspaceTeam(a.id, { name: "A 队" });
+      const teamB = store.createWorkspaceTeam(a.id, { name: "B 队" });
+      const task = store.createTeamTask(teamA.team.id, a.id, { title: "A 队的活" });
+      if (task === null || typeof task === "string") throw new Error("任务没建成");
+      store.addTeamTaskComment(teamA.team.id, task.id, a.id, "A 队内部讨论");
+
+      expect(store.listTeamTaskComments(teamA.team.id, task.id).map((c) => c.text)).toEqual([
+        "A 队内部讨论",
+      ]);
+      // 内存版此前只按 taskId 从 Map 取、忽略 teamId，错队 id 也能读到别队讨论（跨队泄漏面）。
+      expect(store.listTeamTaskComments(teamB.team.id, task.id)).toEqual([]);
+      expect(store.listTeamTaskComments("no-such-team", task.id)).toEqual([]);
     });
 
     it("删任务/删团队不留孤儿：讨论与动态一并清掉（痛点 16）", () => {
@@ -1275,6 +1359,31 @@ for (const f of factories) {
       expect(store.searchTeamKnowledge(teamId, owner.id, "不存在")).toEqual([]);
     });
 
+    it("搜索标签：标题/正文不含但标签含时，长短查询都命中（两实现同口径，d.412.4.190）", () => {
+      // 漂移史：内存版长查询（>=3）搜 tags、短查询不搜；SQLite 版反过来——
+      // 长查询走 FTS（索引无 tags）漏命中、短查询 LIKE 含 tags 多命中。
+      // 统一为「标签在任意长度都参与搜索」：用户输标签词无论长短都应找到文档。
+      const { owner, teamId } = seedTeam();
+      // 标题/正文刻意不含 "api" 与 "运"，只有标签含，确保命中只能来自标签。
+      store.createTeamKnowledge(teamId, owner.id, {
+        title: "接口文档", content: "描述协议的正文", tags: ["api", "运营"],
+      });
+
+      // 长查询（>=3）命中标签
+      expect(store.searchTeamKnowledge(teamId, owner.id, "api")?.map((d) => d.title)).toEqual(["接口文档"]);
+      // 短查询（<3）命中标签（中文两字词）
+      expect(store.searchTeamKnowledge(teamId, owner.id, "运营")?.map((d) => d.title)).toEqual(["接口文档"]);
+      // 单个中文字标签也命中
+      expect(store.searchTeamKnowledge(teamId, owner.id, "运")?.map((d) => d.title)).toEqual(["接口文档"]);
+
+      // LIKE 通配符必须按字面量匹配（对齐内存 includes）："%"、"_" 不当通配符。
+      store.createTeamKnowledge(teamId, owner.id, {
+        title: "100% 覆盖", content: "含下划线 _ 的说明", tags: ["v1_api"],
+      });
+      expect(store.searchTeamKnowledge(teamId, owner.id, "100%")?.map((d) => d.title)).toEqual(["100% 覆盖"]);
+      expect(store.searchTeamKnowledge(teamId, owner.id, "v1_api")?.map((d) => d.title)).toEqual(["100% 覆盖"]);
+    });
+
     it("删团队级联清文档", () => {
       const { owner, teamId } = seedTeam();
       const doc = store.createTeamKnowledge(teamId, owner.id, { title: "会删掉", content: "x" });
@@ -1325,6 +1434,22 @@ for (const f of factories) {
       expect(store.listTeamDirectory("不存在")).toEqual([]);
     });
 
+    it("目录搜索把 %/_ 当字面量、不当 LIKE 通配符（两实现同口径，d.412.4.203）", () => {
+      const { owner } = seedTeam();
+      // 建三个目标含特殊字符的团队：下划线、百分号、反斜杠。
+      const a = store.createWorkspaceTeam(owner.id, { name: "含下划线", goal: "API_v2 接入" });
+      const b = store.createWorkspaceTeam(owner.id, { name: "含百分号", goal: "达成 100% 转化" });
+      const c = store.createWorkspaceTeam(owner.id, { name: "普通目标", goal: "常规增长" });
+      const ids = [a.team.id, b.team.id, c.team.id];
+      // 字面量 "_" 只能命中 goal 真含下划线的 a；若当通配符，会命中全部三个。
+      expect(store.listTeamDirectory("_").map((t) => t.id)).toEqual([a.team.id]);
+      // 字面量 "100%" 只能命中 b；若当通配符（尾部 % 放开），会多命中。
+      expect(store.listTeamDirectory("100%").map((t) => t.id)).toEqual([b.team.id]);
+      // 反斜杠同样按字面量处理，不应报错或误配。
+      expect(store.listTeamDirectory("\\").map((t) => t.id)).toEqual([]);
+      expect(ids.every((id) => store.listTeamDirectory("").some((t) => t.id === id))).toBe(true);
+    });
+
     it("申请→队长审批通过：写入成员行、可复看状态；重复申请/重复审拦截", () => {
       const { owner, mate, applicant, teamId } = seedTeam();
       const req = store.createJoinRequest(teamId, applicant.id, "想加入");
@@ -1373,6 +1498,31 @@ for (const f of factories) {
       // 删团队级联清申请
       expect(store.deleteWorkspaceTeam(teamId, owner.id)).toBe(true);
       expect(store.listMyJoinRequests(applicant.id)).toEqual([]);
+    });
+
+    it("审批通过加入申请应刷新团队 updatedAt（两实现同口径，d.412.4.208）", async () => {
+      const { owner, applicant, teamId } = seedTeam();
+      const before = store.getWorkspaceTeam(teamId, owner.id)!.team.updatedAt;
+      const req = store.createJoinRequest(teamId, applicant.id, "想加入");
+      if (!req || typeof req === "string") throw new Error("申请失败");
+      // 毫秒级 ISO 时间戳，须让时钟前进才能观察刷新
+      await new Promise((r) => setTimeout(r, 5));
+
+      expect(store.reviewJoinRequest(teamId, req.id, owner.id, "approve")).toMatchObject({ status: "approved" });
+      const after = store.getWorkspaceTeam(teamId, owner.id)!.team.updatedAt;
+      // 成员变更属于「团队有动静」，两实现都应把团队 updatedAt 往前刷
+      expect(after > before).toBe(true);
+
+      // 反例：已是成员时申请人（owner 手动拉进来的）再被审批，不应重复刷新
+      const mate2 = store.createUser("mate2", "h", "成员2");
+      const req2 = store.createJoinRequest(teamId, mate2.id, "想加入");
+      if (!req2 || typeof req2 === "string") throw new Error("申请失败");
+      store.addWorkspaceMember(teamId, owner.id, mate2.username);
+      const afterManual = store.getWorkspaceTeam(teamId, owner.id)!.team.updatedAt;
+      await new Promise((r) => setTimeout(r, 5));
+      store.reviewJoinRequest(teamId, req2.id, owner.id, "approve");
+      // 已在团队里，审批不再写成员行 → 不应刷新（与内存版 !has(key) 条件一致）
+      expect(store.getWorkspaceTeam(teamId, owner.id)!.team.updatedAt).toBe(afterManual);
     });
   });
 }

@@ -94,6 +94,14 @@ describe("会话导出", () => {
     expect(name.endsWith("-20261021-1405.md")).toBe(true);
   });
 
+  it("文件名截断不劈开 emoji 代理对，不留落单代理（d.412.4.198）", () => {
+    // 59 个 ASCII + 一个 emoji（占 2 个 UTF-16 码元）：slice(0, 60) 正好切在高位代理之后
+    const name = conversationFileName("a".repeat(59) + "😀" + "tail", input.exportedAt, "md");
+    const lone =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(lone.test(name)).toBe(false);
+  });
+
   it("大小与时间格式化对异常输入不抛错", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(1536)).toBe("1.5 KB");

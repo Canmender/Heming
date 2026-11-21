@@ -159,6 +159,25 @@ describe("渲染器", () => {
     expect(fills[0]).not.toBe(fills[1]);
   });
 
+  it("热力图：格子查找不随网格规模平方增长（不逐个 cells.find，d.412.4.201）", () => {
+    // 40×40=1600 格。旧版每个 (row,col) 都 cells.find 线性扫一遍 → O(N²)。
+    // 给 cells 数组打补丁计数 find 调用；直接构造 ChartSpec 绕过 spec() 的 zod clone。
+    const cells: { row: string; col: string; value: number }[] = [];
+    for (let r = 0; r < 40; r++) {
+      for (let c = 0; c < 40; c++) cells.push({ row: `r${r}`, col: `c${c}`, value: r * 40 + c });
+    }
+    let findCalls = 0;
+    const watched = cells.slice();
+    watched.find = ((predicate: (c: (typeof cells)[number]) => boolean) => {
+      findCalls++;
+      return Array.prototype.find.call(watched, predicate);
+    }) as typeof cells.find;
+    const { svg } = renderChart({ type: "F10", cells: watched } as never);
+    expect(findCalls).toBe(0);
+    // 正确性：1600 个格子都渲染成 rect
+    expect([...svg.matchAll(/<rect /g)].length).toBe(1600);
+  });
+
   it("瀑布图：正负用不同明度区分（不靠红绿）", () => {
     const { svg } = renderChart(
       spec({
@@ -190,6 +209,24 @@ describe("渲染器", () => {
     // 负值柱用了 data2 明度（与正值 data 不同）
     const fills = [...svg.matchAll(/<path d="M[^"]+" fill="([^"]+)"/g)].map((m) => m[1]);
     expect(new Set(fills).size).toBeGreaterThan(1);
+  });
+
+  it("柱状图负值：最负柱的数值标签不与横轴类目标签重叠（d.412.4.200）", () => {
+    const { svg } = renderChart(
+      spec({
+        type: "F1",
+        points: [
+          { label: "涨", value: 40 },
+          { label: "跌", value: -25 },
+        ],
+      }),
+    );
+    // 每个 text 的 (x,y) 必须唯一——旧版最负柱数值标签与类目标签都在 (cx, baseY+14)，
+    // 完全叠在一起糊成一团。修后数值标签应上移，两者 y 不再相同。
+    const coords = [...svg.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)"/g)].map(
+      (m) => `${m[1]},${m[2]}`,
+    );
+    expect(new Set(coords).size).toBe(coords.length);
   });
 
   it("桑基图 G22：流带带宽与节点共用比例尺，流量不再被误读（d.412 回归）", () => {

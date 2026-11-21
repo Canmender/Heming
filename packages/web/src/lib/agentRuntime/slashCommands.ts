@@ -101,7 +101,9 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     command: HELP_COMMAND,
     title: "列出本地命令",
-    hint: "这些命令只在本机执行，不会发给模型",
+    // 这张表里有 /init，它偏偏会走发送路径（见 INIT_COMMAND 注释）。帮助文本要
+    // 点明这个例外，否则「只在本机、不会发给模型」的承诺与清单自相矛盾。
+    hint: "除 /init 会把任务发给模型并写 AGENTS.md 外，其余命令只在本机执行，不会发给模型",
   },
 ];
 

@@ -101,8 +101,12 @@ export function envFlagEnabled(value: string | undefined): boolean {
  */
 function cors(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,x-heming-client");
+  // 必须列全实际使用的方法/头，否则跨域部署（VITE_API_BASE 绝对地址 / 桌面 file:// 页面，
+  // 见 web/lib/api.ts:42-46）下浏览器预检会拦下这些请求：6 条 PATCH 路由（改会话/团队/
+  // 任务/知识库）与技能社区下载头 x-skill-hub-key（skills/hubClient.ts:267）。维护规则同
+  // d.111 的 x-heming-client：谁在用就列谁（d.412.4.209）。
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,x-heming-client,x-skill-hub-key");
   // 前端/桌面端要能从 JS 读到服务端分配的请求 id（排障时把浏览器报错对上服务端日志）。
   res.setHeader("Access-Control-Expose-Headers", "x-request-id");
   if (req.method === "OPTIONS") {
@@ -739,12 +743,17 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       }
       limit = Math.min(100, parsedLimit);
     }
-    const before = typeof req.query.before === "string" ? req.query.before : undefined;
+    const rawBefore = typeof req.query.before === "string" ? req.query.before : undefined;
     const actorId = typeof req.query.actorId === "string" ? req.query.actorId : undefined;
-    if (before !== undefined && !Number.isFinite(Date.parse(before))) {
+    if (rawBefore !== undefined && !Number.isFinite(Date.parse(rawBefore))) {
       res.status(400).json({ error: "invalid before" });
       return;
     }
+    // d.412.4.195：before 必须和写侧 occurredAt 同形态（toISOString 的毫秒 + Z）再做游标比较。
+    // store 用字符串字典序比较 occurredAt < before；客户端若传无毫秒的 "…08:00:00Z"，
+    // 字典序下库内 ".000Z" < "Z"，同一条被误判「早于 before」而重复返回；+08:00 偏移更会差 8 小时。
+    // 写侧 IsoTimeInputSchema 已归一化入库，读侧这里对称归一化，游标才不重不漏。
+    const before = rawBefore !== undefined ? new Date(rawBefore).toISOString() : undefined;
     // 唯一游标：before 只有毫秒精度，同一时间戳的剩余条目靠 beforeId 继续翻
     //（客户端传上一页最后一条的 id）。只传 before = 旧语义；给了值但不合法 → 400。
     const rawBeforeId = req.query.beforeId;
@@ -807,6 +816,11 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     // 的同一浏览器会用**相同 sourceId** 把它们原样重传，撤回会被无声撤销。
     // 清除之后新完成的任务 occurredAt=now > 清除时刻，仍然可以正常上报（这是对的）。
     const clearedAt = store.getTeamActivityClearedAt(actorId);
+    // d.412.4.196：入口的 count 检查只在循环前查一次，批量提交（一次最多 50 条）可能在
+    // 尚未满时放行、循环里却突破 500。这里算出真实剩余额度，在循环内逐条递减：
+    // 幂等命中（addTeamActivity 返回 false）与清除水位跳过的都不占额度，只有真插入才扣。
+    // 这样一批既能补满空位、又不多占，超限的条目计入 skipped 告知调用方。
+    let remaining = ACTIVITY_MAX_PER_ACTOR - store.countTeamActivities(actorId);
     let inserted = 0;
     let skipped = 0;
     for (const item of parsed.data.items) {
@@ -814,8 +828,14 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
         skipped += 1;
         continue;
       }
-      if (store.addTeamActivity(actorId, item)) inserted += 1;
-      else skipped += 1;
+      if (remaining <= 0) {
+        skipped += 1;
+        continue;
+      }
+      if (store.addTeamActivity(actorId, item)) {
+        inserted += 1;
+        remaining -= 1;
+      } else skipped += 1;
     }
     res.status(inserted > 0 ? 201 : 200).json({ inserted, skipped });
   });
@@ -2046,13 +2066,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   });
 
   // 附件内容（气泡图片/下载）：与列表同为登录可见口径（共享库语义），无属主校验
+  // d.412.4.194（安全审计 C26）：mime 来自上传 body、用户可控，绝不回显到响应头——
+  // 否则攻击者上传 text/html 内容、诱导同源导航/iframe 即可触发存储型 XSS。前端全程用
+  // fetch + blob（downloadEncryptedFile/fetchFileBlobUrl/fetchFileBlobText）取字节、自带
+  // mime 造 Blob，根本不读这个响应头，故固定为不可执行类型不破坏图片预览/下载。
   app.get("/api/files/:id/content", authOnly, (req, res) => {
     const stored = store.getFile(req.params.id);
     if (!stored) {
       res.status(404).json({ error: "not found" });
       return;
     }
-    res.setHeader("Content-Type", stored.meta.mime);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", "attachment");
     res.send(Buffer.from(stored.contentBase64, "base64"));
   });
 

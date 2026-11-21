@@ -236,6 +236,13 @@ describe("展示辅助", () => {
     expect(tailText(long, 10)).toMatch(/省略/);
   });
 
+  it("tailText 截断不把 emoji 代理对劈成落单低位代理（d.412.4.197）", () => {
+    const out = tailText("😀".repeat(30) + "y", 10);
+    const tail = out.slice(out.indexOf("\n") + 1);
+    const first = tail.charCodeAt(0);
+    expect(first >= 0xdc00 && first <= 0xdfff).toBe(false);
+  });
+
   it("formatCommand 仅供展示", () => {
     expect(formatCommand(["provider", "add", "deepseek", "sk-x"])).toBe(
       "模型服务 provider add deepseek sk-x",

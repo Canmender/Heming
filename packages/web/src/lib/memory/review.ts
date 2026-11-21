@@ -214,6 +214,15 @@ export function parseReviewOutput(raw: string): ReviewOutput {
   return { memories, skill };
 }
 
+/**
+ * 按码点截断到 max——不能用 String.slice（UTF-16 码元），否则边界落在 emoji/生僻字
+ * 的代理对中间会劈出落单代理，把无效标量喂给复盘模型（d.412 同款截断修复）。
+ */
+function clipByCodePoints(value: string, max: number): string {
+  const chars = Array.from(value);
+  return chars.length <= max ? value : chars.slice(0, max).join("");
+}
+
 /** 复盘提示词：只输出 JSON，不许寒暄；并把「什么不该记」写清楚。 */
 export function buildReviewPrompt(input: {
   userText: string;
@@ -225,7 +234,7 @@ export function buildReviewPrompt(input: {
     .slice(-6)
     .map(
       (t, i) =>
-        `【第 ${i + 1} 轮】用户：${t.userText.slice(0, 400)}\n助手：${t.assistantText.slice(0, 600)}`,
+        `【第 ${i + 1} 轮】用户：${clipByCodePoints(t.userText, 400)}\n助手：${clipByCodePoints(t.assistantText, 600)}`,
     )
     .join("\n\n");
   const known = input.knownKeys.length ? input.knownKeys.slice(0, 30).join("、") : "（暂无）";
@@ -251,7 +260,7 @@ export function buildReviewPrompt(input: {
     window,
     "",
     "## 本轮",
-    `用户：${input.userText.slice(0, 600)}\n助手：${input.assistantText.slice(0, 1200)}`,
+    `用户：${clipByCodePoints(input.userText, 600)}\n助手：${clipByCodePoints(input.assistantText, 1200)}`,
   ].join("\n");
 }
 

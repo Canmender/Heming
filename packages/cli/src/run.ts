@@ -338,10 +338,43 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
   const seenWrites = new Set<string>();
 /** 模型被调用了几次（工具循环每轮一次；与评测的 `rounds` 同口径）。 */
   let modelRounds = 0;
+  let usageInput = 0;
+  let usageOutput = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let sawCacheRead = false;
+  let sawCacheWrite = false;
+
   const chat: StreamChatFn = (profile, messages, opts) => {
     modelRounds += 1;
     const impl = options.streamChat ?? realStreamChat;
     return impl(profile, messages, opts);
+  };
+
+  /**
+   * 子代理专用 chat（d.412.4.213）：子代理直接 await deps.chat 发起模型调用，
+   * 不经过 agentStream 编排，用量不会转成 turn_end rollout 给 onRollout 收口——
+   * 只能在 opts 上挂 onUsage 把它的用量并进本回合的账（兑现帮助里「同样的用量」承诺）。
+   * 与原 onUsage 串联，绝不吞掉调用方自己的回调；字段口径按 UsageTotals（...Tokens）。
+   */
+  const subagentChat: StreamChatFn = (profile, messages, opts) => {
+    const originalOnUsage = opts.onUsage;
+    return chat(profile, messages, {
+      ...opts,
+      onUsage: (u) => {
+        usageInput += u.inputTokens ?? 0;
+        usageOutput += u.outputTokens ?? 0;
+        if (u.cacheReadTokens !== undefined) {
+          sawCacheRead = true;
+          cacheRead += u.cacheReadTokens;
+        }
+        if (u.cacheWriteTokens !== undefined) {
+          sawCacheWrite = true;
+          cacheWrite += u.cacheWriteTokens;
+        }
+        originalOnUsage?.(u);
+      },
+    });
   };
 
   const tooling = createCliTooling({
@@ -356,8 +389,9 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
     memory: options.memory !== false && options.readOnly !== true,
     ask: options.ask ?? null,
     ...(options.askWrites ? { askWrites: true } : {}),
-    // 子代理用同一份 chat：modelRounds 因此把它的调用也算进去，成本不会凭空消失。
-    subagent: options.subagent === false ? null : { chat, profile: options.profile },
+    // 子代理用专用 chat：既经通用 chat 计 modelRounds，又挂 onUsage 把用量并进账，
+    // 成本（轮次 + token）都不会凭空消失。
+    subagent: options.subagent === false ? null : { chat: subagentChat, profile: options.profile },
     conversationId,
     onWrite: (file) => {
       if (seenWrites.has(file)) return;
@@ -396,12 +430,6 @@ export function startAgentRun(options: AgentRunOptions): AgentRunHandle {
 
   const toolCalls: ToolCallRecord[] = [];
   let finalText = "";
-  let usageInput = 0;
-  let usageOutput = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let sawCacheRead = false;
-  let sawCacheWrite = false;
   let settled: RunSettled | undefined;
   let capHit = false;
 

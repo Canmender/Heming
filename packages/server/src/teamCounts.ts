@@ -51,3 +51,25 @@ export function summarizeTeamTasks(
   }
   return { counts: { open, done, overdue, unassigned, blocked }, perMember };
 }
+
+/**
+ * 团队简报成员名单的排序口径（d.412.4.189）：组长恒在前，同类按中文名排序。
+ *
+ * 为什么两个 Store 必须共用这一段：web/teamBrief.ts 把成员名单 slice(0,10) 写进提示词，
+ * 组长排在后面就会被截掉，模型便看不到「谁是组长」。此前内存实现显式组长在前，
+ * 而 SQLite 实现用 `ORDER BY role ASC`（BINARY 下 "member" < "owner"）让组长垫底——
+ * 同一 Store 契约、两份相反的排序。把口径收敛到这一个纯函数，杜绝再次漂移。
+ *
+ * 泛型保留调用方的额外字段（id / open 等），只按 displayName + role 排序，不入参修改。
+ */
+export function sortTeamBriefMembers<T extends { displayName: string; role: "owner" | "member" }>(
+  members: readonly T[],
+): T[] {
+  return [...members].sort((a, b) =>
+    a.role === b.role
+      ? a.displayName.localeCompare(b.displayName, "zh-Hans-CN")
+      : a.role === "owner"
+        ? -1
+        : 1,
+  );
+}

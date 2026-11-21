@@ -138,6 +138,16 @@ describe.skipIf(tsx === null)("CLI 入口的进程级行为", () => {
     expect(result.stdout).toContain("--ask");
     expect(result.stdout).toContain("需要真终端");
   }, 30_000);
+
+  it("-o 运行失败时不覆盖已有文件（codex 的 no-overwrite-on-failure 语义）", async () => {
+    const dir = tmpDir();
+    const out = path.join(dir, "answer.txt");
+    writeFileSync(out, "上一次的成功结果", "utf8");
+    // 清掉了模型凭据 → 这次必然失败（exit 2）；失败时 -o 绝不能把半截结果写进去。
+    const failed = await runCli(["exec", "-o", out, "跑一下", "--cwd", dir]);
+    expect(failed.code).toBe(2);
+    expect(readFileSync(out, "utf8")).toBe("上一次的成功结果");
+  }, 30_000);
 });
 
 /**
@@ -295,5 +305,15 @@ describe.skipIf(tsx === null)("heming memory 子命令", () => {
     expect(result.stdout).toContain("heming rewind");
     expect(result.stdout).toContain("--no-rewind");
     expect(result.stdout).toContain(".heming/rewind/");
+  }, 30_000);
+
+  it("rewind 帮助文案与实际口径一致：命令新建的文件会删、改过内容的退不回（d.412.4.216）", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.code).toBe(0);
+    // rewind.ts 的实现能抓命令新建的文件并删掉（describeCliRewindResult:520），
+    // 帮助别再说「run_command 抓不到 / 命令退不回去」这种自相矛盾的话。
+    expect(result.stdout).toContain("命令新建的文件");
+    expect(result.stdout).not.toContain("命令退不回去");
+    expect(result.stdout).not.toContain("run_command 改的东西抓不到");
   }, 30_000);
 });

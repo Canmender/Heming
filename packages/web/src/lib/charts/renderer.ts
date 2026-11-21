@@ -353,8 +353,11 @@ function renderBars(ctx: Ctx): RenderedChart {
         )}${el("path", { d: barTopPath(x, yTop, barW, h), fill: color })}</g>`,
       );
     }
-    // 数值标签：正柱在顶上，负柱在底下（不压到横轴文字）
-    parts.push(valueText(cx, positive ? yTop - 9 : yTop + h + 14, fmtNum(d.value), p));
+    // 数值标签：正柱在顶上，负柱在底下。最负柱的柱底正好是 baseY，
+    // 若照搬 yTop+h+14 会落在 baseY+14——与下面的横轴类目标签同一坐标，糊成一团。
+    // 负柱标签钳制到 baseY-4（零轴与画布底之间），保证不与轴标签重叠（d.412.4.200）。
+    const valueY = positive ? yTop - 9 : Math.min(yTop + h + 14, baseY - 4);
+    parts.push(valueText(cx, valueY, fmtNum(d.value), p));
     parts.push(axisText(cx, baseY + 14, d.label ?? "", p));
   });
 
@@ -757,11 +760,22 @@ function renderHeat(ctx: Ctx): RenderedChart {
   const cellH = gridH / Math.max(1, rows.length);
   const max = Math.max(1, ...cells.map((c) => Math.abs(c.value)));
   const parts: string[] = [];
+  // 行/列标签可能含任意字符（含分隔符），用嵌套 Map 而非拼接字符串做键，避免碰撞。
+  // 一次建索引 O(N)，替代双重循环里每个坐标 cells.find 的 O(N²)（d.412.4.201）。
+  const cellIndex = new Map<string, Map<string, (typeof cells)[number]>>();
+  for (const cell of cells) {
+    let byCol = cellIndex.get(cell.row);
+    if (!byCol) {
+      byCol = new Map();
+      cellIndex.set(cell.row, byCol);
+    }
+    byCol.set(cell.col, cell);
+  }
 
   rows.forEach((row, ri) => {
     parts.push(axisText(labelW - 8, PAD.top + ri * cellH + cellH / 2, row, p, "end"));
     cols.forEach((col, ci) => {
-      const cell = cells.find((c) => c.row === row && c.col === col);
+      const cell = cellIndex.get(row)?.get(col);
       if (!cell) return;
       const t = Math.abs(cell.value) / max;
       const x = labelW + ci * cellW;

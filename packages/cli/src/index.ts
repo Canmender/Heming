@@ -7,7 +7,7 @@
  * 否则用户只会看到半截堆栈——CLI 最常见的第一次体验就是「key 没配」。
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "./args.js";
 import { resolveModelConfig } from "./config.js";
@@ -61,7 +61,7 @@ const USAGE = `用法：
   heming memory [list | add <一句话> | forget <id 或序号>]
                                              看 / 加 / 删这个工作区的长期记忆
   heming commands [--json] [--cwd <dir>]     列出 .heming/commands/*.md 里的自定义命令
-  heming rewind [轮数] [--cwd <dir>]          看/退回前面几轮改过的文件（只含写工具，命令退不回去）
+  heming rewind [轮数] [--cwd <dir>]          看/退回前面几轮改过的文件（写工具按原文还原，命令新建的会删掉）
   heming --version | --help
 
 常用选项：
@@ -80,6 +80,7 @@ const USAGE = `用法：
   --no-subagent        不给 agent_task：查证类任务只能自己翻，省一次模型调用
   --no-rewind          不留回退记录（默认会抓写工具的原文，供 heming rewind 用）
   --output-format <f>  stdout 格式：text（默认）/ json（exec 专用）/ stream-json（事件流）
+  -o, --output-last-message <file>  成功后把最终回答正文写入文件（失败不写；给 CI/脚本接结果）
   --continue           接着这个目录下最近一次会话聊（等价于 --resume 最近一条）
   --resume <id>        接着指定会话聊（支持唯一前缀，id 从 heming sessions 看）
   --session-dir <dir>  会话存档目录（默认 ~/.heming/cli-sessions）
@@ -177,13 +178,14 @@ MCP 服务（给别的编辑器用）：
   折了会打一行「上下文：折叠了 N 条早期对话」；--no-compact 则整段原样发送。
   真的撞上供应商的上下文上限时，会自动收紧一次预算重试（最多两级）。
 
-回退（.heming/rewind/，只覆盖写工具）：
+回退（.heming/rewind/，覆盖写工具与命令新建的文件）：
   每次运行改文件之前，会先把它原来的内容抓一份存起来（一次运行一份，最多留 20 轮）。
   heming rewind                         看有哪些轮次可以退
   heming rewind 1                       退回最近一轮改过的文件
   heming rewind 3                       退回最近三轮（回到这三轮开始之前）
-  只还原 file_write / file_edit / file_patch 动过的文件；run_command 改的东西抓不到，
-  退不回去——那种情况请用 git 或自己的备份。抓不到原文的（太大 / 二进制）会点名跳过。
+  file_write / file_edit / file_patch 动过的文件按原文还原；命令（run_command）新建的文件
+  会一并删掉，但命令改过内容或删掉的文件没原文、退不回去——那种情况请用 git 或自己的备份。
+  抓不到原文的（太大 / 二进制）会点名跳过。
 
 工作区自定义命令（.heming/commands/*.md，与桌面端的 /名字 同一批文件）：
   文件名就是命令名（小写字母开头，可带数字和短横线），正文就是提示词；
@@ -726,6 +728,16 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } else if (lastChar && lastChar !== "\n") {
     process.stdout.write("\n");
+  }
+
+  // `--output-last-message`（借鉴 codex -o）：成功时把最终回答正文单独写一份，给 CI/脚本接结果。
+  // 只在成功时写——失败/中断时绝不用半截内容覆盖旧文件（codex 的 no-overwrite-on-failure 语义）。
+  if (options.lastMessageFile && !interrupted && result.ok) {
+    try {
+      writeFileSync(options.lastMessageFile, result.text ?? "", "utf8");
+    } catch (error) {
+      writeErr(`[heming] 最后一条回答没能写进 ${options.lastMessageFile}：${error instanceof Error ? error.message : String(error)}\n`);
+    }
   }
 
   const summary = interrupted

@@ -60,8 +60,22 @@ export function previewToolResult(
   // 行数判据在这里失效，退化成按字符截。
   if (lines.length <= headLines + tailLines) {
     const keep = Math.max(1, Math.floor(minChars / 2));
-    const head = result.slice(0, keep);
-    const tail = result.slice(-keep);
+    let head = result.slice(0, keep);
+    let tail = result.slice(-keep);
+    // slice 按 UTF-16 码元切，切点可能正好落在 emoji/扩展汉字的代理对中间，
+    // 劈出落单代理（渲染/回灌模型都会变乱码方块）。与 shell/tool.ts 的 clip 同口径：
+    // head 末尾是被劈开的高位代理就退一格，tail 开头是被劈开的低位代理就丢一格。
+    // 只在确属被劈开的配对时退，文本本身落单的异常字符不动；hiddenChars 仍按码元计。
+    const headLast = head.charCodeAt(head.length - 1);
+    if (headLast >= 0xd800 && headLast <= 0xdbff) {
+      const next = result.charCodeAt(keep);
+      if (next >= 0xdc00 && next <= 0xdfff) head = head.slice(0, -1);
+    }
+    const tailFirst = tail.charCodeAt(0);
+    if (tailFirst >= 0xdc00 && tailFirst <= 0xdfff) {
+      const prev = result.charCodeAt(result.length - keep - 1);
+      if (prev >= 0xd800 && prev <= 0xdbff) tail = tail.slice(1);
+    }
     const hiddenChars = Math.max(0, result.length - head.length - tail.length);
     if (hiddenChars === 0) return { preview: result, hiddenChars: 0, truncated: false };
     return {
