@@ -216,8 +216,8 @@ describe("TeamTaskBoard 真任务看板", () => {
     expect(screen.queryByRole("dialog", { name: "任务详情" })).not.toBeInTheDocument();
   });
 
-  it("详情里的「到工作台处理」回调宿主切到工作台，并关掉详情", async () => {
-    const onOpenWorkbench = vi.fn();
+  it("详情里的「到团队列表处理」回调宿主切到团队列表，并关掉详情", async () => {
+    const onOpenTeamList = vi.fn();
     vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
       snapshot([task({ id: "k1", title: "写周报初稿", status: "todo", assigneeId: me.id })]),
     );
@@ -227,20 +227,20 @@ describe("TeamTaskBoard 真任务看板", () => {
         members={members}
         currentUserId={me.id}
         ownerId={me.id}
-        onOpenWorkbench={onOpenWorkbench}
+        onOpenTeamList={onOpenTeamList}
       />,
     );
     await screen.findByText("写周报初稿");
     fireEvent.click(screen.getByRole("button", { name: "查看任务详情 写周报初稿" }));
 
     const dialog = screen.getByRole("dialog", { name: "任务详情" });
-    fireEvent.click(within(dialog).getByRole("button", { name: /到工作台处理/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /到团队列表处理/ }));
 
-    expect(onOpenWorkbench).toHaveBeenCalledTimes(1);
+    expect(onOpenTeamList).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog", { name: "任务详情" })).not.toBeInTheDocument();
   });
 
-  it("未传 onOpenWorkbench 时不显示「到工作台处理」（独立嵌入场景不报错）", async () => {
+  it("未传 onOpenTeamList 时不显示「到团队列表处理」（独立嵌入场景不报错）", async () => {
     vi.mocked(fetchWorkspaceTeam).mockResolvedValue(
       snapshot([task({ id: "k1", title: "写周报初稿", status: "todo", assigneeId: me.id })]),
     );
@@ -249,7 +249,7 @@ describe("TeamTaskBoard 真任务看板", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看任务详情 写周报初稿" }));
 
     const dialog = screen.getByRole("dialog", { name: "任务详情" });
-    expect(within(dialog).queryByRole("button", { name: /到工作台处理/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /到团队列表处理/ })).not.toBeInTheDocument();
   });
 
   it("按方案筛选：只显示该方案下的任务，并可只看独立任务", async () => {

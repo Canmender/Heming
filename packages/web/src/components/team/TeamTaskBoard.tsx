@@ -14,7 +14,7 @@ import { Button } from "../ui/Button.js";
  *
  * 旧的 `TeamBoardView` 读 `team_activities` 摘要、铺成「任务 / 日程」两列，
  * 不能拖卡也不能改状态——用户点进「看板」必然期待落空。这里改成读真正的
- * `team_tasks`（与工作台同一数据源 `GET /api/teams/:id`），按状态分列，
+ * `team_tasks`（与团队列表同一数据源 `GET /api/teams/:id`），按状态分列，
  * 支持拖拽流转，并复用收紧后的状态机（见 `updateTeamTask` 的 done_locked）。
  *
  * - 拖到「待验收」= 交活（status:done），不直接完成。
@@ -77,11 +77,11 @@ export interface TeamTaskBoardProps {
   members: TeamMember[];
   currentUserId: string | null;
   ownerId: string | null;
-  /** 只读详情里的「到工作台处理」落点：由宿主切到工作台 Tab；不传则不显示该按钮。 */
-  onOpenWorkbench?: () => void;
+  /** 只读详情里的「到团队列表处理」落点：由宿主切到团队列表 Tab；不传则不显示该按钮。 */
+  onOpenTeamList?: () => void;
 }
 
-export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenWorkbench }: TeamTaskBoardProps) {
+export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenTeamList }: TeamTaskBoardProps) {
   const [tasks, setTasks] = useState<TeamTask[]>([]);
   const [plans, setPlans] = useState<TeamPlanItem[]>([]);
   const [ready, setReady] = useState(false);
@@ -169,7 +169,7 @@ export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenW
     return map;
   }, [filtered]);
 
-  /** 拖拽落下：把任务流转到目标列。所有状态改写都走 updateTeamTask，与工作台同一接口。 */
+  /** 拖拽落下：把任务流转到目标列。所有状态改写都走 updateTeamTask，与团队列表同一接口。 */
   const dropOn = async (taskId: string, target: ColumnKey) => {
     setNotice("");
     const task = tasks.find((t) => t.id === taskId);
@@ -188,7 +188,7 @@ export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenW
     }
     // 已完成任务不能拖回待认领/有卡点（绕过验收，服务端 done_locked 也会挡）。
     if (from === "done" || from === "review") {
-      setNotice("已交的任务要重开，请让组长打回重做（会记下原因）；本人继续做可在工作台改回进行中");
+      setNotice("已交的任务要重开，请让组长打回重做（会记下原因）；本人继续做可在团队列表改回进行中");
       return;
     }
     const nextStatus: TeamItemStatus = target === "review" ? "done" : target;
@@ -285,7 +285,7 @@ export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenW
           </button>
         </div>
         <p className="mt-2 ui-micro">
-          读真正的任务（与工作台同一份），拖动卡片改状态 · 交活拖到「待验收」，验收由组长做
+          读真正的任务（与团队列表同一份），拖动卡片改状态 · 交活拖到「待验收」，验收由组长做
         </p>
         {notice ? (
           <p role="status" className="mt-1 ui-caption text-warn">
@@ -313,7 +313,7 @@ export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenW
           {filtered.length === 0 ? (
             <EmptyState
               className="py-10"
-              title={tasks.length === 0 ? "还没有任务。去工作台把目标拆成能派出去的一件事。" : "没有任务命中筛选。"}
+              title={tasks.length === 0 ? "还没有任务。去团队列表把目标拆成能派出去的一件事。" : "没有任务命中筛选。"}
             />
           ) : (
             <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
@@ -469,19 +469,19 @@ export function TeamTaskBoard({ teamId, members, currentUserId, ownerId, onOpenW
             ) : null}
           </dl>
           <p className="mt-3 ui-micro text-muted">
-            只读详情，数据与看板同源。验收、讨论等编辑请到工作台。
+            只读详情，数据与看板同源。验收、讨论等编辑请到团队列表。
           </p>
-          {onOpenWorkbench ? (
+          {onOpenTeamList ? (
             <div className="mt-3 flex justify-end">
               <Button
                 size="sm"
                 variant="primary"
                 onClick={() => {
                   setDetailId(null);
-                  onOpenWorkbench();
+                  onOpenTeamList();
                 }}
               >
-                到工作台处理 →
+                到团队列表处理 →
               </Button>
             </div>
           ) : null}

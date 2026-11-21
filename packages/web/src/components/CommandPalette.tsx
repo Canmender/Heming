@@ -58,10 +58,10 @@ export type { SearchOutcome, SearchResult } from "../lib/palette/search.js";
  * 宿主页 `consumePageView()` 取走即清）。视图入口不写「最近使用」：recent 只认
  * 页面 / 设置 / 动作三类的可复原 id。
  *
- * 未覆盖的 8 个 Tab（团队 workspace/feed/agenda/usage、模型 models/agents/sources/run）
- * 目前宿主页没有消费方。等 TeamPage / ModelPage 补一个 `useEffect` 消费通用意图
- * `{ kind: "focus-tab", data: { page, tab } }`（形状见 `store/ui.ts` 的 `PaletteIntentData`）
- * 之后，往这张表加条目、在 `execute` 里改成 `setPaletteIntent` 即可，面板其它部分不用动。
+ * 未覆盖的 Tab（模型 models/agents/sources/run）目前宿主页没有消费方。
+ * 团队页只用 workspace/feed（团队列表/动向）两个 `focus-tab` 入口，看板走 `view: "board"`。
+ * 形状见 `store/ui.ts` 的 `PaletteIntentData`；往这张表加条目、在 `execute` 里改成
+ * `setPaletteIntent` 即可，面板其它部分不用动。
  */
 interface PaletteViewEntry {
   /** 目标宿主页。 */
@@ -111,9 +111,9 @@ const PALETTE_VIEWS: PaletteViewEntry[] = [
   {
     page: "team",
     tab: "workspace",
-    label: "团队 › 工作台",
-    description: "成员名册、待办与团队共享设置",
-    keywords: ["团队", "工作台", "名册", "成员", "workspace"],
+    label: "团队 › 团队列表",
+    description: "建队、名册、方案与任务",
+    keywords: ["团队", "团队列表", "名册", "成员", "workspace"],
   },
   {
     page: "team",
@@ -121,20 +121,6 @@ const PALETTE_VIEWS: PaletteViewEntry[] = [
     label: "团队 › 动向",
     description: "同队成员共享的任务与日程摘要流",
     keywords: ["团队", "动向", "动态", "feed", "activity"],
-  },
-  {
-    page: "team",
-    tab: "agenda",
-    label: "团队 › 团队日程",
-    description: "按天排的团队日程",
-    keywords: ["团队", "日程", "日历", "agenda", "calendar"],
-  },
-  {
-    page: "team",
-    tab: "usage",
-    label: "团队 › 用量",
-    description: "团队成员的用量排行与趋势",
-    keywords: ["团队", "用量", "统计", "usage", "排行"],
   },
   {
     page: "model",
