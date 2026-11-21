@@ -167,6 +167,24 @@ describe("applyStandardRepair：只补缺、不覆盖", () => {
     expect(schema?.text).toContain("知识库规约");
   });
 
+  it("不注入 today 时用本地日期，不用 UTC 日（跨时区午夜不错日，d.412 回归）", async () => {
+    // 2025-12-31T16:30:00Z = 北京时间 2026-01-01 00:30。UTC 日会错成 12-31。
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2025-12-31T16:30:00Z"));
+      const bridge = createMemoryVaultBridge();
+      const before = await bridge.tree("memory", { depth: 4 });
+      const report = inspectStandard({ tree: before, pages: new Map() });
+
+      await applyStandardRepair(bridge, "memory", report); // 不传 today
+      const log = await bridge.read("memory", "log.md");
+      expect(log?.text).toContain("2026-01-01");
+      expect(log?.text).not.toContain("2025-12-31");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("已有文件一字不动：只补缺的那几个", async () => {
     const userIndex = "---\ntitle: 我的索引\ncreated: 2025-01-01\ntags: [mine]\n---\n\n用户自己写的\n";
     const bridge = createMemoryVaultBridge({ files: { "index.md": userIndex } });

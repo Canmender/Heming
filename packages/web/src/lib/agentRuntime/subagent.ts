@@ -801,7 +801,9 @@ export function withSubagentTool(
         const list = started
           .map((job, index) => {
             const head = started.length > 1 ? `【任务 ${index + 1}】` : "";
-            const brief = job.task.length > 60 ? `${job.task.slice(0, 60)}…` : job.task;
+            // 按码点截断（d.412 回归）：这段任务摘要会回给模型，不能在 emoji 中间劈出落单代理。
+            const taskPoints = [...job.task];
+            const brief = taskPoints.length > 60 ? `${taskPoints.slice(0, 60).join("")}…` : job.task;
             return `${head}${brief}（任务 ${job.id}）`;
           })
           .join("\n");

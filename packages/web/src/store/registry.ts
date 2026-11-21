@@ -199,6 +199,12 @@ export function createRegistryStore(deps: RegistryStoreDeps = {}): RegistryStore
   const confirm = deps.confirmInstall ?? hitlConfirm;
   const probeRuntime = deps.probeRuntime ?? probeLocalRuntime;
 
+  // 搜索框有 400ms 防抖，但防抖只挡"按键频率"，挡不住"请求来回耗时"：
+  // 上一个查询还没回来时用户又输了新词，两个 load() 会重叠。没有序号的话，
+  // 慢的那个后落地就会用旧词的结果盖掉新词的结果。每次 load 领一个号，
+  // 只有最新的号才能写回状态（loadMore 也认这个号，避免往新结果上追加旧游标的分页）。
+  let loadSeq = 0;
+
   return create<RegistryState>((set, get) => ({
     entries: [],
     nextCursor: undefined,
@@ -229,6 +235,7 @@ export function createRegistryStore(deps: RegistryStoreDeps = {}): RegistryStore
     },
 
     load: async (query, opts = {}) => {
+      const seq = ++loadSeq;
       const q = (query ?? get().query).trim();
       if (q !== get().query) set({ query: q });
 
@@ -260,6 +267,10 @@ export function createRegistryStore(deps: RegistryStoreDeps = {}): RegistryStore
         // 数据层已把错误归一成 `{ok:false}`；这里再兜一层，保证 load 永不抛。
         result = { ok: false as const, error: `无法连接 Registry：${(err as Error).message}` };
       }
+
+      // 期间又发起了新的 load（防抖挡不住这种重叠）：旧查询的结果已经作废，
+      // 写了反而会用旧词的结果盖掉新词。直接丢弃，连缓存和降级都不写。
+      if (seq !== loadSeq) return;
 
       if (result.ok) {
         const savedAt = now();
@@ -294,10 +305,18 @@ export function createRegistryStore(deps: RegistryStoreDeps = {}): RegistryStore
     loadMore: async () => {
       const { nextCursor, query, loadingMore } = get();
       if (!nextCursor || loadingMore) return;
+      const seq = loadSeq;
       set({ loadingMore: true, error: null });
       const result = query
         ? await search(query, { fetchImpl, cursor: nextCursor })
         : await fetchPage(nextCursor, REGISTRY_PAGE_SIZE, { fetchImpl });
+      // 翻页期间若发起了新的 load（换了查询词），旧游标的分页已经作废；
+      // 再 append 会把旧词的结果混进新词列表。同时把 loadingMore 复位，
+      // 否则这次被丢弃的翻页会永久占住标志位，后面的翻页全被挡住。
+      if (seq !== loadSeq) {
+        set({ loadingMore: false });
+        return;
+      }
       if (!result.ok) {
         set({ loadingMore: false, error: result.error });
         return;

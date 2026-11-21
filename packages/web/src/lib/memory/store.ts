@@ -809,11 +809,14 @@ export class MemoryStore {
     if (!inputs.length) return { ok: true, written: 0, dropped: 0 };
     const bucket = GLOBAL_AGENT_ID;
     const list = this.data.semantic[bucket] ?? [];
+    // 键必须与落库的 entry.key 同口径：entry.key 被截到 300 字符（见 build），
+    // 若这里用完整 rel 作键，超长 rel 的条目在下面用 entry.key 查不到 → 旧条目留着、
+    // 新条目又追加一份，同一 id 出现两条陈旧/新鲜并存的幽灵记录（d.412 回归）。
     const inputByKey = new Map<string, VaultEntryInput>();
     for (const input of inputs) {
       const rel = String(input.rel ?? "");
       if (!rel) continue;
-      inputByKey.set(rel, input);
+      inputByKey.set(rel.slice(0, 300), input);
     }
     if (!inputByKey.size) return { ok: true, written: 0, dropped: 0 };
 

@@ -1709,8 +1709,12 @@ export function runAgentMentions(
               const text = matches.length
                 ? `已加入可调用工具（本轮后续即可调用）：\n${matches
                     .map(
-                      (t) =>
-                        `- ${t.name}${t.description ? `：${t.description.replace(/\s+/g, " ").slice(0, 80)}` : ""}`,
+                      (t) => {
+                        // 按码点截断（d.412 回归）：工具描述会随结果回给模型，不能在 emoji 中间劈出落单代理。
+                        const desc = Array.from(t.description.replace(/\s+/g, " "));
+                        const shown = desc.length > 80 ? desc.slice(0, 80).join("") : desc.join("");
+                        return `- ${t.name}${t.description ? `：${shown}` : ""}`;
+                      },
                     )
                     .join("\n")}`
                 : `没有找到与「${query}」匹配的工具。换更通用的关键词（例如服务名）再试一次。`;

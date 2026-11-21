@@ -78,7 +78,15 @@ const isDirectRun = process.argv[1]?.endsWith("index.ts") || process.argv[1]?.en
 if (isDirectRun) {
   const port = Number(process.env.PORT ?? 8787);
   const host = resolveHost();
-  startServer(port, host).then((ctx) => {
-    console.log(`heming server listening on http://${host}:${ctx.port}`);
-  });
+  startServer(port, host).then(
+    (ctx) => {
+      console.log(`heming server listening on http://${host}:${ctx.port}`);
+    },
+    (error: unknown) => {
+      // 启动失败要给出清晰错误并置失败退出码，而不是留一个未处理的 Promise 拒绝
+      // 让进程用原始 ERR_UNHANDLED_REJECTION 堆栈崩掉（d.412 回归）。
+      console.error(`[heming] 服务启动失败：${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    },
+  );
 }

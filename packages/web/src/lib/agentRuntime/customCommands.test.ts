@@ -76,6 +76,22 @@ describe("自定义命令：文件名即命令名（d.240）", () => {
     expect(cmd?.prompt).toContain(".heming/commands/long.md");
   });
 
+  it("提示词截断落在 emoji 中间时不劈出落单代理（会进提示词，d.412 回归）", () => {
+    const long = "x".repeat(MAX_CUSTOM_COMMAND_CHARS - 1) + "😀" + "tail";
+    const prompt = parseCustomCommand(source(".heming/commands/emoji.md", long))?.prompt ?? "";
+    const units = prompt.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+    // 正文字数按码点正好到上限（不含追加的说明）
+    expect(Array.from(prompt.split("\n")[0]!)).toHaveLength(MAX_CUSTOM_COMMAND_CHARS);
+  });
+
   it("整批：按路径排序、同名取先读到的、超过上限就停", () => {
     const sources = [
       source(".heming/commands/b.md", "占位 B"),

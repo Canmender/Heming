@@ -68,10 +68,12 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
   let nextRequestId = allocateRequestIdBase();
 
   const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
+    // 已经中断就别再把请求发出去：否则副作用（工具调用）真的会到主进程，且这条在途
+    // Promise 没人 then 会在预中断路径上变成 unhandledRejection（d.412 回归）。
+    if (signal?.aborted) throw new Error("工具调用已中断");
     const requestId = nextRequestId++;
     const request = bridge.request(serverId, config, method, params, requestId);
     if (!signal) return ((await request) ?? {}) as T;
-    if (signal.aborted) throw new Error("工具调用已中断");
     /**
      * 中断要真的传到主进程：`cancel` 会让它发 `notifications/cancelled` 并按
      * 「已取消」拒绝这条调用，我们就能立刻拿到确定结果而不是干等超时。

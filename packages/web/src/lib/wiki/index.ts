@@ -36,6 +36,17 @@ export const WIKI_KINDS = [
 ] as const;
 export type WikiKind = (typeof WIKI_KINDS)[number];
 
+/**
+ * 本地日期键（YYYY-MM-DD）。不能用 toISOString().slice(0,10)——那是 UTC 日期，
+ * UTC+ 用户凌晨会记成前一天（与日记等模块的「今天」口径不一致）。
+ */
+function localDayKey(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
 /** 类别中文名（界面用）。 */
 export const KIND_LABEL: Record<WikiKind, string> = {
   entities: "实体",
@@ -127,7 +138,7 @@ export function renderPage(page: {
   body: string;
   updated?: string;
 }): string {
-  const updated = page.updated ?? new Date().toISOString().slice(0, 10);
+  const updated = page.updated ?? localDayKey();
   const lines = ["---", `title: ${page.title}`];
   if (page.tags?.length) lines.push(`tags: [${page.tags.join(", ")}]`);
   lines.push(`updated: ${updated}`, "---", "");
@@ -243,7 +254,7 @@ export function buildGraph(pages: WikiPage[]): WikiGraph {
  * 索引必须按类别组织且带一句话摘要。
  */
 export function renderIndex(pages: WikiPage[]): string {
-  const lines = ["---", "title: 索引", `updated: ${new Date().toISOString().slice(0, 10)}`, "---", ""];
+  const lines = ["---", "title: 索引", `updated: ${localDayKey()}`, "---", ""];
   lines.push("# 索引", "", `共 ${pages.length} 个页面。`, "");
   for (const kind of WIKI_KINDS) {
     const inKind = pages.filter((p) => (parsePagePath(p.path)?.kind ?? "notes") === kind);
@@ -271,7 +282,7 @@ export function renderIndex(pages: WikiPage[]): string {
  */
 export const DEFAULT_SCHEMA = `---
 title: 知识库规约
-updated: ${new Date().toISOString().slice(0, 10)}
+updated: ${localDayKey()}
 ---
 
 # 知识库规约
@@ -343,7 +354,7 @@ export function createMemoryWikiBridge(): WikiBridge {
       return files.delete(rel);
     },
     async log(kind, title, extra) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDayKey();
       const prev = files.get("log.md") ?? "";
       files.set(
         "log.md",

@@ -115,6 +115,59 @@ describe("Registry store：缓存与降级", () => {
     expect(store.getState().stale).toBe(false);
   });
 
+  it("两个 load 重叠时，慢的旧查询不许用旧结果盖掉新查询（d.412 回归）", async () => {
+    // 搜索框防抖只挡按键频率，挡不住请求来回耗时：上一个查询没回来时用户又输了新词。
+    // 旧版没有序号，慢的 foo 后落地会把 bar 的结果盖成 foo。
+    const deferred: {
+      resolve: (v: ReturnType<typeof server>) => void;
+    }[] = [];
+    const fetchImpl = vi.fn(() => {
+      let resolve!: (v: ReturnType<typeof server>) => void;
+      const promise = new Promise<ReturnType<typeof server>>((r) => (resolve = r));
+      deferred.push({ resolve });
+      return promise;
+    });
+    const { store } = make({}, fetchImpl);
+
+    const oldLoad = store.getState().load("foo"); // 慢查询
+    const newLoad = store.getState().load("bar"); // 新查询
+
+    // 新查询先回，旧查询后回 —— 恢复真实世界的乱序落地
+    deferred[1]?.resolve(server([item("io.github.a/bar-result")]));
+    await newLoad;
+    deferred[0]?.resolve(server([item("io.github.a/foo-result")]));
+    await oldLoad;
+
+    expect(store.getState().query).toBe("bar");
+    expect(store.getState().entries.map((e) => e.key)).toEqual(["io.github.a/bar-result"]);
+  });
+
+  it("翻页期间换了查询词：旧游标的分页不混进新结果，且 loadingMore 复位", async () => {
+    let resolveFirst!: (v: ReturnType<typeof server>) => void;
+    let resolveMore!: (v: ReturnType<typeof server>) => void;
+    const first = new Promise<ReturnType<typeof server>>((r) => (resolveFirst = r));
+    const more = new Promise<ReturnType<typeof server>>((r) => (resolveMore = r));
+    const fetchImpl = vi
+      .fn()
+      .mockReturnValueOnce(first)
+      .mockImplementationOnce(() => more)
+      .mockImplementationOnce(() => Promise.resolve(server([item("io.github.a/fresh")])));
+    const { store } = make({}, fetchImpl);
+
+    const initial = store.getState().load(""); // 首屏在飞（等 first）
+    resolveFirst(server([item("io.github.a/initial")], "cursor-old"));
+    await initial;
+    const paging = store.getState().loadMore(); // 翻页在飞（等 more）
+    // 翻页没回来前换了查询词 → 新 load 领新号，走第 3 次 fetch
+    await store.getState().load("fresh");
+    resolveMore(server([item("io.github.a/stale-page")]));
+    await paging;
+
+    // 新词的单条结果留下；旧游标的翻页被丢弃，且 loadingMore 复位
+    expect(store.getState().entries.map((e) => e.key)).toEqual(["io.github.a/fresh"]);
+    expect(store.getState().loadingMore).toBe(false);
+  });
+
   it("loadMore 追加并去重", async () => {
     const fetchImpl = vi
       .fn()

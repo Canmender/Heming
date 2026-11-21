@@ -29,6 +29,12 @@ export const SUBAGENT_DEFS_DIR = ".heming/agents";
 export const MAX_SUBAGENT_DEFS = 20;
 /** 单个定义的字符上限：定义是「一段角色要求」，不是长文档。 */
 export const MAX_SUBAGENT_DEF_CHARS = 3000;
+
+/** 按码点截断（d.412 回归）：指令会进子代理提示词，不能在 emoji 中间劈出落单代理。 */
+function clipByPoints(text: string, max: number): string {
+  const points = Array.from(text);
+  return points.length > max ? points.slice(0, max).join("") : text;
+}
 /** 子代理名（来自文件名，不含 `.md`）。 */
 export const SUBAGENT_NAME_RE = /^[a-z][a-z0-9-]{0,29}$/;
 
@@ -71,7 +77,7 @@ export function parseSubagentDef(source: SubagentDefSource): SubagentDef | null 
   if (body === "") return null;
   const truncated = body.length > MAX_SUBAGENT_DEF_CHARS;
   const instructions = truncated
-    ? `${body.slice(0, MAX_SUBAGENT_DEF_CHARS)}\n\n（这份定义超过 ${MAX_SUBAGENT_DEF_CHARS} 字，只发了前面这些；需要完整内容请用 file_read 读 \`${source.rel}\`。）`
+    ? `${clipByPoints(body, MAX_SUBAGENT_DEF_CHARS)}\n\n（这份定义超过 ${MAX_SUBAGENT_DEF_CHARS} 字，只发了前面这些；需要完整内容请用 file_read 读 \`${source.rel}\`。）`
     : body;
   return {
     name,

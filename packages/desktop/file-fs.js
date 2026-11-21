@@ -91,6 +91,113 @@ const MAX_WALK_ENTRIES = 20000;
 const MAX_WALK_DEPTH = 20;
 /** glob/grep 模式串长度上限（路径上限之外单列，便于给出明确文案）。 */
 const MAX_PATTERN_CHARS = 1000;
+
+/**
+ * 粗略的灾难性回溯（ReDoS）检测：拒绝「量词套量词」与「量化组里含重叠分支」的正则。
+ *
+ * grep 的模式由模型给出（可被不可信内容通过提示注入操纵），文本来自文件（可被攻击者
+ * 构造），两者相遇时 `(a+)+$` 这类模式能在被截断的 2000 字符长行上指数级卡死主进程
+ * （实测 n=28 已约 1.2s，2000 字符永不返回）。仅靠截断输入长度防不住——所以编译前
+ * 先保守拒绝明确的指数级结构。只针对这两种清晰模式，普通 `\d+` / `a|b` / `(?:ab)+`
+ * 不受影响。宁可误拒少数复杂正则，也不让整个桌面进程被拖死。
+ *
+ * @param {string} pattern
+ * @returns {boolean} 命中灾难性结构时 true
+ */
+function hasCatastrophicPattern(pattern) {
+  const stack = []; // 每个打开的组：{ hasQuant, branches }
+  let prevGroup = null; // 刚闭合的组（供其后的量词判断）
+  let prevWasGroup = false;
+  let classDepth = 0; // 字符类 [...] 内部不当量词/组处理
+  let branchStart = null; // 当前分支的首个字符
+
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === "\\") {
+      i += 1;
+      continue;
+    }
+    if (c === "[") {
+      classDepth += 1;
+      branchStart = null;
+      continue;
+    }
+    if (c === "]") {
+      if (classDepth > 0) classDepth -= 1;
+      continue;
+    }
+    if (classDepth > 0) continue;
+
+    if (c === "(") {
+      stack.push({ hasQuant: false, branches: [] });
+      // 跳过组前缀 (? : / ?= / ?! / ?<= / ?<! / ?<name>)——其中的 ? 不是量词
+      if (pattern[i + 1] === "?") {
+        let j = i + 2;
+        if (pattern[j] === "=" || pattern[j] === "!") {
+          j += 1;
+        } else if (pattern[j] === "<") {
+          j += 1;
+          if (pattern[j] === "=" || pattern[j] === "!") j += 1;
+          else {
+            while (j < pattern.length && pattern[j] !== ">") j += 1;
+            j += 1;
+          }
+        } else {
+          while (j < pattern.length && pattern[j] !== ":") j += 1;
+          j += 1;
+        }
+        i = j - 1;
+      }
+      branchStart = null;
+      prevWasGroup = false;
+      continue;
+    }
+    if (c === "|") {
+      if (stack.length) stack[stack.length - 1].branches.push(branchStart);
+      branchStart = null;
+      continue;
+    }
+    if (c === ")") {
+      const group = stack.pop();
+      if (group) {
+        // 收尾分支也要计入（`(a|aa)` 的最后一段 `aa` 在 `)` 之前没有 `|`）
+        if (branchStart !== null) group.branches.push(branchStart);
+        prevGroup = group;
+        prevWasGroup = true;
+      }
+      branchStart = null;
+      continue;
+    }
+
+    const isQuant = c === "+" || c === "*" || c === "{" || c === "?";
+    if (isQuant) {
+      if (c !== "?") {
+        if (prevWasGroup && prevGroup) {
+          // (a+)+ / (a*)* / (a{2,})+ —— 组内有量词，组本身又被量化
+          if (prevGroup.hasQuant) return true;
+          // (a|aa)+ —— 量化组内两个分支同首字符，重叠分支也可指数爆炸
+          const starts = prevGroup.branches.filter((b) => b !== null);
+          if (starts.length >= 2 && new Set(starts).size < starts.length) return true;
+        }
+        if (stack.length) stack[stack.length - 1].hasQuant = true;
+      } else {
+        // '?' 单独出现的懒/可选修饰也算该层「已有量词」；紧跟 + / * 的 '?' 只是惰性标志，
+        // 此时 prevWasGroup 已被量词处理清成 false，不会误触发上面的嵌套判断。
+        if (stack.length) stack[stack.length - 1].hasQuant = true;
+      }
+      prevWasGroup = false;
+      if (c === "{") {
+        const close = pattern.indexOf("}", i);
+        if (close !== -1) i = close;
+      }
+      continue;
+    }
+
+    if (branchStart === null) branchStart = c;
+    prevWasGroup = false;
+  }
+  return false;
+}
 /** 整目录跳过的名字：依赖目录与版本库对「找文件 / 搜内容」没有意义，而且体量巨大。 */
 const SKIP_DIR_NAMES = new Set(["node_modules", ".git", ".hg", ".svn"]);
 
@@ -780,6 +887,14 @@ async function grepFiles(payload) {
   if (pattern.includes("\0")) return { ok: false, code: "invalid-pattern", error: "grep 的正则含非法字符（NUL）" };
   if (pattern.length > MAX_PATTERN_CHARS) {
     return { ok: false, code: "invalid-pattern", error: `grep 的正则过长（超过 ${MAX_PATTERN_CHARS} 字符）` };
+  }
+  // 截断长行只限制了输入规模，挡不住 (a+)+ 这类指数级回溯——编译前先拒绝明确的灾难性结构。
+  if (hasCatastrophicPattern(pattern)) {
+    return {
+      ok: false,
+      code: "invalid-pattern",
+      error: "grep 的正则含可能导致灾难性回溯的结构（嵌套量词或重叠分支），已拒绝",
+    };
   }
   let matcher;
   try {
@@ -1627,6 +1742,7 @@ function registerFileIpc(ipcMain, deps) {
 }
 
 module.exports = {
+  hasCatastrophicPattern,
   registerFileIpc,
   normalizeRoots,
   findRoot,

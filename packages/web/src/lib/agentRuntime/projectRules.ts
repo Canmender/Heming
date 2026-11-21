@@ -34,6 +34,12 @@ export const MAX_PROJECT_RULE_FILES = 2;
 /** 单个文件的字数上限（超出截断并写清怎么继续读）。 */
 export const MAX_PROJECT_RULE_CHARS = 4000;
 
+/** 按码点截断（d.412 回归）：这段会进提示词，不能在 emoji 中间劈出落单代理。 */
+function clipByPoints(text: string, max: number): string {
+  const points = Array.from(text);
+  return points.length > max ? points.slice(0, max).join("") : text;
+}
+
 /** 所有约定文件加起来的字数上限。 */
 export const MAX_PROJECT_RULES_TOTAL_CHARS = 6000;
 
@@ -135,7 +141,7 @@ export async function collectProjectRules(input: {
     if (!text) continue; // 空文件没有信息量，不占预算
 
     const truncated = text.length > MAX_PROJECT_RULE_CHARS;
-    const clipped = truncated ? text.slice(0, MAX_PROJECT_RULE_CHARS).trimEnd() : text;
+    const clipped = truncated ? clipByPoints(text, MAX_PROJECT_RULE_CHARS).trimEnd() : text;
     if (used + clipped.length > MAX_PROJECT_RULES_TOTAL_CHARS) {
       omitted.push(name); // 总量不够了：不进正文，但要在段尾说出来
       continue;

@@ -89,18 +89,18 @@ export function parseCliMemory(value: unknown): CliMemoryEntry[] | null {
   if (file.version !== undefined && file.version !== CLI_MEMORY_VERSION) return null;
   const entries = file.entries;
   if (!Array.isArray(entries)) return null;
-  const out: CliMemoryEntry[] = [];
-  const seen = new Set<string>();
+  // 数组是老 → 新：同一 id 重复出现时，后一条才是用户改过的最新版本，应该覆盖前一条。
+  // 旧实现用 Set 先到先得，反而留下最旧的重复项，和下面「超出上限保留最新」的口径矛盾。
+  // 文件可被手工编辑，复制一段改文字却忘改 id 是真实场景。
+  const byId = new Map<string, CliMemoryEntry>();
   for (const item of entries) {
     if (!isEntry(item)) return null;
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
     const text = normalizeMemoryText(item.text);
     if (!text) continue;
-    out.push({ id: item.id, at: item.at, text });
+    byId.set(item.id, { id: item.id, at: item.at, text });
   }
   // 超出上限时保留最新的（数组是老 → 新）。
-  return out.slice(-CLI_MEMORY_MAX_ENTRIES);
+  return [...byId.values()].slice(-CLI_MEMORY_MAX_ENTRIES);
 }
 
 /** 读工作区记忆；没有文件返回 `null`，读不动/格式坏返回 `ok:false`（附人能看懂的原因）。 */

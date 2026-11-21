@@ -79,7 +79,9 @@ function exportsRoot(env) {
 function safeFileName(name) {
   const raw = String(name ?? "");
   // 先于清洗拒绝：`../x.json` 这类输入清洗后只剩 `x.json`，能写但语义错误。
-  if (raw.includes("..")) return null;
+  // 只认完整的 `..`/`.` 路径段；名字里的 `..`（如团队名「版本-v1..2」）是合法字符，
+  // 不能因为子串命中就被整条导出拒掉——真正防越界靠下面的 base 取末段 + resolve 包含判断。
+  if (raw.replace(/\\/g, "/").split("/").some((seg) => seg === ".." || seg === ".")) return null;
   const base = raw.split(/[\\/]/).pop() ?? "";
   let cleaned = base
     .replace(/[^\p{L}\p{N}\-_. ]/gu, "-")

@@ -304,6 +304,31 @@ describe("self.* 工具：技能", () => {
     expect(created?.instructions).toContain("bump 版本");
   });
 
+  it("技能说明/指令按码点截断，不劈出落单代理（会进系统提示词，d.412 回归）", async () => {
+    const { call, skills } = setup();
+    // 描述正好跨在 200 边界、指令跨在 8000 边界
+    const desc = "x".repeat(199) + "😀" + "tail";
+    const instructions = "y".repeat(7999) + "😀" + "tail";
+    const r = await call("self_skill_create", { name: "emoji技能", description: desc, instructions });
+    expect(r.ok).toBe(true);
+    const created = skills.list().find((s) => s.name === "emoji技能");
+    const hasLone = (s: string) =>
+      s.split("").some((ch, i, arr) => {
+        const c = ch.charCodeAt(0);
+        const prev = i > 0 ? arr[i - 1].charCodeAt(0) : 0;
+        const next = i + 1 < arr.length ? arr[i + 1].charCodeAt(0) : 0;
+        return (
+          (c >= 0xd800 && c <= 0xdbff && !(next >= 0xdc00 && next <= 0xdfff)) ||
+          (c >= 0xdc00 && c <= 0xdfff && !(prev >= 0xd800 && prev <= 0xdbff))
+        );
+      });
+    expect(hasLone(created?.description ?? "")).toBe(false);
+    expect(hasLone(created?.instructions ?? "")).toBe(false);
+    // 码点数正好到上限
+    expect(Array.from(created?.description ?? "")).toHaveLength(200);
+    expect(Array.from(created?.instructions ?? "")).toHaveLength(8000);
+  });
+
   it("更新同名技能是改进而非新建", async () => {
     const { call, skills } = setup();
     await call("self_skill_create", {

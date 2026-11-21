@@ -60,6 +60,21 @@ describe("自定义子代理：文件名即子代理名（d.287）", () => {
     expect(parseSubagentDef(source(".heming/agents/README.md", "# 目录说明\n这些文件是子代理定义。"))).not.toBeNull();
   });
 
+  it("指令截断落在 emoji 中间时不劈出落单代理（会进子代理提示词，d.412 回归）", () => {
+    const long = "x".repeat(MAX_SUBAGENT_DEF_CHARS - 1) + "😀" + "tail";
+    const instructions = parseSubagentDef(source(".heming/agents/emoji.md", long))?.instructions ?? "";
+    const units = instructions.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+    expect(Array.from(instructions.split("\n")[0]!)).toHaveLength(MAX_SUBAGENT_DEF_CHARS);
+  });
+
   it("超长要求按上限截断，并写明「需要完整内容用 file_read」", () => {
     const long = "字".repeat(MAX_SUBAGENT_DEF_CHARS + 200);
     const def = parseSubagentDef(source(".heming/agents/long.md", long));

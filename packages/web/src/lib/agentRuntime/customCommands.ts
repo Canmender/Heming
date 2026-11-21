@@ -27,6 +27,12 @@ export const CUSTOM_COMMANDS_DIR = ".heming/commands";
 export const MAX_CUSTOM_COMMANDS = 20;
 /** 单条命令的提示词上限：命令是「一段叮嘱」，不是长文档。 */
 export const MAX_CUSTOM_COMMAND_CHARS = 4000;
+
+/** 按码点截断（d.412 回归）：这段正文会进提示词，不能在 emoji 中间劈出落单代理。 */
+function clipByPoints(text: string, max: number): string {
+  const points = Array.from(text);
+  return points.length > max ? points.slice(0, max).join("") : text;
+}
 /** 命令名（来自文件名，不含 `.md`）。 */
 export const CUSTOM_COMMAND_NAME_RE = /^[a-z][a-z0-9-]{0,29}$/;
 
@@ -104,7 +110,7 @@ export function parseCustomCommand(source: CustomCommandSource): CustomCommand |
   if (body === "") return null;
   const truncated = body.length > MAX_CUSTOM_COMMAND_CHARS;
   const prompt = truncated
-    ? `${body.slice(0, MAX_CUSTOM_COMMAND_CHARS)}\n\n（这条命令超过 ${MAX_CUSTOM_COMMAND_CHARS} 字，只发了前面这些；需要完整内容请用 file_read 读 \`${source.rel}\`。）`
+    ? `${clipByPoints(body, MAX_CUSTOM_COMMAND_CHARS)}\n\n（这条命令超过 ${MAX_CUSTOM_COMMAND_CHARS} 字，只发了前面这些；需要完整内容请用 file_read 读 \`${source.rel}\`。）`
     : body;
   return {
     name,

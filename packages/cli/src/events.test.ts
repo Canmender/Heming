@@ -41,6 +41,17 @@ describe("jsonLine", () => {
     expect(parsed.text).toBe(text);
   });
 
+  it("U+2028/U+2029 转义成 \\uXXXX：JS 消费方按行读也不拆行、能还原原文", () => {
+    const text = "A\u2028B\u2029C";
+    const line = jsonLine({ type: "delta", text });
+    // 裸的 U+2028/U+2029 一个都不留（它们是 ECMA-262 行终止符，按行读会被拆开）。
+    expect(line).not.toMatch(/[\u2028\u2029]/);
+    // 用「ECMA-262 行终止符」切分仍是一行，且能解析回原文。
+    const fragments = line.split(/\r\n|[\n\r\u2028\u2029]/).filter(Boolean);
+    expect(fragments).toHaveLength(1);
+    expect((JSON.parse(fragments[0]!) as { text: string }).text).toBe(text);
+  });
+
   it("createEventSink 按 emit 顺序写出，每次一条", () => {
     const written: string[] = [];
     const sink = createEventSink((chunk) => written.push(chunk));

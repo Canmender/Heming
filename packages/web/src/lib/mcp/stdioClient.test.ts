@@ -99,6 +99,17 @@ describe("stdio 客户端", () => {
     expect(config).not.toHaveProperty("timeoutMs");
   });
 
+  it("调用前就已中断：不发请求、无副作用（d.412 回归）", async () => {
+    const bridge = installBridge();
+    const client = createStdioMcpClient(SERVER);
+    const controller = new AbortController();
+    controller.abort(); // 调用前已中断
+
+    await expect(client.callTool("destructive", { x: 1 }, { signal: controller.signal })).rejects.toThrow(/工具调用已中断/);
+    // 副作用不能真的发生：请求根本不该发到主进程
+    expect(bridge.request).not.toHaveBeenCalled();
+  });
+
   it("用户中断：带着 requestId 调桥的 cancel，并立刻以「已中断」拒绝", async () => {
     const bridge = installBridge();
     (bridge as unknown as { cancel: Mock }).cancel = vi.fn(async () => true);

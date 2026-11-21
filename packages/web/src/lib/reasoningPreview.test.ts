@@ -35,6 +35,59 @@ describe("思考片段的大小控制（d.247）", () => {
     expect(preview.hiddenChars).toBe(30);
   });
 
+  it("按行截断与 split/slice/join 的语义逐字一致（含结尾换行、空行）", () => {
+    // 性能改写（不再对整段做 split）不能改变任何可见结果：穷举几种行结构，
+    // 对照参考实现 split→slice→join 的输出。
+    const reference = (text: string, maxLines: number, mode: "head" | "tail"): string => {
+      const lines = text.split("\n");
+      if (lines.length <= maxLines) return text;
+      return mode === "tail"
+        ? lines.slice(lines.length - maxLines).join("\n")
+        : lines.slice(0, maxLines).join("\n");
+    };
+    const cases = [
+      "a\nb\nc\nd",
+      "第0行\n第1行\n第2行",
+      "开头\n\n\n末尾", // 空行
+      "只有一行",
+      "结尾有换行\n",
+      "a\nb\nc\n",
+      "",
+      "\n\n\n\n",
+    ];
+    for (const text of cases) {
+      for (const mode of ["head", "tail"] as const) {
+        for (const maxLines of [1, 2, 3, 12]) {
+          // chars 给足够大，逼出纯按行的结果，直接对照参考实现
+          const got = previewReasoning(text, { mode, lines: maxLines, chars: 100_000 }).text;
+          const expected = reference(text, maxLines, mode);
+          expect(got, `text=${JSON.stringify(text)} mode=${mode} lines=${maxLines}`).toBe(expected);
+        }
+      }
+    }
+  });
+
+  it("超长思考流：逐帧调用不因整段 split 产生 O(n²) 分配", () => {
+    // instrument String.prototype.split，断言长文本求 preview 不走整段切分。
+    // 旧实现每个 streaming 帧都会 split("\n") 整个累积串；新实现从尾部扫描到 maxLines 行即停。
+    const original = String.prototype.split;
+    let splitCalls = 0;
+    // 临时打桩，测完还原。用 unknown 中转避开 split 重载的字面量类型推断。
+    String.prototype.split = function (this: string, ...args: unknown[]) {
+      if (args[0] === "\n" && this.length > 5000) splitCalls++;
+      return (original as (...a: unknown[]) => string[]).apply(this, args);
+    } as typeof original;
+    try {
+      const long = Array.from({ length: 500 }, (_, i) => `思考第 ${i} 行内容`).join("\n");
+      for (let end = 100; end <= long.length; end += 500) {
+        previewReasoning(long.slice(0, end), { mode: "tail" });
+      }
+      expect(splitCalls).toBe(0);
+    } finally {
+      String.prototype.split = original;
+    }
+  });
+
   it("行数比字数更严格时按行截（长段落与多短行都要能压住）", () => {
     const many = Array.from({ length: 40 }, (_, i) => `第 ${i} 行`).join("\n");
     const preview = previewReasoning(many, { mode: "head", lines: 5 });

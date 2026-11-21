@@ -45,6 +45,23 @@ describe("会话目标", () => {
     expect(getGoal("c1")?.text).toHaveLength(GOAL_TEXT_MAX);
   });
 
+  it("目标截断落在 emoji 中间时不劈出落单代理（进系统提示词的文本，d.412 回归）", () => {
+    const stored = setGoal("emoji", "x".repeat(GOAL_TEXT_MAX - 1) + "😀" + "tail");
+    const text = stored?.text ?? "";
+    // 逐 UTF-16 单元检查：高代理后面必须跟低代理，低代理前面必须是高代理
+    const units = text.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+    // 码点数正好到上限（emoji 是一个码点，占 2 个 UTF-16 单元）
+    expect(Array.from(text)).toHaveLength(GOAL_TEXT_MAX);
+  });
+
   it("空文本等于清除，不会留下空目标", () => {
     setGoal("c1", "先设一个");
     expect(setGoal("c1", "   ")).toBeNull();

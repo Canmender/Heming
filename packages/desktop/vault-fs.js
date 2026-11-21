@@ -329,7 +329,11 @@ async function probeWritableDir(dir) {
  * @returns {Promise<{createdDirs: string[], createdFiles: string[], failures: {rel: string, message: string}[]}>}
  */
 async function ensureStandardVault(root) {
-  const today = new Date().toISOString().slice(0, 10);
+  // 用本地日期而非 UTC：与 web 端 standard.ts 的 applyStandardRepair 同一处口径
+  // （日键与 daily.ts / template.ts 一致）。UTC iso 日在本地午夜前后会差一天。
+  // 两处清单与模板改一处必须改两处。
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const result = { createdDirs: [], createdFiles: [], failures: [] };
   for (const rel of STANDARD_VAULT_DIRS) {
     const abs = path.join(root, ...rel.split("/"));

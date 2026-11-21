@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   buildGraph,
   extractLinks,
@@ -228,6 +228,27 @@ describe("renderIndex：内容目录", () => {
     const long = "长".repeat(100);
     const md = renderIndex([page({ path: "wiki/notes/a.md", title: "A", body: long })]);
     expect(md).toContain(`${"长".repeat(60)}…`);
+  });
+
+  it("默认 updated 用本地日期而非 UTC 日：凌晨写页不记成前一天（d.412 回归）", () => {
+    afterEach(() => vi.useRealTimers());
+    vi.useFakeTimers();
+    // 固定为 UTC 2026-11-20T19:00Z：Asia/Shanghai 已是 11-21 凌晨 03:00。
+    // 无论测试在哪个时区跑，期望值都用本地 getter 算，和被测代码同一口径。
+    vi.setSystemTime(new Date("2026-11-20T19:00:00.000Z"));
+    const d = new Date();
+    const localDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const utcDay = "2026-11-20";
+    if (localDay === utcDay) return; // 恰好在 UTC 时区的测试环境里跳过（两者相等无从区分）
+
+    const pageMd = renderPage({ title: "A", body: "正文" });
+    expect(pageMd).toContain(`updated: ${localDay}`);
+    expect(pageMd).not.toContain(`updated: ${utcDay}`);
+
+    const indexMd = renderIndex([]);
+    expect(indexMd).toContain(`updated: ${localDay}`);
+    expect(indexMd).not.toContain(`updated: ${utcDay}`);
+    vi.useRealTimers();
   });
 
   it("摘要含 emoji 时按码点截断，不切出落单代理（d.412 回归）", () => {

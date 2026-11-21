@@ -26,6 +26,15 @@ export interface SessionGoal {
 /** 目标文本上限：一句话说清「要达成什么」；写成段落就没人读了。 */
 export const GOAL_TEXT_MAX = 300;
 
+/**
+ * 按 Unicode 码点取前 max 个（d.412 回归）：String.slice 按 UTF-16 单元切，
+ * 边界落在 emoji/扩展汉字中间会劈出落单代理；目标文本会进系统提示词，不能带乱码。
+ */
+function clipGoalText(text: string, max: number): string {
+  const points = Array.from(text);
+  return points.length > max ? points.slice(0, max).join("") : text;
+}
+
 /** 最多保留几个会话的目标（按最近写入淘汰）。 */
 export const MAX_STORED_GOALS = 50;
 
@@ -128,7 +137,7 @@ function ensureLoaded(): void {
   );
   for (const [conversationId, value] of ordered) {
     if (typeof value?.text !== "string") continue;
-    const text = value.text.trim().slice(0, GOAL_TEXT_MAX);
+    const text = clipGoalText(value.text.trim(), GOAL_TEXT_MAX);
     if (!text) continue;
     goals.set(conversationId, {
       text,
@@ -155,7 +164,7 @@ export function setGoal(conversationId: string, text: string, now = Date.now()):
     clearGoal(conversationId);
     return null;
   }
-  const goal: SessionGoal = { text: trimmed.slice(0, GOAL_TEXT_MAX), createdAt: now };
+  const goal: SessionGoal = { text: clipGoalText(trimmed, GOAL_TEXT_MAX), createdAt: now };
   goals.set(conversationId, goal);
   touchedAt.set(conversationId, tick());
   persist(conversationId);

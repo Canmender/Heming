@@ -86,6 +86,20 @@ describe("项目约定文件（d.174）", () => {
     expect(got.section).toContain("`file_read`");
   });
 
+  it("规则文件截断落在 emoji 中间时不劈出落单代理（会进提示词，d.412 回归）", async () => {
+    const long = "x".repeat(MAX_PROJECT_RULE_CHARS - 1) + "😀" + "tail";
+    const got = await collectProjectRules({ ...base(), bridge: fakeBridge({ "D:/项目/和鸣/AGENTS.md": long }) });
+    const units = got.section.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+  });
+
   it("按优先级读、最多读两个：AGENTS.md 之后是 HEMING.md", async () => {
     const got = await collectProjectRules({
       ...base(),

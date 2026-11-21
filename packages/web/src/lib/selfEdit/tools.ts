@@ -582,10 +582,10 @@ export async function runSelfTool(
       };
       const updated = deps.skills.update(existing.id, {
         ...(typeof args.instructions === "string" && args.instructions.trim()
-          ? { instructions: args.instructions.trim().slice(0, 8000) }
+          ? { instructions: str(args.instructions, 8000) }
           : {}),
         ...(typeof args.description === "string" && args.description.trim()
-          ? { description: args.description.trim().slice(0, 200) }
+          ? { description: str(args.description, 200) }
           : {}),
         ...(Array.isArray(args.triggers) ? { triggers: strArray(args.triggers, 12) } : {}),
       });
@@ -771,7 +771,9 @@ function parseArgs(raw: string): Record<string, unknown> {
 /** 取字符串并截断到上限；非字符串一律视为空（宁可缺字段也不要写入 [object Object]）。 */
 function str(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
-  return value.trim().slice(0, max);
+  // 按码点截断（d.412 回归）：技能说明/指令会进系统提示词，不能在 emoji 中间劈出落单代理。
+  const chars = Array.from(value.trim());
+  return chars.length > max ? chars.slice(0, max).join("") : chars.join("");
 }
 
 /** 取字符串数组：逐项裁剪、去空、去重、限量。非数组返回空数组。 */

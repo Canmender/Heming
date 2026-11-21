@@ -33,6 +33,7 @@ const {
   globToRegExp,
   globFiles,
   grepFiles,
+  hasCatastrophicPattern,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
   MAX_GLOB_RESULTS,
@@ -778,6 +779,26 @@ test("IPC file:glob：正常返回；非可信来源被拒绝（fail-closed）",
   }));
 
 /* ────────────────────────────── grepFiles ────────────────────────────── */
+
+test("hasCatastrophicPattern：嵌套量词/重叠分支判为危险，普通正则放行（d.412 回归）", () => {
+  // 指数级回溯的经典结构必须拦下
+  for (const bad of ["(a+)+$", "(a*)*", "(\\w+)+", "(a{2,})+", "(?:a+)+b", "(a|aa)+x", "(ab|ab)*"]) {
+    assert.equal(hasCatastrophicPattern(bad), true, `应判危险：${bad}`);
+  }
+  // 普通正则不能误伤
+  for (const ok of ["\\d+", "a|b", "(?:ab)+", "^[a-z]+\\d*$", "foo(bar)?baz", "a{2,4}b", "[+*?]+", "\\(a+\\)"]) {
+    assert.equal(hasCatastrophicPattern(ok), false, `不应误伤：${ok}`);
+  }
+});
+
+test("grepFiles：灾难性回溯模式在编译前被拒，不进匹配循环（d.412 回归）", () =>
+  withWorkspace(async (ws) => {
+    fs.writeFileSync(path.join(ws.writeRoot, "a.md"), "needle\n");
+    const result = await grepFiles({ roots: ws.roots, pattern: "(a+)+$" });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "invalid-pattern");
+    assert.match(result.error, /灾难性回溯/);
+  }));
 
 test("grepFiles：命中行号/行文本正确，返回绝对路径与 root", () =>
   withWorkspace(async (ws) => {

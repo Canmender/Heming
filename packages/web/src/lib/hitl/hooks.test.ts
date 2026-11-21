@@ -349,4 +349,19 @@ describe("执行后的检查（d.345）", () => {
     );
     expect(many).toContain("另有 2 条检查说明没有展开");
   });
+
+  it("postHookNoteText：超长命令按码点截断，不劈出落单代理（会回给模型，d.412 回归）", () => {
+    const text = postHookNoteText([
+      { command: "x".repeat(78) + "😀" + "TAIL", ruleIndex: 1, text: "说明" },
+    ]);
+    const units = text.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+  });
 });

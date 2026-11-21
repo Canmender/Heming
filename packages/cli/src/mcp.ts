@@ -31,6 +31,7 @@ import {
   MCP_RESOURCE_TEMPLATE_URI,
   describeCliMcpCatalog,
   describeResourceTemplates,
+  relOfResourceUri,
   type McpCatalog,
   type McpResourceTemplate,
   type WorkspaceResourceRead,
@@ -473,7 +474,11 @@ export async function handleMcpRequest(request: McpRequest, ctx: McpContext): Pr
       const uri = typeof params.uri === "string" ? params.uri.trim() : "";
       if (!uri) return errorResponse(id, MCP_ERROR.invalidParams, "resources/subscribe 需要 uri");
       const known = catalog.resources.find((entry) => entry.uri === uri);
-      if (!known) {
+      // 资源模板 heming://workspace/{path} 也是本服务声明、能读、且 watcher 真会跟踪的 URI
+      // （见 mcpWatch.ts 的 relOfResourceUri）：客户端刚读成功的文件就该能订上变更。
+      // 用与 watcher 同一个判定，避免"读得到却订不上"；仍不认识的 URI 照旧拒绝。
+      const isTemplate = Boolean(ctx.readResource && relOfResourceUri(uri) !== null);
+      if (!known && !isTemplate) {
         const available = catalog.resources.map((entry) => entry.uri).join("、") || "无";
         return errorResponse(
           id,

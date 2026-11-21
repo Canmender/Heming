@@ -232,6 +232,22 @@ describe("DuckDuckGo 结果解析", () => {
     expect(decodeHtmlEntities("&unknown;")).toBe("&unknown;");
     expect(collapseWhitespace("  a \n\t b  ")).toBe("a b");
   });
+
+  it("代理区数字实体不解成落单代理（会进模型工具结果，d.412 回归）", () => {
+    // String.fromCodePoint(0xD83D) 不抛错，但返回的是落单高代理——代理区不是合法标量值。
+    // 这些实体原样保留；真正的字符（含代理对以上/以下的边界值）照常解码。
+    for (const entity of ["&#xD83D;", "&#xD800;", "&#55296;", "&#xDE00;", "&#xDFFF;"]) {
+      const out = decodeHtmlEntities(entity);
+      expect(out).toBe(entity); // 原样保留，不含落单代理
+      expect(out.split("").some((c) => {
+        const code = c.charCodeAt(0);
+        return (code >= 0xd800 && code <= 0xdfff);
+      })).toBe(false);
+    }
+    // 边界合法值仍解码：D7FF（代理区前一个）与 E000（代理区后一个）
+    expect(decodeHtmlEntities("&#xD7FF;&#xE000;")).toBe("\ud7ff\ue000");
+    expect(decodeHtmlEntities("&#X1F600;")).toBe("😀");
+  });
 });
 
 describe("结果 URL 归一（只用于去重）", () => {

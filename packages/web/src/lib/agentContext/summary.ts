@@ -41,7 +41,10 @@ function squeeze(text: string): string {
 }
 
 function clip(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) : text;
+  // 按码点截断（d.412 回归）：text.slice 按 UTF-16 单元切，边界落在 emoji/CJK 扩展区
+  // 的代理对中间会留下落单代理，这段文本会进摘要提示词/系统消息喂给模型。
+  const chars = [...text];
+  return chars.length > max ? chars.slice(0, max).join("") : text;
 }
 
 /** 首句：以中英文句末标点为界（不含标点）；无标点时整段（仍受长度上限约束）。 */
@@ -112,7 +115,9 @@ export function buildSummaryPrompt(older: ChatMessage[], maxChars?: number): Cha
       ? Math.max(0, Math.floor(maxChars))
       : SUMMARY_PROMPT_CHARS;
   const text = transcript(list);
-  const body = text.length > limit ? text.slice(text.length - limit) : text;
+  // 尾部截断同样按码点，避免从 emoji 代理对中间开始（落单代理进 LLM 提示词）。
+  const chars = [...text];
+  const body = chars.length > limit ? chars.slice(chars.length - limit).join("") : text;
   return [
     { role: "system", content: SUMMARY_INSTRUCTION },
     { role: "user", content: `${SUMMARY_TASK}\n\n${body}` },

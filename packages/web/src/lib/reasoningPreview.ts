@@ -78,11 +78,24 @@ function clipByChars(text: string, maxChars: number, mode: "head" | "tail"): str
 }
 
 function clipByLines(text: string, maxLines: number, mode: "head" | "tail"): string {
-  const lines = text.split("\n");
-  if (lines.length <= maxLines) return text;
-  return mode === "tail"
-    ? lines.slice(lines.length - maxLines).join("\n")
-    : lines.slice(0, maxLines).join("\n");
+  // 流式每帧都调这里（AgentStreamBubble 渲染思考尾巴）。旧实现 `text.split("\n")`
+  // 把整段思考切成数组再取头/尾——思考能写几万字，逐字追加时每帧重建上万元素的数组，
+  // 总分配量是最终文本的几百倍（O(n²)）。改成从需要的那一端扫描到 maxLines 个换行即停：
+  //   · tail：从末尾数到第 maxLines 个换行，取它之后的内容（最后 maxLines 行）；
+  //   · head：从开头数到第 maxLines 个换行，取它之前的内容（最前 maxLines 行）。
+  // 不足 maxLines 行时返回全文，与 split().slice() 的口径完全一致。
+  if (mode === "tail") {
+    let seen = 0;
+    for (let i = text.length - 1; i >= 0; i--) {
+      if (text.charCodeAt(i) === 10 /* \n */ && ++seen === maxLines) return text.slice(i + 1);
+    }
+    return text;
+  }
+  let seen = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10 /* \n */ && ++seen === maxLines) return text.slice(0, i);
+  }
+  return text;
 }
 
 /** 「…前面/后面还有 N 字没显示」——方向由 mode 决定，免得用户以为内容丢了。 */

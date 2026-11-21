@@ -34,9 +34,21 @@ export type CliEvent =
   /** 运行前的用法/配置错误（此时还没有运行，只有一句话）。 */
   | { type: "error"; message: string };
 
-/** 单条事件序列化为一行。换行与引号由 `JSON.stringify` 负责转义。 */
+/**
+ * `JSON.stringify` 会原样留下 U+2028/U+2029：它们在 JSON 里合法，但按 ECMA-262 的
+ * 行终止符语义（\n \r U+2028 U+2029）会把一行拆成两行。JS 侧消费 stream-json 的
+ * 编排器按行读、遇到解析失败就跳过，这条事件就悄悄丢了（Claude Code 的
+ * ndjsonSafeStringify 就是为此而来）。这里把这两个字符转成 \uXXXX 转义——JSON 里
+ * 等价、仍是一行，且 `JSON.parse` 能还原出原文。
+ */
+const JS_LINE_TERMINATOR_RE = /\u2028|\u2029/g;
+function escapeJsLineTerminators(json: string): string {
+  return json.replace(JS_LINE_TERMINATOR_RE, (ch) => (ch === "\u2028" ? "\\u2028" : "\\u2029"));
+}
+
+/** 单条事件序列化为一行。换行、引号与 JS 行终止符都转义，消费方可按行安全读取。 */
 export function jsonLine(event: CliEvent): string {
-  return `${JSON.stringify(event)}\n`;
+  return `${escapeJsLineTerminators(JSON.stringify(event))}\n`;
 }
 
 export interface EventSink {

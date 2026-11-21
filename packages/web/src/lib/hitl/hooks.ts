@@ -582,7 +582,9 @@ export function postHookNoteText(notes: readonly ToolPostHookNote[]): string {
   const shown = notes.slice(0, MAX_POST_HOOK_NOTES);
   const lines = ["", "【执行后的本机检查】", "下面这些检查在**上面那次调用已经执行之后**才跑，它们不改变调用结果："];
   for (const note of shown) {
-    const command = note.command.length > 80 ? `${note.command.slice(0, 79)}…` : note.command;
+    // 按码点截断（d.412 回归）：这段会随工具结果回给模型，不能在 emoji 中间劈出落单代理。
+    const cmdPoints = Array.from(note.command);
+    const command = cmdPoints.length > 80 ? `${cmdPoints.slice(0, 79).join("")}…` : note.command;
     lines.push(`- 第 ${note.ruleIndex} 条「${oneLine(command)}」：${oneLine(note.text)}`);
   }
   if (notes.length > shown.length) {

@@ -256,6 +256,19 @@ describe("MemoryStore：Episodic 上限与淘汰", () => {
 });
 
 describe("MemoryStore：Semantic 去重与上限", () => {
+  it("超长 rel 的知识库条目 upsert 不产生重复幽灵记录（d.412 回归）", () => {
+    const store = new MemoryStore(new FakeStorage(), () => T0);
+    const longRel = "a".repeat(301); // 超过落库 key 的 300 字符截断上限
+    const first = store.upsertVaultEntries([{ rel: longRel, vaultId: "v1", mtime: "2026-11-08T07:00:00.000Z", hash: "h1", value: "OLD" }]);
+    expect(first.written).toBe(1);
+    const second = store.upsertVaultEntries([{ rel: longRel, vaultId: "v1", mtime: "2026-11-08T07:05:00.000Z", hash: "h2", value: "NEW" }]);
+    expect(second.written).toBe(1);
+    const entries = store.vaultEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].value).toBe("NEW");
+    expect(entries[0].vault?.hash).toBe("h2");
+  });
+
   it("同 agentId + key upsert：保留 id/createdAt，刷新 value/updatedAt", () => {
     const clock = makeClock();
     const store = new MemoryStore(new FakeStorage(), clock.now);

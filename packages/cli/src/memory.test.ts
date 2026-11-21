@@ -109,6 +109,21 @@ describe("parseCliMemory", () => {
     expect(parsed!).toHaveLength(CLI_MEMORY_MAX_ENTRIES);
     expect(parsed![parsed!.length - 1]!.text).toBe(`第 ${CLI_MEMORY_MAX_ENTRIES + 4} 条`);
   });
+
+  it("同一 id 重复时保留更新的那条，不是先出现的旧版本（d.412 回归）", () => {
+    // 文件可手工编辑，复制一段改了文字却忘改 id 是真实场景；数组老→新，后一条才是最新版本。
+    const parsed = parseCliMemory({
+      version: 1,
+      entries: [
+        { id: "m-1", at: "2026-01-01T00:00:00.000Z", text: "旧偏好：用中文" },
+        { id: "m-1", at: "2026-02-01T00:00:00.000Z", text: "新偏好：用英文" },
+      ],
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!).toHaveLength(1);
+    expect(parsed![0]!.text).toBe("新偏好：用英文");
+    expect(parsed![0]!.at).toBe("2026-02-01T00:00:00.000Z");
+  });
 });
 
 describe("normalizeMemoryText", () => {

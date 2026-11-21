@@ -810,6 +810,25 @@ describe("后台派发（d.349）", () => {
     expect(delivered.join("\n")).toContain("安装说明");
   });
 
+  it("后台任务摘要截断落在 emoji 中间时不劈出落单代理（会回给模型，d.412 回归）", async () => {
+    const chat = vi.fn(async () => "结论");
+    const wrapped = withSubagentTool(baseBridge, { agentId: "a1", conversationId: "c1", chat });
+    const longTask = "x".repeat(59) + "😀" + "tail";
+    const result = await wrapped.execute({
+      name: SUBAGENT_TOOL,
+      arguments: JSON.stringify({ tasks: [longTask], background: true }),
+    });
+    const units = result.text.split("").map((ch) => ch.charCodeAt(0));
+    const lone = units.some((c, i) =>
+      (c >= 0xd800 && c <= 0xdbff)
+        ? !(i + 1 < units.length && units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff)
+        : (c >= 0xdc00 && c <= 0xdfff)
+          ? !(i > 0 && units[i - 1] >= 0xd800 && units[i - 1] <= 0xdbff)
+          : false,
+    );
+    expect(lone).toBe(false);
+  });
+
   it("一次 tasks 数组在后台各开一个任务，编号不重复", async () => {
     const chat = vi.fn(async () => "结论");
     const wrapped = withSubagentTool(baseBridge, { agentId: "a1", conversationId: "c1", chat });

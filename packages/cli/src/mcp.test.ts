@@ -700,6 +700,22 @@ describe("资源订阅（d.327）", () => {
     expect(calls).toEqual(["sub:heming://workspace/AGENTS.md"]);
   });
 
+  it("资源模板 uri（能读、watcher 会跟）也能订阅，不再读得到却订不上", async () => {
+    const { bridge } = readBridge(async () => ({ text: "", ok: true }));
+    const { calls, watch } = watchStub();
+    const response = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 10, method: "resources/subscribe", params: { uri: "heming://workspace/src/a.ts" } },
+      ctxOf(bridge, {
+        catalog: async () => catalog,
+        subscriptions: watch,
+        readResource: async (uri) => ({ ok: true as const, uri, mimeType: "text/plain", text: "export const a = 1;" }),
+      }),
+    );
+    if (!response || !("result" in response)) throw new Error("期望成功响应：模板 uri 应可订阅");
+    expect(response.result).toEqual({});
+    expect(calls).toEqual(["sub:heming://workspace/src/a.ts"]);
+  });
+
   it("名单外的 uri 订阅不了，并列出这个工作区有哪些", async () => {
     const { bridge } = readBridge(async () => ({ text: "", ok: true }));
     const { calls, watch } = watchStub();

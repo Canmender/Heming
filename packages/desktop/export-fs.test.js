@@ -58,6 +58,17 @@ test("`..` 直接拒绝（不静默清洗成最后一段）", () => {
   assert.equal(result.ok, false);
 });
 
+test("名字里的 `..` 不是路径穿越：合法的团队名/版本名不被整条拒绝（d.412 回归）", () => {
+  // 团队周报名由团队名拼出（TeamWorkspace → weeklyReport），团队名含 `..` 是合法字符。
+  const name = "团队周报-版本-v1..2-20261121.md";
+  assert.equal(safeFileName(name), name);
+  const target = resolveTarget(name, { [EXPORT_DIR_ENV]: tmpDir() });
+  assert.ok(target);
+  assert.equal(target.name, name);
+  // 真正越界仍拒绝
+  assert.equal(safeFileName("a..b/../evil.json"), null);
+});
+
 test("Windows 保留名被拒绝（带后缀也不行）", () => {
   for (const name of ["CON.json", "con.json", "PRN.json", "aux.json", "NUL.json", "COM1.json", "LPT9.json"]) {
     assert.equal(safeFileName(name), null, `${name} 应被拒绝`);

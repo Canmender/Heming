@@ -302,7 +302,13 @@ export async function applyStandardRepair(
   report: StandardReport,
   options: StandardRepairOptions = {},
 ): Promise<StandardRepairResult> {
-  const today = options.today ?? new Date().toISOString().slice(0, 10);
+  // 用本地日期而非 UTC：日键口径与 daily.ts / template.ts 一致（formatDateTokens 用本地 getter）。
+  // 否则 UTC+ 用户在本地午夜前后补齐，根文件 created 会落在前一天。
+  // 与桌面端 vault-fs.js 的 ensureStandardVault 同一处口径，改一处必须改两处。
+  const now = new Date();
+  const today =
+    options.today ??
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const result: StandardRepairResult = { createdDirs: [], createdFiles: [], failures: [] };
 
   for (const dir of report.missingDirs) {
